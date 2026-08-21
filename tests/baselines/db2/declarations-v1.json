@@ -16909,9 +16909,15 @@
           "line": 29
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.conflict_list operation lists contradictions between memories, newest first. Only unresolved ones are listed and that filter is in the statement rather than the request, so a caller cannot ask what was resolved or how -- which makes the resolved and resolution columns it returns constant: the first is always zero and the second always empty. There is no scope: this is every unresolved conflict the installation holds."
+      },
       "signature": "int db2_memory_conflict_list ( conflict_t * out , int max )",
       "signature_sha256": "d4c30481649165c3612c47ec97caaa6faaab378da8cb9f87ae501a47f3b8fbf5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_conflict_list"
     },
     {
@@ -18602,9 +18608,15 @@
           "line": 362
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.artifact_hashed_list operation lists memories carrying an artifact hash. The statement has no ordering, so which memories a truncated answer holds is not decided by anything -- and its caller asks for fifty, which for an installation with more than fifty such memories means fifty arbitrary ones. The hash is what a caller would use to detect a changed artifact, so the ones it does not receive are the ones it cannot check."
+      },
       "signature": "int db2_memory_list_artifact_hashed ( db2_memory_artifact_row_t * rows , int max )",
       "signature_sha256": "c5fdd3451ab71ad8cc4c7d2bb7bc24aed73d646c2fb4583a6892ebb65cc8fb72",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_artifact_hashed"
     },
     {
@@ -18660,9 +18672,15 @@
           "line": 474
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.depends_on_keys operation lists the keys a memory declares it depends on. A key is text a writer chose, and nothing checks that a memory holding it exists -- so a dependency on a key nobody wrote reads exactly like one on a key that was deleted, and this cannot tell a caller which. The keys come back as stored, at the column's full width."
+      },
       "signature": "int db2_memory_list_depends_on_keys ( int64_t memory_id , db2_memory_key_row_t * rows , int max )",
       "signature_sha256": "2dd8535bb45e65c8ae402e6a329cbe9b5cbced15fda46b654df951385de7da4f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_depends_on_keys"
     },
     {
@@ -19517,9 +19535,15 @@
           "line": 33
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.provenance_list operation lists what has happened to a memory. It is ordered oldest first, so a caller whose array fills keeps the earliest entries and loses the newest -- the opposite of what a reader asking what happened recently wants, and nothing says the tail was dropped. The row carries the memory identifier the caller already supplied, which is the only field of the six that tells it nothing."
+      },
       "signature": "int db2_memory_provenance_list ( int64_t memory_id , provenance_entry_t * out , int max )",
       "signature_sha256": "502b1cd58b923f56c8bd898ef8560a3307b28e09a55657a600ef3d402fd0dd04",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_provenance_list"
     },
     {
@@ -19589,9 +19613,15 @@
           "line": 79
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.relation_dates operation lists the dates a memory's relations begin. Only relations whose start date is not empty are listed, so the count is not the memory's relation count and a caller cannot tell a memory with no relations from one whose relations are all undated. The date is a text column ordered as text, which is right for the one format DB2 writes and wrong for any other that reaches it."
+      },
       "signature": "int db2_memory_relation_dates_for_memory ( int64_t memory_id , db2_memory_relation_date_row_t * rows , int max )",
       "signature_sha256": "9a001ba17de42a621320489549e074ec973ad2e6c28135521b352a0469c2ffae",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_relation_dates_for_memory"
     },
     {
@@ -19813,9 +19843,15 @@
           "line": 49
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.scene_memberships operation lists the scenes a memory belongs to and how strongly. The statement has no ordering, so a memory in more scenes than the caller's array holds answers with an arbitrary subset -- and because the strength is what a caller would rank by, the rows it needs most are exactly the ones it may not receive."
+      },
       "signature": "int db2_memory_scene_memberships_for_memory ( int64_t memory_id , db2_memory_scene_membership_t * rows , int max )",
       "signature_sha256": "9b32133fe4bb756d375465b49f59d0fe3c413962da8b3cd8b06e2035f9d2d324",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scene_memberships_for_memory"
     },
     {
@@ -20296,9 +20332,15 @@
           "line": 914
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.summaries_list operation lists a memory's summaries, oldest first. It takes both a limit and an array size, and the two are separate bounds: the statement applies the limit, the loop applies the array, and a caller passing a limit larger than its array gets the array. A limit of zero is not none -- the backend substitutes its own default -- so the only way to ask for nothing is not to ask."
+      },
       "signature": "int db2_memory_summaries_list ( int64_t memory_id , int limit , db2_memory_summary_row_t * out , int max )",
       "signature_sha256": "b07df20b01f1eb617d6abc78d4ffefe32418ac369d7814fc462fb0cfd41a61e0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_summaries_list"
     },
     {
@@ -28045,15 +28087,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f074440e30786969d871865bd13cc67ad01d8a5209a558704908932252323d00",
+  "fingerprint": "67fc281ac13d360ad854364eb2cdcaca3c2ed2546a1b4b08b1826ac77c7f91cd",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 292,
+    "audit_pending": 285,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 667
+    "reviewed": 674
   }
 }

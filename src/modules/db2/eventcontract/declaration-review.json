@@ -3180,6 +3180,14 @@
       "reason": "Fetching conflict member IDs is a private read inside the future memory.conflict_resolve transaction; the pair must remain stable through conflict update, audit logging, and directive closure."
     },
     {
+      "symbol": "db2_memory_conflict_list",
+      "signature_sha256": "d4c30481649165c3612c47ec97caaa6faaab378da8cb9f87ae501a47f3b8fbf5",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.conflict_list operation lists contradictions between memories, newest first. Only unresolved ones are listed and that filter is in the statement rather than the request, so a caller cannot ask what was resolved or how -- which makes the resolved and resolution columns it returns constant: the first is always zero and the second always empty. There is no scope: this is every unresolved conflict the installation holds."
+    },
+    {
       "symbol": "db2_memory_conflict_record",
       "signature_sha256": "3bd891b026c6470570fe4e24c292ada8d962b708e0ccf957a42f775eae2d4bdd",
       "disposition": "private-db2",
@@ -3700,6 +3708,14 @@
       "reason": "The typed memory.list_rows operation replaces the tier and kind listing. It is the only read here whose statement is assembled: the tier and kind clauses appear only when their value is non-empty, so an empty value is no filter on that column rather than a match against the empty string, and this is four statements sharing one name. Its LIMIT was interpolated from an unbounded caller integer and is a bounded field on the wire. Identifiers cross and the scope travels, as for the other scoped reads."
     },
     {
+      "symbol": "db2_memory_list_artifact_hashed",
+      "signature_sha256": "c5fdd3451ab71ad8cc4c7d2bb7bc24aed73d646c2fb4583a6892ebb65cc8fb72",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.artifact_hashed_list operation lists memories carrying an artifact hash. The statement has no ordering, so which memories a truncated answer holds is not decided by anything -- and its caller asks for fifty, which for an installation with more than fifty such memories means fifty arbitrary ones. The hash is what a caller would use to detect a changed artifact, so the ones it does not receive are the ones it cannot check."
+    },
+    {
       "symbol": "db2_memory_list_by_key",
       "signature_sha256": "fd0e4589b229b43e524024d09eea5b0fea9eae11de11ee0712e424c77c06af84",
       "disposition": "wire-operation",
@@ -3714,6 +3730,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.memory_candidates operation loads the memories a scorer will rank. The filter picks one of two tier sets and neither contains the other -- the primary set excludes L0 and the fallback excludes L3 and L5 -- so falling back is not widening the search, it is looking somewhere else. The ordering leads with the identifier, so confidence and use count only break ties."
+    },
+    {
+      "symbol": "db2_memory_list_depends_on_keys",
+      "signature_sha256": "2dd8535bb45e65c8ae402e6a329cbe9b5cbced15fda46b654df951385de7da4f",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.depends_on_keys operation lists the keys a memory declares it depends on. A key is text a writer chose, and nothing checks that a memory holding it exists -- so a dependency on a key nobody wrote reads exactly like one on a key that was deleted, and this cannot tell a caller which. The keys come back as stored, at the column's full width."
     },
     {
       "symbol": "db2_memory_list_global_constraints",
@@ -3932,6 +3956,14 @@
       "reason": "Provenance append is private bookkeeping inside complete insert, merge, consolidate, and supersede operations; no generic caller-controlled provenance mutation crosses the bus."
     },
     {
+      "symbol": "db2_memory_provenance_list",
+      "signature_sha256": "502b1cd58b923f56c8bd898ef8560a3307b28e09a55657a600ef3d402fd0dd04",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.provenance_list operation lists what has happened to a memory. It is ordered oldest first, so a caller whose array fills keeps the earliest entries and loses the newest -- the opposite of what a reader asking what happened recently wants, and nothing says the tail was dropped. The row carries the memory identifier the caller already supplied, which is the only field of the six that tells it nothing."
+    },
+    {
       "symbol": "db2_memory_prune_orphaned_l0",
       "signature_sha256": "6e10c9e9cae3ed58ded0b8eb1bd7be915e6ca0f96173c50ff0ba75437927cf12",
       "disposition": "wire-operation",
@@ -3946,6 +3978,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.reject operation replaces the confidence penalty. The backend's reason parameter is discarded and never persisted, so the wire operation deliberately does not carry it rather than implying a rejection rationale is recorded; the penalty and floor stay fixed policy."
+    },
+    {
+      "symbol": "db2_memory_relation_dates_for_memory",
+      "signature_sha256": "9a001ba17de42a621320489549e074ec973ad2e6c28135521b352a0469c2ffae",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.relation_dates operation lists the dates a memory's relations begin. Only relations whose start date is not empty are listed, so the count is not the memory's relation count and a caller cannot tell a memory with no relations from one whose relations are all undated. The date is a text column ordered as text, which is right for the one format DB2 writes and wrong for any other that reaches it."
     },
     {
       "symbol": "db2_memory_relations_delete_for_memory",
@@ -4002,6 +4042,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.scene_member_exists operation replaces the membership probe. The pair is matched in the order given, unlike memory.unit_edge_exists beside it which tries both orders, so swapping the arguments here asks a genuinely different question. A statement that cannot run answers false, indistinguishable from an absent membership."
+    },
+    {
+      "symbol": "db2_memory_scene_memberships_for_memory",
+      "signature_sha256": "9b32133fe4bb756d375465b49f59d0fe3c413962da8b3cd8b06e2035f9d2d324",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.scene_memberships operation lists the scenes a memory belongs to and how strongly. The statement has no ordering, so a memory in more scenes than the caller's array holds answers with an arbitrary subset -- and because the strength is what a caller would rank by, the rows it needs most are exactly the ones it may not receive."
     },
     {
       "symbol": "db2_memory_scope_context_clear",
@@ -4154,6 +4202,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of the summary refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_summaries_list",
+      "signature_sha256": "b07df20b01f1eb617d6abc78d4ffefe32418ac369d7814fc462fb0cfd41a61e0",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.summaries_list operation lists a memory's summaries, oldest first. It takes both a limit and an array size, and the two are separate bounds: the statement applies the limit, the loop applies the array, and a caller passing a limit larger than its array gets the array. A limit of zero is not none -- the backend substitutes its own default -- so the only way to ask for nothing is not to ask."
     },
     {
       "symbol": "db2_memory_summary_upsert",

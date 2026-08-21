@@ -3670,6 +3670,70 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_event_frames_list_count == 0);
 
+   /* Seven lists over memories and their relations, none of which has anything to find. */
+   static aimee_db2_memory_provenance_list_row_t
+       memory_provenance_list_rows[AIMEE_DB2_MEMORY_PROVENANCE_LIST_MAX_ROWS];
+   uint32_t memory_provenance_list_count = 99;
+   assert(aimee_db2_memory_provenance_list_call(
+              call_client, &client, 9492, 0, 4242, memory_provenance_list_rows,
+              AIMEE_DB2_MEMORY_PROVENANCE_LIST_MAX_ROWS, &memory_provenance_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_provenance_list_count == 0);
+
+   static aimee_db2_memory_scene_memberships_row_t
+       memory_scene_memberships_rows[AIMEE_DB2_MEMORY_SCENE_MEMBERSHIPS_MAX_ROWS];
+   uint32_t memory_scene_memberships_count = 99;
+   assert(aimee_db2_memory_scene_memberships_call(
+              call_client, &client, 9493, 0, 4242, memory_scene_memberships_rows,
+              AIMEE_DB2_MEMORY_SCENE_MEMBERSHIPS_MAX_ROWS, &memory_scene_memberships_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_scene_memberships_count == 0);
+
+   static aimee_db2_memory_relation_dates_row_t
+       memory_relation_dates_rows[AIMEE_DB2_MEMORY_RELATION_DATES_MAX_ROWS];
+   uint32_t memory_relation_dates_count = 99;
+   assert(aimee_db2_memory_relation_dates_call(
+              call_client, &client, 9494, 0, 4242, memory_relation_dates_rows,
+              AIMEE_DB2_MEMORY_RELATION_DATES_MAX_ROWS, &memory_relation_dates_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_relation_dates_count == 0);
+
+   static aimee_db2_memory_summaries_list_row_t
+       memory_summaries_list_rows[AIMEE_DB2_MEMORY_SUMMARIES_LIST_MAX_ROWS];
+   uint32_t memory_summaries_list_count = 99;
+   assert(aimee_db2_memory_summaries_list_call(
+              call_client, &client, 9495, 0, 4242, 8, memory_summaries_list_rows,
+              AIMEE_DB2_MEMORY_SUMMARIES_LIST_MAX_ROWS, &memory_summaries_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_summaries_list_count == 0);
+
+   static aimee_db2_memory_conflict_list_row_t
+       memory_conflict_list_rows[AIMEE_DB2_MEMORY_CONFLICT_LIST_MAX_ROWS];
+   uint32_t memory_conflict_list_count = 99;
+   assert(aimee_db2_memory_conflict_list_call(
+              call_client, &client, 9496, 0, memory_conflict_list_rows,
+              AIMEE_DB2_MEMORY_CONFLICT_LIST_MAX_ROWS, &memory_conflict_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_conflict_list_count == 0);
+
+   static aimee_db2_memory_artifact_hashed_list_row_t
+       memory_artifact_hashed_list_rows[AIMEE_DB2_MEMORY_ARTIFACT_HASHED_LIST_MAX_ROWS];
+   uint32_t memory_artifact_hashed_list_count = 99;
+   assert(aimee_db2_memory_artifact_hashed_list_call(
+              call_client, &client, 9497, 0, memory_artifact_hashed_list_rows,
+              AIMEE_DB2_MEMORY_ARTIFACT_HASHED_LIST_MAX_ROWS, &memory_artifact_hashed_list_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_artifact_hashed_list_count == 0);
+
+   static aimee_db2_memory_depends_on_keys_row_t
+       memory_depends_on_keys_rows[AIMEE_DB2_MEMORY_DEPENDS_ON_KEYS_MAX_ROWS];
+   uint32_t memory_depends_on_keys_count = 99;
+   assert(aimee_db2_memory_depends_on_keys_call(
+              call_client, &client, 9498, 0, 4242, memory_depends_on_keys_rows,
+              AIMEE_DB2_MEMORY_DEPENDS_ON_KEYS_MAX_ROWS, &memory_depends_on_keys_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_depends_on_keys_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

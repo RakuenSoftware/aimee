@@ -13679,6 +13679,48 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_event_frames_list",
         "policy": {"reads": 200},
     },
+    "memory_provenance_list": {
+        "key": ("memory", 113),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_provenance_list",
+        "policy": {"reads": 200},
+    },
+    "memory_scene_memberships": {
+        "key": ("memory", 114),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_scene_memberships_for_memory",
+        "policy": {"reads": 200},
+    },
+    "memory_relation_dates": {
+        "key": ("memory", 115),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_relation_dates_for_memory",
+        "policy": {"reads": 200},
+    },
+    "memory_summaries_list": {
+        "key": ("memory", 116),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_summaries_list",
+        "policy": {"reads": 200},
+    },
+    "memory_conflict_list": {
+        "key": ("memory", 117),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_conflict_list",
+        "policy": {"reads": 200},
+    },
+    "memory_artifact_hashed_list": {
+        "key": ("memory", 118),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_artifact_hashed",
+        "policy": {"reads": 200},
+    },
+    "memory_depends_on_keys": {
+        "key": ("memory", 119),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_depends_on_keys",
+        "policy": {"reads": 200},
+    },
 }
 
 

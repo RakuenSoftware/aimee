@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/memory_conflicts.h"
 #include "c/workflow_patterns.h"
 #include "c/tool_registry.h"
 #include "c/feedback.h"
@@ -1042,6 +1043,13 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .memory_entities_list = db2_memory_entities_list_weighted,
        .memory_temporal_refs_list = db2_memory_temporal_refs_list,
        .memory_event_frames_list = db2_memory_event_frames_list,
+       .memory_provenance_list = db2_memory_provenance_list,
+       .memory_scene_memberships = db2_memory_scene_memberships_for_memory,
+       .memory_relation_dates = db2_memory_relation_dates_for_memory,
+       .memory_summaries_list = db2_memory_summaries_list,
+       .memory_conflict_list = db2_memory_conflict_list,
+       .memory_artifact_hashed_list = db2_memory_list_artifact_hashed,
+       .memory_depends_on_keys = db2_memory_list_depends_on_keys,
    };
    return &backend;
 }
@@ -2196,12 +2204,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_briefing_entity_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int requested = (int)limit;
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int requested = 0;
+               if (found)
+                  requested = (int)limit;
                if (requested > (int)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS)
                   requested = (int)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS;
                int written = backend->briefing_active_entities(found, requested);
@@ -2249,12 +2258,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_prospective_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_LIST_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->prospective_list(state_filter, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->prospective_list(state_filter, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2315,13 +2325,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_prospective_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->prospective_list_armed(
-                   found, AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->prospective_list_armed(
+                      found, AIMEE_DB2_PROSPECTIVE_LIST_ARMED_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2385,12 +2396,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_prospective_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_BY_ENTITY_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->prospective_by_entity(entity_lowered, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->prospective_by_entity(entity_lowered, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2454,12 +2466,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_prospective_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_BY_FILE_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->prospective_by_file(file_anchor, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->prospective_by_file(file_anchor, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2523,12 +2536,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_prospective_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_PROSPECTIVE_BY_TRIGGER_TERMS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->prospective_by_trigger_terms(turn_text, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->prospective_by_trigger_terms(turn_text, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].prospective_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2592,13 +2606,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_relation_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->relations_for_entity(entity, (int)limit, found,
-                                                           AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->relations_for_entity(entity, (int)limit, found,
+                                                          AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].relation_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2658,13 +2673,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_relation_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->relations_search(relation_query, (int)limit, found,
-                                                       AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->relations_search(relation_query, (int)limit, found,
+                                                      AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].relation_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2793,13 +2809,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_relation_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->relations_supporting(entity_token, (int)limit, found,
-                                                           AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->relations_supporting(entity_token, (int)limit, found,
+                                                          AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].relation_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -2967,13 +2984,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                db2_memory_kv_row_t *found = malloc(sizeof(*found) * AIMEE_DB2_KV_SECTION_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->kv_section((db2_memory_section_t)kv_section, found,
-                                                 AIMEE_DB2_KV_SECTION_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->kv_section((db2_memory_section_t)kv_section, found,
+                                                AIMEE_DB2_KV_SECTION_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].memory_key, sizeof(rows[index].memory_key), "%s",
@@ -3016,13 +3034,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_id_content_row_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_MEMORIES_BY_KEY_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->memories_by_key(memory_key_exact, found,
-                                                      AIMEE_DB2_MEMORIES_BY_KEY_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->memories_by_key(memory_key_exact, found,
+                                                     AIMEE_DB2_MEMORIES_BY_KEY_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].memory_row_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -3065,13 +3084,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_id_content_row_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_SESSION_MEMORIES_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->session_memories(memory_session_id, (int)limit, found,
-                                                       AIMEE_DB2_SESSION_MEMORIES_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->session_memories(memory_session_id, (int)limit, found,
+                                                      AIMEE_DB2_SESSION_MEMORIES_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].memory_row_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -3171,13 +3191,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_cand_row_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_RECALL_SECTION_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->recall_section((db2_memory_recall_section_t)recall_section,
-                                                     found, AIMEE_DB2_RECALL_SECTION_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->recall_section((db2_memory_recall_section_t)recall_section,
+                                                    found, AIMEE_DB2_RECALL_SECTION_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].memory_row_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -3225,13 +3246,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_pair_row_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_L2_CROSS_KEY_PAIRS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->l2_cross_key_pairs((int)max_pairs, found,
-                                                         AIMEE_DB2_L2_CROSS_KEY_PAIRS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->l2_cross_key_pairs((int)max_pairs, found,
+                                                        AIMEE_DB2_L2_CROSS_KEY_PAIRS_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].memory_id_a =
@@ -3278,13 +3300,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_pair_row_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_L2_FACT_DECISION_PAIRS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->l2_fact_decision_pairs(
-                   (int)max_pairs, found, AIMEE_DB2_L2_FACT_DECISION_PAIRS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->l2_fact_decision_pairs(
+                      (int)max_pairs, found, AIMEE_DB2_L2_FACT_DECISION_PAIRS_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].memory_id_a =
@@ -3888,13 +3911,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_scope_tag_row_t *listed =
                    malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_SCOPES_LIST_MAX_ROWS);
-               if (!listed)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int found = backend->memory_scopes_list((int64_t)memory_id, listed,
-                                                       (int)AIMEE_DB2_MEMORY_SCOPES_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_scopes_list((int64_t)memory_id, listed,
+                                                      (int)AIMEE_DB2_MEMORY_SCOPES_LIST_MAX_ROWS);
                for (int index = 0; index < found; index++)
                {
                   snprintf(rows[index].scope_type, sizeof(rows[index].scope_type), "%s",
@@ -3936,13 +3960,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_unit_row_t *listed =
                    malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_UNITS_LIST_MAX_ROWS);
-               if (!listed)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int found = backend->memory_units_list((int64_t)memory_id, listed,
-                                                      (int)AIMEE_DB2_MEMORY_UNITS_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_units_list((int64_t)memory_id, listed,
+                                                     (int)AIMEE_DB2_MEMORY_UNITS_LIST_MAX_ROWS);
                for (int index = 0; index < found; index++)
                {
                   rows[index].unit_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
@@ -3989,13 +4014,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_entity_row_t *listed =
                    malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_ENTITIES_LIST_MAX_ROWS);
-               if (!listed)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int found = backend->memory_entities_list(
-                   (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_ENTITIES_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_entities_list(
+                      (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_ENTITIES_LIST_MAX_ROWS);
                for (int index = 0; index < found; index++)
                {
                   snprintf(rows[index].entity_name, sizeof(rows[index].entity_name), "%s",
@@ -4039,13 +4065,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_temporal_ref_row_t *listed =
                    malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_MAX_ROWS);
-               if (!listed)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int found = backend->memory_temporal_refs_list(
-                   (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_temporal_refs_list(
+                      (int64_t)memory_id, listed,
+                      (int)AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_MAX_ROWS);
                for (int index = 0; index < found; index++)
                {
                   snprintf(rows[index].ref_key, sizeof(rows[index].ref_key), "%s",
@@ -4089,13 +4117,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_memory_event_frame_row_t *listed =
                    malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_MAX_ROWS);
-               if (!listed)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int found = backend->memory_event_frames_list(
-                   (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_event_frames_list(
+                      (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_MAX_ROWS);
                for (int index = 0; index < found; index++)
                {
                   snprintf(rows[index].frame_actor, sizeof(rows[index].frame_actor), "%s",
@@ -4119,6 +4148,355 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_memory_event_frames_list_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         if (aimee_db2_memory_provenance_list_request_decode(request_body, request_len,
+                                                             &memory_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_PROVENANCE_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_provenance_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_provenance_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_PROVENANCE_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               provenance_entry_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_PROVENANCE_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_provenance_list(
+                      (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_PROVENANCE_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].provenance_id =
+                      listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].session_id, sizeof(rows[index].session_id), "%s",
+                           listed[index].session_id);
+                  snprintf(rows[index].provenance_action, sizeof(rows[index].provenance_action),
+                           "%s", listed[index].action);
+                  snprintf(rows[index].provenance_details, sizeof(rows[index].provenance_details),
+                           "%s", listed[index].details);
+                  snprintf(rows[index].provenance_created_at,
+                           sizeof(rows[index].provenance_created_at), "%s",
+                           listed[index].created_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_provenance_list_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         if (aimee_db2_memory_scene_memberships_request_decode(request_body, request_len,
+                                                               &memory_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SCENE_MEMBERSHIPS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_scene_memberships)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_scene_memberships_row_t
+                rows[AIMEE_DB2_MEMORY_SCENE_MEMBERSHIPS_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_memory_scene_membership_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_SCENE_MEMBERSHIPS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_scene_memberships(
+                      (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_SCENE_MEMBERSHIPS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].scene_id =
+                      listed[index].scene_id > 0 ? (uint64_t)listed[index].scene_id : 0u;
+                  rows[index].membership_strength = listed[index].membership_strength;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_scene_memberships_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         if (aimee_db2_memory_relation_dates_request_decode(request_body, request_len,
+                                                            &memory_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_RELATION_DATES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_relation_dates)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_relation_dates_row_t rows[AIMEE_DB2_MEMORY_RELATION_DATES_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_memory_relation_date_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_RELATION_DATES_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_relation_dates(
+                      (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_RELATION_DATES_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].relation_date, sizeof(rows[index].relation_date), "%s",
+                           listed[index].date);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_relation_dates_reply_encode(rows, count, response_body,
+                                                             response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         uint32_t summary_limit = 0u;
+         if (aimee_db2_memory_summaries_list_request_decode(request_body, request_len, &memory_id,
+                                                            &summary_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SUMMARIES_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_summaries_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_summaries_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_SUMMARIES_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_summary_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_SUMMARIES_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found =
+                      backend->memory_summaries_list((int64_t)memory_id, (int)summary_limit, listed,
+                                                     (int)AIMEE_DB2_MEMORY_SUMMARIES_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].summary_scope, sizeof(rows[index].summary_scope), "%s",
+                           listed[index].scope);
+                  snprintf(rows[index].summary_text, sizeof(rows[index].summary_text), "%s",
+                           listed[index].summary);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_summaries_list_reply_encode(rows, count, response_body,
+                                                             response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_memory_conflict_list_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_CONFLICT_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_conflict_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_conflict_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_CONFLICT_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               conflict_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_CONFLICT_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_conflict_list(
+                      listed, (int)AIMEE_DB2_MEMORY_CONFLICT_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].conflict_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  rows[index].memory_a =
+                      listed[index].memory_a > 0 ? (uint64_t)listed[index].memory_a : 0u;
+                  rows[index].memory_b =
+                      listed[index].memory_b > 0 ? (uint64_t)listed[index].memory_b : 0u;
+                  snprintf(rows[index].detected_at, sizeof(rows[index].detected_at), "%s",
+                           listed[index].detected_at);
+                  rows[index].conflict_resolved =
+                      listed[index].resolved > 0 ? (uint32_t)listed[index].resolved : 0u;
+                  snprintf(rows[index].conflict_resolution, sizeof(rows[index].conflict_resolution),
+                           "%s", listed[index].resolution);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_conflict_list_reply_encode(rows, count, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_memory_artifact_hashed_list_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_ARTIFACT_HASHED_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_artifact_hashed_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_artifact_hashed_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_ARTIFACT_HASHED_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_artifact_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_ARTIFACT_HASHED_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_artifact_hashed_list(
+                      listed, (int)AIMEE_DB2_MEMORY_ARTIFACT_HASHED_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].memory_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].artifact_type, sizeof(rows[index].artifact_type), "%s",
+                           listed[index].artifact_type);
+                  snprintf(rows[index].artifact_ref, sizeof(rows[index].artifact_ref), "%s",
+                           listed[index].artifact_ref);
+                  snprintf(rows[index].artifact_hash, sizeof(rows[index].artifact_hash), "%s",
+                           listed[index].artifact_hash);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_artifact_hashed_list_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         if (aimee_db2_memory_depends_on_keys_request_decode(request_body, request_len,
+                                                             &memory_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_DEPENDS_ON_KEYS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_depends_on_keys)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_depends_on_keys_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_DEPENDS_ON_KEYS_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_key_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_DEPENDS_ON_KEYS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_depends_on_keys(
+                      (int64_t)memory_id, listed, (int)AIMEE_DB2_MEMORY_DEPENDS_ON_KEYS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].depends_on_key, sizeof(rows[index].depends_on_key), "%s",
+                           listed[index].key);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_depends_on_keys_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
             {
                free(rows);
                return AIMEE_MODULE_STATUS_INTERNAL;
@@ -5167,13 +5545,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_entity_neighbor_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_neighbors(
-                   entity, found, AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_neighbors(
+                      entity, found, AIMEE_DB2_ENTITY_NEIGHBORS_MAX_ROWS, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].node, sizeof(rows[index].node), "%s", found[index].node);
@@ -5219,14 +5598,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_entity_neighbor_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_neighbors_filtered(
-                   entity, relation_a, relation_b, (int)order_by_weight, found,
-                   AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_neighbors_filtered(
+                      entity, relation_a, relation_b, (int)order_by_weight, found,
+                      AIMEE_DB2_ENTITY_NEIGHBORS_FILTERED_MAX_ROWS, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].node, sizeof(rows[index].node), "%s", found[index].node);
@@ -5268,13 +5648,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_entity_neighbor_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_outbound_neighbors(
-                   entity, found, AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_outbound_neighbors(
+                      entity, found, AIMEE_DB2_ENTITY_OUTBOUND_NEIGHBORS_MAX_ROWS, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].node, sizeof(rows[index].node), "%s", found[index].node);
@@ -5317,13 +5698,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_entity_neighbor_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_top_partners(entity, relation, found,
-                                                          AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_top_partners(entity, relation, found,
+                                                         AIMEE_DB2_ENTITY_TOP_PARTNERS_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].node, sizeof(rows[index].node), "%s", found[index].node);
@@ -5366,13 +5748,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_entity_neighbor_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_top_targets(entity, relation, found,
-                                                         AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_top_targets(entity, relation, found,
+                                                        AIMEE_DB2_ENTITY_TOP_TARGETS_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].node, sizeof(rows[index].node), "%s", found[index].node);
@@ -5414,13 +5797,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                definition_t *found = malloc(sizeof(*found) * AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->file_definitions(project, file_path, found,
-                                                       AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->file_definitions(project, file_path, found,
+                                                      AIMEE_DB2_FILE_DEFINITIONS_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].symbol_name, sizeof(rows[index].symbol_name), "%s",
@@ -5467,13 +5851,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                code_search_hit_t *found = malloc(sizeof(*found) * AIMEE_DB2_CODE_SEARCH_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->code_search(query, project, found,
-                                                  AIMEE_DB2_CODE_SEARCH_MAX_ROWS, (int)enrich);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->code_search(query, project, found,
+                                                 AIMEE_DB2_CODE_SEARCH_MAX_ROWS, (int)enrich);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].project, sizeof(rows[index].project), "%s",
@@ -5526,14 +5911,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                code_search_hit_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->code_search_excluding_project(
-                   query, excluded_project, found, AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS,
-                   (int)enrich);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->code_search_excluding_project(
+                      query, excluded_project, found,
+                      AIMEE_DB2_CODE_SEARCH_EXCLUDING_PROJECT_MAX_ROWS, (int)enrich);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].project, sizeof(rows[index].project), "%s",
@@ -5698,14 +6084,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_entity_edge_weighted_neighbor_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_neighbors_weighted(
-                   entity, found, AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS, (int)limit,
-                   (int)utility_scoring_enabled);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_neighbors_weighted(
+                      entity, found, AIMEE_DB2_ENTITY_NEIGHBORS_WEIGHTED_MAX_ROWS, (int)limit,
+                      (int)utility_scoring_enabled);
                for (int index = 0; index < written; index++)
                {
                   snprintf(rows[index].node, sizeof(rows[index].node), "%s", found[index].node);
@@ -5748,12 +6135,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                edge_t *found = malloc(sizeof(*found) * AIMEE_DB2_ENTITY_EDGES_FOR_ENTITY_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_edges_for_entity(entity, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_edges_for_entity(entity, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].edge_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -5801,13 +6189,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                edge_t *found = malloc(sizeof(*found) * AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->entity_edges_by_token(
-                   token, found, AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->entity_edges_by_token(
+                      token, found, AIMEE_DB2_ENTITY_EDGES_BY_TOKEN_MAX_ROWS, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].edge_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -5907,12 +6296,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                code_projection_edge_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_PROJECTION_EDGES_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->projection_edges(project, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->projection_edges(project, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].structural_weight = found[index].structural_weight < 0
@@ -5961,13 +6351,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                code_projection_edge_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_PROJECTION_EDGES_FOR_GENERATION_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->projection_edges_for_generation(
-                   (int64_t)projection_generation, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->projection_edges_for_generation((int64_t)projection_generation,
+                                                                     found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].structural_weight = found[index].structural_weight < 0
@@ -6013,12 +6404,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                term_hit_t *found = malloc(sizeof(*found) * AIMEE_DB2_TERM_FIND_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->term_find(identifier, found, AIMEE_DB2_TERM_FIND_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->term_find(identifier, found, AIMEE_DB2_TERM_FIND_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
@@ -6067,13 +6459,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                term_hit_t *found = malloc(sizeof(*found) * AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->term_find_in_project(project, identifier, found,
-                                                           AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->term_find_in_project(project, identifier, found,
+                                                          AIMEE_DB2_TERM_FIND_IN_PROJECT_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
@@ -6123,14 +6516,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                term_hit_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->term_find_excluding_project(
-                   excluded_project, identifier, found,
-                   AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->term_find_excluding_project(
+                      excluded_project, identifier, found,
+                      AIMEE_DB2_TERM_FIND_EXCLUDING_PROJECT_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].line = found[index].line < 0 ? 0u : (uint32_t)found[index].line;
@@ -6232,13 +6626,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                caller_hit_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->callers_find_scoped(project, callee, found,
-                                                          AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->callers_find_scoped(project, callee, found,
+                                                         AIMEE_DB2_CALLERS_FIND_SCOPED_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].caller_line =
@@ -6288,14 +6683,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                caller_hit_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->callers_find_excluding_project(
-                   excluded_project, callee, found,
-                   AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->callers_find_excluding_project(
+                      excluded_project, callee, found,
+                      AIMEE_DB2_CALLERS_FIND_EXCLUDING_PROJECT_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].caller_line =
@@ -7689,13 +8085,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                aimee_task_t *found = malloc(sizeof(*found) * AIMEE_DB2_TASK_LIST_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->task_list(task_state_filter, task_session_filter, (int)limit,
-                                                found, AIMEE_DB2_TASK_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->task_list(task_state_filter, task_session_filter, (int)limit,
+                                               found, AIMEE_DB2_TASK_LIST_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].task_row_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -7746,13 +8143,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                aimee_task_t *found = malloc(sizeof(*found) * AIMEE_DB2_TASK_SUBTASKS_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->task_subtasks((int64_t)parent_task, found,
-                                                    AIMEE_DB2_TASK_SUBTASKS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->task_subtasks((int64_t)parent_task, found,
+                                                   AIMEE_DB2_TASK_SUBTASKS_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].task_row_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -8721,12 +9119,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                rule_t *found = malloc(sizeof(*found) * AIMEE_DB2_RULES_LIST_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->rules_list(found, AIMEE_DB2_RULES_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->rules_list(found, AIMEE_DB2_RULES_LIST_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].rule_id = found[index].id < 0 ? 0u : (uint32_t)found[index].id;
@@ -8783,13 +9182,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                rule_t *found = malloc(sizeof(*found) * AIMEE_DB2_RULES_LIST_BY_TIER_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->rules_list_by_tier((int)min_weight, found,
-                                                         AIMEE_DB2_RULES_LIST_BY_TIER_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->rules_list_by_tier((int)min_weight, found,
+                                                        AIMEE_DB2_RULES_LIST_BY_TIER_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].rule_id = found[index].id < 0 ? 0u : (uint32_t)found[index].id;
@@ -8844,12 +9244,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                rule_t *found = malloc(sizeof(*found) * AIMEE_DB2_RULES_LIST_HARD_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->rules_list_hard(found, AIMEE_DB2_RULES_LIST_HARD_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->rules_list_hard(found, AIMEE_DB2_RULES_LIST_HARD_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].rule_id = found[index].id < 0 ? 0u : (uint32_t)found[index].id;
@@ -8963,13 +9364,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                anti_pattern_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ANTI_PATTERN_LIST_HOT_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->anti_pattern_list_hot(
-                   (int)hit_threshold, found, AIMEE_DB2_ANTI_PATTERN_LIST_HOT_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->anti_pattern_list_hot(
+                      (int)hit_threshold, found, AIMEE_DB2_ANTI_PATTERN_LIST_HOT_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].anti_pattern_id =
@@ -9023,13 +9425,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                anti_pattern_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_ANTI_PATTERN_CHECK_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->anti_pattern_check(file_path, command, found,
-                                                         AIMEE_DB2_ANTI_PATTERN_CHECK_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->anti_pattern_check(file_path, command, found,
+                                                        AIMEE_DB2_ANTI_PATTERN_CHECK_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].anti_pattern_id =
@@ -10145,13 +10548,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_artifact_link_row_t *links =
                    malloc(sizeof(*links) * AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS);
-               if (!links)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int listed = backend->artifact_links_read(
-                   artifact_id, links, (int)AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int listed = 0;
+               if (links)
+                  listed = backend->artifact_links_read(
+                      artifact_id, links, (int)AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS);
                for (int index = 0; index < listed; index++)
                {
                   snprintf(rows[index].to_artifact_id, sizeof(rows[index].to_artifact_id), "%s",
@@ -10194,13 +10598,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_calibration_surface_t *surfaces =
                    malloc(sizeof(*surfaces) * AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS);
-               if (!surfaces)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int listed = backend->calibration_surface_list(
-                   (int)min_rows, surfaces, (int)AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int listed = 0;
+               if (surfaces)
+                  listed = backend->calibration_surface_list(
+                      (int)min_rows, surfaces, (int)AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS);
                for (int index = 0; index < listed; index++)
                {
                   snprintf(rows[index].target_surface, sizeof(rows[index].target_surface), "%s",
@@ -10632,12 +11037,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_directive_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_LIST_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->directive_list(state_filter, cause_filter, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->directive_list(state_filter, cause_filter, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -10713,12 +11119,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_directive_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_BY_ENTITY_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->directive_by_entity(entity_lowered, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->directive_by_entity(entity_lowered, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -10794,12 +11201,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_directive_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_BY_FILE_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->directive_by_file(file_anchor, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->directive_by_file(file_anchor, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -10875,12 +11283,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                memory_directive_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_DIRECTIVE_BY_LEXICAL_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->directive_by_lexical(match_clause, found, (int)limit);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->directive_by_lexical(match_clause, found, (int)limit);
                for (int index = 0; index < written; index++)
                {
                   rows[index].directive_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -10952,12 +11361,13 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             {
                memory_lint_issue_t *found = malloc(sizeof(*found) * AIMEE_DB2_MEMORY_LINT_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->memory_lint(found, AIMEE_DB2_MEMORY_LINT_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->memory_lint(found, AIMEE_DB2_MEMORY_LINT_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].lint_memory_id =
@@ -11005,13 +11415,14 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_decision_log_row_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->decision_log_list(outcome_filter, (int)limit, found,
-                                                        AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->decision_log_list(outcome_filter, (int)limit, found,
+                                                       AIMEE_DB2_DECISION_LOG_LIST_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].decision_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;
@@ -11083,14 +11494,15 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                db2_decision_log_row_t *found =
                    malloc(sizeof(*found) * AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS);
-               if (!found)
-               {
-                  free(rows);
-                  return AIMEE_MODULE_STATUS_INTERNAL;
-               }
-               int written = backend->decision_log_list_scoped(
-                   decision_subject_filter, status_filter, (int)limit, found,
-                   AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int written = 0;
+               if (found)
+                  written = backend->decision_log_list_scoped(
+                      decision_subject_filter, status_filter, (int)limit, found,
+                      AIMEE_DB2_DECISION_LOG_LIST_SCOPED_MAX_ROWS);
                for (int index = 0; index < written; index++)
                {
                   rows[index].decision_id = found[index].id < 0 ? 0u : (uint64_t)found[index].id;

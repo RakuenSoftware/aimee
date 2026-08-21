@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "memory_conflicts.h"
+#include "memory_scenes.h"
 #include "anti_patterns.h"
 #include "workflow_patterns.h"
 #include "tool_registry.h"
@@ -577,6 +579,14 @@ typedef struct
    int (*memory_entities_list)(int64_t memory_id, db2_memory_entity_row_t *out, int max);
    int (*memory_temporal_refs_list)(int64_t memory_id, db2_memory_temporal_ref_row_t *out, int max);
    int (*memory_event_frames_list)(int64_t memory_id, db2_memory_event_frame_row_t *out, int max);
+   int (*memory_provenance_list)(int64_t memory_id, provenance_entry_t *out, int max);
+   int (*memory_scene_memberships)(int64_t memory_id, db2_memory_scene_membership_t *rows, int max);
+   int (*memory_relation_dates)(int64_t memory_id, db2_memory_relation_date_row_t *rows, int max);
+   int (*memory_summaries_list)(int64_t memory_id, int limit, db2_memory_summary_row_t *out,
+                                int max);
+   int (*memory_conflict_list)(conflict_t *out, int max);
+   int (*memory_artifact_hashed_list)(db2_memory_artifact_row_t *rows, int max);
+   int (*memory_depends_on_keys)(int64_t memory_id, db2_memory_key_row_t *rows, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -3309,6 +3309,63 @@ int db2_memory_event_frames_list(int64_t memory_id, db2_memory_event_frame_row_t
    return 0;
 }
 
+int db2_memory_provenance_list(int64_t memory_id, provenance_entry_t *out, int max)
+{
+   (void)memory_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_scene_memberships_for_memory(int64_t memory_id, db2_memory_scene_membership_t *rows,
+                                            int max)
+{
+   (void)memory_id;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_relation_dates_for_memory(int64_t memory_id, db2_memory_relation_date_row_t *rows,
+                                         int max)
+{
+   (void)memory_id;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_summaries_list(int64_t memory_id, int limit, db2_memory_summary_row_t *out, int max)
+{
+   (void)memory_id;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_conflict_list(conflict_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_artifact_hashed(db2_memory_artifact_row_t *rows, int max)
+{
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_depends_on_keys(int64_t memory_id, db2_memory_key_row_t *rows, int max)
+{
+   (void)memory_id;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
