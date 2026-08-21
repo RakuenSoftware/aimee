@@ -209,12 +209,40 @@ provenance, not from the hardcoded constant it used before.
   a KB-signed identity token this container has no tenancy to issue. The mapping
   is covered for all six attestation values in `test_mcp_memory_gate.c`.
 
-- **The LLM half of the drain.** The synthesis endpoint here is a stub that
-  returns an empty fact list, present only because the `memory_facts` drain runs
-  on the curator's LLM lane and that lane will not start without a configured
-  endpoint. The deterministic pattern pass -- the path under test -- runs before
-  the LLM call, so the stub's own responses never influenced a result; jobs that
-  end `failed` failed on the LLM call after their facts were already committed.
+### The whole model, live, against a real LLM
+
+The synthesis endpoint is Qwen3.8-27B on the appliance's llama-server. It binds
+127.0.0.1:8762 there, which is why no external probe finds it;
+`scripts/validation/fact-authority/llm-tunnel.sh` forwards it onto the
+workstation's LAN address for the container.
+
+Two configuration traps cost a wrong diagnosis each, and both are worth naming
+because each produced a plausible-looking failure:
+
+- `SYNTHESIS_ENDPOINT` takes a BASE url. `config_synth_chat_endpoint_normalize`
+  appends `/v1` itself and `provider_client` then appends `/chat/completions`, so
+  a value ending in `/v1/chat/completions` becomes
+  `.../v1/chat/completions/v1/chat/completions` and every call fails as
+  `provider HTTP -1` -- a transport error that reads like the endpoint is down.
+- `start-kb.sh` had no `pkill`, the same trap as `start-server.sh`, so a changed
+  endpoint appeared to be ignored while the ORIGINAL kb kept running with the old
+  environment. Both scripts restart properly now.
+
+With those fixed the `memory_facts` jobs reach `done`, and the resulting edges
+show the entire authority model in one table:
+
+    user | age       | 52              | A   pattern extractor, user_stated note
+    user | email     | ctl@example.com | B   pattern extractor, agent_message note
+    user | has_email | ctl@example.com | C   REAL LLM extraction, novel rel_type
+    user | city      | Berlin          | A   the user's, still current
+    user | city      | Paris           | B   model's, alongside -- city is not functional
+
+The third row is the LLM's own extraction, which chose a relation the seed does
+not define; §5 forces a novel rel_type to Class C whatever the authority, so it
+cannot outrank anything. The LLM path commits at `FACT_AUTHORITY_MODEL`
+unconditionally (`kb_memory_facts.c`), which is the right asymmetry: the pattern
+extractor reproduces what the user actually wrote, while an LLM's reading of the
+same note is inference.
 
 - **The module's server-only stages.** aimee-server calls four memory stages --
   EXTRACT_INDEX, WRITE, RETRIEVE (the PII recall gate) and RERANK (the ingress
