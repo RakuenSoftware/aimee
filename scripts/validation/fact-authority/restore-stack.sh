@@ -12,6 +12,9 @@ rm -f /root/.config/aimee/modules.d/kb/bus-probe.grant
 rm -f /root/modules.d/server/bus-probe.grant
 echo "probe grants removed"
 
+# Both instances, deliberately: restore brings the whole stack back, and each
+# start script re-launches its own. (The per-bus scripts scope their own kill so
+# they cannot take the other daemon's module down -- see start-memory-module.sh.)
 pkill -f aimee-module-memory 2>/dev/null
 sleep 1
 bash /root/start-kb.sh   >/dev/null 2>&1
