@@ -94,13 +94,13 @@ retraction-cue query:
 
 and the fact is still recalled into the block (`- email: theo@example.com`).
 
-**This one is not yet proven, and the doc should say so.** The Class-B control *also*
-survived, because the retraction scan is served by a memory module over the module bus
-(`AIMEE_MEMORY_EVENT_EXTRACT_INDEX`) and no such module binary ships today — the kb logs
-`retraction scan gave no answer; not retracting this turn` and skips the retraction
-entirely. So the Class-A result here is consistent with the fix but does not demonstrate
-it: nothing was retracted either way. The unit test `test_fact_ingest.c` covers this
-path directly with a stub scanner, at both authorities, and passes on real Postgres.
+**This one is not proven, and the doc should say so.** The Class-B control *also*
+survived, so nothing was retracted either way and the Class-A result demonstrates
+nothing. The cause is the placement gap below: the retraction scan is served by
+`aimee-module-memory`, which the manifest places in `server` and not in `kb`, so the
+call fails as TRANSPORT and the kb logs `retraction scan gave no answer; not retracting
+this turn`. The unit test `test_fact_ingest.c` covers this path directly with a stub
+scanner, at both authorities, and passes on real Postgres.
 
 ### Provenance is stamped from identity, and fails closed
 
@@ -158,17 +158,39 @@ the mapping is broken.
   provenance→authority mapping is unit-tested (`fact_authority_from_provenance`, ten
   cases including NULL/empty/unknown) and the stamping is verified above, but the two
   halves were not observed joined up in one live run.
-- **The memory module, and this is the largest gap.** The retraction scan AND the
-  pattern extractor are both served by a memory module over the module bus
-  (`AIMEE_MEMORY_EVENT_EXTRACT_INDEX`); only the client side and a header constant
-  exist in the tree, and `kb_module_stage_adapters_configure()` registers the
-  module-backed providers unconditionally with no in-process fallback. So in any
-  current deployment the kb logs `retraction scan gave no answer` and `pattern
-  extraction gave no answer`, and the whole typed-fact ingest path is inert.
+- **The memory module is not placed in aimee-kb, and this is the largest gap.**
+  Chasing why the scan never fires found the cause, and it is not "the module does
+  not exist". `aimee-module-memory` is a **required** module in
+  `dependencies/aimee-repositories.lock.json` serving 5889-5894 -- but its
+  `placements` list is `["server"]`, and the caller
+  (`src/kb/kb_module_stage_adapters.c`) runs in **kb**.
 
-  This is pre-existing and belongs to the module-migration work, not here. It is
-  fail-closed in both directions — a missing scan retracts nothing, a missing
-  extractor commits nothing — which is the correct way for it to be absent, and it
-  is why the `get_context_block` scenario above is inconclusive. But it means the
-  provenance→authority wiring, though verified at the stamping end, cannot be
-  observed end to end until that module ships. Worth its own issue.
+  aimee-kb calls three of its stages and none of them is served there:
+
+      AIMEE_MEMORY_EVENT_EXTRACT_INDEX (5889)  pattern extraction + retraction scan
+      AIMEE_MEMORY_EVENT_WRITE         (5890)  the typed-fact WRITE GATE
+      AIMEE_MEMORY_EVENT_EMBED         (5891)  memory embedding
+
+  `obs_bus_module_call` returns TRANSPORT, the adapters turn that into "no
+  answer", and each of those features silently does nothing. The typed-fact layer
+  is the visible casualty: the retraction cue never fires, the drain's pattern
+  pass never runs, and `db2_fact_commit` cannot validate a triple at all. A
+  deployed kb shows one WARN per turn and nothing else.
+
+  It is fail-closed in every direction, which is why it has gone unnoticed and why
+  nothing is corrupted by it. The remedy is a placement decision for the
+  module-migration owners -- place `memory` in kb, or remove kb's calls if it is
+  meant to reach that code another way -- and it cannot be verified from this
+  repo: the module is an external Go repository whose pinned ref (`v0.3.0` /
+  `d4fc0dd0f7cc`) is not currently published, as is true of every v0.3.0 pin in
+  the manifest.
+
+  `scripts/check-module-placement.py`, wired into `make lint`, pairs each daemon's
+  call sites against the manifest placements so this class of gap is caught at
+  review rather than by a feature quietly doing nothing. The three known gaps are
+  recorded in its `KNOWN_GAPS`: a NEW gap fails the build, and so does leaving an
+  entry there once it is fixed.
+
+  Consequence for this work: the provenance-to-authority wiring is verified at the
+  stamping end and cannot be observed being READ until that placement is fixed,
+  and the `get_context_block` scenario above stays inconclusive.
