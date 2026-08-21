@@ -3568,6 +3568,22 @@ int db2_anti_pattern_insert(const char *pattern, const char *description, const 
    return -1;
 }
 
+int db2_artifact_links_read(const char *id, db2_artifact_link_row_t *out, int max)
+{
+   (void)id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_calibration_surface_list(int min_rows, db2_calibration_surface_t *out, int max_out)
+{
+   (void)min_rows;
+   (void)out;
+   (void)max_out;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

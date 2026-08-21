@@ -1035,6 +1035,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kb_document_fetch = db2_kb_document_fetch,
        .workflow_pattern_insert = db2_workflow_pattern_insert,
        .anti_pattern_insert = db2_anti_pattern_insert,
+       .artifact_links_read = db2_artifact_links_read,
+       .calibration_surface_list = db2_calibration_surface_list,
    };
    return &backend;
 }
@@ -9862,6 +9864,108 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char artifact_id[AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MAX + 1] = "";
+         if (aimee_db2_artifact_links_read_request_decode(request_body, request_len, artifact_id,
+                                                          sizeof(artifact_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ARTIFACT_LINKS_READ_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->artifact_links_read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_artifact_links_read_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_artifact_link_row_t *links =
+                   malloc(sizeof(*links) * AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS);
+               if (!links)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int listed = backend->artifact_links_read(
+                   artifact_id, links, (int)AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS);
+               for (int index = 0; index < listed; index++)
+               {
+                  snprintf(rows[index].to_artifact_id, sizeof(rows[index].to_artifact_id), "%s",
+                           links[index].to_id);
+                  snprintf(rows[index].link_kind, sizeof(rows[index].link_kind), "%s",
+                           links[index].link_kind);
+               }
+               count = listed < 0 ? 0u : (uint32_t)listed;
+               free(links);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_artifact_links_read_reply_encode(rows, count, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t min_rows = 0u;
+         if (aimee_db2_calibration_surface_list_request_decode(request_body, request_len,
+                                                               &min_rows) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CALIBRATION_SURFACE_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->calibration_surface_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_calibration_surface_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_calibration_surface_t *surfaces =
+                   malloc(sizeof(*surfaces) * AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS);
+               if (!surfaces)
+               {
+                  free(rows);
+                  return AIMEE_MODULE_STATUS_INTERNAL;
+               }
+               int listed = backend->calibration_surface_list(
+                   (int)min_rows, surfaces, (int)AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS);
+               for (int index = 0; index < listed; index++)
+               {
+                  snprintf(rows[index].target_surface, sizeof(rows[index].target_surface), "%s",
+                           surfaces[index].target_surface);
+                  snprintf(rows[index].artifact_kind, sizeof(rows[index].artifact_kind), "%s",
+                           surfaces[index].kind);
+                  snprintf(rows[index].scope_kind, sizeof(rows[index].scope_kind), "%s",
+                           surfaces[index].scope_kind);
+                  snprintf(rows[index].scope_id, sizeof(rows[index].scope_id), "%s",
+                           surfaces[index].scope_id);
+               }
+               count = listed < 0 ? 0u : (uint32_t)listed;
+               free(surfaces);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_calibration_surface_list_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }

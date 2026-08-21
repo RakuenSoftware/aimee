@@ -570,6 +570,8 @@ typedef struct
                                   workflow_pattern_t *out);
    int (*anti_pattern_insert)(const char *pattern, const char *description, const char *source,
                               const char *source_ref, double confidence, anti_pattern_t *out);
+   int (*artifact_links_read)(const char *id, db2_artifact_link_row_t *out, int max);
+   int (*calibration_surface_list)(int min_rows, db2_calibration_surface_t *out, int max_out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -3605,6 +3605,25 @@ int main(int argc, char **argv)
               0.5, &anti_pattern_insert_pattern_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(anti_pattern_insert_pattern_id > 0);
 
+   /* Two list reads: an artifact's links and the calibratable surfaces. */
+   static aimee_db2_artifact_links_read_row_t
+       artifact_links_read_rows[AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS];
+   uint32_t artifact_links_read_count = 99;
+   assert(aimee_db2_artifact_links_read_call(
+              call_client, &client, 9485, 0, "replay-artifact-w", artifact_links_read_rows,
+              AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS, &artifact_links_read_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(artifact_links_read_count == 0);
+
+   static aimee_db2_calibration_surface_list_row_t
+       calibration_surface_list_rows[AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS];
+   uint32_t calibration_surface_list_count = 99;
+   assert(aimee_db2_calibration_surface_list_call(
+              call_client, &client, 9486, 0, 3, calibration_surface_list_rows,
+              AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS, &calibration_surface_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(calibration_surface_list_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

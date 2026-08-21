@@ -13637,6 +13637,18 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_anti_pattern_insert",
         "policy": {"writes": 200},
     },
+    "artifact_links_read": {
+        "key": ("learning", 80),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_links_read",
+        "policy": {"reads": 200},
+    },
+    "calibration_surface_list": {
+        "key": ("learning", 81),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_calibration_surface_list",
+        "policy": {"reads": 200},
+    },
 }
 
 

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "301ca2c136209881972fb506f1687c3cb5d8525ccaec88c3ff09d5c773b5bacb"
+const ContractSHA256 = "95d497595a4676dc1a91cc9c780ce27b7f385e14330e8a74ce2aa69a193a9ba1"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -10755,6 +10755,96 @@ func DecodeAntiPatternInsertRequest(request []byte) (string, string, string, str
 		return "", "", "", "", 0, ErrMalformedEnvelope
 	}
 	return patternText, patternDescription, patternSource, patternSourceRef, patternConfidence, nil
+}
+
+const EventArtifactLinksRead = EventLearning
+const StageArtifactLinksRead = FamilyLearning
+const OperationArtifactLinksRead uint32 = 80
+const ArtifactLinksReadArtifactIDMin = 1
+const ArtifactLinksReadArtifactIDMax = 63
+
+// EncodeArtifactLinksReadRequest writes the schema artifact_links_read declares, in order.
+func EncodeArtifactLinksReadRequest(artifactID string) ([]byte, error) {
+	if len(artifactID) < ArtifactLinksReadArtifactIDMin || len(artifactID) > ArtifactLinksReadArtifactIDMax || hasNUL(artifactID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, ArtifactLinksReadArtifactIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactLinksRead, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactLinksReadRequest reads it back, checking each field against its own bound.
+func DecodeArtifactLinksReadRequest(request []byte) (string, error) {
+	var artifactID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactLinksRead || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, ArtifactLinksReadArtifactIDMax); err != nil ||
+		len(artifactID) < ArtifactLinksReadArtifactIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return artifactID, nil
+}
+
+const EventCalibrationSurfaceList = EventLearning
+const StageCalibrationSurfaceList = FamilyLearning
+const OperationCalibrationSurfaceList uint32 = 81
+const CalibrationSurfaceListMinRowsMin uint32 = 0
+const CalibrationSurfaceListMinRowsMax uint32 = 65535
+
+// EncodeCalibrationSurfaceListRequest writes the schema calibration_surface_list declares, in order.
+func EncodeCalibrationSurfaceListRequest(minRows uint32) ([]byte, error) {
+	if minRows < CalibrationSurfaceListMinRowsMin || minRows > CalibrationSurfaceListMinRowsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var minRowsBytes [4]byte
+	binary.LittleEndian.PutUint32(minRowsBytes[:], minRows)
+	payload = append(payload, minRowsBytes[:]...)
+	header, err := EncodeRequestHeader(OperationCalibrationSurfaceList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCalibrationSurfaceListRequest reads it back, checking each field against its own bound.
+func DecodeCalibrationSurfaceListRequest(request []byte) (uint32, error) {
+	var minRows uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCalibrationSurfaceList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	minRows = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if minRows < CalibrationSurfaceListMinRowsMin || minRows > CalibrationSurfaceListMinRowsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return minRows, nil
 }
 
 const EventDocumentExists = EventOrganization

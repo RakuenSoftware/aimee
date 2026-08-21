@@ -14404,6 +14404,116 @@
       }
     },
     {
+      "family": "learning",
+      "id": 80,
+      "name": "artifact_links_read",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifact links are relational DB2 rows.",
+      "c_symbols": [
+        "db2_artifact_links_read"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the statement has no ordering, so an artifact with more links than the caller's array holds answers with an arbitrary subset"
+        },
+        "fields": [
+          {
+            "name": "artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "to_artifact_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 36
+            },
+            {
+              "name": "link_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "learning",
+      "id": 81,
+      "name": "calibration_surface_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events and the artifacts they judge are relational DB2 rows.",
+      "c_symbols": [
+        "db2_calibration_surface_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "surfaces are ordered by how many audited events each has, and that count is not returned"
+        },
+        "fields": [
+          {
+            "name": "min_rows",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "target_surface",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "artifact_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "scope_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "scope_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",

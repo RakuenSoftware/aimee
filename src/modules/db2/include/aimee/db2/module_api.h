@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "301ca2c136209881972fb506f1687c3cb5d8525ccaec88c3ff09d5c773b5bacb"
+#define AIMEE_DB2_CONTRACT_SHA256 "95d497595a4676dc1a91cc9c780ce27b7f385e14330e8a74ce2aa69a193a9ba1"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -3862,6 +3862,40 @@
 #define AIMEE_DB2_ANTI_PATTERN_INSERT_RESPONSE_MIN_LEN                              32u
 #define AIMEE_DB2_ANTI_PATTERN_INSERT_RESPONSE_MAX_LEN                              32u
 #define AIMEE_DB2_ANTI_PATTERN_INSERT_ERROR_LEN                                     24u
+#define AIMEE_DB2_EVENT_ARTIFACT_LINKS_READ                                         AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_ARTIFACT_LINKS_READ                                         AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_ARTIFACT_LINKS_READ                                     80u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_REQUEST_MIN_LEN                               28u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_REQUEST_MAX_LEN                               91u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MIN                               1u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MAX                               63u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_TO_ARTIFACT_ID_MIN                            0u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_TO_ARTIFACT_ID_MAX                            36u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_LINK_KIND_MIN                                 0u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_LINK_KIND_MAX                                 63u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS                                      256u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_RESPONSE_MIN_LEN                              28u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_RESPONSE_MAX_LEN                              27420u
+#define AIMEE_DB2_ARTIFACT_LINKS_READ_ERROR_LEN                                     24u
+#define AIMEE_DB2_EVENT_CALIBRATION_SURFACE_LIST                                    AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_CALIBRATION_SURFACE_LIST                                    AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_CALIBRATION_SURFACE_LIST                                81u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_REQUEST_MIN_LEN                          28u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_REQUEST_MAX_LEN                          28u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_MIN_ROWS_MIN                             0u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_MIN_ROWS_MAX                             65535u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_TARGET_SURFACE_MIN                       0u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_TARGET_SURFACE_MAX                       63u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_ARTIFACT_KIND_MIN                        0u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_ARTIFACT_KIND_MAX                        63u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_KIND_MIN                           0u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_KIND_MAX                           63u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_ID_MIN                             0u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_ID_MAX                             127u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS                                 256u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_RESPONSE_MIN_LEN                         28u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_RESPONSE_MAX_LEN                         85020u
+#define AIMEE_DB2_CALIBRATION_SURFACE_LIST_ERROR_LEN                                24u
 #define AIMEE_DB2_EVENT_DOCUMENT_EXISTS                                             AIMEE_DB2_EVENT_ORGANIZATION
 #define AIMEE_DB2_STAGE_DOCUMENT_EXISTS                                             AIMEE_DB2_FAMILY_ORGANIZATION
 #define AIMEE_DB2_OPERATION_DOCUMENT_EXISTS                                         6u
@@ -37257,6 +37291,301 @@ static inline int aimee_db2_anti_pattern_insert_reply_decode(const uint8_t *inpu
       return -1;
    if (cursor != payload_len)
       return -1;
+   return 0;
+}
+
+static inline int aimee_db2_artifact_links_read_request_encode(const char *artifact_id,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!artifact_id || !output || !output_len)
+      return -1;
+   size_t artifact_id_len = 0u;
+   while (artifact_id_len <= AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MAX && artifact_id[artifact_id_len])
+      ++artifact_id_len;
+   if (artifact_id_len < AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MIN || artifact_id_len > AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ARTIFACT_LINKS_READ_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)artifact_id_len);
+   memcpy(payload + cursor + 4u, artifact_id, artifact_id_len);
+   cursor += 4u + (uint32_t)artifact_id_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ARTIFACT_LINKS_READ, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_artifact_links_read_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *artifact_id, size_t artifact_id_capacity)
+{
+   if (artifact_id && artifact_id_capacity)
+      artifact_id[0] = '\0';
+   if (!artifact_id || artifact_id_capacity < (size_t)AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ARTIFACT_LINKS_READ || header.flags != 0u ||
+       input_len < AIMEE_DB2_ARTIFACT_LINKS_READ_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_ARTIFACT_LINKS_READ_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, artifact_id,
+                                 AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (artifact_id[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_ARTIFACT_LINKS_READ_ARTIFACT_ID_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+typedef struct
+{
+   char to_artifact_id[AIMEE_DB2_ARTIFACT_LINKS_READ_TO_ARTIFACT_ID_MAX + 1];
+   char link_kind[AIMEE_DB2_ARTIFACT_LINKS_READ_LINK_KIND_MAX + 1];
+} aimee_db2_artifact_links_read_row_t;
+
+static inline int aimee_db2_artifact_links_read_reply_encode(const aimee_db2_artifact_links_read_row_t *rows,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !rows) || count > AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ARTIFACT_LINKS_READ_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   aimee_db2_put_u32(payload, count);
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < count; index++)
+   {
+      size_t to_artifact_id_len = 0u;
+      while (to_artifact_id_len <= AIMEE_DB2_ARTIFACT_LINKS_READ_TO_ARTIFACT_ID_MAX && rows[index].to_artifact_id[to_artifact_id_len])
+         ++to_artifact_id_len;
+      size_t link_kind_len = 0u;
+      while (link_kind_len <= AIMEE_DB2_ARTIFACT_LINKS_READ_LINK_KIND_MAX && rows[index].link_kind[link_kind_len])
+         ++link_kind_len;
+      if (to_artifact_id_len > AIMEE_DB2_ARTIFACT_LINKS_READ_TO_ARTIFACT_ID_MAX ||
+       link_kind_len > AIMEE_DB2_ARTIFACT_LINKS_READ_LINK_KIND_MAX)
+         return -1;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)to_artifact_id_len);
+      memcpy(payload + cursor + 4u, rows[index].to_artifact_id, to_artifact_id_len);
+      cursor += 4u + (uint32_t)to_artifact_id_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)link_kind_len);
+      memcpy(payload + cursor + 4u, rows[index].link_kind, link_kind_len);
+      cursor += 4u + (uint32_t)link_kind_len;
+   }
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ARTIFACT_LINKS_READ, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_artifact_links_read_reply_decode(const uint8_t *input, size_t input_len,
+                                                 aimee_db2_artifact_links_read_row_t *rows, uint32_t capacity,
+                                                 uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !rows))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ARTIFACT_LINKS_READ ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_ARTIFACT_LINKS_READ_MAX_ROWS || decoded > capacity)
+      return -1;
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      memset(&rows[index], 0, sizeof(rows[index]));
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].to_artifact_id,
+                                    AIMEE_DB2_ARTIFACT_LINKS_READ_TO_ARTIFACT_ID_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].link_kind,
+                                    AIMEE_DB2_ARTIFACT_LINKS_READ_LINK_KIND_MAX) != 0)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   *count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_calibration_surface_list_request_encode(uint32_t min_rows,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (min_rows > AIMEE_DB2_CALIBRATION_SURFACE_LIST_MIN_ROWS_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_CALIBRATION_SURFACE_LIST_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, min_rows);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_CALIBRATION_SURFACE_LIST, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_calibration_surface_list_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *min_rows)
+{
+   if (min_rows)
+      *min_rows = 0u;
+   if (!min_rows)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CALIBRATION_SURFACE_LIST || header.flags != 0u ||
+       input_len < AIMEE_DB2_CALIBRATION_SURFACE_LIST_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_CALIBRATION_SURFACE_LIST_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *min_rows = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*min_rows > AIMEE_DB2_CALIBRATION_SURFACE_LIST_MIN_ROWS_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+typedef struct
+{
+   char target_surface[AIMEE_DB2_CALIBRATION_SURFACE_LIST_TARGET_SURFACE_MAX + 1];
+   char artifact_kind[AIMEE_DB2_CALIBRATION_SURFACE_LIST_ARTIFACT_KIND_MAX + 1];
+   char scope_kind[AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_KIND_MAX + 1];
+   char scope_id[AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_ID_MAX + 1];
+} aimee_db2_calibration_surface_list_row_t;
+
+static inline int aimee_db2_calibration_surface_list_reply_encode(const aimee_db2_calibration_surface_list_row_t *rows,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !rows) || count > AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_CALIBRATION_SURFACE_LIST_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   aimee_db2_put_u32(payload, count);
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < count; index++)
+   {
+      size_t target_surface_len = 0u;
+      while (target_surface_len <= AIMEE_DB2_CALIBRATION_SURFACE_LIST_TARGET_SURFACE_MAX && rows[index].target_surface[target_surface_len])
+         ++target_surface_len;
+      size_t artifact_kind_len = 0u;
+      while (artifact_kind_len <= AIMEE_DB2_CALIBRATION_SURFACE_LIST_ARTIFACT_KIND_MAX && rows[index].artifact_kind[artifact_kind_len])
+         ++artifact_kind_len;
+      size_t scope_kind_len = 0u;
+      while (scope_kind_len <= AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_KIND_MAX && rows[index].scope_kind[scope_kind_len])
+         ++scope_kind_len;
+      size_t scope_id_len = 0u;
+      while (scope_id_len <= AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_ID_MAX && rows[index].scope_id[scope_id_len])
+         ++scope_id_len;
+      if (target_surface_len > AIMEE_DB2_CALIBRATION_SURFACE_LIST_TARGET_SURFACE_MAX ||
+       artifact_kind_len > AIMEE_DB2_CALIBRATION_SURFACE_LIST_ARTIFACT_KIND_MAX ||
+       scope_kind_len > AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_KIND_MAX ||
+       scope_id_len > AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_ID_MAX)
+         return -1;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)target_surface_len);
+      memcpy(payload + cursor + 4u, rows[index].target_surface, target_surface_len);
+      cursor += 4u + (uint32_t)target_surface_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)artifact_kind_len);
+      memcpy(payload + cursor + 4u, rows[index].artifact_kind, artifact_kind_len);
+      cursor += 4u + (uint32_t)artifact_kind_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)scope_kind_len);
+      memcpy(payload + cursor + 4u, rows[index].scope_kind, scope_kind_len);
+      cursor += 4u + (uint32_t)scope_kind_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)scope_id_len);
+      memcpy(payload + cursor + 4u, rows[index].scope_id, scope_id_len);
+      cursor += 4u + (uint32_t)scope_id_len;
+   }
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_CALIBRATION_SURFACE_LIST, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_calibration_surface_list_reply_decode(const uint8_t *input, size_t input_len,
+                                                 aimee_db2_calibration_surface_list_row_t *rows, uint32_t capacity,
+                                                 uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !rows))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_CALIBRATION_SURFACE_LIST ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_CALIBRATION_SURFACE_LIST_MAX_ROWS || decoded > capacity)
+      return -1;
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      memset(&rows[index], 0, sizeof(rows[index]));
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].target_surface,
+                                    AIMEE_DB2_CALIBRATION_SURFACE_LIST_TARGET_SURFACE_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].artifact_kind,
+                                    AIMEE_DB2_CALIBRATION_SURFACE_LIST_ARTIFACT_KIND_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].scope_kind,
+                                    AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_KIND_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].scope_id,
+                                    AIMEE_DB2_CALIBRATION_SURFACE_LIST_SCOPE_ID_MAX) != 0)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   *count = decoded;
    return 0;
 }
 

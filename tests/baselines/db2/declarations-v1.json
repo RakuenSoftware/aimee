@@ -718,6 +718,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_css_projection_pg.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_css_render.c"
     },
     {
@@ -2006,6 +2010,7 @@
         "src/tests/test_cross_repo_review.c",
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_pool.c",
@@ -3517,9 +3522,15 @@
           "line": 242
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_links_read operation lists an artifact's outgoing links. The statement has no ordering and no limit of its own -- the caller's array is the only bound -- so an artifact with more links than the array holds answers with whichever ones the database returned first, and nothing says any were left. Its one caller in the knowledge base asks for eight."
+      },
       "signature": "int db2_artifact_links_read ( const char * id , db2_artifact_link_row_t * out , int max )",
       "signature_sha256": "82afdefbcaeb9163684d9bf8954f0bcb99f5c8b2bbde7de79f82690c5c3f6c3f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_links_read"
     },
     {
@@ -4219,9 +4230,15 @@
           "line": 107
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.calibration_surface_list operation lists the surfaces with enough audited events to calibrate. The ordering is by that count, descending, and the count itself is not returned -- so a caller sees which surface has the most evidence but never how much, and cannot tell a surface at the threshold from one far past it. A minimum of zero is silently read as one, so asking for no threshold applies the lowest."
+      },
       "signature": "int db2_calibration_surface_list ( int min_rows , db2_calibration_surface_t * out , int max_out )",
       "signature_sha256": "5d817b0f2ade524bff5cda44c8526b5592997f90ceddad018580a053afe21980",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_calibration_surface_list"
     },
     {
@@ -4470,6 +4487,7 @@
     {
       "consumers": [
         "src/index.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_index.c"
       ],
       "locations": [
@@ -4490,6 +4508,7 @@
         "src/tests/test_css_graph.c",
         "src/tests/test_css_insights.c",
         "src/tests/test_css_migration.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_css_render.c",
         "src/tests/test_index.c"
       ],
@@ -4672,6 +4691,7 @@
         "src/tests/test_css_graph.c",
         "src/tests/test_css_insights.c",
         "src/tests/test_css_migration.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_css_render.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -5006,6 +5026,7 @@
       "consumers": [
         "src/kb/kb_service_graph.c",
         "src/tests/test_code_projection.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_kb_graph.c"
       ],
       "locations": [
@@ -5051,6 +5072,7 @@
       "consumers": [
         "src/kb/kb_service_graph.c",
         "src/tests/test_code_projection.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_kb_graph.c"
       ],
       "locations": [
@@ -5202,6 +5224,7 @@
       "consumers": [
         "src/kb/kb_service_graph.c",
         "src/tests/test_code_projection.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_kb_graph.c"
       ],
       "locations": [
@@ -5498,6 +5521,7 @@
         "src/tests/test_cross_repo_review.c",
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_curator_promote.c",
         "src/tests/test_curator_synthesize.c",
         "src/tests/test_curiosity.c",
@@ -6220,6 +6244,7 @@
         "src/index.c",
         "src/tests/test_css_graph.c",
         "src/tests/test_css_migration.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_css_render.c"
       ],
       "locations": [
@@ -6318,6 +6343,7 @@
         "src/tests/test_css_graph.c",
         "src/tests/test_css_insights.c",
         "src/tests/test_css_migration.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_css_render.c"
       ],
       "locations": [
@@ -8278,6 +8304,7 @@
       "consumers": [
         "src/modules/memory/memory_graph.c",
         "src/tests/test_code_projection.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
@@ -8822,6 +8849,7 @@
     {
       "consumers": [
         "src/kb/kb_service_code_embed.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_entity_nodes.c"
       ],
       "locations": [
@@ -8859,6 +8887,7 @@
     {
       "consumers": [
         "src/kb/http/kb_http_code.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_entity_nodes.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -9758,6 +9787,7 @@
         "src/cmd_doctor.c",
         "src/kb/kb_main.c",
         "src/tests/test_content_scope_pg.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_db2.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_bedrock_live.c",
@@ -23017,6 +23047,7 @@
         "src/cmd_doctor.c",
         "src/kb/kb_main.c",
         "src/tests/test_content_scope_pg.c",
+        "src/tests/test_css_projection_pg.c",
         "src/tests/test_db2.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_bedrock_live.c",
@@ -27984,15 +28015,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ecf20d1ad93e243a43d27b7f9f397fce710e75e4ee7fbff9718179b644b01a72",
+  "fingerprint": "b210b379292cb0f1bcbdc03989c40007c21666797b6f7915a01cba8c5a9d6605",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 299,
+    "audit_pending": 297,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 660
+    "reviewed": 662
   }
 }

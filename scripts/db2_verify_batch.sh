@@ -71,6 +71,12 @@ pin = Path("scripts/tests/test_check_db2_source_boundary.py")
 text = pin.read_text(encoding="utf-8")
 for key in ("source_files", "consumer_files", "include_directives"):
     text = re.sub(rf'(result\["{key}"\], )\d+\)', rf'\g<1>{summary[key]})', text, count=1)
+# The same counts are pinned a second way, inside the string the checker prints,
+# by the test that runs it from another directory. Re-pinning only the first
+# shape left that one to fail the gate for the very change the gate just made.
+for key, word in (("consumer_files", "consumers"), ("source_files", "boundary files"),
+                  ("include_directives", "inbound includes")):
+    text = re.sub(rf'("\s*)\d+( {word}")', rf'\g<1>{summary[key]}\g<2>', text)
 pin.write_text(text, encoding="utf-8")
 print("boundary: source_files", summary["source_files"],
       "consumers", summary["consumer_files"], "includes", summary["include_directives"])

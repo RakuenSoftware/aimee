@@ -292,6 +292,14 @@
       "reason": "The typed learning.artifact_link operation replaces the link insert. Both artifacts are foreign keys, so an unknown end is refused, but the kind is stored unchecked: a caller can record a relationship no reader understands, in a direction only it knows the meaning of. Linking the same pair and kind twice does nothing and is acknowledged."
     },
     {
+      "symbol": "db2_artifact_links_read",
+      "signature_sha256": "82afdefbcaeb9163684d9bf8954f0bcb99f5c8b2bbde7de79f82690c5c3f6c3f",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_links_read operation lists an artifact's outgoing links. The statement has no ordering and no limit of its own -- the caller's array is the only bound -- so an artifact with more links than the array holds answers with whichever ones the database returned first, and nothing says any were left. Its one caller in the knowledge base asks for eight."
+    },
+    {
       "symbol": "db2_artifact_register_exemplar",
       "signature_sha256": "f2f0c6014383b7a62830e3c6abba57a3bceaccca6a0c4b29aa2657849aafe9d1",
       "disposition": "wire-operation",
@@ -466,6 +474,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.calibration_profile_write operation records a calibration profile. It is not a table of its own: the profile is a committed artifact whose kind, surface and feature-set version are stamped by a second statement, with nothing wrapping the pair, so a failure between them leaves a committed profile the surface-filtered reads cannot see. That statement's result is discarded and an identifier comes back regardless. The kind is stored in the model-version column."
+    },
+    {
+      "symbol": "db2_calibration_surface_list",
+      "signature_sha256": "5d817b0f2ade524bff5cda44c8526b5592997f90ceddad018580a053afe21980",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.calibration_surface_list operation lists the surfaces with enough audited events to calibrate. The ordering is by that count, descending, and the count itself is not returned -- so a caller sees which surface has the most evidence but never how much, and cannot tell a surface at the threshold from one far past it. A minimum of zero is silently read as one, so asking for no threshold applies the lowest."
     },
     {
       "symbol": "db2_calibration_surfaces_with_data",

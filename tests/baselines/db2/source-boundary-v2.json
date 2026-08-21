@@ -1,15 +1,15 @@
 {
   "schema_version": 2,
-  "source_revision": "89dc0077115026a8339065a9ef01d10fe07db598",
+  "source_revision": "793aabf74a1c00c5944eed0f078ea2aab552a672",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
     "headers": 138,
     "sql_files": 6,
-    "consumer_files": 305,
+    "consumer_files": 306,
     "production_consumers": 151,
-    "test_consumers": 154,
-    "include_directives": 996,
+    "test_consumers": 155,
+    "include_directives": 1004,
     "outbound_dependency_rows": 574,
     "outbound_include_directives": 574
   },
@@ -3974,6 +3974,44 @@
         },
         {
           "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_css_projection_pg.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/code_index.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/code_projection.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/css_graph.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/entity_edges.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/entity_nodes.h",
           "count": 1
         }
       ]
@@ -10139,5 +10177,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "98c6116c19e93f30b7b71a34410336baf5c9a57d5bfdc75af13a833b7ccaed9e"
+  "fingerprint": "81ade17efd9b8ca3a32cea243a05ef0cc930571ecafeb8f0ad0901c6672b0596"
 }

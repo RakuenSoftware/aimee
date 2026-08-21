@@ -1225,6 +1225,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *pattern_text, const char *pattern_description, const char *pattern_source, const char *pattern_source_ref, double pattern_confidence, uint64_t *pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_artifact_links_read_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *artifact_id, aimee_db2_artifact_links_read_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_calibration_surface_list_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t min_rows, aimee_db2_calibration_surface_list_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
