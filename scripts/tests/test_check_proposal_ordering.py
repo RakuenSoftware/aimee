@@ -71,11 +71,122 @@ class ProposalOrderingTests(unittest.TestCase):
         cutoff = self.commit(repo, "base")
         return tmp, repo, cutoff
 
+    # --- properties the workflow used to prove by re-running the whole gate ---
+    #
+    # `Prove event revision binding` and `Validate CWD independence` each ran the
+    # full script against the real repository: ~6 minutes apiece, of which the
+    # property under test was settled in the first milliseconds. validate_event()
+    # is called immediately after `rev-parse HEAD` and is pure env/string logic,
+    # and the config root is resolved in main() before any history is touched.
+    # Everything after that was a re-scan of 4,000+ commits that could not change
+    # either verdict. The properties are worth testing; paying for a full
+    # rename/copy scan to test them was not.
+
+    def test_event_binding_requires_the_checked_out_revision(self) -> None:
+        """GITHUB_SHA must agree with HEAD, whatever the event says."""
+        head = "a" * 40
+        pushed = {
+            "GITHUB_EVENT_NAME": "push",
+            "GITHUB_REF": "refs/heads/testing",
+            "GITHUB_SHA": head,
+            "GITHUB_BASE_REF": "",
+            "GITHUB_HEAD_REF": "",
+        }
+        with mock.patch.dict(os.environ, pushed, clear=True):
+            ordering.validate_event(head)  # binds to the checked-out revision
+
+        # The whole point: a context describing a DIFFERENT revision than the one
+        # checked out must not be accepted, or the gate reports on history the
+        # event did not name.
+        with mock.patch.dict(os.environ, {**pushed, "GITHUB_SHA": "b" * 40}, clear=True):
+            with self.assertRaisesRegex(ordering.OrderingError, "event-head"):
+                ordering.validate_event(head)
+
+        # An absent context stays usable for local runs.
+        with mock.patch.dict(os.environ, {}, clear=True):
+            ordering.validate_event(head)
+
+        # A present-but-incomplete context is refused rather than half-trusted.
+        for missing in ("GITHUB_EVENT_NAME", "GITHUB_REF"):
+            context = dict(pushed)
+            context[missing] = ""
+            with mock.patch.dict(os.environ, context, clear=True):
+                with self.assertRaises(ordering.OrderingError):
+                    ordering.validate_event(head)
+
+    def test_event_binding_gates_pull_request_base(self) -> None:
+        """A pull_request context must name a gated base and a real head ref."""
+        head = "c" * 40
+        pr = {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REF": "refs/pull/42/merge",
+            "GITHUB_SHA": head,
+            "GITHUB_BASE_REF": "testing",
+            "GITHUB_HEAD_REF": "topic",
+        }
+        with mock.patch.dict(os.environ, pr, clear=True):
+            ordering.validate_event(head)
+
+        with mock.patch.dict(os.environ, {**pr, "GITHUB_BASE_REF": "unlisted"}, clear=True):
+            with self.assertRaisesRegex(ordering.OrderingError, "event-base"):
+                ordering.validate_event(head)
+
+        with mock.patch.dict(os.environ, {**pr, "GITHUB_REF": "refs/heads/topic"}, clear=True):
+            with self.assertRaisesRegex(ordering.OrderingError, "event-ref"):
+                ordering.validate_event(head)
+
+    def test_config_root_resolution_is_cwd_independent(self) -> None:
+        """The gate reads the repository it was pointed at, not the one it stands in."""
+        tmp, repo, _ = self.make_repo()
+        try:
+            elsewhere = tempfile.TemporaryDirectory()
+            try:
+                # Run from an unrelated directory, naming the fixture explicitly.
+                # main() must resolve that root rather than inheriting the cwd,
+                # so the failure it reports is the fixture's (no anchor), not a
+                # "not a repository" complaint about where it happened to run.
+                original = Path.cwd()
+                os.chdir(elsewhere.name)
+                try:
+                    with mock.patch.dict(os.environ, {}, clear=True):
+                        result = subprocess.run(
+                            [
+                                "python3", "-I", "-S", str(CHECKER_PATH),
+                                "--config-root", str(repo),
+                            ],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            cwd=elsewhere.name, check=False,
+                        )
+                finally:
+                    os.chdir(original)
+                combined = result.stdout + result.stderr
+                self.assertNotIn("rule=config-root", combined)
+                self.assertNotIn(str(elsewhere.name), combined)
+                # It reached the fixture and judged IT.
+                self.assertNotEqual(result.returncode, 0)
+            finally:
+                elsewhere.cleanup()
+        finally:
+            tmp.cleanup()
+
     def test_current_repository_passes(self) -> None:
         # Gated on ancestry, matching the rule itself. Gating on first-parent
         # membership skipped this on every ordinary checkout -- including the
         # integration branch -- so the one test that exercises the real history
         # never ran.
+        #
+        # This is the same full-history scan the workflow's `Enforce Git proposal
+        # ordering` step performs, on the same checkout, in the same job. Running
+        # both costs a second ~6-minute scan to reach a verdict already reached.
+        # The workflow sets this variable AFTER that step has passed, so CI pays
+        # for one scan and a developer running the suite locally still gets the
+        # real-history coverage. It is opt-in and names the step that replaces
+        # it: nothing skips silently.
+        if os.environ.get("PROPOSAL_ORDERING_FULL_SCAN_DONE") == "1":
+            self.skipTest(
+                "full-history scan already performed by the workflow's "
+                "'Enforce Git proposal ordering' step"
+            )
         head = ordering.git_text(REPO_ROOT, "rev-parse", "HEAD")
         if not ordering.descends_from(REPO_ROOT, ordering.SLICE2_ANCHOR, head):
             self.skipTest("checkout does not descend from the approved Slice 2 anchor")
