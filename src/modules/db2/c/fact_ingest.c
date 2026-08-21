@@ -1,10 +1,11 @@
 /* fact_ingest.c: pattern-first typed-fact ingest pipeline (§6 -> §1) + the
  * per-turn ingress orchestration (§4/§6/§7). P5. See fact_ingest.h. */
 #include "fact_ingest.h"
-#include "fact_lifecycle.h"   /* db2_fact_retract */
-#include "fact_recall.h"      /* db2_fact_recall_in_query */
-#include "rel_types_store.h"  /* db2_fact_commit */
-#include "../headers/aimee.h" /* config_t */
+#include "fact_lifecycle.h"       /* db2_fact_retract */
+#include "fact_recall.h"          /* db2_fact_recall_in_query */
+#include "rel_types_store.h"      /* db2_fact_commit */
+#include "../headers/rel_types.h" /* rel_types_seed_lookup, rel_type_kind_allowed */
+#include "../headers/aimee.h"     /* config_t */
 #include "../support/db2_runtime_config.h"
 #include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "../support/db2_log.h"             /* LOG_WARN */
@@ -65,9 +66,34 @@ int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabl
    for (int i = 0; i < nt; i++)
    {
       const db2_fact_candidate_t *t = &triples[i];
-      fact_gate_verdict_t v =
-          db2_fact_commit(t->subject, (memory_node_kind_t)t->subject_kind, t->rel_type, t->object,
-                          (memory_node_kind_t)t->object_kind, authority, enabled);
+
+      /* The extractor GUESSES endpoint kinds from the value's shape: an IP looks
+       * like an IP, an email like a scalar, and everything else falls to
+       * NODE_OTHER. The gate then REJECTS a seed relation whose declared kinds
+       * disagree, and the fact is silently dropped -- so "my age is 41" produced
+       * nothing at all, because `age` declares tail NODE_SCALAR and a bare number
+       * classifies as NODE_OTHER. Most seed relations are unreachable from this
+       * path for exactly that reason.
+       *
+       * A seed relation's own definition is better evidence than a guess made
+       * from the value's spelling, so prefer it whenever the guess is not already
+       * allowed. This is the same repair kb_memory_facts.c makes on the LLM
+       * extraction path; only the pattern path was left without it. Novel
+       * relations keep the guess -- they are not kind-checked, and inventing
+       * kinds for them would be a guess with no definition behind it. */
+      memory_node_kind_t subj_kind = (memory_node_kind_t)t->subject_kind;
+      memory_node_kind_t obj_kind = (memory_node_kind_t)t->object_kind;
+      const rel_type_def_t *sdef = rel_types_seed_lookup(t->rel_type);
+      if (sdef)
+      {
+         if (!rel_type_kind_allowed(sdef, 1, subj_kind) && sdef->head_kind_count > 0)
+            subj_kind = sdef->head_kinds[0];
+         if (!rel_type_kind_allowed(sdef, 0, obj_kind) && sdef->tail_kind_count > 0)
+            obj_kind = sdef->tail_kinds[0];
+      }
+
+      fact_gate_verdict_t v = db2_fact_commit(t->subject, subj_kind, t->rel_type, t->object,
+                                              obj_kind, authority, enabled);
       /* Count the triples the gate let through when enabled: ACCEPT writes/bumps a
        * validated edge, NOVEL stages a provisional rel_type + a Class-C edge. A
        * re-ingest of a known triple still counts (it bumps weight, no new row).

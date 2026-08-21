@@ -83,24 +83,21 @@ is what makes the 0 meaningful.
 The TCP row is a pre-existing defence (write-tier grants), not this change — worth
 recording because it means an agent on the network never reaches the retraction path at
 all; the fix matters for the paths that *do* get through.
-
 ### `get_context_block` no longer speaks as the user
 
-Seeded `user/email` as user-stated Class A, then had the action run with the agent's own
-retraction-cue query:
+With `aimee-module-memory` placed in kb (below) the retraction scan actually
+fires, so this scenario is finally conclusive. The agent's own query carries the
+retraction cue, and both classes go through the identical query:
 
     user-stated (Class A) before: A current
-    after the agent's query:      A current
+    after the agent's query:      A current      <- the user's fact stands
 
-and the fact is still recalled into the block (`- email: theo@example.com`).
+    model-authored (Class B) before: B current
+    after the same query:            B gone      <- the path is demonstrably live
 
-**This one is not proven, and the doc should say so.** The Class-B control *also*
-survived, so nothing was retracted either way and the Class-A result demonstrates
-nothing. The cause is the placement gap below: the retraction scan is served by
-`aimee-module-memory`, which the manifest places in `server` and not in `kb`, so the
-call fails as TRANSPORT and the kb logs `retraction scan gave no answer; not retracting
-this turn`. The unit test `test_fact_ingest.c` covers this path directly with a stub
-scanner, at both authorities, and passes on real Postgres.
+The Class-B row being retracted is what makes the Class-A row surviving mean
+anything. On the first pass, before the module was placed, BOTH survived and the
+result proved nothing at all.
 
 ### Provenance is stamped from identity, and fails closed
 
@@ -147,50 +144,78 @@ all six `attested_transport_t` values — including `ATTEST_NONE`, the value a
 missed hop collapses to — with a negative control confirming the test fails when
 the mapping is broken.
 
+### Gap 2 through the REAL commit path, and the placement fix that unblocked it
+
+`aimee-module-memory` is a required module serving 5889-5894, but its
+`placements` were `["server"]` while the caller
+(`src/kb/kb_module_stage_adapters.c`) runs in kb. aimee-kb called three stages
+nothing served there -- `EXTRACT_INDEX` (extraction + retraction scan), `WRITE`
+(the typed-fact write gate) and `EMBED` -- each failing as TRANSPORT, so all of
+them silently did nothing. `memory` is now placed in `["server", "kb"]`.
+
+The module is stateless: its stages are pure decisions plus one outbound HTTP
+call, and "storage, graph, and lifecycle units likewise remain C". So there is no
+sqlite-on-server / postgres-on-kb split to reconcile -- the generated kb grant is
+byte-identical to the server one and requests nothing. Verified on the container
+rather than on paper: built from `server-go/cmd/aimee-module`, installed with its
+generated grant, attached to kb's bus, after which the scan stopped answering
+"no answer" and the drain ran for the first time.
+
+That made the only production route to the commit gate reachable:
+`memory.store` -> `memory_facts` job -> drain -> pattern extractor -> the module's
+write gate -> `db2_fact_commit`. Choosing the relation for this took three
+attempts, each of which produced a green-looking result that proved nothing:
+
+- `city` is not FUNCTIONAL, so two values legitimately accumulate and no
+  correction ever applies;
+- `has_hostname` is functional, but the extractor turns "my X is Y" into rel_type
+  X verbatim, so that text yields `hostname` -- a different, novel relation, which
+  §5 forces to Class C whatever the authority;
+- `age` is functional, seed, and extractable -- but produced NO row, because it
+  declares tail `NODE_SCALAR` while the extractor classifies a bare number as
+  `NODE_OTHER`, so the gate rejected it before the guard was ever consulted.
+
+That last one is a real defect, not just an awkward test: the pattern path had no
+kind fixup, so it silently dropped every seed relation whose declared kinds
+disagreed with a guess made from the value's spelling. The LLM path in
+`kb_memory_facts.c` already repairs exactly this and carries a comment saying why;
+only the pattern path was left without it. Fixed in `db2_fact_ingest_text`, with a
+unit test that fails without it.
+
+With `age` finally reachable, gap 2 on the real path:
+
+    the user stated:  user/age = 30   class=A  [current]
+    a model note says "my age is 41"  (provenance = agent_message)
+    after the drain:  30  class=A  [current]        <- alone
+
+    positive control (no prior fact):  ctl@example.com  class=B   <- drain ran
+    user-provenance note "my age is 52":  52  class=A  [current]
+
+The control is what makes this evidence: it commits through the same gate on the
+same drain, so "41 is absent" is the guard dropping an outranked write rather
+than nothing having happened. The last line closes the provenance loop in the
+READ direction -- the drain took USER authority from the row's recorded
+provenance, not from the hardcoded constant it used before.
+
 ## What this did not cover
 
 - **The mTLS/distributed topology.** The asserted-caller path
-  (`X-Aimee-Caller-Subject` → `KB_PRIN_HOST` actor) is wired and unit-tested, but this
-  run used the plain-loopback deployment, so the host-actor branch of
+  (`X-Aimee-Caller-Subject` -> `KB_PRIN_HOST` actor) is wired and unit-tested, but
+  this run used the plain-loopback deployment, so the host-actor branch of
   `kb_memory_request_authority()` was not exercised against a live mTLS listener.
-- **The drain end to end.** Driving a stored note through to a committed typed fact
-  needs the curator LLM lane, which had no synthesis endpoint configured here. The
-  provenance→authority mapping is unit-tested (`fact_authority_from_provenance`, ten
-  cases including NULL/empty/unknown) and the stamping is verified above, but the two
-  halves were not observed joined up in one live run.
-- **The memory module is not placed in aimee-kb, and this is the largest gap.**
-  Chasing why the scan never fires found the cause, and it is not "the module does
-  not exist". `aimee-module-memory` is a **required** module in
-  `dependencies/aimee-repositories.lock.json` serving 5889-5894 -- but its
-  `placements` list is `["server"]`, and the caller
-  (`src/kb/kb_module_stage_adapters.c`) runs in **kb**.
 
-  aimee-kb calls three of its stages and none of them is served there:
+- **`memory.delete`'s retire path.** Over TCP the request is refused above the
+  authority decision by the per-user write-tier grant gate, and reaching it needs
+  a KB-signed identity token this container has no tenancy to issue. The mapping
+  is covered for all six attestation values in `test_mcp_memory_gate.c`.
 
-      AIMEE_MEMORY_EVENT_EXTRACT_INDEX (5889)  pattern extraction + retraction scan
-      AIMEE_MEMORY_EVENT_WRITE         (5890)  the typed-fact WRITE GATE
-      AIMEE_MEMORY_EVENT_EMBED         (5891)  memory embedding
+- **The LLM half of the drain.** The synthesis endpoint here is a stub that
+  returns an empty fact list, present only because the `memory_facts` drain runs
+  on the curator's LLM lane and that lane will not start without a configured
+  endpoint. The deterministic pattern pass -- the path under test -- runs before
+  the LLM call, so the stub's own responses never influenced a result; jobs that
+  end `failed` failed on the LLM call after their facts were already committed.
 
-  `obs_bus_module_call` returns TRANSPORT, the adapters turn that into "no
-  answer", and each of those features silently does nothing. The typed-fact layer
-  is the visible casualty: the retraction cue never fires, the drain's pattern
-  pass never runs, and `db2_fact_commit` cannot validate a triple at all. A
-  deployed kb shows one WARN per turn and nothing else.
-
-  It is fail-closed in every direction, which is why it has gone unnoticed and why
-  nothing is corrupted by it. The remedy is a placement decision for the
-  module-migration owners -- place `memory` in kb, or remove kb's calls if it is
-  meant to reach that code another way -- and it cannot be verified from this
-  repo: the module is an external Go repository whose pinned ref (`v0.3.0` /
-  `d4fc0dd0f7cc`) is not currently published, as is true of every v0.3.0 pin in
-  the manifest.
-
-  `scripts/check-module-placement.py`, wired into `make lint`, pairs each daemon's
-  call sites against the manifest placements so this class of gap is caught at
-  review rather than by a feature quietly doing nothing. The three known gaps are
-  recorded in its `KNOWN_GAPS`: a NEW gap fails the build, and so does leaving an
-  entry there once it is fixed.
-
-  Consequence for this work: the provenance-to-authority wiring is verified at the
-  stamping end and cannot be observed being READ until that placement is fixed,
-  and the `get_context_block` scenario above stays inconclusive.
+- **The module's other three stages.** `RETRIEVE`, `RERANK` and
+  `DECLARE_COMMANDS` are served by the module but not called by kb, so placing it
+  there exercised only the three stages kb uses.

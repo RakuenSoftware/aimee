@@ -186,6 +186,22 @@ int main(void)
    assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 1); /* the user's own retraction lands */
 
+   /* A SEED relation whose declared kinds disagree with the extractor's guess
+    * must still commit. The extractor infers kinds from the value's spelling --
+    * a bare number is NODE_OTHER -- while `age` declares tail NODE_SCALAR, so
+    * the gate rejected it and the fact vanished with no error anywhere. Most
+    * seed relations were unreachable from this path for that reason. */
+   assert(db2_fact_ingest_text("my age is 41", FACT_AUTHORITY_USER, 1) == 1);
+   {
+      edge_t e[16];
+      int n = db2_entity_edges_semantic_by_entity("user", e, 16);
+      int found = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(e[i].relation, "age") == 0 && strcmp(e[i].target, "41") == 0)
+            found = 1;
+      assert(found); /* rejected on kind before the fixup */
+   }
+
    /* Bad args. */
    assert(db2_fact_ingest_text(NULL, FACT_AUTHORITY_USER, 1) == -1);
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Every module stage a daemon CALLS must be served by a module PLACED in it.
 
-aimee-kb calls the memory module's EXTRACT_INDEX stage (5889) from
-kb_module_stage_adapters.c, but the memory module is placed only in `server`.
-Nothing failed loudly: obs_bus_module_call returns TRANSPORT, the adapters turn
-that into "no answer", and the typed-fact ingest path silently does nothing --
-fail-closed, and invisible. The kb logs one WARN per turn and no deployment
-notices.
+Written for a gap that had shipped: aimee-kb called the memory module's
+extraction, write-gate and embed stages, and the manifest placed that module in
+`server` only. Nothing failed loudly -- obs_bus_module_call returns TRANSPORT,
+the adapters turn that into "no answer", and the whole typed-fact layer silently
+did nothing. Fail-closed, and invisible: one WARN per turn, and no deployment
+noticed.
 
 This pairs the two sides that were never compared: the call sites in each
 daemon's C sources, and the placements in the runtime-bundle manifest.
@@ -33,25 +33,15 @@ EVENT_DEF = re.compile(r"^#define\s+(AIMEE_[A-Z0-9_]*_EVENT_[A-Z0-9_]+)\s+(\d+)u
                        re.MULTILINE)
 CALL_SITE = re.compile(r"call_module(?:_with_budget)?\s*\(\s*(AIMEE_[A-Z0-9_]+)")
 
-# Gaps that already existed when this check was written. They are recorded, not
-# forgiven: each one is a live feature that silently does nothing in a deployed
-# kb, and the list is the visible debt. Grandfathered so the check can go in
-# green and fail on any NEW gap; shrinking it is the fix.
+# No known gaps. The list below is deliberately empty: it exists so a placement
+# gap that cannot be fixed immediately can be recorded rather than ignored, and
+# the stale-entry check further down means an entry cannot outlive its fix.
 #
-# aimee-kb's provider table (kb_module_stage_adapters.c) calls the memory
-# module's extraction, write-gate and embed stages, but the manifest places that
-# module in `server` only. The typed-fact layer is the visible casualty: the
-# retraction scan and the pattern extractor return "no answer" every turn, and
-# the write GATE cannot validate a triple at all. Fixing it is a placement
-# decision for the module-migration owners -- either place `memory` in kb, or
-# remove kb's calls if the intent is for kb to reach it another way -- and it
-# cannot be verified from this repo, because the module is an external Go
-# repository whose pinned ref is not currently published.
-KNOWN_GAPS = {
-    ("kb", "AIMEE_MEMORY_EVENT_EXTRACT_INDEX"),
-    ("kb", "AIMEE_MEMORY_EVENT_WRITE"),
-    ("kb", "AIMEE_MEMORY_EVENT_EMBED"),
-}
+# It was populated once, by the gap this check was written for: aimee-kb calls
+# the memory module's extraction, write-gate and embed stages, and the manifest
+# placed that module in `server` only, so the typed-fact layer silently did
+# nothing in a deployed kb. That is fixed -- `memory` is now placed in both.
+KNOWN_GAPS: set[tuple[str, str]] = set()
 
 
 def event_constants() -> dict[str, int]:
