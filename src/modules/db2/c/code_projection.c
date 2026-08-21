@@ -859,6 +859,40 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
          }
       }
 
+      /* styles: file → symbol:proj:class (from css_component_styles).
+       *
+       * The other half of the join CSS now completes. A stylesheet defines .btn as
+       * a symbol, and this is the component that names it -- so the two meet at
+       * symbol:proj:btn and a frontend token and the style it resolves to sit in
+       * one traversable structure. Without this the join lived only in
+       * css_component_styles, a table nothing else queries.
+       *
+       * Unresolved tokens are edges too: a class a component names and no
+       * stylesheet defines is exactly what a reader wants to find, and dropping it
+       * would make a missing style look like an absent reference. */
+      {
+         static const char *styles_sql = "SELECT class_token, resolved FROM css_component_styles"
+                                         " WHERE component_file_id = ?1 AND class_token != ''";
+         aimee_pg_stmt_t *ss = aimee_pg_prepare(conn, styles_sql, err, sizeof(err));
+         if (ss)
+         {
+            aimee_pg_bind_int64(ss, "?1", files[fi].id);
+            while (aimee_pg_step(ss, err, sizeof(err)) == AIMEE_PG_ROW)
+            {
+               const char *token = aimee_pg_column_text(ss, 0);
+               if (!token)
+                  continue;
+               char class_key[GRAPH_ENDPOINT_MAX];
+               if (db2_entity_node_key_symbol(project, token, class_key, sizeof(class_key)) != 0)
+                  continue;
+               if (project_edge(gen_id, project, file_key, "styles", class_key, REL_DEPENDS_ON,
+                                NODE_FILE, NODE_STRUCT) == 0)
+                  edge_count++;
+            }
+            aimee_pg_finalize(ss);
+         }
+      }
+
       /* calls: symbol → symbol (from code_calls joined through file) */
       {
          static const char *calls_sql = "SELECT caller, callee FROM code_calls WHERE file_id = ?1"

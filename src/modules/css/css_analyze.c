@@ -814,11 +814,11 @@ static int css_add_class_tokens(const char *s, size_t len, char (*out)[CSS_CLASS
    return n;
 }
 
-int css_extract_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
-                             int max)
+/* The scanner. Reached when the JSX grammar is not compiled in, or could not
+ * read this source -- Vue and Svelte templates among them. */
+static int css_extract_class_tokens_scanned(const char *text, size_t len,
+                                            char (*out)[CSS_CLASS_TOKEN_MAX], int max)
 {
-   if (!text || !out || max <= 0)
-      return 0;
    int n = 0;
    size_t i = 0;
    while (i < len && n < max)
@@ -859,4 +859,19 @@ int css_extract_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS
       i++;
    }
    return n;
+}
+
+int css_extract_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                             int max)
+{
+   if (!text || !out || max <= 0)
+      return 0;
+   /* Prefer the JSX grammar where it is compiled in and could read this source;
+    * fall back to the scanner otherwise, and in the default build, where
+    * css_treesitter_class_tokens is a stub. The same arrangement css_analyze
+    * uses above, and extract_calls uses for code_treesitter_calls. */
+   int parsed = css_treesitter_class_tokens(text, len, out, max);
+   if (parsed >= 0)
+      return parsed;
+   return css_extract_class_tokens_scanned(text, len, out, max);
 }

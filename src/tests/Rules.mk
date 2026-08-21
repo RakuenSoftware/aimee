@@ -1233,6 +1233,9 @@ $(TESTPREFIX)/unit-test-css-graph: \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) \
+                                       $(OBJDIR)/db2/code_projection.o \
+                                       $(OBJDIR)/db2/entity_nodes.o \
+                                       $(OBJDIR)/db2/entity_edges.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
@@ -5789,6 +5792,21 @@ $(TESTPREFIX)/unit-test-kb-audit-worm-pg: $(OBJDIR)/tests/test_kb_audit_worm_pg.
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
+# The CSS <-> component join, end to end. Real Postgres only: the projection's
+# edge upsert writes with to_char(CURRENT_TIMESTAMP, ...), which the SQLite shim
+# has no function for, so it cannot run there at all. Skips cleanly without
+# AIMEE_TEST_PG_URL, as the other _pg tests do.
+# Declared below the blanket `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)` line,
+# which expands TEST_TARGETS where it is written -- so like
+# unit-test-code-treesitter this target has to ask for the archive itself.
+$(TESTPREFIX)/unit-test-css-projection-pg: | $(CORE_CONNECTION_LIB)
+$(TESTPREFIX)/unit-test-css-projection-pg: $(OBJDIR)/tests/test_css_projection_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
 $(TESTPREFIX)/unit-test-witness-checkpoint-produce-pg: $(OBJDIR)/tests/test_witness_checkpoint_produce_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
@@ -8573,6 +8591,7 @@ $(TESTPREFIX)/unit-test-config-set-section: $(OBJDIR)/tests/test_config_set_sect
 # cache from binaries that do not reference it.
 TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-kb-audit-worm-pg \
+  $(TESTPREFIX)/unit-test-css-projection-pg \
   $(TESTPREFIX)/unit-test-content-scope-pg \
   $(TESTPREFIX)/unit-test-kb-bedrock-live \
   $(TESTPREFIX)/unit-test-kb-p2b-egress-live \

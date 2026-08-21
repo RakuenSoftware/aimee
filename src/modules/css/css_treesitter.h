@@ -35,6 +35,20 @@ extern "C"
     * hand-rolled parser rather than reporting an empty stylesheet. */
    css_stylesheet_t *css_treesitter_analyze(const char *text, size_t len);
 
+   /* The static class tokens a component's markup names, read from the JSX
+    * grammar rather than scanned for. Writes up to `max` de-duplicated tokens
+    * and returns the count, or -1 when tree-sitter is not compiled in or the
+    * source did not parse -- in which case the caller falls back to
+    * css_extract_class_tokens' scanner, which is the more forgiving of the two
+    * and the only one that reads Vue and Svelte templates.
+    *
+    * The grammar draws the static/dynamic line structurally: a `className="a b"`
+    * attribute holds a string node and `className={expr}` holds a jsx_expression,
+    * so a dynamic class is skipped because of what it is rather than because of
+    * which characters it happens to contain. */
+   int css_treesitter_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                                   int max);
+
 #ifdef __cplusplus
 }
 #endif

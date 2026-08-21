@@ -29,6 +29,9 @@
  * than shared with code_treesitter.c so neither file has to include the
  * other's types; both are declaring the same symbol from the same object. */
 const TSLanguage *tree_sitter_css(void);
+/* The JSX side of the same join: a component's markup names the classes a
+ * stylesheet defines, and tsx is the grammar that reads it. */
+const TSLanguage *tree_sitter_tsx(void);
 
 /* The same hard caps the hand-rolled parser applies, so a pathological input
  * is bounded identically whichever path reads it. */
@@ -508,6 +511,134 @@ css_stylesheet_t *css_treesitter_analyze(const char *text, size_t len)
    return sheet;
 }
 
+/* --- component class tokens ----------------------------------------------- */
+
+static int css_ts_token_seen(char (*out)[CSS_CLASS_TOKEN_MAX], int n, const char *token)
+{
+   for (int i = 0; i < n; i++)
+      if (strcmp(out[i], token) == 0)
+         return 1;
+   return 0;
+}
+
+/* Split an attribute value on whitespace, de-duplicating, and append. */
+static int css_ts_add_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX], int n,
+                             int max)
+{
+   size_t i = 0;
+   while (i < len && n < max)
+   {
+      while (i < len && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r'))
+         i++;
+      size_t start = i;
+      while (i < len && text[i] != ' ' && text[i] != '\t' && text[i] != '\n' && text[i] != '\r')
+         i++;
+      size_t length = i - start;
+      if (length == 0)
+         continue;
+      if (length > CSS_CLASS_TOKEN_MAX - 1)
+         length = CSS_CLASS_TOKEN_MAX - 1;
+      char token[CSS_CLASS_TOKEN_MAX];
+      memcpy(token, text + start, length);
+      token[length] = '\0';
+      if (!css_ts_token_seen(out, n, token))
+         snprintf(out[n++], CSS_CLASS_TOKEN_MAX, "%s", token);
+   }
+   return n;
+}
+
+/* A jsx_attribute is `name` then, optionally, a value. A class attribute whose
+ * value is a string contributes its tokens; one whose value is a jsx_expression
+ * is dynamic and contributes nothing, which is the documented contract and here
+ * is a fact about the node rather than a guess about its characters. */
+static void css_ts_class_attribute(const css_ts_ctx_t *ctx, TSNode attribute,
+                                   char (*out)[CSS_CLASS_TOKEN_MAX], int *n, int max)
+{
+   if (ts_node_named_child_count(attribute) == 0)
+      return;
+   TSNode name = ts_node_named_child(attribute, 0);
+   if (strcmp(ts_node_type(name), "property_identifier") != 0)
+      return;
+   char attribute_name[32];
+   css_ts_text(ctx, name, attribute_name, sizeof(attribute_name));
+   if (strcmp(attribute_name, "className") != 0 && strcmp(attribute_name, "class") != 0)
+      return;
+
+   if (ts_node_named_child_count(attribute) < 2)
+      return;
+   TSNode value = ts_node_named_child(attribute, 1);
+   if (strcmp(ts_node_type(value), "string") != 0)
+      return; /* jsx_expression: dynamic, and not statically resolvable */
+
+   /* The fragments inside the quotes. An escape sequence is not a class token,
+    * and a string of nothing but escapes contributes none. */
+   uint32_t parts = ts_node_named_child_count(value);
+   for (uint32_t i = 0; i < parts && *n < max; i++)
+   {
+      TSNode part = ts_node_named_child(value, i);
+      if (strcmp(ts_node_type(part), "string_fragment") != 0)
+         continue;
+      uint32_t start = ts_node_start_byte(part);
+      uint32_t end = ts_node_end_byte(part);
+      if (end > ctx->len || end <= start)
+         continue;
+      *n = css_ts_add_tokens(ctx->text + start, end - start, out, *n, max);
+   }
+}
+
+static void css_ts_walk_attributes(const css_ts_ctx_t *ctx, TSNode node,
+                                   char (*out)[CSS_CLASS_TOKEN_MAX], int *n, int max)
+{
+   if (*n >= max)
+      return;
+   if (strcmp(ts_node_type(node), "jsx_attribute") == 0)
+      css_ts_class_attribute(ctx, node, out, n, max);
+   uint32_t children = ts_node_named_child_count(node);
+   for (uint32_t i = 0; i < children && *n < max; i++)
+      css_ts_walk_attributes(ctx, ts_node_named_child(node, i), out, n, max);
+}
+
+int css_treesitter_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                                int max)
+{
+   if (!text || !out || max <= 0)
+      return -1;
+
+   TSParser *parser = ts_parser_new();
+   if (!parser)
+      return -1;
+   if (!ts_parser_set_language(parser, tree_sitter_tsx()))
+   {
+      ts_parser_delete(parser);
+      return -1;
+   }
+   TSTree *tree = ts_parser_parse_string(parser, NULL, text, (uint32_t)len);
+   if (!tree)
+   {
+      ts_parser_delete(parser);
+      return -1;
+   }
+
+   TSNode root = ts_tree_root_node(tree);
+   /* Vue and Svelte templates, and anything else this grammar cannot read, come
+    * back with errors. Rather than report the few tokens a broken parse happens
+    * to reach, say nothing and let the scanner -- which reads them -- answer. */
+   if (ts_node_has_error(root))
+   {
+      ts_tree_delete(tree);
+      ts_parser_delete(parser);
+      return -1;
+   }
+
+   css_ts_ctx_t ctx = {text, len, NULL};
+   int n = 0;
+   css_ts_walk_attributes(&ctx, root, out, &n, max);
+
+   ts_tree_delete(tree);
+   ts_parser_delete(parser);
+   return n;
+}
+
 #else /* !AIMEE_TREESITTER */
 
 css_stylesheet_t *css_treesitter_analyze(const char *text, size_t len)
@@ -515,6 +646,16 @@ css_stylesheet_t *css_treesitter_analyze(const char *text, size_t len)
    (void)text;
    (void)len;
    return NULL;
+}
+
+int css_treesitter_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                                int max)
+{
+   (void)text;
+   (void)len;
+   (void)out;
+   (void)max;
+   return -1;
 }
 
 #endif

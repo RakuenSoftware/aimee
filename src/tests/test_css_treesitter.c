@@ -201,6 +201,87 @@ static void test_malformed_is_bounded(void)
    printf("  malformed_is_bounded: ok\n");
 }
 
+static int has_token(char (*tokens)[CSS_CLASS_TOKEN_MAX], int n, const char *want)
+{
+   for (int i = 0; i < n; i++)
+      if (strcmp(tokens[i], want) == 0)
+         return 1;
+   return 0;
+}
+
+/* The JSX side of the join: a component names the classes a stylesheet defines. */
+static void test_class_tokens(void)
+{
+   char tokens[64][CSS_CLASS_TOKEN_MAX];
+   const char *component = "<div className=\"btn btn primary\">\n"
+                           "  <span class='label muted'></span>\n"
+                           "  <i className={dynamicOnly}></i>\n"
+                           "</div>;\n";
+   int n = css_treesitter_class_tokens(component, strlen(component), tokens, 64);
+   assert(n > 0);
+   assert(has_token(tokens, n, "btn"));
+   assert(has_token(tokens, n, "primary"));
+   assert(has_token(tokens, n, "label"));
+   assert(has_token(tokens, n, "muted"));
+   /* A dynamic value is a jsx_expression rather than a string, so it is skipped
+    * for what it is rather than for the characters it holds. */
+   assert(!has_token(tokens, n, "dynamicOnly"));
+   int seen = 0;
+   for (int i = 0; i < n; i++)
+      if (strcmp(tokens[i], "btn") == 0)
+         seen++;
+   assert(seen == 1); /* de-duplicated */
+   printf("  class_tokens: ok\n");
+}
+
+/* What the grammar knows and a scan cannot: `className=` inside a string is text,
+ * not an attribute. The scanner this fronts reads it as one. */
+static void test_class_tokens_ignore_text(void)
+{
+   char tokens[64][CSS_CLASS_TOKEN_MAX];
+   const char *source = "const doc = 'write className=\"not-a-class\" to style it';\n";
+   int n = css_treesitter_class_tokens(source, strlen(source), tokens, 64);
+   if (n < 0)
+   {
+      fprintf(stderr, "ignore_text: source did not parse\n");
+      failures++;
+      return;
+   }
+   if (has_token(tokens, n, "not-a-class"))
+   {
+      fprintf(stderr, "ignore_text: read a class out of a string literal\n");
+      failures++;
+      return;
+   }
+   printf("  class_tokens_ignore_text: ok\n");
+}
+
+/* A template this grammar cannot read reports so, rather than offering the few
+ * tokens a broken parse reached -- css_extract_class_tokens then falls back to
+ * the scanner, which reads Vue and Svelte. */
+static void test_class_tokens_defer_when_unparsable(void)
+{
+   char tokens[64][CSS_CLASS_TOKEN_MAX];
+   const char *vue = "<template>\n"
+                     "  <div class=\"card\" v-for=\"x in xs\" :key=\"x\">{{ x }}</div>\n"
+                     "</template>\n"
+                     "<script setup lang=\"ts\">\n"
+                     "const xs = [1]\n"
+                     "</script>\n";
+   int n = css_treesitter_class_tokens(vue, strlen(vue), tokens, 64);
+   if (n >= 0)
+      printf("  class_tokens_defer_when_unparsable: read it (%d token(s))\n", n);
+   else
+      printf("  class_tokens_defer_when_unparsable: deferred\n");
+   /* Either way the caller must answer, and must find the class. */
+   int viaFallback = css_extract_class_tokens(vue, strlen(vue), tokens, 64);
+   if (viaFallback <= 0 || !has_token(tokens, viaFallback, "card"))
+   {
+      fprintf(stderr, "defer_when_unparsable: css_extract_class_tokens lost 'card'\n");
+      failures++;
+   }
+}
+
 int main(void)
 {
    printf("css_treesitter:\n");
@@ -209,6 +290,9 @@ int main(void)
    test_at_context();
    test_important();
    test_malformed_is_bounded();
+   test_class_tokens();
+   test_class_tokens_ignore_text();
+   test_class_tokens_defer_when_unparsable();
    if (failures)
    {
       fprintf(stderr, "css_treesitter: %d check(s) failed\n", failures);

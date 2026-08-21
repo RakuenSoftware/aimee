@@ -32,6 +32,7 @@ RULES = Path("src/tests/Rules.mk")
 INFRASTRUCTURE = {
     "unit-test-bus-db2-process": "needs Postgres and the packaged DB2 executable",
     "unit-test-content-scope-pg": "needs Postgres",
+    "unit-test-css-projection-pg": "needs Postgres",
     "unit-test-kb-audit-worm-pg": "needs Postgres",
     "unit-test-vault-pg": "needs Postgres",
     "unit-test-witness-canary-pg": "needs Postgres",
