@@ -253,10 +253,9 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
 
       /* Positive = the outcome accepted the surfaced row (used-in-answer /
        * positively attributed). Every corrective/negative verdict is a 0. */
-      int label = (strcmp(verdict, DEMOTION_VERDICT_ACCEPTED) == 0 ||
-                   strcmp(verdict, "useful") == 0)
-                      ? 1
-                      : 0;
+      int label =
+          (strcmp(verdict, DEMOTION_VERDICT_ACCEPTED) == 0 || strcmp(verdict, "useful") == 0) ? 1
+                                                                                              : 0;
 
       cJSON *row = cJSON_CreateObject();
       cJSON_AddStringToObject(row, "group", group);

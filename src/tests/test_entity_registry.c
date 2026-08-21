@@ -29,10 +29,11 @@ static void merge_commit(int64_t merge_id, char out[FACT_COMMIT_ID_MAX])
 static void assert_commit_actor(const char *commit_id, const char *principal, int rank)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT actor_principal,authority_rank FROM fact_graph_commits"
-                   " WHERE commit_id=?1 LIMIT 1",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT actor_principal,authority_rank FROM fact_graph_commits"
+                        " WHERE commit_id=?1 LIMIT 1",
+                        err, sizeof(err));
    assert(st);
    aimee_pg_bind_text(st, "?1", commit_id);
    assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);

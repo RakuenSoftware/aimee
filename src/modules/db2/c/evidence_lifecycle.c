@@ -21,49 +21,47 @@ static const el_spec_t *el_spec(evidence_lifecycle_op_t op)
    static const el_spec_t specs[] = {
        [EL_CHANGESET_SHOW] = {"SELECT knowledge_changeset_show(?1)::text", 1, 1},
        [EL_CHANGESET_DIFF] = {"SELECT knowledge_changeset_diff(?1)::text", 1, 1},
-       [EL_CHANGESET_PREVIEW_REVERT] = {
-           "SELECT knowledge_changeset_preview_revert(?1)::text", 1, 1},
-       [EL_CHANGESET_REVERT] = {
-           "SELECT knowledge_changeset_revert(?1,CAST(?2 AS boolean))::text", 2, 1},
-       [EL_DOCUMENT_PREVIEW] = {
-           "SELECT document_lifecycle_preview(CAST(?1 AS bigint),?2)::text", 2, 1},
-       [EL_DOCUMENT_APPLY] = {
-           "SELECT document_lifecycle_apply(CAST(?1 AS bigint),?2,?3,?4)::text", 4, 1},
-       [EL_DERIVED_STATUS] = {
-           "SELECT jsonb_build_object('items',COALESCE((SELECT jsonb_agg(to_jsonb(x)) FROM ("
-           " SELECT r.*,f.status AS computed_status,f.cause_kind,f.cause_id FROM"
-           " derived_memory_registry r JOIN derived_memory_freshness f USING"
-           " (derived_kind,derived_memory_id) WHERE (?1='' OR r.derived_kind=?1)"
-           " AND (?2='' OR r.derived_memory_id=?2)) x),'[]'::jsonb),'reverse',COALESCE(("
-           " SELECT jsonb_agg(to_jsonb(d)) FROM derived_memory_dependencies d WHERE"
-           " (?3='' OR d.input_kind=?3) AND (?4='' OR d.input_id=?4)),'[]'::jsonb))::text",
-           4, 1},
-       [EL_OUTCOME_RECORD] = {
-           "SELECT jsonb_build_object('outcome_id',work_outcome_record(?1,?2,?3,?4,?5,?6,"
-           " ?7,?8,?9,?10,?11,?12,CAST(?13 AS bigint),?14,?15))::text",
-           15, 0},
-       [EL_REVIEW_LIST] = {
-           "SELECT jsonb_build_object('items',COALESCE(jsonb_agg(to_jsonb(x) ORDER BY priority"
-           " DESC,item_id),'[]'::jsonb),'changeset_head',evidence_current_head())::text FROM"
-           " (SELECT * FROM operator_review_surface ORDER BY priority DESC,item_id"
-           " LIMIT CAST(?1 AS bigint)) x",
-           1, 1},
-       [EL_REVIEW_DECIDE] = {
-           "SELECT operator_review_decide(?1,?2,?3,?4,?5)::text", 5, 1},
+       [EL_CHANGESET_PREVIEW_REVERT] = {"SELECT knowledge_changeset_preview_revert(?1)::text", 1,
+                                        1},
+       [EL_CHANGESET_REVERT] = {"SELECT knowledge_changeset_revert(?1,CAST(?2 AS boolean))::text",
+                                2, 1},
+       [EL_DOCUMENT_PREVIEW] = {"SELECT document_lifecycle_preview(CAST(?1 AS bigint),?2)::text", 2,
+                                1},
+       [EL_DOCUMENT_APPLY] = {"SELECT document_lifecycle_apply(CAST(?1 AS bigint),?2,?3,?4)::text",
+                              4, 1},
+       [EL_DERIVED_STATUS] =
+           {"SELECT jsonb_build_object('items',COALESCE((SELECT jsonb_agg(to_jsonb(x)) FROM ("
+            " SELECT r.*,f.status AS computed_status,f.cause_kind,f.cause_id FROM"
+            " derived_memory_registry r JOIN derived_memory_freshness f USING"
+            " (derived_kind,derived_memory_id) WHERE (?1='' OR r.derived_kind=?1)"
+            " AND (?2='' OR r.derived_memory_id=?2)) x),'[]'::jsonb),'reverse',COALESCE(("
+            " SELECT jsonb_agg(to_jsonb(d)) FROM derived_memory_dependencies d WHERE"
+            " (?3='' OR d.input_kind=?3) AND (?4='' OR d.input_id=?4)),'[]'::jsonb))::text",
+            4, 1},
+       [EL_OUTCOME_RECORD] =
+           {"SELECT jsonb_build_object('outcome_id',work_outcome_record(?1,?2,?3,?4,?5,?6,"
+            " ?7,?8,?9,?10,?11,?12,CAST(?13 AS bigint),?14,?15))::text",
+            15, 0},
+       [EL_REVIEW_LIST] =
+           {"SELECT jsonb_build_object('items',COALESCE(jsonb_agg(to_jsonb(x) ORDER BY priority"
+            " DESC,item_id),'[]'::jsonb),'changeset_head',evidence_current_head())::text FROM"
+            " (SELECT * FROM operator_review_surface ORDER BY priority DESC,item_id"
+            " LIMIT CAST(?1 AS bigint)) x",
+            1, 1},
+       [EL_REVIEW_DECIDE] = {"SELECT operator_review_decide(?1,?2,?3,?4,?5)::text", 5, 1},
        [EL_ONTOLOGY_EXPORT] = {"SELECT ontology_package_export()::text", 0, 1},
-       [EL_ONTOLOGY_IMPORT] = {
-           "SELECT jsonb_build_object('package_id',ontology_package_import(CAST(?1 AS jsonb),"
-           " ?2,?3,?4))::text",
-           4, 1},
-       [EL_ONTOLOGY_DRY_RUN] = {
-           "SELECT ontology_package_dry_run(?1,CAST(?2 AS boolean))::text", 2, 1},
+       [EL_ONTOLOGY_IMPORT] =
+           {"SELECT jsonb_build_object('package_id',ontology_package_import(CAST(?1 AS jsonb),"
+            " ?2,?3,?4))::text",
+            4, 1},
+       [EL_ONTOLOGY_DRY_RUN] = {"SELECT ontology_package_dry_run(?1,CAST(?2 AS boolean))::text", 2,
+                                1},
        [EL_ONTOLOGY_MIGRATE] = {"SELECT ontology_package_migrate(?1,?2)::text", 2, 1},
        [EL_ONTOLOGY_REPORT] = {"SELECT ontology_package_report(?1)::text", 1, 1},
        [EL_ONTOLOGY_ROLLBACK] = {"SELECT ontology_package_rollback()::text", 0, 1},
-       [EL_RECALL_TRACE_RECORD] = {
-           "SELECT recall_trace_record(?1,?2,?3,?4,?5,?6,CAST(?7 AS jsonb),"
-           " CAST(?8 AS boolean))::text",
-           8, 0},
+       [EL_RECALL_TRACE_RECORD] = {"SELECT recall_trace_record(?1,?2,?3,?4,?5,?6,CAST(?7 AS jsonb),"
+                                   " CAST(?8 AS boolean))::text",
+                                   8, 0},
        [EL_RECALL_TRACE_GET] = {"SELECT recall_trace_get(?1,?2,?3)::text", 3, 0},
    };
    if (op <= 0 || op >= (int)(sizeof(specs) / sizeof(specs[0])) || !specs[op].sql)

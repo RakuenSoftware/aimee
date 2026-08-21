@@ -271,7 +271,8 @@ static int fm_commit_open(void *conn, const fact_actor_t *actor, const char *ope
       return -1;
    aimee_pg_bind_text(ctx, "?1", actor->principal);
    aimee_pg_bind_text(ctx, "?2", actor->role);
-   aimee_pg_bind_text(ctx, "?3", actor->transport_identity[0] ? actor->transport_identity : "internal");
+   aimee_pg_bind_text(ctx, "?3",
+                      actor->transport_identity[0] ? actor->transport_identity : "internal");
    int ctx_ok = aimee_pg_step(ctx, err, sizeof(err)) == AIMEE_PG_ROW;
    aimee_pg_finalize(ctx);
    if (!ctx_ok)
@@ -299,11 +300,11 @@ static int fm_commit_parent(void *conn, const char *commit_id, const char *paren
    if (!parent_commit_id || !parent_commit_id[0])
       return 0;
    char err[FM_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "UPDATE fact_graph_commits SET parent_commit_id=?2,origin_ref=?2"
-       " WHERE commit_id=?1 AND status='open'",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE fact_graph_commits SET parent_commit_id=?2,origin_ref=?2"
+                        " WHERE commit_id=?1 AND status='open'",
+                        err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", commit_id);
@@ -328,9 +329,10 @@ static int fm_commit_finish(void *conn, const fact_actor_t *actor, const char *c
 {
    char err[FM_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "UPDATE fact_graph_commits SET status=?2,closed_at=to_char(CURRENT_TIMESTAMP,"
-             " 'YYYY-MM-DD HH24:MI:SS') WHERE commit_id=?1 AND status='open'", err,
-       sizeof(err));
+       conn,
+       "UPDATE fact_graph_commits SET status=?2,closed_at=to_char(CURRENT_TIMESTAMP,"
+       " 'YYYY-MM-DD HH24:MI:SS') WHERE commit_id=?1 AND status='open'",
+       err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", commit_id);
@@ -871,8 +873,7 @@ int db2_fact_mutation_invalidate(const fact_actor_t *actor, const char *source,
     * episode/experience is historical evidence and may only be annotated;
     * policy changes require governance authority. */
    char kind_sql[768], kind_err[FM_ERRBUF] = "";
-   if (fm_selector_sql(kind_sql, sizeof(kind_sql),
-                       "SELECT epistemic_kind FROM entity_edges",
+   if (fm_selector_sql(kind_sql, sizeof(kind_sql), "SELECT epistemic_kind FROM entity_edges",
                        "AND superseded_at='' AND invalidated_at='' AND suppressed=0", relation,
                        target) != 0)
       return fm_end(conn, 0);
@@ -1010,8 +1011,9 @@ int db2_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
    aimee_pg_bind_text(ins, "?4", commit_id);
    int ok = aimee_pg_step(ins, err, sizeof(err)) == AIMEE_PG_DONE;
    aimee_pg_finalize(ins);
-   if (!ok || fm_change(conn, commit_id, assertion_id, "contradict", &state, &state,
-                        "episode annotation; original retained") != 0 ||
+   if (!ok ||
+       fm_change(conn, commit_id, assertion_id, "contradict", &state, &state,
+                 "episode annotation; original retained") != 0 ||
        fm_commit_finish(conn, actor, commit_id, "fact.annotate", id_text, "applied") != 0 ||
        fm_end(conn, 1) != 0)
       return -1;

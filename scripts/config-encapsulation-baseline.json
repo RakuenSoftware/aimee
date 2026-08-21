@@ -101,10 +101,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_curator_queue.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/tests/test_delegate_sandbox_image.c": {
       "decls": 3,
       "loads": 3
@@ -219,8 +215,8 @@
     }
   },
   "totals": {
-    "decls": 239,
-    "files": 55,
+    "decls": 236,
+    "files": 53,
     "loads": 147
   }
 }

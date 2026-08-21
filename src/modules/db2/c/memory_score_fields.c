@@ -553,11 +553,13 @@ int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe
    return n;
 }
 
-int64_t db2_memory_row_insert_epistemic_ex(
-    const char *tier, const char *kind, const char *epistemic_kind, const char *key,
-    const char *content, const char *use_cases, double confidence, const char *session_id,
-    const char *ts, const char *sensitivity, double evidence_strength, double salience,
-    double surprise, const char *provenance_category)
+int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
+                                           const char *epistemic_kind, const char *key,
+                                           const char *content, const char *use_cases,
+                                           double confidence, const char *session_id,
+                                           const char *ts, const char *sensitivity,
+                                           double evidence_strength, double salience,
+                                           double surprise, const char *provenance_category)
 {
    if (!tier || !kind || !epistemic_kind || !epistemic_kind[0] || !key || !ts)
       return -1;
@@ -627,8 +629,8 @@ int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap)
    if (!conn)
       return -1;
    char err[MSF_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT epistemic_kind FROM memories WHERE id=?1", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT epistemic_kind FROM memories WHERE id=?1", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", memory_id);
@@ -650,14 +652,13 @@ double db2_memory_outcome_adjustment(int64_t memory_id)
    void *conn = db2_conn();
    if (!conn)
       return 0.0;
-   static const char *sql =
-       "SELECT s.outcome_rank_weight * CASE COALESCE((SELECT p.status"
-       " FROM work_outcome_projection p WHERE p.subject_kind='memory'"
-       " AND p.subject_id=?1 AND p.workflow='*'"
-       " ORDER BY (p.scope_kind='global') DESC LIMIT 1),'tentative')"
-       " WHEN 'preferred' THEN 1.0 WHEN 'contested' THEN -0.25"
-       " WHEN 'stale' THEN -0.5 ELSE 0.0 END"
-       " FROM evidence_lifecycle_settings s WHERE s.singleton=1";
+   static const char *sql = "SELECT s.outcome_rank_weight * CASE COALESCE((SELECT p.status"
+                            " FROM work_outcome_projection p WHERE p.subject_kind='memory'"
+                            " AND p.subject_id=?1 AND p.workflow='*'"
+                            " ORDER BY (p.scope_kind='global') DESC LIMIT 1),'tentative')"
+                            " WHEN 'preferred' THEN 1.0 WHEN 'contested' THEN -0.25"
+                            " WHEN 'stale' THEN -0.5 ELSE 0.0 END"
+                            " FROM evidence_lifecycle_settings s WHERE s.singleton=1";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -1004,12 +1005,13 @@ int db2_memory_list_kv_section(db2_memory_section_t section, db2_memory_kv_row_t
                                                                        "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_CONSTRAINTS:
-      sql = "SELECT m.key, m.content FROM memories m"
-            " WHERE (m.tier = 'L2' OR m.tier = 'L3')"
-            " AND (m.kind = 'decision' OR (m.kind = 'policy' AND"
-            " (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)))" DB2_MEMORY_SCOPE_FILTER_SQL(
-                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC "
-                                                                       "LIMIT ?1";
+      sql =
+          "SELECT m.key, m.content FROM memories m"
+          " WHERE (m.tier = 'L2' OR m.tier = 'L3')"
+          " AND (m.kind = 'decision' OR (m.kind = 'policy' AND"
+          " (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)))" DB2_MEMORY_SCOPE_FILTER_SQL(
+              "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC "
+                                                                     "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_PROCEDURES:
       sql =

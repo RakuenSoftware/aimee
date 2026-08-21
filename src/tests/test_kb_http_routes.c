@@ -2711,12 +2711,11 @@ static void test_console_evidence_operator_boundary(void)
    assert(s == 403);
    assert(strstr(buf, "authenticated operator required") != NULL);
    test_kb_fact_actor_set(1);
-   s = kb_http_route_ex("POST", "/v1/console/evidence", NULL, NULL, NULL, body,
-                        (int)strlen(body), buf, sizeof(buf));
+   s = kb_http_route_ex("POST", "/v1/console/evidence", NULL, NULL, NULL, body, (int)strlen(body),
+                        buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"ok\":true") != NULL);
-   s = kb_http_route_ex("GET", "/v1/console/evidence", NULL, NULL, NULL, NULL, 0, buf,
-                        sizeof(buf));
+   s = kb_http_route_ex("GET", "/v1/console/evidence", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(s == 405);
    test_kb_fact_actor_set(0);
 }

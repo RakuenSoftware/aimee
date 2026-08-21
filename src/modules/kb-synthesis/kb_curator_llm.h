@@ -10,7 +10,7 @@
 #ifndef KB_CURATOR_LLM_H
 #define KB_CURATOR_LLM_H
 
-#include "kb_curator_provider.h" /* kb_curator_stage_t, config_t */
+#include "kb_curator_provider.h" /* kb_curator_stage_t */
 
 #include <stddef.h>
 
@@ -30,8 +30,8 @@ extern "C"
    /* json_schema (optional, provider path only): sent as an OpenAI response_format
     * json_schema so the model returns strict, fence-free JSON in that shape. The
     * sidecar fallback ignores it (it carries its own prompt contract). */
-   char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage,
-                            const char *system_prompt, const char *request_json,
+   char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
+                            const char *request_json,
                             struct cJSON *json_schema, const char *fallback_command, int out_cap,
                             char *errbuf, size_t errlen);
 

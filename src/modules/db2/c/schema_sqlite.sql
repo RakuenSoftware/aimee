@@ -626,3 +626,193 @@ CREATE TABLE IF NOT EXISTS org_egress_dispatch (
 );
 CREATE INDEX IF NOT EXISTS idx_org_egress_recover
   ON org_egress_dispatch(state,lease_expires_at,id);
+
+-- Evidence-lifecycle proposal tables. SQLite mirrors the complete data shape
+-- used by local and unit-test stores; PostgreSQL retains the authoritative WORM,
+-- transaction-fencing, RLS, and lifecycle trigger enforcement.
+CREATE TABLE IF NOT EXISTS memory_evidence_events (
+  event_id TEXT PRIMARY KEY,
+  changeset_id TEXT NOT NULL DEFAULT '',
+  object_kind TEXT NOT NULL CHECK(object_kind IN
+    ('assertion','memory','document','document_version','entity','alias','rel_type',
+     'derived','scope','link','ontology_package','review','outcome','recall_trace')),
+  object_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK(operation IN
+    ('assert','confirm','contradict','supersede','retire','restore','promote','demote',
+     'invalidate','redact','purge','derive')),
+  before_ref TEXT NOT NULL DEFAULT '', after_ref TEXT NOT NULL DEFAULT '',
+  authenticated_actor TEXT NOT NULL, transport_identity TEXT NOT NULL DEFAULT '',
+  effective_authority TEXT NOT NULL, source_document_id TEXT NOT NULL DEFAULT '',
+  source_span TEXT NOT NULL DEFAULT '', source_hash TEXT NOT NULL DEFAULT '',
+  code_generation INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '',
+  occurred_at TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+  correlation_id TEXT NOT NULL DEFAULT '',
+  CHECK(operation <> 'purge' OR (before_ref = '' AND after_ref = ''))
+);
+CREATE TABLE IF NOT EXISTS evidence_lifecycle_settings (
+  singleton INTEGER PRIMARY KEY DEFAULT 1 CHECK(singleton=1),
+  outcome_rank_weight REAL NOT NULL DEFAULT 0.0,
+  trace_sample_rate REAL NOT NULL DEFAULT 0.05 CHECK(trace_sample_rate BETWEEN 0 AND 1),
+  trace_max_rows INTEGER NOT NULL DEFAULT 10000 CHECK(trace_max_rows>0),
+  trace_max_age_days INTEGER NOT NULL DEFAULT 30 CHECK(trace_max_age_days>0),
+  trace_top_k INTEGER NOT NULL DEFAULT 20 CHECK(trace_top_k>0)
+);
+CREATE TABLE IF NOT EXISTS document_lifecycle_previews (
+  preview_token TEXT PRIMARY KEY, doc_id INTEGER NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+  operation TEXT NOT NULL CHECK(operation IN ('invalidate','purge')),
+  lifecycle_version INTEGER NOT NULL, changeset_head TEXT NOT NULL DEFAULT '',
+  facts_only INTEGER NOT NULL DEFAULT 0, facts_surviving INTEGER NOT NULL DEFAULT 0,
+  derived_items INTEGER NOT NULL DEFAULT 0, citations INTEGER NOT NULL DEFAULT 0,
+  entity_links INTEGER NOT NULL DEFAULT 0, code_links INTEGER NOT NULL DEFAULT 0,
+  recall_impact INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS document_purge_receipts (
+  receipt_id TEXT PRIMARY KEY, doc_id INTEGER NOT NULL, selector TEXT NOT NULL,
+  section_count INTEGER NOT NULL DEFAULT 0, region_count INTEGER NOT NULL DEFAULT 0,
+  cell_count INTEGER NOT NULL DEFAULT 0, embedding_count INTEGER NOT NULL DEFAULT 0,
+  trace_count INTEGER NOT NULL DEFAULT 0, actor TEXT NOT NULL, authority TEXT NOT NULL,
+  reason TEXT NOT NULL, changeset_id TEXT NOT NULL,
+  purged_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS derivation_policy_versions (
+  derived_kind TEXT PRIMARY KEY, current_version TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS derived_memory_registry (
+  derived_kind TEXT NOT NULL, derived_memory_id TEXT NOT NULL,
+  current_status TEXT NOT NULL DEFAULT 'dependencies:not-recorded' CHECK(current_status IN
+    ('dependencies:not-recorded','fresh','stale','unsupported')),
+  stale_cause_kind TEXT NOT NULL DEFAULT '', stale_cause_id TEXT NOT NULL DEFAULT '',
+  response_policy TEXT NOT NULL DEFAULT 'warn',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(derived_kind,derived_memory_id)
+);
+CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, derived_kind TEXT NOT NULL,
+  derived_memory_id TEXT NOT NULL, input_kind TEXT NOT NULL CHECK(input_kind IN
+    ('document','document_version','assertion','memory','code_unit','outcome','entity')),
+  input_id TEXT NOT NULL, input_version TEXT NOT NULL DEFAULT '',
+  source_hash TEXT NOT NULL DEFAULT '', extractor_version TEXT NOT NULL DEFAULT '',
+  derivation_policy_version TEXT NOT NULL DEFAULT '',
+  contribution TEXT NOT NULL DEFAULT 'supporting' CHECK(contribution IN ('essential','supporting')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(derived_kind,derived_memory_id,input_kind,input_id)
+);
+CREATE TABLE IF NOT EXISTS derived_rederivation_queue (
+  derived_kind TEXT NOT NULL, derived_memory_id TEXT NOT NULL, cause TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(derived_kind,derived_memory_id)
+);
+CREATE TABLE IF NOT EXISTS work_outcomes (
+  outcome_id TEXT PRIMARY KEY, retrieval_event_id TEXT NOT NULL,
+  query_fingerprint TEXT NOT NULL DEFAULT '', task_label TEXT NOT NULL DEFAULT '',
+  workflow TEXT NOT NULL DEFAULT '', scope_kind TEXT NOT NULL DEFAULT 'global',
+  scope_id TEXT NOT NULL DEFAULT '', subject_kind TEXT NOT NULL CHECK(subject_kind IN
+    ('memory','assertion','document','code_unit','derived')),
+  subject_id TEXT NOT NULL, resulting_action TEXT NOT NULL DEFAULT '',
+  authenticated_evaluator TEXT NOT NULL, outcome TEXT NOT NULL CHECK(outcome IN
+    ('useful','dead_end','corrected','misleading','outdated')),
+  correction_ref TEXT NOT NULL DEFAULT '', source_hash_at_eval TEXT NOT NULL DEFAULT '',
+  code_generation_at_eval INTEGER NOT NULL DEFAULT 0,
+  fault_kind TEXT NOT NULL DEFAULT '' CHECK(fault_kind IN ('','lane','source','feature','policy')),
+  fault_value TEXT NOT NULL DEFAULT '', occurred_at TEXT NOT NULL,
+  UNIQUE(retrieval_event_id,subject_kind,subject_id,authenticated_evaluator,outcome)
+);
+CREATE TABLE IF NOT EXISTS epistemic_annotations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL,
+  annotation TEXT NOT NULL, actor TEXT NOT NULL, changeset_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS epistemic_resolutions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL,
+  from_kind TEXT NOT NULL, to_kind TEXT NOT NULL, actor TEXT NOT NULL,
+  changeset_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS knowledge_corrections (
+  correction_id TEXT PRIMARY KEY, changeset_id TEXT NOT NULL, subject_kind TEXT NOT NULL,
+  subject_id TEXT NOT NULL, before_value TEXT NOT NULL, after_value TEXT NOT NULL,
+  actor TEXT NOT NULL, created_at TEXT NOT NULL, reverted_by_changeset TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS knowledge_review_decisions (
+  decision_id TEXT PRIMARY KEY, item_id TEXT NOT NULL, source_queue TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK(decision IN
+    ('accept','correct','retire','restore','promote','invalidate_source','purge',
+     'request_evidence','annotate','revoke','resolve')),
+  authenticated_actor TEXT NOT NULL, requested_value TEXT NOT NULL DEFAULT '',
+  evidence_snapshot TEXT NOT NULL DEFAULT '', resulting_authority TEXT NOT NULL DEFAULT '',
+  changeset_id TEXT NOT NULL, preview_token TEXT NOT NULL DEFAULT '',
+  head_at_decision TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_evidence_requests (
+  item_id TEXT PRIMARY KEY, condition TEXT NOT NULL, actor TEXT NOT NULL,
+  created_at TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'open'
+);
+CREATE TABLE IF NOT EXISTS ontology_packages (
+  package_id TEXT PRIMARY KEY, version INTEGER NOT NULL UNIQUE,
+  parent_version INTEGER NOT NULL DEFAULT 0, package_json TEXT NOT NULL,
+  author TEXT NOT NULL, review_record TEXT NOT NULL DEFAULT '', signature TEXT NOT NULL DEFAULT '',
+  verified INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'staged' CHECK(state IN ('staged','active','superseded','rejected')),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ontology_package_versions (
+  version INTEGER PRIMARY KEY, package_id TEXT NOT NULL REFERENCES ontology_packages(package_id),
+  parent_version INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 0,
+  activated_at TEXT NOT NULL DEFAULT '', activated_by TEXT NOT NULL DEFAULT '',
+  changeset_id TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ontology_package_relations (
+  package_id TEXT NOT NULL REFERENCES ontology_packages(package_id) ON DELETE CASCADE,
+  rel_type TEXT NOT NULL, head_kinds TEXT NOT NULL, tail_kinds TEXT NOT NULL,
+  is_symmetric INTEGER NOT NULL, inverse_rel_type TEXT NOT NULL, cardinality TEXT NOT NULL,
+  correction_behavior TEXT NOT NULL, category TEXT NOT NULL, sensitivity TEXT NOT NULL,
+  is_hierarchy_rel INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY(package_id,rel_type)
+);
+CREATE TABLE IF NOT EXISTS ontology_dry_runs (
+  preview_token TEXT PRIMARY KEY, package_id TEXT NOT NULL REFERENCES ontology_packages(package_id),
+  changeset_head TEXT NOT NULL, facts_invalid INTEGER NOT NULL DEFAULT 0,
+  correction_changes INTEGER NOT NULL DEFAULT 0, symmetry_changes INTEGER NOT NULL DEFAULT 0,
+  endpoint_narrowings INTEGER NOT NULL DEFAULT 0, widenings INTEGER NOT NULL DEFAULT 0,
+  sensitivity_lowerings INTEGER NOT NULL DEFAULT 0,
+  provisional_promotions INTEGER NOT NULL DEFAULT 0, derived_affected INTEGER NOT NULL DEFAULT 0,
+  widening_acknowledged INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL, consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ontology_migration_reports (
+  changeset_id TEXT PRIMARY KEY, package_id TEXT NOT NULL, prior_package_id TEXT NOT NULL DEFAULT '',
+  migrated INTEGER NOT NULL DEFAULT 0, retired INTEGER NOT NULL DEFAULT 0,
+  quarantined INTEGER NOT NULL DEFAULT 0, left_unchanged INTEGER NOT NULL DEFAULT 0,
+  report TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recall_traces (
+  trace_id TEXT PRIMARY KEY, retrieval_event_id TEXT NOT NULL UNIQUE,
+  turn_id TEXT NOT NULL DEFAULT '', query_fingerprint TEXT NOT NULL DEFAULT '',
+  scope_kind TEXT NOT NULL DEFAULT 'global', scope_id TEXT NOT NULL DEFAULT '',
+  sensitivity TEXT NOT NULL DEFAULT 'normal', persisted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recall_trace_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trace_id TEXT NOT NULL REFERENCES recall_traces(trace_id) ON DELETE CASCADE,
+  subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL, lane TEXT NOT NULL,
+  lane_rank INTEGER NOT NULL, final_rank INTEGER NOT NULL DEFAULT 0,
+  scope_decision TEXT NOT NULL, semantic_value REAL NOT NULL DEFAULT 0,
+  semantic_weight REAL NOT NULL DEFAULT 0, keyword_value REAL NOT NULL DEFAULT 0,
+  keyword_weight REAL NOT NULL DEFAULT 0, graph_value REAL NOT NULL DEFAULT 0,
+  graph_weight REAL NOT NULL DEFAULT 0, temporal_value REAL NOT NULL DEFAULT 0,
+  temporal_weight REAL NOT NULL DEFAULT 0, outcome_value REAL NOT NULL DEFAULT 0,
+  outcome_weight REAL NOT NULL DEFAULT 0, feature_values TEXT NOT NULL DEFAULT '{}',
+  feature_weights TEXT NOT NULL DEFAULT '{}', feature_contributions TEXT NOT NULL DEFAULT '{}',
+  final_score REAL NOT NULL DEFAULT 0, graph_path TEXT NOT NULL DEFAULT '',
+  relation_gravity REAL NOT NULL DEFAULT 0, gravity_relation TEXT NOT NULL DEFAULT '',
+  authority_class TEXT NOT NULL DEFAULT 'not-computed',
+  confidence_class TEXT NOT NULL DEFAULT 'not-computed',
+  epistemic_kind TEXT NOT NULL DEFAULT 'world_fact',
+  valid_time_match TEXT NOT NULL DEFAULT 'not-computed',
+  source_evidence TEXT NOT NULL DEFAULT 'not-computed',
+  document_state TEXT NOT NULL DEFAULT 'not-computed',
+  staleness_status TEXT NOT NULL DEFAULT 'not-computed', stale_input TEXT NOT NULL DEFAULT '',
+  rejected INTEGER NOT NULL DEFAULT 0, rejection_gate TEXT NOT NULL DEFAULT '',
+  UNIQUE(trace_id,subject_kind,subject_id,lane,rejected)
+);

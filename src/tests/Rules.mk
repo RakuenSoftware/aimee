@@ -1344,6 +1344,7 @@ $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
+                                       $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
@@ -1363,6 +1364,7 @@ $(TESTPREFIX)/unit-test-css-render: \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
+                                       $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \

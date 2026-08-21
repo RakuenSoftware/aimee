@@ -12,7 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static kb_principal_t reviewer = {.kind = KB_PRIN_OIDC, .authenticated = 1,
+static kb_principal_t reviewer = {.kind = KB_PRIN_OIDC,
+                                  .authenticated = 1,
                                   .issuer = "https://operator.test",
                                   .subject = "ontology-reviewer"};
 

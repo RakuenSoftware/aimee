@@ -442,7 +442,7 @@ Responses:
 - `200`: Operation result; shape is selected by action
 - `400`: Invalid action or request
 - `403`: Authenticated operator required
-- `409`: Conflict
+- `409`: Conflict, stale preview, authority refusal, or atomic failure
 
 ### `GET /v1/console/overview`
 

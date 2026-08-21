@@ -96,10 +96,10 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
    (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(parts, (name)))                                \
         ? cJSON_GetObjectItemCaseSensitive(parts, (name))->valuedouble                             \
         : 0.0)
-      double final_score = cJSON_IsNumber(final_j) && cJSON_IsNumber(hybrid_rank_j) &&
-                                   hybrid_rank_j->valuedouble > 0
-                               ? final_j->valuedouble
-                               : TRACE_PART("total");
+      double final_score =
+          cJSON_IsNumber(final_j) && cJSON_IsNumber(hybrid_rank_j) && hybrid_rank_j->valuedouble > 0
+              ? final_j->valuedouble
+              : TRACE_PART("total");
       double semantic = TRACE_PART("semantic");
       double graph_weight = TRACE_PART("graph_weight");
       double graph = TRACE_PART("graph_score");
@@ -108,8 +108,8 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
       double keyword = TRACE_PART("lexical") + TRACE_PART("coverage");
       double explained = keyword + TRACE_PART("entity") + temporal + TRACE_PART("evidence") +
                          semantic + TRACE_PART("state") + TRACE_PART("intent") +
-                         TRACE_PART("salience") + TRACE_PART("surprise") +
-                         TRACE_PART("pagerank") + graph * graph_weight + outcome;
+                         TRACE_PART("salience") + TRACE_PART("surprise") + TRACE_PART("pagerank") +
+                         graph * graph_weight + outcome;
       double residual = final_score - explained;
       cJSON *r = cJSON_CreateObject();
       char subject[32];
@@ -138,9 +138,9 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
 #define TRACE_FEATURE(name, value, weight)                                                         \
    do                                                                                              \
    {                                                                                               \
-      cJSON_AddNumberToObject(feature_values, (name), (value));                                   \
-      cJSON_AddNumberToObject(feature_weights, (name), (weight));                                 \
-      cJSON_AddNumberToObject(feature_contributions, (name), (value) * (weight));                 \
+      cJSON_AddNumberToObject(feature_values, (name), (value));                                    \
+      cJSON_AddNumberToObject(feature_weights, (name), (weight));                                  \
+      cJSON_AddNumberToObject(feature_contributions, (name), (value) * (weight));                  \
    } while (0)
       TRACE_FEATURE("lexical", TRACE_PART("lexical"), 1.0);
       TRACE_FEATURE("coverage", TRACE_PART("coverage"), 1.0);
@@ -157,9 +157,10 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
       TRACE_FEATURE("outcome", outcome, 1.0);
       TRACE_FEATURE("post_rank_residual", residual, 1.0);
 #undef TRACE_FEATURE
-      cJSON_AddStringToObject(r, "authority_class",
-                             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
-                                 memory, "provenance_category")) ?: "not-computed");
+      cJSON_AddStringToObject(
+          r, "authority_class",
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(memory, "provenance_category"))
+              ?: "not-computed");
       cJSON_AddStringToObject(r, "confidence_class", "not-computed");
       char epistemic_kind[32] = "world_fact";
       if (cJSON_IsNumber(id))
@@ -167,9 +168,10 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
                                          sizeof(epistemic_kind));
       cJSON_AddStringToObject(r, "epistemic_kind", epistemic_kind);
       cJSON_AddStringToObject(r, "valid_time_match", "not-computed");
-      cJSON_AddStringToObject(r, "source_evidence",
-                             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
-                                 memory, "source_session")) ?: "not-computed");
+      cJSON_AddStringToObject(
+          r, "source_evidence",
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(memory, "source_session"))
+              ?: "not-computed");
       cJSON_AddStringToObject(r, "document_state", "not-computed");
       cJSON_AddStringToObject(r, "staleness_status", "not-computed");
       cJSON_AddItemToArray(results, r);
@@ -188,8 +190,8 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
       cJSON_AddNumberToObject(r, "lane_rank", 0);
       cJSON_AddNumberToObject(r, "final_rank", 0);
       cJSON_AddStringToObject(r, "scope_decision",
-                             strcmp(rejected[i].gate, "scope_boundary") == 0 ? "rejected"
-                                                                            : "allowed");
+                              strcmp(rejected[i].gate, "scope_boundary") == 0 ? "rejected"
+                                                                              : "allowed");
       cJSON_AddNumberToObject(r, "final_score", 0.0);
       cJSON_AddBoolToObject(r, "rejected", 1);
       cJSON_AddStringToObject(r, "rejection_gate", rejected[i].gate);
@@ -217,17 +219,12 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
    const char *turn = cJSON_IsString(turn_j) ? turn_j->valuestring : generated_event;
    const char *event = cJSON_IsString(event_j) ? event_j->valuestring : generated_event;
    const char *sensitivity = cJSON_IsString(sensitivity_j) ? sensitivity_j->valuestring : "normal";
-   const char *args[] = {event,
-                         turn,
-                         fingerprint,
-                         scope_kind,
-                         scope_id,
-                         sensitivity,
-                         results_json,
-                         cJSON_IsTrue(persist_j) ? "true" : "false"};
+   const char *args[] = {
+       event,    turn,        fingerprint,  scope_kind,
+       scope_id, sensitivity, results_json, cJSON_IsTrue(persist_j) ? "true" : "false"};
    char *trace_out = malloc(262144);
-   if (trace_out && db2_evidence_lifecycle_json(&actor, EL_RECALL_TRACE_RECORD, args, 8, trace_out,
-                                                262144) == 0)
+   if (trace_out &&
+       db2_evidence_lifecycle_json(&actor, EL_RECALL_TRACE_RECORD, args, 8, trace_out, 262144) == 0)
    {
       cJSON *trace = cJSON_Parse(trace_out);
       if (trace)
@@ -1304,8 +1301,8 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
        * parallel reporting path.  An empty array means computed-and-empty;
        * lookup failure is explicit and never masquerades as no outcomes. */
       char outcomes_json[16384] = "";
-      if (db2_work_outcomes_for_retrieval_json(ev_id, outcomes_json,
-                                               (int)sizeof(outcomes_json)) == 0)
+      if (db2_work_outcomes_for_retrieval_json(ev_id, outcomes_json, (int)sizeof(outcomes_json)) ==
+          0)
       {
          cJSON *outcomes = cJSON_Parse(outcomes_json);
          if (cJSON_IsArray(outcomes))

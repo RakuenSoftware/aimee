@@ -1220,10 +1220,11 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
        tier, kind, "world_fact", key, content, use_cases, confidence, session_id, authority);
 }
 
-cJSON *db2_kb_service_memory_insert_epistemic_ex_json(
-    const char *tier, const char *kind, const char *epistemic_kind, const char *key,
-    const char *content, const char *use_cases, double confidence, const char *session_id,
-    int authority)
+cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
+                                                      const char *epistemic_kind, const char *key,
+                                                      const char *content, const char *use_cases,
+                                                      double confidence, const char *session_id,
+                                                      int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -1232,8 +1233,8 @@ cJSON *db2_kb_service_memory_insert_epistemic_ex_json(
    memory_t out;
    int rc = memory_insert_epistemic_ex(
        tier ? tier : "", kind ? kind : "", epistemic_kind ? epistemic_kind : "", key ? key : "",
-       content ? content : "", use_cases ? use_cases : "", confidence,
-       session_id ? session_id : "", (memory_authority_t)authority, &out);
+       content ? content : "", use_cases ? use_cases : "", confidence, session_id ? session_id : "",
+       (memory_authority_t)authority, &out);
    if (rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");

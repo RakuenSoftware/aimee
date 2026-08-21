@@ -641,8 +641,8 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    const char *sys_prompt = novel_mode ? CE_SYSTEM_PROMPT : CE_EXTRACT_DOC_PROMPT;
    cJSON *extract_schema = ce_build_extract_schema();
    char *resp_str =
-       kb_curator_llm_run(NULL, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema,
-                          cmd, CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
+       kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema, cmd,
+                          CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
    cJSON_Delete(extract_schema);
    free(req_str);
 

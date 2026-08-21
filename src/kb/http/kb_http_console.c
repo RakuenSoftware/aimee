@@ -520,8 +520,7 @@ static int console_typed_facts_entity(const char *body, char *out_buf, int out_c
                   "{\"error\":\"entities are not both active or merge would be invalid\"}");
          return 409;
       }
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+      snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
                (long long)mid, cid);
       return 200;
    }
@@ -541,8 +540,7 @@ static int console_typed_facts_entity(const char *body, char *out_buf, int out_c
                "{\"error\":\"merge is unknown, already undone, or no longer current\"}");
       return 409;
    }
-   snprintf(out_buf, (size_t)out_cap,
-            "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+   snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
             (long long)mid, cid);
    return 200;
 }
@@ -747,16 +745,16 @@ static int console_evidence(const char *body, char *out_buf, int out_cap)
    {                                                                                               \
       cJSON *nv = cJSON_GetObjectItemCaseSensitive(req, (name));                                   \
       int el_i = nargs;                                                                            \
-      snprintf(numbers[el_i], sizeof(numbers[el_i]), "%lld",                                      \
+      snprintf(numbers[el_i], sizeof(numbers[el_i]), "%lld",                                       \
                (long long)(cJSON_IsNumber(nv) ? nv->valuedouble : (fallback)));                    \
-      EL_ARG(numbers[el_i]);                                                                        \
+      EL_ARG(numbers[el_i]);                                                                       \
    } while (0)
    if (strcmp(action, "changeset.show") == 0 || strcmp(action, "changeset.diff") == 0 ||
        strcmp(action, "changeset.preview_revert") == 0)
    {
-      op = strcmp(action, "changeset.show") == 0          ? EL_CHANGESET_SHOW
-           : strcmp(action, "changeset.diff") == 0        ? EL_CHANGESET_DIFF
-                                                           : EL_CHANGESET_PREVIEW_REVERT;
+      op = strcmp(action, "changeset.show") == 0   ? EL_CHANGESET_SHOW
+           : strcmp(action, "changeset.diff") == 0 ? EL_CHANGESET_DIFF
+                                                   : EL_CHANGESET_PREVIEW_REVERT;
       EL_ARG(console_json_string(req, "changeset_id"));
    }
    else if (strcmp(action, "changeset.revert") == 0)
@@ -764,7 +762,7 @@ static int console_evidence(const char *body, char *out_buf, int out_cap)
       op = EL_CHANGESET_REVERT;
       EL_ARG(console_json_string(req, "changeset_id"));
       EL_ARG(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force_partial")) ? "true"
-                                                                                   : "false");
+                                                                                  : "false");
    }
    else if (strcmp(action, "document.preview_lifecycle") == 0)
    {

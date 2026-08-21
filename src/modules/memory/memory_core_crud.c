@@ -240,9 +240,9 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
                                double confidence, const char *session_id,
                                memory_authority_t authority, memory_t *out)
 {
-   static const char *const epistemic_kinds[] = {
-       "world_fact", "episode", "experience", "mental_model", "preference",
-       "instruction", "policy", "hypothesis", NULL};
+   static const char *const epistemic_kinds[] = {"world_fact",   "episode",    "experience",
+                                                 "mental_model", "preference", "instruction",
+                                                 "policy",       "hypothesis", NULL};
    int epistemic_ok = 0;
    for (int i = 0; epistemic_kinds[i]; i++)
       if (epistemic_kind && strcmp(epistemic_kind, epistemic_kinds[i]) == 0)
@@ -486,8 +486,8 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
    /* Truly new: INSERT */
    {
       int64_t new_id = db2_memory_row_insert_epistemic_ex(
-          tier, kind, epistemic_kind, norm_key, content, use_cases, confidence, session_id, ts, sensitivity,
-          memory_base_evidence_strength(norm_key, content, confidence),
+          tier, kind, epistemic_kind, norm_key, content, use_cases, confidence, session_id, ts,
+          sensitivity, memory_base_evidence_strength(norm_key, content, confidence),
           memory_content_salience(content), memory_content_surprise(session_id, content),
           MEMORY_PROVENANCE_FOR(authority));
       if (new_id < 0)
@@ -522,8 +522,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
                      const char *use_cases, double confidence, const char *session_id,
                      memory_authority_t authority, memory_t *out)
 {
-   return memory_insert_epistemic_ex(tier, kind, "world_fact", key, content, use_cases,
-                                     confidence, session_id, authority, out);
+   return memory_insert_epistemic_ex(tier, kind, "world_fact", key, content, use_cases, confidence,
+                                     session_id, authority, out);
 }
 
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,

@@ -191,12 +191,13 @@ int db2_memory_promotion_delete_stale_l1_provenance(const char *kind, const char
    if (!conn)
       return 0;
 
-   static const char *sql = "DELETE FROM memory_provenance WHERE memory_id IN"
-                            " (SELECT id FROM memories WHERE tier = 'L1'"
-                            "   AND epistemic_kind = ?1"
-                            "   AND last_used_at < pg_now_text('-' || COALESCE("
-                            "     expiry_days_migration_override,CAST(replace(?2,'-','') AS bigint))"
-                            "     || ' days'))";
+   static const char *sql =
+       "DELETE FROM memory_provenance WHERE memory_id IN"
+       " (SELECT id FROM memories WHERE tier = 'L1'"
+       "   AND epistemic_kind = ?1"
+       "   AND last_used_at < pg_now_text('-' || COALESCE("
+       "     expiry_days_migration_override,CAST(replace(?2,'-','') AS bigint))"
+       "     || ' days'))";
    char err[MP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

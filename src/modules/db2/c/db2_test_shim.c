@@ -29,6 +29,18 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Most DB2 fixtures do not exercise governed mutations and intentionally link a
+ * narrow object set. Keep the audit host contract optional at this generic test
+ * bootstrap boundary; mutation fixtures link both symbols and get the provider,
+ * while unrelated fixtures retain their existing link closure. */
+extern void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider)
+   __attribute__((weak));
+extern void audit_worm_row_hash(long long seq, const char *actor_role,
+                                const char *actor_principal, const char *action,
+                                const char *subject, const char *verdict, const char *key_id,
+                                const char *detail, const char *prev_hash, char out_hex[65])
+   __attribute__((weak));
+
 /* Weakly link to DB1's per-handle statement-cache flush. The shim
  * uses one sqlite handle to back the DB2 surface, and any DB1 helper
  * that prepared a statement against it (test seed paths, stray
@@ -39,6 +51,12 @@
 extern void db1_stmt_cache_clear_for_sqlite(struct sqlite3 *db) __attribute__((weak));
 
 static sqlite3 *g_shim_handle;
+
+static void register_test_audit_provider(void)
+{
+   if (aimee_db2_register_audit_hash_provider && audit_worm_row_hash)
+      aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
+}
 
 /* --- Postgres-backed mode -------------------------------------------------
  *
@@ -232,6 +250,8 @@ static void pg_open_clone(const char *template_url)
       abort();
    }
 
+   register_test_audit_provider();
+
    g_pg_mode = 1;
 }
 
@@ -363,7 +383,7 @@ void db2_test_shim_open_path(const char *path)
    /* Production registers this host contract during KB module startup. The
     * shim owns the equivalent test startup boundary, so mutation paths retain
     * their mandatory WORM audit without every fixture reimplementing boot. */
-   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
+   register_test_audit_provider();
 
    db2_register_shared_sqlite(raw);
    rc = db2_init("shim");

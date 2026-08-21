@@ -157,11 +157,11 @@ static void mf_mark_done(int64_t job_id)
    if (!conn)
       return;
    char err[MF_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "UPDATE kb_async_jobs SET status='done', last_error='', next_attempt_at='',"
-       " claimed_by='', claimed_at='', updated_at=pg_now_text() WHERE id=?1",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE kb_async_jobs SET status='done', last_error='', next_attempt_at='',"
+                        " claimed_by='', claimed_at='', updated_at=pg_now_text() WHERE id=?1",
+                        err, sizeof(err));
    if (!st)
       return;
    aimee_pg_bind_int64(st, "?1", job_id);
@@ -396,7 +396,7 @@ static int mf_commit_facts(const char *llm_json, const char *note,
    return committed;
 }
 
-static int mf_process_one(const config_t *cfg, const mf_job_t *job)
+static int mf_process_one(const mf_job_t *job)
 {
    memory_t mem;
    memset(&mem, 0, sizeof(mem));
@@ -454,8 +454,8 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
     * a model-sourced triple never enters at Class A). This used to be a flat
     * FACT_AUTHORITY_USER, which made every note the model chose to remember a
     * source of permanent facts outranking the user's own. */
-   if (db2_fact_ingest_text_as_actor(mem.content, &source_actor, 1, &evidence,
-                                     FACT_KIND_WORLD_FACT, mem.created_at, NULL) < 0)
+   if (db2_fact_ingest_text_as_actor(mem.content, &source_actor, 1, &evidence, FACT_KIND_WORLD_FACT,
+                                     mem.created_at, NULL) < 0)
       aimee_log(LOG_WARN, "kb.memory.facts", "pattern extraction gave no answer for memory %lld",
                 (long long)job->memory_id);
 
@@ -477,8 +477,8 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    db2_lease_release_idle();
 
    char err[MF_ERRBUF] = "";
-   char *resp = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json,
-                                   NULL, "", MF_LLM_OUT_CAP, err, sizeof(err));
+   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json, NULL,
+                                   "", MF_LLM_OUT_CAP, err, sizeof(err));
    free(request_json);
    if (!resp)
    {
@@ -495,9 +495,9 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    return n;
 }
 
-int kb_memory_facts_drain(const config_t *cfg, int batch)
+int kb_memory_facts_drain(int batch)
 {
-   if (!cfg || !config_typed_facts_enabled() || batch <= 0)
+   if (!config_typed_facts_enabled() || batch <= 0)
       return 0;
    if (!db2_conn())
       return 0;
@@ -513,7 +513,7 @@ int kb_memory_facts_drain(const config_t *cfg, int batch)
       memset(&job, 0, sizeof(job));
       if (!mf_claim_job(&job))
          break;
-      (void)mf_process_one(cfg, &job);
+      (void)mf_process_one(&job);
       processed++;
    }
    return processed;

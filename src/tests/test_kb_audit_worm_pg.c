@@ -23,7 +23,7 @@
 #include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "modules/db2/c/db_postgres.h"  /* aimee_pg_* */
 #include "kb_audit_worm.h"              /* db2_kb_audit_append / verify / count */
-#include "config_embedder_dims.h"        /* CONFIG_EMBEDDER_DIMS_DEFAULT */
+#include "config_embedder_dims.h"       /* CONFIG_EMBEDDER_DIMS_DEFAULT */
 
 #include <assert.h>
 #include <stdio.h>
