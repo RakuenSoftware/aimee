@@ -2425,6 +2425,53 @@ int main(int argc, char **argv)
           entity_node_get_node_file_path[0] == '\0' && entity_node_get_node_symbol[0] == '\0' &&
           entity_node_get_node_origin[0] == '\0');
 
+   /* The artifact and agent-outcome writers, in an order that means something: artifact_write
+    * creates the artifact the reads after it look for, so this run writes and reads back rather
+    * than watching an empty schema answer nothing. */
+   uint32_t artifact_write_acknowledged = 99;
+   assert(aimee_db2_artifact_write_call(call_client, &client, 9371, 0, "replay-artifact-w", "probe",
+                                        "proposed", "user", "replay", "replay-op", 0.5, "{}",
+                                        &artifact_write_acknowledged, NULL,
+                                        NULL) == AIMEE_MODULE_CALL_OK);
+   /* The artifact lands: the identifier is the caller's and nothing here
+    * is a foreign key. The two calls after this one read it back. */
+   assert(artifact_write_acknowledged == 1);
+
+   uint32_t artifact_write_ex_acknowledged = 99;
+   assert(aimee_db2_artifact_write_ex_call(call_client, &client, 9372, 0, "replay-artifact-x",
+                                           "probe", "proposed", "user", "replay", "replay-op", 0.5,
+                                           3u, "{}", &artifact_write_ex_acknowledged, NULL,
+                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(artifact_write_ex_acknowledged == 1);
+
+   static char
+       artifact_target_surface_target_surface[AIMEE_DB2_ARTIFACT_TARGET_SURFACE_TARGET_SURFACE_MAX +
+                                              1];
+   artifact_target_surface_target_surface[0] = 'x';
+   assert(aimee_db2_artifact_target_surface_call(call_client, &client, 9373, 0, "replay-artifact-w",
+                                                 artifact_target_surface_target_surface,
+                                                 sizeof(artifact_target_surface_target_surface),
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Empty even though the artifact exists: artifact_write never sets the
+    * column, so this reads the same for a written artifact as for one
+    * that was never written, which is what the reason records. */
+   assert(artifact_target_surface_target_surface[0] == '\0');
+
+   uint32_t agent_outcome_record_acknowledged = 99;
+   assert(aimee_db2_agent_outcome_record_call(call_client, &client, 9374, 0, "replay-agent",
+                                              "worker", "completed", "replayed", 3u, 5u, 1024, "",
+                                              &agent_outcome_record_acknowledged, NULL,
+                                              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(agent_outcome_record_acknowledged == 1);
+
+   uint32_t artifact_reject_acknowledged = 99;
+   assert(aimee_db2_artifact_reject_call(call_client, &client, 9375, 0, "replay-artifact-w", "tag",
+                                         "scope", "counter", "{}", &artifact_reject_acknowledged,
+                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Rejects the artifact written above, and writes the audit row that
+    * records why -- two statements with no transaction around them. */
+   assert(artifact_reject_acknowledged == 1);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

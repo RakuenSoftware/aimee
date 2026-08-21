@@ -152,7 +152,10 @@ func Test{go_name(name)}MatchesEverySharedCVector(t *testing.T) {{
     for tag, kind in wanted.items():
         if f'json:"{tag}"' in text[request_start:request_end]:
             continue
-        additions.append(f'\t\t\t{go_name(tag):<27}{kind:<9}`json:"{tag}"`\n')
+        # A name longer than the padding has to keep a space after it, or the
+        # name and the type run together into one undefined identifier.
+        name = go_name(tag)
+        additions.append(f'\t\t\t{name:<27} {kind:<9}`json:"{tag}"`\n')
     if additions:
         # The request struct's own Negative block, found from inside it: the
         # same text opens the reply struct too, and anchoring on the first

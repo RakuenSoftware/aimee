@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "agent_outcomes.h"
+#include "artifacts.h"
 #include "bandit.h"
 #include "entity_nodes.h"
 #include "kb_service_backend.h"
@@ -401,6 +403,18 @@ typedef struct
                              int *out_added);
    int (*bandit_decision_insert)(const char *id, const char *decision_point, const char *arm_id,
                                  const char *context_hash, double propensity, int is_exploration);
+   int (*artifact_write)(const char *id, const char *kind, const char *state,
+                         const char *scope_kind, const char *scope_id, const char *operator_id,
+                         double confidence, const char *payload_json);
+   int (*artifact_write_ex)(const char *id, const char *kind, const char *state,
+                            const char *scope_kind, const char *scope_id, const char *operator_id,
+                            double confidence, int attempt_count, const char *payload_json);
+   int (*artifact_target_surface)(const char *id, char *out, int out_len);
+   int (*agent_outcome_record)(const char *agent_name, const char *role, const char *outcome_kind,
+                               const char *reason, int turns_used, int tools_called,
+                               int64_t tokens_used, const char *tool_error_pattern);
+   int (*artifact_reject)(const char *id, const char *verdict_tag, const char *verdict_scope,
+                          const char *counter_example, const char *before_json);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

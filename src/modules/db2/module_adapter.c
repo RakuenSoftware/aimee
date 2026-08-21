@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/agent_outcomes.h"
 #include "c/entity_nodes.h"
 #include "c/memory_lint.h"
 #include "c/typed_facts.h"
@@ -943,6 +944,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_node_alias_upsert = db2_entity_node_alias_upsert,
        .entity_edge_upsert = db2_entity_edge_upsert,
        .bandit_decision_insert = db2_bandit_decision_insert,
+       .artifact_write = db2_artifact_write,
+       .artifact_write_ex = db2_artifact_write_ex,
+       .artifact_target_surface = db2_artifact_target_surface,
+       .agent_outcome_record = db2_agent_outcome_record,
+       .artifact_reject = db2_artifact_reject,
    };
    return &backend;
 }
@@ -7532,6 +7538,176 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_bandit_decision_insert_reply_encode(acknowledged, response_body,
                                                               response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char artifact_id[AIMEE_DB2_ARTIFACT_WRITE_ARTIFACT_ID_MAX + 1] = "";
+         char artifact_kind[AIMEE_DB2_ARTIFACT_WRITE_ARTIFACT_KIND_MAX + 1] = "";
+         char artifact_state[AIMEE_DB2_ARTIFACT_WRITE_ARTIFACT_STATE_MAX + 1] = "";
+         char scope_kind[AIMEE_DB2_ARTIFACT_WRITE_SCOPE_KIND_MAX + 1] = "";
+         char scope_id[AIMEE_DB2_ARTIFACT_WRITE_SCOPE_ID_MAX + 1] = "";
+         char operator_id[AIMEE_DB2_ARTIFACT_WRITE_OPERATOR_ID_MAX + 1] = "";
+         double artifact_confidence = 0.0;
+         char payload_json[AIMEE_DB2_ARTIFACT_WRITE_PAYLOAD_JSON_MAX + 1] = "";
+         if (aimee_db2_artifact_write_request_decode(
+                 request_body, request_len, artifact_id, sizeof(artifact_id), artifact_kind,
+                 sizeof(artifact_kind), artifact_state, sizeof(artifact_state), scope_kind,
+                 sizeof(scope_kind), scope_id, sizeof(scope_id), operator_id, sizeof(operator_id),
+                 &artifact_confidence, payload_json, sizeof(payload_json)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ARTIFACT_WRITE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->artifact_write)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->artifact_write(artifact_id, artifact_kind, artifact_state,
+                                                   scope_kind, scope_id, operator_id,
+                                                   artifact_confidence, payload_json) == 0
+                               ? 1u
+                               : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_artifact_write_reply_encode(acknowledged, response_body,
+                                                      response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char artifact_id[AIMEE_DB2_ARTIFACT_WRITE_EX_ARTIFACT_ID_MAX + 1] = "";
+         char artifact_kind[AIMEE_DB2_ARTIFACT_WRITE_EX_ARTIFACT_KIND_MAX + 1] = "";
+         char artifact_state[AIMEE_DB2_ARTIFACT_WRITE_EX_ARTIFACT_STATE_MAX + 1] = "";
+         char scope_kind[AIMEE_DB2_ARTIFACT_WRITE_EX_SCOPE_KIND_MAX + 1] = "";
+         char scope_id[AIMEE_DB2_ARTIFACT_WRITE_EX_SCOPE_ID_MAX + 1] = "";
+         char operator_id[AIMEE_DB2_ARTIFACT_WRITE_EX_OPERATOR_ID_MAX + 1] = "";
+         double artifact_confidence = 0.0;
+         uint32_t attempt_count = 0u;
+         char payload_json[AIMEE_DB2_ARTIFACT_WRITE_EX_PAYLOAD_JSON_MAX + 1] = "";
+         if (aimee_db2_artifact_write_ex_request_decode(
+                 request_body, request_len, artifact_id, sizeof(artifact_id), artifact_kind,
+                 sizeof(artifact_kind), artifact_state, sizeof(artifact_state), scope_kind,
+                 sizeof(scope_kind), scope_id, sizeof(scope_id), operator_id, sizeof(operator_id),
+                 &artifact_confidence, &attempt_count, payload_json, sizeof(payload_json)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ARTIFACT_WRITE_EX_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->artifact_write_ex)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->artifact_write_ex(artifact_id, artifact_kind, artifact_state, scope_kind,
+                                           scope_id, operator_id, artifact_confidence,
+                                           (int)attempt_count, payload_json) == 0
+                    ? 1u
+                    : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_artifact_write_ex_reply_encode(acknowledged, response_body,
+                                                         response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char artifact_id[AIMEE_DB2_ARTIFACT_TARGET_SURFACE_ARTIFACT_ID_MAX + 1] = "";
+         if (aimee_db2_artifact_target_surface_request_decode(
+                 request_body, request_len, artifact_id, sizeof(artifact_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ARTIFACT_TARGET_SURFACE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->artifact_target_surface)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char target_surface[AIMEE_DB2_ARTIFACT_TARGET_SURFACE_TARGET_SURFACE_MAX + 1] = "";
+            (void)backend->artifact_target_surface(artifact_id, target_surface,
+                                                   (int)sizeof(target_surface));
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_artifact_target_surface_reply_encode(
+                    target_surface, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char agent_name[AIMEE_DB2_AGENT_OUTCOME_RECORD_AGENT_NAME_MAX + 1] = "";
+         char agent_role[AIMEE_DB2_AGENT_OUTCOME_RECORD_AGENT_ROLE_MAX + 1] = "";
+         char outcome_kind[AIMEE_DB2_AGENT_OUTCOME_RECORD_OUTCOME_KIND_MAX + 1] = "";
+         char outcome_reason[AIMEE_DB2_AGENT_OUTCOME_RECORD_OUTCOME_REASON_MAX + 1] = "";
+         uint32_t turns_used = 0u;
+         uint32_t tools_called = 0u;
+         uint64_t tokens_used = 0u;
+         char tool_error_pattern[AIMEE_DB2_AGENT_OUTCOME_RECORD_TOOL_ERROR_PATTERN_MAX + 1] = "";
+         if (aimee_db2_agent_outcome_record_request_decode(
+                 request_body, request_len, agent_name, sizeof(agent_name), agent_role,
+                 sizeof(agent_role), outcome_kind, sizeof(outcome_kind), outcome_reason,
+                 sizeof(outcome_reason), &turns_used, &tools_called, &tokens_used,
+                 tool_error_pattern, sizeof(tool_error_pattern)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_AGENT_OUTCOME_RECORD_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->agent_outcome_record)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->agent_outcome_record(agent_name, agent_role, outcome_kind, outcome_reason,
+                                              (int)turns_used, (int)tools_called,
+                                              (int64_t)tokens_used, tool_error_pattern) == 0
+                    ? 1u
+                    : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_agent_outcome_record_reply_encode(acknowledged, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char artifact_id[AIMEE_DB2_ARTIFACT_REJECT_ARTIFACT_ID_MAX + 1] = "";
+         char verdict_tag[AIMEE_DB2_ARTIFACT_REJECT_VERDICT_TAG_MAX + 1] = "";
+         char verdict_scope[AIMEE_DB2_ARTIFACT_REJECT_VERDICT_SCOPE_MAX + 1] = "";
+         char counter_example[AIMEE_DB2_ARTIFACT_REJECT_COUNTER_EXAMPLE_MAX + 1] = "";
+         char before_json[AIMEE_DB2_ARTIFACT_REJECT_BEFORE_JSON_MAX + 1] = "";
+         if (aimee_db2_artifact_reject_request_decode(
+                 request_body, request_len, artifact_id, sizeof(artifact_id), verdict_tag,
+                 sizeof(verdict_tag), verdict_scope, sizeof(verdict_scope), counter_example,
+                 sizeof(counter_example), before_json, sizeof(before_json)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ARTIFACT_REJECT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->artifact_reject)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->artifact_reject(artifact_id, verdict_tag, verdict_scope,
+                                                    counter_example, before_json) == 0
+                               ? 1u
+                               : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_artifact_reject_reply_encode(acknowledged, response_body,
+                                                       response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

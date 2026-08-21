@@ -3068,9 +3068,15 @@
           "line": 24
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.agent_outcome_record operation appends what an agent run cost and how it ended. Every call appends: nothing deduplicates and no identifier ties a row to the run it describes, so recording the same outcome twice makes two rows that nothing can tell apart. The outcome kind is stored unchecked, so the vocabulary is whatever callers happen to write."
+      },
       "signature": "int db2_agent_outcome_record ( const char * agent_name , const char * role , const char * outcome_kind , const char * reason , int turns_used , int tools_called , int64_t tokens_used , const char * tool_error_pattern )",
       "signature_sha256": "9e17166bb8ceca1bad93c583d06937a92f589bc7d0678ff0d0d5959c8ca7c96e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_agent_outcome_record"
     },
     {
@@ -3585,9 +3591,15 @@
           "line": 161
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_reject operation rejects an artifact and records why. The state moves first and the audit row is written second, with no transaction around the pair, so a failure between them leaves the artifact rejected and the reason lost -- and the reply reports only the second half. The before-state is the caller's to supply, so what the audit says the artifact was is whatever the caller claimed."
+      },
       "signature": "int db2_artifact_reject ( const char * id , const char * verdict_tag , const char * verdict_scope , const char * counter_example , const char * before_json )",
       "signature_sha256": "6f095caf76828c9071532d6cc5ddbaeec2b8fcd4b39cb0e90e7caac6b02a8aee",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_reject"
     },
     {
@@ -3684,9 +3696,15 @@
           "line": 84
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_target_surface operation reads which surface an artifact targets. The column defaults to empty and learning.artifact_write never sets it, so most artifacts read back empty here -- the same answer as an artifact that does not exist, and the same as a failed read. A caller cannot use this to check whether an artifact is there."
+      },
       "signature": "int db2_artifact_target_surface ( const char * id , char * out , int out_len )",
       "signature_sha256": "4a38cd8e26c9b0f35f3374507ea5c2fb97e238e3bdb38ad7303026d4ca881000",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_target_surface"
     },
     {
@@ -3761,9 +3779,15 @@
           "line": 33
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_write operation records an artifact. The identifier is the caller's, and writing one that exists does nothing and is acknowledged -- so a second write with different content neither updates the artifact nor says it did not. An empty kind becomes the proposed state's defaults, an empty payload becomes an empty object, and the attempt count is fixed at one, which is what learning.artifact_write_ex exists to vary."
+      },
       "signature": "int db2_artifact_write ( const char * id , const char * kind , const char * state , const char * scope_kind , const char * scope_id , const char * operator_id , double confidence , const char * payload_json )",
       "signature_sha256": "46951c63f8c37d6934387e8ba9cad0bea59becb2f5d892c807b15db043deb426",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_write"
     },
     {
@@ -3791,9 +3815,15 @@
           "line": 39
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_write_ex operation records an artifact with an attempt count of the caller's choosing. It is otherwise learning.artifact_write, including the part that matters: writing an identifier that exists does nothing and is acknowledged. So the attempt count can only ever be set when the artifact is created, and a caller trying to raise it on a retry writes nothing and is told it worked."
+      },
       "signature": "int db2_artifact_write_ex ( const char * id , const char * kind , const char * state , const char * scope_kind , const char * scope_id , const char * operator_id , double confidence , int attempt_count , const char * payload_json )",
       "signature_sha256": "64e2e37f25b125b5237bd41517a036361b458813e752d7a481bc9116d2e08a57",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_write_ex"
     },
     {
@@ -27486,15 +27516,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c1aa89e726b2e2e24b22ef1e714c42fe45b42940120bba8527444ee1467113f1",
+  "fingerprint": "c0ef0cb68eb93cc54345c315bb5d40e4ab7a762c86e0b9b4f6e8015d56e38bce",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 382,
+    "audit_pending": 377,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 577
+    "reviewed": 582
   }
 }

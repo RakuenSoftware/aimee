@@ -316,3 +316,156 @@ aimee_module_call_result_t aimee_db2_bandit_decision_insert_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_artifact_write_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *artifact_id, const char *artifact_kind, const char *artifact_state,
+    const char *scope_kind, const char *scope_id, const char *operator_id,
+    double artifact_confidence, const char *payload_json, uint32_t *acknowledged,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ARTIFACT_WRITE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ARTIFACT_WRITE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_artifact_write_request_encode(
+           artifact_id, artifact_kind, artifact_state, scope_kind, scope_id, operator_id,
+           artifact_confidence, payload_json, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ARTIFACT_WRITE, AIMEE_DB2_STAGE_ARTIFACT_WRITE, trace_id,
+            deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_artifact_write_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_artifact_write_ex_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *artifact_id, const char *artifact_kind, const char *artifact_state,
+    const char *scope_kind, const char *scope_id, const char *operator_id,
+    double artifact_confidence, uint32_t attempt_count, const char *payload_json,
+    uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ARTIFACT_WRITE_EX_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ARTIFACT_WRITE_EX_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_artifact_write_ex_request_encode(artifact_id, artifact_kind, artifact_state,
+                                                  scope_kind, scope_id, operator_id,
+                                                  artifact_confidence, attempt_count, payload_json,
+                                                  request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ARTIFACT_WRITE_EX, AIMEE_DB2_STAGE_ARTIFACT_WRITE_EX,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_artifact_write_ex_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_artifact_target_surface_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *artifact_id, char *target_surface, size_t target_surface_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ARTIFACT_TARGET_SURFACE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ARTIFACT_TARGET_SURFACE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_artifact_target_surface_request_encode(artifact_id, request, sizeof(request),
+                                                        &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ARTIFACT_TARGET_SURFACE,
+            AIMEE_DB2_STAGE_ARTIFACT_TARGET_SURFACE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_artifact_target_surface_reply_decode(response, response_len, target_surface,
+                                                      target_surface_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_agent_outcome_record_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *agent_name, const char *agent_role, const char *outcome_kind,
+    const char *outcome_reason, uint32_t turns_used, uint32_t tools_called, uint64_t tokens_used,
+    const char *tool_error_pattern, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_AGENT_OUTCOME_RECORD_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_AGENT_OUTCOME_RECORD_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_agent_outcome_record_request_encode(
+           agent_name, agent_role, outcome_kind, outcome_reason, turns_used, tools_called,
+           tokens_used, tool_error_pattern, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_AGENT_OUTCOME_RECORD,
+            AIMEE_DB2_STAGE_AGENT_OUTCOME_RECORD, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_agent_outcome_record_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_artifact_reject_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *artifact_id, const char *verdict_tag, const char *verdict_scope,
+    const char *counter_example, const char *before_json, uint32_t *acknowledged,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ARTIFACT_REJECT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ARTIFACT_REJECT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_artifact_reject_request_encode(artifact_id, verdict_tag, verdict_scope,
+                                                counter_example, before_json, request,
+                                                sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ARTIFACT_REJECT, AIMEE_DB2_STAGE_ARTIFACT_REJECT,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_artifact_reject_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

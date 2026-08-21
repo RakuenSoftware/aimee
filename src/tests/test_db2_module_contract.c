@@ -2742,6 +2742,71 @@ int db2_bandit_decision_insert(const char *id, const char *decision_point, const
    return 0;
 }
 
+int db2_artifact_write(const char *id, const char *kind, const char *state, const char *scope_kind,
+                       const char *scope_id, const char *operator_id, double confidence,
+                       const char *payload_json)
+{
+   (void)id;
+   (void)kind;
+   (void)state;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)operator_id;
+   (void)confidence;
+   (void)payload_json;
+   return 0;
+}
+
+int db2_artifact_write_ex(const char *id, const char *kind, const char *state,
+                          const char *scope_kind, const char *scope_id, const char *operator_id,
+                          double confidence, int attempt_count, const char *payload_json)
+{
+   (void)id;
+   (void)kind;
+   (void)state;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)operator_id;
+   (void)confidence;
+   (void)attempt_count;
+   (void)payload_json;
+   return 0;
+}
+
+int db2_artifact_target_surface(const char *id, char *out, int out_len)
+{
+   (void)id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return -1;
+}
+
+int db2_agent_outcome_record(const char *agent_name, const char *role, const char *outcome_kind,
+                             const char *reason, int turns_used, int tools_called,
+                             int64_t tokens_used, const char *tool_error_pattern)
+{
+   (void)agent_name;
+   (void)role;
+   (void)outcome_kind;
+   (void)reason;
+   (void)turns_used;
+   (void)tools_called;
+   (void)tokens_used;
+   (void)tool_error_pattern;
+   return 0;
+}
+
+int db2_artifact_reject(const char *id, const char *verdict_tag, const char *verdict_scope,
+                        const char *counter_example, const char *before_json)
+{
+   (void)id;
+   (void)verdict_tag;
+   (void)verdict_scope;
+   (void)counter_example;
+   (void)before_json;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

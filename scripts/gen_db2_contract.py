@@ -13132,6 +13132,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_bandit_decision_insert",
         "policy": {"writes": 200},
     },
+    "artifact_write": {
+        "key": ("learning", 50),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_write",
+        "policy": {"writes": 200},
+    },
+    "artifact_write_ex": {
+        "key": ("learning", 51),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_write_ex",
+        "policy": {"writes": 200},
+    },
+    "artifact_target_surface": {
+        "key": ("learning", 52),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_target_surface",
+        "policy": {"reads": 200},
+    },
+    "agent_outcome_record": {
+        "key": ("learning", 53),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_agent_outcome_record",
+        "policy": {"writes": 200},
+    },
+    "artifact_reject": {
+        "key": ("learning", 54),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_reject",
+        "policy": {"writes": 200},
+    },
 }
 
 

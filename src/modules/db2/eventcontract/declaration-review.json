@@ -172,6 +172,14 @@
       "reason": "canonical_index_structure is index.file_definitions under another name. It used to run its own copy of the query without selecting line_end, leaving that member of every row it wrote uninitialised for its callers to read; it forwards now, so the two cannot drift again. Reviewed as the same operation rather than a second one, because a forward is not a boundary."
     },
     {
+      "symbol": "db2_agent_outcome_record",
+      "signature_sha256": "9e17166bb8ceca1bad93c583d06937a92f589bc7d0678ff0d0d5959c8ca7c96e",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.agent_outcome_record operation appends what an agent run cost and how it ended. Every call appends: nothing deduplicates and no identifier ties a row to the run it describes, so recording the same outcome twice makes two rows that nothing can tell apart. The outcome kind is stored unchecked, so the vocabulary is whatever callers happen to write."
+    },
+    {
       "symbol": "db2_anti_pattern_bump",
       "signature_sha256": "7dcb238fd67595c2cab8ed4f626ccecff7bd5f7e8c9a4d2b9f5742e8e5c0d4a0",
       "disposition": "wire-operation",
@@ -276,6 +284,14 @@
       "reason": "The typed learning.artifact_register_exemplar operation replaces the exemplar insert. Unlike the queue inserts beside it, this one has no conflict clause, so registering the same artifact and collection twice fails rather than being ignored -- a difference worth recording because both look identical from the wire."
     },
     {
+      "symbol": "db2_artifact_reject",
+      "signature_sha256": "6f095caf76828c9071532d6cc5ddbaeec2b8fcd4b39cb0e90e7caac6b02a8aee",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_reject operation rejects an artifact and records why. The state moves first and the audit row is written second, with no transaction around the pair, so a failure between them leaves the artifact rejected and the reason lost -- and the reply reports only the second half. The before-state is the caller's to supply, so what the audit says the artifact was is whatever the caller claimed."
+    },
+    {
       "symbol": "db2_artifact_set_state",
       "signature_sha256": "8b37c5aec52f41a89ddc43835bd016e1bbc6c9c5fa04ea64978fc91e17324117",
       "disposition": "wire-operation",
@@ -292,12 +308,36 @@
       "reason": "The typed learning.artifact_stamp_reflected operation replaces the reflection stamp. The time written is DB2's own clock and never crosses, so a caller can record that an artifact was reflected on but not when. An identifier naming nothing updates no row and is acknowledged the same as one that did, which the wire cannot show."
     },
     {
+      "symbol": "db2_artifact_target_surface",
+      "signature_sha256": "4a38cd8e26c9b0f35f3374507ea5c2fb97e238e3bdb38ad7303026d4ca881000",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_target_surface operation reads which surface an artifact targets. The column defaults to empty and learning.artifact_write never sets it, so most artifacts read back empty here -- the same answer as an artifact that does not exist, and the same as a failed read. A caller cannot use this to check whether an artifact is there."
+    },
+    {
       "symbol": "db2_artifact_verdict_suppressed",
       "signature_sha256": "b63ab840e1a0a8aebd23bd28b73b98fc89da5c8fb9b062c69e4b52088a27d2bd",
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.verdict_suppressed operation reports whether anything has been thumbed down under a tag and scope. Every failure path answers not suppressed: an empty tag, no connection, a statement that will not prepare. So the operation fails open, and a caller using it as a suppression gate lets suppressed content through whenever the database is unreachable. Recorded because a Boolean reply cannot say which of the two answers it is."
+    },
+    {
+      "symbol": "db2_artifact_write",
+      "signature_sha256": "46951c63f8c37d6934387e8ba9cad0bea59becb2f5d892c807b15db043deb426",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_write operation records an artifact. The identifier is the caller's, and writing one that exists does nothing and is acknowledged -- so a second write with different content neither updates the artifact nor says it did not. An empty kind becomes the proposed state's defaults, an empty payload becomes an empty object, and the attempt count is fixed at one, which is what learning.artifact_write_ex exists to vary."
+    },
+    {
+      "symbol": "db2_artifact_write_ex",
+      "signature_sha256": "64e2e37f25b125b5237bd41517a036361b458813e752d7a481bc9116d2e08a57",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_write_ex operation records an artifact with an attempt count of the caller's choosing. It is otherwise learning.artifact_write, including the part that matters: writing an identifier that exists does nothing and is acknowledged. So the attempt count can only ever be set when the artifact is created, and a caller trying to raise it on a retry writes nothing and is told it worked."
     },
     {
       "symbol": "db2_bandit_arms_list",

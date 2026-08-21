@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "8886789d96f0706f77e2fbf9c9b5f1dd59813c42f630bb1d9c2ee8daf6f2724c"
+const ContractSHA256 = "5513377d67ef2726c9a0d0180e1826078cfe76e09013e9d3fb6f63d4d1e746aa"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -6778,6 +6778,535 @@ func DecodeBanditDecisionInsertRequest(request []byte) (string, string, string, 
 		return "", "", "", "", 0, 0, ErrMalformedEnvelope
 	}
 	return banditDecisionID, decisionPoint, armID, contextHash, propensity, isExploration, nil
+}
+
+const EventArtifactWrite = EventLearning
+const StageArtifactWrite = FamilyLearning
+const OperationArtifactWrite uint32 = 50
+const ArtifactWriteArtifactIDMin = 1
+const ArtifactWriteArtifactIDMax = 127
+const ArtifactWriteArtifactKindMin = 0
+const ArtifactWriteArtifactKindMax = 63
+const ArtifactWriteArtifactStateMin = 0
+const ArtifactWriteArtifactStateMax = 31
+const ArtifactWriteScopeKindMin = 0
+const ArtifactWriteScopeKindMax = 31
+const ArtifactWriteScopeIDMin = 0
+const ArtifactWriteScopeIDMax = 127
+const ArtifactWriteOperatorIDMin = 0
+const ArtifactWriteOperatorIDMax = 127
+const ArtifactWriteArtifactConfidenceMaxMagnitudeBits uint64 = 4607182418800017408
+const ArtifactWritePayloadJsonMin = 0
+const ArtifactWritePayloadJsonMax = 4095
+
+// EncodeArtifactWriteRequest writes the schema artifact_write declares, in order.
+func EncodeArtifactWriteRequest(artifactID string, artifactKind string, artifactState string, scopeKind string, scopeID string, operatorID string, artifactConfidence float64, payloadJson string) ([]byte, error) {
+	if len(artifactID) < ArtifactWriteArtifactIDMin || len(artifactID) > ArtifactWriteArtifactIDMax || hasNUL(artifactID) ||
+		len(artifactKind) < ArtifactWriteArtifactKindMin || len(artifactKind) > ArtifactWriteArtifactKindMax || hasNUL(artifactKind) ||
+		len(artifactState) < ArtifactWriteArtifactStateMin || len(artifactState) > ArtifactWriteArtifactStateMax || hasNUL(artifactState) ||
+		len(scopeKind) < ArtifactWriteScopeKindMin || len(scopeKind) > ArtifactWriteScopeKindMax || hasNUL(scopeKind) ||
+		len(scopeID) < ArtifactWriteScopeIDMin || len(scopeID) > ArtifactWriteScopeIDMax || hasNUL(scopeID) ||
+		len(operatorID) < ArtifactWriteOperatorIDMin || len(operatorID) > ArtifactWriteOperatorIDMax || hasNUL(operatorID) ||
+		math.Float64bits(artifactConfidence)&0x7fffffffffffffff > ArtifactWriteArtifactConfidenceMaxMagnitudeBits ||
+		len(payloadJson) < ArtifactWritePayloadJsonMin || len(payloadJson) > ArtifactWritePayloadJsonMax || hasNUL(payloadJson) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, ArtifactWriteArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactKind, ArtifactWriteArtifactKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactState, ArtifactWriteArtifactStateMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeKind, ArtifactWriteScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeID, ArtifactWriteScopeIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, operatorID, ArtifactWriteOperatorIDMax); err != nil {
+		return nil, err
+	}
+	var artifactConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(artifactConfidenceBytes[:], math.Float64bits(artifactConfidence))
+	payload = append(payload, artifactConfidenceBytes[:]...)
+	if err := putRowText(&payload, payloadJson, ArtifactWritePayloadJsonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactWrite, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactWriteRequest reads it back, checking each field against its own bound.
+func DecodeArtifactWriteRequest(request []byte) (string, string, string, string, string, string, float64, string, error) {
+	var artifactID string
+	var artifactKind string
+	var artifactState string
+	var scopeKind string
+	var scopeID string
+	var operatorID string
+	var artifactConfidence float64
+	var payloadJson string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactWrite || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, ArtifactWriteArtifactIDMax); err != nil ||
+		len(artifactID) < ArtifactWriteArtifactIDMin {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if artifactKind, err = takeRowText(payload, &cursor, ArtifactWriteArtifactKindMax); err != nil ||
+		len(artifactKind) < ArtifactWriteArtifactKindMin {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if artifactState, err = takeRowText(payload, &cursor, ArtifactWriteArtifactStateMax); err != nil ||
+		len(artifactState) < ArtifactWriteArtifactStateMin {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if scopeKind, err = takeRowText(payload, &cursor, ArtifactWriteScopeKindMax); err != nil ||
+		len(scopeKind) < ArtifactWriteScopeKindMin {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if scopeID, err = takeRowText(payload, &cursor, ArtifactWriteScopeIDMax); err != nil ||
+		len(scopeID) < ArtifactWriteScopeIDMin {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if operatorID, err = takeRowText(payload, &cursor, ArtifactWriteOperatorIDMax); err != nil ||
+		len(operatorID) < ArtifactWriteOperatorIDMin {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > ArtifactWriteArtifactConfidenceMaxMagnitudeBits {
+			return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+		}
+		artifactConfidence = math.Float64frombits(bits)
+	}
+	if payloadJson, err = takeRowText(payload, &cursor, ArtifactWritePayloadJsonMax); err != nil ||
+		len(payloadJson) < ArtifactWritePayloadJsonMin {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	return artifactID, artifactKind, artifactState, scopeKind, scopeID, operatorID, artifactConfidence, payloadJson, nil
+}
+
+const EventArtifactWriteEx = EventLearning
+const StageArtifactWriteEx = FamilyLearning
+const OperationArtifactWriteEx uint32 = 51
+const ArtifactWriteExArtifactIDMin = 1
+const ArtifactWriteExArtifactIDMax = 127
+const ArtifactWriteExArtifactKindMin = 0
+const ArtifactWriteExArtifactKindMax = 63
+const ArtifactWriteExArtifactStateMin = 0
+const ArtifactWriteExArtifactStateMax = 31
+const ArtifactWriteExScopeKindMin = 0
+const ArtifactWriteExScopeKindMax = 31
+const ArtifactWriteExScopeIDMin = 0
+const ArtifactWriteExScopeIDMax = 127
+const ArtifactWriteExOperatorIDMin = 0
+const ArtifactWriteExOperatorIDMax = 127
+const ArtifactWriteExArtifactConfidenceMaxMagnitudeBits uint64 = 4607182418800017408
+const ArtifactWriteExAttemptCountMin uint32 = 0
+const ArtifactWriteExAttemptCountMax uint32 = 4294967295
+const ArtifactWriteExPayloadJsonMin = 0
+const ArtifactWriteExPayloadJsonMax = 4095
+
+// EncodeArtifactWriteExRequest writes the schema artifact_write_ex declares, in order.
+func EncodeArtifactWriteExRequest(artifactID string, artifactKind string, artifactState string, scopeKind string, scopeID string, operatorID string, artifactConfidence float64, attemptCount uint32, payloadJson string) ([]byte, error) {
+	if len(artifactID) < ArtifactWriteExArtifactIDMin || len(artifactID) > ArtifactWriteExArtifactIDMax || hasNUL(artifactID) ||
+		len(artifactKind) < ArtifactWriteExArtifactKindMin || len(artifactKind) > ArtifactWriteExArtifactKindMax || hasNUL(artifactKind) ||
+		len(artifactState) < ArtifactWriteExArtifactStateMin || len(artifactState) > ArtifactWriteExArtifactStateMax || hasNUL(artifactState) ||
+		len(scopeKind) < ArtifactWriteExScopeKindMin || len(scopeKind) > ArtifactWriteExScopeKindMax || hasNUL(scopeKind) ||
+		len(scopeID) < ArtifactWriteExScopeIDMin || len(scopeID) > ArtifactWriteExScopeIDMax || hasNUL(scopeID) ||
+		len(operatorID) < ArtifactWriteExOperatorIDMin || len(operatorID) > ArtifactWriteExOperatorIDMax || hasNUL(operatorID) ||
+		math.Float64bits(artifactConfidence)&0x7fffffffffffffff > ArtifactWriteExArtifactConfidenceMaxMagnitudeBits ||
+		attemptCount < ArtifactWriteExAttemptCountMin || attemptCount > ArtifactWriteExAttemptCountMax ||
+		len(payloadJson) < ArtifactWriteExPayloadJsonMin || len(payloadJson) > ArtifactWriteExPayloadJsonMax || hasNUL(payloadJson) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, ArtifactWriteExArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactKind, ArtifactWriteExArtifactKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactState, ArtifactWriteExArtifactStateMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeKind, ArtifactWriteExScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeID, ArtifactWriteExScopeIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, operatorID, ArtifactWriteExOperatorIDMax); err != nil {
+		return nil, err
+	}
+	var artifactConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(artifactConfidenceBytes[:], math.Float64bits(artifactConfidence))
+	payload = append(payload, artifactConfidenceBytes[:]...)
+	var attemptCountBytes [4]byte
+	binary.LittleEndian.PutUint32(attemptCountBytes[:], attemptCount)
+	payload = append(payload, attemptCountBytes[:]...)
+	if err := putRowText(&payload, payloadJson, ArtifactWriteExPayloadJsonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactWriteEx, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactWriteExRequest reads it back, checking each field against its own bound.
+func DecodeArtifactWriteExRequest(request []byte) (string, string, string, string, string, string, float64, uint32, string, error) {
+	var artifactID string
+	var artifactKind string
+	var artifactState string
+	var scopeKind string
+	var scopeID string
+	var operatorID string
+	var artifactConfidence float64
+	var attemptCount uint32
+	var payloadJson string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactWriteEx || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, ArtifactWriteExArtifactIDMax); err != nil ||
+		len(artifactID) < ArtifactWriteExArtifactIDMin {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if artifactKind, err = takeRowText(payload, &cursor, ArtifactWriteExArtifactKindMax); err != nil ||
+		len(artifactKind) < ArtifactWriteExArtifactKindMin {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if artifactState, err = takeRowText(payload, &cursor, ArtifactWriteExArtifactStateMax); err != nil ||
+		len(artifactState) < ArtifactWriteExArtifactStateMin {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if scopeKind, err = takeRowText(payload, &cursor, ArtifactWriteExScopeKindMax); err != nil ||
+		len(scopeKind) < ArtifactWriteExScopeKindMin {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if scopeID, err = takeRowText(payload, &cursor, ArtifactWriteExScopeIDMax); err != nil ||
+		len(scopeID) < ArtifactWriteExScopeIDMin {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if operatorID, err = takeRowText(payload, &cursor, ArtifactWriteExOperatorIDMax); err != nil ||
+		len(operatorID) < ArtifactWriteExOperatorIDMin {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > ArtifactWriteExArtifactConfidenceMaxMagnitudeBits {
+			return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+		}
+		artifactConfidence = math.Float64frombits(bits)
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	attemptCount = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if attemptCount < ArtifactWriteExAttemptCountMin || attemptCount > ArtifactWriteExAttemptCountMax {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if payloadJson, err = takeRowText(payload, &cursor, ArtifactWriteExPayloadJsonMax); err != nil ||
+		len(payloadJson) < ArtifactWriteExPayloadJsonMin {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", 0, 0, "", ErrMalformedEnvelope
+	}
+	return artifactID, artifactKind, artifactState, scopeKind, scopeID, operatorID, artifactConfidence, attemptCount, payloadJson, nil
+}
+
+const EventArtifactTargetSurface = EventLearning
+const StageArtifactTargetSurface = FamilyLearning
+const OperationArtifactTargetSurface uint32 = 52
+const ArtifactTargetSurfaceArtifactIDMin = 1
+const ArtifactTargetSurfaceArtifactIDMax = 127
+
+// EncodeArtifactTargetSurfaceRequest writes the schema artifact_target_surface declares, in order.
+func EncodeArtifactTargetSurfaceRequest(artifactID string) ([]byte, error) {
+	if len(artifactID) < ArtifactTargetSurfaceArtifactIDMin || len(artifactID) > ArtifactTargetSurfaceArtifactIDMax || hasNUL(artifactID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, ArtifactTargetSurfaceArtifactIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactTargetSurface, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactTargetSurfaceRequest reads it back, checking each field against its own bound.
+func DecodeArtifactTargetSurfaceRequest(request []byte) (string, error) {
+	var artifactID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactTargetSurface || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, ArtifactTargetSurfaceArtifactIDMax); err != nil ||
+		len(artifactID) < ArtifactTargetSurfaceArtifactIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return artifactID, nil
+}
+
+const EventAgentOutcomeRecord = EventLearning
+const StageAgentOutcomeRecord = FamilyLearning
+const OperationAgentOutcomeRecord uint32 = 53
+const AgentOutcomeRecordAgentNameMin = 0
+const AgentOutcomeRecordAgentNameMax = 127
+const AgentOutcomeRecordAgentRoleMin = 0
+const AgentOutcomeRecordAgentRoleMax = 63
+const AgentOutcomeRecordOutcomeKindMin = 0
+const AgentOutcomeRecordOutcomeKindMax = 63
+const AgentOutcomeRecordOutcomeReasonMin = 0
+const AgentOutcomeRecordOutcomeReasonMax = 511
+const AgentOutcomeRecordTurnsUsedMin uint32 = 0
+const AgentOutcomeRecordTurnsUsedMax uint32 = 4294967295
+const AgentOutcomeRecordToolsCalledMin uint32 = 0
+const AgentOutcomeRecordToolsCalledMax uint32 = 4294967295
+const AgentOutcomeRecordTokensUsedMin uint64 = 0
+const AgentOutcomeRecordTokensUsedMax uint64 = 9223372036854775807
+const AgentOutcomeRecordToolErrorPatternMin = 0
+const AgentOutcomeRecordToolErrorPatternMax = 511
+
+// EncodeAgentOutcomeRecordRequest writes the schema agent_outcome_record declares, in order.
+func EncodeAgentOutcomeRecordRequest(agentName string, agentRole string, outcomeKind string, outcomeReason string, turnsUsed uint32, toolsCalled uint32, tokensUsed uint64, toolErrorPattern string) ([]byte, error) {
+	if len(agentName) < AgentOutcomeRecordAgentNameMin || len(agentName) > AgentOutcomeRecordAgentNameMax || hasNUL(agentName) ||
+		len(agentRole) < AgentOutcomeRecordAgentRoleMin || len(agentRole) > AgentOutcomeRecordAgentRoleMax || hasNUL(agentRole) ||
+		len(outcomeKind) < AgentOutcomeRecordOutcomeKindMin || len(outcomeKind) > AgentOutcomeRecordOutcomeKindMax || hasNUL(outcomeKind) ||
+		len(outcomeReason) < AgentOutcomeRecordOutcomeReasonMin || len(outcomeReason) > AgentOutcomeRecordOutcomeReasonMax || hasNUL(outcomeReason) ||
+		turnsUsed < AgentOutcomeRecordTurnsUsedMin || turnsUsed > AgentOutcomeRecordTurnsUsedMax ||
+		toolsCalled < AgentOutcomeRecordToolsCalledMin || toolsCalled > AgentOutcomeRecordToolsCalledMax ||
+		tokensUsed < AgentOutcomeRecordTokensUsedMin || tokensUsed > AgentOutcomeRecordTokensUsedMax ||
+		len(toolErrorPattern) < AgentOutcomeRecordToolErrorPatternMin || len(toolErrorPattern) > AgentOutcomeRecordToolErrorPatternMax || hasNUL(toolErrorPattern) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, agentName, AgentOutcomeRecordAgentNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, agentRole, AgentOutcomeRecordAgentRoleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, outcomeKind, AgentOutcomeRecordOutcomeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, outcomeReason, AgentOutcomeRecordOutcomeReasonMax); err != nil {
+		return nil, err
+	}
+	var turnsUsedBytes [4]byte
+	binary.LittleEndian.PutUint32(turnsUsedBytes[:], turnsUsed)
+	payload = append(payload, turnsUsedBytes[:]...)
+	var toolsCalledBytes [4]byte
+	binary.LittleEndian.PutUint32(toolsCalledBytes[:], toolsCalled)
+	payload = append(payload, toolsCalledBytes[:]...)
+	var tokensUsedBytes [8]byte
+	binary.LittleEndian.PutUint64(tokensUsedBytes[:], tokensUsed)
+	payload = append(payload, tokensUsedBytes[:]...)
+	if err := putRowText(&payload, toolErrorPattern, AgentOutcomeRecordToolErrorPatternMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAgentOutcomeRecord, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAgentOutcomeRecordRequest reads it back, checking each field against its own bound.
+func DecodeAgentOutcomeRecordRequest(request []byte) (string, string, string, string, uint32, uint32, uint64, string, error) {
+	var agentName string
+	var agentRole string
+	var outcomeKind string
+	var outcomeReason string
+	var turnsUsed uint32
+	var toolsCalled uint32
+	var tokensUsed uint64
+	var toolErrorPattern string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAgentOutcomeRecord || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if agentName, err = takeRowText(payload, &cursor, AgentOutcomeRecordAgentNameMax); err != nil ||
+		len(agentName) < AgentOutcomeRecordAgentNameMin {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if agentRole, err = takeRowText(payload, &cursor, AgentOutcomeRecordAgentRoleMax); err != nil ||
+		len(agentRole) < AgentOutcomeRecordAgentRoleMin {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if outcomeKind, err = takeRowText(payload, &cursor, AgentOutcomeRecordOutcomeKindMax); err != nil ||
+		len(outcomeKind) < AgentOutcomeRecordOutcomeKindMin {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if outcomeReason, err = takeRowText(payload, &cursor, AgentOutcomeRecordOutcomeReasonMax); err != nil ||
+		len(outcomeReason) < AgentOutcomeRecordOutcomeReasonMin {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	turnsUsed = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if turnsUsed < AgentOutcomeRecordTurnsUsedMin || turnsUsed > AgentOutcomeRecordTurnsUsedMax {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	toolsCalled = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if toolsCalled < AgentOutcomeRecordToolsCalledMin || toolsCalled > AgentOutcomeRecordToolsCalledMax {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	tokensUsed = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if tokensUsed < AgentOutcomeRecordTokensUsedMin || tokensUsed > AgentOutcomeRecordTokensUsedMax {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if toolErrorPattern, err = takeRowText(payload, &cursor, AgentOutcomeRecordToolErrorPatternMax); err != nil ||
+		len(toolErrorPattern) < AgentOutcomeRecordToolErrorPatternMin {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", 0, 0, 0, "", ErrMalformedEnvelope
+	}
+	return agentName, agentRole, outcomeKind, outcomeReason, turnsUsed, toolsCalled, tokensUsed, toolErrorPattern, nil
+}
+
+const EventArtifactReject = EventLearning
+const StageArtifactReject = FamilyLearning
+const OperationArtifactReject uint32 = 54
+const ArtifactRejectArtifactIDMin = 1
+const ArtifactRejectArtifactIDMax = 127
+const ArtifactRejectVerdictTagMin = 0
+const ArtifactRejectVerdictTagMax = 127
+const ArtifactRejectVerdictScopeMin = 0
+const ArtifactRejectVerdictScopeMax = 127
+const ArtifactRejectCounterExampleMin = 0
+const ArtifactRejectCounterExampleMax = 1023
+const ArtifactRejectBeforeJsonMin = 0
+const ArtifactRejectBeforeJsonMax = 4095
+
+// EncodeArtifactRejectRequest writes the schema artifact_reject declares, in order.
+func EncodeArtifactRejectRequest(artifactID string, verdictTag string, verdictScope string, counterExample string, beforeJson string) ([]byte, error) {
+	if len(artifactID) < ArtifactRejectArtifactIDMin || len(artifactID) > ArtifactRejectArtifactIDMax || hasNUL(artifactID) ||
+		len(verdictTag) < ArtifactRejectVerdictTagMin || len(verdictTag) > ArtifactRejectVerdictTagMax || hasNUL(verdictTag) ||
+		len(verdictScope) < ArtifactRejectVerdictScopeMin || len(verdictScope) > ArtifactRejectVerdictScopeMax || hasNUL(verdictScope) ||
+		len(counterExample) < ArtifactRejectCounterExampleMin || len(counterExample) > ArtifactRejectCounterExampleMax || hasNUL(counterExample) ||
+		len(beforeJson) < ArtifactRejectBeforeJsonMin || len(beforeJson) > ArtifactRejectBeforeJsonMax || hasNUL(beforeJson) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, ArtifactRejectArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, verdictTag, ArtifactRejectVerdictTagMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, verdictScope, ArtifactRejectVerdictScopeMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, counterExample, ArtifactRejectCounterExampleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, beforeJson, ArtifactRejectBeforeJsonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactReject, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactRejectRequest reads it back, checking each field against its own bound.
+func DecodeArtifactRejectRequest(request []byte) (string, string, string, string, string, error) {
+	var artifactID string
+	var verdictTag string
+	var verdictScope string
+	var counterExample string
+	var beforeJson string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactReject || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, ArtifactRejectArtifactIDMax); err != nil ||
+		len(artifactID) < ArtifactRejectArtifactIDMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if verdictTag, err = takeRowText(payload, &cursor, ArtifactRejectVerdictTagMax); err != nil ||
+		len(verdictTag) < ArtifactRejectVerdictTagMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if verdictScope, err = takeRowText(payload, &cursor, ArtifactRejectVerdictScopeMax); err != nil ||
+		len(verdictScope) < ArtifactRejectVerdictScopeMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if counterExample, err = takeRowText(payload, &cursor, ArtifactRejectCounterExampleMax); err != nil ||
+		len(counterExample) < ArtifactRejectCounterExampleMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if beforeJson, err = takeRowText(payload, &cursor, ArtifactRejectBeforeJsonMax); err != nil ||
+		len(beforeJson) < ArtifactRejectBeforeJsonMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return artifactID, verdictTag, verdictScope, counterExample, beforeJson, nil
 }
 
 const EventDocumentExists = EventOrganization

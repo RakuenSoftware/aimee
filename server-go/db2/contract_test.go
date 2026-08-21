@@ -139,211 +139,229 @@ type wireBaseline struct {
 		Name    string `json:"name"`
 		Family  string `json:"family"`
 		Request struct {
-			Positive                   string   `json:"positive"`
-			SourceSession              string   `json:"source_session"`
-			Key                        string   `json:"key"`
-			Kind                       string   `json:"kind"`
-			SessionID                  string   `json:"session_id"`
-			Tokens                     string   `json:"tokens"`
-			Cleared                    string   `json:"cleared"`
-			TierA                      string   `json:"tier_a"`
-			TierB                      string   `json:"tier_b"`
-			MemoryID                   uint64   `json:"memory_id"`
-			LinkID                     uint64   `json:"link_id"`
-			AsOf                       string   `json:"as_of"`
-			ScopeType                  string   `json:"scope_type"`
-			Content                    string   `json:"content"`
-			Workspace                  string   `json:"workspace"`
-			HasValue                   uint32   `json:"has_value"`
-			ValueBits                  uint64   `json:"value_bits"`
-			ThresholdBits              uint64   `json:"threshold_bits"`
-			LowThresholdBits           uint64   `json:"low_threshold_bits"`
-			MaximumIDs                 uint32   `json:"maximum_ids"`
-			Limit                      uint32   `json:"limit"`
-			ScopeFlags                 uint32   `json:"scope_flags"`
-			Term                       string   `json:"term"`
-			AnchorID                   uint64   `json:"anchor_id"`
-			AnchorZero                 string   `json:"anchor_zero"`
-			UnitID                     uint64   `json:"unit_id"`
-			NormalizedKey              string   `json:"normalized_key"`
-			HideArchived               uint32   `json:"hide_archived"`
-			Tier                       string   `json:"tier"`
-			Unfiltered                 string   `json:"unfiltered"`
-			EntitySeed                 string   `json:"entity_seed"`
-			Keyword                    string   `json:"keyword"`
-			Unselected                 string   `json:"unselected"`
-			RecordID                   uint64   `json:"record_id"`
-			DocumentID                 uint64   `json:"document_id"`
-			LastTraceID                uint64   `json:"last_trace_id"`
-			Pattern                    string   `json:"pattern"`
-			SourceRef                  string   `json:"source_ref"`
-			ArtifactID                 string   `json:"artifact_id"`
-			Sink                       string   `json:"sink"`
-			EntityID                   string   `json:"entity_id"`
-			TurnID                     string   `json:"turn_id"`
-			BlobRef                    string   `json:"blob_ref"`
-			QueryNorm                  string   `json:"query_norm"`
-			StateKey                   string   `json:"state_key"`
-			FinishedAt                 string   `json:"finished_at"`
-			JobID                      string   `json:"job_id"`
-			State                      string   `json:"state"`
-			Collection                 string   `json:"collection"`
-			LastError                  string   `json:"last_error"`
-			StateValue                 string   `json:"state_value"`
-			Version                    string   `json:"version"`
-			UpdatedAt                  string   `json:"updated_at"`
-			Window                     string   `json:"window"`
-			ContentHash                string   `json:"content_hash"`
-			Scope                      string   `json:"scope"`
-			FilePath                   string   `json:"file_path"`
-			CertIssuer                 string   `json:"cert_issuer"`
-			CertSerialNorm             string   `json:"cert_serial_norm"`
-			Project                    string   `json:"project"`
-			StaleL1Tier                string   `json:"stale_l1_tier"`
-			MaximumKinds               uint32   `json:"maximum_kinds"`
-			DemoteTier                 string   `json:"demote_tier"`
-			SourceTier                 string   `json:"source_tier"`
-			TargetTier                 string   `json:"target_tier"`
-			Kinds                      []string `json:"kinds"`
-			ConfidenceBits             uint64   `json:"confidence_bits"`
-			UseCount                   uint32   `json:"use_count"`
-			StableDays                 uint32   `json:"stable_days"`
-			GatedKind                  string   `json:"gated_kind"`
-			RequireApproval            uint32   `json:"require_approval"`
-			OpenPositive               string   `json:"open_positive"`
-			Approver                   string   `json:"approver"`
-			Note                       string   `json:"note"`
-			BarePositive               string   `json:"bare_positive"`
-			Promotions                 uint32   `json:"promotions"`
-			Demotions                  uint32   `json:"demotions"`
-			Expirations                uint32   `json:"expirations"`
-			ConflictWindowDays         uint32   `json:"conflict_window_days"`
-			SnapshotRetentionDays      uint32   `json:"snapshot_retention_days"`
-			ContradictionRetentionDays uint32   `json:"contradiction_retention_days"`
-			PromoteUseCount            uint32   `json:"promote_use_count"`
-			PromoteConfidenceBits      uint64   `json:"promote_confidence_bits"`
-			DecisionPoint              string   `json:"decision_point"`
-			RelType                    string   `json:"rel_type"`
-			ProspectiveID              uint64   `json:"prospective_id"`
-			NewState                   string   `json:"new_state"`
-			GenerationID               uint64   `json:"generation_id"`
-			ErrorMessage               string   `json:"error_message"`
-			SourceHash                 string   `json:"source_hash"`
-			ProjectID                  uint64   `json:"project_id"`
-			PathGlob                   string   `json:"path_glob"`
-			DecisionID                 uint64   `json:"decision_id"`
-			Outcome                    string   `json:"outcome"`
-			Status                     string   `json:"status"`
-			RevisitWhen                string   `json:"revisit_when"`
-			TaskID                     uint64   `json:"task_id"`
-			IngestJobID                uint64   `json:"ingest_job_id"`
-			DryRun                     uint32   `json:"dry_run"`
-			RuleID                     uint32   `json:"rule_id"`
-			ProposalID                 uint32   `json:"proposal_id"`
-			RuleRowID                  uint32   `json:"rule_row_id"`
-			MinRows                    uint32   `json:"min_rows"`
-			MaxAttempts                uint32   `json:"max_attempts"`
-			SceneMemoryID              uint64   `json:"scene_memory_id"`
-			SceneID                    uint64   `json:"scene_id"`
-			UnitIDA                    uint64   `json:"unit_id_a"`
-			UnitIDB                    uint64   `json:"unit_id_b"`
-			CitingArtifactID           string   `json:"citing_artifact_id"`
-			SourceKind                 string   `json:"source_kind"`
-			SourceID                   string   `json:"source_id"`
-			FromArtifactID             string   `json:"from_artifact_id"`
-			ToArtifactID               string   `json:"to_artifact_id"`
-			LinkKind                   string   `json:"link_kind"`
-			ArmID                      string   `json:"arm_id"`
-			RollbackArm                string   `json:"rollback_arm"`
-			RuleText                   string   `json:"rule_text"`
-			RuleReason                 string   `json:"rule_reason"`
-			ProposedBy                 string   `json:"proposed_by"`
-			ReleaseID                  uint64   `json:"release_id"`
-			DocID                      uint64   `json:"doc_id"`
-			DirectiveID                uint64   `json:"directive_id"`
-			ResolutionMemoryID         uint64   `json:"resolution_memory_id"`
-			DirectiveType              string   `json:"directive_type"`
-			FlagReason                 string   `json:"flag_reason"`
-			VerdictTag                 string   `json:"verdict_tag"`
-			VerdictScope               string   `json:"verdict_scope"`
-			DocumentKey                string   `json:"document_key"`
-			MappedTo                   string   `json:"mapped_to"`
-			NowIso                     string   `json:"now_iso"`
-			ReleaseName                string   `json:"release_name"`
-			ExemplarProject            string   `json:"exemplar_project"`
-			Basename                   string   `json:"basename"`
-			Generation                 string   `json:"generation"`
-			PurgeID                    string   `json:"purge_id"`
-			FileHash                   string   `json:"file_hash"`
-			ErrorLowered               string   `json:"error_lowered"`
-			Entity                     string   `json:"entity"`
-			RelationA                  string   `json:"relation_a"`
-			RelationB                  string   `json:"relation_b"`
-			OrderByWeight              uint32   `json:"order_by_weight"`
-			Relation                   string   `json:"relation"`
-			Query                      string   `json:"query"`
-			Enrich                     uint32   `json:"enrich"`
-			ExcludedProject            string   `json:"excluded_project"`
-			Node                       string   `json:"node"`
-			UtilityDelta               float64  `json:"utility_delta"`
-			UtilityScoringEnabled      uint32   `json:"utility_scoring_enabled"`
-			BanditDecisionID           string   `json:"bandit_decision_id"`
-			Reward                     float64  `json:"reward"`
-			UtilityDeltaBinary64Bits   uint64   `json:"utility_delta_binary64_bits"`
-			RewardBinary64Bits         uint64   `json:"reward_binary64_bits"`
-			StateFilter                string   `json:"state_filter"`
-			EntityLowered              string   `json:"entity_lowered"`
-			FileAnchor                 string   `json:"file_anchor"`
-			TurnText                   string   `json:"turn_text"`
-			CauseFilter                string   `json:"cause_filter"`
-			MatchClause                string   `json:"match_clause"`
-			RelationQuery              string   `json:"relation_query"`
-			EntityToken                string   `json:"entity_token"`
-			Token                      string   `json:"token"`
-			ProjectionGeneration       uint64   `json:"projection_generation"`
-			Identifier                 string   `json:"identifier"`
-			Callee                     string   `json:"callee"`
-			MinWeight                  uint32   `json:"min_weight"`
-			HitThreshold               uint32   `json:"hit_threshold"`
-			Command                    string   `json:"command"`
-			TaskStateFilter            string   `json:"task_state_filter"`
-			TaskSessionFilter          string   `json:"task_session_filter"`
-			ParentTask                 uint64   `json:"parent_task"`
-			FactSubject                string   `json:"fact_subject"`
-			RelationFilter             string   `json:"relation_filter"`
-			OutcomeFilter              string   `json:"outcome_filter"`
-			DecisionSubjectFilter      string   `json:"decision_subject_filter"`
-			StatusFilter               string   `json:"status_filter"`
-			KvSection                  uint32   `json:"kv_section"`
-			MemoryKeyExact             string   `json:"memory_key_exact"`
-			MemorySessionID            string   `json:"memory_session_id"`
-			CandidateFilter            uint32   `json:"candidate_filter"`
-			RecallSection              uint32   `json:"recall_section"`
-			MaxPairs                   uint32   `json:"max_pairs"`
-			LinkSourceID               uint64   `json:"link_source_id"`
-			LinkTargetID               uint64   `json:"link_target_id"`
-			LinkRelation               string   `json:"link_relation"`
-			EdgeSourceTask             uint64   `json:"edge_source_task"`
-			EdgeTargetTask             uint64   `json:"edge_target_task"`
-			EdgeRelation               string   `json:"edge_relation"`
-			ResolutionNote             string   `json:"resolution_note"`
-			DecisionSubject            string   `json:"decision_subject"`
-			LinkedPolicy               uint64   `json:"linked_policy"`
-			NodeKey                    string   `json:"node_key"`
-			Alias                      string   `json:"alias"`
-			AliasKind                  string   `json:"alias_kind"`
-			AliasProject               string   `json:"alias_project"`
-			AliasGeneration            uint64   `json:"alias_generation"`
-			EdgeSource                 string   `json:"edge_source"`
-			EdgeTarget                 string   `json:"edge_target"`
-			WindowID                   uint64   `json:"window_id"`
-			RelationID                 uint32   `json:"relation_id"`
-			SubjectKind                uint32   `json:"subject_kind"`
-			ObjectKind                 uint32   `json:"object_kind"`
-			ContextHash                string   `json:"context_hash"`
-			PropensityBinary64Bits     uint64   `json:"propensity_binary64_bits"`
-			IsExploration              uint32   `json:"is_exploration"`
-			Negative                   []struct {
+			Positive                       string   `json:"positive"`
+			SourceSession                  string   `json:"source_session"`
+			Key                            string   `json:"key"`
+			Kind                           string   `json:"kind"`
+			SessionID                      string   `json:"session_id"`
+			Tokens                         string   `json:"tokens"`
+			Cleared                        string   `json:"cleared"`
+			TierA                          string   `json:"tier_a"`
+			TierB                          string   `json:"tier_b"`
+			MemoryID                       uint64   `json:"memory_id"`
+			LinkID                         uint64   `json:"link_id"`
+			AsOf                           string   `json:"as_of"`
+			ScopeType                      string   `json:"scope_type"`
+			Content                        string   `json:"content"`
+			Workspace                      string   `json:"workspace"`
+			HasValue                       uint32   `json:"has_value"`
+			ValueBits                      uint64   `json:"value_bits"`
+			ThresholdBits                  uint64   `json:"threshold_bits"`
+			LowThresholdBits               uint64   `json:"low_threshold_bits"`
+			MaximumIDs                     uint32   `json:"maximum_ids"`
+			Limit                          uint32   `json:"limit"`
+			ScopeFlags                     uint32   `json:"scope_flags"`
+			Term                           string   `json:"term"`
+			AnchorID                       uint64   `json:"anchor_id"`
+			AnchorZero                     string   `json:"anchor_zero"`
+			UnitID                         uint64   `json:"unit_id"`
+			NormalizedKey                  string   `json:"normalized_key"`
+			HideArchived                   uint32   `json:"hide_archived"`
+			Tier                           string   `json:"tier"`
+			Unfiltered                     string   `json:"unfiltered"`
+			EntitySeed                     string   `json:"entity_seed"`
+			Keyword                        string   `json:"keyword"`
+			Unselected                     string   `json:"unselected"`
+			RecordID                       uint64   `json:"record_id"`
+			DocumentID                     uint64   `json:"document_id"`
+			LastTraceID                    uint64   `json:"last_trace_id"`
+			Pattern                        string   `json:"pattern"`
+			SourceRef                      string   `json:"source_ref"`
+			ArtifactID                     string   `json:"artifact_id"`
+			Sink                           string   `json:"sink"`
+			EntityID                       string   `json:"entity_id"`
+			TurnID                         string   `json:"turn_id"`
+			BlobRef                        string   `json:"blob_ref"`
+			QueryNorm                      string   `json:"query_norm"`
+			StateKey                       string   `json:"state_key"`
+			FinishedAt                     string   `json:"finished_at"`
+			JobID                          string   `json:"job_id"`
+			State                          string   `json:"state"`
+			Collection                     string   `json:"collection"`
+			LastError                      string   `json:"last_error"`
+			StateValue                     string   `json:"state_value"`
+			Version                        string   `json:"version"`
+			UpdatedAt                      string   `json:"updated_at"`
+			Window                         string   `json:"window"`
+			ContentHash                    string   `json:"content_hash"`
+			Scope                          string   `json:"scope"`
+			FilePath                       string   `json:"file_path"`
+			CertIssuer                     string   `json:"cert_issuer"`
+			CertSerialNorm                 string   `json:"cert_serial_norm"`
+			Project                        string   `json:"project"`
+			StaleL1Tier                    string   `json:"stale_l1_tier"`
+			MaximumKinds                   uint32   `json:"maximum_kinds"`
+			DemoteTier                     string   `json:"demote_tier"`
+			SourceTier                     string   `json:"source_tier"`
+			TargetTier                     string   `json:"target_tier"`
+			Kinds                          []string `json:"kinds"`
+			ConfidenceBits                 uint64   `json:"confidence_bits"`
+			UseCount                       uint32   `json:"use_count"`
+			StableDays                     uint32   `json:"stable_days"`
+			GatedKind                      string   `json:"gated_kind"`
+			RequireApproval                uint32   `json:"require_approval"`
+			OpenPositive                   string   `json:"open_positive"`
+			Approver                       string   `json:"approver"`
+			Note                           string   `json:"note"`
+			BarePositive                   string   `json:"bare_positive"`
+			Promotions                     uint32   `json:"promotions"`
+			Demotions                      uint32   `json:"demotions"`
+			Expirations                    uint32   `json:"expirations"`
+			ConflictWindowDays             uint32   `json:"conflict_window_days"`
+			SnapshotRetentionDays          uint32   `json:"snapshot_retention_days"`
+			ContradictionRetentionDays     uint32   `json:"contradiction_retention_days"`
+			PromoteUseCount                uint32   `json:"promote_use_count"`
+			PromoteConfidenceBits          uint64   `json:"promote_confidence_bits"`
+			DecisionPoint                  string   `json:"decision_point"`
+			RelType                        string   `json:"rel_type"`
+			ProspectiveID                  uint64   `json:"prospective_id"`
+			NewState                       string   `json:"new_state"`
+			GenerationID                   uint64   `json:"generation_id"`
+			ErrorMessage                   string   `json:"error_message"`
+			SourceHash                     string   `json:"source_hash"`
+			ProjectID                      uint64   `json:"project_id"`
+			PathGlob                       string   `json:"path_glob"`
+			DecisionID                     uint64   `json:"decision_id"`
+			Outcome                        string   `json:"outcome"`
+			Status                         string   `json:"status"`
+			RevisitWhen                    string   `json:"revisit_when"`
+			TaskID                         uint64   `json:"task_id"`
+			IngestJobID                    uint64   `json:"ingest_job_id"`
+			DryRun                         uint32   `json:"dry_run"`
+			RuleID                         uint32   `json:"rule_id"`
+			ProposalID                     uint32   `json:"proposal_id"`
+			RuleRowID                      uint32   `json:"rule_row_id"`
+			MinRows                        uint32   `json:"min_rows"`
+			MaxAttempts                    uint32   `json:"max_attempts"`
+			SceneMemoryID                  uint64   `json:"scene_memory_id"`
+			SceneID                        uint64   `json:"scene_id"`
+			UnitIDA                        uint64   `json:"unit_id_a"`
+			UnitIDB                        uint64   `json:"unit_id_b"`
+			CitingArtifactID               string   `json:"citing_artifact_id"`
+			SourceKind                     string   `json:"source_kind"`
+			SourceID                       string   `json:"source_id"`
+			FromArtifactID                 string   `json:"from_artifact_id"`
+			ToArtifactID                   string   `json:"to_artifact_id"`
+			LinkKind                       string   `json:"link_kind"`
+			ArmID                          string   `json:"arm_id"`
+			RollbackArm                    string   `json:"rollback_arm"`
+			RuleText                       string   `json:"rule_text"`
+			RuleReason                     string   `json:"rule_reason"`
+			ProposedBy                     string   `json:"proposed_by"`
+			ReleaseID                      uint64   `json:"release_id"`
+			DocID                          uint64   `json:"doc_id"`
+			DirectiveID                    uint64   `json:"directive_id"`
+			ResolutionMemoryID             uint64   `json:"resolution_memory_id"`
+			DirectiveType                  string   `json:"directive_type"`
+			FlagReason                     string   `json:"flag_reason"`
+			VerdictTag                     string   `json:"verdict_tag"`
+			VerdictScope                   string   `json:"verdict_scope"`
+			DocumentKey                    string   `json:"document_key"`
+			MappedTo                       string   `json:"mapped_to"`
+			NowIso                         string   `json:"now_iso"`
+			ReleaseName                    string   `json:"release_name"`
+			ExemplarProject                string   `json:"exemplar_project"`
+			Basename                       string   `json:"basename"`
+			Generation                     string   `json:"generation"`
+			PurgeID                        string   `json:"purge_id"`
+			FileHash                       string   `json:"file_hash"`
+			ErrorLowered                   string   `json:"error_lowered"`
+			Entity                         string   `json:"entity"`
+			RelationA                      string   `json:"relation_a"`
+			RelationB                      string   `json:"relation_b"`
+			OrderByWeight                  uint32   `json:"order_by_weight"`
+			Relation                       string   `json:"relation"`
+			Query                          string   `json:"query"`
+			Enrich                         uint32   `json:"enrich"`
+			ExcludedProject                string   `json:"excluded_project"`
+			Node                           string   `json:"node"`
+			UtilityDelta                   float64  `json:"utility_delta"`
+			UtilityScoringEnabled          uint32   `json:"utility_scoring_enabled"`
+			BanditDecisionID               string   `json:"bandit_decision_id"`
+			Reward                         float64  `json:"reward"`
+			UtilityDeltaBinary64Bits       uint64   `json:"utility_delta_binary64_bits"`
+			RewardBinary64Bits             uint64   `json:"reward_binary64_bits"`
+			StateFilter                    string   `json:"state_filter"`
+			EntityLowered                  string   `json:"entity_lowered"`
+			FileAnchor                     string   `json:"file_anchor"`
+			TurnText                       string   `json:"turn_text"`
+			CauseFilter                    string   `json:"cause_filter"`
+			MatchClause                    string   `json:"match_clause"`
+			RelationQuery                  string   `json:"relation_query"`
+			EntityToken                    string   `json:"entity_token"`
+			Token                          string   `json:"token"`
+			ProjectionGeneration           uint64   `json:"projection_generation"`
+			Identifier                     string   `json:"identifier"`
+			Callee                         string   `json:"callee"`
+			MinWeight                      uint32   `json:"min_weight"`
+			HitThreshold                   uint32   `json:"hit_threshold"`
+			Command                        string   `json:"command"`
+			TaskStateFilter                string   `json:"task_state_filter"`
+			TaskSessionFilter              string   `json:"task_session_filter"`
+			ParentTask                     uint64   `json:"parent_task"`
+			FactSubject                    string   `json:"fact_subject"`
+			RelationFilter                 string   `json:"relation_filter"`
+			OutcomeFilter                  string   `json:"outcome_filter"`
+			DecisionSubjectFilter          string   `json:"decision_subject_filter"`
+			StatusFilter                   string   `json:"status_filter"`
+			KvSection                      uint32   `json:"kv_section"`
+			MemoryKeyExact                 string   `json:"memory_key_exact"`
+			MemorySessionID                string   `json:"memory_session_id"`
+			CandidateFilter                uint32   `json:"candidate_filter"`
+			RecallSection                  uint32   `json:"recall_section"`
+			MaxPairs                       uint32   `json:"max_pairs"`
+			LinkSourceID                   uint64   `json:"link_source_id"`
+			LinkTargetID                   uint64   `json:"link_target_id"`
+			LinkRelation                   string   `json:"link_relation"`
+			EdgeSourceTask                 uint64   `json:"edge_source_task"`
+			EdgeTargetTask                 uint64   `json:"edge_target_task"`
+			EdgeRelation                   string   `json:"edge_relation"`
+			ResolutionNote                 string   `json:"resolution_note"`
+			DecisionSubject                string   `json:"decision_subject"`
+			LinkedPolicy                   uint64   `json:"linked_policy"`
+			NodeKey                        string   `json:"node_key"`
+			Alias                          string   `json:"alias"`
+			AliasKind                      string   `json:"alias_kind"`
+			AliasProject                   string   `json:"alias_project"`
+			AliasGeneration                uint64   `json:"alias_generation"`
+			EdgeSource                     string   `json:"edge_source"`
+			EdgeTarget                     string   `json:"edge_target"`
+			WindowID                       uint64   `json:"window_id"`
+			RelationID                     uint32   `json:"relation_id"`
+			SubjectKind                    uint32   `json:"subject_kind"`
+			ObjectKind                     uint32   `json:"object_kind"`
+			ContextHash                    string   `json:"context_hash"`
+			PropensityBinary64Bits         uint64   `json:"propensity_binary64_bits"`
+			IsExploration                  uint32   `json:"is_exploration"`
+			ArtifactKind                   string   `json:"artifact_kind"`
+			ArtifactState                  string   `json:"artifact_state"`
+			ScopeKind                      string   `json:"scope_kind"`
+			ScopeID                        string   `json:"scope_id"`
+			OperatorID                     string   `json:"operator_id"`
+			ArtifactConfidenceBinary64Bits uint64   `json:"artifact_confidence_binary64_bits"`
+			PayloadJson                    string   `json:"payload_json"`
+			AttemptCount                   uint32   `json:"attempt_count"`
+			AgentName                      string   `json:"agent_name"`
+			AgentRole                      string   `json:"agent_role"`
+			OutcomeKind                    string   `json:"outcome_kind"`
+			OutcomeReason                  string   `json:"outcome_reason"`
+			TurnsUsed                      uint32   `json:"turns_used"`
+			ToolsCalled                    uint32   `json:"tools_called"`
+			TokensUsed                     uint64   `json:"tokens_used"`
+			ToolErrorPattern               string   `json:"tool_error_pattern"`
+			CounterExample                 string   `json:"counter_example"`
+			BeforeJson                     string   `json:"before_json"`
+			Negative                       []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
 			} `json:"negative"`
@@ -458,7 +476,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 273 ||
+	if len(baseline.Operations) != 278 ||
 		baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
@@ -661,77 +679,82 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[199].Name != "anti_pattern_list_hot" ||
 		baseline.Operations[200].Name != "anti_pattern_check" ||
 		baseline.Operations[201].Name != "bandit_decision_insert" ||
-		baseline.Operations[202].Name != "rel_types_ensure_seed" ||
-		baseline.Operations[203].Name != "doc_delete" ||
-		baseline.Operations[204].Name != "task_delete" ||
-		baseline.Operations[205].Name != "clear_project" ||
-		baseline.Operations[206].Name != "clear_current_project" ||
-		baseline.Operations[207].Name != "document_exists" ||
-		baseline.Operations[208].Name != "blob_referenced" ||
-		baseline.Operations[209].Name != "fence_active" ||
-		baseline.Operations[210].Name != "doc_exists_by_hash" ||
-		baseline.Operations[211].Name != "pdf_quarantine_confirm" ||
-		baseline.Operations[212].Name != "pdf_quarantine_reject" ||
-		baseline.Operations[213].Name != "ontology_eval_status" ||
-		baseline.Operations[214].Name != "task_update_state" ||
-		baseline.Operations[215].Name != "release_add_doc" ||
-		baseline.Operations[216].Name != "ontology_approve" ||
-		baseline.Operations[217].Name != "ontology_reject" ||
-		baseline.Operations[218].Name != "doc_assets_delete_for_doc" ||
-		baseline.Operations[219].Name != "ontology_map" ||
-		baseline.Operations[220].Name != "release_create" ||
-		baseline.Operations[221].Name != "purge_fence_heartbeat" ||
-		baseline.Operations[222].Name != "purge_fence_clear" ||
-		baseline.Operations[223].Name != "document_stored_hash" ||
-		baseline.Operations[224].Name != "document_hash_exists" ||
-		baseline.Operations[225].Name != "pdf_tsr_state" ||
-		baseline.Operations[226].Name != "document_chunk_ids" ||
-		baseline.Operations[227].Name != "task_edges" ||
-		baseline.Operations[228].Name != "task_list" ||
-		baseline.Operations[229].Name != "task_subtasks" ||
-		baseline.Operations[230].Name != "task_add_edge" ||
-		baseline.Operations[231].Name != "vector_rebuild_lock_try_acquire" ||
-		baseline.Operations[232].Name != "vector_rebuild_lock_release" ||
-		baseline.Operations[233].Name != "release_get_active" ||
-		baseline.Operations[234].Name != "enrollment_active" ||
-		baseline.Operations[235].Name != "prospective_sweep_expired" ||
-		baseline.Operations[236].Name != "directive_sweep_expired" ||
-		baseline.Operations[237].Name != "mark_revisit_due" ||
-		baseline.Operations[238].Name != "ingest_queue_reset_running" ||
-		baseline.Operations[239].Name != "evidence_reembed_all" ||
-		baseline.Operations[240].Name != "curator_reembed_all" ||
-		baseline.Operations[241].Name != "synth_reenqueue_all" ||
-		baseline.Operations[242].Name != "curator_reenqueue_extract_all" ||
-		baseline.Operations[243].Name != "directive_suppress" ||
-		baseline.Operations[244].Name != "directive_record_surface" ||
-		baseline.Operations[245].Name != "async_pending_count" ||
-		baseline.Operations[246].Name != "runtime_state_touch" ||
-		baseline.Operations[247].Name != "synth_enqueue" ||
-		baseline.Operations[248].Name != "synth_mark_done" ||
-		baseline.Operations[249].Name != "reembed_mark_finished" ||
-		baseline.Operations[250].Name != "mining_job_try_lock" ||
-		baseline.Operations[251].Name != "synth_mark_failed" ||
-		baseline.Operations[252].Name != "runtime_state_set" ||
-		baseline.Operations[253].Name != "set_active_embedder_version" ||
-		baseline.Operations[254].Name != "runtime_state_get" ||
-		baseline.Operations[255].Name != "ingest_queue_fail" ||
-		baseline.Operations[256].Name != "reset_stuck_vector_ops" ||
-		baseline.Operations[257].Name != "directive_resolve" ||
-		baseline.Operations[258].Name != "css_migration_enumerate" ||
-		baseline.Operations[259].Name != "css_migration_assert_conventions" ||
-		baseline.Operations[260].Name != "css_migration_rules_doc" ||
-		baseline.Operations[261].Name != "retryable_index_failures" ||
-		baseline.Operations[262].Name != "active_embedder_version" ||
-		baseline.Operations[263].Name != "corpus_pipeline_stage_counts" ||
-		baseline.Operations[264].Name != "directive_list" ||
-		baseline.Operations[265].Name != "directive_by_entity" ||
-		baseline.Operations[266].Name != "directive_by_file" ||
-		baseline.Operations[267].Name != "directive_by_lexical" ||
-		baseline.Operations[268].Name != "memory_lint" ||
-		baseline.Operations[269].Name != "decision_log_list" ||
-		baseline.Operations[270].Name != "decision_log_list_scoped" ||
-		baseline.Operations[271].Name != "kb_directive_resolve" ||
-		baseline.Operations[272].Name != "decision_log_active_id" {
+		baseline.Operations[202].Name != "artifact_write" ||
+		baseline.Operations[203].Name != "artifact_write_ex" ||
+		baseline.Operations[204].Name != "artifact_target_surface" ||
+		baseline.Operations[205].Name != "agent_outcome_record" ||
+		baseline.Operations[206].Name != "artifact_reject" ||
+		baseline.Operations[207].Name != "rel_types_ensure_seed" ||
+		baseline.Operations[208].Name != "doc_delete" ||
+		baseline.Operations[209].Name != "task_delete" ||
+		baseline.Operations[210].Name != "clear_project" ||
+		baseline.Operations[211].Name != "clear_current_project" ||
+		baseline.Operations[212].Name != "document_exists" ||
+		baseline.Operations[213].Name != "blob_referenced" ||
+		baseline.Operations[214].Name != "fence_active" ||
+		baseline.Operations[215].Name != "doc_exists_by_hash" ||
+		baseline.Operations[216].Name != "pdf_quarantine_confirm" ||
+		baseline.Operations[217].Name != "pdf_quarantine_reject" ||
+		baseline.Operations[218].Name != "ontology_eval_status" ||
+		baseline.Operations[219].Name != "task_update_state" ||
+		baseline.Operations[220].Name != "release_add_doc" ||
+		baseline.Operations[221].Name != "ontology_approve" ||
+		baseline.Operations[222].Name != "ontology_reject" ||
+		baseline.Operations[223].Name != "doc_assets_delete_for_doc" ||
+		baseline.Operations[224].Name != "ontology_map" ||
+		baseline.Operations[225].Name != "release_create" ||
+		baseline.Operations[226].Name != "purge_fence_heartbeat" ||
+		baseline.Operations[227].Name != "purge_fence_clear" ||
+		baseline.Operations[228].Name != "document_stored_hash" ||
+		baseline.Operations[229].Name != "document_hash_exists" ||
+		baseline.Operations[230].Name != "pdf_tsr_state" ||
+		baseline.Operations[231].Name != "document_chunk_ids" ||
+		baseline.Operations[232].Name != "task_edges" ||
+		baseline.Operations[233].Name != "task_list" ||
+		baseline.Operations[234].Name != "task_subtasks" ||
+		baseline.Operations[235].Name != "task_add_edge" ||
+		baseline.Operations[236].Name != "vector_rebuild_lock_try_acquire" ||
+		baseline.Operations[237].Name != "vector_rebuild_lock_release" ||
+		baseline.Operations[238].Name != "release_get_active" ||
+		baseline.Operations[239].Name != "enrollment_active" ||
+		baseline.Operations[240].Name != "prospective_sweep_expired" ||
+		baseline.Operations[241].Name != "directive_sweep_expired" ||
+		baseline.Operations[242].Name != "mark_revisit_due" ||
+		baseline.Operations[243].Name != "ingest_queue_reset_running" ||
+		baseline.Operations[244].Name != "evidence_reembed_all" ||
+		baseline.Operations[245].Name != "curator_reembed_all" ||
+		baseline.Operations[246].Name != "synth_reenqueue_all" ||
+		baseline.Operations[247].Name != "curator_reenqueue_extract_all" ||
+		baseline.Operations[248].Name != "directive_suppress" ||
+		baseline.Operations[249].Name != "directive_record_surface" ||
+		baseline.Operations[250].Name != "async_pending_count" ||
+		baseline.Operations[251].Name != "runtime_state_touch" ||
+		baseline.Operations[252].Name != "synth_enqueue" ||
+		baseline.Operations[253].Name != "synth_mark_done" ||
+		baseline.Operations[254].Name != "reembed_mark_finished" ||
+		baseline.Operations[255].Name != "mining_job_try_lock" ||
+		baseline.Operations[256].Name != "synth_mark_failed" ||
+		baseline.Operations[257].Name != "runtime_state_set" ||
+		baseline.Operations[258].Name != "set_active_embedder_version" ||
+		baseline.Operations[259].Name != "runtime_state_get" ||
+		baseline.Operations[260].Name != "ingest_queue_fail" ||
+		baseline.Operations[261].Name != "reset_stuck_vector_ops" ||
+		baseline.Operations[262].Name != "directive_resolve" ||
+		baseline.Operations[263].Name != "css_migration_enumerate" ||
+		baseline.Operations[264].Name != "css_migration_assert_conventions" ||
+		baseline.Operations[265].Name != "css_migration_rules_doc" ||
+		baseline.Operations[266].Name != "retryable_index_failures" ||
+		baseline.Operations[267].Name != "active_embedder_version" ||
+		baseline.Operations[268].Name != "corpus_pipeline_stage_counts" ||
+		baseline.Operations[269].Name != "directive_list" ||
+		baseline.Operations[270].Name != "directive_by_entity" ||
+		baseline.Operations[271].Name != "directive_by_file" ||
+		baseline.Operations[272].Name != "directive_by_lexical" ||
+		baseline.Operations[273].Name != "memory_lint" ||
+		baseline.Operations[274].Name != "decision_log_list" ||
+		baseline.Operations[275].Name != "decision_log_list_scoped" ||
+		baseline.Operations[276].Name != "kb_directive_resolve" ||
+		baseline.Operations[277].Name != "decision_log_active_id" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -5003,6 +5026,127 @@ func TestBanditDecisionInsertMatchesEverySharedCVector(t *testing.T) {
 	}
 	for _, vector := range operation.Request.Negative {
 		if _, _, _, _, _, _, err := DecodeBanditDecisionInsertRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestArtifactWriteMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "artifact_write")]
+
+	request, err := EncodeArtifactWriteRequest(operation.Request.ArtifactID, operation.Request.ArtifactKind, operation.Request.ArtifactState, operation.Request.ScopeKind, operation.Request.ScopeID, operation.Request.OperatorID, math.Float64frombits(operation.Request.ArtifactConfidenceBinary64Bits), operation.Request.PayloadJson)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	artifactID, artifactKind, artifactState, scopeKind, scopeID, operatorID, artifactConfidence, payloadJson, err := DecodeArtifactWriteRequest(request)
+	if err != nil || artifactID != operation.Request.ArtifactID ||
+		artifactKind != operation.Request.ArtifactKind ||
+		artifactState != operation.Request.ArtifactState ||
+		scopeKind != operation.Request.ScopeKind ||
+		scopeID != operation.Request.ScopeID ||
+		operatorID != operation.Request.OperatorID ||
+		artifactConfidence != math.Float64frombits(operation.Request.ArtifactConfidenceBinary64Bits) ||
+		payloadJson != operation.Request.PayloadJson {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, _, _, _, _, _, _, err := DecodeArtifactWriteRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestArtifactWriteExMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "artifact_write_ex")]
+
+	request, err := EncodeArtifactWriteExRequest(operation.Request.ArtifactID, operation.Request.ArtifactKind, operation.Request.ArtifactState, operation.Request.ScopeKind, operation.Request.ScopeID, operation.Request.OperatorID, math.Float64frombits(operation.Request.ArtifactConfidenceBinary64Bits), operation.Request.AttemptCount, operation.Request.PayloadJson)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	artifactID, artifactKind, artifactState, scopeKind, scopeID, operatorID, artifactConfidence, attemptCount, payloadJson, err := DecodeArtifactWriteExRequest(request)
+	if err != nil || artifactID != operation.Request.ArtifactID ||
+		artifactKind != operation.Request.ArtifactKind ||
+		artifactState != operation.Request.ArtifactState ||
+		scopeKind != operation.Request.ScopeKind ||
+		scopeID != operation.Request.ScopeID ||
+		operatorID != operation.Request.OperatorID ||
+		artifactConfidence != math.Float64frombits(operation.Request.ArtifactConfidenceBinary64Bits) ||
+		attemptCount != operation.Request.AttemptCount ||
+		payloadJson != operation.Request.PayloadJson {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, _, _, _, _, _, _, _, err := DecodeArtifactWriteExRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestArtifactTargetSurfaceMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "artifact_target_surface")]
+
+	request, err := EncodeArtifactTargetSurfaceRequest(operation.Request.ArtifactID)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	artifactID, err := DecodeArtifactTargetSurfaceRequest(request)
+	if err != nil || artifactID != operation.Request.ArtifactID {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeArtifactTargetSurfaceRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestAgentOutcomeRecordMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "agent_outcome_record")]
+
+	request, err := EncodeAgentOutcomeRecordRequest(operation.Request.AgentName, operation.Request.AgentRole, operation.Request.OutcomeKind, operation.Request.OutcomeReason, operation.Request.TurnsUsed, operation.Request.ToolsCalled, operation.Request.TokensUsed, operation.Request.ToolErrorPattern)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	agentName, agentRole, outcomeKind, outcomeReason, turnsUsed, toolsCalled, tokensUsed, toolErrorPattern, err := DecodeAgentOutcomeRecordRequest(request)
+	if err != nil || agentName != operation.Request.AgentName ||
+		agentRole != operation.Request.AgentRole ||
+		outcomeKind != operation.Request.OutcomeKind ||
+		outcomeReason != operation.Request.OutcomeReason ||
+		turnsUsed != operation.Request.TurnsUsed ||
+		toolsCalled != operation.Request.ToolsCalled ||
+		tokensUsed != operation.Request.TokensUsed ||
+		toolErrorPattern != operation.Request.ToolErrorPattern {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, _, _, _, _, _, _, err := DecodeAgentOutcomeRecordRequest(decodeHex(t, vector.Hex)); err == nil {
+			t.Fatalf("request %s decoded", vector.Mutation)
+		}
+	}
+}
+
+// Generated by scripts/db2_sync_go_contract_test.py; edits are overwritten.
+func TestArtifactRejectMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[operationIndex(t, "artifact_reject")]
+
+	request, err := EncodeArtifactRejectRequest(operation.Request.ArtifactID, operation.Request.VerdictTag, operation.Request.VerdictScope, operation.Request.CounterExample, operation.Request.BeforeJson)
+	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
+		t.Fatalf("request encode: %v %x", err, request)
+	}
+	artifactID, verdictTag, verdictScope, counterExample, beforeJson, err := DecodeArtifactRejectRequest(request)
+	if err != nil || artifactID != operation.Request.ArtifactID ||
+		verdictTag != operation.Request.VerdictTag ||
+		verdictScope != operation.Request.VerdictScope ||
+		counterExample != operation.Request.CounterExample ||
+		beforeJson != operation.Request.BeforeJson {
+		t.Fatalf("request decode: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, _, _, _, err := DecodeArtifactRejectRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
