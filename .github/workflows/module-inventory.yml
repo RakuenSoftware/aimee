@@ -331,14 +331,19 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     # scan_history walks every commit since the historical cutoff, and that
-    # history keeps growing. Three full-history validations plus the failure-mode
-    # suite can now exceed 20 minutes. Keep enough headroom for a green suite to
-    # publish its result instead of being cancelled during teardown.
+    # history keeps growing. The job used to run FOUR of those walks -- the gate
+    # itself, two property checks that re-ran the whole script, and the suite's
+    # real-history test -- and so approached the 20 minutes this timeout was
+    # sized for. It now runs exactly one; the properties are unit-tested and the
+    # suite is told the scan already happened.
     #
-    # This grows with history. Making scan_history a single git-log pass would
-    # remove it, but that means reimplementing rename/copy detection and the
-    # blob claim scan in a gate that governs the Git core contract, so it is
-    # deliberately left as separate, reviewable work rather than folded in here.
+    # The one remaining walk is ~6 minutes here and grows with history. Most of
+    # that is `--find-copies-harder`, measured at 283s of a 319s run against 8.9s
+    # without it. The flag is NOT redundant -- it is what catches governed content
+    # copied out of a watched path whose source was never modified, which is the
+    # evasion this gate exists to see -- so it stays, and the headroom stays with
+    # it. Speeding up the walk itself means changing what the gate can detect,
+    # which is a contract question, not a performance one.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -353,14 +358,18 @@ jobs:
       # limitation above. Branch protection supplies enforcement, not isolation.
       - name: Enforce Git proposal ordering
         run: python3 -I -S scripts/check_proposal_ordering.py
-      - name: Prove event revision binding
-        env:
-          GITHUB_EVENT_NAME: push
-          GITHUB_REF: refs/heads/feature/core-modularization
-          GITHUB_SHA: ${{ github.sha }}
-        run: python3 -I -S scripts/check_proposal_ordering.py
-      - name: Validate CWD independence
-        run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_proposal_ordering.py"
+      # `Prove event revision binding` and `Validate CWD independence` used to
+      # live here, each re-running the whole gate against the real repository.
+      # Both properties are settled before any history is read -- validate_event()
+      # runs immediately after `rev-parse HEAD` and is pure env/string logic, and
+      # the config root is resolved in main() before the scan -- so each spent
+      # ~6 minutes re-scanning 4,000+ commits with rename/copy detection that
+      # could not change either verdict. They are now
+      # test_event_binding_requires_the_checked_out_revision,
+      # test_event_binding_gates_pull_request_base and
+      # test_config_root_resolution_is_cwd_independent in the failure-mode suite
+      # below, where they run in milliseconds and assert BOTH directions rather
+      # than only that a good context passes.
       - name: Reject a non-repository config root
         run: |
           root=$(mktemp -d)
@@ -372,4 +381,10 @@ jobs:
           echo "$output"
           printf '%s\n' "$output" | grep -q 'rule=config-root'
       - name: Test proposal-ordering failure modes
+        # The suite's test_current_repository_passes is the same full-history
+        # scan the gate step above already performed, on this same checkout.
+        # Telling it so keeps the job to ONE scan; the test still runs in full
+        # for anyone executing the suite outside this workflow.
+        env:
+          PROPOSAL_ORDERING_FULL_SCAN_DONE: "1"
         run: python3 -I scripts/tests/test_check_proposal_ordering.py -v
