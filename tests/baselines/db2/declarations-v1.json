@@ -17629,9 +17629,15 @@
           "line": 160
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.confidence_by_key operation reads the confidence of the memory holding a key. The key column carries no unique constraint and the statement has neither an ordering nor a limit, so a key held by several memories answers with whichever row the database returns first and never says there was a choice. A key nobody holds and a database that could not be reached are both a zero flag."
+      },
       "signature": "int db2_memory_get_confidence_by_key ( const char * key , double * confidence_out )",
       "signature_sha256": "f2ae9d6f883b3c802ae0ecbb87d20c669443f19258bf936e2f52febf254b73e3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_confidence_by_key"
     },
     {
@@ -17665,9 +17671,15 @@
           "line": 93
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.evidence_fields operation reads a memory's evidence strength and observation count. The count is stored as a sixty-four bit column and read back through an int, so a memory observed more times than an int holds comes back wrapped rather than clamped. A memory that is not there and a database that could not be reached are both a zero flag; the identifier carries no scope."
+      },
       "signature": "int db2_memory_get_evidence_fields ( int64_t memory_id , double * evidence , int * observations )",
       "signature_sha256": "f3a837e5d09d1a5d48eb38576a9f20a2161a2b0bb3cf7c9b46c63ddc3afc59d3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_evidence_fields"
     },
     {
@@ -17696,9 +17708,15 @@
           "line": 97
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.salience operation reads a memory's salience, answering the caller's own default when there is nothing to read. That default covers three different things -- no such memory, a database it could not reach, and a memory whose salience happens to equal it -- and the reply has no way to tell them apart because the backend does not either. Nothing bounds salience in the schema, so the wire's bound is the first one it has."
+      },
       "signature": "double db2_memory_get_salience ( int64_t memory_id , double default_value )",
       "signature_sha256": "52899370e84dc229154b09ad55f7bf6ba64ad50eb2636db5724560e84b1869c7",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_salience"
     },
     {
@@ -17768,9 +17786,15 @@
           "line": 101
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.surprise operation reads a memory's surprise, answering the caller's own default when there is nothing to read. It is memory.salience against a different column and carries the same thing: the default covers a missing memory, an unreachable database and a stored value that happens to match, and nothing distinguishes them. Nothing bounds surprise in the schema, so the wire's bound is the first one it has."
+      },
       "signature": "double db2_memory_get_surprise ( int64_t memory_id , double default_value )",
       "signature_sha256": "f3201a7ea26108cbe468bee80292f524c3b147fc0339b7edf394c6c2e09cc187",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_surprise"
     },
     {
@@ -27840,15 +27864,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d91a928a4678a6bfd38c211f56e39b3f0f27e2a7d2e00e7155999b1d0b72773f",
+  "fingerprint": "00950f24c95d036c1cc847a3fea302e48065f9cdc7d13dece6994377b2b698e5",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 323,
+    "audit_pending": 319,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 636
+    "reviewed": 640
   }
 }

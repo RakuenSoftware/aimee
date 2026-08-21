@@ -527,6 +527,10 @@ typedef struct
    int (*lifecycle_mark_pending)(int64_t memory_id, int ttl_days);
    int (*lifecycle_update_state)(int64_t memory_id, const char *new_state,
                                  const char *archive_reason);
+   double (*memory_salience)(int64_t memory_id, double default_value);
+   double (*memory_surprise)(int64_t memory_id, double default_value);
+   int (*memory_confidence_by_key)(const char *key, double *confidence_out);
+   int (*memory_evidence_fields)(int64_t memory_id, double *evidence, int *observations);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

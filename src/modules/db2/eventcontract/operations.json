@@ -6067,6 +6067,196 @@
       }
     },
     {
+      "family": "memory",
+      "id": 96,
+      "name": "memory_salience",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory salience is a relational DB2 column.",
+      "c_symbols": [
+        "db2_memory_get_salience"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the caller's default is the answer for a memory that is not there and for a read that failed alike"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "default_value",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "salience",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 97,
+      "name": "memory_surprise",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory surprise is a relational DB2 column.",
+      "c_symbols": [
+        "db2_memory_get_surprise"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the caller's default is the answer for a memory that is not there and for a read that failed alike"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "default_value",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "surprise",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 98,
+      "name": "memory_confidence_by_key",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory confidence is a relational DB2 column.",
+      "c_symbols": [
+        "db2_memory_get_confidence_by_key"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the key is not unique and the statement has no ordering, so a key held by several memories answers with an arbitrary one"
+        },
+        "fields": [
+          {
+            "name": "memory_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "confidence_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "memory_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 99,
+      "name": "memory_evidence_fields",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory evidence strength and observation counts are relational DB2 columns.",
+      "c_symbols": [
+        "db2_memory_get_evidence_fields"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one row by identifier, with no scope"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "evidence_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "evidence_strength",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          },
+          {
+            "name": "observation_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

@@ -3356,12 +3356,36 @@
       "reason": "The typed memory.get_by_unit_id operation resolves a unit to its memory and shares memory.get's row format. It does not fill the same row: its statement asks for eleven columns, so salience, provenance_category and use_cases come back empty rather than absent, and a caller cannot tell an unread column from a genuinely empty one. That is why each operation's policy lists the columns it actually reads. It conflates an absent row with a failed statement the same way memory.get does."
     },
     {
+      "symbol": "db2_memory_get_confidence_by_key",
+      "signature_sha256": "f2ae9d6f883b3c802ae0ecbb87d20c669443f19258bf936e2f52febf254b73e3",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.confidence_by_key operation reads the confidence of the memory holding a key. The key column carries no unique constraint and the statement has neither an ordering nor a limit, so a key held by several memories answers with whichever row the database returns first and never says there was a choice. A key nobody holds and a database that could not be reached are both a zero flag."
+    },
+    {
       "symbol": "db2_memory_get_content",
       "signature_sha256": "45147cad822329064bfe4f49e6259586766da0199382cb8d31a2205c1536cc05",
       "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.get_content operation replaces the canonical text read and is the companion to memory.update_content. A missing memory is reported as not_found rather than as empty content, because a stored row may legitimately hold an empty string and the two answers are different."
+    },
+    {
+      "symbol": "db2_memory_get_evidence_fields",
+      "signature_sha256": "f3a837e5d09d1a5d48eb38576a9f20a2161a2b0bb3cf7c9b46c63ddc3afc59d3",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.evidence_fields operation reads a memory's evidence strength and observation count. The count is stored as a sixty-four bit column and read back through an int, so a memory observed more times than an int holds comes back wrapped rather than clamped. A memory that is not there and a database that could not be reached are both a zero flag; the identifier carries no scope."
+    },
+    {
+      "symbol": "db2_memory_get_salience",
+      "signature_sha256": "52899370e84dc229154b09ad55f7bf6ba64ad50eb2636db5724560e84b1869c7",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.salience operation reads a memory's salience, answering the caller's own default when there is nothing to read. That default covers three different things -- no such memory, a database it could not reach, and a memory whose salience happens to equal it -- and the reply has no way to tell them apart because the backend does not either. Nothing bounds salience in the schema, so the wire's bound is the first one it has."
     },
     {
       "symbol": "db2_memory_get_session_kinds",
@@ -3378,6 +3402,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.get_source_session operation replaces the session read and is the companion to memory.set_source_session. The backend succeeds only for a non-empty session and reports an absent memory and a blank column identically, so the wire reply is non-empty on ok and everything else is not_found rather than inventing a distinction the backend cannot make."
+    },
+    {
+      "symbol": "db2_memory_get_surprise",
+      "signature_sha256": "f3201a7ea26108cbe468bee80292f524c3b147fc0339b7edf394c6c2e09cc187",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.surprise operation reads a memory's surprise, answering the caller's own default when there is nothing to read. It is memory.salience against a different column and carries the same thing: the default covers a missing memory, an unreachable database and a stored value that happens to match, and nothing distinguishes them. Nothing bounds surprise in the schema, so the wire's bound is the first one it has."
     },
     {
       "symbol": "db2_memory_has_any_workspace_tag",

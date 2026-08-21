@@ -1009,6 +1009,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .lifecycle_counts = db2_memory_lifecycle_counts,
        .lifecycle_mark_pending = db2_memory_lifecycle_mark_pending,
        .lifecycle_update_state = db2_memory_lifecycle_update_state,
+       .memory_salience = db2_memory_get_salience,
+       .memory_surprise = db2_memory_get_surprise,
+       .memory_confidence_by_key = db2_memory_get_confidence_by_key,
+       .memory_evidence_fields = db2_memory_get_evidence_fields,
    };
    return &backend;
 }
@@ -3456,6 +3460,121 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             }
             if (aimee_db2_lifecycle_update_state_reply_encode(acknowledged, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         double default_value = 0.0;
+         if (aimee_db2_memory_salience_request_decode(request_body, request_len, &memory_id,
+                                                      &default_value) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SALIENCE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_salience)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            double salience = 0.0;
+            salience = backend->memory_salience((int64_t)memory_id, default_value);
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_salience_reply_encode(salience, response_body, response_capacity,
+                                                       response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         double default_value = 0.0;
+         if (aimee_db2_memory_surprise_request_decode(request_body, request_len, &memory_id,
+                                                      &default_value) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SURPRISE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_surprise)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            double surprise = 0.0;
+            surprise = backend->memory_surprise((int64_t)memory_id, default_value);
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_surprise_reply_encode(surprise, response_body, response_capacity,
+                                                       response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char memory_key[AIMEE_DB2_MEMORY_CONFIDENCE_BY_KEY_MEMORY_KEY_MAX + 1] = "";
+         if (aimee_db2_memory_confidence_by_key_request_decode(request_body, request_len,
+                                                               memory_key, sizeof(memory_key)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_CONFIDENCE_BY_KEY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_confidence_by_key)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t confidence_found = 0u;
+            double memory_confidence = 0.0;
+            {
+               double found = 0.0;
+               if (backend->memory_confidence_by_key(memory_key, &found))
+               {
+                  confidence_found = 1u;
+                  memory_confidence = found;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_confidence_by_key_reply_encode(confidence_found, memory_confidence,
+                                                                response_body, response_capacity,
+                                                                response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         if (aimee_db2_memory_evidence_fields_request_decode(request_body, request_len,
+                                                             &memory_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_EVIDENCE_FIELDS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_evidence_fields)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t evidence_found = 0u;
+            double evidence_strength = 0.0;
+            uint32_t observation_count = 0u;
+            {
+               double strength = 0.0;
+               int observations = 0;
+               if (backend->memory_evidence_fields((int64_t)memory_id, &strength, &observations))
+               {
+                  evidence_found = 1u;
+                  evidence_strength = strength;
+                  observation_count = observations > 0 ? (uint32_t)observations : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_evidence_fields_reply_encode(evidence_found, evidence_strength,
+                                                              observation_count, response_body,
                                                               response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;

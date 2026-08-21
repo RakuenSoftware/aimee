@@ -3344,6 +3344,36 @@ int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
    return -1;
 }
 
+double db2_memory_get_salience(int64_t memory_id, double default_value)
+{
+   (void)memory_id;
+   return default_value;
+}
+
+double db2_memory_get_surprise(int64_t memory_id, double default_value)
+{
+   (void)memory_id;
+   return default_value;
+}
+
+int db2_memory_get_confidence_by_key(const char *key, double *confidence_out)
+{
+   (void)key;
+   if (confidence_out)
+      *confidence_out = 0.0;
+   return 0;
+}
+
+int db2_memory_get_evidence_fields(int64_t memory_id, double *evidence, int *observations)
+{
+   (void)memory_id;
+   if (evidence)
+      *evidence = 0.0;
+   if (observations)
+      *observations = 0;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

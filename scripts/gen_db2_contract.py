@@ -13486,6 +13486,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_lifecycle_update_state",
         "policy": {"writes": 200},
     },
+    "memory_salience": {
+        "key": ("memory", 96),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_get_salience",
+        "policy": {"reads": 200},
+    },
+    "memory_surprise": {
+        "key": ("memory", 97),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_get_surprise",
+        "policy": {"reads": 200},
+    },
+    "memory_confidence_by_key": {
+        "key": ("memory", 98),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_get_confidence_by_key",
+        "policy": {"reads": 200},
+    },
+    "memory_evidence_fields": {
+        "key": ("memory", 99),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_get_evidence_fields",
+        "policy": {"reads": 200},
+    },
 }
 
 

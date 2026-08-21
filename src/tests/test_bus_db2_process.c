@@ -3235,6 +3235,42 @@ int main(int argc, char **argv)
               sizeof(lifecycle_get_state_lifecycle_state), NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(lifecycle_get_state_lifecycle_state[0] == '\0');
 
+   /* Memory score fields, all against a memory that does not exist -- the defaults come straight
+    * back. */
+   double memory_salience_salience = 9.0;
+   assert(aimee_db2_memory_salience_call(call_client, &client, 9459, 0, 4242, 0.25,
+                                         &memory_salience_salience, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   /* No memory carries this identifier, so the caller's own default comes back.
+    * A memory whose salience is 0.25 would answer identically. */
+   assert(memory_salience_salience == 0.25);
+
+   double memory_surprise_surprise = 9.0;
+   assert(aimee_db2_memory_surprise_call(call_client, &client, 9460, 0, 4242, 0.75,
+                                         &memory_surprise_surprise, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_surprise_surprise == 0.75);
+
+   uint32_t memory_confidence_by_key_confidence_found = 99;
+   double memory_confidence_by_key_memory_confidence = 9.0;
+   assert(aimee_db2_memory_confidence_by_key_call(
+              call_client, &client, 9461, 0, "a-key-no-memory-holds",
+              &memory_confidence_by_key_confidence_found,
+              &memory_confidence_by_key_memory_confidence, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_confidence_by_key_confidence_found == 0 &&
+          memory_confidence_by_key_memory_confidence == 0.0);
+
+   uint32_t memory_evidence_fields_evidence_found = 99;
+   double memory_evidence_fields_evidence_strength = 9.0;
+   uint32_t memory_evidence_fields_observation_count = 99;
+   assert(aimee_db2_memory_evidence_fields_call(
+              call_client, &client, 9462, 0, 4242, &memory_evidence_fields_evidence_found,
+              &memory_evidence_fields_evidence_strength, &memory_evidence_fields_observation_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_evidence_fields_evidence_found == 0 &&
+          memory_evidence_fields_evidence_strength == 0.0 &&
+          memory_evidence_fields_observation_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
