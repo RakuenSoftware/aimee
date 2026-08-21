@@ -469,3 +469,96 @@ aimee_module_call_result_t aimee_db2_artifact_reject_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_audit_event_write_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *audit_id, const char *source_artifact_id, const char *audit_target_surface,
+    const char *audit_target_id, const char *audit_operator_id, const char *audit_scope_kind,
+    const char *audit_scope_id, double applied_confidence, uint32_t flagged_for_review,
+    const char *before_snapshot, const char *after_snapshot, uint32_t *acknowledged,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_AUDIT_EVENT_WRITE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_AUDIT_EVENT_WRITE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_audit_event_write_request_encode(
+           audit_id, source_artifact_id, audit_target_surface, audit_target_id, audit_operator_id,
+           audit_scope_kind, audit_scope_id, applied_confidence, flagged_for_review,
+           before_snapshot, after_snapshot, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_AUDIT_EVENT_WRITE, AIMEE_DB2_STAGE_AUDIT_EVENT_WRITE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_audit_event_write_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_audit_latest_before_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *artifact_id,
+                                   char *before_snapshot, size_t before_snapshot_capacity,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_AUDIT_LATEST_BEFORE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_AUDIT_LATEST_BEFORE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_audit_latest_before_request_encode(artifact_id, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_AUDIT_LATEST_BEFORE, AIMEE_DB2_STAGE_AUDIT_LATEST_BEFORE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_audit_latest_before_reply_decode(response, response_len, before_snapshot,
+                                                  before_snapshot_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_bandit_arm_stats_update_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *decision_point, const char *arm_id, double reward_delta, double posterior_alpha,
+    double posterior_beta, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_BANDIT_ARM_STATS_UPDATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_BANDIT_ARM_STATS_UPDATE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_bandit_arm_stats_update_request_encode(decision_point, arm_id, reward_delta,
+                                                        posterior_alpha, posterior_beta, request,
+                                                        sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_BANDIT_ARM_STATS_UPDATE,
+            AIMEE_DB2_STAGE_BANDIT_ARM_STATS_UPDATE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_bandit_arm_stats_update_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

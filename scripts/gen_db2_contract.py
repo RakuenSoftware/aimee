@@ -13162,6 +13162,42 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_artifact_reject",
         "policy": {"writes": 200},
     },
+    "audit_event_write": {
+        "key": ("learning", 55),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_audit_event_write",
+        "policy": {"writes": 200},
+    },
+    "audit_latest_before": {
+        "key": ("learning", 56),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_audit_read_latest_before",
+        "policy": {"reads": 200},
+    },
+    "bandit_arm_stats_update": {
+        "key": ("learning", 57),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_arm_stats_update",
+        "policy": {"writes": 200},
+    },
+    "code_file_hash": {
+        "key": ("index", 57),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_file_hash",
+        "policy": {"reads": 200},
+    },
+    "file_modified_since": {
+        "key": ("index", 58),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_file_modified_since",
+        "policy": {"reads": 200},
+    },
+    "code_file_upsert": {
+        "key": ("index", 59),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_file_upsert",
+        "policy": {"writes": 200},
+    },
 }
 
 

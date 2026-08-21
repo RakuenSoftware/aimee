@@ -340,6 +340,30 @@
       "reason": "The typed learning.artifact_write_ex operation records an artifact with an attempt count of the caller's choosing. It is otherwise learning.artifact_write, including the part that matters: writing an identifier that exists does nothing and is acknowledged. So the attempt count can only ever be set when the artifact is created, and a caller trying to raise it on a retry writes nothing and is told it worked."
     },
     {
+      "symbol": "db2_audit_event_write",
+      "signature_sha256": "996924ace3f43aa69b680a7bca9922ce96381a673846d295c084d018b88ce508",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. Writing an identifier that exists does nothing and is acknowledged, which makes an append safe to retry and makes a collision silent."
+    },
+    {
+      "symbol": "db2_audit_read_latest_before",
+      "signature_sha256": "f638c295272283eb8a84a49a7373e22aa4d7a9566c045adbad4fb4e798707ddd",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.audit_latest_before operation reads the before-state the newest audit event recorded for an artifact. Newest means the highest identifier, not the latest stamp -- the identifiers are generated rather than sequential, so this returns whichever sorts highest, which is not the same thing. The snapshot it returns was the caller's to supply when the event was written."
+    },
+    {
+      "symbol": "db2_bandit_arm_stats_update",
+      "signature_sha256": "a61e954e785a03e0b0fdb7b5f3cd34571a948266b93708a7be3dab9e0161400e",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.bandit_arm_stats_update operation folds one reward into an arm's running statistics. Both the decision count and the reward count are raised by one on every call, so an arm updated with a reward of zero is indistinguishable from one rewarded -- the counts measure calls rather than outcomes. The posteriors are the caller's, so what they mean is decided outside DB2, and every call overwrites them."
+    },
+    {
       "symbol": "db2_bandit_arms_list",
       "signature_sha256": "7aa8a96866d304f3bef2b0441c21477c9d20725b7f97795b677d89925e9a80b5",
       "disposition": "wire-operation",
@@ -412,6 +436,14 @@
       "reason": "Parsing DB2-owned profile JSON is private operation logic; the future learning.calibration_threshold reply returns only the validated bounded threshold selected from the same scoped profile read."
     },
     {
+      "symbol": "db2_code_file_hash",
+      "signature_sha256": "5575a54cd729d4473b90cea34c1d2b084cd6ac97a631191888d5fdb0785df9d8",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.code_file_hash operation reads the hash recorded for an indexed file. Only the project's current generation answers, so a file indexed under an older one reads back empty -- the same empty as a file nobody indexed. It is the code-index twin of organization.document_stored_hash, which does the same thing for documents and shares the same trap: a caller comparing hashes to decide whether a file changed sees an unchanged file as new across a generation bump."
+    },
+    {
       "symbol": "db2_code_index_blast_radius_local_first",
       "signature_sha256": "665fd461dd166961f6be1cacd477e3f81641a2ef73c5c78e1fa76f4f5a9973fb",
       "disposition": "private-db2",
@@ -458,6 +490,22 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.file_definitions operation lists the symbols defined in one file, in line order. Both the project and the file must be in the current generation, so a file indexed under an older one has no definitions here rather than an error. A line_end of zero means the extractor never recorded where the symbol ended, which reads the same as a symbol ending at line zero; the pair is only meaningful when line_end is at least line."
+    },
+    {
+      "symbol": "db2_code_index_file_modified_since",
+      "signature_sha256": "95eb58929fade658c93877844144069573035cc5deb5ab4df766a9c85b98ffa8",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.file_modified_since operation asks whether a file needs re-indexing. Everything uncertain answers yes: a file nobody has indexed, a stamp that will not parse, a failed read. That is the safe direction -- re-indexing costs time where skipping costs correctness -- but it means a yes says nothing about the file, and a scan against a database it cannot reach re-indexes everything rather than failing."
+    },
+    {
+      "symbol": "db2_code_index_file_upsert",
+      "signature_sha256": "6ebf1ea6aad9f5abc9373ab6330e4b1daa453baadf6257e62f14e62a2d49939d",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.code_file_upsert operation records that a file exists in a project's current generation. The generation is taken from the project rather than supplied, so a project that is not current matches nothing and the insert writes no row -- answering zero, which is also what a failed write answers. Re-recording a file updates its scan stamp and keeps its identity, so the identifier is stable across scans."
     },
     {
       "symbol": "db2_code_index_project_count",

@@ -823,6 +823,18 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *edge_source, const char *edge_relation, const char *edge_target, uint64_t window_id, uint32_t relation_id, uint32_t subject_kind, uint32_t object_kind, uint32_t *acknowledged, uint32_t *edge_added, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_code_file_hash_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project, const char *file_path, char *file_hash, size_t file_hash_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_file_modified_since_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t project_id, const char *file_path, uint64_t modified_since, uint32_t *modified, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_code_file_upsert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t project_id, const char *file_path, const char *scanned_at, uint64_t *file_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_trace_mining_record_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -1016,6 +1028,18 @@ extern "C"
    aimee_module_call_result_t aimee_db2_artifact_reject_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *artifact_id, const char *verdict_tag, const char *verdict_scope, const char *counter_example, const char *before_json, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_audit_event_write_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *audit_id, const char *source_artifact_id, const char *audit_target_surface, const char *audit_target_id, const char *audit_operator_id, const char *audit_scope_kind, const char *audit_scope_id, double applied_confidence, uint32_t flagged_for_review, const char *before_snapshot, const char *after_snapshot, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_audit_latest_before_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *artifact_id, char *before_snapshot, size_t before_snapshot_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_bandit_arm_stats_update_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *decision_point, const char *arm_id, double reward_delta, double posterior_alpha, double posterior_beta, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,

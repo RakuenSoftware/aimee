@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "code_index.h"
+#include "code_index_ops.h"
 #include "agent_outcomes.h"
 #include "artifacts.h"
 #include "bandit.h"
@@ -415,6 +417,18 @@ typedef struct
                                int64_t tokens_used, const char *tool_error_pattern);
    int (*artifact_reject)(const char *id, const char *verdict_tag, const char *verdict_scope,
                           const char *counter_example, const char *before_json);
+   int (*audit_event_write)(const char *id, const char *source_artifact_id,
+                            const char *target_surface, const char *target_id,
+                            const char *operator_id, const char *scope_kind, const char *scope_id,
+                            double applied_confidence, int flagged_for_review,
+                            const char *before_json, const char *after_json);
+   int (*audit_latest_before)(const char *artifact_id, char *out, int out_len);
+   int (*bandit_arm_stats_update)(const char *decision_point, const char *arm_id,
+                                  double reward_delta, double posterior_alpha,
+                                  double posterior_beta);
+   int (*code_file_hash)(const char *project, const char *file_path, char *out, int out_len);
+   int (*file_modified_since)(int64_t project_id, const char *rel_path, time_t mtime);
+   int64_t (*code_file_upsert)(int64_t project_id, const char *rel_path, const char *scanned_at);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

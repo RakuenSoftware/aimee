@@ -8748,6 +8748,156 @@
       }
     },
     {
+      "family": "index",
+      "id": 57,
+      "name": "code_file_hash",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed files and the hashes recorded for them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_file_hash"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only the project's current generation answers, so a file indexed under an older one reads back as absent"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "file_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 58,
+      "name": "file_modified_since",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed files and when they were scanned are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_file_modified_since"
+      ],
+      "request": {
+        "policy": {
+          "reads": "every uncertainty answers modified, so a stamp that will not parse and a file nobody indexed both look like work to do"
+        },
+        "fields": [
+          {
+            "name": "project_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "modified_since",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "modified",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 59,
+      "name": "code_file_upsert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projects, their generations and the files indexed under them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_file_upsert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the generation is read from the project rather than supplied, so a project that is not current inserts nothing and answers zero"
+        },
+        "fields": [
+          {
+            "name": "project_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "scanned_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "file_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -11383,6 +11533,210 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 55,
+      "name": "audit_event_write",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events and the artifacts they refer to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_audit_event_write"
+      ],
+      "request": {
+        "policy": {
+          "writes": "both snapshots are the caller's to supply, so the audit trail says whatever the caller said it did"
+        },
+        "fields": [
+          {
+            "name": "audit_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "source_artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "audit_target_surface",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "audit_target_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "audit_operator_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "audit_scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "audit_scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "applied_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4607182418800017408
+          },
+          {
+            "name": "flagged_for_review",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "before_snapshot",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          },
+          {
+            "name": "after_snapshot",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 56,
+      "name": "audit_latest_before",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events and the snapshots recorded on them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_audit_read_latest_before"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the newest event is chosen by identifier rather than by time, so it is the highest-sorting identifier and not necessarily the latest"
+        },
+        "fields": [
+          {
+            "name": "artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "before_snapshot",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 57,
+      "name": "bandit_arm_stats_update",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Bandit arm statistics and their posteriors are relational DB2 rows.",
+      "c_symbols": [
+        "db2_bandit_arm_stats_update"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the decision and reward counts are both raised by one on every call, so a call with no reward still counts as one"
+        },
+        "fields": [
+          {
+            "name": "decision_point",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "arm_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "reward_delta",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          },
+          {
+            "name": "posterior_alpha",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          },
+          {
+            "name": "posterior_beta",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
           }
         ]
       },

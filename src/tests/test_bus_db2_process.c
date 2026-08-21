@@ -2472,6 +2472,60 @@ int main(int argc, char **argv)
     * records why -- two statements with no transaction around them. */
    assert(artifact_reject_acknowledged == 1);
 
+   /* The audit, bandit-statistics and file-index writers. audit_event_write writes the event that
+    * audit_latest_before then reads, so those two are a round trip rather than two empty answers.
+    */
+   uint32_t audit_event_write_acknowledged = 99;
+   assert(aimee_db2_audit_event_write_call(
+              call_client, &client, 9381, 0, "replay-audit", "replay-artifact-w", "", "",
+              "replay-op", "user", "replay", 0.5, 0u, "{}", "{\"state\":\"probe\"}",
+              &audit_event_write_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Lands: the identifier is the caller's and nothing here is a foreign
+    * key, so an audit event can name an artifact that does not exist. */
+   assert(audit_event_write_acknowledged == 1);
+
+   static char
+       audit_latest_before_before_snapshot[AIMEE_DB2_AUDIT_LATEST_BEFORE_BEFORE_SNAPSHOT_MAX + 1];
+   audit_latest_before_before_snapshot[0] = 'x';
+   assert(aimee_db2_audit_latest_before_call(call_client, &client, 9382, 0, "replay-artifact-w",
+                                             audit_latest_before_before_snapshot,
+                                             sizeof(audit_latest_before_before_snapshot), NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   /* Reads back what the write above supplied, which is the round trip
+    * worth having: the snapshot is the caller's, and this proves only
+    * that DB2 stored and returned it, not that it was ever true. */
+   assert(strcmp(audit_latest_before_before_snapshot, "{}") == 0);
+
+   uint32_t bandit_arm_stats_update_acknowledged = 99;
+   assert(aimee_db2_bandit_arm_stats_update_call(
+              call_client, &client, 9383, 0, "replay-dp", "arm-one", 0.25, 1.0, 1.0,
+              &bandit_arm_stats_update_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(bandit_arm_stats_update_acknowledged == 1);
+
+   static char code_file_hash_file_hash[AIMEE_DB2_CODE_FILE_HASH_FILE_HASH_MAX + 1];
+   code_file_hash_file_hash[0] = 'x';
+   assert(aimee_db2_code_file_hash_call(call_client, &client, 9384, 0, "demo", "src/replay.c",
+                                        code_file_hash_file_hash, sizeof(code_file_hash_file_hash),
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(code_file_hash_file_hash[0] == '\0');
+
+   uint32_t file_modified_since_modified = 99;
+   assert(aimee_db2_file_modified_since_call(call_client, &client, 9385, 0, 4242, "src/replay.c",
+                                             1700000000, &file_modified_since_modified, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   /* One, not zero: every uncertainty answers modified, and a file nobody
+    * indexed is the plainest uncertainty there is. */
+   assert(file_modified_since_modified == 1);
+
+   uint64_t code_file_upsert_file_id = 99;
+   assert(aimee_db2_code_file_upsert_call(call_client, &client, 9386, 0, 4242, "src/replay.c",
+                                          "2026-01-01 00:00:00", &code_file_upsert_file_id, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   /* Zero because no project 4242 exists: the generation comes from the
+    * project row, so an absent project matches nothing and inserts
+    * nothing -- the same zero a failed write gives. */
+   assert(code_file_upsert_file_id == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

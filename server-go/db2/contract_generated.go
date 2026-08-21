@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "5513377d67ef2726c9a0d0180e1826078cfe76e09013e9d3fb6f63d4d1e746aa"
+const ContractSHA256 = "8ddb3240345f73f182858c445fc09d52c943061b95eac8042bc6d08a74f1e8c7"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4481,6 +4481,202 @@ func DecodeEntityEdgeUpsertRequest(request []byte) (string, string, string, uint
 	return edgeSource, edgeRelation, edgeTarget, windowID, relationID, subjectKind, objectKind, nil
 }
 
+const EventCodeFileHash = EventIndex
+const StageCodeFileHash = FamilyIndex
+const OperationCodeFileHash uint32 = 57
+const CodeFileHashProjectMin = 1
+const CodeFileHashProjectMax = 127
+const CodeFileHashFilePathMin = 1
+const CodeFileHashFilePathMax = 1023
+
+// EncodeCodeFileHashRequest writes the schema code_file_hash declares, in order.
+func EncodeCodeFileHashRequest(project string, filePath string) ([]byte, error) {
+	if len(project) < CodeFileHashProjectMin || len(project) > CodeFileHashProjectMax || hasNUL(project) ||
+		len(filePath) < CodeFileHashFilePathMin || len(filePath) > CodeFileHashFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, CodeFileHashProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, CodeFileHashFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCodeFileHash, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCodeFileHashRequest reads it back, checking each field against its own bound.
+func DecodeCodeFileHashRequest(request []byte) (string, string, error) {
+	var project string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCodeFileHash || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, CodeFileHashProjectMax); err != nil ||
+		len(project) < CodeFileHashProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, CodeFileHashFilePathMax); err != nil ||
+		len(filePath) < CodeFileHashFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, filePath, nil
+}
+
+const EventFileModifiedSince = EventIndex
+const StageFileModifiedSince = FamilyIndex
+const OperationFileModifiedSince uint32 = 58
+const FileModifiedSinceProjectIDMin uint64 = 1
+const FileModifiedSinceProjectIDMax uint64 = 9223372036854775807
+const FileModifiedSinceFilePathMin = 1
+const FileModifiedSinceFilePathMax = 1023
+const FileModifiedSinceModifiedSinceMin uint64 = 0
+const FileModifiedSinceModifiedSinceMax uint64 = 9223372036854775807
+
+// EncodeFileModifiedSinceRequest writes the schema file_modified_since declares, in order.
+func EncodeFileModifiedSinceRequest(projectID uint64, filePath string, modifiedSince uint64) ([]byte, error) {
+	if projectID < FileModifiedSinceProjectIDMin || projectID > FileModifiedSinceProjectIDMax ||
+		len(filePath) < FileModifiedSinceFilePathMin || len(filePath) > FileModifiedSinceFilePathMax || hasNUL(filePath) ||
+		modifiedSince < FileModifiedSinceModifiedSinceMin || modifiedSince > FileModifiedSinceModifiedSinceMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var projectIDBytes [8]byte
+	binary.LittleEndian.PutUint64(projectIDBytes[:], projectID)
+	payload = append(payload, projectIDBytes[:]...)
+	if err := putRowText(&payload, filePath, FileModifiedSinceFilePathMax); err != nil {
+		return nil, err
+	}
+	var modifiedSinceBytes [8]byte
+	binary.LittleEndian.PutUint64(modifiedSinceBytes[:], modifiedSince)
+	payload = append(payload, modifiedSinceBytes[:]...)
+	header, err := EncodeRequestHeader(OperationFileModifiedSince, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeFileModifiedSinceRequest reads it back, checking each field against its own bound.
+func DecodeFileModifiedSinceRequest(request []byte) (uint64, string, uint64, error) {
+	var projectID uint64
+	var filePath string
+	var modifiedSince uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFileModifiedSince || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	projectID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if projectID < FileModifiedSinceProjectIDMin || projectID > FileModifiedSinceProjectIDMax {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, FileModifiedSinceFilePathMax); err != nil ||
+		len(filePath) < FileModifiedSinceFilePathMin {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	modifiedSince = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if modifiedSince < FileModifiedSinceModifiedSinceMin || modifiedSince > FileModifiedSinceModifiedSinceMax {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	return projectID, filePath, modifiedSince, nil
+}
+
+const EventCodeFileUpsert = EventIndex
+const StageCodeFileUpsert = FamilyIndex
+const OperationCodeFileUpsert uint32 = 59
+const CodeFileUpsertProjectIDMin uint64 = 1
+const CodeFileUpsertProjectIDMax uint64 = 9223372036854775807
+const CodeFileUpsertFilePathMin = 1
+const CodeFileUpsertFilePathMax = 1023
+const CodeFileUpsertScannedAtMin = 0
+const CodeFileUpsertScannedAtMax = 63
+
+// EncodeCodeFileUpsertRequest writes the schema code_file_upsert declares, in order.
+func EncodeCodeFileUpsertRequest(projectID uint64, filePath string, scannedAt string) ([]byte, error) {
+	if projectID < CodeFileUpsertProjectIDMin || projectID > CodeFileUpsertProjectIDMax ||
+		len(filePath) < CodeFileUpsertFilePathMin || len(filePath) > CodeFileUpsertFilePathMax || hasNUL(filePath) ||
+		len(scannedAt) < CodeFileUpsertScannedAtMin || len(scannedAt) > CodeFileUpsertScannedAtMax || hasNUL(scannedAt) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var projectIDBytes [8]byte
+	binary.LittleEndian.PutUint64(projectIDBytes[:], projectID)
+	payload = append(payload, projectIDBytes[:]...)
+	if err := putRowText(&payload, filePath, CodeFileUpsertFilePathMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scannedAt, CodeFileUpsertScannedAtMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCodeFileUpsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCodeFileUpsertRequest reads it back, checking each field against its own bound.
+func DecodeCodeFileUpsertRequest(request []byte) (uint64, string, string, error) {
+	var projectID uint64
+	var filePath string
+	var scannedAt string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCodeFileUpsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	projectID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if projectID < CodeFileUpsertProjectIDMin || projectID > CodeFileUpsertProjectIDMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, CodeFileUpsertFilePathMax); err != nil ||
+		len(filePath) < CodeFileUpsertFilePathMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if scannedAt, err = takeRowText(payload, &cursor, CodeFileUpsertScannedAtMax); err != nil ||
+		len(scannedAt) < CodeFileUpsertScannedAtMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return projectID, filePath, scannedAt, nil
+}
+
 const EventTraceMiningRecord = EventLearning
 const StageTraceMiningRecord = FamilyLearning
 const OperationTraceMiningRecord uint32 = 8
@@ -7307,6 +7503,317 @@ func DecodeArtifactRejectRequest(request []byte) (string, string, string, string
 		return "", "", "", "", "", ErrMalformedEnvelope
 	}
 	return artifactID, verdictTag, verdictScope, counterExample, beforeJson, nil
+}
+
+const EventAuditEventWrite = EventLearning
+const StageAuditEventWrite = FamilyLearning
+const OperationAuditEventWrite uint32 = 55
+const AuditEventWriteAuditIDMin = 1
+const AuditEventWriteAuditIDMax = 127
+const AuditEventWriteSourceArtifactIDMin = 0
+const AuditEventWriteSourceArtifactIDMax = 127
+const AuditEventWriteAuditTargetSurfaceMin = 0
+const AuditEventWriteAuditTargetSurfaceMax = 127
+const AuditEventWriteAuditTargetIDMin = 0
+const AuditEventWriteAuditTargetIDMax = 127
+const AuditEventWriteAuditOperatorIDMin = 0
+const AuditEventWriteAuditOperatorIDMax = 127
+const AuditEventWriteAuditScopeKindMin = 0
+const AuditEventWriteAuditScopeKindMax = 31
+const AuditEventWriteAuditScopeIDMin = 0
+const AuditEventWriteAuditScopeIDMax = 127
+const AuditEventWriteAppliedConfidenceMaxMagnitudeBits uint64 = 4607182418800017408
+const AuditEventWriteFlaggedForReviewMin uint32 = 0
+const AuditEventWriteFlaggedForReviewMax uint32 = 1
+const AuditEventWriteBeforeSnapshotMin = 0
+const AuditEventWriteBeforeSnapshotMax = 4095
+const AuditEventWriteAfterSnapshotMin = 0
+const AuditEventWriteAfterSnapshotMax = 4095
+
+// EncodeAuditEventWriteRequest writes the schema audit_event_write declares, in order.
+func EncodeAuditEventWriteRequest(auditID string, sourceArtifactID string, auditTargetSurface string, auditTargetID string, auditOperatorID string, auditScopeKind string, auditScopeID string, appliedConfidence float64, flaggedForReview uint32, beforeSnapshot string, afterSnapshot string) ([]byte, error) {
+	if len(auditID) < AuditEventWriteAuditIDMin || len(auditID) > AuditEventWriteAuditIDMax || hasNUL(auditID) ||
+		len(sourceArtifactID) < AuditEventWriteSourceArtifactIDMin || len(sourceArtifactID) > AuditEventWriteSourceArtifactIDMax || hasNUL(sourceArtifactID) ||
+		len(auditTargetSurface) < AuditEventWriteAuditTargetSurfaceMin || len(auditTargetSurface) > AuditEventWriteAuditTargetSurfaceMax || hasNUL(auditTargetSurface) ||
+		len(auditTargetID) < AuditEventWriteAuditTargetIDMin || len(auditTargetID) > AuditEventWriteAuditTargetIDMax || hasNUL(auditTargetID) ||
+		len(auditOperatorID) < AuditEventWriteAuditOperatorIDMin || len(auditOperatorID) > AuditEventWriteAuditOperatorIDMax || hasNUL(auditOperatorID) ||
+		len(auditScopeKind) < AuditEventWriteAuditScopeKindMin || len(auditScopeKind) > AuditEventWriteAuditScopeKindMax || hasNUL(auditScopeKind) ||
+		len(auditScopeID) < AuditEventWriteAuditScopeIDMin || len(auditScopeID) > AuditEventWriteAuditScopeIDMax || hasNUL(auditScopeID) ||
+		math.Float64bits(appliedConfidence)&0x7fffffffffffffff > AuditEventWriteAppliedConfidenceMaxMagnitudeBits ||
+		flaggedForReview < AuditEventWriteFlaggedForReviewMin || flaggedForReview > AuditEventWriteFlaggedForReviewMax ||
+		len(beforeSnapshot) < AuditEventWriteBeforeSnapshotMin || len(beforeSnapshot) > AuditEventWriteBeforeSnapshotMax || hasNUL(beforeSnapshot) ||
+		len(afterSnapshot) < AuditEventWriteAfterSnapshotMin || len(afterSnapshot) > AuditEventWriteAfterSnapshotMax || hasNUL(afterSnapshot) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, auditID, AuditEventWriteAuditIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, sourceArtifactID, AuditEventWriteSourceArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditTargetSurface, AuditEventWriteAuditTargetSurfaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditTargetID, AuditEventWriteAuditTargetIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditOperatorID, AuditEventWriteAuditOperatorIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditScopeKind, AuditEventWriteAuditScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditScopeID, AuditEventWriteAuditScopeIDMax); err != nil {
+		return nil, err
+	}
+	var appliedConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(appliedConfidenceBytes[:], math.Float64bits(appliedConfidence))
+	payload = append(payload, appliedConfidenceBytes[:]...)
+	var flaggedForReviewBytes [4]byte
+	binary.LittleEndian.PutUint32(flaggedForReviewBytes[:], flaggedForReview)
+	payload = append(payload, flaggedForReviewBytes[:]...)
+	if err := putRowText(&payload, beforeSnapshot, AuditEventWriteBeforeSnapshotMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, afterSnapshot, AuditEventWriteAfterSnapshotMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAuditEventWrite, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAuditEventWriteRequest reads it back, checking each field against its own bound.
+func DecodeAuditEventWriteRequest(request []byte) (string, string, string, string, string, string, string, float64, uint32, string, string, error) {
+	var auditID string
+	var sourceArtifactID string
+	var auditTargetSurface string
+	var auditTargetID string
+	var auditOperatorID string
+	var auditScopeKind string
+	var auditScopeID string
+	var appliedConfidence float64
+	var flaggedForReview uint32
+	var beforeSnapshot string
+	var afterSnapshot string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAuditEventWrite || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if auditID, err = takeRowText(payload, &cursor, AuditEventWriteAuditIDMax); err != nil ||
+		len(auditID) < AuditEventWriteAuditIDMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if sourceArtifactID, err = takeRowText(payload, &cursor, AuditEventWriteSourceArtifactIDMax); err != nil ||
+		len(sourceArtifactID) < AuditEventWriteSourceArtifactIDMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if auditTargetSurface, err = takeRowText(payload, &cursor, AuditEventWriteAuditTargetSurfaceMax); err != nil ||
+		len(auditTargetSurface) < AuditEventWriteAuditTargetSurfaceMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if auditTargetID, err = takeRowText(payload, &cursor, AuditEventWriteAuditTargetIDMax); err != nil ||
+		len(auditTargetID) < AuditEventWriteAuditTargetIDMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if auditOperatorID, err = takeRowText(payload, &cursor, AuditEventWriteAuditOperatorIDMax); err != nil ||
+		len(auditOperatorID) < AuditEventWriteAuditOperatorIDMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if auditScopeKind, err = takeRowText(payload, &cursor, AuditEventWriteAuditScopeKindMax); err != nil ||
+		len(auditScopeKind) < AuditEventWriteAuditScopeKindMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if auditScopeID, err = takeRowText(payload, &cursor, AuditEventWriteAuditScopeIDMax); err != nil ||
+		len(auditScopeID) < AuditEventWriteAuditScopeIDMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > AuditEventWriteAppliedConfidenceMaxMagnitudeBits {
+			return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+		}
+		appliedConfidence = math.Float64frombits(bits)
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	flaggedForReview = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if flaggedForReview < AuditEventWriteFlaggedForReviewMin || flaggedForReview > AuditEventWriteFlaggedForReviewMax {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if beforeSnapshot, err = takeRowText(payload, &cursor, AuditEventWriteBeforeSnapshotMax); err != nil ||
+		len(beforeSnapshot) < AuditEventWriteBeforeSnapshotMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if afterSnapshot, err = takeRowText(payload, &cursor, AuditEventWriteAfterSnapshotMax); err != nil ||
+		len(afterSnapshot) < AuditEventWriteAfterSnapshotMin {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	return auditID, sourceArtifactID, auditTargetSurface, auditTargetID, auditOperatorID, auditScopeKind, auditScopeID, appliedConfidence, flaggedForReview, beforeSnapshot, afterSnapshot, nil
+}
+
+const EventAuditLatestBefore = EventLearning
+const StageAuditLatestBefore = FamilyLearning
+const OperationAuditLatestBefore uint32 = 56
+const AuditLatestBeforeArtifactIDMin = 1
+const AuditLatestBeforeArtifactIDMax = 127
+
+// EncodeAuditLatestBeforeRequest writes the schema audit_latest_before declares, in order.
+func EncodeAuditLatestBeforeRequest(artifactID string) ([]byte, error) {
+	if len(artifactID) < AuditLatestBeforeArtifactIDMin || len(artifactID) > AuditLatestBeforeArtifactIDMax || hasNUL(artifactID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, AuditLatestBeforeArtifactIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAuditLatestBefore, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAuditLatestBeforeRequest reads it back, checking each field against its own bound.
+func DecodeAuditLatestBeforeRequest(request []byte) (string, error) {
+	var artifactID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAuditLatestBefore || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, AuditLatestBeforeArtifactIDMax); err != nil ||
+		len(artifactID) < AuditLatestBeforeArtifactIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return artifactID, nil
+}
+
+const EventBanditArmStatsUpdate = EventLearning
+const StageBanditArmStatsUpdate = FamilyLearning
+const OperationBanditArmStatsUpdate uint32 = 57
+const BanditArmStatsUpdateDecisionPointMin = 1
+const BanditArmStatsUpdateDecisionPointMax = 127
+const BanditArmStatsUpdateArmIDMin = 1
+const BanditArmStatsUpdateArmIDMax = 127
+const BanditArmStatsUpdateRewardDeltaMaxMagnitudeBits uint64 = 4741671816366391296
+const BanditArmStatsUpdatePosteriorAlphaMaxMagnitudeBits uint64 = 4741671816366391296
+const BanditArmStatsUpdatePosteriorBetaMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeBanditArmStatsUpdateRequest writes the schema bandit_arm_stats_update declares, in order.
+func EncodeBanditArmStatsUpdateRequest(decisionPoint string, armID string, rewardDelta float64, posteriorAlpha float64, posteriorBeta float64) ([]byte, error) {
+	if len(decisionPoint) < BanditArmStatsUpdateDecisionPointMin || len(decisionPoint) > BanditArmStatsUpdateDecisionPointMax || hasNUL(decisionPoint) ||
+		len(armID) < BanditArmStatsUpdateArmIDMin || len(armID) > BanditArmStatsUpdateArmIDMax || hasNUL(armID) ||
+		math.Float64bits(rewardDelta)&0x7fffffffffffffff > BanditArmStatsUpdateRewardDeltaMaxMagnitudeBits ||
+		math.Float64bits(posteriorAlpha)&0x7fffffffffffffff > BanditArmStatsUpdatePosteriorAlphaMaxMagnitudeBits ||
+		math.Float64bits(posteriorBeta)&0x7fffffffffffffff > BanditArmStatsUpdatePosteriorBetaMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionPoint, BanditArmStatsUpdateDecisionPointMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, armID, BanditArmStatsUpdateArmIDMax); err != nil {
+		return nil, err
+	}
+	var rewardDeltaBytes [8]byte
+	binary.LittleEndian.PutUint64(rewardDeltaBytes[:], math.Float64bits(rewardDelta))
+	payload = append(payload, rewardDeltaBytes[:]...)
+	var posteriorAlphaBytes [8]byte
+	binary.LittleEndian.PutUint64(posteriorAlphaBytes[:], math.Float64bits(posteriorAlpha))
+	payload = append(payload, posteriorAlphaBytes[:]...)
+	var posteriorBetaBytes [8]byte
+	binary.LittleEndian.PutUint64(posteriorBetaBytes[:], math.Float64bits(posteriorBeta))
+	payload = append(payload, posteriorBetaBytes[:]...)
+	header, err := EncodeRequestHeader(OperationBanditArmStatsUpdate, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditArmStatsUpdateRequest reads it back, checking each field against its own bound.
+func DecodeBanditArmStatsUpdateRequest(request []byte) (string, string, float64, float64, float64, error) {
+	var decisionPoint string
+	var armID string
+	var rewardDelta float64
+	var posteriorAlpha float64
+	var posteriorBeta float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditArmStatsUpdate || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionPoint, err = takeRowText(payload, &cursor, BanditArmStatsUpdateDecisionPointMax); err != nil ||
+		len(decisionPoint) < BanditArmStatsUpdateDecisionPointMin {
+		return "", "", 0, 0, 0, ErrMalformedEnvelope
+	}
+	if armID, err = takeRowText(payload, &cursor, BanditArmStatsUpdateArmIDMax); err != nil ||
+		len(armID) < BanditArmStatsUpdateArmIDMin {
+		return "", "", 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", 0, 0, 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > BanditArmStatsUpdateRewardDeltaMaxMagnitudeBits {
+			return "", "", 0, 0, 0, ErrMalformedEnvelope
+		}
+		rewardDelta = math.Float64frombits(bits)
+	}
+	if cursor+8 > len(payload) {
+		return "", "", 0, 0, 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > BanditArmStatsUpdatePosteriorAlphaMaxMagnitudeBits {
+			return "", "", 0, 0, 0, ErrMalformedEnvelope
+		}
+		posteriorAlpha = math.Float64frombits(bits)
+	}
+	if cursor+8 > len(payload) {
+		return "", "", 0, 0, 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > BanditArmStatsUpdatePosteriorBetaMaxMagnitudeBits {
+			return "", "", 0, 0, 0, ErrMalformedEnvelope
+		}
+		posteriorBeta = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return "", "", 0, 0, 0, ErrMalformedEnvelope
+	}
+	return decisionPoint, armID, rewardDelta, posteriorAlpha, posteriorBeta, nil
 }
 
 const EventDocumentExists = EventOrganization

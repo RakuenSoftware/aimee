@@ -2492,6 +2492,70 @@ int db2_artifact_reject(const char *id, const char *verdict_tag, const char *ver
    return 0;
 }
 
+int db2_audit_event_write(const char *id, const char *source_artifact_id,
+                          const char *target_surface, const char *target_id,
+                          const char *operator_id, const char *scope_kind, const char *scope_id,
+                          double applied_confidence, int flagged_for_review,
+                          const char *before_json, const char *after_json)
+{
+   (void)id;
+   (void)source_artifact_id;
+   (void)target_surface;
+   (void)target_id;
+   (void)operator_id;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)applied_confidence;
+   (void)flagged_for_review;
+   (void)before_json;
+   (void)after_json;
+   return 0;
+}
+
+int db2_audit_read_latest_before(const char *artifact_id, char *out, int out_len)
+{
+   (void)artifact_id;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return -1;
+}
+
+int db2_bandit_arm_stats_update(const char *decision_point, const char *arm_id, double reward_delta,
+                                double posterior_alpha, double posterior_beta)
+{
+   (void)decision_point;
+   (void)arm_id;
+   (void)reward_delta;
+   (void)posterior_alpha;
+   (void)posterior_beta;
+   return 0;
+}
+
+int db2_code_file_hash(const char *project, const char *file_path, char *out, int out_len)
+{
+   (void)project;
+   (void)file_path;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return -1;
+}
+
+int db2_code_index_file_modified_since(int64_t project_id, const char *rel_path, time_t mtime)
+{
+   (void)project_id;
+   (void)rel_path;
+   (void)mtime;
+   return 1;
+}
+
+int64_t db2_code_index_file_upsert(int64_t project_id, const char *rel_path, const char *scanned_at)
+{
+   (void)project_id;
+   (void)rel_path;
+   (void)scanned_at;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

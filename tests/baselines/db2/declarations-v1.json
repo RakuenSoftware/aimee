@@ -3859,9 +3859,15 @@
           "line": 107
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. Writing an identifier that exists does nothing and is acknowledged, which makes an append safe to retry and makes a collision silent."
+      },
       "signature": "int db2_audit_event_write ( const char * id , const char * source_artifact_id , const char * target_surface , const char * target_id , const char * operator_id , const char * scope_kind , const char * scope_id , double applied_confidence , int flagged_for_review , const char * before_json , const char * after_json )",
       "signature_sha256": "996924ace3f43aa69b680a7bca9922ce96381a673846d295c084d018b88ce508",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_audit_event_write"
     },
     {
@@ -3874,9 +3880,15 @@
           "line": 65
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.audit_latest_before operation reads the before-state the newest audit event recorded for an artifact. Newest means the highest identifier, not the latest stamp -- the identifiers are generated rather than sequential, so this returns whichever sorts highest, which is not the same thing. The snapshot it returns was the caller's to supply when the event was written."
+      },
       "signature": "int db2_audit_read_latest_before ( const char * artifact_id , char * out , int out_len )",
       "signature_sha256": "f638c295272283eb8a84a49a7373e22aa4d7a9566c045adbad4fb4e798707ddd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_audit_read_latest_before"
     },
     {
@@ -3907,9 +3919,15 @@
           "line": 49
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_arm_stats_update operation folds one reward into an arm's running statistics. Both the decision count and the reward count are raised by one on every call, so an arm updated with a reward of zero is indistinguishable from one rewarded -- the counts measure calls rather than outcomes. The posteriors are the caller's, so what they mean is decided outside DB2, and every call overwrites them."
+      },
       "signature": "int db2_bandit_arm_stats_update ( const char * decision_point , const char * arm_id , double reward_delta , double posterior_alpha , double posterior_beta )",
       "signature_sha256": "a61e954e785a03e0b0fdb7b5f3cd34571a948266b93708a7be3dab9e0161400e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_arm_stats_update"
     },
     {
@@ -4241,9 +4259,15 @@
           "line": 54
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.code_file_hash operation reads the hash recorded for an indexed file. Only the project's current generation answers, so a file indexed under an older one reads back empty -- the same empty as a file nobody indexed. It is the code-index twin of organization.document_stored_hash, which does the same thing for documents and shares the same trap: a caller comparing hashes to decide whether a file changed sees an unchanged file as new across a generation bump."
+      },
       "signature": "int db2_code_file_hash ( const char * project , const char * file_path , char * out , int out_len )",
       "signature_sha256": "5575a54cd729d4473b90cea34c1d2b084cd6ac97a631191888d5fdb0785df9d8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_file_hash"
     },
     {
@@ -4396,9 +4420,15 @@
           "line": 86
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.file_modified_since operation asks whether a file needs re-indexing. Everything uncertain answers yes: a file nobody has indexed, a stamp that will not parse, a failed read. That is the safe direction -- re-indexing costs time where skipping costs correctness -- but it means a yes says nothing about the file, and a scan against a database it cannot reach re-indexes everything rather than failing."
+      },
       "signature": "int db2_code_index_file_modified_since ( int64_t project_id , const char * rel_path , time_t mtime )",
       "signature_sha256": "95eb58929fade658c93877844144069573035cc5deb5ab4df766a9c85b98ffa8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_file_modified_since"
     },
     {
@@ -4433,9 +4463,15 @@
           "line": 79
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.code_file_upsert operation records that a file exists in a project's current generation. The generation is taken from the project rather than supplied, so a project that is not current matches nothing and the insert writes no row -- answering zero, which is also what a failed write answers. Re-recording a file updates its scan stamp and keeps its identity, so the identifier is stable across scans."
+      },
       "signature": "int64_t db2_code_index_file_upsert ( int64_t project_id , const char * rel_path , const char * scanned_at )",
       "signature_sha256": "6ebf1ea6aad9f5abc9373ab6330e4b1daa453baadf6257e62f14e62a2d49939d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_file_upsert"
     },
     {
@@ -27516,15 +27552,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c0ef0cb68eb93cc54345c315bb5d40e4ab7a762c86e0b9b4f6e8015d56e38bce",
+  "fingerprint": "cdeb4c0df1504e96343b349c376740f3b65b998d9c056404789ef4db954f3f41",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 377,
+    "audit_pending": 371,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 582
+    "reviewed": 588
   }
 }

@@ -949,6 +949,12 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .artifact_target_surface = db2_artifact_target_surface,
        .agent_outcome_record = db2_agent_outcome_record,
        .artifact_reject = db2_artifact_reject,
+       .audit_event_write = db2_audit_event_write,
+       .audit_latest_before = db2_audit_read_latest_before,
+       .bandit_arm_stats_update = db2_bandit_arm_stats_update,
+       .code_file_hash = db2_code_file_hash,
+       .file_modified_since = db2_code_index_file_modified_since,
+       .code_file_upsert = db2_code_index_file_upsert,
    };
    return &backend;
 }
@@ -5572,6 +5578,90 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char project[AIMEE_DB2_CODE_FILE_HASH_PROJECT_MAX + 1] = "";
+         char file_path[AIMEE_DB2_CODE_FILE_HASH_FILE_PATH_MAX + 1] = "";
+         if (aimee_db2_code_file_hash_request_decode(request_body, request_len, project,
+                                                     sizeof(project), file_path,
+                                                     sizeof(file_path)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CODE_FILE_HASH_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->code_file_hash)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char file_hash[AIMEE_DB2_CODE_FILE_HASH_FILE_HASH_MAX + 1] = "";
+            (void)backend->code_file_hash(project, file_path, file_hash, (int)sizeof(file_hash));
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_code_file_hash_reply_encode(file_hash, response_body, response_capacity,
+                                                      response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t project_id = 0u;
+         char file_path[AIMEE_DB2_FILE_MODIFIED_SINCE_FILE_PATH_MAX + 1] = "";
+         uint64_t modified_since = 0u;
+         if (aimee_db2_file_modified_since_request_decode(request_body, request_len, &project_id,
+                                                          file_path, sizeof(file_path),
+                                                          &modified_since) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_FILE_MODIFIED_SINCE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->file_modified_since)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t modified = 0u;
+            modified = backend->file_modified_since((int64_t)project_id, file_path,
+                                                    (time_t)modified_since) != 0
+                           ? 1u
+                           : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_file_modified_since_reply_encode(modified, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t project_id = 0u;
+         char file_path[AIMEE_DB2_CODE_FILE_UPSERT_FILE_PATH_MAX + 1] = "";
+         char scanned_at[AIMEE_DB2_CODE_FILE_UPSERT_SCANNED_AT_MAX + 1] = "";
+         if (aimee_db2_code_file_upsert_request_decode(request_body, request_len, &project_id,
+                                                       file_path, sizeof(file_path), scanned_at,
+                                                       sizeof(scanned_at)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CODE_FILE_UPSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->code_file_upsert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t file_id = 0u;
+            {
+               int64_t written =
+                   backend->code_file_upsert((int64_t)project_id, file_path, scanned_at);
+               file_id = written < 0 ? 0u : (uint64_t)written;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_code_file_upsert_reply_encode(file_id, response_body, response_capacity,
+                                                        response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -7708,6 +7798,106 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_artifact_reject_reply_encode(acknowledged, response_body,
                                                        response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char audit_id[AIMEE_DB2_AUDIT_EVENT_WRITE_AUDIT_ID_MAX + 1] = "";
+         char source_artifact_id[AIMEE_DB2_AUDIT_EVENT_WRITE_SOURCE_ARTIFACT_ID_MAX + 1] = "";
+         char audit_target_surface[AIMEE_DB2_AUDIT_EVENT_WRITE_AUDIT_TARGET_SURFACE_MAX + 1] = "";
+         char audit_target_id[AIMEE_DB2_AUDIT_EVENT_WRITE_AUDIT_TARGET_ID_MAX + 1] = "";
+         char audit_operator_id[AIMEE_DB2_AUDIT_EVENT_WRITE_AUDIT_OPERATOR_ID_MAX + 1] = "";
+         char audit_scope_kind[AIMEE_DB2_AUDIT_EVENT_WRITE_AUDIT_SCOPE_KIND_MAX + 1] = "";
+         char audit_scope_id[AIMEE_DB2_AUDIT_EVENT_WRITE_AUDIT_SCOPE_ID_MAX + 1] = "";
+         double applied_confidence = 0.0;
+         uint32_t flagged_for_review = 0u;
+         char before_snapshot[AIMEE_DB2_AUDIT_EVENT_WRITE_BEFORE_SNAPSHOT_MAX + 1] = "";
+         char after_snapshot[AIMEE_DB2_AUDIT_EVENT_WRITE_AFTER_SNAPSHOT_MAX + 1] = "";
+         if (aimee_db2_audit_event_write_request_decode(
+                 request_body, request_len, audit_id, sizeof(audit_id), source_artifact_id,
+                 sizeof(source_artifact_id), audit_target_surface, sizeof(audit_target_surface),
+                 audit_target_id, sizeof(audit_target_id), audit_operator_id,
+                 sizeof(audit_operator_id), audit_scope_kind, sizeof(audit_scope_kind),
+                 audit_scope_id, sizeof(audit_scope_id), &applied_confidence, &flagged_for_review,
+                 before_snapshot, sizeof(before_snapshot), after_snapshot,
+                 sizeof(after_snapshot)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_AUDIT_EVENT_WRITE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->audit_event_write)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->audit_event_write(
+                    audit_id, source_artifact_id, audit_target_surface, audit_target_id,
+                    audit_operator_id, audit_scope_kind, audit_scope_id, applied_confidence,
+                    (int)flagged_for_review, before_snapshot, after_snapshot) == 0
+                    ? 1u
+                    : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_audit_event_write_reply_encode(acknowledged, response_body,
+                                                         response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char artifact_id[AIMEE_DB2_AUDIT_LATEST_BEFORE_ARTIFACT_ID_MAX + 1] = "";
+         if (aimee_db2_audit_latest_before_request_decode(request_body, request_len, artifact_id,
+                                                          sizeof(artifact_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_AUDIT_LATEST_BEFORE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->audit_latest_before)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char before_snapshot[AIMEE_DB2_AUDIT_LATEST_BEFORE_BEFORE_SNAPSHOT_MAX + 1] = "";
+            (void)backend->audit_latest_before(artifact_id, before_snapshot,
+                                               (int)sizeof(before_snapshot));
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_audit_latest_before_reply_encode(before_snapshot, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char decision_point[AIMEE_DB2_BANDIT_ARM_STATS_UPDATE_DECISION_POINT_MAX + 1] = "";
+         char arm_id[AIMEE_DB2_BANDIT_ARM_STATS_UPDATE_ARM_ID_MAX + 1] = "";
+         double reward_delta = 0.0;
+         double posterior_alpha = 0.0;
+         double posterior_beta = 0.0;
+         if (aimee_db2_bandit_arm_stats_update_request_decode(
+                 request_body, request_len, decision_point, sizeof(decision_point), arm_id,
+                 sizeof(arm_id), &reward_delta, &posterior_alpha, &posterior_beta) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_BANDIT_ARM_STATS_UPDATE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->bandit_arm_stats_update)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->bandit_arm_stats_update(decision_point, arm_id, reward_delta,
+                                                            posterior_alpha, posterior_beta) == 0
+                               ? 1u
+                               : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_bandit_arm_stats_update_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
