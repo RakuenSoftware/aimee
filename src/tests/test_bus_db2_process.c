@@ -3379,6 +3379,58 @@ int main(int argc, char **argv)
               &ontology_eval_count_occurrence_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(ontology_eval_count_eval_found == 0 && ontology_eval_count_occurrence_count == 0);
 
+   /* Memory provenance, an artifact attach that matches nothing, and a memory unit's metadata. */
+   uint32_t memory_provenance_by_id_provenance_result = 99;
+   static char
+       memory_provenance_by_id_memory_kind[AIMEE_DB2_MEMORY_PROVENANCE_BY_ID_MEMORY_KIND_MAX + 1];
+   memory_provenance_by_id_memory_kind[0] = 'x';
+   static char
+       memory_provenance_by_id_source_session[AIMEE_DB2_MEMORY_PROVENANCE_BY_ID_SOURCE_SESSION_MAX +
+                                              1];
+   memory_provenance_by_id_source_session[0] = 'x';
+   static char
+       memory_provenance_by_id_memory_version[AIMEE_DB2_MEMORY_PROVENANCE_BY_ID_MEMORY_VERSION_MAX +
+                                              1];
+   memory_provenance_by_id_memory_version[0] = 'x';
+   assert(aimee_db2_memory_provenance_by_id_call(
+              call_client, &client, 9471, 0, 4242, &memory_provenance_by_id_provenance_result,
+              memory_provenance_by_id_memory_kind, sizeof(memory_provenance_by_id_memory_kind),
+              memory_provenance_by_id_source_session,
+              sizeof(memory_provenance_by_id_source_session),
+              memory_provenance_by_id_memory_version,
+              sizeof(memory_provenance_by_id_memory_version), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_provenance_by_id_provenance_result == 0 &&
+          memory_provenance_by_id_memory_kind[0] == '\0' &&
+          memory_provenance_by_id_source_session[0] == '\0' &&
+          memory_provenance_by_id_memory_version[0] == '\0');
+
+   uint32_t memory_set_artifact_memory_changed = 99;
+   assert(aimee_db2_memory_set_artifact_call(
+              call_client, &client, 9472, 0, 4242, "note", "replay/artifact", "",
+              &memory_set_artifact_memory_changed, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Zero because no memory carries this identifier -- and this operation is one
+    * of the few that can say so, because its backend counts the rows the update
+    * matched. Every write in this replay that acknowledges a row it never found
+    * is one that does not. */
+   assert(memory_set_artifact_memory_changed == 0);
+
+   uint32_t memory_unit_active_meta_unit_found = 99;
+   double memory_unit_active_meta_unit_weight = 9.0;
+   static char
+       memory_unit_active_meta_unit_type[AIMEE_DB2_MEMORY_UNIT_ACTIVE_META_UNIT_TYPE_MAX + 1];
+   memory_unit_active_meta_unit_type[0] = 'x';
+   static char
+       memory_unit_active_meta_unit_kind[AIMEE_DB2_MEMORY_UNIT_ACTIVE_META_UNIT_KIND_MAX + 1];
+   memory_unit_active_meta_unit_kind[0] = 'x';
+   assert(aimee_db2_memory_unit_active_meta_call(
+              call_client, &client, 9473, 0, 4242, &memory_unit_active_meta_unit_found,
+              &memory_unit_active_meta_unit_weight, memory_unit_active_meta_unit_type,
+              sizeof(memory_unit_active_meta_unit_type), memory_unit_active_meta_unit_kind,
+              sizeof(memory_unit_active_meta_unit_kind), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_unit_active_meta_unit_found == 0 && memory_unit_active_meta_unit_weight == 0.0 &&
+          memory_unit_active_meta_unit_type[0] == '\0' &&
+          memory_unit_active_meta_unit_kind[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

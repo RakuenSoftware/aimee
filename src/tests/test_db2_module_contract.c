@@ -3439,6 +3439,42 @@ long db2_ontology_eval_count(const char *rel_type)
    return -1;
 }
 
+int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len, char *source_out,
+                                int source_len, char *version_out, int version_len)
+{
+   (void)memory_id;
+   if (kind_out && kind_len > 0)
+      kind_out[0] = '\0';
+   if (source_out && source_len > 0)
+      source_out[0] = '\0';
+   if (version_out && version_len > 0)
+      version_out[0] = '\0';
+   return -1;
+}
+
+int db2_memory_set_artifact(int64_t memory_id, const char *artifact_type, const char *artifact_ref,
+                            const char *artifact_hash)
+{
+   (void)memory_id;
+   (void)artifact_type;
+   (void)artifact_ref;
+   (void)artifact_hash;
+   return 0;
+}
+
+int db2_memory_unit_active_meta(int64_t unit_id, double *weight_out, char *unit_type_out,
+                                int unit_type_len, char *unit_kind_out, int unit_kind_len)
+{
+   (void)unit_id;
+   if (weight_out)
+      *weight_out = 0.0;
+   if (unit_type_out && unit_type_len > 0)
+      unit_type_out[0] = '\0';
+   if (unit_kind_out && unit_kind_len > 0)
+      unit_kind_out[0] = '\0';
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "adf8ca4996b2a04e3a6ccba816f3a188293f182770cbd127e9242887eb43c000"
+const ContractSHA256 = "797991f44fb07fd59c504ca431ca8643d770e1f5ddb2a03b7c3ce570376a9de2"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2666,6 +2666,180 @@ func DecodeOntologyEvalCountRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return relType, nil
+}
+
+const EventMemoryProvenanceByID = EventMemory
+const StageMemoryProvenanceByID = FamilyMemory
+const OperationMemoryProvenanceByID uint32 = 105
+const MemoryProvenanceByIDMemoryIDMin uint64 = 1
+const MemoryProvenanceByIDMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryProvenanceByIDRequest writes the schema memory_provenance_by_id declares, in order.
+func EncodeMemoryProvenanceByIDRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryProvenanceByIDMemoryIDMin || memoryID > MemoryProvenanceByIDMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryProvenanceByID, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryProvenanceByIDRequest reads it back, checking each field against its own bound.
+func DecodeMemoryProvenanceByIDRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryProvenanceByID || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryProvenanceByIDMemoryIDMin || memoryID > MemoryProvenanceByIDMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+const EventMemorySetArtifact = EventMemory
+const StageMemorySetArtifact = FamilyMemory
+const OperationMemorySetArtifact uint32 = 106
+const MemorySetArtifactMemoryIDMin uint64 = 1
+const MemorySetArtifactMemoryIDMax uint64 = 9223372036854775807
+const MemorySetArtifactArtifactTypeMin = 1
+const MemorySetArtifactArtifactTypeMax = 63
+const MemorySetArtifactArtifactRefMin = 1
+const MemorySetArtifactArtifactRefMax = 511
+const MemorySetArtifactArtifactHashMin = 0
+const MemorySetArtifactArtifactHashMax = 127
+
+// EncodeMemorySetArtifactRequest writes the schema memory_set_artifact declares, in order.
+func EncodeMemorySetArtifactRequest(memoryID uint64, artifactType string, artifactRef string, artifactHash string) ([]byte, error) {
+	if memoryID < MemorySetArtifactMemoryIDMin || memoryID > MemorySetArtifactMemoryIDMax ||
+		len(artifactType) < MemorySetArtifactArtifactTypeMin || len(artifactType) > MemorySetArtifactArtifactTypeMax || hasNUL(artifactType) ||
+		len(artifactRef) < MemorySetArtifactArtifactRefMin || len(artifactRef) > MemorySetArtifactArtifactRefMax || hasNUL(artifactRef) ||
+		len(artifactHash) < MemorySetArtifactArtifactHashMin || len(artifactHash) > MemorySetArtifactArtifactHashMax || hasNUL(artifactHash) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, artifactType, MemorySetArtifactArtifactTypeMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactRef, MemorySetArtifactArtifactRefMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactHash, MemorySetArtifactArtifactHashMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemorySetArtifact, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemorySetArtifactRequest reads it back, checking each field against its own bound.
+func DecodeMemorySetArtifactRequest(request []byte) (uint64, string, string, string, error) {
+	var memoryID uint64
+	var artifactType string
+	var artifactRef string
+	var artifactHash string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemorySetArtifact || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", "", ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemorySetArtifactMemoryIDMin || memoryID > MemorySetArtifactMemoryIDMax {
+		return 0, "", "", "", ErrMalformedEnvelope
+	}
+	if artifactType, err = takeRowText(payload, &cursor, MemorySetArtifactArtifactTypeMax); err != nil ||
+		len(artifactType) < MemorySetArtifactArtifactTypeMin {
+		return 0, "", "", "", ErrMalformedEnvelope
+	}
+	if artifactRef, err = takeRowText(payload, &cursor, MemorySetArtifactArtifactRefMax); err != nil ||
+		len(artifactRef) < MemorySetArtifactArtifactRefMin {
+		return 0, "", "", "", ErrMalformedEnvelope
+	}
+	if artifactHash, err = takeRowText(payload, &cursor, MemorySetArtifactArtifactHashMax); err != nil ||
+		len(artifactHash) < MemorySetArtifactArtifactHashMin {
+		return 0, "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", "", ErrMalformedEnvelope
+	}
+	return memoryID, artifactType, artifactRef, artifactHash, nil
+}
+
+const EventMemoryUnitActiveMeta = EventMemory
+const StageMemoryUnitActiveMeta = FamilyMemory
+const OperationMemoryUnitActiveMeta uint32 = 107
+const MemoryUnitActiveMetaUnitIDMin uint64 = 1
+const MemoryUnitActiveMetaUnitIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryUnitActiveMetaRequest writes the schema memory_unit_active_meta declares, in order.
+func EncodeMemoryUnitActiveMetaRequest(unitID uint64) ([]byte, error) {
+	if unitID < MemoryUnitActiveMetaUnitIDMin || unitID > MemoryUnitActiveMetaUnitIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var unitIDBytes [8]byte
+	binary.LittleEndian.PutUint64(unitIDBytes[:], unitID)
+	payload = append(payload, unitIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryUnitActiveMeta, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryUnitActiveMetaRequest reads it back, checking each field against its own bound.
+func DecodeMemoryUnitActiveMetaRequest(request []byte) (uint64, error) {
+	var unitID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryUnitActiveMeta || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	unitID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if unitID < MemoryUnitActiveMetaUnitIDMin || unitID > MemoryUnitActiveMetaUnitIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return unitID, nil
 }
 
 const EventEntityObservationCount = EventIndex

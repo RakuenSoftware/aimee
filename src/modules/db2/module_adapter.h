@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "memory_payload.h"
 #include "mining.h"
 #include "ontology_evolution.h"
 #include "prospective_memories.h"
@@ -544,6 +545,12 @@ typedef struct
    void (*prospective_counts)(int *armed_out, int *triggered_out, int *completed_out,
                               int *expired_out);
    long (*ontology_eval_count)(const char *rel_type);
+   int (*memory_provenance_by_id)(int64_t memory_id, char *kind_out, int kind_len, char *source_out,
+                                  int source_len, char *version_out, int version_len);
+   int (*memory_set_artifact)(int64_t memory_id, const char *artifact_type,
+                              const char *artifact_ref, const char *artifact_hash);
+   int (*memory_unit_active_meta)(int64_t unit_id, double *weight_out, char *unit_type_out,
+                                  int unit_type_len, char *unit_kind_out, int unit_kind_len);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

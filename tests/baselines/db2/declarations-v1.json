@@ -19399,9 +19399,15 @@
           "line": 47
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.provenance_by_id operation reads where a memory came from. What it calls a version is the memory's updated_at stamp, which has one-second resolution, so two writes inside the same second produce the same version and a caller watching for change sees none. The backend separates a memory that is not there from a read that failed, and the reply carries that three-way rather than folding it into an empty answer."
+      },
       "signature": "int db2_memory_provenance_by_id ( int64_t memory_id , char * kind_out , int kind_len , char * source_out , int source_len , char * version_out , int version_len )",
       "signature_sha256": "edcb650389616509161b39930010d9c2d5fe03e74a54063b625956ddce1975fb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_provenance_by_id"
     },
     {
@@ -20081,9 +20087,15 @@
           "line": 322
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.set_artifact operation attaches an artifact to a memory. Unlike most writes here it counts the rows its update matched, so a memory that does not exist is reported unchanged rather than acknowledged -- the reply means what it says. An empty hash is stored as a null rather than an empty string, so a caller reading the column back cannot use the same test for 'not sent' as for every other text column on the row."
+      },
       "signature": "int db2_memory_set_artifact ( int64_t memory_id , const char * artifact_type , const char * artifact_ref , const char * artifact_hash )",
       "signature_sha256": "e47b9d38a6c66c333fefd3e95c5e05eb9a43037666fb8c99d75bfb3e81769f93",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_set_artifact"
     },
     {
@@ -20385,9 +20397,15 @@
           "line": 651
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.unit_active_meta operation reads a memory unit's weight and kind. The unit is only visible while its memory sits in one of three tiers, so a unit that exists answers as absent once its memory moves out of them, and the reply cannot say which of the two happened. The three tiers are written into the statement rather than passed, so a caller cannot ask about a unit whose memory is anywhere else."
+      },
       "signature": "int db2_memory_unit_active_meta ( int64_t unit_id , double * weight_out , char * unit_type_out , int unit_type_len , char * unit_kind_out , int unit_kind_len )",
       "signature_sha256": "3340c6ca39b6dafbd02fa08e51b9ac525006656e88e454387679add1856aa3eb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_unit_active_meta"
     },
     {
@@ -27906,15 +27924,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "eb255811a7de6cd4bb1f8fb28152bf241de77a4a4621b852c2467db33f879f4e",
+  "fingerprint": "66636ef000b8058800028d11076d8acca5cb238dbc04cd66c7006e94e1186524",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 312,
+    "audit_pending": 309,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 647
+    "reviewed": 650
   }
 }

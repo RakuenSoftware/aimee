@@ -13552,6 +13552,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_ontology_eval_count",
         "policy": {"reads": 200},
     },
+    "memory_provenance_by_id": {
+        "key": ("memory", 105),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_provenance_by_id",
+        "policy": {"reads": 200},
+    },
+    "memory_set_artifact": {
+        "key": ("memory", 106),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_set_artifact",
+        "policy": {"writes": 200},
+    },
+    "memory_unit_active_meta": {
+        "key": ("memory", 107),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_unit_active_meta",
+        "policy": {"reads": 200},
+    },
 }
 
 

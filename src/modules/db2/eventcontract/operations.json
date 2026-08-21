@@ -6497,6 +6497,180 @@
       }
     },
     {
+      "family": "memory",
+      "id": 105,
+      "name": "memory_provenance_by_id",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory provenance columns are relational DB2 columns.",
+      "c_symbols": [
+        "db2_memory_provenance_by_id"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one row by identifier, with no scope"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "provenance_result",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2
+          },
+          {
+            "name": "memory_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "source_session",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "memory_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 106,
+      "name": "memory_set_artifact",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory artifact references are relational DB2 columns.",
+      "c_symbols": [
+        "db2_memory_set_artifact"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the reply counts the rows the update matched, so a memory that is not there is reported as unchanged"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "artifact_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "artifact_ref",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "artifact_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "memory_changed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 107,
+      "name": "memory_unit_active_meta",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory units and their tiers are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_unit_active_meta"
+      ],
+      "request": {
+        "policy": {
+          "reads": "only units whose memory sits in one of three tiers are visible, so a unit is found or not depending on its memory"
+        },
+        "fields": [
+          {
+            "name": "unit_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "unit_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "unit_weight",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          },
+          {
+            "name": "unit_type",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "unit_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
