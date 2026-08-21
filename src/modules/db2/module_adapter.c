@@ -1005,6 +1005,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kb_release_promote = db2_kb_release_promote,
        .kb_release_rollback = db2_kb_release_rollback,
        .proposal_archive = db2_learning_proposal_archive,
+       .lifecycle_get_state = db2_memory_lifecycle_get_state,
+       .lifecycle_counts = db2_memory_lifecycle_counts,
+       .lifecycle_mark_pending = db2_memory_lifecycle_mark_pending,
+       .lifecycle_update_state = db2_memory_lifecycle_update_state,
    };
    return &backend;
 }
@@ -3338,6 +3342,121 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_db2_directive_counts_by_state_reply_encode(
                     directives_open, directives_suppressed, directives_resolved, directives_expired,
                     response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         if (aimee_db2_lifecycle_get_state_request_decode(request_body, request_len, &memory_id) ==
+             0)
+         {
+            if (response_capacity < AIMEE_DB2_LIFECYCLE_GET_STATE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->lifecycle_get_state)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            char lifecycle_state[AIMEE_DB2_LIFECYCLE_GET_STATE_LIFECYCLE_STATE_MAX + 1] = "";
+            (void)backend->lifecycle_get_state((int64_t)memory_id, lifecycle_state,
+                                               sizeof(lifecycle_state));
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_lifecycle_get_state_reply_encode(lifecycle_state, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_lifecycle_counts_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_LIFECYCLE_COUNTS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->lifecycle_counts)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t memories_active = 0u;
+            uint64_t memories_pending = 0u;
+            uint64_t memories_fulfilled = 0u;
+            uint64_t memories_superseded = 0u;
+            uint64_t memories_archived = 0u;
+            {
+               db2_memory_lifecycle_counts_t counts;
+               memset(&counts, 0, sizeof(counts));
+               if (backend->lifecycle_counts(&counts) == 0)
+               {
+                  memories_active = counts.active > 0 ? (uint64_t)counts.active : 0u;
+                  memories_pending = counts.pending > 0 ? (uint64_t)counts.pending : 0u;
+                  memories_fulfilled = counts.fulfilled > 0 ? (uint64_t)counts.fulfilled : 0u;
+                  memories_superseded = counts.superseded > 0 ? (uint64_t)counts.superseded : 0u;
+                  memories_archived = counts.archived > 0 ? (uint64_t)counts.archived : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_lifecycle_counts_reply_encode(
+                    memories_active, memories_pending, memories_fulfilled, memories_superseded,
+                    memories_archived, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         uint32_t ttl_days = 0u;
+         if (aimee_db2_lifecycle_mark_pending_request_decode(request_body, request_len, &memory_id,
+                                                             &ttl_days) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_LIFECYCLE_MARK_PENDING_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->lifecycle_mark_pending)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->lifecycle_mark_pending((int64_t)memory_id, (int)ttl_days) == 0 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_lifecycle_mark_pending_reply_encode(acknowledged, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         char lifecycle_state[AIMEE_DB2_LIFECYCLE_UPDATE_STATE_LIFECYCLE_STATE_MAX + 1] = "";
+         char archive_reason[AIMEE_DB2_LIFECYCLE_UPDATE_STATE_ARCHIVE_REASON_MAX + 1] = "";
+         if (aimee_db2_lifecycle_update_state_request_decode(
+                 request_body, request_len, &memory_id, lifecycle_state, sizeof(lifecycle_state),
+                 archive_reason, sizeof(archive_reason)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_LIFECYCLE_UPDATE_STATE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->lifecycle_update_state)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->lifecycle_update_state((int64_t)memory_id, lifecycle_state,
+                                                           archive_reason) == 0
+                               ? 1u
+                               : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_lifecycle_update_state_reply_encode(acknowledged, response_body,
+                                                              response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

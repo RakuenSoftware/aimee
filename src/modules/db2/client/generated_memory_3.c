@@ -441,3 +441,121 @@ aimee_module_call_result_t aimee_db2_directive_counts_by_state_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_lifecycle_get_state_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint64_t memory_id, char *lifecycle_state,
+                                   size_t lifecycle_state_capacity,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIFECYCLE_GET_STATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIFECYCLE_GET_STATE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_lifecycle_get_state_request_encode(memory_id, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIFECYCLE_GET_STATE, AIMEE_DB2_STAGE_LIFECYCLE_GET_STATE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_lifecycle_get_state_reply_decode(response, response_len, lifecycle_state,
+                                                  lifecycle_state_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_lifecycle_counts_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, uint64_t *memories_active,
+                                uint64_t *memories_pending, uint64_t *memories_fulfilled,
+                                uint64_t *memories_superseded, uint64_t *memories_archived,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIFECYCLE_COUNTS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIFECYCLE_COUNTS_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_lifecycle_counts_request_encode(request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIFECYCLE_COUNTS, AIMEE_DB2_STAGE_LIFECYCLE_COUNTS,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_lifecycle_counts_reply_decode(response, response_len, memories_active,
+                                               memories_pending, memories_fulfilled,
+                                               memories_superseded, memories_archived) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_lifecycle_mark_pending_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                      uint64_t deadline_ns, uint64_t memory_id, uint32_t ttl_days,
+                                      uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+                                      void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIFECYCLE_MARK_PENDING_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIFECYCLE_MARK_PENDING_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_lifecycle_mark_pending_request_encode(memory_id, ttl_days, request,
+                                                       sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIFECYCLE_MARK_PENDING,
+            AIMEE_DB2_STAGE_LIFECYCLE_MARK_PENDING, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_lifecycle_mark_pending_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_lifecycle_update_state_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t memory_id, const char *lifecycle_state, const char *archive_reason,
+    uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LIFECYCLE_UPDATE_STATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LIFECYCLE_UPDATE_STATE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_lifecycle_update_state_request_encode(memory_id, lifecycle_state, archive_reason,
+                                                       request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LIFECYCLE_UPDATE_STATE,
+            AIMEE_DB2_STAGE_LIFECYCLE_UPDATE_STATE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_lifecycle_update_state_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

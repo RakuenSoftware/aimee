@@ -18223,9 +18223,15 @@
           "line": 77
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lifecycle_counts operation counts memories by lifecycle state. It names five states and drops every other group, so the five need not add up to the table. The empty state is one of the groups dropped, and memory.lifecycle_get_state answers that same empty column as active -- so a memory can be active to one operation and counted nowhere by the other. There is no scope: this is every memory the installation holds."
+      },
       "signature": "int db2_memory_lifecycle_counts ( db2_memory_lifecycle_counts_t * out )",
       "signature_sha256": "84d0cbe650292df9c1adfc7bcea7f5984231a33a0932343d7acfd81e2cc9fe45",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lifecycle_counts"
     },
     {
@@ -18238,9 +18244,15 @@
           "line": 61
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lifecycle_get_state operation reads one memory's lifecycle state. An empty column is answered as active, so a memory whose state was never written reads exactly like one that is active -- and memory.lifecycle_counts, which groups by the same column, counts that memory under no state at all. The two operations disagree about the same row. A memory that is not there and a read that failed are both an empty answer."
+      },
       "signature": "int db2_memory_lifecycle_get_state ( int64_t memory_id , char * out , size_t out_len )",
       "signature_sha256": "39201ba57c9323a5a0eba1b88741785a848d2a2ec0ed71833863543e7dfd14f2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lifecycle_get_state"
     },
     {
@@ -18299,9 +18311,15 @@
           "line": 70
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lifecycle_mark_pending operation marks a memory pending and gives it a deadline. The update names no current state, so an archived or superseded memory becomes pending again. Nothing checks that a row matched, so a memory identifier that names nothing is acknowledged. The day count is written into the statement text rather than bound -- it is an integer, so it cannot carry anything else, and the wire keeps it inside a century."
+      },
       "signature": "int db2_memory_lifecycle_mark_pending ( int64_t memory_id , int ttl_days )",
       "signature_sha256": "097028fd4e99b43e70c24715c33cda20a790e4cf77c8021a07873f1a2a3fe0ba",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lifecycle_mark_pending"
     },
     {
@@ -18336,9 +18354,15 @@
           "line": 66
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lifecycle_update_state operation moves a memory to a lifecycle state. The state is stored as sent and nothing checks it against a vocabulary, so a misspelling becomes a state that memory.lifecycle_counts counts nowhere and memory.lifecycle_get_state reports back unchanged. Entering superseded or archived closes the memory's event-time interval, but only when it is still open, so a caller who knew the real end date keeps it. The update names no current state."
+      },
       "signature": "int db2_memory_lifecycle_update_state ( int64_t memory_id , const char * new_state , const char * archive_reason )",
       "signature_sha256": "0de703391a1e478b4cafbcac514f9b76a1f36c14af09a0a05580716bbf72670c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lifecycle_update_state"
     },
     {
@@ -27816,15 +27840,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "11849b26fcba11b27236a5089b66bbc3f637a6e47c00c8f7f94f7690e5f75bf5",
+  "fingerprint": "d91a928a4678a6bfd38c211f56e39b3f0f27e2a7d2e00e7155999b1d0b72773f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 327,
+    "audit_pending": 323,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 632
+    "reviewed": 636
   }
 }

@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "memory_lifecycle.h"
 #include "kb_releases.h"
 #include "db2_learning.h"
 #include "feedback.h"
@@ -521,6 +522,11 @@ typedef struct
    int (*kb_release_promote)(int64_t id);
    int (*kb_release_rollback)(int64_t target_id);
    int (*proposal_archive)(int id, const char *reason);
+   int (*lifecycle_get_state)(int64_t memory_id, char *out, size_t out_len);
+   int (*lifecycle_counts)(db2_memory_lifecycle_counts_t *out);
+   int (*lifecycle_mark_pending)(int64_t memory_id, int ttl_days);
+   int (*lifecycle_update_state)(int64_t memory_id, const char *new_state,
+                                 const char *archive_reason);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

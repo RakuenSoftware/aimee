@@ -5872,6 +5872,201 @@
       }
     },
     {
+      "family": "memory",
+      "id": 92,
+      "name": "lifecycle_get_state",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory lifecycle state is a relational DB2 column.",
+      "c_symbols": [
+        "db2_memory_lifecycle_get_state"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty state column is answered as active, so a memory with no state reads as one that has it"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "lifecycle_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 93,
+      "name": "lifecycle_counts",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory lifecycle state is a relational DB2 column.",
+      "c_symbols": [
+        "db2_memory_lifecycle_counts"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one grouped count over every memory, with no scope and no filter"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "memories_active",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "memories_pending",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "memories_fulfilled",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "memories_superseded",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "memories_archived",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 94,
+      "name": "lifecycle_mark_pending",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory lifecycle state is a relational DB2 column.",
+      "c_symbols": [
+        "db2_memory_lifecycle_mark_pending"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the update names no current state, so a memory in any state is marked pending"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "ttl_days",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 36500
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 95,
+      "name": "lifecycle_update_state",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory lifecycle state is a relational DB2 column.",
+      "c_symbols": [
+        "db2_memory_lifecycle_update_state"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the state is whatever the caller sends, and the vocabulary is not checked against anything"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "lifecycle_state",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "archive_reason",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

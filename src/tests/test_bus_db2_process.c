@@ -3193,6 +3193,48 @@ int main(int argc, char **argv)
                                           NULL) == AIMEE_MODULE_CALL_OK);
    assert(proposal_archive_acknowledged == 1);
 
+   /* Memory lifecycle: counts, a pending mark and a state move against a memory that does not
+    * exist. */
+   uint64_t lifecycle_counts_memories_active = 99;
+   uint64_t lifecycle_counts_memories_pending = 99;
+   uint64_t lifecycle_counts_memories_fulfilled = 99;
+   uint64_t lifecycle_counts_memories_superseded = 99;
+   uint64_t lifecycle_counts_memories_archived = 99;
+   assert(aimee_db2_lifecycle_counts_call(
+              call_client, &client, 9455, 0, &lifecycle_counts_memories_active,
+              &lifecycle_counts_memories_pending, &lifecycle_counts_memories_fulfilled,
+              &lifecycle_counts_memories_superseded, &lifecycle_counts_memories_archived, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(lifecycle_counts_memories_active == 0 && lifecycle_counts_memories_pending == 0 &&
+          lifecycle_counts_memories_fulfilled == 0 && lifecycle_counts_memories_superseded == 0 &&
+          lifecycle_counts_memories_archived == 0);
+
+   uint32_t lifecycle_mark_pending_acknowledged = 99;
+   assert(aimee_db2_lifecycle_mark_pending_call(call_client, &client, 9456, 0, 4242, 7,
+                                                &lifecycle_mark_pending_acknowledged, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   /* No memory carries this identifier. The update names no current state and
+    * checks no row matched, so it is acknowledged. */
+   assert(lifecycle_mark_pending_acknowledged == 1);
+
+   uint32_t lifecycle_update_state_acknowledged = 99;
+   assert(aimee_db2_lifecycle_update_state_call(
+              call_client, &client, 9457, 0, 4242, "a-state-nothing-defines", "replayed",
+              &lifecycle_update_state_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Acknowledged too, and the state sent is not one the schema knows -- nothing
+    * checks it against a vocabulary. Had a memory been there, that state would
+    * be stored, read back unchanged by memory.lifecycle_get_state, and counted
+    * under nothing by memory.lifecycle_counts. */
+   assert(lifecycle_update_state_acknowledged == 1);
+
+   static char
+       lifecycle_get_state_lifecycle_state[AIMEE_DB2_LIFECYCLE_GET_STATE_LIFECYCLE_STATE_MAX + 1];
+   lifecycle_get_state_lifecycle_state[0] = 'x';
+   assert(aimee_db2_lifecycle_get_state_call(
+              call_client, &client, 9458, 0, 4242, lifecycle_get_state_lifecycle_state,
+              sizeof(lifecycle_get_state_lifecycle_state), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(lifecycle_get_state_lifecycle_state[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

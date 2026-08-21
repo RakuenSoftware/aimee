@@ -13462,6 +13462,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_learning_proposal_archive",
         "policy": {"writes": 200},
     },
+    "lifecycle_get_state": {
+        "key": ("memory", 92),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lifecycle_get_state",
+        "policy": {"reads": 200},
+    },
+    "lifecycle_counts": {
+        "key": ("memory", 93),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lifecycle_counts",
+        "policy": {"reads": 200},
+    },
+    "lifecycle_mark_pending": {
+        "key": ("memory", 94),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lifecycle_mark_pending",
+        "policy": {"writes": 200},
+    },
+    "lifecycle_update_state": {
+        "key": ("memory", 95),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lifecycle_update_state",
+        "policy": {"writes": 200},
+    },
 }
 
 

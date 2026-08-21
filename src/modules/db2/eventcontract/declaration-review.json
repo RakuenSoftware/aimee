@@ -3524,12 +3524,44 @@
       "reason": "The typed memory.l2_fact_decision_pairs operation finds facts and decisions that mention each other. Like memory.l2_cross_key_pairs it is a self-join with a substring comparison, so its cost is the product of the two sets and no index helps -- but the two draw from different tiers, so a fact and a decision at the same tier are never paired. Both sides need a confidence above a half."
     },
     {
+      "symbol": "db2_memory_lifecycle_counts",
+      "signature_sha256": "84d0cbe650292df9c1adfc7bcea7f5984231a33a0932343d7acfd81e2cc9fe45",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_counts operation counts memories by lifecycle state. It names five states and drops every other group, so the five need not add up to the table. The empty state is one of the groups dropped, and memory.lifecycle_get_state answers that same empty column as active -- so a memory can be active to one operation and counted nowhere by the other. There is no scope: this is every memory the installation holds."
+    },
+    {
+      "symbol": "db2_memory_lifecycle_get_state",
+      "signature_sha256": "39201ba57c9323a5a0eba1b88741785a848d2a2ec0ed71833863543e7dfd14f2",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_get_state operation reads one memory's lifecycle state. An empty column is answered as active, so a memory whose state was never written reads exactly like one that is active -- and memory.lifecycle_counts, which groups by the same column, counts that memory under no state at all. The two operations disagree about the same row. A memory that is not there and a read that failed are both an empty answer."
+    },
+    {
+      "symbol": "db2_memory_lifecycle_mark_pending",
+      "signature_sha256": "097028fd4e99b43e70c24715c33cda20a790e4cf77c8021a07873f1a2a3fe0ba",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_mark_pending operation marks a memory pending and gives it a deadline. The update names no current state, so an archived or superseded memory becomes pending again. Nothing checks that a row matched, so a memory identifier that names nothing is acknowledged. The day count is written into the statement text rather than bound -- it is an integer, so it cannot carry anything else, and the wire keeps it inside a century."
+    },
+    {
       "symbol": "db2_memory_lifecycle_sweep_expired",
       "signature_sha256": "a376eab483cc4e760da1f31e68d1358cb1d233584830b790ef1a162eefd4fa4b",
       "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.lifecycle_sweep_expired operation replaces the pending time-to-live archival pass; the source state, target state, and archive reason stay fixed policy behind the handler so no caller can archive a different set of rows."
+    },
+    {
+      "symbol": "db2_memory_lifecycle_update_state",
+      "signature_sha256": "0de703391a1e478b4cafbcac514f9b76a1f36c14af09a0a05580716bbf72670c",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_update_state operation moves a memory to a lifecycle state. The state is stored as sent and nothing checks it against a vocabulary, so a misspelling becomes a state that memory.lifecycle_counts counts nowhere and memory.lifecycle_get_state reports back unchanged. Entering superseded or archived closes the memory's event-time interval, but only when it is still open, so a caller who knew the real end date keeps it. The update names no current state."
     },
     {
       "symbol": "db2_memory_link_create",

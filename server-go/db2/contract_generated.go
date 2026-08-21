@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "85a924fe18c054767ed7b3fd69ecf45b2eab9716cd3eb1ac8e076faadfdb86db"
+const ContractSHA256 = "19a18c4d6e01e26770514377f3ee3df0ef0b399c8623ae253232c305b3f0c01d"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2033,6 +2033,215 @@ func DecodeDirectiveCountsByStateRequest(request []byte) (error) {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+const EventLifecycleGetState = EventMemory
+const StageLifecycleGetState = FamilyMemory
+const OperationLifecycleGetState uint32 = 92
+const LifecycleGetStateMemoryIDMin uint64 = 1
+const LifecycleGetStateMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeLifecycleGetStateRequest writes the schema lifecycle_get_state declares, in order.
+func EncodeLifecycleGetStateRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < LifecycleGetStateMemoryIDMin || memoryID > LifecycleGetStateMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationLifecycleGetState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLifecycleGetStateRequest reads it back, checking each field against its own bound.
+func DecodeLifecycleGetStateRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleGetState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < LifecycleGetStateMemoryIDMin || memoryID > LifecycleGetStateMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+const EventLifecycleCounts = EventMemory
+const StageLifecycleCounts = FamilyMemory
+const OperationLifecycleCounts uint32 = 93
+
+
+// EncodeLifecycleCountsRequest writes the schema lifecycle_counts declares, in order.
+func EncodeLifecycleCountsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationLifecycleCounts, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLifecycleCountsRequest reads it back, checking each field against its own bound.
+func DecodeLifecycleCountsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleCounts || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventLifecycleMarkPending = EventMemory
+const StageLifecycleMarkPending = FamilyMemory
+const OperationLifecycleMarkPending uint32 = 94
+const LifecycleMarkPendingMemoryIDMin uint64 = 1
+const LifecycleMarkPendingMemoryIDMax uint64 = 9223372036854775807
+const LifecycleMarkPendingTtlDaysMin uint32 = 1
+const LifecycleMarkPendingTtlDaysMax uint32 = 36500
+
+// EncodeLifecycleMarkPendingRequest writes the schema lifecycle_mark_pending declares, in order.
+func EncodeLifecycleMarkPendingRequest(memoryID uint64, ttlDays uint32) ([]byte, error) {
+	if memoryID < LifecycleMarkPendingMemoryIDMin || memoryID > LifecycleMarkPendingMemoryIDMax ||
+		ttlDays < LifecycleMarkPendingTtlDaysMin || ttlDays > LifecycleMarkPendingTtlDaysMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	var ttlDaysBytes [4]byte
+	binary.LittleEndian.PutUint32(ttlDaysBytes[:], ttlDays)
+	payload = append(payload, ttlDaysBytes[:]...)
+	header, err := EncodeRequestHeader(OperationLifecycleMarkPending, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLifecycleMarkPendingRequest reads it back, checking each field against its own bound.
+func DecodeLifecycleMarkPendingRequest(request []byte) (uint64, uint32, error) {
+	var memoryID uint64
+	var ttlDays uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleMarkPending || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < LifecycleMarkPendingMemoryIDMin || memoryID > LifecycleMarkPendingMemoryIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	ttlDays = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if ttlDays < LifecycleMarkPendingTtlDaysMin || ttlDays > LifecycleMarkPendingTtlDaysMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return memoryID, ttlDays, nil
+}
+
+const EventLifecycleUpdateState = EventMemory
+const StageLifecycleUpdateState = FamilyMemory
+const OperationLifecycleUpdateState uint32 = 95
+const LifecycleUpdateStateMemoryIDMin uint64 = 1
+const LifecycleUpdateStateMemoryIDMax uint64 = 9223372036854775807
+const LifecycleUpdateStateLifecycleStateMin = 1
+const LifecycleUpdateStateLifecycleStateMax = 31
+const LifecycleUpdateStateArchiveReasonMin = 0
+const LifecycleUpdateStateArchiveReasonMax = 511
+
+// EncodeLifecycleUpdateStateRequest writes the schema lifecycle_update_state declares, in order.
+func EncodeLifecycleUpdateStateRequest(memoryID uint64, lifecycleState string, archiveReason string) ([]byte, error) {
+	if memoryID < LifecycleUpdateStateMemoryIDMin || memoryID > LifecycleUpdateStateMemoryIDMax ||
+		len(lifecycleState) < LifecycleUpdateStateLifecycleStateMin || len(lifecycleState) > LifecycleUpdateStateLifecycleStateMax || hasNUL(lifecycleState) ||
+		len(archiveReason) < LifecycleUpdateStateArchiveReasonMin || len(archiveReason) > LifecycleUpdateStateArchiveReasonMax || hasNUL(archiveReason) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, lifecycleState, LifecycleUpdateStateLifecycleStateMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, archiveReason, LifecycleUpdateStateArchiveReasonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationLifecycleUpdateState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLifecycleUpdateStateRequest reads it back, checking each field against its own bound.
+func DecodeLifecycleUpdateStateRequest(request []byte) (uint64, string, string, error) {
+	var memoryID uint64
+	var lifecycleState string
+	var archiveReason string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleUpdateState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < LifecycleUpdateStateMemoryIDMin || memoryID > LifecycleUpdateStateMemoryIDMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if lifecycleState, err = takeRowText(payload, &cursor, LifecycleUpdateStateLifecycleStateMax); err != nil ||
+		len(lifecycleState) < LifecycleUpdateStateLifecycleStateMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if archiveReason, err = takeRowText(payload, &cursor, LifecycleUpdateStateArchiveReasonMax); err != nil ||
+		len(archiveReason) < LifecycleUpdateStateArchiveReasonMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return memoryID, lifecycleState, archiveReason, nil
 }
 
 const EventEntityObservationCount = EventIndex

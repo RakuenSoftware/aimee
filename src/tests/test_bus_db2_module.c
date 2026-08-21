@@ -2998,6 +2998,37 @@ int db2_learning_proposal_archive(int id, const char *reason)
    return -1;
 }
 
+int db2_memory_lifecycle_get_state(int64_t memory_id, char *out, size_t out_len)
+{
+   (void)memory_id;
+   if (out && out_len)
+      out[0] = '\0';
+   return -1;
+}
+
+int db2_memory_lifecycle_counts(db2_memory_lifecycle_counts_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_memory_lifecycle_mark_pending(int64_t memory_id, int ttl_days)
+{
+   (void)memory_id;
+   (void)ttl_days;
+   return -1;
+}
+
+int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
+                                      const char *archive_reason)
+{
+   (void)memory_id;
+   (void)new_state;
+   (void)archive_reason;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;
