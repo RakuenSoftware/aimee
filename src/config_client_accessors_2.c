@@ -878,7 +878,8 @@ size_t config_db2_vector_corpus_index_copy(char *out, size_t n)
 const char *config_workspace_vcs_remote(int index)
 {
    static _Thread_local char value[512];
-   (void)config_client_read_indexed_string("workspace_vcs_remote", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("workspace_vcs_remote", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 

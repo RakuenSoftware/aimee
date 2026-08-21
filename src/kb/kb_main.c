@@ -613,9 +613,8 @@ static int kb_bootstrap_db2_resolve(cJSON *resp)
 
    cJSON_AddStringToObject(resp, "status", "error");
    cJSON_AddBoolToObject(resp, "knowledge_ready", 0);
-   cJSON_AddStringToObject(
-       resp, "message",
-       "DB2 bootstrap failed; install/start Postgres or set AIMEE_DB2_URL");
+   cJSON_AddStringToObject(resp, "message",
+                           "DB2 bootstrap failed; install/start Postgres or set AIMEE_DB2_URL");
    cJSON_AddStringToObject(
        resp, "remediation",
        "Install PostgreSQL, start the service, then run: createdb " AIMEE_DB2_BOOTSTRAP_DB
@@ -2310,8 +2309,7 @@ int main(int argc, char **argv)
       return 1;
    }
    char kb_http_bearer[4096] = "";
-   (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", kb_http_bearer,
-                            sizeof(kb_http_bearer));
+   (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", kb_http_bearer, sizeof(kb_http_bearer));
    int kb_http_start_rc = kb_http_start(http_port, kb_http_bearer);
    runtime_secret_wipe(kb_http_bearer, sizeof(kb_http_bearer));
    if (kb_http_start_rc != 0)

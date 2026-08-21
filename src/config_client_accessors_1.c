@@ -878,14 +878,16 @@ size_t config_aux_default_model_copy(char *out, size_t n)
 const char *config_workspace_providers(int index)
 {
    static _Thread_local char value[16];
-   (void)config_client_read_indexed_string("workspace_providers", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("workspace_providers", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 
 const char *config_identity_working_profile_injection_fields(int index)
 {
    static _Thread_local char value[CONFIG_WORKING_PROFILE_FIELD_LEN];
-   (void)config_client_read_indexed_string("identity_working_profile_injection_fields", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("identity_working_profile_injection_fields", index, NULL,
+                                           value, sizeof(value));
    return value;
 }
 

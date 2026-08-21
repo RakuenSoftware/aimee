@@ -899,7 +899,8 @@ const char *config_mcp_client_url(int index)
 const char *config_cron_job_context_from(int index)
 {
    static _Thread_local char value[CRON_JOB_MAX_CONTEXT_FROM];
-   (void)config_client_read_indexed_string("cron_jobs", index, "context_from", value, sizeof(value));
+   (void)config_client_read_indexed_string("cron_jobs", index, "context_from", value,
+                                           sizeof(value));
    return value;
 }
 

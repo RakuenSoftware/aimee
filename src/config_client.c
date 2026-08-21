@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CONFIG_CLIENT_MAX_BODY (16u * 1024u * 1024u)
+#define CONFIG_CLIENT_MAX_BODY   (16u * 1024u * 1024u)
 #define CONFIG_CLIENT_TIMEOUT_MS 5000
 
 static pthread_mutex_t g_config_client_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -19,9 +19,10 @@ static _Thread_local char g_config_client_error[160];
 
 /* Narrow transport seam used by contract tests. Production resolves this weak
  * default, which is the existing generic JSON event-bus caller. */
-__attribute__((weak)) cJSON *config_client_transport_call(
-    uint32_t event_kind, uint32_t stage_id, cJSON *request, size_t max_body, int timeout_ms,
-    aimee_module_call_result_t *result)
+__attribute__((weak)) cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id,
+                                                          cJSON *request, size_t max_body,
+                                                          int timeout_ms,
+                                                          aimee_module_call_result_t *result)
 {
    return aimee_module_json_call(event_kind, stage_id, request, max_body, timeout_ms, result);
 }
@@ -30,12 +31,18 @@ static const char *config_client_result_name(aimee_module_call_result_t result)
 {
    switch (result)
    {
-   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT: return "config module unavailable";
-   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED: return "config module timeout";
-   case AIMEE_MODULE_CALL_CANCELLED: return "config module call cancelled";
-   case AIMEE_MODULE_CALL_INVALID_REQUEST: return "config module rejected request";
-   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE: return "config module response too large";
-   default: return "config module transport failure";
+   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT:
+      return "config module unavailable";
+   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED:
+      return "config module timeout";
+   case AIMEE_MODULE_CALL_CANCELLED:
+      return "config module call cancelled";
+   case AIMEE_MODULE_CALL_INVALID_REQUEST:
+      return "config module rejected request";
+   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE:
+      return "config module response too large";
+   default:
+      return "config module transport failure";
    }
 }
 
@@ -90,9 +97,9 @@ static int config_client_fetch_locked(void)
       return -1;
    }
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID,
-                                                  request, CONFIG_CLIENT_MAX_BODY,
-                                                  CONFIG_CLIENT_TIMEOUT_MS, &result);
+   cJSON *response =
+       config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
+                                    CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);
    if (!response)
    {
       config_client_error(config_client_result_name(result));
@@ -104,7 +111,8 @@ static int config_client_fetch_locked(void)
    if (!cJSON_IsTrue(ok) || !cJSON_IsObject(values))
    {
       cJSON *message = cJSON_GetObjectItemCaseSensitive(response, "error");
-      config_client_error(cJSON_IsString(message) ? message->valuestring : "malformed config reply");
+      config_client_error(cJSON_IsString(message) ? message->valuestring
+                                                  : "malformed config reply");
       cJSON_Delete(response);
       return -1;
    }
@@ -134,9 +142,9 @@ int config_client_changed(void)
       return -1;
    }
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID,
-                                                  request, CONFIG_CLIENT_MAX_BODY,
-                                                  CONFIG_CLIENT_TIMEOUT_MS, &result);
+   cJSON *response =
+       config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
+                                    CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);
    if (!response)
    {
       config_client_error(config_client_result_name(result));
@@ -270,8 +278,8 @@ cJSON *config_client_value_copy(const char *key)
 cJSON *config_client_snapshot_copy(void)
 {
    pthread_mutex_lock(&g_config_client_lock);
-   cJSON *copy = config_client_ensure_locked() == 0 ? cJSON_Duplicate(g_config_client_values, 1)
-                                                    : NULL;
+   cJSON *copy =
+       config_client_ensure_locked() == 0 ? cJSON_Duplicate(g_config_client_values, 1) : NULL;
    pthread_mutex_unlock(&g_config_client_lock);
    return copy;
 }
@@ -293,9 +301,9 @@ int config_client_set_value(const char *key, cJSON *value)
    }
    cJSON_AddItemToObject(request, "value", value);
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID,
-                                                  request, CONFIG_CLIENT_MAX_BODY,
-                                                  CONFIG_CLIENT_TIMEOUT_MS, &result);
+   cJSON *response =
+       config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
+                                    CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);
    if (!response)
    {
       config_client_error(config_client_result_name(result));
@@ -305,7 +313,8 @@ int config_client_set_value(const char *key, cJSON *value)
    if (rc != 0)
    {
       cJSON *message = cJSON_GetObjectItemCaseSensitive(response, "error");
-      config_client_error(cJSON_IsString(message) ? message->valuestring : "config mutation failed");
+      config_client_error(cJSON_IsString(message) ? message->valuestring
+                                                  : "config mutation failed");
    }
    cJSON_Delete(response);
    if (rc == 0)
@@ -340,9 +349,9 @@ int config_client_operation(const char *operation, cJSON *value)
    if (value)
       cJSON_AddItemToObject(request, "value", value);
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID,
-                                                  request, CONFIG_CLIENT_MAX_BODY,
-                                                  CONFIG_CLIENT_TIMEOUT_MS, &result);
+   cJSON *response =
+       config_client_transport_call(AIMEE_CONFIG_EVENT_KIND, AIMEE_CONFIG_STAGE_ID, request,
+                                    CONFIG_CLIENT_MAX_BODY, CONFIG_CLIENT_TIMEOUT_MS, &result);
    if (!response)
    {
       config_client_error(config_client_result_name(result));
@@ -353,9 +362,10 @@ int config_client_operation(const char *operation, cJSON *value)
    {
       cJSON *code = cJSON_GetObjectItemCaseSensitive(response, "code");
       cJSON *message = cJSON_GetObjectItemCaseSensitive(response, "error");
-      config_client_error(cJSON_IsString(message) ? message->valuestring : "config mutation failed");
-      if (cJSON_IsString(code) && (!strcmp(code->valuestring, "exists") ||
-                                   !strcmp(code->valuestring, "not_found")))
+      config_client_error(cJSON_IsString(message) ? message->valuestring
+                                                  : "config mutation failed");
+      if (cJSON_IsString(code) &&
+          (!strcmp(code->valuestring, "exists") || !strcmp(code->valuestring, "not_found")))
          rc = -2;
       else if (cJSON_IsString(code) && !strcmp(code->valuestring, "full"))
          rc = -3;

@@ -75,7 +75,8 @@ static int config_source_path(char *out, size_t n)
    if (base && base[0])
       return snprintf(out, n, "%s/aimee.yaml", base) > 0 ? 0 : -1;
    base = getenv("HOME");
-   return base && base[0] && snprintf(out, n, "%s/.config/aimee/aimee.yaml", base) > 0 ? 0 : -1;
+   static const char default_suffix[] = ".config/aimee/aimee.yaml";
+   return base && base[0] && snprintf(out, n, "%s/%s", base, default_suffix) > 0 ? 0 : -1;
 }
 
 static int source_stat_equal(const struct stat *a, const struct stat *b)
@@ -96,14 +97,14 @@ static int refresh_owned_snapshot(void)
    const char *process_home = getenv("HOME");
    char path[sizeof(g_source_path)];
    struct stat current;
-   if (!module || !module[0] || strchr(module, '\'') ||
-       config_source_path(path, sizeof(path)) != 0)
+   if (!module || !module[0] || strchr(module, '\'') || config_source_path(path, sizeof(path)) != 0)
       return 0;
    /* Never let an unrelated unit test read the developer's real config merely
     * because it toggled the historical no-cache switch. Fixture tests point
     * AIMEE_HOME/HOME at a private temporary tree (or set AIMEE_CONFIG_PATH). */
    if (!getenv("AIMEE_CONFIG_PATH") && host_home && host_home[0] &&
-       (!configured_home || !configured_home[0]) && process_home && !strcmp(process_home, host_home))
+       (!configured_home || !configured_home[0]) && process_home &&
+       !strcmp(process_home, host_home))
       return 0;
    int exists = stat(path, &current) == 0;
    uint64_t current_hash = exists ? source_hash(path) : 0;
@@ -276,12 +277,12 @@ static int mutate_workspace(cJSON *request, int remove)
    {
       index = cJSON_GetArraySize(paths);
       cJSON_AddItemToArray(paths, cJSON_CreateString(path));
-      set_array_string(providers, index, cJSON_GetStringValue(
-                                             cJSON_GetObjectItemCaseSensitive(change, "provider")));
-      set_array_string(remotes, index, cJSON_GetStringValue(
-                                           cJSON_GetObjectItemCaseSensitive(change, "remote")));
-      set_array_string(heads, index, cJSON_GetStringValue(
-                                         cJSON_GetObjectItemCaseSensitive(change, "head")));
+      set_array_string(providers, index,
+                       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(change, "provider")));
+      set_array_string(remotes, index,
+                       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(change, "remote")));
+      set_array_string(heads, index,
+                       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(change, "head")));
    }
    replace_value("workspace_count", cJSON_CreateNumber(cJSON_GetArraySize(paths)));
    return 0;
@@ -318,15 +319,12 @@ static int mutate_roundtable_preset(cJSON *request)
                  {"converge_threshold", "roundtable_converge_threshold"},
                  {"deadline_ms", "roundtable_deadline_ms"},
                  {"pipeline_max_passes", "roundtable_pipeline_max_passes"},
-                 {"pipeline_max_attempts_per_pass",
-                  "roundtable_pipeline_max_attempts_per_pass"},
+                 {"pipeline_max_attempts_per_pass", "roundtable_pipeline_max_attempts_per_pass"},
                  {"pipeline_max_cost_usd", "roundtable_pipeline_max_cost_usd"},
                  {"pipeline_max_total_cost_usd", "roundtable_pipeline_max_total_cost_usd"},
                  {"pipeline_gate_ttl_h", "roundtable_pipeline_gate_ttl_h"},
-                 {"pipeline_parked_releases_slot",
-                  "roundtable_pipeline_parked_releases_slot"},
-                 {"pipeline_unknown_context_tokens",
-                  "roundtable_pipeline_unknown_context_tokens"},
+                 {"pipeline_parked_releases_slot", "roundtable_pipeline_parked_releases_slot"},
+                 {"pipeline_unknown_context_tokens", "roundtable_pipeline_unknown_context_tokens"},
                  {"turns", "roundtable_turns"},
                  {"pipeline_done_bar", "roundtable_pipeline_done_bar"}};
    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
@@ -416,8 +414,8 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
    load_defaults();
    int refresh_rc = refresh_owned_snapshot();
    cJSON *response = cJSON_CreateObject();
-   const char *operation = cJSON_GetStringValue(
-       cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    if (refresh_rc != 0)
    {
       cJSON_AddBoolToObject(response, "ok", 0);
@@ -428,13 +426,13 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
       cJSON_AddBoolToObject(response, "ok", 1);
       cJSON_AddItemToObject(response, "values", cJSON_Duplicate(g_values, 1));
       cJSON_AddStringToObject(response, "version",
-                             "0000000000000000000000000000000000000000000000000000000000000000");
+                              "0000000000000000000000000000000000000000000000000000000000000000");
    }
    else if (operation && !strcmp(operation, "version"))
    {
       cJSON_AddBoolToObject(response, "ok", 1);
       cJSON_AddStringToObject(response, "version",
-                             "0000000000000000000000000000000000000000000000000000000000000000");
+                              "0000000000000000000000000000000000000000000000000000000000000000");
    }
    else if (operation && !strcmp(operation, "value"))
    {
@@ -465,8 +463,8 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
       }
       cJSON_AddBoolToObject(response, "ok", key[0] && value);
    }
-   else if (operation && (!strcmp(operation, "workspace-add") ||
-                          !strcmp(operation, "workspace-remove")))
+   else if (operation &&
+            (!strcmp(operation, "workspace-add") || !strcmp(operation, "workspace-remove")))
    {
       int rc = mutate_workspace(request, !strcmp(operation, "workspace-remove"));
       if (rc == 0)
@@ -474,8 +472,10 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
       cJSON_AddBoolToObject(response, "ok", rc == 0);
       if (rc)
       {
-         cJSON_AddStringToObject(response, "code", rc == -2 ? "not_found" :
-                                                   rc == -3 ? "exists" : "invalid");
+         cJSON_AddStringToObject(response, "code",
+                                 rc == -2   ? "not_found"
+                                 : rc == -3 ? "exists"
+                                            : "invalid");
          cJSON_AddStringToObject(response, "error", "workspace mutation failed");
       }
    }
@@ -509,15 +509,17 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
          cJSON_AddStringToObject(response, "error", "model concurrency mutation failed");
       }
    }
-   else if (operation && (!strcmp(operation, "profile-create") ||
-                          !strcmp(operation, "profile-present")))
+   else if (operation &&
+            (!strcmp(operation, "profile-create") || !strcmp(operation, "profile-present")))
    {
       int rc = mutate_profile(request, !strcmp(operation, "profile-create"));
       cJSON_AddBoolToObject(response, "ok", rc == 0);
       if (rc)
       {
-         cJSON_AddStringToObject(response, "code", rc == -2 ? "not_found" :
-                                                   rc == -3 ? "full" : "invalid");
+         cJSON_AddStringToObject(response, "code",
+                                 rc == -2   ? "not_found"
+                                 : rc == -3 ? "full"
+                                            : "invalid");
          cJSON_AddStringToObject(response, "error", "profile config operation failed");
       }
    }

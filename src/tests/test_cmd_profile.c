@@ -16,7 +16,10 @@ static cJSON *profile_operation(const char *operation, const cJSON *value)
 {
    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "name"));
    cJSON *response = cJSON_CreateObject();
-   cJSON_AddBoolToObject(response, "ok", 1);
+   /* Production /v1 envelopes report status:"ok". Keep this test on the real
+    * wire shape so a client cannot accidentally accept only an in-process
+    * boolean test-double convention. */
+   cJSON_AddStringToObject(response, "status", "ok");
    if (!strcmp(operation, "profile-create") && name && !strcmp(name, "coder"))
       g_profile_created = 1;
    if (!strcmp(operation, "profile-present"))

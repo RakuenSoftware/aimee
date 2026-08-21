@@ -1973,8 +1973,7 @@ static void test_config_secret_redaction_and_vault_write(void)
    assert(ctx != NULL && conn != NULL);
    conn->capabilities = CAP_SESSION_ADMIN;
 
-   assert(vault_runtime_secret_set("AIMEE_KB_API_BEARER_TOKEN",
-                                   "never-echo-config-secret") == 0);
+   assert(vault_runtime_secret_set("AIMEE_KB_API_BEARER_TOKEN", "never-echo-config-secret") == 0);
    config_secret_writer_set(test_config_secret_store);
    g_config_secret_store_calls = 0;
    g_config_secret_store_configured = 0;

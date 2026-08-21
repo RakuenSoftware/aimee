@@ -44,9 +44,8 @@ static int bootstrap_db2(int json_output)
    if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       if (!json_output)
-         fprintf(stderr,
-                 "Note: AIMEE_DB2_URL is not available from the runtime secret store; "
-                 "the project/workspace knowledge tier is disabled.\n");
+         fprintf(stderr, "Note: AIMEE_DB2_URL is not available from the runtime secret store; "
+                         "the project/workspace knowledge tier is disabled.\n");
       return 0;
    }
 
@@ -80,17 +79,16 @@ static int bootstrap_db2(int json_output)
     * the cause; otherwise the failure is connect/auth/database-missing.
     * Surface a generic remediation that covers the common cases. */
    if (!json_output)
-      fprintf(stderr,
-              "DB2 init failed.\n"
-              "Common fixes:\n"
-              "  - Ensure the postgres server is running and reachable from this host.\n"
-              "  - Ensure the role and database in db2_url exist:\n"
-              "      CREATE ROLE aimee LOGIN PASSWORD '...';\n"
-              "      CREATE DATABASE aimee OWNER aimee;\n"
-              "  - Connect as a privileged role and install the trigram extension:\n"
-              "      \\c aimee\n"
-              "      CREATE EXTENSION pg_trgm;\n"
-              "  - Re-run `aimee init` once the above succeeds.\n");
+      fprintf(stderr, "DB2 init failed.\n"
+                      "Common fixes:\n"
+                      "  - Ensure the postgres server is running and reachable from this host.\n"
+                      "  - Ensure the role and database in db2_url exist:\n"
+                      "      CREATE ROLE aimee LOGIN PASSWORD '...';\n"
+                      "      CREATE DATABASE aimee OWNER aimee;\n"
+                      "  - Connect as a privileged role and install the trigram extension:\n"
+                      "      \\c aimee\n"
+                      "      CREATE EXTENSION pg_trgm;\n"
+                      "  - Re-run `aimee init` once the above succeeds.\n");
    runtime_secret_wipe(db2_url, sizeof(db2_url));
    return -1;
 }

@@ -8,7 +8,7 @@
 #include "config.h"
 #include "config_client.h"
 #include "config_database.h" /* config_emit_deploy_env_current */
-#include "json_fluent.h" /* jo_ok */
+#include "json_fluent.h"     /* jo_ok */
 #include "server.h"
 #include "server_http.h"
 #include "server_http_identity.h"
@@ -122,8 +122,7 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *operation = jo_str(req, "operation", "");
    if (operation && operation[0])
    {
-      if (strcmp(operation, "profile-create") != 0 &&
-          strcmp(operation, "profile-present") != 0)
+      if (strcmp(operation, "profile-create") != 0 && strcmp(operation, "profile-present") != 0)
          return server_send_error(conn, "config: unsupported structured operation", NULL);
       cJSON *value = cJSON_GetObjectItemCaseSensitive(req, "value");
       if (!cJSON_IsObject(value))
@@ -200,7 +199,8 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "config: invalid value for key", NULL);
 
    /* Push the change into the live snapshot NOW so it takes effect immediately for every
-    * legacy_config_read reader, instead of waiting for an mtime-cache miss (live-config-reload P1b). */
+    * legacy_config_read reader, instead of waiting for an mtime-cache miss (live-config-reload
+    * P1b). */
    (void)config_reload();
 
    cJSON *resp = jo_ok();

@@ -183,21 +183,17 @@ static void publish_cfg(void)
       cJSON *client = cJSON_CreateObject();
       cJSON_AddStringToObject(client, "name", cfg.mcp_clients[i].name);
       cJSON_AddStringToObject(client, "transport",
-                             cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_STDIO
-                                 ? "stdio"
-                                 : cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_SSE
-                                       ? "sse"
-                                       : "");
-      cJSON_AddStringToObject(client, "install",
-                             cfg.mcp_clients[i].install == CONFIG_MCP_INSTALL_KB ? "kb"
-                                                                                : "server");
+                              cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_STDIO ? "stdio"
+                              : cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_SSE ? "sse"
+                                                                                         : "");
+      cJSON_AddStringToObject(
+          client, "install", cfg.mcp_clients[i].install == CONFIG_MCP_INSTALL_KB ? "kb" : "server");
       cJSON *command = cJSON_AddArrayToObject(client, "command");
       for (int j = 0; j < cfg.mcp_clients[i].command_count; j++)
          cJSON_AddItemToArray(command, cJSON_CreateString(cfg.mcp_clients[i].command[j]));
       cJSON_AddStringToObject(client, "cwd", cfg.mcp_clients[i].cwd);
       cJSON_AddStringToObject(client, "url", cfg.mcp_clients[i].url);
-      cJSON_AddStringToObject(client, "bearer_token_env",
-                             cfg.mcp_clients[i].bearer_token_env);
+      cJSON_AddStringToObject(client, "bearer_token_env", cfg.mcp_clients[i].bearer_token_env);
       cJSON_AddItemToArray(clients, client);
    }
    assert(config_client_set_value("mcp_clients", clients) == 0);

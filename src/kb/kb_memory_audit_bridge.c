@@ -10,8 +10,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "aimee.h"   /* prerequisites for memory.h (KIND_*, legacy_config_record, ...) */
-#include "memory.h"  /* memory_set_audit_hook */
+#include "aimee.h"  /* prerequisites for memory.h (KIND_*, legacy_config_record, ...) */
+#include "memory.h" /* memory_set_audit_hook */
 #include <aimee/audit/obs_bus.h> /* obs_bus_emit, obs_bus_key_fingerprint */
 
 /* memory_audit_hook_fn: publish one memory-mutation audit row over the KB's bus

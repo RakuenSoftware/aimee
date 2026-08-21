@@ -11,7 +11,7 @@
 
 #include <stddef.h>
 
-#include "config.h"               /* legacy_config_record */
+#include "config.h"                /* legacy_config_record */
 #include "kb/kb_graph_analytics.h" /* kb_graph_surprising_t */
 
 typedef struct

@@ -20,8 +20,8 @@ void client_config_set_provider(cJSON *(*provider)(const char *key))
    g_provider = provider;
 }
 
-void client_config_set_operation_provider(
-    cJSON *(*provider)(const char *operation, const cJSON *value))
+void client_config_set_operation_provider(cJSON *(*provider)(const char *operation,
+                                                             const cJSON *value))
 {
    g_operation_provider = provider;
 }
@@ -64,8 +64,12 @@ static cJSON *client_config_operation_response(const char *operation, cJSON *val
 int client_config_operation(const char *operation, cJSON *value)
 {
    cJSON *response = client_config_operation_response(operation, value);
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(response, "status");
    int rc = cJSON_IsObject(response) &&
-            cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "ok")) ? 0 : -1;
+                    (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "ok")) ||
+                     (cJSON_IsString(status) && !strcmp(status->valuestring, "ok")))
+                ? 0
+                : -1;
    cJSON_Delete(response);
    return rc;
 }
@@ -134,8 +138,7 @@ int client_config_int(const char *key, int fallback)
    return result;
 }
 
-int client_config_string(const char *key, char *out, unsigned long out_size,
-                         const char *fallback)
+int client_config_string(const char *key, char *out, unsigned long out_size, const char *fallback)
 {
    if (!out || out_size == 0)
       return -1;

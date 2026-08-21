@@ -109,8 +109,7 @@ int roundtable_preset_apply_to_config(const char *name, char *err, size_t errn);
  * "default" exists, and -1 when an explicitly named/configured preset is
  * missing. `resolved` receives the acquired name when provided. */
 int roundtable_preset_resolve_runtime(const char *requested, ensemble_panel_t *panel,
-                                      char *resolved,
-                                      size_t resolved_n, char *err, size_t err_n);
+                                      char *resolved, size_t resolved_n, char *err, size_t err_n);
 
 /* Synthesize a preset named `name` from the live legacy_config_record (ensemble_* and roundtable_*)
  * into *out. Used to materialize an implicit "current" preset when the store is

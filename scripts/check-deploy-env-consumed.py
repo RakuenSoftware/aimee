@@ -323,12 +323,15 @@ def plant_test(root: Path) -> int:
     bogus = "AIMEE_DEPLOY_ENV_PLANTED_KEY"
     assert bogus not in keys
     text = (root / EMITTER).read_text(encoding="utf-8")
-    planted = text.replace(
-        'EMITF("COMPOSE_PROFILES=%s\\n", profiles);',
-        'EMITF("COMPOSE_PROFILES=%s\\n", profiles);\n   EMITF("'
-        + bogus
-        + '=%s\\n", "x");',
-        1,
+    # Plant beside the first emitter call instead of coupling the proof to a
+    # particular deploy key. The external module now owns the set and ordering
+    # of emitted keys, so a key-specific anchor would make this check fail when
+    # that perfectly valid implementation detail changes.
+    planted = re.sub(
+        r'(\bEMITF\([^;]+;)',
+        r'\1\n   EMITF("' + bogus + r'=%s\\n", "x");',
+        text,
+        count=1,
     )
     if planted == text:
         print("check-deploy-env-consumed plant: could not plant a key", file=sys.stderr)

@@ -61,12 +61,13 @@
 
 /* Max additional bearers (beyond the primary) a deployment may accept at once. */
 /* Capacity of the ensemble reference arrays. Exported as a named constant so a
- * consumer can check its own limit against config's WITHOUT naming the configuration implementation:
- * delegate_ensemble.c used to assert on sizeof(((the configuration implementation *)0)->...), which made
- * the struct's layout part of its interface just to catch dimension drift. */
+ * consumer can check its own limit against config's WITHOUT naming the configuration
+ * implementation: delegate_ensemble.c used to assert on sizeof(((the configuration implementation
+ * *)0)->...), which made the struct's layout part of its interface just to catch dimension drift.
+ */
 #define CONFIG_ENSEMBLE_MAX_REFS 32
 
-#define AIMEE_API_BEARER_EXTRA_MAX 7
+#define AIMEE_API_BEARER_EXTRA_MAX        7
 #define CONFIG_DEFAULT_STALE_SESSION_SECS 14400
 
 typedef struct
@@ -289,7 +290,6 @@ typedef struct
  * + pgvector). See docs/STORAGE_TIERS.md. (The vector tier was folded
  * into DB2 as pgvector in #1575.) */
 #define CONFIG_DB2_URL_LEN 512
-
 
 #define CONFIG_LSP_MAX_SERVERS    8
 #define CONFIG_LSP_MAX_ARGS       16

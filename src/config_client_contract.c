@@ -199,8 +199,8 @@ int config_module_enabled(int config_tristate, int env_default)
 int config_module_roundtable_enabled(void)
 {
    const char *env = getenv("AIMEE_MODULE_ROUNDTABLE");
-   int fallback = env && (!strcasecmp(env, "1") || !strcasecmp(env, "true") ||
-                         !strcasecmp(env, "on"));
+   int fallback =
+       env && (!strcasecmp(env, "1") || !strcasecmp(env, "true") || !strcasecmp(env, "on"));
    return config_module_enabled(config_module_roundtable(), fallback);
 }
 
@@ -255,10 +255,14 @@ const char *guardrails_semantic_mode_name(int mode)
 {
    switch (mode)
    {
-   case GSEM_MODE_DRY_RUN: return "dry_run";
-   case GSEM_MODE_ADVISORY: return "advisory";
-   case GSEM_MODE_ENFORCE: return "enforce";
-   default: return "off";
+   case GSEM_MODE_DRY_RUN:
+      return "dry_run";
+   case GSEM_MODE_ADVISORY:
+      return "advisory";
+   case GSEM_MODE_ENFORCE:
+      return "enforce";
+   default:
+      return "off";
    }
 }
 
@@ -615,9 +619,8 @@ int config_mcp_client_at(int index, config_mcp_client_t *out)
    if (cJSON_IsString(transport_value))
       transport = transport_value->valuestring;
    out->transport = !strcmp(transport, "stdio") ? CONFIG_MCP_TRANSPORT_STDIO
-                                                : !strcmp(transport, "sse")
-                                                      ? CONFIG_MCP_TRANSPORT_SSE
-                                                      : CONFIG_MCP_TRANSPORT_NONE;
+                    : !strcmp(transport, "sse") ? CONFIG_MCP_TRANSPORT_SSE
+                                                : CONFIG_MCP_TRANSPORT_NONE;
    cJSON *install = cJSON_GetObjectItemCaseSensitive(row, "install");
    out->install = cJSON_IsString(install) && !strcmp(install->valuestring, "kb")
                       ? CONFIG_MCP_INSTALL_KB
@@ -659,10 +662,14 @@ const char *config_disposition_source_name(config_disposition_source_t source)
 {
    switch (source)
    {
-   case CONFIG_DISPOSITION_SOURCE_GLOBAL: return "global";
-   case CONFIG_DISPOSITION_SOURCE_WORKSPACE: return "workspace";
-   case CONFIG_DISPOSITION_SOURCE_PROJECT: return "project";
-   default: return "none";
+   case CONFIG_DISPOSITION_SOURCE_GLOBAL:
+      return "global";
+   case CONFIG_DISPOSITION_SOURCE_WORKSPACE:
+      return "workspace";
+   case CONFIG_DISPOSITION_SOURCE_PROJECT:
+      return "project";
+   default:
+      return "none";
    }
 }
 
@@ -722,14 +729,22 @@ int config_secret_store(const char *name, const char *value)
 
 static aimee_mode_t mode_parse(const char *s)
 {
-   if (s && !strcasecmp(s, "novel")) return AIMEE_MODE_NOVEL;
-   if (s && !strcasecmp(s, "songwriter")) return AIMEE_MODE_SONGWRITER;
-   if (s && !strcasecmp(s, "qa")) return AIMEE_MODE_QA;
-   if (s && !strcasecmp(s, "security")) return AIMEE_MODE_SECURITY;
-   if (s && !strcasecmp(s, "reviewer")) return AIMEE_MODE_REVIEWER;
-   if (s && !strcasecmp(s, "architect")) return AIMEE_MODE_ARCHITECT;
-   if (s && !strcasecmp(s, "reviewer-constructive")) return AIMEE_MODE_REVIEWER_CONSTRUCTIVE;
-   if (s && !strcasecmp(s, "technical-writer")) return AIMEE_MODE_TECH_WRITER;
+   if (s && !strcasecmp(s, "novel"))
+      return AIMEE_MODE_NOVEL;
+   if (s && !strcasecmp(s, "songwriter"))
+      return AIMEE_MODE_SONGWRITER;
+   if (s && !strcasecmp(s, "qa"))
+      return AIMEE_MODE_QA;
+   if (s && !strcasecmp(s, "security"))
+      return AIMEE_MODE_SECURITY;
+   if (s && !strcasecmp(s, "reviewer"))
+      return AIMEE_MODE_REVIEWER;
+   if (s && !strcasecmp(s, "architect"))
+      return AIMEE_MODE_ARCHITECT;
+   if (s && !strcasecmp(s, "reviewer-constructive"))
+      return AIMEE_MODE_REVIEWER_CONSTRUCTIVE;
+   if (s && !strcasecmp(s, "technical-writer"))
+      return AIMEE_MODE_TECH_WRITER;
    return AIMEE_MODE_ENGINEER;
 }
 
@@ -882,10 +897,9 @@ void config_emit_deploy_env_current(char *buf, size_t n)
       return;
    }
 
-   const char *kb_variant = embedder_url[0]
-                                ? ""
-                                : (!strcmp(embedder_model, "nomic-embed-text-v2-moe") ? "nomic"
-                                                                                       : "a25m");
+   const char *kb_variant =
+       embedder_url[0] ? ""
+                       : (!strcmp(embedder_model, "nomic-embed-text-v2-moe") ? "nomic" : "a25m");
    EMITF("AIMEE_KB_VARIANT=%s\n", kb_variant);
    if (embedder_model[0])
       EMITF("EMBEDDER_MODEL=%s\n", embedder_model);
@@ -916,7 +930,11 @@ static double config_number_or_zero(const char *key)
    return value;
 }
 
-#define CONFIG_FLAG(name, key) int name(void) { return (int)config_number_or_zero(key); }
+#define CONFIG_FLAG(name, key)                                                                     \
+   int name(void)                                                                                  \
+   {                                                                                               \
+      return (int)config_number_or_zero(key);                                                      \
+   }
 CONFIG_FLAG(config_audit_worm_enabled, "audit_worm_enabled")
 CONFIG_FLAG(config_bandit_live_decision_enabled, "bandit_live_decision_enabled")
 CONFIG_FLAG(config_css_style_graph_enabled, "css_style_graph_enabled")

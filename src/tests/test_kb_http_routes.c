@@ -1412,7 +1412,10 @@ double config_code_hybrid_rrf_k(void)
    return 60.0;
 }
 
-int config_code_trust_actuation_enabled(void) { return 0; }
+int config_code_trust_actuation_enabled(void)
+{
+   return 0;
+}
 
 int config_kb_curator_extract_docs_enabled(void)
 {
@@ -3050,8 +3053,7 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "503 Service Unavailable") &&
           strstr(resp, "service bearer authority is not configured"));
    assert(!strstr(resp, "\"status\":\"ok\""));
-   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
-                               g_stub_kb_api_bearer_token) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
                     "Authorization: Bearer wrong-token\r\nConnection: close\r\n\r\n",
@@ -3405,8 +3407,7 @@ static void test_mtls_listener(void)
 
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
-   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
-                               g_stub_kb_api_bearer_token) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);

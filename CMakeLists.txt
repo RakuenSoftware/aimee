@@ -1510,13 +1510,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 endif()
 
-# Native config callers use the same generic JSON-over-event-bus transport as
-# every other external Go module.  Keep that dependency explicit in CMake just
-# as it is in the Make build; the event bus itself remains Linux-only.
-if(TARGET aimee-core AND TARGET aimee-core-event-bus)
-    target_link_libraries(aimee-core PUBLIC aimee-core-event-bus)
-endif()
-
 add_executable(aimee
     ${CLI_SRCS}
     ${CLIENT_SUPPORT_SRCS}

@@ -878,28 +878,32 @@ size_t config_roundtable_turns_copy(char *out, size_t n)
 const char *config_workspace_sandbox_image(int index)
 {
    static _Thread_local char value[256];
-   (void)config_client_read_indexed_string("workspace_sandbox_image", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("workspace_sandbox_image", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 
 const char *config_computer_use_allowed_domains(int index)
 {
    static _Thread_local char value[128];
-   (void)config_client_read_indexed_string("computer_use_allowed_domains", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("computer_use_allowed_domains", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 
 const char *config_mcp_client_bearer_token_env(int index)
 {
    static _Thread_local char value[128];
-   (void)config_client_read_indexed_string("mcp_clients", index, "bearer_token_env", value, sizeof(value));
+   (void)config_client_read_indexed_string("mcp_clients", index, "bearer_token_env", value,
+                                           sizeof(value));
    return value;
 }
 
 const char *config_cron_job_when_context_contains(int index)
 {
    static _Thread_local char value[CRON_JOB_MAX_WHEN_CONTEXT];
-   (void)config_client_read_indexed_string("cron_jobs", index, "when_context_contains", value, sizeof(value));
+   (void)config_client_read_indexed_string("cron_jobs", index, "when_context_contains", value,
+                                           sizeof(value));
    return value;
 }
 

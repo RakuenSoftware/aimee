@@ -1,5 +1,5 @@
-github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260821221708-e6da1e5a067f h1:D8MD/F3z3RLAytLrx2W5HwywHir9aNu/IIzgCO02YQY=
-github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260821221708-e6da1e5a067f/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260821231506-b1bef8dd036f h1:we4d3WyKQar2kvucswQyN7felZhGN6Y4pt+9gEVQ7hU=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260821231506-b1bef8dd036f/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

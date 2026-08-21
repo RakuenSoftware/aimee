@@ -483,12 +483,18 @@ def _config_metadata():
         module_dir = Path(override)
     else:
         result = subprocess.run(
-            ["go", "list", "-m", "-f", "{{.Dir}}",
+            ["go", "list", "-mod=mod", "-m", "-f", "{{.Dir}}",
              "github.com/RakuenSoftware/aimee-module-config"],
             cwd=ROOT / "server-go", check=True, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        module_dir = Path(result.stdout.strip())
+        resolved = result.stdout.strip()
+        if not resolved:
+            raise SystemExit(
+                "gen-reference-docs: pinned config module was not downloaded "
+                "and go list returned no module directory"
+            )
+        module_dir = Path(resolved)
     metadata_path = module_dir / "server-go" / "modules" / "config" / "metadata.json"
     try:
         _CONFIG_METADATA = json.loads(metadata_path.read_text(encoding="utf-8"))

@@ -193,8 +193,7 @@ void memory_alias_join_tokens(char *buf, size_t buf_len, char tokens[][64], int 
 void memory_coref_audit_record(int64_t memory_id, const char *session_id, const char *outcome,
                                const char *entity, const char *mode, double confidence);
 int memory_coref_has_pronoun(const char *content);
-int memory_coref_llm_resolve(int64_t memory_id, const char *content,
-                             const char *session_buf);
+int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char *session_buf);
 const char *memory_coref_mode_effective(void);
 int memory_coref_window_effective(void);
 void memory_entity_insert(int64_t memory_id, const char *entity, const char *role, double weight);

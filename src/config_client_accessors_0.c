@@ -885,7 +885,8 @@ const char *config_workspaces(int index)
 const char *config_charter_tone_boundaries(int index)
 {
    static _Thread_local char value[CONFIG_CHARTER_ENTRY_LEN];
-   (void)config_client_read_indexed_string("charter_tone_boundaries", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("charter_tone_boundaries", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 

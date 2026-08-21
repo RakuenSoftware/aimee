@@ -34,7 +34,7 @@ static void tpm2_set_err(char *errbuf, size_t errlen, const char *msg)
  * ════════════════════════════════════════════════════════════════════════════ */
 #ifdef WITH_TPM2
 
-#include "config.h"        /* legacy_config_read, config_default_dir, CONFIG_DEFAULT_VAULT_TPM2_TCTI */
+#include "config.h" /* legacy_config_read, config_default_dir, CONFIG_DEFAULT_VAULT_TPM2_TCTI */
 #include "platform_path.h" /* platform_mkdir_p */
 #include "vault_crypto.h"  /* vault_kek_derive, VAULT_ROOT_KEY_LEN, VAULT_SALT_LEN */
 #include <errno.h>
@@ -306,9 +306,9 @@ static int ensure_ready(tpm2_ctx_t *ctx)
    config_vault_tpm2_nv_index_copy(cfg_nv_index, sizeof(cfg_nv_index));
 
    const char *env_tcti = getenv("AIMEE_VAULT_TPM2_TCTI");
-   const char *tcti = (env_tcti && env_tcti[0])        ? env_tcti
-                      : (cfg_tcti[0] != 0)              ? cfg_tcti
-                                                       : CONFIG_DEFAULT_VAULT_TPM2_TCTI;
+   const char *tcti = (env_tcti && env_tcti[0]) ? env_tcti
+                      : (cfg_tcti[0] != 0)      ? cfg_tcti
+                                                : CONFIG_DEFAULT_VAULT_TPM2_TCTI;
    snprintf(ctx->tcti_conf, sizeof(ctx->tcti_conf), "%s", tcti);
 
    const char *env_blob = getenv("AIMEE_VAULT_TPM2_BLOB_PATH");
@@ -330,9 +330,9 @@ static int ensure_ready(tpm2_ctx_t *ctx)
     * else vault.tpm2.nv_index, else the compiled default. Parsed base-0 so both hex
     * (0x01500001) and decimal round-trip; a bad/zero value fails closed. */
    const char *env_nv = getenv("AIMEE_VAULT_TPM2_NV_INDEX");
-   const char *nvs = (env_nv && env_nv[0])                ? env_nv
-                     : (cfg_nv_index[0] != 0)              ? cfg_nv_index
-                                                          : CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX;
+   const char *nvs = (env_nv && env_nv[0])    ? env_nv
+                     : (cfg_nv_index[0] != 0) ? cfg_nv_index
+                                              : CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX;
    char *nv_end = NULL;
    unsigned long nv_val = strtoul(nvs, &nv_end, 0);
    if (!nv_end || *nv_end != '\0' || nv_val == 0 || nv_val > 0xFFFFFFFFUL)

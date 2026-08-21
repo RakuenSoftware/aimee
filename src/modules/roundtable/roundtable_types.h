@@ -118,15 +118,15 @@ typedef struct
    int deadline_hit;
    int cancelled;
    int best_round;
-   int participants_total;           /* reference models per round (panel size) */
-   int participants_failed;          /* unusable responses in the adopted best round */
+   int participants_total;  /* reference models per round (panel size) */
+   int participants_failed; /* unusable responses in the adopted best round */
    /* Failures in the adopted best round's required prefix. This is always <=
     * participants_failed; degraded remains run-level and sticky across rounds. */
    int participants_required_failed;
-   int participants_tool_used; /* adopted review round: seats with >=1 Aimee tool call */
-   int participant_tool_calls; /* adopted review round: total Aimee tool calls */
+   int participants_tool_used;            /* adopted review round: seats with >=1 Aimee tool call */
+   int participant_tool_calls;            /* adopted review round: total Aimee tool calls */
    int participant_successful_tool_calls; /* adopted review round: non-error results */
-   int evidence_coverage_incomplete; /* evidence gate was on but a responding seat used none */
+   int evidence_coverage_incomplete;      /* evidence gate was on but a responding seat used none */
    double cost_usd;
    /* Explicit assessment of whether the reviewed direction still serves the
     * originating request. `unclear` is fail-closed for workflow gates: a panel

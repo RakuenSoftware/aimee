@@ -44,11 +44,10 @@ const char *session_id(void)
    unsigned char random[16];
    if (platform_random_bytes(random, sizeof(random)) != 0)
       memset(random, 0, sizeof(random));
-   snprintf(id, sizeof(id),
-            "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-            random[0], random[1], random[2], random[3], random[4], random[5], random[6],
-            random[7], random[8], random[9], random[10], random[11], random[12], random[13],
-            random[14], random[15]);
+   snprintf(id, sizeof(id), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            random[0], random[1], random[2], random[3], random[4], random[5], random[6], random[7],
+            random[8], random[9], random[10], random[11], random[12], random[13], random[14],
+            random[15]);
    if (ppid > 1)
    {
       (void)platform_mkdir_p(config_default_dir(), 0700);

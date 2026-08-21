@@ -75,8 +75,13 @@ check() {
 }
 
 # --- build ----------------------------------------------------------------
-bold "==> Building aimee client + server + kb"
-make -C src ../aimee ../aimee-server ../aimee-kb >/dev/null
+bold "==> Building aimee client + server + kb + required modules"
+make -C src ../aimee ../aimee-server ../aimee-kb \
+  build/obj/aimee-module-db1 build/obj/aimee-module-config \
+  build/obj/aimee-module >/dev/null
+cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
+python3 scripts/export_c_repositories.py \
+  --runtime-bundle src/build/obj/module-bundle >/dev/null
 
 # --- scratch home ---------------------------------------------------------
 SCRATCH="$(mktemp -d)"
@@ -88,11 +93,13 @@ mkdir -p "$AIMEE_HOME/.config/aimee"
 # bearer is injected only into the server's first-boot process below.
 sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/" \
     deploy/container/aimee-server.yaml > "$AIMEE_HOME/aimee.yaml"
-# kb config: the baked container config points sidecar commands at the in-image
-# /opt/aimee/scripts/ path; for a NATIVE local run rewrite them to the repo's
-# scripts/ so the kb can actually popen embed-remote.py etc.
+# The config provider owns one document for this installation. Append the kb's
+# disjoint sections to that document rather than putting a second file at the
+# retired in-process loader path. Both daemons read the same document through
+# their own config-module connection.
 sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
-    deploy/container/aimee.yaml > "$AIMEE_HOME/.config/aimee/aimee.yaml"
+    deploy/container/aimee.yaml >> "$AIMEE_HOME/aimee.yaml"
+chmod 0600 "$AIMEE_HOME/aimee.yaml"
 # Optional: point memory embedding at a REAL small embedder so the semantic
 # vector path is actually exercised (see scripts/test-embedder-qwen.sh, which
 # serves Qwen3-Embedding-0.6B at 1024-d). Without this the kb falls back to the
@@ -100,9 +107,8 @@ sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
 # URL is used directly (aimee POSTs raw text to {url}/embed).
 if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${EMBEDDER_DIMS:-unset})"
-  # The SERVER forwards its own embedding_command to the kb on memory.store /
-  # memory search (server/server_api.c); the kb also reads its own for direct
-  # embedding. Set it in BOTH configs (replace an existing line, else append).
+  # The server forwards embedding_command to the kb on memory.store / memory
+  # search, and the kb reads the same installation document for direct embedding.
   set_embed_cmd() {  # $1 = config file
     if grep -qE '^embedding_command:' "$1"; then
       sed -i "s#^embedding_command:.*#embedding_command: \"${AIMEE_E2E_EMBEDDER_URL}\"#" "$1"
@@ -111,7 +117,6 @@ if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
     fi
   }
   set_embed_cmd "$AIMEE_HOME/aimee.yaml"                     # server config
-  set_embed_cmd "$AIMEE_HOME/.config/aimee/aimee.yaml"      # kb config
   [[ -n "${EMBEDDER_DIMS:-}" ]] && export EMBEDDER_DIMS
 fi
 export AIMEE_SERVER_HTTP_BIND=1
@@ -119,8 +124,56 @@ export AIMEE_DEPLOY_ENABLED=1
 export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
+DB1_MODULE="$REPO/src/build/obj/aimee-module-db1"
+CONFIG_MODULE="$REPO/src/build/obj/aimee-module-config"
+POSTGRES_MODULE="$REPO/src/build/obj/aimee-module-postgres"
+SERVER_POLICY="$AIMEE_HOME/modules.d/server"
+KB_POLICY="$AIMEE_HOME/modules.d/kb"
+mkdir -p "$SERVER_POLICY" "$KB_POLICY"
+sed "s|^executable=.*|executable=$DB1_MODULE|" \
+  src/build/obj/module-bundle/grants/server/db1.grant > "$SERVER_POLICY/db1.grant"
+sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
+  src/build/obj/module-bundle/grants/server/config.grant > "$SERVER_POLICY/config.grant"
+sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
+  src/build/obj/module-bundle/grants/kb/config.grant > "$KB_POLICY/config.grant"
+sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
+  src/build/obj/module-bundle/grants/kb/postgres.grant > "$KB_POLICY/postgres.grant"
+chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
+
 kb_pid=""; server_pid=""
+server_db1_pid=""; server_config_pid=""
+kb_config_pid=""; kb_postgres_pid=""
+
+arm_module() { # executable socket policy log pid-variable [environment...]
+  local executable="$1" socket="$2" policy="$3" log="$4" pid_var="$5"
+  shift 5
+  (
+    local deadline=$((SECONDS + WAIT_SECONDS))
+    while (( SECONDS < deadline )); do
+      if [[ -S "$socket" ]]; then
+        env AIMEE_HOME="$AIMEE_HOME" AIMEE_MODULE_POLICY_DIR="$policy" \
+          "$@" "$executable" "$socket"
+      fi
+      sleep 0.1
+    done
+    echo "module: bus socket never appeared: $socket" >&2
+  ) >>"$log" 2>&1 &
+  printf -v "$pid_var" '%s' "$!"
+}
+
+stop_modules() {
+  local pid
+  for pid in "$server_db1_pid" "$server_config_pid" "$kb_config_pid" "$kb_postgres_pid"; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  server_db1_pid=""; server_config_pid=""
+  kb_config_pid=""; kb_postgres_pid=""
+}
+
 cleanup() {
+  stop_modules
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
   [[ -n "$kb_pid" ]] && kill "$kb_pid" 2>/dev/null || true
   rm -rf "$SCRATCH"
@@ -136,6 +189,11 @@ if [[ "$MODE" == "full" ]]; then
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
+  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-config-module.log" kb_config_pid
+  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-postgres-module.log" kb_postgres_pid \
+    "AIMEE_DB2_URL=$AIMEE_DB2_URL"
   # Capture kb output so the embedder-fidelity gate below can see whether pgvec
   # accepted the memory vectors or refused them on a dim mismatch.
   "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
@@ -155,6 +213,11 @@ else
 fi
 
 bold "==> Starting aimee-server"
+arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+  "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
+  "AIMEE_DB1_PATH=$AIMEE_HOME/aimee.db"
+arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+  "$AIMEE_HOME/server-config-module.log" server_config_pid
 AIMEE_API_BEARER_TOKEN="$BEARER" \
   "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!

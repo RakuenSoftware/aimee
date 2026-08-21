@@ -14,7 +14,7 @@
 #include "modules/db2/c/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
 #include "rel_types.h"                        /* REL_TYPE_NAME_MAX */
 #include "runtime_secret.h"
-#include <openssl/crypto.h>                   /* wipe transient credential request copies */
+#include <openssl/crypto.h> /* wipe transient credential request copies */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -641,9 +641,8 @@ static int console_settings(char *out_buf, int out_cap)
    for (size_t i = 0; i < sizeof(KB_SETTINGS) / sizeof(KB_SETTINGS[0]); i++)
    {
       const char *secret_name = config_client_secret_name(KB_SETTINGS[i].key);
-      cJSON *value = secret_name
-                         ? cJSON_CreateBool(runtime_secret_has(secret_name))
-                         : config_client_value_copy(KB_SETTINGS[i].key);
+      cJSON *value = secret_name ? cJSON_CreateBool(runtime_secret_has(secret_name))
+                                 : config_client_value_copy(KB_SETTINGS[i].key);
       if (!value)
          continue;
       cJSON *o = cJSON_CreateObject();

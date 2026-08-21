@@ -60,17 +60,14 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
       snapshot_calls++;
       cJSON *response = success();
       cJSON *values = cJSON_AddObjectToObject(response, "values");
-      must(values && cJSON_AddNumberToObject(values, "max_iterations", 37),
-           "snapshot values");
+      must(values && cJSON_AddNumberToObject(values, "max_iterations", 37), "snapshot values");
       must(cJSON_AddStringToObject(values, "kb_mode", "local") != NULL, "kb mode");
       must(cJSON_AddStringToObject(values, "kb_client_url", "") != NULL, "kb URL");
       must(cJSON_AddStringToObject(values, "embedder_model", "bekko-a25m") != NULL,
            "embedder model");
       must(cJSON_AddStringToObject(values, "embedder_url", "") != NULL, "embedder URL");
-      must(cJSON_AddStringToObject(values, "synthesis_model", "") != NULL,
-           "synthesis model");
-      must(cJSON_AddStringToObject(values, "synthesis_endpoint", "") != NULL,
-           "synthesis endpoint");
+      must(cJSON_AddStringToObject(values, "synthesis_model", "") != NULL, "synthesis model");
+      must(cJSON_AddStringToObject(values, "synthesis_endpoint", "") != NULL, "synthesis endpoint");
       must(cJSON_AddStringToObject(
                response, "version",
                changed_version
@@ -102,8 +99,8 @@ static cJSON *request_value(void)
 
 static void expect_operation(const char *name)
 {
-   cJSON *request = (!strcmp(name, "snapshot") || !strcmp(name, "version")) ? last_request
-                                                                           : last_mutation;
+   cJSON *request =
+       (!strcmp(name, "snapshot") || !strcmp(name, "version")) ? last_request : last_mutation;
    cJSON *operation = cJSON_GetObjectItemCaseSensitive(request, "operation");
    must(cJSON_IsString(operation) && !strcmp(operation->valuestring, name), name);
    must(last_event_kind == AIMEE_CONFIG_EVENT_KIND, "config event kind");
@@ -123,8 +120,7 @@ int main(void)
    config_emit_deploy_env_current(deploy_env, sizeof(deploy_env));
    must(strstr(deploy_env, "COMPOSE_PROFILES=kb\n") != NULL, "local KB compose profile");
    must(strstr(deploy_env, "AIMEE_KB_VARIANT=a25m\n") != NULL, "bundled KB variant");
-   must(strstr(deploy_env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL,
-        "bundled embedder selection");
+   must(strstr(deploy_env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL, "bundled embedder selection");
    must(strstr(deploy_env, "TOKEN=") == NULL && strstr(deploy_env, "API_KEY=") == NULL,
         "deploy environment excludes credentials");
 
@@ -169,9 +165,9 @@ int main(void)
         "removed model name");
 
    must(config_client_key_is_secret("db2_url"), "DB URL is not config data");
-   must(!strcmp(config_client_secret_name("kb_client_bearer_token"),
-                "AIMEE_KB_CLIENT_BEARER_TOKEN"),
-        "KB client credential maps to runtime secret");
+   must(
+       !strcmp(config_client_secret_name("kb_client_bearer_token"), "AIMEE_KB_CLIENT_BEARER_TOKEN"),
+       "KB client credential maps to runtime secret");
    must(!config_client_key_is_secret("max_iterations"), "ordinary key is public");
 
    cJSON_Delete(last_request);

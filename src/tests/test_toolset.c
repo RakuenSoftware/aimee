@@ -194,8 +194,7 @@ static void test_unknown_tool_dropped(void)
    toolset_registry_t reg;
    char err[TOOLSET_ERROR_MAX] = "";
    assert(load_contract_json(
-              &reg,
-              "{\"toolsets\":{\"custom\":{\"tools\":[\"read_file\",\"not_registered\"]}}}",
+              &reg, "{\"toolsets\":{\"custom\":{\"tools\":[\"read_file\",\"not_registered\"]}}}",
               err, sizeof(err)) == 0);
    char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int n = toolset_resolve(&reg, "custom", tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
@@ -280,11 +279,10 @@ static void test_script_allowed_tools_config(void)
 {
    toolset_registry_t reg;
    char err[TOOLSET_ERROR_MAX] = "";
-   assert(load_contract_json(
-              &reg,
-              "{\"toolsets\":{\"scripts_readonly\":{\"tools\":[\"read_file\"]}},"
-              "\"script\":{\"allowed_tools\":\"scripts_readonly\"}}",
-              err, sizeof(err)) == 0);
+   assert(load_contract_json(&reg,
+                             "{\"toolsets\":{\"scripts_readonly\":{\"tools\":[\"read_file\"]}},"
+                             "\"script\":{\"allowed_tools\":\"scripts_readonly\"}}",
+                             err, sizeof(err)) == 0);
    assert(strcmp(reg.script_allowed_tools, "scripts_readonly") == 0);
    char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int n =

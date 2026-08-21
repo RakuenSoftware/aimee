@@ -471,7 +471,8 @@ static void cmd_config_get(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
    if (config_client_key_is_secret(key))
-      printf("%s\n", cJSON_IsString(value) && value->valuestring[0] ? "configured" : "not configured");
+      printf("%s\n",
+             cJSON_IsString(value) && value->valuestring[0] ? "configured" : "not configured");
    else if (cJSON_IsString(value))
       printf("%s\n", value->valuestring[0] ? value->valuestring : "(unset)");
    else

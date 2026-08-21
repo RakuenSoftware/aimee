@@ -182,8 +182,8 @@ static void test_upstream_provider_gate(void)
 int main(void)
 {
    printf("gateway_mutate_wire: ");
-   /* Deterministic defaults for legacy_config_read (no aimee.yaml -> economizer safe -> gateway mutation
-    * off). */
+   /* Deterministic defaults for legacy_config_read (no aimee.yaml -> economizer safe -> gateway
+    * mutation off). */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-gwwire-XXXXXX", platform_tmpdir());
    if (platform_mkdtemp(tmpdir))

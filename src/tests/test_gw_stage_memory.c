@@ -26,7 +26,8 @@
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
  * (the "pre-injection off / recall empty" path). */
 static int g_no_recall = 0;
-static int g_test_placement = 0; /* drives ingress_cache_placement_enabled in legacy_config_read stub */
+static int g_test_placement =
+    0; /* drives ingress_cache_placement_enabled in legacy_config_read stub */
 
 /* --- stubs: make ingress_preinject_build deterministic without the kb graph --- */
 char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)

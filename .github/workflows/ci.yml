@@ -308,24 +308,40 @@ jobs:
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build
-        run: cd src && make -j$(nproc) all server
+        run: cd src && make -j$(nproc) all server build/obj/aimee-module-config
       - name: Skill lint
         run: |
           sock=/tmp/aimee-ci-skill-lint.sock
+          app_home=$(mktemp -d)
           rm -f "$sock"
-          AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" ./aimee-server --socket="$sock" &
+          cp deploy/container/aimee-server.yaml "$app_home/aimee.yaml"
+          python3 scripts/export_c_repositories.py --runtime-bundle src/build/obj/module-bundle >/dev/null
+          mkdir -p "$app_home/modules.d/server"
+          sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
+            src/build/obj/module-bundle/grants/server/config.grant \
+            >"$app_home/modules.d/server/config.grant"
+          AIMEE_HOME="$app_home" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" \
+            ./aimee-server --socket="$sock" &
           pid=$!
-          trap 'kill "$pid" 2>/dev/null || true' EXIT
-          for i in $(seq 1 50); do
-            [ -S "$sock" ] && break
+          module_pid=
+          trap 'kill "$pid" ${module_pid:-} 2>/dev/null || true; rm -rf "$app_home"' EXIT
+          for i in $(seq 1 100); do
+            [ -S "$app_home/server-module-bus.sock" ] && break
+            sleep 0.1
+          done
+          AIMEE_HOME="$app_home" src/build/obj/aimee-module-config \
+            "$app_home/server-module-bus.sock" &
+          module_pid=$!
+          for i in $(seq 1 100); do
+            [ -S "$app_home/aimee-http.sock" ] && break
             sleep 0.1
           done
           # The client only ever talks to an EXPLICITLY configured endpoint; it
           # no longer discovers a co-located server. aimee-server publishes its
           # /v1 socket under its config dir (config_default_dir()/aimee-http.sock),
           # not next to --socket, so point at that.
-          AIMEE_SOCK="$sock" \
-            AIMEE_API_ENDPOINT="unix:$HOME/.config/aimee/aimee-http.sock" \
+          AIMEE_HOME="$app_home" AIMEE_SOCK="$sock" \
+            AIMEE_API_ENDPOINT="unix:$app_home/aimee-http.sock" \
             AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" ./aimee skill lint --all
       - name: Smoke test
         run: |

@@ -132,7 +132,8 @@ int config_identity_working_profile_injection_fields_count(void)
 
 int config_set_identity_working_profile_injection_fields_count(int value)
 {
-   return config_client_set_number("identity_working_profile_injection_fields_count", (double)value);
+   return config_client_set_number("identity_working_profile_injection_fields_count",
+                                   (double)value);
 }
 
 int config_memory_window_radius(void)
@@ -885,7 +886,8 @@ const char *config_charter_values(int index)
 const char *config_ensemble_reference_personas(int index)
 {
    static _Thread_local char value[64];
-   (void)config_client_read_indexed_string("ensemble_reference_personas", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("ensemble_reference_personas", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 
@@ -906,6 +908,7 @@ int config_cron_job_deliver_only_if_changed(int index)
 const char *config_trigger_rule_workspace(int index)
 {
    static _Thread_local char value[TRIGGER_RULE_MAX_WS];
-   (void)config_client_read_indexed_string("trigger_rules", index, "workspace", value, sizeof(value));
+   (void)config_client_read_indexed_string("trigger_rules", index, "workspace", value,
+                                           sizeof(value));
    return value;
 }

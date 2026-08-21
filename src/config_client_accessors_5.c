@@ -879,7 +879,8 @@ size_t config_roundtable_default_copy(char *out, size_t n)
 const char *config_charter_safety_axioms(int index)
 {
    static _Thread_local char value[CONFIG_CHARTER_ENTRY_LEN];
-   (void)config_client_read_indexed_string("charter_safety_axioms", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("charter_safety_axioms", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 
@@ -913,6 +914,7 @@ int config_cron_job_skill_count(int index)
 const char *config_trigger_rule_schedule(int index)
 {
    static _Thread_local char value[TRIGGER_RULE_MAX_SCHEDULE];
-   (void)config_client_read_indexed_string("trigger_rules", index, "schedule", value, sizeof(value));
+   (void)config_client_read_indexed_string("trigger_rules", index, "schedule", value,
+                                           sizeof(value));
    return value;
 }

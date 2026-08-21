@@ -45,8 +45,8 @@ static void agent_file_id_from(const struct stat *st, agent_file_id_t *out)
 
 static int agent_file_id_eq(const agent_file_id_t *a, const agent_file_id_t *b)
 {
-   return a && b && a->mtime.tv_sec == b->mtime.tv_sec &&
-          a->mtime.tv_nsec == b->mtime.tv_nsec && a->size == b->size && a->ino == b->ino;
+   return a && b && a->mtime.tv_sec == b->mtime.tv_sec && a->mtime.tv_nsec == b->mtime.tv_nsec &&
+          a->size == b->size && a->ino == b->ino;
 }
 
 /* The cache is read/written from many threads at once -- every delegate dispatch

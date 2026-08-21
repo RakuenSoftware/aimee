@@ -886,14 +886,16 @@ size_t config_roundtable_pipeline_done_bar_copy(char *out, size_t n)
 const char *config_charter_hard_constraints(int index)
 {
    static _Thread_local char value[CONFIG_CHARTER_ENTRY_LEN];
-   (void)config_client_read_indexed_string("charter_hard_constraints", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("charter_hard_constraints", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 
 const char *config_ensemble_reference_models(int index)
 {
    static _Thread_local char value[128];
-   (void)config_client_read_indexed_string("ensemble_reference_models", index, NULL, value, sizeof(value));
+   (void)config_client_read_indexed_string("ensemble_reference_models", index, NULL, value,
+                                           sizeof(value));
    return value;
 }
 
@@ -907,13 +909,15 @@ const char *config_cron_job_schedule(int index)
 const char *config_cron_job_deliver_target(int index)
 {
    static _Thread_local char value[CRON_JOB_MAX_DELIVER_TARGET];
-   (void)config_client_read_indexed_string("cron_jobs", index, "deliver_target", value, sizeof(value));
+   (void)config_client_read_indexed_string("cron_jobs", index, "deliver_target", value,
+                                           sizeof(value));
    return value;
 }
 
 const char *config_trigger_rule_pipeline_template(int index)
 {
    static _Thread_local char value[TRIGGER_RULE_MAX_TEMPLATE];
-   (void)config_client_read_indexed_string("trigger_rules", index, "pipeline_template", value, sizeof(value));
+   (void)config_client_read_indexed_string("trigger_rules", index, "pipeline_template", value,
+                                           sizeof(value));
    return value;
 }

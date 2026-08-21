@@ -421,10 +421,9 @@ static int run_server(const char *socket_path, log_level_t log_level)
    char api_primary_bearer[256] = "";
    (void)runtime_secret_get("AIMEE_API_BEARER_TOKEN", api_primary_bearer,
                             sizeof(api_primary_bearer));
-   int http_start =
-       server_http_start(NULL, config_server_api_http_port(), config_server_api_tls_port(),
-                         api_primary_bearer, config_server_api_rate_limit_per_min(),
-                         config_server_api_remote_writes());
+   int http_start = server_http_start(
+       NULL, config_server_api_http_port(), config_server_api_tls_port(), api_primary_bearer,
+       config_server_api_rate_limit_per_min(), config_server_api_remote_writes());
    runtime_secret_wipe(api_primary_bearer, sizeof(api_primary_bearer));
    if (http_start == SERVER_HTTP_START_MGMT_FATAL)
    {

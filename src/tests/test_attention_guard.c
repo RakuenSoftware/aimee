@@ -128,8 +128,7 @@ static void test_score(void)
 static void write_config(const char *body)
 {
    g_ingress_max_raw_scans = body && strstr(body, "ingress_max_raw_scans: 2") ? 2 : 0;
-   g_require_session_worktree =
-       !(body && strstr(body, "require_session_worktree: false"));
+   g_require_session_worktree = !(body && strstr(body, "require_session_worktree: false"));
    g_require_aimee_memory = !(body && strstr(body, "require_aimee_memory: false"));
 }
 
