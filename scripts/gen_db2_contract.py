@@ -44,6 +44,13 @@ WIRE_REPLY_MAX = (1 << 20) - ENVELOPE_HEADER_LEN
 # At or below this a generated client declares its response buffer; past it the
 # buffer is allocated, because a caller's stack is not the right place for it.
 STACK_REPLY_MAX = 16384
+# The widest one string field may be. Six DB2 row structs carry an 8192-byte
+# content or schema buffer -- kb documents, PDF chunks, convention candidates,
+# evidence vectors, notes and the tool registry -- and a field narrower than the
+# buffer it fills would truncate silently at the boundary rather than at the
+# code's own limit. The whole-message bounds below are what keep this honest;
+# this cap alone never was.
+FIELD_BYTES_MAX = 8192
 # Wrappers per generated client file. The repository refuses a source past 2500
 # lines, and a wrapper is about twenty; this leaves room for the longest ones.
 CLIENT_WRAPPERS_PER_FILE = 40
@@ -13594,6 +13601,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_rules_reinforce_directive",
         "policy": {"writes": 200},
     },
+    "task_create": {
+        "key": ("organization", 32),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_task_create",
+        "policy": {"writes": 200},
+    },
+    "task_get": {
+        "key": ("organization", 33),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_task_get",
+        "policy": {"reads": 200},
+    },
+    "tool_registry_lookup": {
+        "key": ("organization", 34),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_tool_registry_lookup",
+        "policy": {"reads": 200},
+    },
 }
 
 
@@ -13636,7 +13661,17 @@ def _check_derived(operation: dict[str, object], name: str, key: tuple[str, int]
                 fail(f"{rule}-reply",
                      f"the widest reply is {widest} bytes, past what the wire carries")
         else:
-            _generic_fields(reply, f"{name}.reply")
+            reply_fields = _generic_fields(reply, f"{name}.reply")
+            widest = ENVELOPE_HEADER_LEN + _generic_widest_bytes(reply_fields)
+            if widest > WIRE_REPLY_MAX:
+                fail(f"{rule}-reply",
+                     f"the widest reply is {widest} bytes, past what the wire carries")
+        # A request crosses the same wire, and until the per-field cap was
+        # raised the field count alone kept it small enough. Say it outright.
+        widest_request = ENVELOPE_HEADER_LEN + _generic_widest_bytes(request_fields)
+        if widest_request > WIRE_REPLY_MAX:
+            fail(f"{rule}-request",
+                 f"the widest request is {widest_request} bytes, past what the wire carries")
         return
 
     request = operation["request"]
@@ -14758,7 +14793,7 @@ def _generic_fields(section: dict[str, object], where: str,
         if kind == "utf8":
             checked = _keys(field, {"name", "type", "minimum_bytes", "maximum_bytes"},
                             f"{where}[{index}]")
-            if not (0 <= checked["minimum_bytes"] <= checked["maximum_bytes"] <= 4096):
+            if not (0 <= checked["minimum_bytes"] <= checked["maximum_bytes"] <= FIELD_BYTES_MAX):
                 fail("generic-fields", f"{where}[{index}] has impossible byte bounds")
         elif kind in ("u32", "u64"):
             checked = _keys(field, {"name", "type", "minimum", "maximum"}, f"{where}[{index}]")

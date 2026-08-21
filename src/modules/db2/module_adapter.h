@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "tool_registry.h"
 #include "rules.h"
 #include "memory_payload.h"
 #include "mining.h"
@@ -557,6 +558,10 @@ typedef struct
                        int weight);
    int (*rules_update_directive_type)(int id, const char *directive_type);
    int (*rules_reinforce_directive)(int id, const char *directive_type, int weight_override);
+   int (*task_create)(const char *title, const char *session_id, int64_t parent_id,
+                      aimee_task_t *out);
+   int (*task_get)(int64_t id, aimee_task_t *out);
+   int (*tool_registry_lookup)(const char *name, tool_registry_entry_t *out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

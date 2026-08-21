@@ -3192,6 +3192,32 @@ int db2_rules_reinforce_directive(int id, const char *directive_type, int weight
    return -1;
 }
 
+int db2_task_create(const char *title, const char *session_id, int64_t parent_id, aimee_task_t *out)
+{
+   (void)title;
+   (void)session_id;
+   (void)parent_id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_task_get(int64_t id, aimee_task_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_tool_registry_lookup(const char *name, tool_registry_entry_t *out)
+{
+   (void)name;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/tool_registry.h"
 #include "c/feedback.h"
 #include "c/cross_repo_stats.h"
 #include "c/feature_rows.h"
@@ -1027,6 +1028,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .rules_insert = db2_rules_insert,
        .rules_update_directive_type = db2_rules_update_directive_type,
        .rules_reinforce_directive = db2_rules_reinforce_directive,
+       .task_create = db2_task_create,
+       .task_get = db2_task_get,
+       .tool_registry_lookup = db2_tool_registry_lookup,
    };
    return &backend;
 }
@@ -7608,6 +7612,120 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_recompute_blocked_symbols_reply_encode(
                     blocked_count, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char task_title[AIMEE_DB2_TASK_CREATE_TASK_TITLE_MAX + 1] = "";
+         char session_id[AIMEE_DB2_TASK_CREATE_SESSION_ID_MAX + 1] = "";
+         uint64_t parent_task_id = 0u;
+         if (aimee_db2_task_create_request_decode(request_body, request_len, task_title,
+                                                  sizeof(task_title), session_id,
+                                                  sizeof(session_id), &parent_task_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TASK_CREATE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->task_create)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t task_id = 0u;
+            {
+               aimee_task_t task;
+               memset(&task, 0, sizeof(task));
+               if (backend->task_create(task_title, session_id, (int64_t)parent_task_id, &task) ==
+                   0)
+                  task_id = task.id > 0 ? (uint64_t)task.id : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_task_create_reply_encode(task_id, response_body, response_capacity,
+                                                   response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t task_id = 0u;
+         if (aimee_db2_task_get_request_decode(request_body, request_len, &task_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TASK_GET_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->task_get)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t task_found = 0u;
+            uint64_t parent_task_id = 0u;
+            char task_title[AIMEE_DB2_TASK_GET_TASK_TITLE_MAX + 1] = "";
+            char task_state[AIMEE_DB2_TASK_GET_TASK_STATE_MAX + 1] = "";
+            double task_confidence = 0.0;
+            char session_id[AIMEE_DB2_TASK_GET_SESSION_ID_MAX + 1] = "";
+            char task_created_at[AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MAX + 1] = "";
+            char task_updated_at[AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MAX + 1] = "";
+            {
+               aimee_task_t task;
+               memset(&task, 0, sizeof(task));
+               if (backend->task_get((int64_t)task_id, &task) == 0)
+               {
+                  task_found = 1u;
+                  parent_task_id = task.parent_id > 0 ? (uint64_t)task.parent_id : 0u;
+                  snprintf(task_title, sizeof(task_title), "%s", task.title);
+                  snprintf(task_state, sizeof(task_state), "%s", task.state);
+                  task_confidence = task.confidence;
+                  snprintf(session_id, sizeof(session_id), "%s", task.session_id);
+                  snprintf(task_created_at, sizeof(task_created_at), "%s", task.created_at);
+                  snprintf(task_updated_at, sizeof(task_updated_at), "%s", task.updated_at);
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_task_get_reply_encode(task_found, parent_task_id, task_title, task_state,
+                                                task_confidence, session_id, task_created_at,
+                                                task_updated_at, response_body, response_capacity,
+                                                response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char tool_name[AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MAX + 1] = "";
+         if (aimee_db2_tool_registry_lookup_request_decode(request_body, request_len, tool_name,
+                                                           sizeof(tool_name)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TOOL_REGISTRY_LOOKUP_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->tool_registry_lookup)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t tool_found = 0u;
+            char input_schema[AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MAX + 1] = "";
+            char side_effect[AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MAX + 1] = "";
+            uint32_t tool_enabled = 0u;
+            {
+               tool_registry_entry_t entry;
+               memset(&entry, 0, sizeof(entry));
+               if (backend->tool_registry_lookup(tool_name, &entry) == 0 && entry.found)
+               {
+                  tool_found = 1u;
+                  snprintf(input_schema, sizeof(input_schema), "%s", entry.input_schema);
+                  snprintf(side_effect, sizeof(side_effect), "%s", entry.side_effect);
+                  tool_enabled = entry.enabled ? 1u : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_tool_registry_lookup_reply_encode(tool_found, input_schema, side_effect,
+                                                            tool_enabled, response_body,
+                                                            response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

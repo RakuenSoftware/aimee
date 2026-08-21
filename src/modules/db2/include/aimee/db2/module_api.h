@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "f4f8b34b7b141fd65b8a1c112ea9822ec97d8e7021c7a9e9c91bf4e90fbb82c7"
+#define AIMEE_DB2_CONTRACT_SHA256 "df9270e6a3fbf6b46b9e16b8165158594983b2524f702a03ce3b6c5b0e7bdebb"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -4214,6 +4214,65 @@
 #define AIMEE_DB2_RECOMPUTE_BLOCKED_SYMBOLS_RESPONSE_MIN_LEN                        28u
 #define AIMEE_DB2_RECOMPUTE_BLOCKED_SYMBOLS_RESPONSE_MAX_LEN                        28u
 #define AIMEE_DB2_RECOMPUTE_BLOCKED_SYMBOLS_ERROR_LEN                               24u
+#define AIMEE_DB2_EVENT_TASK_CREATE                                                 AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_TASK_CREATE                                                 AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_TASK_CREATE                                             32u
+#define AIMEE_DB2_TASK_CREATE_REQUEST_MIN_LEN                                       40u
+#define AIMEE_DB2_TASK_CREATE_REQUEST_MAX_LEN                                       422u
+#define AIMEE_DB2_TASK_CREATE_TASK_TITLE_MIN                                        1u
+#define AIMEE_DB2_TASK_CREATE_TASK_TITLE_MAX                                        255u
+#define AIMEE_DB2_TASK_CREATE_SESSION_ID_MIN                                        0u
+#define AIMEE_DB2_TASK_CREATE_SESSION_ID_MAX                                        127u
+#define AIMEE_DB2_TASK_CREATE_PARENT_TASK_ID_MIN                                    0ull
+#define AIMEE_DB2_TASK_CREATE_PARENT_TASK_ID_MAX                                    9223372036854775807ull
+#define AIMEE_DB2_TASK_CREATE_TASK_ID_MIN                                           0ull
+#define AIMEE_DB2_TASK_CREATE_TASK_ID_MAX                                           9223372036854775807ull
+#define AIMEE_DB2_TASK_CREATE_RESPONSE_MIN_LEN                                      32u
+#define AIMEE_DB2_TASK_CREATE_RESPONSE_MAX_LEN                                      32u
+#define AIMEE_DB2_TASK_CREATE_ERROR_LEN                                             24u
+#define AIMEE_DB2_EVENT_TASK_GET                                                    AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_TASK_GET                                                    AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_TASK_GET                                                33u
+#define AIMEE_DB2_TASK_GET_REQUEST_MIN_LEN                                          32u
+#define AIMEE_DB2_TASK_GET_REQUEST_MAX_LEN                                          32u
+#define AIMEE_DB2_TASK_GET_TASK_ID_MIN                                              1ull
+#define AIMEE_DB2_TASK_GET_TASK_ID_MAX                                              9223372036854775807ull
+#define AIMEE_DB2_TASK_GET_TASK_FOUND_MIN                                           0u
+#define AIMEE_DB2_TASK_GET_TASK_FOUND_MAX                                           1u
+#define AIMEE_DB2_TASK_GET_PARENT_TASK_ID_MIN                                       0ull
+#define AIMEE_DB2_TASK_GET_PARENT_TASK_ID_MAX                                       9223372036854775807ull
+#define AIMEE_DB2_TASK_GET_TASK_TITLE_MIN                                           0u
+#define AIMEE_DB2_TASK_GET_TASK_TITLE_MAX                                           255u
+#define AIMEE_DB2_TASK_GET_TASK_STATE_MIN                                           0u
+#define AIMEE_DB2_TASK_GET_TASK_STATE_MAX                                           15u
+#define AIMEE_DB2_TASK_GET_TASK_CONFIDENCE_MAX_MAGNITUDE_BITS                       4741671816366391296ull
+#define AIMEE_DB2_TASK_GET_SESSION_ID_MIN                                           0u
+#define AIMEE_DB2_TASK_GET_SESSION_ID_MAX                                           127u
+#define AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MIN                                      0u
+#define AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MAX                                      31u
+#define AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MIN                                      0u
+#define AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MAX                                      31u
+#define AIMEE_DB2_TASK_GET_RESPONSE_MIN_LEN                                         64u
+#define AIMEE_DB2_TASK_GET_RESPONSE_MAX_LEN                                         523u
+#define AIMEE_DB2_TASK_GET_ERROR_LEN                                                24u
+#define AIMEE_DB2_EVENT_TOOL_REGISTRY_LOOKUP                                        AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_TOOL_REGISTRY_LOOKUP                                        AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_TOOL_REGISTRY_LOOKUP                                    34u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_REQUEST_MIN_LEN                              28u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_REQUEST_MAX_LEN                              155u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MIN                                1u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MAX                                127u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_FOUND_MIN                               0u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_FOUND_MAX                               1u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MIN                             0u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MAX                             8191u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MIN                              0u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MAX                              31u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_ENABLED_MIN                             0u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_ENABLED_MAX                             1u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_RESPONSE_MIN_LEN                             40u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_RESPONSE_MAX_LEN                             8262u
+#define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_ERROR_LEN                                    24u
 #define AIMEE_DB2_EVENT_ENROLLMENT_ACTIVE                                           AIMEE_DB2_EVENT_CUSTODY
 #define AIMEE_DB2_STAGE_ENROLLMENT_ACTIVE                                           AIMEE_DB2_FAMILY_CUSTODY
 #define AIMEE_DB2_OPERATION_ENROLLMENT_ACTIVE                                       4u
@@ -40113,6 +40172,473 @@ static inline int aimee_db2_recompute_blocked_symbols_reply_decode(const uint8_t
    *blocked_count = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*blocked_count > AIMEE_DB2_RECOMPUTE_BLOCKED_SYMBOLS_BLOCKED_COUNT_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_task_create_request_encode(const char *task_title, const char *session_id, uint64_t parent_task_id,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!task_title || !session_id || !output || !output_len)
+      return -1;
+   size_t task_title_len = 0u;
+   while (task_title_len <= AIMEE_DB2_TASK_CREATE_TASK_TITLE_MAX && task_title[task_title_len])
+      ++task_title_len;
+   size_t session_id_len = 0u;
+   while (session_id_len <= AIMEE_DB2_TASK_CREATE_SESSION_ID_MAX && session_id[session_id_len])
+      ++session_id_len;
+   if (task_title_len < AIMEE_DB2_TASK_CREATE_TASK_TITLE_MIN || task_title_len > AIMEE_DB2_TASK_CREATE_TASK_TITLE_MAX ||
+       session_id_len > AIMEE_DB2_TASK_CREATE_SESSION_ID_MAX ||
+       parent_task_id > AIMEE_DB2_TASK_CREATE_PARENT_TASK_ID_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TASK_CREATE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)task_title_len);
+   memcpy(payload + cursor + 4u, task_title, task_title_len);
+   cursor += 4u + (uint32_t)task_title_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)session_id_len);
+   memcpy(payload + cursor + 4u, session_id, session_id_len);
+   cursor += 4u + (uint32_t)session_id_len;
+   aimee_db2_put_u64(payload + cursor, parent_task_id);
+   cursor += 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TASK_CREATE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_task_create_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *task_title, size_t task_title_capacity, char *session_id, size_t session_id_capacity, uint64_t *parent_task_id)
+{
+   if (task_title && task_title_capacity)
+      task_title[0] = '\0';
+   if (session_id && session_id_capacity)
+      session_id[0] = '\0';
+   if (parent_task_id)
+      *parent_task_id = 0u;
+   if (!task_title || task_title_capacity < (size_t)AIMEE_DB2_TASK_CREATE_TASK_TITLE_MAX + 1u || !session_id || session_id_capacity < (size_t)AIMEE_DB2_TASK_CREATE_SESSION_ID_MAX + 1u || !parent_task_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TASK_CREATE || header.flags != 0u ||
+       input_len < AIMEE_DB2_TASK_CREATE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_TASK_CREATE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, task_title,
+                                 AIMEE_DB2_TASK_CREATE_TASK_TITLE_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (task_title[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_TASK_CREATE_TASK_TITLE_MIN)
+         return -1;
+   }
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, session_id,
+                                 AIMEE_DB2_TASK_CREATE_SESSION_ID_MAX) != 0)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *parent_task_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*parent_task_id > AIMEE_DB2_TASK_CREATE_PARENT_TASK_ID_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_task_create_reply_encode(uint64_t task_id,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (task_id > AIMEE_DB2_TASK_CREATE_TASK_ID_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TASK_CREATE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u64(payload + cursor, task_id);
+   cursor += 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TASK_CREATE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_task_create_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint64_t *task_id)
+{
+   if (task_id)
+      *task_id = 0u;
+   if (!task_id)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TASK_CREATE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *task_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*task_id > AIMEE_DB2_TASK_CREATE_TASK_ID_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_task_get_request_encode(uint64_t task_id,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (task_id < AIMEE_DB2_TASK_GET_TASK_ID_MIN || task_id > AIMEE_DB2_TASK_GET_TASK_ID_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TASK_GET_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u64(payload + cursor, task_id);
+   cursor += 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TASK_GET, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_task_get_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *task_id)
+{
+   if (task_id)
+      *task_id = 0u;
+   if (!task_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TASK_GET || header.flags != 0u ||
+       input_len < AIMEE_DB2_TASK_GET_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_TASK_GET_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *task_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*task_id < AIMEE_DB2_TASK_GET_TASK_ID_MIN || *task_id > AIMEE_DB2_TASK_GET_TASK_ID_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_task_get_reply_encode(uint32_t task_found, uint64_t parent_task_id, const char *task_title, const char *task_state, double task_confidence, const char *session_id, const char *task_created_at, const char *task_updated_at,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!task_title || !task_state || !session_id || !task_created_at || !task_updated_at || !output || !output_len)
+      return -1;
+   size_t task_title_len = 0u;
+   while (task_title_len <= AIMEE_DB2_TASK_GET_TASK_TITLE_MAX && task_title[task_title_len])
+      ++task_title_len;
+   size_t task_state_len = 0u;
+   while (task_state_len <= AIMEE_DB2_TASK_GET_TASK_STATE_MAX && task_state[task_state_len])
+      ++task_state_len;
+   size_t session_id_len = 0u;
+   while (session_id_len <= AIMEE_DB2_TASK_GET_SESSION_ID_MAX && session_id[session_id_len])
+      ++session_id_len;
+   size_t task_created_at_len = 0u;
+   while (task_created_at_len <= AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MAX && task_created_at[task_created_at_len])
+      ++task_created_at_len;
+   size_t task_updated_at_len = 0u;
+   while (task_updated_at_len <= AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MAX && task_updated_at[task_updated_at_len])
+      ++task_updated_at_len;
+   if (task_found > AIMEE_DB2_TASK_GET_TASK_FOUND_MAX ||
+       parent_task_id > AIMEE_DB2_TASK_GET_PARENT_TASK_ID_MAX ||
+       task_title_len > AIMEE_DB2_TASK_GET_TASK_TITLE_MAX ||
+       task_state_len > AIMEE_DB2_TASK_GET_TASK_STATE_MAX ||
+       (aimee_db2_binary64_bits(task_confidence) & 0x7fffffffffffffffull) > AIMEE_DB2_TASK_GET_TASK_CONFIDENCE_MAX_MAGNITUDE_BITS ||
+       session_id_len > AIMEE_DB2_TASK_GET_SESSION_ID_MAX ||
+       task_created_at_len > AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MAX ||
+       task_updated_at_len > AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TASK_GET_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, task_found);
+   cursor += 4u;
+   aimee_db2_put_u64(payload + cursor, parent_task_id);
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)task_title_len);
+   memcpy(payload + cursor + 4u, task_title, task_title_len);
+   cursor += 4u + (uint32_t)task_title_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)task_state_len);
+   memcpy(payload + cursor + 4u, task_state, task_state_len);
+   cursor += 4u + (uint32_t)task_state_len;
+   aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(task_confidence));
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)session_id_len);
+   memcpy(payload + cursor + 4u, session_id, session_id_len);
+   cursor += 4u + (uint32_t)session_id_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)task_created_at_len);
+   memcpy(payload + cursor + 4u, task_created_at, task_created_at_len);
+   cursor += 4u + (uint32_t)task_created_at_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)task_updated_at_len);
+   memcpy(payload + cursor + 4u, task_updated_at, task_updated_at_len);
+   cursor += 4u + (uint32_t)task_updated_at_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TASK_GET, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_task_get_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *task_found, uint64_t *parent_task_id, char *task_title, size_t task_title_capacity, char *task_state, size_t task_state_capacity, double *task_confidence, char *session_id, size_t session_id_capacity, char *task_created_at, size_t task_created_at_capacity, char *task_updated_at, size_t task_updated_at_capacity)
+{
+   if (task_found)
+      *task_found = 0u;
+   if (parent_task_id)
+      *parent_task_id = 0u;
+   if (task_title && task_title_capacity)
+      task_title[0] = '\0';
+   if (task_state && task_state_capacity)
+      task_state[0] = '\0';
+   if (task_confidence)
+      *task_confidence = 0.0;
+   if (session_id && session_id_capacity)
+      session_id[0] = '\0';
+   if (task_created_at && task_created_at_capacity)
+      task_created_at[0] = '\0';
+   if (task_updated_at && task_updated_at_capacity)
+      task_updated_at[0] = '\0';
+   if (!task_found || !parent_task_id || !task_title || task_title_capacity < (size_t)AIMEE_DB2_TASK_GET_TASK_TITLE_MAX + 1u || !task_state || task_state_capacity < (size_t)AIMEE_DB2_TASK_GET_TASK_STATE_MAX + 1u || !task_confidence || !session_id || session_id_capacity < (size_t)AIMEE_DB2_TASK_GET_SESSION_ID_MAX + 1u || !task_created_at || task_created_at_capacity < (size_t)AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MAX + 1u || !task_updated_at || task_updated_at_capacity < (size_t)AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MAX + 1u)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TASK_GET ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *task_found = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*task_found > AIMEE_DB2_TASK_GET_TASK_FOUND_MAX)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *parent_task_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*parent_task_id > AIMEE_DB2_TASK_GET_PARENT_TASK_ID_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, task_title,
+                                 AIMEE_DB2_TASK_GET_TASK_TITLE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, task_state,
+                                 AIMEE_DB2_TASK_GET_TASK_STATE_MAX) != 0)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   {
+      uint64_t bits = aimee_db2_get_u64(payload + cursor);
+      cursor += 8u;
+      if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_TASK_GET_TASK_CONFIDENCE_MAX_MAGNITUDE_BITS)
+         return -1;
+      *task_confidence = aimee_db2_binary64_value(bits);
+   }
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, session_id,
+                                 AIMEE_DB2_TASK_GET_SESSION_ID_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, task_created_at,
+                                 AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, task_updated_at,
+                                 AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MAX) != 0)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_tool_registry_lookup_request_encode(const char *tool_name,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!tool_name || !output || !output_len)
+      return -1;
+   size_t tool_name_len = 0u;
+   while (tool_name_len <= AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MAX && tool_name[tool_name_len])
+      ++tool_name_len;
+   if (tool_name_len < AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MIN || tool_name_len > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TOOL_REGISTRY_LOOKUP_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)tool_name_len);
+   memcpy(payload + cursor + 4u, tool_name, tool_name_len);
+   cursor += 4u + (uint32_t)tool_name_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TOOL_REGISTRY_LOOKUP, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_tool_registry_lookup_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *tool_name, size_t tool_name_capacity)
+{
+   if (tool_name && tool_name_capacity)
+      tool_name[0] = '\0';
+   if (!tool_name || tool_name_capacity < (size_t)AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TOOL_REGISTRY_LOOKUP || header.flags != 0u ||
+       input_len < AIMEE_DB2_TOOL_REGISTRY_LOOKUP_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, tool_name,
+                                 AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (tool_name[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_NAME_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_tool_registry_lookup_reply_encode(uint32_t tool_found, const char *input_schema, const char *side_effect, uint32_t tool_enabled,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!input_schema || !side_effect || !output || !output_len)
+      return -1;
+   size_t input_schema_len = 0u;
+   while (input_schema_len <= AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MAX && input_schema[input_schema_len])
+      ++input_schema_len;
+   size_t side_effect_len = 0u;
+   while (side_effect_len <= AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MAX && side_effect[side_effect_len])
+      ++side_effect_len;
+   if (tool_found > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_FOUND_MAX ||
+       input_schema_len > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MAX ||
+       side_effect_len > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MAX ||
+       tool_enabled > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_ENABLED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TOOL_REGISTRY_LOOKUP_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, tool_found);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)input_schema_len);
+   memcpy(payload + cursor + 4u, input_schema, input_schema_len);
+   cursor += 4u + (uint32_t)input_schema_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)side_effect_len);
+   memcpy(payload + cursor + 4u, side_effect, side_effect_len);
+   cursor += 4u + (uint32_t)side_effect_len;
+   aimee_db2_put_u32(payload + cursor, tool_enabled);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TOOL_REGISTRY_LOOKUP, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_tool_registry_lookup_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *tool_found, char *input_schema, size_t input_schema_capacity, char *side_effect, size_t side_effect_capacity, uint32_t *tool_enabled)
+{
+   if (tool_found)
+      *tool_found = 0u;
+   if (input_schema && input_schema_capacity)
+      input_schema[0] = '\0';
+   if (side_effect && side_effect_capacity)
+      side_effect[0] = '\0';
+   if (tool_enabled)
+      *tool_enabled = 0u;
+   if (!tool_found || !input_schema || input_schema_capacity < (size_t)AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MAX + 1u || !side_effect || side_effect_capacity < (size_t)AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MAX + 1u || !tool_enabled)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TOOL_REGISTRY_LOOKUP ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *tool_found = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*tool_found > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_FOUND_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, input_schema,
+                                 AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, side_effect,
+                                 AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MAX) != 0)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *tool_enabled = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*tool_enabled > AIMEE_DB2_TOOL_REGISTRY_LOOKUP_TOOL_ENABLED_MAX)
       return -1;
    if (cursor != payload_len)
       return -1;

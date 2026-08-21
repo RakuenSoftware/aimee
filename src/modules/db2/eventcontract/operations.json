@@ -15794,6 +15794,198 @@
       }
     },
     {
+      "family": "organization",
+      "id": 32,
+      "name": "task_create",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Tasks and their parents are relational DB2 rows.",
+      "c_symbols": [
+        "db2_task_create"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing checks the parent exists, so a task can be created beneath one that is not there"
+        },
+        "fields": [
+          {
+            "name": "task_title",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "session_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "parent_task_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "task_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 33,
+      "name": "task_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Tasks are relational DB2 rows.",
+      "c_symbols": [
+        "db2_task_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "any task can be read by its identifier, which carries no scope"
+        },
+        "fields": [
+          {
+            "name": "task_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "task_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "parent_task_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "task_title",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "task_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "task_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          },
+          {
+            "name": "session_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "task_created_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "task_updated_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "organization",
+      "id": 34,
+      "name": "tool_registry_lookup",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The tool registry is a relational DB2 table.",
+      "c_symbols": [
+        "db2_tool_registry_lookup"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one tool by name, and a name nobody registered is not an error"
+        },
+        "fields": [
+          {
+            "name": "tool_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "tool_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "input_schema",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 8191
+          },
+          {
+            "name": "side_effect",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "tool_enabled",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "custody",
       "id": 1,
       "name": "vector_rebuild_lock_try_acquire",

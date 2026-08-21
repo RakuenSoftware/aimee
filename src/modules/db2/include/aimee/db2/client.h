@@ -1327,6 +1327,18 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t callee_repo_min, uint32_t definition_repo_min, uint32_t symbol_length_min, uint32_t *blocked_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_task_create_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *task_title, const char *session_id, uint64_t parent_task_id, uint64_t *task_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_task_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t task_id, uint32_t *task_found, uint64_t *parent_task_id, char *task_title, size_t task_title_capacity, char *task_state, size_t task_state_capacity, double *task_confidence, char *session_id, size_t session_id_capacity, char *task_created_at, size_t task_created_at_capacity, char *task_updated_at, size_t task_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_tool_registry_lookup_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *tool_name, uint32_t *tool_found, char *input_schema, size_t input_schema_capacity, char *side_effect, size_t side_effect_capacity, uint32_t *tool_enabled, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_enrollment_active_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *cert_issuer, const char *cert_serial_norm, uint32_t *active,

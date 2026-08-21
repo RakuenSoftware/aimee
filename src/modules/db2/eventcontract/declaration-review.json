@@ -4604,12 +4604,28 @@
       "reason": "The typed organization.task_add_edge operation links one task to another. Unlike memory.memory_link_create beside it, which does the same thing for memories, nothing deduplicates here: adding the same edge twice stores it twice, and organization.task_edges then returns it twice. The relation is stored unchecked, so an unknown relation is recorded rather than refused."
     },
     {
+      "symbol": "db2_task_create",
+      "signature_sha256": "4a10d319f92002d0d7b93960322d6bfef9efe1c8f545a626497c2005156af6a9",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_create operation creates a task. Nothing checks the parent exists -- the column carries no foreign key here -- so a task can be created beneath a parent that is not there and nothing later says its tree is broken. The state and confidence are fixed in the statement at todo and one, so a caller cannot create a task in any other state. The stamps are DB2's clock."
+    },
+    {
       "symbol": "db2_task_delete",
       "signature_sha256": "21f27fb7c710097e6ea93b0bfbe11956a8b8740863c592cabcd7b5fa33a8a3c8",
       "disposition": "wire-operation",
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.task_delete operation removes a task and its edges. It runs two statements with no transaction and ignores whether the edge delete succeeded, so a caller can be told the task is gone while its edges remain. The schema's foreign key cascades the edges anyway, which is why the explicit delete looked safe to ignore; the catalog records that the pair is not atomic instead of leaving that reasoning in a comment."
+    },
+    {
+      "symbol": "db2_task_get",
+      "signature_sha256": "75203ebb4e367c9aed1fb287993d55b0d2394beff93443f53659cadeece7448e",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.task_get operation reads one task. The identifier carries no scope, so a caller holding a number reads whichever session's task it names -- the session is returned rather than checked. A parent identifier of zero means no parent, and a non-zero one is returned whether or not that task exists, because organization.task_create never checked. A task that is not there and a read that failed are both a zero flag."
     },
     {
       "symbol": "db2_task_get_edges",
@@ -4666,6 +4682,14 @@
       "family": "tenancy",
       "db3_placement": "retained-db2",
       "reason": "Rollback and tenant-GUC clearing remain DB2 process cleanup; failures, cancellation, and denied scope roll back before the typed operation returns."
+    },
+    {
+      "symbol": "db2_tool_registry_lookup",
+      "signature_sha256": "b8068d3a48dd1282b6a8aeafe4732306ac587871fa9ba55e4799add3514d1306",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.tool_registry_lookup operation reads a registered tool's input schema and side-effect class. A name nobody registered is not an error -- the backend returns success with nothing filled in -- so the found flag is the only thing separating an unregistered tool from a registered one, and a read that failed returns the same. A registered tool with an empty side-effect column is read as 'read', which is the least dangerous of the classes."
     },
     {
       "symbol": "db2_trace_mining_last_id",

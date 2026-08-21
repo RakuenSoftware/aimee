@@ -3494,6 +3494,61 @@ int main(int argc, char **argv)
                                                    NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(rules_reinforce_directive_acknowledged == 1);
 
+   /* A task created beneath a parent that does not exist, read back, and a tool nobody registered.
+    */
+   uint64_t task_create_task_id = 99;
+   assert(aimee_db2_task_create_call(call_client, &client, 9479, 0, "replay task", "replay-session",
+                                     4242, &task_create_task_id, NULL,
+                                     NULL) == AIMEE_MODULE_CALL_OK);
+   /* Created beneath parent 4242, which is not a task. Nothing checks that, so
+    * the task exists with a parent that does not. */
+   assert(task_create_task_id > 0);
+
+   uint32_t task_get_task_found = 99;
+   uint64_t task_get_parent_task_id = 99;
+   static char task_get_task_title[AIMEE_DB2_TASK_GET_TASK_TITLE_MAX + 1];
+   task_get_task_title[0] = 'x';
+   static char task_get_task_state[AIMEE_DB2_TASK_GET_TASK_STATE_MAX + 1];
+   task_get_task_state[0] = 'x';
+   double task_get_task_confidence = 9.0;
+   static char task_get_session_id[AIMEE_DB2_TASK_GET_SESSION_ID_MAX + 1];
+   task_get_session_id[0] = 'x';
+   static char task_get_task_created_at[AIMEE_DB2_TASK_GET_TASK_CREATED_AT_MAX + 1];
+   task_get_task_created_at[0] = 'x';
+   static char task_get_task_updated_at[AIMEE_DB2_TASK_GET_TASK_UPDATED_AT_MAX + 1];
+   task_get_task_updated_at[0] = 'x';
+   assert(aimee_db2_task_get_call(
+              call_client, &client, 9480, 0, 1, &task_get_task_found, &task_get_parent_task_id,
+              task_get_task_title, sizeof(task_get_task_title), task_get_task_state,
+              sizeof(task_get_task_state), &task_get_task_confidence, task_get_session_id,
+              sizeof(task_get_session_id), task_get_task_created_at,
+              sizeof(task_get_task_created_at), task_get_task_updated_at,
+              sizeof(task_get_task_updated_at), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Reading it back: the broken parent comes out as written, and the state and
+    * confidence are the ones the statement fixes rather than any the caller
+    * could have chosen. */
+   assert(task_get_task_found == 1);
+   assert(task_get_parent_task_id == 4242);
+   assert(strcmp(task_get_task_title, "replay task") == 0);
+   assert(strcmp(task_get_task_state, "todo") == 0);
+   assert(task_get_task_confidence == 1.0);
+
+   uint32_t tool_registry_lookup_tool_found = 99;
+   static char
+       tool_registry_lookup_input_schema[AIMEE_DB2_TOOL_REGISTRY_LOOKUP_INPUT_SCHEMA_MAX + 1];
+   tool_registry_lookup_input_schema[0] = 'x';
+   static char tool_registry_lookup_side_effect[AIMEE_DB2_TOOL_REGISTRY_LOOKUP_SIDE_EFFECT_MAX + 1];
+   tool_registry_lookup_side_effect[0] = 'x';
+   uint32_t tool_registry_lookup_tool_enabled = 99;
+   assert(aimee_db2_tool_registry_lookup_call(
+              call_client, &client, 9481, 0, "a-tool-nobody-registered",
+              &tool_registry_lookup_tool_found, tool_registry_lookup_input_schema,
+              sizeof(tool_registry_lookup_input_schema), tool_registry_lookup_side_effect,
+              sizeof(tool_registry_lookup_side_effect), &tool_registry_lookup_tool_enabled, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(tool_registry_lookup_tool_found == 0 && tool_registry_lookup_input_schema[0] == '\0' &&
+          tool_registry_lookup_side_effect[0] == '\0' && tool_registry_lookup_tool_enabled == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "f4f8b34b7b141fd65b8a1c112ea9822ec97d8e7021c7a9e9c91bf4e90fbb82c7"
+const ContractSHA256 = "df9270e6a3fbf6b46b9e16b8165158594983b2524f702a03ce3b6c5b0e7bdebb"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -12162,6 +12162,165 @@ func DecodeRecomputeBlockedSymbolsRequest(request []byte) (uint32, uint32, uint3
 		return 0, 0, 0, ErrMalformedEnvelope
 	}
 	return calleeRepoMin, definitionRepoMin, symbolLengthMin, nil
+}
+
+const EventTaskCreate = EventOrganization
+const StageTaskCreate = FamilyOrganization
+const OperationTaskCreate uint32 = 32
+const TaskCreateTaskTitleMin = 1
+const TaskCreateTaskTitleMax = 255
+const TaskCreateSessionIDMin = 0
+const TaskCreateSessionIDMax = 127
+const TaskCreateParentTaskIDMin uint64 = 0
+const TaskCreateParentTaskIDMax uint64 = 9223372036854775807
+
+// EncodeTaskCreateRequest writes the schema task_create declares, in order.
+func EncodeTaskCreateRequest(taskTitle string, sessionID string, parentTaskID uint64) ([]byte, error) {
+	if len(taskTitle) < TaskCreateTaskTitleMin || len(taskTitle) > TaskCreateTaskTitleMax || hasNUL(taskTitle) ||
+		len(sessionID) < TaskCreateSessionIDMin || len(sessionID) > TaskCreateSessionIDMax || hasNUL(sessionID) ||
+		parentTaskID < TaskCreateParentTaskIDMin || parentTaskID > TaskCreateParentTaskIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, taskTitle, TaskCreateTaskTitleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, sessionID, TaskCreateSessionIDMax); err != nil {
+		return nil, err
+	}
+	var parentTaskIDBytes [8]byte
+	binary.LittleEndian.PutUint64(parentTaskIDBytes[:], parentTaskID)
+	payload = append(payload, parentTaskIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationTaskCreate, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTaskCreateRequest reads it back, checking each field against its own bound.
+func DecodeTaskCreateRequest(request []byte) (string, string, uint64, error) {
+	var taskTitle string
+	var sessionID string
+	var parentTaskID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskCreate || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if taskTitle, err = takeRowText(payload, &cursor, TaskCreateTaskTitleMax); err != nil ||
+		len(taskTitle) < TaskCreateTaskTitleMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if sessionID, err = takeRowText(payload, &cursor, TaskCreateSessionIDMax); err != nil ||
+		len(sessionID) < TaskCreateSessionIDMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	parentTaskID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if parentTaskID < TaskCreateParentTaskIDMin || parentTaskID > TaskCreateParentTaskIDMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return taskTitle, sessionID, parentTaskID, nil
+}
+
+const EventTaskGet = EventOrganization
+const StageTaskGet = FamilyOrganization
+const OperationTaskGet uint32 = 33
+const TaskGetTaskIDMin uint64 = 1
+const TaskGetTaskIDMax uint64 = 9223372036854775807
+
+// EncodeTaskGetRequest writes the schema task_get declares, in order.
+func EncodeTaskGetRequest(taskID uint64) ([]byte, error) {
+	if taskID < TaskGetTaskIDMin || taskID > TaskGetTaskIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var taskIDBytes [8]byte
+	binary.LittleEndian.PutUint64(taskIDBytes[:], taskID)
+	payload = append(payload, taskIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationTaskGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeTaskGetRequest reads it back, checking each field against its own bound.
+func DecodeTaskGetRequest(request []byte) (uint64, error) {
+	var taskID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTaskGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	taskID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if taskID < TaskGetTaskIDMin || taskID > TaskGetTaskIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return taskID, nil
+}
+
+const EventToolRegistryLookup = EventOrganization
+const StageToolRegistryLookup = FamilyOrganization
+const OperationToolRegistryLookup uint32 = 34
+const ToolRegistryLookupToolNameMin = 1
+const ToolRegistryLookupToolNameMax = 127
+
+// EncodeToolRegistryLookupRequest writes the schema tool_registry_lookup declares, in order.
+func EncodeToolRegistryLookupRequest(toolName string) ([]byte, error) {
+	if len(toolName) < ToolRegistryLookupToolNameMin || len(toolName) > ToolRegistryLookupToolNameMax || hasNUL(toolName) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, toolName, ToolRegistryLookupToolNameMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationToolRegistryLookup, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeToolRegistryLookupRequest reads it back, checking each field against its own bound.
+func DecodeToolRegistryLookupRequest(request []byte) (string, error) {
+	var toolName string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationToolRegistryLookup || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if toolName, err = takeRowText(payload, &cursor, ToolRegistryLookupToolNameMax); err != nil ||
+		len(toolName) < ToolRegistryLookupToolNameMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return toolName, nil
 }
 
 const EventEnrollmentActive = EventCustody
