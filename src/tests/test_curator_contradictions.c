@@ -65,6 +65,9 @@ static void test_contradiction(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_contradictions"))
+      return 0;
+
    test_empty();
    test_contradiction();
    printf("curator_contradictions: all tests passed\n");

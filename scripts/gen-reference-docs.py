@@ -869,6 +869,14 @@ ENV_DESC = {
     "AIMEE_VECTOR_KB_BATCH_SIZE": ("Knowledge base (aimee-kb)", "Embedding batch size for KB vector ingest."),
     # Database & vectors
     "AIMEE_DB2_URL": ("Database & vectors", "Postgres (DB2) connection URL for the KB store."),
+    "AIMEE_TEST_DB2_TEMPLATE_URL": (
+        "Database & vectors",
+        "Test-only. Postgres template database the DB2 test shim clones per test process, so unit "
+        "tests run against the real engine instead of the sqlite shim (which translates DB2's SQL "
+        "rather than executing it). Build the template with `make db2-test-template` and the suite "
+        "with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test "
+        "binaries; no production code path consults it.",
+    ),
     "AIMEE_DB2_STATEMENT_TIMEOUT_MS": (
         "Database & vectors",
         "Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease "

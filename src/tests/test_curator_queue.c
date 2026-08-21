@@ -381,6 +381,9 @@ static void test_only_current_document_generation_queues(sqlite3 *db)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_queue"))
+      return 0;
+
    /* Deterministic config: HOME with no aimee.yaml -> config_load (called inside
     * the queue) returns built-in defaults (extract_docs default-ON). */
    platform_setenv("HOME", "/tmp");

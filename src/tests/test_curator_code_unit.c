@@ -905,6 +905,9 @@ static void test_queue_code_units_skipped_without_synthesis_endpoint(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_code_unit"))
+      return 0;
+
    printf("curator_code_unit:\n");
 
    test_force_curator_gate_off();

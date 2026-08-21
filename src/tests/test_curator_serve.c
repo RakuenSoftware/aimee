@@ -86,6 +86,9 @@ static void test_contradictions(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_serve"))
+      return 0;
+
    test_implements();
    test_synthesize();
    test_contradictions();

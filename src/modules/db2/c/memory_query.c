@@ -1674,6 +1674,70 @@ int db2_memory_touch(int64_t memory_id)
    return changes > 0 ? 0 : -1;
 }
 
+/* Ids per UPDATE, and the widest decimal int64 plus its separator. Together
+ * these bound the stack buffers below (~3.5 KB) while keeping a whole turn's
+ * injected-memory set to one or two statements. */
+#define MQ_TOUCH_BATCH    128
+#define MQ_TOUCH_ID_WIDTH 21
+#define MQ_TOUCH_LIST_CAP (MQ_TOUCH_BATCH * MQ_TOUCH_ID_WIDTH)
+
+int db2_memory_touch_many(const int64_t *ids, int n)
+{
+   if (!ids || n <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   int total = 0;
+   int wanted = 0; /* ids worth an UPDATE */
+   int issued = 0; /* statements that actually ran */
+   for (int off = 0; off < n; off += MQ_TOUCH_BATCH)
+   {
+      /* The ids are BIGINTs read back out of `memories`, so they are formatted
+       * into the IN list directly; there is no injection surface, and it avoids
+       * running the placeholder namespace out to ?128 with a bind call each. */
+      char list[MQ_TOUCH_LIST_CAP];
+      size_t pos = 0;
+      int in_batch = 0;
+      for (int i = off; i < n && i < off + MQ_TOUCH_BATCH; i++)
+      {
+         if (ids[i] <= 0)
+            continue;
+         int w = snprintf(list + pos, sizeof(list) - pos, "%s%lld", in_batch ? "," : "",
+                          (long long)ids[i]);
+         if (w < 0 || (size_t)w >= sizeof(list) - pos)
+            break;
+         pos += (size_t)w;
+         in_batch++;
+      }
+      if (in_batch == 0)
+         continue;
+      wanted += in_batch;
+
+      char sql[MQ_TOUCH_LIST_CAP + 128];
+      int sn = snprintf(sql, sizeof(sql),
+                        "UPDATE memories SET use_count = use_count + 1,"
+                        " last_used_at = pg_now_text() WHERE id IN (%s)",
+                        list);
+      if (sn < 0 || (size_t)sn >= sizeof(sql))
+         continue;
+      char err[MQ_ERRBUF] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!st)
+         continue;
+      if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+      {
+         total += aimee_pg_stmt_changes(st);
+         issued++;
+      }
+      aimee_pg_finalize(st);
+   }
+   if (wanted == 0)
+      return 0; /* nothing addressable — not a failure */
+   return issued > 0 ? total : -1;
+}
+
 int db2_memory_update_content(int64_t memory_id, const char *content)
 {
    if (memory_id <= 0 || !content || !content[0])

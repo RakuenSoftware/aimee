@@ -78,6 +78,9 @@ static void seed(sqlite3 *db, const char *sql)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_pipeline"))
+      return 0;
+
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    assert(db != NULL);

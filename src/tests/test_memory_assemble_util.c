@@ -3,6 +3,7 @@
  * Header is static inline → this test links nothing extra. */
 #include "modules/memory/memory_assemble_util.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -111,11 +112,77 @@ static void test_near_duplicate(void)
    printf("near_duplicate OK\n");
 }
 
+static void test_recency_curve(void)
+{
+   /* Inside the plateau nothing decays: a fact three months old must not be
+    * outranked on age alone, which is the whole point of the flat zone. */
+   assert(context_recency_from_age_days(0.0) == 1.0);
+   assert(context_recency_from_age_days(1.0) == 1.0);
+   assert(context_recency_from_age_days(MEMORY_RECENCY_PLATEAU_DAYS) == 1.0);
+
+   /* An unknown age is not evidence of staleness. */
+   assert(context_recency_from_age_days(-1.0) == 1.0);
+
+   /* Exactly one half-life past the plateau halves the factor. */
+   double half =
+       context_recency_from_age_days(MEMORY_RECENCY_PLATEAU_DAYS + MEMORY_RECENCY_HALFLIFE_DAYS);
+   assert(fabs(half - 0.5) < 1e-9);
+
+   /* Monotonically decreasing past the plateau, and never zero -- an old fact
+    * sinks but stays reachable. */
+   double prev = 1.0;
+   for (double d = MEMORY_RECENCY_PLATEAU_DAYS + 1.0; d < 8000.0; d += 137.0)
+   {
+      double r = context_recency_from_age_days(d);
+      assert(r < prev);
+      assert(r > 0.0);
+      prev = r;
+   }
+
+   /* The tail is deliberately gentle: a year past the plateau must still be
+    * worth more than half its original score, or correct old facts get buried
+    * under fresher but less relevant ones. */
+   assert(context_recency_from_age_days(MEMORY_RECENCY_PLATEAU_DAYS + 365.0) > 0.8);
+
+   printf("recency_curve OK\n");
+}
+
+static void test_apply_recency(void)
+{
+   /* recency_weight 0 means the intent does not care about age; the score must
+    * come through untouched rather than picking up a near-1.0 multiplier. */
+   assert(context_apply_recency(0.75, 0.25, 0.0) == 0.75);
+   assert(context_apply_recency(0.75, 0.25, -1.0) == 0.75);
+
+   /* Full weight applies the whole decay. */
+   assert(fabs(context_apply_recency(0.8, 0.5, 1.0) - 0.4) < 1e-9);
+
+   /* Out-of-range weights clamp rather than amplifying the decay. */
+   assert(fabs(context_apply_recency(0.8, 0.5, 4.0) - 0.4) < 1e-9);
+
+   /* Partial weight interpolates: half weight on a 0.5 factor gives 0.75x. */
+   assert(fabs(context_apply_recency(1.0, 0.5, 0.5) - 0.75) < 1e-9);
+
+   /* A fresh candidate is never penalised at any weight. */
+   for (double w = 0.0; w <= 1.0; w += 0.1)
+      assert(fabs(context_apply_recency(0.6, 1.0, w) - 0.6) < 1e-9);
+
+   /* Ordering: given equal base scores, the fresher candidate wins whenever
+    * recency actually carries weight. */
+   double fresh = context_apply_recency(0.5, context_recency_from_age_days(10.0), 0.7);
+   double stale = context_apply_recency(0.5, context_recency_from_age_days(4000.0), 0.7);
+   assert(fresh > stale);
+
+   printf("apply_recency OK\n");
+}
+
 int main(void)
 {
    test_xml_escape();
    test_xml_tag_for_header();
    test_near_duplicate();
+   test_recency_curve();
+   test_apply_recency();
    printf("memory_assemble_util: all tests passed\n");
    return 0;
 }

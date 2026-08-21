@@ -239,6 +239,13 @@ int memory_touch(int64_t id)
    return -1;
 }
 
+int memory_touch_many(const int64_t *ids, int n)
+{
+   (void)ids;
+   (void)n;
+   return -1;
+}
+
 int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
                              int64_t *new_id_out)
 {

@@ -67,6 +67,9 @@ static void test_seeded_commits(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_index_narrative"))
+      return 0;
+
    db2_test_shim_open();
    int rc = kb_curator_index_narrative_one(NULL);
    assert(rc == 0);

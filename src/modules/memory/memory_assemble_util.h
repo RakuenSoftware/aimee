@@ -6,6 +6,7 @@
 #define DEC_MEMORY_ASSEMBLE_UTIL_H 1
 
 #include <ctype.h>
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -127,6 +128,40 @@ static inline int assemble_texts_near_duplicate(const char *a, const char *b)
       return 0;
    /* >= 0.85 without floating point: 100*inter >= 85*uni. */
    return (inter * 100U) >= (uni * 85U);
+}
+
+/* Recency factor in (0, 1] for a memory of the given age: a flat plateau
+ * followed by a slow half-life, rather than a plain exponential from day zero.
+ *
+ * The plateau exists because a fact does not become less true as it ages. A
+ * correct answer learned three months ago should not lose to a less relevant
+ * one learned yesterday, so inside the plateau candidates compete on relevance
+ * alone. Past it the tail is long enough that a still-valid old fact stays
+ * reachable while genuinely stale material sinks.
+ *
+ * A negative age means "no usable stamp" and returns 1.0: an unknown age is not
+ * evidence of staleness, so it must not be penalised. */
+#define MEMORY_RECENCY_PLATEAU_DAYS  180.0
+#define MEMORY_RECENCY_HALFLIFE_DAYS 1825.0
+
+static inline double context_recency_from_age_days(double days)
+{
+   if (days < 0.0 || days <= MEMORY_RECENCY_PLATEAU_DAYS)
+      return 1.0;
+   return pow(0.5, (days - MEMORY_RECENCY_PLATEAU_DAYS) / MEMORY_RECENCY_HALFLIFE_DAYS);
+}
+
+/* Fold `recency` into `score` under the retrieval plan's recency_weight, which
+ * runs 0.0 (recency is irrelevant to this intent — score unchanged) through 1.0
+ * (score scales by the full decay). Weights outside [0,1] are clamped. */
+static inline double context_apply_recency(double score, double recency, double recency_weight)
+{
+   double w = recency_weight;
+   if (w <= 0.0)
+      return score;
+   if (w > 1.0)
+      w = 1.0;
+   return score * ((1.0 - w) + w * recency);
 }
 
 #endif /* DEC_MEMORY_ASSEMBLE_UTIL_H */

@@ -483,6 +483,11 @@ extern "C"
       char kind[16];
       double confidence;
       int use_count;
+      /* Recency inputs for the context scorer. last_used_at is empty until the
+       * memory has actually been recalled, so the scorer falls back to
+       * created_at for never-recalled rows. */
+      char last_used_at[32];
+      char created_at[32];
    } db2_memory_cand_row_t;
 
    /* Tier filter selecting which set of candidates to load. */
@@ -687,6 +692,13 @@ extern "C"
    /* Increment a memory's use_count and stamp last_used_at = now.
     * Returns 0 on success, -1 on miss / SQL failure. */
    int db2_memory_touch(int64_t memory_id);
+
+   /* Batch form of db2_memory_touch. Recall touches every memory injected into
+    * a turn, so the single-row form would cost one UPDATE per injected memory
+    * on the context-assembly path; this issues one statement per chunk instead.
+    * Ids <= 0 are skipped. Returns the number of rows updated, or -1 when no
+    * statement could be issued at all. */
+   int db2_memory_touch_many(const int64_t *ids, int n);
 
    /* Single-row SELECT into memory_t. Returns 0 on hit, -1 on miss. */
    int db2_memory_get(int64_t memory_id, memory_t *out);
