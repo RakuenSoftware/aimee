@@ -9,6 +9,8 @@
 #include "cJSON.h"
 #include <aimee/core/connection/tls_openssl.h>
 
+#include <time.h>
+
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -966,6 +968,44 @@ static SSL *server_tls_management_accept(int fd)
    SSL *ssl = g_management_ctx ? SSL_new(g_management_ctx) : NULL;
    pthread_mutex_unlock(&g_management_ctx_mu);
    return tls_accept_with_ssl(fd, ssl);
+}
+
+/* How long server_tls_wait_for_store waits. The module attaches in well under a
+   second when it is coming at all, and this is paid once, at startup. */
+#define TLS_STORE_WAIT_MS 5000
+#define TLS_STORE_POLL_MS 50
+
+/* Wait for the store before the mTLS ramp runs.
+ *
+ * The ramp inside server_tls_init_default reads and writes DB1, and DB1 lives
+ * in a module that attaches on its own schedule: it connects to the bus socket
+ * the daemon owns, so it cannot begin until the daemon is already listening.
+ * Racing it is permanent -- the ramp self-test fails, init returns non-zero, and
+ * TLS stays DISABLED for the life of the process while a healthy module attaches
+ * a moment later. Observed as "tls_port set but TLS cert/key not loadable"
+ * beside a running module, and in CI as an adoption run timing out on a TLS
+ * listener that was never coming.
+ *
+ * The probe is a parameter rather than a direct call so this file keeps no DB1
+ * dependency: its unit test links it alone, deliberately. Only waits when mTLS
+ * is configured on, since that is the only mode whose init needs the store. A
+ * module that is coming attaches in well under a second; one that is not leaves
+ * TLS refused exactly as before, having cost a second once, and says why. */
+void server_tls_wait_for_store(int (*store_ready)(void))
+{
+   if (!store_ready || config_server_api_mtls() <= 0)
+      return;
+   for (int waited_ms = 0; waited_ms < TLS_STORE_WAIT_MS && !store_ready();
+        waited_ms += TLS_STORE_POLL_MS)
+   {
+      struct timespec ts = {0, TLS_STORE_POLL_MS * 1000000L};
+      nanosleep(&ts, NULL);
+   }
+   if (!store_ready())
+      aimee_log(LOG_WARN, "server.tls",
+                "the store did not answer within %dms; the mTLS ramp needs it, so TLS may be "
+                "refused",
+                TLS_STORE_WAIT_MS);
 }
 
 int server_tls_init_default(void)

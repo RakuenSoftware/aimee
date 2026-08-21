@@ -1,7 +1,6 @@
 /* db1/ensemble.c: JSON-backed templated multi-agent ensembles. */
 #include "ensemble.h"
 #include "db1_internal.h"
-#include "config.h"
 #include "dstr.h"
 #include "util.h"
 
@@ -82,6 +81,8 @@ static const wf_builtin_template_t g_builtin_templates[] = {
      "]"
      "}"},
     {NULL, NULL}};
+
+static int wf_role_needs_dissent(const char *role);
 
 static void wf_set_err(char *err, size_t errlen, const char *msg)
 {
@@ -258,7 +259,7 @@ static char *wf_build_prompt(cJSON *tmpl, cJSON *context, int phase_idx, int tur
    dstr_init(&out);
    dstr_appendf(&out, "Phase: %s\nAgent: %s\nRole: %s\n", phase_name ? phase_name : "?",
                 agent ? agent : "?", role ? role : "?");
-   if (db1_ensemble_role_needs_dissent(role))
+   if (wf_role_needs_dissent(role))
    {
       dstr_append_str(&out,
                       "\nProvide your own independent analysis. Do not repeat or defer to "
@@ -441,7 +442,8 @@ static void wf_append_context(cJSON *context, const char *sender, const char *te
    cJSON_AddItemToArray(context, msg);
 }
 
-int db1_ensemble_template_path(const char *project_root, const char *name, char *buf, size_t bufsz)
+static int wf_template_path(const char *project_root, const char *config_dir, const char *name,
+                            char *buf, size_t bufsz)
 {
    struct stat st;
 
@@ -461,24 +463,27 @@ int db1_ensemble_template_path(const char *project_root, const char *name, char 
             return 0;
       }
 
-      snprintf(buf, bufsz, "%s/%s/%s.json", config_default_dir(), dirs[d], name);
-      if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
-         return 0;
+      if (config_dir && config_dir[0])
+      {
+         snprintf(buf, bufsz, "%s/%s/%s.json", config_dir, dirs[d], name);
+         if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
+            return 0;
+      }
    }
 
    buf[0] = '\0';
    return -1;
 }
 
-cJSON *db1_ensemble_template_load(const char *project_root, const char *name, char *err,
-                                  size_t errlen)
+static cJSON *wf_template_load(const char *project_root, const char *config_dir, const char *name,
+                               char *err, size_t errlen)
 {
    char path[MAX_PATH_LEN];
    dstr_t raw;
    dstr_init(&raw);
    cJSON *root = NULL;
 
-   if (db1_ensemble_template_path(project_root, name, path, sizeof(path)) == 0)
+   if (wf_template_path(project_root, config_dir, name, path, sizeof(path)) == 0)
    {
       if (dstr_read_file(&raw, path) != 0)
       {
@@ -524,7 +529,7 @@ cJSON *db1_ensemble_template_load(const char *project_root, const char *name, ch
    return root;
 }
 
-int db1_ensemble_role_needs_dissent(const char *role)
+static int wf_role_needs_dissent(const char *role)
 {
    static const char *roles[] = {"reviewer", "red_team", "critic", "challenger", "against", NULL};
    if (!role)
@@ -537,16 +542,33 @@ int db1_ensemble_role_needs_dissent(const char *role)
    return 0;
 }
 
-int db1_ensemble_create(const char *project_root, const char *template_name, const char *channel,
-                        cJSON *assignments, int *out_id, char *err, size_t errlen)
+static int ensemble_create_locked(const char *project_root, const char *config_dir,
+                                  const char *template_name, const char *channel,
+                                  const char *assignments_json, int *out_id, char *err,
+                                  size_t errlen)
 {
-   cJSON *tmpl = db1_ensemble_template_load(project_root, template_name, err, errlen);
+   cJSON *tmpl = wf_template_load(project_root, config_dir, template_name, err, errlen);
    if (!tmpl)
       return -1;
+
+   /* An absent or empty document means no assignments, which is not an error:
+      a template whose participants each name their agent needs none. */
+   cJSON *assignments = NULL;
+   if (assignments_json && assignments_json[0])
+   {
+      assignments = cJSON_Parse(assignments_json);
+      if (!assignments)
+      {
+         cJSON_Delete(tmpl);
+         wf_set_err(err, errlen, "assignments are not valid JSON");
+         return -1;
+      }
+   }
 
    if (wf_expand_assignments(tmpl, assignments, err, errlen) != 0)
    {
       cJSON_Delete(tmpl);
+      cJSON_Delete(assignments);
       return -1;
    }
 
@@ -557,6 +579,7 @@ int db1_ensemble_create(const char *project_root, const char *template_name, con
       free(tmpl_raw);
       free(assign_raw);
       cJSON_Delete(tmpl);
+      cJSON_Delete(assignments);
       wf_set_err(err, errlen, "failed to serialize ensemble template");
       return -1;
    }
@@ -576,6 +599,7 @@ int db1_ensemble_create(const char *project_root, const char *template_name, con
       free(tmpl_raw);
       free(assign_raw);
       cJSON_Delete(tmpl);
+      cJSON_Delete(assignments);
       wf_set_err(err, errlen, sqlite3_errmsg(db1_conn()));
       return -1;
    }
@@ -592,6 +616,7 @@ int db1_ensemble_create(const char *project_root, const char *template_name, con
    free(tmpl_raw);
    free(assign_raw);
    cJSON_Delete(tmpl);
+   cJSON_Delete(assignments);
    if (rc != SQLITE_DONE)
    {
       wf_set_err(err, errlen, sqlite3_errmsg(db1_conn()));
@@ -603,8 +628,8 @@ int db1_ensemble_create(const char *project_root, const char *template_name, con
    return 0;
 }
 
-int db1_ensemble_get(int id, ensemble_info_t *out, char **prompt_out, char **context_out, char *err,
-                     size_t errlen)
+static int ensemble_get_locked(int id, ensemble_info_t *out, char **prompt_out, char **context_out,
+                               char *err, size_t errlen)
 {
    wf_loaded_session_t loaded;
    if (wf_load_session_row(id, &loaded, err, errlen) != 0)
@@ -646,8 +671,9 @@ int db1_ensemble_pause(int id, const char *reason, char *err, size_t errlen)
    return 0;
 }
 
-int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_info_t *out,
-                         char **prompt_out, char *err, size_t errlen)
+static int ensemble_advance_locked(int id, const char *sender, const char *text,
+                                   ensemble_info_t *out, char **prompt_out, char *err,
+                                   size_t errlen)
 {
    wf_loaded_session_t loaded;
    if (wf_load_session_row(id, &loaded, err, errlen) != 0)
@@ -757,7 +783,7 @@ int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_
    return 0;
 }
 
-int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t errlen)
+static int ensemble_list_locked(ensemble_info_t **out, int *out_count, char *err, size_t errlen)
 {
    if (!out || !out_count)
    {
@@ -868,7 +894,7 @@ int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t e
    return 0;
 }
 
-int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char *err, size_t errlen)
+static int ensemble_find_current_locked(const char *channel, int *out_id, char *err, size_t errlen)
 {
    if (!channel || !channel[0] || !out_id)
    {
@@ -907,34 +933,55 @@ int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char 
    return 0;
 }
 
-cJSON *db1_ensemble_info_to_json(const ensemble_info_t *info, const char *prompt_text,
-                                 const char *context_text)
+/* The two reads that answer with a whole view.
+ *
+ * rc and err are filled rather than returned: the ensemble refusing a turn is
+ * something it has to SAY, and a reply that carried only a status would reduce
+ * "expected 'alice', got 'bob'" to "no". The returned int is about the store,
+ * not about the ensemble -- it is 0 whenever the view is filled at all. */
+int db1_ensemble_view(int id, ensemble_view_t *out)
 {
-   if (!info)
-      return NULL;
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc =
+       ensemble_get_locked(id, &out->info, &out->prompt, &out->context, out->err, sizeof(out->err));
+   return 0;
+}
 
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return NULL;
+int db1_ensemble_advance_view(int id, const char *sender, const char *text, ensemble_view_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc = ensemble_advance_locked(id, sender, text, &out->info, &out->prompt, out->err,
+                                     sizeof(out->err));
+   return 0;
+}
 
-   cJSON_AddNumberToObject(obj, "id", info->id);
-   cJSON_AddStringToObject(obj, "template", info->template_name);
-   cJSON_AddStringToObject(obj, "channel", info->channel);
-   cJSON_AddStringToObject(obj, "status", info->status);
-   cJSON_AddNumberToObject(obj, "current_phase", info->current_phase);
-   cJSON_AddNumberToObject(obj, "current_turn", info->current_turn);
-   cJSON_AddNumberToObject(obj, "phase_count", info->phase_count);
-   cJSON_AddNumberToObject(obj, "turns_in_phase", info->turns_in_phase);
-   cJSON_AddStringToObject(obj, "phase_name", info->phase_name);
-   cJSON_AddStringToObject(obj, "expected_agent", info->expected_agent);
-   cJSON_AddStringToObject(obj, "expected_role", info->expected_role);
-   cJSON_AddStringToObject(obj, "paused_reason", info->paused_reason);
-   cJSON_AddStringToObject(obj, "created_at", info->created_at);
-   cJSON_AddStringToObject(obj, "updated_at", info->updated_at);
-   if (prompt_text)
-      cJSON_AddStringToObject(obj, "next_prompt", prompt_text);
-   if (context_text)
-      cJSON_AddStringToObject(obj, "recent_context", context_text);
+int db1_ensemble_create_id(const char *project_root, const char *config_dir,
+                           const char *template_name, const char *channel,
+                           const char *assignments_json, ensemble_id_result_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc = ensemble_create_locked(project_root, config_dir, template_name, channel,
+                                    assignments_json, &out->id, out->err, sizeof(out->err));
+   return 0;
+}
 
-   return obj;
+int db1_ensemble_find_current_id(const char *channel, ensemble_id_result_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->rc = ensemble_find_current_locked(channel, &out->id, out->err, sizeof(out->err));
+   return 0;
+}
+
+int db1_ensemble_list_rows(ensemble_info_t **out, int *out_count)
+{
+   char err[ENSEMBLE_ERR_LEN];
+   return ensemble_list_locked(out, out_count, err, sizeof err);
 }

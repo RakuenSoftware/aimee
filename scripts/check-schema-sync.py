@@ -149,6 +149,14 @@ DB1_ONLY_TABLES = {
     "lifecycle_work_item",
     "lifecycle_event",
     "lifecycle_stage_attempt",
+    # The rest of the workflow engine's own tables. These were created by the Go
+    # WFE against DB1's file rather than declared here, which is why they are a
+    # late addition to a list that is otherwise as old as the tables: DB1 owned
+    # the store but not the schema, and the drift did not show up because
+    # nothing declared them to drift from.
+    "wfe_convergence",
+    "wfe_frozen_create",
+    "lifecycle_delegate_job",
     # primary-as-manager: interactive session <-> work-item binding (per-user, DB1-owned)
     "workflow_binding",
     # webchat tab -> Claude --resume id binding (per-user, DB1-owned)

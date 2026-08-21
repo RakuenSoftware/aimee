@@ -325,7 +325,9 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
       return agent_execute(agent, system_prompt, user_prompt, max_tokens, temperature, out);
    }
 
-   int plan_id = db1_execution_plan_create(agent->name, user_prompt, json);
+   char *steps_doc = cJSON_PrintUnformatted(json);
+   int plan_id = steps_doc ? db1_execution_plan_create(agent->name, user_prompt, steps_doc) : -1;
+   free(steps_doc);
    cJSON_Delete(json);
    free(plan_res.response);
    if (plan_id < 0)
@@ -386,8 +388,8 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
 /* --- Durable job context globals ---
  *
  * Only the job id is published. DB1 helpers (db1_agent_job_update,
- * db1_agent_job_heartbeat) reach DB1 through db1_conn() internally,
- * so callers do not pass a DB connection in. */
+ * db1_agent_job_heartbeat) reach the DB1 module over the bus, so callers
+ * do not pass a DB connection in -- there is none in this process. */
 
 static __thread int g_durable_job_id = 0;
 

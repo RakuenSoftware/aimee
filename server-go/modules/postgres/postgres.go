@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -169,6 +170,11 @@ func newHandler(probe func(context.Context) (healthEvidence, error)) bus.ModuleH
 			return nil, bus.ModuleStatusCancelled
 		}
 		if err != nil {
+			// Why the health probe failed IS the health answer. Returning a bare
+			// Internal told the caller only that the check did not complete, so
+			// an unreachable database, a refused login and a probe timeout were
+			// one indistinguishable status.
+			log.Printf("postgres: health probe failed: %v", err)
 			return nil, bus.ModuleStatusInternal
 		}
 		return healthResponse(evidence), bus.ModuleStatusOK

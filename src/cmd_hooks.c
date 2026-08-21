@@ -318,7 +318,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* DB1 owns its own connection; session_state_load/save delegate to DB1. */
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("cannot open database");
 
    if (strcmp(phase, "pre") == 0)

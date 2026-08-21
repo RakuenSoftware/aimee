@@ -689,6 +689,61 @@
           "id": 8,
           "name": "db1-telemetry",
           "event_kind": 11784
+        },
+        {
+          "id": 9,
+          "name": "db1-guardrail-state",
+          "event_kind": 11785
+        },
+        {
+          "id": 10,
+          "name": "db1-ensemble",
+          "event_kind": 11786
+        },
+        {
+          "id": 11,
+          "name": "db1-workflow",
+          "event_kind": 11787
+        },
+        {
+          "id": 12,
+          "name": "db1-roundtable",
+          "event_kind": 11788
+        },
+        {
+          "id": 13,
+          "name": "db1-identity",
+          "event_kind": 11789
+        },
+        {
+          "id": 14,
+          "name": "db1-checkpoints",
+          "event_kind": 11790
+        },
+        {
+          "id": 15,
+          "name": "db1-jti-replay",
+          "event_kind": 11791
+        },
+        {
+          "id": 16,
+          "name": "db1-lifecycle",
+          "event_kind": 11792
+        },
+        {
+          "id": 17,
+          "name": "db1-mgmt-jwks",
+          "event_kind": 11793
+        },
+        {
+          "id": 18,
+          "name": "db1-mgmt-nonce",
+          "event_kind": 11794
+        },
+        {
+          "id": 19,
+          "name": "db1-pki",
+          "event_kind": 11795
         }
       ]
     }
@@ -704,7 +759,8 @@
       "request": [
         6657,
         6678,
-        9474
+        9474,
+        11792
       ]
     },
     {

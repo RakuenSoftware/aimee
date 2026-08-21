@@ -35,10 +35,26 @@ type commandWebchatVault struct {
 	mu sync.Mutex
 }
 
+// aimeeServerPath resolves aimee-server in THIS process's PATH before handing it
+// to runuser. runuser replaces the environment with the target user's login
+// PATH, which on a stock Debian login.defs is /sbin:/bin:/usr/sbin:/usr/bin --
+// and aimee-server installs to /usr/local/bin, including in the server image.
+// Passing the bare name made the lookup depend on the aimee user's login PATH
+// rather than on where the binary actually is, and where that PATH omits the
+// install directory the service exits at startup with "webchat Vault export
+// failed" -- an error about the Vault, for a binary that was never found.
+// Resolving here changes nothing where the bare name already worked.
+func aimeeServerPath() string {
+	if resolved, err := exec.LookPath("aimee-server"); err == nil {
+		return resolved
+	}
+	return "aimee-server"
+}
+
 func (v *commandWebchatVault) Snapshot() (webchatVaultSnapshot, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	cmd := exec.Command("runuser", "-u", "aimee", "--", "aimee-server", "--webchat-vault-export")
+	cmd := exec.Command("runuser", "-u", "aimee", "--", aimeeServerPath(), "--webchat-vault-export")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = new(bytes.Buffer)
@@ -54,7 +70,7 @@ func (v *commandWebchatVault) Snapshot() (webchatVaultSnapshot, error) {
 func (v *commandWebchatVault) Seal(record string, value []byte) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	cmd := exec.Command("runuser", "-u", "aimee", "--", "aimee-server", "--webchat-vault-seal", record)
+	cmd := exec.Command("runuser", "-u", "aimee", "--", aimeeServerPath(), "--webchat-vault-seal", record)
 	cmd.Stdin = bytes.NewReader(value)
 	cmd.Stdout = new(bytes.Buffer)
 	cmd.Stderr = new(bytes.Buffer)

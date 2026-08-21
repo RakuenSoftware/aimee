@@ -73,6 +73,13 @@
           "type": "array",
           "uniqueItems": true
         },
+        "shared_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "system_libraries": {
           "items": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:+-]*$",

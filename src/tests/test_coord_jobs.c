@@ -62,7 +62,9 @@ static int create_test_plan(sqlite3 *db)
    cJSON_AddStringToObject(s3, "action", "Run tests");
    cJSON_AddItemToArray(steps, s3);
 
-   int plan_id = db1_execution_plan_create("test-agent", "test task", steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", "test task", steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    return plan_id;
 }

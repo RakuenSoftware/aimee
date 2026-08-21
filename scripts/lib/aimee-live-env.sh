@@ -495,7 +495,59 @@ live_env_restart_kb() {
    exit 2
 }
 
+# The DB1 module. The daemon holds no store -- it reaches DB1 over the module
+# bus -- so without this every family is unreachable and the rig measures a
+# server that cannot answer: write-tier grants verify against DB1 (jti consume,
+# jwks trust), so every grant read as INVALID and every authorized write got a
+# 403 that had nothing to do with the policy under test.
+#
+# Armed BEFORE the daemon, waiting for the socket the daemon is about to create.
+# The daemon does one-shot startup work that needs the store (the mTLS ramp among
+# it), so a module that attaches afterwards is already too late.
+live_env_start_module() {
+   live_env_stop_module
+   local module="${LIVE_DB1_MODULE:-src/build/obj/aimee-module-db1}"
+   # `make all` does not build the module, and both CI rigs that source this
+   # file run exactly that. Build it here rather than making them remember.
+   [ -x "$module" ] || make -C src build/obj/aimee-module-db1 >/dev/null 2>&1 || true
+   [ -x "$module" ] || {
+      echo "$LIVE_NAME: could not build the DB1 module at $module" >&2
+      exit 2
+   }
+   local grant="src/build/obj/module-bundle/grants/server/db1.grant"
+   [ -r "$grant" ] || python3 scripts/export_c_repositories.py \
+      --runtime-bundle src/build/obj/module-bundle >/dev/null 2>&1 || true
+   [ -r "$grant" ] || {
+      echo "$LIVE_NAME: no generated DB1 grant at $grant" >&2
+      exit 2
+   }
+   mkdir -p "$AIMEE_HOME/modules.d/server"
+   sed "s|^executable=.*|executable=$PWD/$module|" "$grant" \
+      >"$AIMEE_HOME/modules.d/server/db1.grant"
+   (
+      i=0
+      while [ "$i" -lt 600 ]; do
+         if [ -S "$AIMEE_HOME/server-module-bus.sock" ]; then
+            AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db" exec "$module" \
+               "$AIMEE_HOME/server-module-bus.sock"
+         fi
+         i=$((i + 1))
+         sleep 0.1
+      done
+      echo "module: the bus socket never appeared" >&2
+   ) >>"$AIMEE_HOME/db1-module.log" 2>&1 &
+   LIVE_MODULE_PID=$!
+}
+
+live_env_stop_module() {
+   [ -n "${LIVE_MODULE_PID:-}" ] || return 0
+   kill "$LIVE_MODULE_PID" 2>/dev/null
+   wait "$LIVE_MODULE_PID" 2>/dev/null
+   LIVE_MODULE_PID=""
+}
+
 live_env_start_server() {
+   live_env_start_module
    step "Starting aimee-server with a TCP listener"
    export AIMEE_KB_API_URL="http://127.0.0.1:$LIVE_KB_PORT"
    export AIMEE_SERVER_ID="$LIVE_SERVER_ID"
@@ -529,10 +581,16 @@ live_env_start_server() {
 }
 
 live_env_restart_server() {
+   # The module attaches to a socket the daemon owns, so a daemon restart takes
+   # its attachment with it. Stop it, clear the stale socket, and arm a fresh one
+   # against the socket the new daemon is about to create.
+   live_env_stop_module
    kill "$LIVE_SRV_PID" 2>/dev/null
    sleep 1
    kill -9 "$LIVE_SRV_PID" 2>/dev/null
    wait "$LIVE_SRV_PID" 2>/dev/null
+   rm -f "$AIMEE_HOME/server-module-bus.sock"
+   live_env_start_module
    ./aimee-server >"${LIVE_SRV_STDIO}.$1" 2>&1 &
    LIVE_SRV_PID=$!
    local i
@@ -546,6 +604,7 @@ live_env_restart_server() {
 }
 
 live_env_cleanup() {
+   live_env_stop_module
    [ -n "${LIVE_SRV_PID:-}" ] && kill "$LIVE_SRV_PID" 2>/dev/null
    [ -n "${LIVE_KB_PID:-}" ] && kill "$LIVE_KB_PID" 2>/dev/null
    sleep 1

@@ -121,7 +121,7 @@ static void delegate_status_print_coord_hint_if_present(const char *task_id, con
    if (job_id <= 0)
       return;
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       return;
 
    db1_coord_job_t job;

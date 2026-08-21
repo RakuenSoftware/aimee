@@ -15,13 +15,14 @@ import (
 
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
 func newTestServer(t *testing.T) (*Server, *db1.Store, *wfe.ArtifactStore) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -844,5 +845,54 @@ func TestManualFileSubmissionPreservesValidatedProposalSource(t *testing.T) {
 	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/dev/submit", bytes.NewReader(body)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("mismatched source status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// The submit reply is a CLI contract, not just an id carrier. `aimee workflow
+// run` prints work_item_id, workflow and state, and it has printed those three
+// since the C intake answered this route. When the intake moved behind this
+// module it began answering with the id alone, so the command printed one
+// filled line and two empty ones -- on every run, for every user, and no test
+// noticed because every test asserted only the id it needed next.
+func TestSubmitAnswersWithTheFieldsTheCLIPrints(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	workflowDir := t.TempDir()
+	definition := `name: build
+start: plan
+nodes:
+  - id: source
+    block: author.proposal
+    next: plan
+  - id: plan
+    block: author.plan
+    in: {proposal: source.out}
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "build.yaml"), []byte(definition), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server.workflowDir = workflowDir
+	body := strings.NewReader(
+		`{"proposal_md":"## do a thing\n\nwhy: because","workflow":"build","repo":"/tmp"}`)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/dev/submit", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("submit: %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		WorkItemID string `json:"work_item_id"`
+		Workflow   string `json:"workflow"`
+		State      string `json:"state"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkItemID == "" {
+		t.Error("work_item_id is empty")
+	}
+	if got.Workflow != "build" {
+		t.Errorf("workflow = %q, want \"build\" -- the CLI prints this field", got.Workflow)
+	}
+	if got.State != "active" {
+		t.Errorf("state = %q, want \"active\" -- the CLI prints this field too", got.State)
 	}
 }

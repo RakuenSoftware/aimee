@@ -41,8 +41,15 @@ STAGES_HEADER = Path("src/modules/db1/db1_stages.h")
 # daemon from util.c. In DB1_SRCS it would be a duplicate symbol there; out of
 # the module it is an undefined one here. db1_module_init.c opens the store the
 # module serves from, which the daemon opens for itself.
+# Sources that live in the module and are linked into no daemon. db1_init.c and
+# db1_write.c joined them when the last family was served: with every read and
+# write going over the bus, the daemon opened a connection it never used, and
+# leaving the lifecycle linked would have kept it one call away from a direct
+# caller again. Tests still link both -- they open ":memory:" and exercise the
+# domain objects directly -- which is why this is about the DAEMON's link and
+# not about who compiles the file.
 MODULE_ONLY_SOURCES = frozenset({"module_adapter.c", "db1_time.c", "db1_module_init.c",
-                                 "db1_module_support.c"})
+                                 "db1_module_support.c", "db1_init.c", "db1_write.c"})
 
 # DB1's principal ref. Event kinds are carved 4096 + ref*256 + stage, and a
 # family's id IS its future stage id, so the arithmetic is fixed here too.
@@ -56,13 +63,13 @@ SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
-PAYLOADS = ("none", "state", "text", "int", "int64", "double", "float", "struct")
+PAYLOADS = ("none", "state", "text", "int", "int64", "uint64", "double", "float", "struct")
 # A request carries a double for the same reason a reply does: a cost is a
 # number, and rounding it to an integer at the boundary would bill differently
 # on each side of it. The conversion is the one the reply already uses.
-FIELD_TYPES = ("text", "int", "int64", "double", "float")
+FIELD_TYPES = ("text", "int", "int64", "uint64", "double", "float")
 # Members that travel as decimal text and convert back on arrival.
-NUMERIC = ("int", "int64", "double", "float")
+NUMERIC = ("int", "int64", "uint64", "double", "float")
 
 
 # Widest decimal text a member can become, with room for the NUL. A %.17g
@@ -80,6 +87,11 @@ def numeric_format(kind: str) -> tuple[str, str]:
     """
     if kind == "int64":
         return "%lld", "(long long)"
+    if kind == "uint64":
+        # A content hash uses the whole width. Rendered signed it comes back as
+        # the same bits on a two's-complement machine and as a different number
+        # to anyone reading the frame, so it is rendered as what it is.
+        return "%llu", "(unsigned long long)"
     if kind == "double":
         return "%.17g", "(double)"
     if kind == "float":
@@ -99,6 +111,8 @@ def numeric_parse(kind: str, cell: str) -> str:
     """
     if kind == "int64":
         return f"(int64_t)strtoll({cell}, NULL, 10)"
+    if kind == "uint64":
+        return f"(uint64_t)strtoull({cell}, NULL, 10)"
     if kind == "float":
         return f"(float)strtod({cell}, NULL)"
     if kind == "double":
@@ -140,7 +154,7 @@ def load_json(path: Path) -> object:
 
 # A field name, or one element of an expanded array or nested member: "qa[3]",
 # "hypothesis.content", "qa[3].answer" -- the way C spells each of them.
-ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?(\.[a-z][a-z0-9_]*)?")
+ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?(\.[a-z][a-z0-9_]*(\[[0-9]+\])?)?")
 
 
 def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -161,11 +175,17 @@ def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
         if nested is not None and "repeat" in field:
             for index in range(int(field["repeat"])):
                 for member in nested:
-                    inner = dict(member)
-                    inner["name"] = f"{field['name']}[{index}].{member['name']}"
-                    if "required" in field:
-                        inner.setdefault("required", field["required"])
-                    grown.append(inner)
+                    # A member that is itself an array expands again, and
+                    # "outer[i].inner[j]" is how C spells that too, so the
+                    # emitters keep working for the same reason.
+                    span = range(int(member["repeat"])) if "repeat" in member else (None,)
+                    for at in span:
+                        inner = {k: v for k, v in member.items() if k != "repeat"}
+                        inner["name"] = (f"{field['name']}[{index}].{member['name']}"
+                                         + ("" if at is None else f"[{at}]"))
+                        if "required" in field:
+                            inner.setdefault("required", field["required"])
+                        grown.append(inner)
             continue
         if nested is not None and "repeat" not in field:
             for member in nested:
@@ -283,7 +303,7 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
         entry.pop("_field_types", None)
         if not isinstance(entry, dict) or \
                 not set(entry) <= allowed | {"c_name", "c_params", "c_returns",
-                                            "c_member"} or \
+                                            "c_member", "negatives"} or \
                 not allowed <= set(entry):
             fail("keys", f"operations[{index}] keys differ from version 1")
         operation = entry
@@ -447,11 +467,31 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             repeated_member = isinstance(entry_field, dict) and "repeat" in entry_field
             nested_member = isinstance(entry_field, dict) and "fields" in entry_field
             allowed = {"name", "type", "required"}
+            if isinstance(entry_field, dict) and "null_when_empty" in entry_field:
+                # The wire has no NULL: an absent string arrives as "". For most
+                # parameters that is the same thing, and for some it is not --
+                # db1_roundtable_run_list reads NULL as "every non-terminal run"
+                # and "" as "state equals the empty string", which matches
+                # nothing. Saying so here restores the distinction the C
+                # signature always had.
+                allowed = allowed | {"null_when_empty"}
             if repeated_member:
                 allowed = allowed | {"repeat"}
             if nested_member:
                 allowed = allowed | {"fields"}
             declared = keys(entry_field, allowed, f"{name}.request.fields[{position}]")
+            if declared.get("null_when_empty") is not None:
+                if declared["null_when_empty"] is not True:
+                    fail("null-when-empty",
+                         f"{name} field {declared['name']!r} null_when_empty must be true")
+                if str(declared["type"]) != "text":
+                    fail("null-when-empty",
+                         f"{name} field {declared['name']!r} is NULL when empty, which is "
+                         f"about a string")
+                if declared.get("required"):
+                    fail("null-when-empty",
+                         f"{name} field {declared['name']!r} is required, so it is never "
+                         f"empty and never NULL")
             if repeated_member:
                 # Only a struct has members wide enough to need this. A bare
                 # argument that repeats is the `repeated` shape, which carries
@@ -757,8 +797,20 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             shape = keys(declared, allowed_field, f"{name}.reply.fields[{position}]")
             if nested_member:
                 for at, member in enumerate(shape["fields"]):
-                    inner = keys(member, {"name", "type"},
+                    # A row's own member may be an array: plan_step_t holds
+                    # depends_on[AGENT_MAX_PLAN_DEPS], and a plan holds 32 of
+                    # those steps. Declaring it is the only way to carry it, and
+                    # carrying it is not optional -- the struct-members rule
+                    # requires every member, so a step's dependencies cannot be
+                    # quietly left behind on the far side of the wire.
+                    inner_keys = ({"name", "type", "repeat"}
+                                  if isinstance(member, dict) and "repeat" in member
+                                  else {"name", "type"})
+                    inner = keys(member, inner_keys,
                                  f"{name}.reply.fields[{position}].fields[{at}]")
+                    if "repeat" in inner:
+                        integer(inner["repeat"],
+                                f"{name}.reply.fields[{position}].fields[{at}].repeat", 2, 64)
                     if inner["type"] not in PAYLOADS or inner["type"] == "none":
                         fail("field-nested",
                              f"{name} nested member {inner['name']!r} type must be a payload")
@@ -834,6 +886,25 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                 fail("c-returns",
                      f"{name} carries its return beside a read, so its reply declares "
                      f"exactly one text value: the buffer the caller passed")
+        if "negatives" in operation:
+            # "The number IS the answer, including when it is negative."
+            #
+            # An integer return is normally read as a status: the stage maps a
+            # negative to FAILED, because for a count or an id a negative means
+            # the store could not answer. db1_wfe_bind is not that -- it returns
+            # -2 to say the work item is already bound to a DIFFERENT session,
+            # which is the single-writer rule doing its job. Mapped as a status
+            # that refusal arrives as -1 and reads as an outage.
+            #
+            # Same distinction ensemble draws between a verdict and a broken
+            # store; ensemble had data to carry so it used a struct, and this
+            # has only the number.
+            if str(operation["negatives"]) != "data":
+                fail("negatives", f"{name} negatives is 'data' or absent")
+            if operation.get("c_returns") != "int64":
+                fail("negatives",
+                     f"{name} says its negatives are data, which is about an integer "
+                     f"return: say c_returns int64")
         if operation.get("c_returns") == "void":
             # Nothing comes back as a RETURN. Out-parameters are a different
             # question: db1_clarify_weakest_dim fills a buffer and answers
@@ -870,9 +941,17 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             spelled = declared_return(root, str(operation["c_name"]))
             # A cost is returned as a double, and rounding it at the boundary
             # would bill differently on each side of it.
+            # An enum is an int with names on it, and the wire has no names --
+            # the JTI replay checks answer ok / replay / saturated / storage /
+            # invalid, and the caller admits a request on the first and refuses
+            # it on the rest, so the VALUE has to survive. It travels as an int
+            # and the client casts it back to the declared type, which is what
+            # keeps "storage failed" distinguishable from "this is a replay".
+            enum_return = spelled.endswith("_result_t")
             wanted = (("double",) if spelled == "double"
                       else ("float",) if spelled == "float"
-                      else ("int", "int64") if spelled == "int" else ("int64",))
+                      else ("int", "int64") if spelled in ("int", "long") or enum_return
+                      else ("int64",))
             if len(reply_fields) != 1 or str(reply_fields[0]["type"]) not in wanted:
                 fail("c-returns",
                      f"{name} hands back its return value, so its reply must declare "
@@ -1430,13 +1509,29 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
    return result;
 }}
 
-/* A write answers 0 or -1; the store either took it or it did not. */
-static int write_result(int status)
-{{
-   return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
-}}
+{write_result}{read_result}"""
 
-{read_result}"""
+
+WRITE_RESULT = """/* A write answers 0 or -1; the store either took it or it did not. */
+static int write_result(int status)
+{
+   return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
+}
+
+"""
+
+
+READ_RESULT = """/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
+   implementation returns and what its callers already branch on. */
+static int read_result(int status, const char *value_out)
+{
+   if (status == (int)AIMEE_DB1_STATUS_OK)
+      return (value_out && value_out[0]) ? 1 : 0;
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return -1;
+}
+"""
 
 
 # Header text, read and comment-stripped once per root.
@@ -1642,12 +1737,15 @@ def pointer_members(root: Path, struct: str) -> set[str]:
     the wrong one. An array member CAN still be empty, which is why this is
     separate from whether the field is required.
     """
+    # struct_body rather than a regex: the non-greedy form this used matched from
+    # the FIRST "typedef struct {" in the file to this struct's closing name, so
+    # for a header holding two structs it returned the wrong one's members --
+    # silently, and spelled the same way, which is why it read as correct.
     body = ""
     for _name, raw, _stripped in header_texts(root):
-        found = re.search(r"typedef\s+struct\s*\{(.*?)\}\s*" + re.escape(struct) + r"\s*;",
-                          raw, re.S)
-        if found:
-            body = found.group(1)
+        found = struct_body(raw, struct)
+        if found is not None:
+            body = found
             break
     names: set[str] = set()
     for member in body.split(";"):
@@ -1655,6 +1753,18 @@ def pointer_members(root: Path, struct: str) -> set[str]:
         matched = re.search(r"\*\s*([A-Za-z_][A-Za-z0-9_]*)$", member)
         if matched:
             names.add(matched.group(1))
+    # A member that is itself a struct contributes its own pointer members under
+    # a dotted name, because that is how the expansion spells them: a request
+    # row holding a token holds "token.jti", and asking this set about the outer
+    # struct alone would call that an inline array and try to snprintf into a
+    # const char *.
+    for member in body.split(";"):
+        member = re.sub(r"/\*.*?\*/", "", member, flags=re.S).strip()
+        nested = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*_t)\s+([A-Za-z_][A-Za-z0-9_]*)", member)
+        if not nested or nested.group(1) == struct:
+            continue
+        for inner in pointer_members(root, nested.group(1)):
+            names.add(f"{nested.group(2)}.{inner}")
     return names
 
 
@@ -1675,40 +1785,20 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         prose = "\n *\n" + "\n".join(wrap(doc, " * ", " * "))
     includes = "\n".join(f'#include "{h}"' for h in headers)
     # Emitted only where something reads a single value: a family of writes and
-    # rows has no use for it, and an unused static is a -Werror failure.
-    # A returned string maps its own miss (NULL) and never goes through this,
-    # so a family of writes, rows and returned strings has no use for it -- and
-    # an unused static is a -Werror failure.
-    # A plain read is the only shape that goes through read_result: not a row,
-    # not a list (a COLUMN has fields and no struct, so it looks like a read
-    # until you ask), and not a returned string, which maps its own miss.
-    # Stated as what a plain read IS rather than as everything it is not. The
-    # exclusion form had to be extended for every shape added -- list, column,
-    # returned string, scalars, returned id -- and each time the symptom was an
-    # unused static, which is a -Werror failure rather than a wrong answer only
-    # because the compiler happens to notice.
-    def is_plain_read(operation: dict[str, object]) -> bool:
-        reply = operation["reply"]
-        assert isinstance(reply, dict)
-        shaped = {"struct", "list", "scalars"} & set(reply)
-        return bool(reply["fields"]) and not shaped and "c_returns" not in operation
-
-    plain_read = any(is_plain_read(o) for o in operations)
-    reader = ("""/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
-   implementation returns and what its callers already branch on. */
-static int read_result(int status, const char *value_out)
-{
-   if (status == (int)AIMEE_DB1_STATUS_OK)
-      return (value_out && value_out[0]) ? 1 : 0;
-   if (status == (int)AIMEE_DB1_STATUS_MISSING)
-      return 0;
-   return -1;
-}
-""" if plain_read else "")
-    out = [CLIENT_SCAFFOLD.format(
-        stem=name, family=name.replace("_", " "), upper=upper,
-        header=includes, client_doc=prose, read_result=reader)]
-
+    # Both helpers are emitted only if the generated code calls one, because an
+    # unused static is a -Werror failure and the build stops.
+    #
+    # This used to be a predicate describing which shapes reach each helper, and
+    # it had to be extended for every shape added -- list, column, returned
+    # string, scalars, returned id -- each time discovered as a broken build
+    # rather than as a wrong answer, because the compiler happened to notice.
+    # ensemble was the next one: the first family whose every operation reads
+    # something back, so write_result had no caller.
+    #
+    # Asking the emitted text which helpers it calls cannot fall behind a shape,
+    # since a shape that does not call one is exactly a shape that does not need
+    # it. The bodies are therefore built before the scaffold that precedes them.
+    out = []
     for operation in operations:
         request = operation["request"]
         reply = operation["reply"]
@@ -2391,7 +2481,14 @@ static int read_result(int status, const char *value_out)
         body.append("}")
         out.append("\n" + "\n".join(body) + "\n")
     out.append("\n/* clang-format on */\n")
-    return "".join(out)
+
+    generated = "".join(out)
+    reader = (READ_RESULT if "read_result(" in generated else "")
+    writer = (WRITE_RESULT if "write_result(" in generated else "")
+    return CLIENT_SCAFFOLD.format(
+        stem=name, family=name.replace("_", " "), upper=upper,
+        header=includes, client_doc=prose, write_result=writer,
+        read_result=reader) + generated
 
 
 def client_families(catalog: dict[str, object]) -> list[tuple[dict, list]]:
@@ -2474,7 +2571,7 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }}
 
-{parse_int}{parse_int64}{parse_double}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
+{parse_int}{parse_int64}{parse_uint64}{parse_double}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
    with no values, a read with one, a row with a value per member. */
 static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
                             const char *const *values, uint32_t count)
@@ -2664,6 +2761,23 @@ static int parse_int64(const char *text, int64_t *out)
 
 """
 
+PARSE_UINT64 = """/* The same, for a member the catalog declared unsigned. Signed parsing would
+   accept "-1" and store it as the largest hash there is. */
+static int parse_uint64(const char *text, uint64_t *out)
+{
+   if (!text || !text[0] || text[0] == '-')
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   unsigned long long value = strtoull(text, &end, 10);
+   if (errno != 0 || !end || *end != '\\0')
+      return 1;
+   *out = (uint64_t)value;
+   return 0;
+}
+
+"""
+
 PARSE_DOUBLE = """/* The same, for a value the catalog declared as a double. A cost parsed as an
    integer is a different number, and one that still looks like a price. */
 static int parse_double(const char *text, double *out)
@@ -2697,6 +2811,8 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         assert isinstance(request, dict) and isinstance(reply, dict)
         arity = len(request["fields"])
         types = [str(f["type"]) for f in request["fields"]]
+        nullable = (lambda at: bool(request["fields"][at].get("null_when_empty"))
+                    if at < len(request["fields"]) else False)
         names = [str(f["name"]) for f in request["fields"]]
         reads = bool(reply["fields"])
         in_struct = str(request["struct"]) if "struct" in request else ""
@@ -2715,9 +2831,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind in ("double", "float")
-                            else "parse_int64")
+                            else "parse_uint64" if kind == "uint64" else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind in ("double", "float") else "int64_t")
+                             else "double" if kind in ("double", "float")
+                             else "uint64_t" if kind == "uint64" else "int64_t")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2733,9 +2850,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind in ("double", "float")
-                            else "parse_int64")
+                            else "parse_uint64" if kind == "uint64" else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind in ("double", "float") else "int64_t")
+                             else "double" if kind in ("double", "float")
+                             else "uint64_t" if kind == "uint64" else "int64_t")
                     parse.append(f"      {ctype} member_{position} = 0;\n"
                                  f"      if ({conv}(field[{position}], &member_{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2757,9 +2875,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
                             else "parse_double" if kind in ("double", "float")
-                            else "parse_int64")
+                            else "parse_uint64" if kind == "uint64" else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind in ("double", "float") else "int64_t")
+                             else "double" if kind in ("double", "float")
+                             else "uint64_t" if kind == "uint64" else "int64_t")
                     args.append(f"parsed{position}")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
@@ -2767,6 +2886,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                                  f"         free(scratch);\n"
                                  f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
                                  f"      }}\n")
+                elif nullable(position):
+                    # "" is how an absent string arrives; this parameter is one
+                    # whose NULL means something else entirely.
+                    args.append(f"field[{position}][0] ? field[{position}] : NULL")
                 else:
                     args.append(f"field[{position}]")
 
@@ -2784,6 +2907,12 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 tail.append("      rc = 0;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%.17g", '
                             "(double)produced);\n")  # a float widens losslessly
+            elif str(operation.get("negatives", "")) == "data":
+                # Declared: every value this returns is an answer, so the only
+                # failure left is the store not answering at all.
+                tail.append("      rc = 0;\n")
+                tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
+                            "(long long)produced);\n")
             else:
                 tail.append("      rc = (produced >= 0) ? 0 : -1;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
@@ -2830,10 +2959,19 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     args += [f"scalar{index}", f"(size_t){width}"]
                 else:
                     ctype = {"int": "int", "int64": "int64_t", "double": "double", "float": "float"}[kind]
+                    # A text scalar takes TWO parameters -- the buffer and its
+                    # capacity -- so the parameter that matches this field is
+                    # not at `index`. Counting them is the difference between
+                    # reading the caller's spelling for `advanced_at_out` and
+                    # reading it for the `hash_len` that precedes it, which is
+                    # how this emitted `size_t hash_len scalar2 = 0;`.
+                    at = len(request["fields"])
+                    for before, (_, before_kind) in enumerate(members[:index]):
+                        at += 2 if (before_kind == "text" and before not in stage_alloc) else 1
+                    params = operation.get("c_params") or []
                     spelled_out = declared_parameters(
                         root, str(operation.get("c_name", ""))).get(
-                            str(operation["c_params"][len(request["fields"]) + index])
-                            if "c_params" in operation else "")
+                            str(params[at]) if at < len(params) else "")
                     if spelled_out:
                         ctype = spelled_out.rsplit("*", 1)[0].strip()
                     parse.append(f"      {ctype} scalar{index} = 0;\n")
@@ -3165,7 +3303,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         cases.append(head + (f"   {{\n{body}   }}\n"
                              if parse or returns_text or returns_id else body))
     used = {str(f["type"]) for o in operations for f in o["request"]["fields"]}
-    typed = bool(used & {"int", "int64", "double"})
+    typed = bool(used & {"int", "int64", "uint64", "double", "float"})
     # Storage for a single row's reply, at function scope because write_reply
     # reads it after the switch. One variable per distinct row type the family
     # answers with; a union would save stack but would have to invent member
@@ -3252,7 +3390,8 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                                  cases="".join(cases),
                                  parse_int=PARSE_INT if "int" in used else "",
                                  parse_int64=PARSE_INT64 if "int64" in used else "",
-                                 parse_double=PARSE_DOUBLE if "double" in used else "",
+                                 parse_double=PARSE_DOUBLE if used & {"double", "float"} else "",
+                                 parse_uint64=PARSE_UINT64 if "uint64" in used else "",
                                  int_includes=INT_INCLUDES if typed else "")
 
 
@@ -3286,6 +3425,353 @@ def stages_header_bytes(catalog: dict[str, object]) -> str:
     lines.append("\n#endif /* AIMEE_DB1_STAGES_H */\n/* clang-format on */\n")
     return "".join(lines)
 
+
+# ---------------------------------------------------------------------------
+# The Go client.
+#
+# The C client is generated because hand-writing 458 wire encoders is how a
+# contract and its callers drift. The Go side has exactly the same problem and
+# had been solving it by not having a client at all: the workflow engine reached
+# DB1 by opening its SQLite file. Moving it onto the bus means the same 45
+# lifecycle operations need Go callers, and they are generated from this catalog
+# for the same reason the C ones are.
+#
+# Only families listed here are emitted. This is not a general Go binding for
+# every family -- it is the surface one Go process needs, and adding a family
+# here should follow a Go caller that needs it rather than precede one.
+GO_CLIENT_FAMILIES = ("lifecycle",)
+GO_CLIENT_DIR = "server-go/db1"
+
+GO_SCALAR = {"text": "string", "int": "int", "int64": "int64", "double": "float64"}
+
+
+def go_name(snake: str) -> str:
+    """work_item_id -> WorkItemID. Initialisms the Go side already spells that
+    way are kept, because a generated name that fights the surrounding code is
+    a name every caller has to look up."""
+    initialisms = {"id": "ID", "ids": "IDs", "url": "URL", "usd": "USD", "pr": "PR"}
+    parts = [p for p in snake.split("_") if p]
+    return "".join(initialisms.get(p, p.capitalize()) for p in parts)
+
+
+def go_lower(snake: str) -> str:
+    name = go_name(snake)
+    head = name[0].lower() + name[1:] if name else name
+    return head + "_" if head in {"type", "range", "func", "return", "default"} else head
+
+
+def go_encode(field: dict[str, object], var: str) -> str:
+    kind = field.get("type", "text")
+    if kind == "text":
+        return var
+    if kind == "int":
+        return f"Itoa({var})"
+    if kind == "int64":
+        return f"I64toa({var})"
+    return f"Ftoa({var})"
+
+
+def go_struct_name(family: str, operation: dict[str, object]) -> str:
+    return go_name(operation["name"])
+
+
+def go_reply_shape(operation: dict[str, object]) -> str:
+    reply = operation.get("reply") or {}
+    if reply.get("list"):
+        return "list-struct" if reply.get("struct") else "list-text"
+    if reply.get("struct"):
+        return "struct"
+    if reply.get("fields"):
+        return "scalar"
+    return "none"
+
+
+
+
+# member[i].inner, the flattened spelling of a repeated struct member.
+ELEMENT_MEMBER = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]\.([A-Za-z_][A-Za-z0-9_]*)$")
+
+
+def go_repeated_group(fields: list[dict[str, object]]) -> dict[str, object] | None:
+    """Recover one repeated struct member from its flattened fields.
+
+    Returns the outer name, the member fields of one element, and how many
+    elements the wire carries, or None when the request has no repeat. More than
+    one repeated member in a single request is not something the catalog has,
+    and guessing at the interleaving of two would be worse than refusing."""
+    groups: dict[str, dict[str, object]] = {}
+    for field in fields:
+        match = ELEMENT_MEMBER.match(str(field["name"]))
+        if not match:
+            continue
+        outer, index, inner = match.group(1), int(match.group(2)), match.group(3)
+        group = groups.setdefault(outer, {"name": outer, "members": [], "count": 0})
+        group["count"] = max(int(group["count"]), index + 1)
+        if index == 0:
+            members = group["members"]
+            assert isinstance(members, list)
+            members.append({"name": inner, "type": field.get("type", "text")})
+    if not groups:
+        return None
+    if len(groups) > 1:
+        fail("go-client-repeat",
+             f"a Go client operation has {len(groups)} repeated members; one is supported")
+    return next(iter(groups.values()))
+
+
+
+def go_client_bytes(catalog: dict[str, object], family: dict[str, object],
+                    operations: list[dict[str, object]]) -> str:
+    name = family["name"]
+    lines: list[str] = []
+    lines.append("package db1")
+    lines.append("")
+    lines.append(f"// GENERATED from src/modules/db1/eventcontract/operations.json by")
+    lines.append("// scripts/gen_db1_contract.py. Do not edit: add an operation to the catalog")
+    lines.append("// and regenerate, so the wire and its callers cannot drift apart.")
+    lines.append("//")
+    lines.append(f"// Family {family['id']}: {name}, event kind {family['event_kind']}.")
+    lines.append("")
+    lines.append("import (")
+    lines.append('\t"context"')
+    lines.append('\t"fmt"')
+    lines.append(")")
+    lines.append("")
+    lines.append(f"const Event{go_name(name)} uint32 = {family['event_kind']}")
+    lines.append(f"const Stage{go_name(name)} uint32 = {family['id']}")
+    lines.append("")
+    for operation in operations:
+        lines.append(f"const op{go_name(operation['name'])} uint32 = {operation['id']}")
+    lines.append("")
+
+    # Element types for repeated request members, so a caller passes a slice of
+    # named fields rather than a flattened positional list.
+    for operation in operations:
+        repeated = go_repeated_group((operation.get("request") or {}).get("fields", []))
+        if repeated is None:
+            continue
+        item = f"{go_name(operation['name'])}Item"
+        lines.append(f"// {item} is one {repeated['name']} entry for {operation['name']}.")
+        lines.append(f"type {item} struct {{")
+        members = [(go_name(m["name"]), GO_SCALAR[m.get("type", "text")])
+                   for m in repeated["members"]]
+        pad = max((len(name) for name, _ in members), default=0)
+        for name, gotype in members:
+            lines.append(f"\t{name.ljust(pad)} {gotype}")
+        lines.append("}")
+        lines.append("")
+
+    # Reply structs, one per operation that answers with a row.
+    for operation in operations:
+        shape = go_reply_shape(operation)
+        if shape not in {"struct", "list-struct"}:
+            continue
+        reply = operation["reply"]
+        struct = go_struct_name(name, operation)
+        lines.append(f"// {struct} is the row {operation['name']} answers with.")
+        lines.append(f"type {struct} struct {{")
+        # Padded to gofmt's alignment. The generated file is checked byte for
+        # byte against what this emits, so producing something gofmt would
+        # rewrite makes every `go fmt ./...` look like catalog drift.
+        members = [(go_name(field["name"]), GO_SCALAR[field.get("type", "text")])
+                   for field in reply["fields"]]
+        width = max((len(member) for member, _ in members), default=0)
+        for member, gotype in members:
+            lines.append(f"\t{member.ljust(width)} {gotype}")
+        lines.append("}")
+        lines.append("")
+
+    for operation in operations:
+        lines.extend(go_operation_bytes(name, operation))
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def go_operation_bytes(family: str, operation: dict[str, object]) -> list[str]:
+    method = go_name(operation["name"])
+    request = (operation.get("request") or {}).get("fields", [])
+    shape = go_reply_shape(operation)
+    reply = operation.get("reply") or {}
+
+    # A repeated struct member is one Go slice, not N*width positional
+    # parameters. By the time an emitter sees the catalog the repeat has already
+    # been flattened into `member[i].inner` names -- that is what the C emitters
+    # want, because C spells an element exactly that way -- so the grouping is
+    # recovered from the names. The wire still carries every slot: the array is
+    # always N wide and unused slots are empty strings, which is what the C side
+    # reads back.
+    repeated = go_repeated_group(request)
+    plain = [f for f in request if not ELEMENT_MEMBER.match(str(f["name"]))]
+
+    params = ["ctx context.Context"]
+    for field in plain:
+        params.append(f"{go_lower(field['name'])} {GO_SCALAR[field.get('type', 'text')]}")
+    if repeated is not None:
+        params.append(f"{go_lower(str(repeated['name']))} []{go_name(operation['name'])}Item")
+
+    if shape == "none":
+        returns = "error"
+    elif shape == "scalar":
+        # Several loose scalars are several returns. Reading only the first was
+        # a silent truncation: work_item_child_counts answers with three counts
+        # and the caller would have got the total and believed it had them all.
+        types = [GO_SCALAR[cell.get("type", "text")] for cell in reply["fields"]]
+        returns = "(" + ", ".join(types + ["error"]) + ")"
+    elif shape == "struct":
+        returns = f"({go_struct_name(family, operation)}, error)"
+    elif shape == "list-text":
+        returns = "([]string, error)"
+    else:
+        returns = f"([]{go_struct_name(family, operation)}, error)"
+
+    if shape == "scalar":
+        zero = ", ".join('""' if cell.get("type", "text") == "text" else "0"
+                         for cell in reply["fields"])
+    else:
+        zero = {"none": "", "struct": "out", "list-text": "nil",
+                "list-struct": "nil"}[shape]
+
+    lines = [f"func (c *Client) {method}({', '.join(params)}) {returns} {{"]
+    if shape == "struct":
+        lines.append(f"\tvar out {go_struct_name(family, operation)}")
+    fail_prefix = "" if shape == "none" else f"{zero}, "
+    lines.append("\tif c == nil || c.caller == nil {")
+    lines.append(f"\t\treturn {fail_prefix}ErrConfig")
+    lines.append("\t}")
+    if repeated is None:
+        encoded = ", ".join(go_encode(f, go_lower(f["name"])) for f in request)
+        lines.append(f"\tfields := []string{{{encoded}}}")
+    else:
+        slot = go_lower(str(repeated["name"]))
+        width = int(repeated["count"])
+        members = repeated["members"]
+        lines.append(f"\tif len({slot}) > {width} {{")
+        lines.append(f'\t\treturn {fail_prefix}fmt.Errorf("db1: {operation["name"]} takes at most '
+                     f'{width} {repeated["name"]}, got %d", len({slot}))')
+        lines.append("\t}")
+        lines.append("\tfields := make([]string, 0, %d)" % len(request))
+        emitted_group = False
+        for field in request:
+            if ELEMENT_MEMBER.match(str(field["name"])):
+                if emitted_group:
+                    continue
+                emitted_group = True
+                lines.append(f"\tfor i := 0; i < {width}; i++ {{")
+                lines.append(f"\t\tif i < len({slot}) {{")
+                for member in members:
+                    expr = go_encode(member, f"{slot}[i].{go_name(member['name'])}")
+                    lines.append(f"\t\t\tfields = append(fields, {expr})")
+                lines.append("\t\t} else {")
+                lines.append(f'\t\t\tfields = append(fields{", \"\"" * len(members)})')
+                lines.append("\t\t}")
+                lines.append("\t}")
+            else:
+                lines.append(f"\tfields = append(fields, {go_encode(field, go_lower(field['name']))})")
+    # An operation that answers with nothing still has a status, but naming its
+    # reply would leave 45 unused variables for the compiler to reject.
+    reply_var = "_" if shape == "none" else "reply"
+    lines.append(f"\tstatus, {reply_var}, err := c.callFields(ctx, op{method}, fields)")
+    lines.append("\tif err != nil {")
+    lines.append(f"\t\treturn {fail_prefix}err")
+    lines.append("\t}")
+    # An operation whose results include "missing" says so with a status rather
+    # than an error: absence is an answer there, and a caller that had to unwrap
+    # an error to discover "nothing recorded" would be one `errors.Is` away from
+    # treating a broken store the same way.
+    if "missing" in operation.get("results", []):
+        lines.append("\tif status == statusMissing {")
+        lines.append(f"\t\treturn {zero + ', ' if shape != 'none' else ''}nil")
+        lines.append("\t}")
+    lines.append("\tif status != statusOK {")
+    lines.append(f'\t\treturn {fail_prefix}&StatusError{{Op: "{operation["name"]}", Status: status}}')
+    lines.append("\t}")
+
+    if shape == "none":
+        lines.append("\treturn nil")
+    elif shape == "scalar":
+        cells = reply["fields"]
+        lines.append(f"\tif len(reply) < {len(cells)} {{")
+        lines.append(f"\t\treturn {zero}, ErrMalformed")
+        lines.append("\t}")
+        names = []
+        for index, cell in enumerate(cells):
+            kind = cell.get("type", "text")
+            local = go_lower(cell["name"])
+            names.append(local)
+            if kind == "text":
+                lines.append(f"\t{local} := reply[{index}]")
+                continue
+            parse = {"int": "Atoi", "int64": "Atoi64", "double": "Atof"}[kind]
+            lines.append(f"\t{local}, err := {parse}(reply[{index}])")
+            lines.append("\tif err != nil {")
+            lines.append(f"\t\treturn {zero}, err")
+            lines.append("\t}")
+        lines.append(f"\treturn {', '.join(names)}, nil")
+    elif shape == "struct":
+        width = len(reply["fields"])
+        lines.append(f"\tif len(reply) != {width} {{")
+        lines.append(f"\t\treturn out, fmt.Errorf(\"%w: {operation['name']} wants {width} fields, got %d\", ErrMalformed, len(reply))")
+        lines.append("\t}")
+        lines.extend(go_assign_row(reply["fields"], "out", "reply"))
+        lines.append("\treturn out, nil")
+    elif shape == "list-text":
+        lines.append("\treturn reply, nil")
+    else:
+        width = len(reply["fields"])
+        lines.append(f"\trows, err := Rows(reply, {width})")
+        lines.append("\tif err != nil {")
+        lines.append("\t\treturn nil, err")
+        lines.append("\t}")
+        lines.append(f"\tout := make([]{go_struct_name(family, operation)}, 0, len(rows))")
+        lines.append("\tfor _, row := range rows {")
+        lines.append(f"\t\tvar item {go_struct_name(family, operation)}")
+        lines.extend("\t" + line for line in go_assign_row(reply["fields"], "item", "row"))
+        lines.append("\t\tout = append(out, item)")
+        lines.append("\t}")
+        lines.append("\treturn out, nil")
+    lines.append("}")
+    return lines
+
+
+def go_assign_row(fields: list[dict[str, object]], target: str, source: str) -> list[str]:
+    lines: list[str] = []
+    for index, field in enumerate(fields):
+        kind = field.get("type", "text")
+        member = go_name(field["name"])
+        cell = f"{source}[{index}]"
+        if kind == "text":
+            lines.append(f"\t{target}.{member} = {cell}")
+            continue
+        parse = {"int": "Atoi", "int64": "Atoi64", "double": "Atof"}[kind]
+        lines.append(f"\tif value, parseErr := {parse}({cell}); parseErr == nil {{")
+        lines.append(f"\t\t{target}.{member} = value")
+        lines.append("\t} else {")
+        lines.append(f"\t\treturn {'out' if target == 'out' else 'nil'}, parseErr")
+        lines.append("\t}")
+    return lines
+
+
+def validate_go_clients(root: Path, catalog: dict[str, object], write: bool) -> None:
+    families = catalog["families"]
+    operations = catalog["operations"]
+    assert isinstance(families, dict) and isinstance(operations, list)
+    for family_name in GO_CLIENT_FAMILIES:
+        family = families[family_name]
+        owned = [op for op in operations if op["family"] == family_name]
+        owned.sort(key=lambda op: op["id"])
+        path = root / GO_CLIENT_DIR / f"{family_name}_gen.go"
+        expected = go_client_bytes(catalog, family, owned)
+        if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected, encoding="utf-8")
+        try:
+            actual = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            fail("go-client-missing", f"cannot read {path}: {exc}")
+        if actual != expected:
+            fail("go-client-stale",
+                 f"{path} is not what the catalog generates; run "
+                 f"scripts/gen_db1_contract.py --write")
 
 def validate_stages(root: Path, catalog: dict[str, object], write: bool) -> None:
     wanted = {(root / SOURCE_DIR / f"{family['name']}_stage.c"):
@@ -3390,6 +3876,7 @@ def run(root: Path, write: bool = False) -> None:
         (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)
     validate_clients(root, catalog, write)
+    validate_go_clients(root, catalog, write)
     validate_stages(root, catalog, write)
     validate_dispatch(root, catalog)
     validate_process_contract(root, catalog)

@@ -16,6 +16,8 @@ static void copy_err(char *errbuf, size_t errlen, const char *src)
    snprintf(errbuf, errlen, "%s", src ? src : "");
 }
 
+static void db1_backfill_after_schema(sqlite3 *db);
+
 static void db1_run_migrations(sqlite3 *db)
 {
    /* Each statement is executed independently; errors are silently ignored so
@@ -86,6 +88,25 @@ static void db1_run_migrations(sqlite3 *db)
         * run; set to the parent's work_item_id for a slice child, so the parent's
         * foreach gate can aggregate its children's terminal states. */
        "ALTER TABLE lifecycle_work_item ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''",
+       /* The workflow engine's own columns. The Go WFE created these against
+        * this same file with its own ALTER ladder, which is how a store could
+        * end up with a different column ORDER depending on which process
+        * opened it first. Declared here so the module's schema is the one that
+        * decides, and so a store the module built has them before anything
+        * else asks. Errors are ignored above, so re-running these on a store
+        * the Go side already migrated is a no-op rather than a failure. */
+       "ALTER TABLE lifecycle_work_item ADD COLUMN source_path TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reserved_cost_usd REAL NOT NULL DEFAULT 0",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_state TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_owner TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_work_item ADD COLUMN reservation_lease_until TEXT NOT NULL DEFAULT "
+       "''",
+       /* And the engine's columns on the delegate mapping. A legacy store has
+        * the table without them, so CREATE TABLE IF NOT EXISTS is a no-op there
+        * and only these make the columns appear -- which the backfills after
+        * the schema then depend on. */
+       "ALTER TABLE lifecycle_delegate_job ADD COLUMN work_item_id TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE lifecycle_delegate_job ADD COLUMN cancel_attempts INTEGER NOT NULL DEFAULT 0",
        /* Rename the multi-agent "workflow session" store to "ensemble" so it no
         * longer collides with the workflow ENGINE. Runs before the canonical
         * schema SQL: on a legacy DB the RENAME preserves every row and the
@@ -131,7 +152,44 @@ int db1_apply_schema_sqlite(sqlite3 *db, char *errbuf, size_t errlen)
       sqlite3_free(err);
       return -1;
    }
+   db1_backfill_after_schema(db);
    return 0;
+}
+
+/* Backfills that need their tables to exist, so they run after the schema
+ * rather than in the ALTER ladder above.
+ *
+ * These came from the Go workflow engine, which used to run them when it opened
+ * this file. They are the module's now because the engine no longer opens
+ * anything -- and they still matter: a store written before these columns
+ * existed is exactly the store an upgrade lands on.
+ *
+ * Every one is guarded by the empty value it fills, so re-running them is a
+ * no-op rather than a rewrite. Errors are ignored for the same reason as the
+ * ladder: on a fresh store there is nothing to backfill. */
+static void db1_backfill_after_schema(sqlite3 *db)
+{
+   static const char *const backfills[] = {
+       /* Structural ownership for mappings written before work_item_id was
+        * stored explicitly. Longest prefix wins, so a parent's id cannot claim
+        * a descendant's mapping -- "wi_1:step" and "wi_1_2:step" both start
+        * with "wi_1". */
+       "UPDATE lifecycle_delegate_job "
+       "SET work_item_id = COALESCE((SELECT work_item_id FROM lifecycle_work_item "
+       "WHERE substr(lifecycle_delegate_job.execution_key, 1, length(work_item_id) + 1) "
+       "= work_item_id || ':' ORDER BY length(work_item_id) DESC LIMIT 1), '') "
+       "WHERE work_item_id = ''",
+       "CREATE INDEX IF NOT EXISTS idx_lifecycle_delegate_job_work_item "
+       "ON lifecycle_delegate_job(work_item_id)",
+       /* Older mappings predate opaque participant capabilities. agent_jobs is
+        * backfilled first by the resource plane, so copy from there. */
+       "UPDATE lifecycle_delegate_job "
+       "SET participant_token = COALESCE((SELECT participant_token FROM agent_jobs "
+       "WHERE agent_jobs.id = lifecycle_delegate_job.job_id), '') "
+       "WHERE participant_token = ''",
+   };
+   for (size_t i = 0; i < sizeof backfills / sizeof backfills[0]; i++)
+      sqlite3_exec(db, backfills[i], NULL, NULL, NULL);
 }
 
 /* ── declarative column reconciliation ─────────────────────────────────── */

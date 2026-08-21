@@ -27,6 +27,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <stdlib.h>
+
 #include "aimee.h"
 #include "log.h"
 #include "platform_path.h"
@@ -35,8 +37,9 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 {
    static const char *names[] = {"DEBUG", "INFO", "WARN", "ERROR"};
    size_t at = (size_t)level;
-   fprintf(stderr, "aimee-module-db1 %s %s: ",
-           at < sizeof names / sizeof names[0] ? names[at] : "LOG", module ? module : "db1");
+   fprintf(stderr,
+           "aimee-module-db1 %s %s: ", at < sizeof names / sizeof names[0] ? names[at] : "LOG",
+           module ? module : "db1");
    va_list args;
    va_start(args, fmt);
    vfprintf(stderr, fmt, args);
@@ -69,4 +72,21 @@ int platform_mkdir_p(const char *path, int mode)
    if (mkdir(tmp, (mode_t)mode) != 0 && errno != EEXIST)
       return -1;
    return 0;
+}
+
+/* util.c's version aborts through fatal(), which this process does not link.
+   Six lines, so it is supplied here rather than dragging util.c across -- the
+   same call db1_time.c makes for now_utc. Out of memory ends the process either
+   way; the difference is only which message says so. */
+char *safe_strdup(const char *s)
+{
+   if (!s)
+      return NULL;
+   char *dup = strdup(s);
+   if (!dup)
+   {
+      fprintf(stderr, "aimee-module-db1: out of memory (strdup)\n");
+      exit(1);
+   }
+   return dup;
 }

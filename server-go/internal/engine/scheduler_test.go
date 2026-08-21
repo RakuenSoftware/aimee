@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -64,7 +65,7 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 }
 
 func TestSchedulerCleansTerminalWorktreesAndRetriesFailures(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +203,7 @@ func seedPerWorkflowItems(t *testing.T, ids []string, global int) (*Scheduler, *
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +314,7 @@ func TestSchedulerRecoversRoundtableTransientPausesWithNewExecutionVersion(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +395,7 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +427,7 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 }
 
 func TestSchedulerReconciliationCancelsRunningOrphan(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +469,7 @@ func TestSchedulerReconciliationStopsAnActuallyRunningOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -666,7 +666,7 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INTERNAL;
       }
       domain_rows = found;
-      rc = db1_agent_log_count_per_role(field[0], found, parsed1);
+      rc = db1_agent_log_count_per_role(field[0][0] ? field[0] : NULL, found, parsed1);
       if (rc > 0)
       {
          uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
@@ -1116,7 +1116,7 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INTERNAL;
       }
       domain_rows = found;
-      rc = db1_agent_log_agent_stats(field[0], found, parsed1);
+      rc = db1_agent_log_agent_stats(field[0][0] ? field[0] : NULL, found, parsed1);
       if (rc > 0)
       {
          uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
@@ -1319,7 +1319,7 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       memset(&row_db1_agent_log_stats_t, 0, sizeof row_db1_agent_log_stats_t);
-      rc = db1_agent_log_stats(field[0], &row_db1_agent_log_stats_t);
+      rc = db1_agent_log_stats(field[0][0] ? field[0] : NULL, &row_db1_agent_log_stats_t);
       snprintf(row_text[0], sizeof row_text[0], "%d", row_db1_agent_log_stats_t.total);
       snprintf(row_text[1], sizeof row_text[1], "%lld", (long long)row_db1_agent_log_stats_t.turns);
       snprintf(row_text[2], sizeof row_text[2], "%lld", (long long)row_db1_agent_log_stats_t.tool_calls);

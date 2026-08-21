@@ -37,9 +37,21 @@ C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
 # own are also optional; they remain restricted to src/vendor/ so "not owned"
 # cannot quietly mean "owned by somebody else".
 C_BUILD_OPTIONAL_KEYS = {
-    "compile_definitions", "generated_headers", "header_dependencies", "vendor_sources",
+    "compile_definitions", "generated_headers", "header_dependencies", "shared_sources",
+    "vendor_sources",
 }
 VENDOR_ROOT = "src/vendor/"
+# First-party utilities that belong to no module and that several compile.
+# The same rule vendor_sources follows -- one copy, owned by nobody, compiled by
+# whoever needs it -- applied to code we wrote. The list is explicit rather than
+# a directory prefix because "shared" must stay a decision somebody made, not a
+# door onto the core tree: a module reaching for storage or config through here
+# would be linking the daemon back together one file at a time.
+#
+# A copy would be the alternative, and a copy of a growable string is not free:
+# DB2 already promoted its own from src/dstr.c, and a fix to one is silently not
+# a fix to the others.
+SHARED_SOURCES = ("src/dstr.c",)
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 C_DEFINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CMAKE_TARGET_PACKAGES = {
@@ -427,6 +439,18 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
                 f"{module_id}: vendor_sources entry {entry!r} must be a .c file under "
                 f"{VENDOR_ROOT}; anything else is a source some module owns")
 
+    shared = build.get("shared_sources", [])
+    if not isinstance(shared, list) or not all(isinstance(item, str) for item in shared):
+        raise ExportError(f"{module_id}: c_build.shared_sources must be a string array")
+    if shared != sorted(set(shared)):
+        raise ExportError(f"{module_id}: c_build.shared_sources must be sorted and unique")
+    for entry in shared:
+        if entry not in SHARED_SOURCES:
+            raise ExportError(
+                f"{module_id}: shared_sources entry {entry!r} is not one of the shared "
+                f"first-party utilities ({', '.join(SHARED_SOURCES)}); anything else is a "
+                f"source some module owns")
+
     definitions = build.get("compile_definitions", [])
     if not isinstance(definitions, list) or not all(
             isinstance(item, str) for item in definitions):
@@ -464,7 +488,11 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
     # Vendored sources compile with the module but are not its own: they are
     # appended here rather than merged into `sources`, so ownership keeps
     # meaning what it says everywhere else.
-    return (c_sources + list(vendored), parsed["include_roots"], definitions,
+    # Sorted as one list: the bundle requires it, and vendor_sources only ever
+    # satisfied that by accident, since "src/vendor" happened to sort after the
+    # module's own paths. A shared source under src/ does not.
+    return (sorted(c_sources + list(shared) + list(vendored)), parsed["include_roots"],
+            definitions,
             c_generated_headers(module_id, build),
             parsed["pkg_config"], parsed["system_libraries"])
 

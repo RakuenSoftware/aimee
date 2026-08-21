@@ -250,8 +250,8 @@ int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   if (db1_init(config_db1_path()) != 0)
-      return server_send_error(conn, "db1_init failed", config_db1_path());
+   if (!db1_store_ready())
+      return server_send_error(conn, "DB1 store unavailable", config_db1_path());
 
    cJSON *resp = cJSON_CreateObject();
    cJSON *items = cJSON_CreateArray();
@@ -287,8 +287,8 @@ int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   if (db1_init(config_db1_path()) != 0)
-      return server_send_error(conn, "db1_init failed", config_db1_path());
+   if (!db1_store_ready())
+      return server_send_error(conn, "DB1 store unavailable", config_db1_path());
 
    cJSON *name = cJSON_GetObjectItemCaseSensitive(req, "name");
    const char *filter = cJSON_IsString(name) && name->valuestring[0] ? name->valuestring : NULL;

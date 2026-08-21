@@ -16,6 +16,7 @@
     "src/modules/db1/agent_work_stage.c",
     "src/modules/db1/caches.c",
     "src/modules/db1/checkpoints.c",
+    "src/modules/db1/checkpoints_stage.c",
     "src/modules/db1/clarify.c",
     "src/modules/db1/cognify_jobs.c",
     "src/modules/db1/conv_context.c",
@@ -39,7 +40,9 @@
     "src/modules/db1/delegations.c",
     "src/modules/db1/diagnose.c",
     "src/modules/db1/diagnostics.c",
+    "src/modules/db1/economizer_state.c",
     "src/modules/db1/ensemble.c",
+    "src/modules/db1/ensemble_stage.c",
     "src/modules/db1/env.c",
     "src/modules/db1/eval.c",
     "src/modules/db1/execution_plans.c",
@@ -48,20 +51,31 @@
     "src/modules/db1/git_ownership.c",
     "src/modules/db1/git_ownership_stage.c",
     "src/modules/db1/guardrail_events.c",
+    "src/modules/db1/guardrail_state_stage.c",
+    "src/modules/db1/identity_stage.c",
     "src/modules/db1/interaction_events.c",
+    "src/modules/db1/jti_replay_stage.c",
+    "src/modules/db1/lifecycle_stage.c",
     "src/modules/db1/local_operator.c",
     "src/modules/db1/maintenance.c",
     "src/modules/db1/mcp_osv_cache.c",
+    "src/modules/db1/mgmt_jwks_cache.c",
+    "src/modules/db1/mgmt_jwks_stage.c",
+    "src/modules/db1/mgmt_nonce.c",
+    "src/modules/db1/mgmt_nonce_stage.c",
     "src/modules/db1/model_catalog.c",
     "src/modules/db1/model_pricing.c",
     "src/modules/db1/module_adapter.c",
     "src/modules/db1/payload_rewrite_state.c",
     "src/modules/db1/pipelines.c",
+    "src/modules/db1/pki_stage.c",
+    "src/modules/db1/pki_store.c",
     "src/modules/db1/primary_sessions.c",
     "src/modules/db1/project_clones.c",
     "src/modules/db1/remote_client_grant.c",
     "src/modules/db1/roadmap_runtime.c",
     "src/modules/db1/roundtable_pipeline.c",
+    "src/modules/db1/roundtable_stage.c",
     "src/modules/db1/runtime_stage.c",
     "src/modules/db1/runtime_state.c",
     "src/modules/db1/secrets.c",
@@ -79,9 +93,14 @@
     "src/modules/db1/webchat_claude_sessions.c",
     "src/modules/db1/webchat_live.c",
     "src/modules/db1/wfe_binding.c",
+    "src/modules/db1/wfe_budget_store.c",
+    "src/modules/db1/wfe_engine_store.c",
     "src/modules/db1/wfe_store.c",
+    "src/modules/db1/wfe_transition_store.c",
+    "src/modules/db1/wfe_tree_store.c",
     "src/modules/db1/windows.c",
     "src/modules/db1/wm.c",
+    "src/modules/db1/workflow_stage.c",
     "src/modules/db1/working_profile_local.c"
   ],
   "private_headers": [
@@ -123,10 +142,13 @@
     "src/modules/db1/local_operator.h",
     "src/modules/db1/maintenance.h",
     "src/modules/db1/mcp_osv_cache.h",
+    "src/modules/db1/mgmt_jwks_cache.h",
+    "src/modules/db1/mgmt_nonce.h",
     "src/modules/db1/model_catalog.h",
     "src/modules/db1/model_pricing.h",
     "src/modules/db1/payload_rewrite_state.h",
     "src/modules/db1/pipelines.h",
+    "src/modules/db1/pki_store.h",
     "src/modules/db1/primary_sessions.h",
     "src/modules/db1/project_clones.h",
     "src/modules/db1/remote_client_grant.h",
@@ -147,6 +169,7 @@
     "src/modules/db1/webchat_claude_sessions.h",
     "src/modules/db1/webchat_live.h",
     "src/modules/db1/wfe_binding.h",
+    "src/modules/db1/wfe_engine_store.h",
     "src/modules/db1/wfe_store.h",
     "src/modules/db1/wm.h",
     "src/modules/db1/working_profile_local.h"
@@ -165,6 +188,7 @@
       "src/vendor/headers"
     ],
     "pkg_config": [
+      "openssl",
       "sqlite3"
     ],
     "vendor_sources": [
@@ -172,6 +196,9 @@
     ],
     "system_libraries": [
       "m"
+    ],
+    "shared_sources": [
+      "src/dstr.c"
     ]
   },
   "contracts": [

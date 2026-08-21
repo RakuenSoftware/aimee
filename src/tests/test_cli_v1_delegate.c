@@ -885,6 +885,44 @@ static void test_server_status_route_lookup(void)
  * printed zero bytes and exited 0. A pre-merge hook, CI job or agent gating on
  * that exit code would have read "no review happened" as "the panel approved
  * it", which is the one conclusion it must never draw. */
+/* An artifact is not the same as an answer.
+ *
+ * A panel whose every seat failed still renders one -- "Roundtable did not
+ * approve the artifact and returned no usable findings." -- so the renderer took
+ * its artifact branch and printed that alone, while the SAME response carried
+ * pause_reason=panel_unreachable and a participant_failures entry per seat
+ * naming the persona and its error. Measured against a real panel: three seats
+ * failed with `unsupported delegate cli_kind "mistral"`, the --json caller saw
+ * all three, and the operator reading the terminal saw one sentence that named
+ * nothing. The reasons are only worth carrying if they are shown. */
+static void test_a_failed_panel_prints_its_reasons_beside_the_artifact(void)
+{
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "artifact",
+                           "Roundtable did not approve the artifact and returned no usable "
+                           "findings.\n");
+   cJSON_AddBoolToObject(resp, "approved", 0);
+   cJSON_AddStringToObject(resp, "pause_reason", "panel_unreachable");
+   cJSON_AddNumberToObject(resp, "participants_total", 3);
+   cJSON_AddNumberToObject(resp, "participants_failed", 3);
+   cJSON *failures = cJSON_AddArrayToObject(resp, "participant_failures");
+   const char *personas[] = {"reviewer", "qa", "security"};
+   for (int i = 0; i < 3; i++)
+   {
+      cJSON *f = cJSON_CreateObject();
+      cJSON_AddStringToObject(f, "persona", personas[i]);
+      cJSON_AddStringToObject(f, "detail", "delegate execution failed: unsupported cli_kind");
+      cJSON_AddItemToArray(failures, f);
+   }
+   /* The renderer writes the artifact to stdout and the reasons to stderr; the
+      contract asserted here is that it still treats this as a review that
+      happened (an artifact was produced) while having reasons to show. */
+   assert(roundtable_review_response_is_failure(resp) == 0);
+   pt_print_roundtable_review("roundtable.review", resp);
+   cJSON_Delete(resp);
+   printf("  PASS: a failed panel prints its reasons beside the artifact\n");
+}
+
 static void test_roundtable_review_without_an_artifact_is_a_failure(void)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -2232,6 +2270,7 @@ int main(void)
    test_server_status_route_lookup();
    test_agent_probe_failure_controls_exit_status();
    test_roundtable_review_without_an_artifact_is_a_failure();
+   test_a_failed_panel_prints_its_reasons_beside_the_artifact();
    test_kb_docs_push_route_and_marshal();
    test_kb_remote_status_routes();
    test_git_verify_failure_detection();

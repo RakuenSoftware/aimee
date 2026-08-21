@@ -62,6 +62,23 @@ type agentEntry struct {
 type agentRegistry struct {
 	DefaultAgent string       `json:"default_agent"`
 	Agents       []agentEntry `json:"agents"`
+	// The same roster under its current key. `aimee model local` writes
+	// models.json with the entries under "models"; the older agents.json put
+	// them under "agents". This executor prefers models.json, so reading only
+	// "agents" meant the file it chose first was the one it could not read:
+	// registering a model the documented way left every delegation refused with
+	// "agent registry has no agents", and delegation only worked on a machine
+	// old enough to still have an agents.json.
+	Models []agentEntry `json:"models"`
+}
+
+// roster is the entry list under whichever key this file uses. Both spellings
+// carry the same entry shape, so the reader does not care which it got.
+func (r agentRegistry) roster() []agentEntry {
+	if len(r.Agents) > 0 {
+		return r.Agents
+	}
+	return r.Models
 }
 
 // RegistryExecutor is the Go-owned delegate producer. It selects a configured
@@ -105,7 +122,7 @@ func (r *RegistryExecutor) load() (agentRegistry, error) {
 	if err != nil {
 		return agentRegistry{}, fmt.Errorf("stat agent registry: %w", err)
 	}
-	if r.stamp == info.ModTime().UnixNano() && len(r.registry.Agents) > 0 {
+	if r.stamp == info.ModTime().UnixNano() && len(r.registry.roster()) > 0 {
 		return r.registry, nil
 	}
 	body, err := os.ReadFile(r.path)
@@ -116,10 +133,10 @@ func (r *RegistryExecutor) load() (agentRegistry, error) {
 	if err := json.Unmarshal(body, &registry); err != nil {
 		return agentRegistry{}, fmt.Errorf("decode agent registry: %w", err)
 	}
-	if len(registry.Agents) == 0 {
+	if len(registry.roster()) == 0 {
 		return agentRegistry{}, errors.New("agent registry has no agents")
 	}
-	for _, agent := range registry.Agents {
+	for _, agent := range registry.roster() {
 		if agent.MaxParallel != nil && *agent.MaxParallel < 0 {
 			return agentRegistry{}, fmt.Errorf("agent %q has negative max_parallel", agent.Name)
 		}
@@ -250,9 +267,9 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]groupCandidate, 0, len(registry.Agents))
+	candidates := make([]groupCandidate, 0, len(registry.roster()))
 	bySelector := make(map[string]groupCandidate)
-	for _, agent := range registry.Agents {
+	for _, agent := range registry.roster() {
 		if !enabled(agent) || !available(agent) || agent.PrimaryOnly || strings.TrimSpace(agent.CLICmd) == "" {
 			continue
 		}
@@ -345,7 +362,7 @@ func selectAgent(registry agentRegistry, model, role, persona string) (agentEntr
 		name = strings.TrimSpace(registry.DefaultAgent)
 	}
 	if name != "" {
-		for _, a := range registry.Agents {
+		for _, a := range registry.roster() {
 			if enabled(a) && available(a) && !a.PrimaryOnly && strings.TrimSpace(a.CLICmd) != "" && eligible(a, role, persona) &&
 				(a.Name == name || a.Model == name) {
 				return a, nil
@@ -355,7 +372,7 @@ func selectAgent(registry agentRegistry, model, role, persona string) (agentEntr
 			return agentEntry{}, fmt.Errorf("delegate model %q is not an enabled CLI agent", name)
 		}
 	}
-	for _, a := range registry.Agents {
+	for _, a := range registry.roster() {
 		if enabled(a) && available(a) && !a.PrimaryOnly && strings.TrimSpace(a.CLICmd) != "" &&
 			eligible(a, role, persona) {
 			return a, nil

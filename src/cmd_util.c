@@ -12,7 +12,7 @@
  * config_load. */
 void cmd_require_db1(const char *errmsg)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("%s", errmsg);
 }
 

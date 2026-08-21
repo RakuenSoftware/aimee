@@ -43,8 +43,23 @@ extern "C"
    /* Atomically consume a fully verified identity token. The row is durable
     * before OK is returned and is never removed on a downstream failure, so a
     * token cannot be replayed by making a later stage fail. */
-   server_identity_jti_result_t server_identity_jti_consume(const server_identity_jti_t *token,
-                                                            int64_t consumed_at);
+   /* The token and the instant it was consumed, as one input.
+    *
+    * consume() takes them as two arguments, and a request that is a struct is
+    * the whole request -- so the pair travels as one row and the two-argument
+    * form below unpacks it. The clock stays the caller's either way, which is
+    * the point of passing it in: authorization and the replay check must agree
+    * on the instant. */
+   typedef struct
+   {
+      server_identity_jti_t token;
+      int64_t consumed_at;
+   } db1_identity_jti_consume_t;
+
+   server_identity_jti_result_t db1_identity_jti_consume_row(const db1_identity_jti_consume_t *in);
+
+   server_identity_jti_result_t db1_identity_jti_consume(const server_identity_jti_t *token,
+                                                         int64_t consumed_at);
 
 #ifdef SERVER_IDENTITY_JTI_TEST_API
    server_identity_jti_result_t

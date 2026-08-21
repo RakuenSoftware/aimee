@@ -111,7 +111,6 @@ CORE_LINKED_REACH = {
     # db1 reaching config, which is core-linked. Retires when db1 stops reading
     # config directly.
     ("src/modules/db1/db1_cron_jobs.h", "config/config.h"),
-    ("src/modules/db1/ensemble.c", "config/config.h"),
     ("src/modules/audit/audit_ledger.c", "config/config.h"),
     ("src/modules/audit/obs_bus.c", "config/config.h"),
     ("src/modules/benchmarks/agent_eval.c", "config/config.h"),

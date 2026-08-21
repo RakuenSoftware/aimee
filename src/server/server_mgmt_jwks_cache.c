@@ -1,4 +1,5 @@
 #include "server_mgmt_jwks_cache.h"
+#include "mgmt_jwks_cache.h"
 
 #include "cJSON.h"
 #include "modules/db1/db1_internal.h"
@@ -471,6 +472,38 @@ done:
    return SERVER_MGMT_JWKS_CACHE_OK;
 }
 
+/* Bytes to lowercase hex, for the three digests and the JWKS the store keeps
+   as blobs. The store speaks hex because the wire has no bytes; see
+   db1/mgmt_jwks_cache.h. */
+/* Exactly 64 lowercase hex characters back to 32 bytes, or refuse. A digest
+   that does not round-trip is not one to compare against. */
+static int jwks_unhex(const char *hex, unsigned char *out)
+{
+   if (!hex || strlen(hex) != 64)
+      return -1;
+   for (int i = 0; i < 32; i++)
+   {
+      int hi = hex[i * 2], lo = hex[i * 2 + 1];
+      hi = (hi >= '0' && hi <= '9') ? hi - '0' : (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10 : -1;
+      lo = (lo >= '0' && lo <= '9') ? lo - '0' : (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10 : -1;
+      if (hi < 0 || lo < 0)
+         return -1;
+      out[i] = (unsigned char)((hi << 4) | lo);
+   }
+   return 0;
+}
+
+static void jwks_hex(const unsigned char *bytes, size_t len, char *out)
+{
+   static const char digits[] = "0123456789abcdef";
+   for (size_t i = 0; i < len; i++)
+   {
+      out[i * 2] = digits[bytes[i] >> 4];
+      out[i * 2 + 1] = digits[bytes[i] & 0x0f];
+   }
+   out[len * 2] = '\0';
+}
+
 server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_install(const char *trust_bundle,
                                                                size_t trust_bundle_len,
                                                                const char *envelope,
@@ -481,60 +514,30 @@ server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_install(const char *trust
        trust_bundle, trust_bundle_len, envelope, envelope_len, now, &record);
    if (valid != SERVER_MGMT_JWKS_CACHE_OK)
       return valid;
-   sqlite3 *db = db1_conn();
-   if (!db || db1_txn_begin_nowait(db, "BEGIN IMMEDIATE") != 0)
-      return SERVER_MGMT_JWKS_CACHE_STORAGE;
-   sqlite3_stmt *q = NULL;
-   server_mgmt_jwks_cache_result_t result = SERVER_MGMT_JWKS_CACHE_STORAGE;
-   if (sqlite3_prepare_v2(db,
-                          "SELECT envelope_sha256,trust_bundle_sha256 FROM "
-                          "server_management_jwks_cache WHERE singleton=1",
-                          -1, &q, NULL) != SQLITE_OK)
-      goto rollback;
-   int step = sqlite3_step(q);
-   if (step == SQLITE_ROW)
+   if (envelope_len >= DB1_MGMT_JWKS_ENVELOPE_MAX || record.jwks_len > DB1_MGMT_JWKS_BYTES_MAX)
+      return SERVER_MGMT_JWKS_CACHE_INVALID;
+
+   db1_mgmt_jwks_install_t in;
+   memset(&in, 0, sizeof in);
+   in.valid_from = record.valid_from;
+   in.valid_until = record.valid_until;
+   in.fetched_at = now;
+   jwks_hex((const unsigned char *)record.jwks, record.jwks_len, in.jwks);
+   memcpy(in.envelope, envelope, envelope_len);
+   in.envelope[envelope_len] = '\0';
+   jwks_hex(record.envelope_sha256, 32, in.envelope_sha256);
+   jwks_hex(record.manifest_sha256, 32, in.manifest_sha256);
+   jwks_hex(record.trust_bundle_sha256, 32, in.trust_bundle_sha256);
+
+   switch (db1_mgmt_jwks_install(&in))
    {
-      const void *envelope_digest = sqlite3_column_blob(q, 0);
-      const void *bundle_digest = sqlite3_column_blob(q, 1);
-      int same = envelope_digest && bundle_digest && sqlite3_column_bytes(q, 0) == 32 &&
-                 sqlite3_column_bytes(q, 1) == 32 &&
-                 !CRYPTO_memcmp(envelope_digest, record.envelope_sha256, 32) &&
-                 !CRYPTO_memcmp(bundle_digest, record.trust_bundle_sha256, 32);
-      sqlite3_finalize(q);
-      q = NULL;
-      if (!same)
-      {
-         result = SERVER_MGMT_JWKS_CACHE_CONFLICT;
-         goto rollback;
-      }
-      result = SERVER_MGMT_JWKS_CACHE_OK;
-      return db1_txn_commit_or_rollback(db) == 0 ? result : SERVER_MGMT_JWKS_CACHE_STORAGE;
+   case 0:
+      return SERVER_MGMT_JWKS_CACHE_OK;
+   case 1:
+      return SERVER_MGMT_JWKS_CACHE_CONFLICT;
+   default:
+      return SERVER_MGMT_JWKS_CACHE_STORAGE;
    }
-   sqlite3_finalize(q);
-   q = NULL;
-   if (step != SQLITE_DONE ||
-       sqlite3_prepare_v2(db,
-                          "INSERT INTO server_management_jwks_cache(singleton,generation,"
-                          "valid_from,valid_until,jwks_bytes,envelope_bytes,envelope_sha256,"
-                          "manifest_sha256,trust_bundle_sha256,fetched_at)"
-                          " VALUES(1,1,?1,?2,?3,?4,?5,?6,?7,?8)",
-                          -1, &q, NULL) != SQLITE_OK ||
-       sqlite3_bind_int64(q, 1, record.valid_from) != SQLITE_OK ||
-       sqlite3_bind_int64(q, 2, record.valid_until) != SQLITE_OK ||
-       sqlite3_bind_blob(q, 3, record.jwks, (int)record.jwks_len, SQLITE_TRANSIENT) != SQLITE_OK ||
-       sqlite3_bind_blob(q, 4, envelope, (int)envelope_len, SQLITE_TRANSIENT) != SQLITE_OK ||
-       sqlite3_bind_blob(q, 5, record.envelope_sha256, 32, SQLITE_TRANSIENT) != SQLITE_OK ||
-       sqlite3_bind_blob(q, 6, record.manifest_sha256, 32, SQLITE_TRANSIENT) != SQLITE_OK ||
-       sqlite3_bind_blob(q, 7, record.trust_bundle_sha256, 32, SQLITE_TRANSIENT) != SQLITE_OK ||
-       sqlite3_bind_int64(q, 8, now) != SQLITE_OK || sqlite3_step(q) != SQLITE_DONE)
-      goto rollback;
-   sqlite3_finalize(q);
-   return db1_txn_commit_or_rollback(db) == 0 ? SERVER_MGMT_JWKS_CACHE_OK
-                                              : SERVER_MGMT_JWKS_CACHE_STORAGE;
-rollback:
-   sqlite3_finalize(q);
-   db1_txn_end(db, "ROLLBACK");
-   return result;
 }
 
 server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_load(const char *trust_bundle,
@@ -548,53 +551,32 @@ server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_load(const char *trust_bu
       *jwks_len = 0;
    if (!jwks_out || !jwks_cap || !jwks_len)
       return SERVER_MGMT_JWKS_CACHE_INVALID;
-   sqlite3 *db = db1_conn();
-   sqlite3_stmt *q = NULL;
-   if (!db || sqlite3_prepare_v2(db,
-                                 "SELECT envelope_bytes,valid_from,valid_until,envelope_sha256,"
-                                 "manifest_sha256,trust_bundle_sha256 FROM "
-                                 "server_management_jwks_cache WHERE singleton=1",
-                                 -1, &q, NULL) != SQLITE_OK)
+
+   db1_mgmt_jwks_row_t row;
+   int found = db1_mgmt_jwks_read(&row);
+   if (found < 0)
       return SERVER_MGMT_JWKS_CACHE_STORAGE;
-   int step = sqlite3_step(q);
-   if (step == SQLITE_DONE)
-   {
-      sqlite3_finalize(q);
+   if (found == 0)
       return SERVER_MGMT_JWKS_CACHE_MISSING;
-   }
-   if (step != SQLITE_ROW)
-   {
-      sqlite3_finalize(q);
-      return SERVER_MGMT_JWKS_CACHE_STORAGE;
-   }
-   const void *raw = sqlite3_column_blob(q, 0);
-   int raw_n = sqlite3_column_bytes(q, 0);
-   char envelope[SERVER_MGMT_JWKS_ENVELOPE_MAX];
-   if (!raw || raw_n < 1 || raw_n >= (int)sizeof(envelope))
-   {
-      sqlite3_finalize(q);
-      return SERVER_MGMT_JWKS_CACHE_INVALID;
-   }
-   memcpy(envelope, raw, (size_t)raw_n);
-   envelope[raw_n] = '\0';
-   int64_t stored_from = sqlite3_column_int64(q, 1), stored_until = sqlite3_column_int64(q, 2);
+
+   /* The digests come back as hex and go straight back to bytes, so the
+      comparison below is the same CRYPTO_memcmp over the same 32 bytes it
+      always was. Only the spelling in transit changed. */
    unsigned char digests[3][32];
-   for (int i = 0; i < 3; ++i)
-   {
-      const void *d = sqlite3_column_blob(q, 3 + i);
-      if (!d || sqlite3_column_bytes(q, 3 + i) != 32)
-      {
-         sqlite3_finalize(q);
-         return SERVER_MGMT_JWKS_CACHE_INVALID;
-      }
-      memcpy(digests[i], d, 32);
-   }
-   sqlite3_finalize(q);
+   if (jwks_unhex(row.envelope_sha256, digests[0]) != 0 ||
+       jwks_unhex(row.manifest_sha256, digests[1]) != 0 ||
+       jwks_unhex(row.trust_bundle_sha256, digests[2]) != 0)
+      return SERVER_MGMT_JWKS_CACHE_INVALID;
+
+   size_t envelope_len = strlen(row.envelope);
+   if (envelope_len < 1)
+      return SERVER_MGMT_JWKS_CACHE_INVALID;
+
    server_mgmt_jwks_cache_record_t record;
    server_mgmt_jwks_cache_result_t result = server_mgmt_jwks_envelope_validate(
-       trust_bundle, trust_bundle_len, envelope, (size_t)raw_n, now, &record);
-   if (result != SERVER_MGMT_JWKS_CACHE_OK || record.valid_from != stored_from ||
-       record.valid_until != stored_until ||
+       trust_bundle, trust_bundle_len, row.envelope, envelope_len, now, &record);
+   if (result != SERVER_MGMT_JWKS_CACHE_OK || record.valid_from != row.valid_from ||
+       record.valid_until != row.valid_until ||
        CRYPTO_memcmp(record.envelope_sha256, digests[0], 32) ||
        CRYPTO_memcmp(record.manifest_sha256, digests[1], 32) ||
        CRYPTO_memcmp(record.trust_bundle_sha256, digests[2], 32) || record.jwks_len + 1 > jwks_cap)
@@ -613,6 +595,8 @@ server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_current_generation(const 
       *generation = 0;
    if (!generation)
       return SERVER_MGMT_JWKS_CACHE_INVALID;
+   /* The load first, and its result respected: the generation of a row whose
+      envelope no longer verifies is not a generation anybody should act on. */
    char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
    size_t jwks_len = 0;
    server_mgmt_jwks_cache_result_t result = server_mgmt_jwks_cache_load(
@@ -620,19 +604,17 @@ server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_current_generation(const 
    OPENSSL_cleanse(jwks, sizeof(jwks));
    if (result != SERVER_MGMT_JWKS_CACHE_OK)
       return result;
-   sqlite3 *db = db1_conn();
-   sqlite3_stmt *q = NULL;
-   if (!db || sqlite3_prepare_v2(db,
-                                 "SELECT generation FROM server_management_jwks_cache "
-                                 "WHERE singleton=1",
-                                 -1, &q, NULL) != SQLITE_OK)
+
+   int64_t found = 0;
+   int present = db1_mgmt_jwks_generation(&found);
+   if (present < 0)
       return SERVER_MGMT_JWKS_CACHE_STORAGE;
-   int step = sqlite3_step(q);
-   int64_t found = step == SQLITE_ROW ? sqlite3_column_int64(q, 0) : 0;
-   int tail = step == SQLITE_ROW ? sqlite3_step(q) : step;
-   sqlite3_finalize(q);
-   if (found < 1 || tail != SQLITE_DONE)
-      return step == SQLITE_DONE ? SERVER_MGMT_JWKS_CACHE_MISSING : SERVER_MGMT_JWKS_CACHE_INVALID;
+   if (present == 0)
+      return SERVER_MGMT_JWKS_CACHE_MISSING;
+   /* A generation below one is a row that exists but says nothing, which the
+      caller must not read as "generation zero is current". */
+   if (found < 1)
+      return SERVER_MGMT_JWKS_CACHE_INVALID;
    *generation = found;
    return SERVER_MGMT_JWKS_CACHE_OK;
 }

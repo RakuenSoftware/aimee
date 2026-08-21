@@ -15,6 +15,7 @@
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h"
+#include "db1.h"            /* db1_store_probe — the mTLS ramp needs a live store */
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
@@ -2344,6 +2345,7 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
     * vault's attested write path. */
    if (tls_port > 0)
    {
+      server_tls_wait_for_store(db1_store_probe);
       if (server_tls_init_default() == 0)
          g_tls_fd = tcp_listen(tls_port, bearer_token, 1 /* TLS: may bind 0.0.0.0 */);
       else

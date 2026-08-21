@@ -1,12 +1,33 @@
 # Proposal: what the identity family needs before it can migrate
 
-- **State:** OPEN — two decisions belong to whoever owns secrets handling and
-  the JTI replay window, not to the migration that reached them first.
+- **State:** PARTLY RESOLVED. remote_client_grant is migrated and served. The
+  secrets question dissolved on inspection -- there was no security decision to
+  make, only a mis-filing to correct. The JTI question stands, in a reserved
+  family of its own ('jti_replay').
 
 `identity` is the smallest reserved DB1 family — four sources, nine
 operations — and it is the next one the wire can carry. It is written up rather
 than migrated because two of its four sources are not what the family name
 suggests, and both questions change behaviour rather than plumbing.
+
+## secrets.c was never in this family's gift (resolved)
+
+The section below is right that secrets.c does not touch DB1, and wrong about
+what follows from it. It framed the choice as (a) migrate and accept a process
+boundary change, (b) drop it from the family, or (c) give it its own module --
+and called that a security decision.
+
+Only (a) is a security decision, and (a) was never required. A family lists the
+sources it SERVES; secrets.c has zero references to db1_conn or sqlite3, so
+there was nothing for this family to serve. It is now in
+`infrastructure_sources`, which is where the catalog already keeps the sources
+that live under src/modules/db1 without being DB1 storage. Nothing about how a
+secret is stored, or which process can read one, changed -- the daemon links it
+exactly as before.
+
+Whether secrets should eventually own a module is still a real question. It is
+just not this migration's, and pretending it blocked the family kept
+remote_client_grant reserved for no reason.
 
 ## secrets.c does not touch DB1
 
@@ -55,6 +76,23 @@ A replay check that answers "storage error" and one that answers "replay" must
 stay distinguishable across the bus, because the caller admits a request on one
 and refuses it on the other. The enum return is what carries that, so the
 shape is required, not optional.
+
+## What remote_client_grant needed (resolved)
+
+Both extensions this section predicted turned out to be unnecessary:
+
+- The enum return beside a struct reply is the shape ensemble already answers
+  with a named result type. `db1_remote_client_claim_row_t` carries the verdict
+  and the grant together, because they are one decision, and the public
+  `db1_remote_client_claim` is a thin unpacking of it beside the caller.
+- `db1_remote_client_bind` answers 1 / 0 / -2 / -1, which `negatives: data`
+  already covers -- the same declaration db1_wfe_bind needed for its
+  single-writer refusal.
+
+The fixture asserts the three claim verdicts from the states that produce them,
+because "re-entered your own slot" and "somebody else owns it" are the two a
+reply carrying only the record cannot tell apart, and confusing them hands the
+appliance's first-user slot to whoever asks next.
 
 ## What the wire already has for it
 

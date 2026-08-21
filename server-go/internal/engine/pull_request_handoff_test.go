@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -202,7 +203,7 @@ func TestFinalPullRequestHandoffExplainsProposalAndActualDiff(t *testing.T) {
 	runGit("add", ".")
 	runGit("commit", "-m", "document proposal watcher behavior")
 
-	store, err := db1.Open(filepath.Join(root, "workflow.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "workflow.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
