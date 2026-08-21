@@ -163,62 +163,86 @@ call.
 Until one of those exists the sixty-six stay unreviewed, and the count is worth
 watching: it is roughly one in seven of what is left.
 
-## Ten declarations run whatever the host process installed into them
+## Twenty-seven declarations run whatever the host process installed into them
 
 `src/modules/db2/include/aimee/db2/host_contracts.h` lets the surrounding
-process hand DB2 function pointers -- twelve registration functions, covering
+process hand DB2 function pointers -- twelve registration functions covering
 embedding, fact extraction, retraction scanning, the fact gate, MDL scoring,
-audit hashing, identity keys, CSS analysis and the vault's crypto. The
-providers live in the process that installed them, and the module process
-installs none.
+audit hashing, identity keys, CSS analysis and the vault's crypto. Seven of
+them have a consumer inside the module today. The providers live in the process
+that installed them, and the module process installs none.
 
-The first count here said six, and it was wrong in a way worth naming: it came
-from grepping each declaration's own body for a provider global. Four
-declarations never mention one. They call a file-static helper that does, and a
-body-only search cannot see through a single call. Following calls to a fixed
-point inside each file finds ten, four of them already published:
+This count has now been wrong twice, and how it was wrong is the useful part.
+The first search asked which declarations name a provider global in their own
+body, and found six. Following calls to a fixed point *within each file* found
+ten. Neither saw `db2_code_project_detach`, which reaches the audit hash
+through `db2_kb_audit_append_in_txn` in a different translation unit
+altogether. A call graph over the whole module finds twenty-seven, nine of them
+already published:
 
-    operation             declaration                    provider
-    artifact_write        db2_artifact_write             mdl_score
-    artifact_set_state    db2_artifact_set_state         mdl_score
-    artifact_reject       db2_artifact_reject            mdl_score
-    kb_audit_append       db2_kb_audit_append            audit_hash
-    (pending)             db2_artifact_review_rollback   mdl_score
-    (pending)             db2_fact_ingest_text           fact_extract
-    (pending)             db2_typed_fact_ingress         fact_scan
-    (pending)             db2_kb_pdf_search_chunks       embed
-    (pending)             db2_fact_commit                fact_gate
-    (pending)             db2_kb_embed_text              embed
+    operation                      declaration                                   provider
+    artifact_write                 db2_artifact_write                            mdl_score
+    artifact_set_state             db2_artifact_set_state                        mdl_score
+    artifact_reject                db2_artifact_reject                           mdl_score, audit_hash
+    audit_event_write              db2_audit_event_write                         audit_hash
+    kb_audit_append                db2_kb_audit_append                           audit_hash
+    corpus_pipeline_drain          db2_corpus_pipeline_drain                     mdl_score, audit_hash
+    curator_invalidate_doc         db2_curator_invalidate_doc                    mdl_score, audit_hash
+    demotion_profile_write         db2_demotion_profile_write                    mdl_score
+    retrieval_attribution_write    db2_demotion_retrieval_attribution_write      mdl_score
+
+Eighteen more are still pending review:
+
+    db2_artifact_review_rollback                    mdl_score
+    db2_calibration_profile_write                   mdl_score
+    db2_code_project_detach                         audit_hash
+    db2_code_project_gc_confirm                     audit_hash
+    db2_code_project_purge_confirm                  audit_hash
+    db2_demotion_retrieval_event_write              mdl_score
+    db2_demotion_retrieval_event_write_turn         mdl_score
+    db2_demotion_retrieval_event_merge_refs_turn    mdl_score
+    db2_fact_commit                                 fact_gate
+    db2_fact_ingest_text                            fact_extract, fact_gate
+    db2_typed_fact_ingress                          fact_extract, fact_gate, fact_scan
+    db2_identity_intent_start                       identity_key
+    db2_identity_login_context                      identity_key
+    db2_management_action_intent_start              identity_key
+    db2_management_action_outcome_append            identity_key
+    db2_management_read_intent_start                identity_key
+    db2_kb_pdf_search_chunks                        embed
+    db2_kb_service_async_queue_drain                embed
 
 What a missing provider does splits three ways, and only one of them is loud.
 
-`db2_kb_audit_append` fails. The row hash comes from the provider, and without
-it the append returns an error before it reaches the table. The replay proves
-this: `custody.kb_audit_append` is answered, acknowledges nothing, and the
-audit table stays empty. An operation that cannot succeed in the module process
-is published because the boundary is real and the wire format is settled; what
-is unsettled is which process hashes the row.
+Anything reaching `audit_hash` fails. The row hash comes from the provider, and
+without it the append returns an error before it reaches the table -- and every
+one of these writes the audit row inside the transaction it needs, so the
+failure takes the whole operation with it. The replay proves the simplest case:
+`custody.kb_audit_append` is answered, acknowledges nothing, and the audit table
+stays empty. `maintenance.corpus_pipeline_drain` only looks fine there because
+the replay corpus is empty; a drain with work to do runs stage handlers that
+reach the same provider.
 
 `db2_kb_pdf_search_chunks` degrades and says so in its own comment: the vector
 leg is skipped and the lexical leg answers alone. Fewer results, no error, and
-the code is explicit that this is the intended shape.
+the code is explicit that this is intended.
 
-The rest degrade silently, which is the part to watch. The three artifact
-writers succeed and quietly skip the MDL feature row, so in the module process
-artifacts accumulate with no MDL features and nothing anywhere records that the
+The rest degrade silently, which is the part to watch. Everything reaching
+`mdl_score` succeeds and quietly skips the MDL feature row, so in the module
+process artifacts accumulate with no MDL features and nothing records that the
 scorer was absent rather than the artifact unscorable. `db2_fact_commit`
 without its gate leaves the verdict at DEFER and writes no semantic edge --
 every edge withheld, and withheld looks exactly like rejected.
 `db2_typed_fact_ingress` treats a missing scanner as "no answer" and declines
 to retract, which is the safe direction and an equally quiet one.
 
-This is a smaller problem than the tenant scope and a different kind. The seam
-is deliberate and documented; what is undecided is which side of the boundary
-each provider belongs on once DB2 is its own process. Embedding in particular
-is a question about where model inference runs, not about DB2. Recorded here so
-that these ten are not migrated as though they were ordinary reads and writes
--- and so that the four reached only through a helper are not lost again to the
-next body-only search.
+The seam is deliberate and documented; what is undecided is which side of the
+boundary each provider belongs on once DB2 is its own process. Embedding is a
+question about where model inference runs, and audit hashing is a question
+about who holds the signing material -- neither is really about DB2. Recorded
+here so that these twenty-seven are not migrated as ordinary reads and writes,
+and so that the next count is taken from a whole-program call graph rather than
+from a grep.
 
 ## One test declares its own copies of six DB2 row types and stubs them untyped
 

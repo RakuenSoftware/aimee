@@ -353,7 +353,7 @@
       "disposition": "wire-operation",
       "family": "learning",
       "db3_placement": "retained-db2",
-      "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. Writing an identifier that exists does nothing and is acknowledged. The scope kind defaults to user only for a null argument, which the wire cannot send."
+      "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. The scope kind defaults to user only for a null argument, which the wire cannot send. The audit row is hashed through a provider the surrounding process installs and the module process installs none, so across the bus the append fails."
     },
     {
       "symbol": "db2_audit_read_latest_before",
@@ -761,7 +761,7 @@
       "disposition": "wire-operation",
       "family": "maintenance",
       "db3_placement": "retained-db2",
-      "reason": "The typed maintenance.corpus_pipeline_drain operation advances corpus jobs one stage at a time until the limit or the work runs out. Nothing wraps the run, so a stage that fails leaves every earlier advance committed and answers a plain failure with no count of what it did. A zero limit means ten thousand steps rather than none. corpus_skipped counts this run's skips, where the same field on maintenance.corpus_pipeline_status counts every skip the corpus ever recorded."
+      "reason": "The typed maintenance.corpus_pipeline_drain operation advances corpus jobs one stage at a time until the limit or the work runs out. Nothing wraps the run, so a stage that fails leaves every earlier advance committed and reports a plain failure with no count. A zero limit means ten thousand steps rather than none. Its stage handlers reach the audit hash and MDL providers, which the module process does not install, so a drain with real work behaves differently there than in the host."
     },
     {
       "symbol": "db2_corpus_pipeline_stage_counts",

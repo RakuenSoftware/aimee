@@ -3869,7 +3869,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. Writing an identifier that exists does nothing and is acknowledged. The scope kind defaults to user only for a null argument, which the wire cannot send."
+        "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. The scope kind defaults to user only for a null argument, which the wire cannot send. The audit row is hashed through a provider the surrounding process installs and the module process installs none, so across the bus the append fails."
       },
       "signature": "int db2_audit_event_write ( const char * id , const char * source_artifact_id , const char * target_surface , const char * target_id , const char * operator_id , const char * scope_kind , const char * scope_id , double applied_confidence , int flagged_for_review , const char * before_json , const char * after_json )",
       "signature_sha256": "996924ace3f43aa69b680a7bca9922ce96381a673846d295c084d018b88ce508",
@@ -5835,7 +5835,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "maintenance",
-        "reason": "The typed maintenance.corpus_pipeline_drain operation advances corpus jobs one stage at a time until the limit or the work runs out. Nothing wraps the run, so a stage that fails leaves every earlier advance committed and answers a plain failure with no count of what it did. A zero limit means ten thousand steps rather than none. corpus_skipped counts this run's skips, where the same field on maintenance.corpus_pipeline_status counts every skip the corpus ever recorded."
+        "reason": "The typed maintenance.corpus_pipeline_drain operation advances corpus jobs one stage at a time until the limit or the work runs out. Nothing wraps the run, so a stage that fails leaves every earlier advance committed and reports a plain failure with no count. A zero limit means ten thousand steps rather than none. Its stage handlers reach the audit hash and MDL providers, which the module process does not install, so a drain with real work behaves differently there than in the host."
       },
       "signature": "int db2_corpus_pipeline_drain ( int limit , db2_corpus_pipeline_stats_t * out )",
       "signature_sha256": "952608cef6644edec07e23dc45f80c628fcb7da20d16ea03d8794aa923452bee",
@@ -27696,7 +27696,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "878858c658d3f3f4331c32d08b9cbd1d7960bba846aa4f2f4f7434f27067fafd",
+  "fingerprint": "a7654400e1bf310e63799c27362fdbaae429ad2aa8bdbc12b8f8c02726696f18",
   "module": "db2",
   "schema_version": 1,
   "summary": {
