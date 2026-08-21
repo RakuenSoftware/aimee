@@ -33,7 +33,8 @@ From highest to lowest:
 Almost every field is read per request, so a change is live as soon as the server picks it up. You do
 not need to restart to change a model, an endpoint, a budget, or a feature flag.
 
-Each field carries a reload class, declared beside it in `src/modules/config/config_fields.c`:
+Each field carries a reload class in the metadata shipped by
+`github.com/RakuenSoftware/aimee-module-config`:
 
 | Class | What it means | Examples |
 | --- | --- | --- |

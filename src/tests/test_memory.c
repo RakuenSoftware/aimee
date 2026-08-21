@@ -122,19 +122,7 @@ static int fetch_memory_count_by_key(const char *key)
 
 static void write_calibration_config(int enabled)
 {
-   char dir1[512];
-   char dir2[512];
-   char path[512];
-   snprintf(dir1, sizeof(dir1), "%s/.config", g_suite_home);
-   snprintf(dir2, sizeof(dir2), "%s/.config/aimee", g_suite_home);
-   snprintf(path, sizeof(path), "%s/aimee.yaml", dir2);
-   (void)mkdir(dir1, 0700);
-   (void)mkdir(dir2, 0700);
-   FILE *f = fopen(path, "w");
-   assert(f != NULL);
-   fprintf(f, "intelligence:\n  calibrate:\n    enabled: %d\n", enabled);
-   fclose(f);
-   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
+   assert(config_set_calibration_enabled(enabled) == 0);
 }
 
 static int fetch_memory_count_like(const char *pattern)
@@ -1143,8 +1131,6 @@ static void test_memory_answer_query_uses_session_cluster_evidence(void)
 static void test_context_budget_prefers_project_l4_rule_over_long_global_l1(void)
 {
    char tmpdir[512];
-   char cfgdir[640];
-   char cfgpath[768];
    char cwd[MAX_PATH_LEN];
    char project[MAX_PATH_LEN];
    const char *old_home = getenv("HOME");
@@ -1157,13 +1143,8 @@ static void test_context_budget_prefers_project_l4_rule_over_long_global_l1(void
    assert(platform_mkdtemp(tmpdir) != NULL);
    assert(platform_setenv("HOME", tmpdir) == 0);
 
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fputs("memory:\n  context_budget:\n    enabled: true\n    tokens: 24\n", fp);
-   fclose(fp);
+   assert(config_set_memory_context_budget_enabled(1) == 0);
+   assert(config_set_memory_context_budget_tokens(24) == 0);
 
    assert(getcwd(cwd, sizeof(cwd)) != NULL);
    {
@@ -1221,6 +1202,8 @@ static void test_context_budget_prefers_project_l4_rule_over_long_global_l1(void
 
    free(ctx);
    teardown();
+   assert(config_set_memory_context_budget_enabled(0) == 0);
+   assert(config_set_memory_context_budget_tokens(0) == 0);
    platform_test_rmrf(tmpdir);
 
    if (old_home_copy[0])
@@ -1232,8 +1215,6 @@ static void test_context_budget_prefers_project_l4_rule_over_long_global_l1(void
 static void test_context_budget_prefers_project_scope_over_global_l5(void)
 {
    char tmpdir[512];
-   char cfgdir[640];
-   char cfgpath[768];
    char cwd[MAX_PATH_LEN];
    char project[MAX_PATH_LEN];
    const char *old_home = getenv("HOME");
@@ -1246,13 +1227,8 @@ static void test_context_budget_prefers_project_scope_over_global_l5(void)
    assert(platform_mkdtemp(tmpdir) != NULL);
    assert(platform_setenv("HOME", tmpdir) == 0);
 
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fputs("memory:\n  context_budget:\n    enabled: true\n    tokens: 14\n", fp);
-   fclose(fp);
+   assert(config_set_memory_context_budget_enabled(1) == 0);
+   assert(config_set_memory_context_budget_tokens(14) == 0);
 
    assert(getcwd(cwd, sizeof(cwd)) != NULL);
    {
@@ -1327,6 +1303,8 @@ static void test_context_budget_prefers_project_scope_over_global_l5(void)
 
    free(ctx);
    teardown();
+   assert(config_set_memory_context_budget_enabled(0) == 0);
+   assert(config_set_memory_context_budget_tokens(0) == 0);
    platform_test_rmrf(tmpdir);
 
    if (old_home_copy[0])
@@ -1491,8 +1469,6 @@ static void test_memory_query_plan_prefers_graph_for_dependency_queries(void)
 static void test_memory_query_plan_respects_routing_disable_flag(void)
 {
    char tmpdir[512];
-   char cfgdir[640];
-   char cfgpath[768];
    const char *old_home = getenv("HOME");
    char old_home_copy[512];
    old_home_copy[0] = '\0';
@@ -1503,19 +1479,14 @@ static void test_memory_query_plan_respects_routing_disable_flag(void)
    assert(platform_mkdtemp(tmpdir) != NULL);
    assert(platform_setenv("HOME", tmpdir) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fputs("memory:\n  routing:\n    enabled: false\n", fp);
-   fclose(fp);
+   assert(config_set("memory_routing_enabled", "false") == 0);
 
    memory_query_plan_t plan;
    assert(memory_query_plan("what calls memory_find_facts_scoped", 10, 96, &plan) == 0);
    assert(plan.route == MEM_ROUTE_HYBRID);
    assert(plan.semantic_enabled == 1);
    assert(plan.graph_hops == 1);
+   assert(config_set("memory_routing_enabled", "true") == 0);
 
    if (old_home_copy[0])
       assert(platform_setenv("HOME", old_home_copy) == 0);
@@ -1923,15 +1894,8 @@ static void test_coref_heuristic_indexes_recent_named_entity(void)
    assert(platform_setenv("HOME", tmpdir) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
-   char cfgdir[256];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cfgpath[320];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fprintf(fp, "memory:\n  coref:\n    mode: heuristic\n    window: 5\n");
-   fclose(fp);
+   assert(config_set_memory_coref_mode("heuristic") == 0);
+   assert(config_set_memory_coref_window(5) == 0);
 
    setup();
    memory_t first, second;
@@ -1978,15 +1942,8 @@ static void test_coref_heuristic_skips_ambiguous_prior_turn(void)
    assert(platform_setenv("HOME", tmpdir) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
-   char cfgdir[256];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cfgpath[320];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fprintf(fp, "memory:\n  coref:\n    mode: heuristic\n    window: 5\n");
-   fclose(fp);
+   assert(config_set_memory_coref_mode("heuristic") == 0);
+   assert(config_set_memory_coref_window(5) == 0);
 
    setup();
    memory_t first, second;
@@ -2018,15 +1975,8 @@ static void test_coref_audit_bound_recorded(void)
    assert(platform_setenv("HOME", tmpdir) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
-   char cfgdir[256];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cfgpath[320];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fprintf(fp, "memory:\n  coref:\n    mode: heuristic\n    window: 5\n");
-   fclose(fp);
+   assert(config_set_memory_coref_mode("heuristic") == 0);
+   assert(config_set_memory_coref_window(5) == 0);
 
    setup();
    memory_t first, second;
@@ -2066,15 +2016,8 @@ static void test_coref_audit_ambiguous_recorded(void)
    assert(platform_setenv("HOME", tmpdir) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
-   char cfgdir[256];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cfgpath[320];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fprintf(fp, "memory:\n  coref:\n    mode: heuristic\n    window: 5\n");
-   fclose(fp);
+   assert(config_set_memory_coref_mode("heuristic") == 0);
+   assert(config_set_memory_coref_window(5) == 0);
 
    setup();
    memory_t first, second;
@@ -2113,15 +2056,8 @@ static void test_coref_stats_increments_bound(void)
    assert(platform_setenv("HOME", tmpdir) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
-   char cfgdir[256];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cfgpath[320];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fprintf(fp, "memory:\n  coref:\n    mode: heuristic\n    window: 5\n");
-   fclose(fp);
+   assert(config_set_memory_coref_mode("heuristic") == 0);
+   assert(config_set_memory_coref_window(5) == 0);
 
    memory_coref_stats_reset();
    memory_coref_stats_t before;
@@ -2151,15 +2087,8 @@ static void test_coref_stats_increments_ambiguous(void)
    assert(platform_setenv("HOME", tmpdir) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
-   char cfgdir[256];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cfgpath[320];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fprintf(fp, "memory:\n  coref:\n    mode: heuristic\n    window: 5\n");
-   fclose(fp);
+   assert(config_set_memory_coref_mode("heuristic") == 0);
+   assert(config_set_memory_coref_window(5) == 0);
 
    memory_coref_stats_reset();
    memory_coref_stats_t before;
@@ -2603,30 +2532,27 @@ static void measure_query_embedding_memo_recall(void)
  * Qwen3-0.6B (1024) / Qwen3-4B (2560). Verify the gate now tracks the active
  * embedding dim and the floor scales down for the compressed-range embedders. */
 
-/* memory_query_rewrite reads its settings through config accessors now, so these
- * cases write a real aimee.yaml under the suite HOME instead of handing over a
- * config_t. AIMEE_NO_CACHE=1 is already set for the suite, so each write is
- * picked up by the next accessor read. */
+/* Publish query-rewrite settings through the config module contract. */
 static void write_rewrite_config(int enabled, int hyde, int decompose, const char *command)
 {
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
-   FILE *fp = fopen(path, "w");
-   assert(fp != NULL);
-   fprintf(fp, "memory_rewrite:\n");
-   fprintf(fp, "  enabled: %s\n", enabled ? "true" : "false");
-   fprintf(fp, "  hyde: %s\n", hyde ? "true" : "false");
-   fprintf(fp, "  decompose: %s\n", decompose ? "true" : "false");
-   if (command && command[0])
-      fprintf(fp, "  command: \"%s\"\n", command);
-   fclose(fp);
+   char direct[1024];
+   size_t at = 0;
+   for (size_t i = 0; command && command[i] && at + 1 < sizeof(direct); i++)
+   {
+      if (command[i] == '\\' && command[i + 1] == '"')
+         continue;
+      direct[at++] = command[i];
+   }
+   direct[at] = '\0';
+   assert(config_set_memory_rewrite_enabled(enabled) == 0);
+   assert(config_set_memory_rewrite_hyde(hyde) == 0);
+   assert(config_set_memory_rewrite_decompose(decompose) == 0);
+   assert(config_set_memory_rewrite_command(direct) == 0);
 }
 
 static void clear_rewrite_config(void)
 {
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
-   unlink(path);
+   write_rewrite_config(0, 0, 0, "");
 }
 
 static void test_semantic_recall_is_embedder_aware(void)
@@ -3124,10 +3050,8 @@ int main(void)
 
    /* --- memory_query_expansion_mode: empty means lexical (default) --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
       /* mode is empty string = lexical (default) */
-      assert(strcmp(cfg.memory_query_expansion_mode, "semantic") != 0);
+      assert(strcmp(config_memory_query_expansion_mode(), "semantic") != 0);
    }
 
    /* --- memory_find_facts_scoped: returns results --- */

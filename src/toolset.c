@@ -1,13 +1,11 @@
 #include "toolset.h"
 
 #include "aimee.h"
-#include "aimee_home.h"
+#include "config_client.h"
 #include "log.h"
-#include "yaml.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <stdarg.h>
-#include <sys/stat.h>
 
 typedef struct
 {
@@ -338,45 +336,12 @@ static void toolset_registry_prune_unknown_tools(toolset_registry_t *registry)
    }
 }
 
-int toolset_registry_load_file(toolset_registry_t *registry, const char *path, char *err,
-                               size_t err_len)
+static int toolset_registry_load_json(toolset_registry_t *registry, cJSON *root, char *err,
+                                      size_t err_len)
 {
-   if (!registry || !path || !path[0])
-      return 0;
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-   fseek(f, 0, SEEK_END);
-   long len = ftell(f);
-   fseek(f, 0, SEEK_SET);
-   if (len < 0 || len > 1024 * 1024)
-   {
-      fclose(f);
-      toolset_err(err, err_len, "toolset config too large: %s", path);
-      return -1;
-   }
-   char *buf = malloc((size_t)len + 1);
-   if (!buf)
-   {
-      fclose(f);
-      toolset_err(err, err_len, "out of memory reading %s", path);
-      return -1;
-   }
-   size_t nread = fread(buf, 1, (size_t)len, f);
-   buf[nread] = '\0';
-   fclose(f);
-
-   cJSON *root = yaml_parse(buf);
-   free(buf);
-   if (!root)
-   {
-      toolset_err(err, err_len, "failed to parse toolset config: %s", path);
-      return -1;
-   }
    cJSON *sets = cJSON_GetObjectItemCaseSensitive(root, "toolsets");
    if (sets && !cJSON_IsObject(sets))
    {
-      cJSON_Delete(root);
       toolset_err(err, err_len, "toolsets must be a mapping");
       return -1;
    }
@@ -384,7 +349,6 @@ int toolset_registry_load_file(toolset_registry_t *registry, const char *path, c
    {
       if (!name_valid(item->string) || !cJSON_IsObject(item))
       {
-         cJSON_Delete(root);
          toolset_err(err, err_len, "invalid toolset definition '%s'",
                      item->string ? item->string : "");
          return -1;
@@ -392,7 +356,6 @@ int toolset_registry_load_file(toolset_registry_t *registry, const char *path, c
       toolset_def_t *def = toolset_registry_upsert(registry, item->string);
       if (!def)
       {
-         cJSON_Delete(root);
          toolset_err(err, err_len, "too many toolsets");
          return -1;
       }
@@ -402,17 +365,13 @@ int toolset_registry_load_file(toolset_registry_t *registry, const char *path, c
                           def, err, err_len) != 0 ||
           add_string_list(cJSON_GetObjectItemCaseSensitive(item, "tools"), toolset_add_tool, def,
                           err, err_len) != 0)
-      {
-         cJSON_Delete(root);
          return -1;
-      }
    }
    cJSON *script = cJSON_GetObjectItemCaseSensitive(root, "script");
    if (script)
    {
       if (!cJSON_IsObject(script))
       {
-         cJSON_Delete(root);
          toolset_err(err, err_len, "script must be a mapping");
          return -1;
       }
@@ -421,7 +380,6 @@ int toolset_registry_load_file(toolset_registry_t *registry, const char *path, c
       {
          if (!cJSON_IsString(allowed) || !name_valid(allowed->valuestring))
          {
-            cJSON_Delete(root);
             toolset_err(err, err_len, "script.allowed_tools must be a toolset name");
             return -1;
          }
@@ -429,7 +387,6 @@ int toolset_registry_load_file(toolset_registry_t *registry, const char *path, c
                   allowed->valuestring);
       }
    }
-   cJSON_Delete(root);
    toolset_registry_prune_unknown_tools(registry);
    return toolset_registry_validate(registry, err, err_len);
 }
@@ -536,15 +493,15 @@ int toolset_registry_load_effective(toolset_registry_t *registry, char *err, siz
    if (!registry)
       return -1;
    toolset_registry_init(registry);
-   const char *override = getenv("AIMEE_TOOLSETS_CONFIG");
-   if (override && override[0])
-      return toolset_registry_load_file(registry, override, err, err_len);
-   static char path[MAX_PATH_LEN];
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 0;
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-   return toolset_registry_load_file(registry, path, err, err_len);
+   cJSON *snapshot = config_client_snapshot_copy();
+   if (!snapshot)
+   {
+      toolset_err(err, err_len, "config module unavailable");
+      return -1;
+   }
+   int rc = toolset_registry_load_json(registry, snapshot, err, err_len);
+   cJSON_Delete(snapshot);
+   return rc;
 }
 
 int toolset_resolve_effective(const char *name, char out[][TOOLSET_TOOL_MAX], int max_tools,

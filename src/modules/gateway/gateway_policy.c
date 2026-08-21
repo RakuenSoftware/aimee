@@ -138,7 +138,7 @@ int gateway_policy_pin_model(cJSON *req, const char *agent_model)
 
 /* Response-side (P2c). Same canonical mapping and config gate as the request
  * side, exposed as a predicate so the buffered/streamed paths can gate cheaply
- * (the predicate does the config_load + canonical-name lookup, so the call
+ * (the predicate does the legacy_config_read + canonical-name lookup, so the call
  * site stays one line). */
 int gateway_policy_is_denied_tool(const char *name)
 {

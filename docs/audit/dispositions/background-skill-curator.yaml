@@ -29,7 +29,7 @@
     "generic_memory_maintenance": "src/modules/memory/memory_maintenance.c",
     "generic_maintenance_state": "src/db1/maintenance.c",
     "kb_synthesis_curator": "src/modules/kb-synthesis/kb_curator_pipeline.c",
-    "kb_curator_config": "src/modules/config/config_kb_curator.c"
+    "kb_curator_config": "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
   },
   "roundtable": {
     "run_id": "oprun_g6a5f2d161a3aecef_1784623013_6",

@@ -1,5 +1,7 @@
 #include "aimee_home.h"
+#include "client_config.h"
 #include "platform_path.h"
+#include "cJSON.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <ctype.h>
@@ -31,24 +33,15 @@ static int path_join(char *out, size_t outsz, const char *dir, const char *leaf)
    return n > 0 && (size_t)n < outsz ? 0 : -1;
 }
 
-static int write_default_profile_config(const char *dir, const char *name)
+static int profile_config_operation(const char *operation, const char *name)
 {
-   char path[4096];
-   if (path_join(path, sizeof(path), dir, "aimee.yaml") != 0)
+   cJSON *value = cJSON_CreateObject();
+   if (!value || !cJSON_AddStringToObject(value, "name", name))
+   {
+      cJSON_Delete(value);
       return -1;
-   if (access(path, F_OK) == 0)
-      return 0;
-
-   FILE *f = fopen(path, "w");
-   if (!f)
-      return -1;
-   fprintf(f, "# Created by `aimee profile create %s`.\n", name);
-   fprintf(f, "# Local runtime paths are derived from AIMEE_PROFILE.\n");
-   fprintf(f, "provider: claude\n");
-   fprintf(f, "guardrail_mode: approve\n");
-   if (fclose(f) != 0)
-      return -1;
-   return 0;
+   }
+   return client_config_operation(operation, value);
 }
 
 static int is_dir(const char *path)
@@ -170,9 +163,9 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error creating profile: %s\n", strerror(errno));
          return 1;
       }
-      if (write_default_profile_config(dir, name) != 0)
+      if (profile_config_operation("profile-create", name) != 0)
       {
-         fprintf(stderr, "error writing default config: %s\n", strerror(errno));
+         fprintf(stderr, "error creating profile config through the server\n");
          return 1;
       }
       printf("profile: %s\n", name);
@@ -207,10 +200,13 @@ int cmd_profile_run(int argc, char **argv)
       }
       printf("profile: %s\n", name);
       printf("path:    %s\n", dir);
-      char cfg[4096];
-      if (path_join(cfg, sizeof(cfg), dir, "aimee.yaml") != 0)
+      int present = client_config_profile_present(name);
+      if (present < 0)
+      {
+         fprintf(stderr, "error reading profile config through the server\n");
          return 1;
-      printf("config:  %s\n", access(cfg, F_OK) == 0 ? "present" : "absent");
+      }
+      printf("config:  %s\n", present ? "present" : "absent");
       return 0;
    }
 

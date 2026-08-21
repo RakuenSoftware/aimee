@@ -102,7 +102,7 @@
 
 /* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly
  * one place — config (config_embedder_dims_default / config_embedder_dims_effective,
- * src/modules/config/config_database.h). Layers that must not depend on config, like
+ * headers/config_database.h). Layers that must not depend on config, like
  * db2, have it injected at startup rather than keeping a copy. A #define here would be
  * a second declaration that can disagree with the embedder actually running. */
 
@@ -146,8 +146,8 @@ typedef enum
    SEV_BLOCK
 } severity_t;
 
-/* No forward declaration of config_t here any more. It existed so app_ctx_t
- * could carry a config_t*; that field is gone, and nothing else in this header
+/* No forward declaration of legacy_config_record here any more. It existed so app_ctx_t
+ * could carry a legacy_config_record*; that field is gone, and nothing else in this header
  * needs the type. Callers that genuinely need config ask the config module. */
 
 /* Application context (replaces globals, passed through command handlers).
@@ -160,7 +160,7 @@ typedef struct
    int json_output;
    const char *json_fields;
    const char *response_profile;
-   /* No config here. It used to carry a pre-loaded config_t so commands could
+   /* No config here. It used to carry a pre-loaded legacy_config_record so commands could
     * avoid re-reading; every command now asks the config module for the field it
     * wants, so the pointer had no readers left. */
 } app_ctx_t;

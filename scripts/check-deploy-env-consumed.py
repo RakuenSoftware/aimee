@@ -38,7 +38,7 @@ try:
 except ImportError:  # pragma: no cover - matches check-kb-container-packaging.py
     yaml = None
 
-EMITTER = Path("src/modules/config/config_database.c")
+EMITTER = Path("src/config_client_contract.c")
 
 # Emitted keys with no consumer yet, and why that is currently acceptable. Removing
 # an entry from here is the goal; adding one needs a reason that names the work.
@@ -64,7 +64,7 @@ def tracked(root: Path, *globs: str) -> list[Path]:
 
 def emitted_keys(root: Path) -> list[str]:
     text = (root / EMITTER).read_text(encoding="utf-8")
-    return sorted(set(re.findall(r'EMITF\("([A-Z_][A-Z0-9_]*)=', text)))
+    return sorted(set(re.findall(r'"([A-Z_][A-Z0-9_]*)=', text)))
 
 
 # Emitted keys whose only legitimate reader IS a Compose file, with the reason. An

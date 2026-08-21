@@ -119,7 +119,6 @@ include_directories(
     # header should not be another red CI run.
     "${AIMEE_SRC_DIR}/modules/workflows"
     "${AIMEE_SRC_DIR}/modules/guardrails"
-    "${AIMEE_SRC_DIR}/modules/config"
     "${AIMEE_SRC_DIR}/modules/economizer"
     "${AIMEE_SRC_DIR}/modules/roadmap"
     "${AIMEE_SRC_DIR}/modules/sandbox"
@@ -574,20 +573,21 @@ set(DB2_HOST_ADAPTER_SRCS
 )
 
 set(CORE_SRCS
+    ${AIMEE_SRC_DIR}/config_client.c
+    ${AIMEE_SRC_DIR}/config_client_contract.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_0.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_1.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_2.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_3.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_4.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_5.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_6.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_7.c
+    ${AIMEE_SRC_DIR}/module_json_call.c
+    ${AIMEE_SRC_DIR}/session_id.c
     ${AIMEE_SRC_DIR}/modules/db1/db.c
     ${AIMEE_SRC_DIR}/modules/db1/db_schema.c
     ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c
-    ${AIMEE_SRC_DIR}/modules/config/config.c
-    ${AIMEE_SRC_DIR}/modules/config/config_sections.c
-    ${AIMEE_SRC_DIR}/modules/config/config_database.c
-    ${AIMEE_SRC_DIR}/modules/config/config_learning.c
-    ${AIMEE_SRC_DIR}/modules/config/config_memory.c
-    ${AIMEE_SRC_DIR}/modules/config/config_charter.c
-    ${AIMEE_SRC_DIR}/modules/config/config_trigger.c
-    ${AIMEE_SRC_DIR}/modules/config/config_kb_maintenance.c
-    ${AIMEE_SRC_DIR}/modules/config/config_kb_curator.c
-    ${AIMEE_SRC_DIR}/modules/config/config_skills.c
-    ${AIMEE_SRC_DIR}/modules/config/config_save.c
     ${AIMEE_SRC_DIR}/util.c
     ${AIMEE_SRC_DIR}/util_url.c
     ${AIMEE_SRC_DIR}/kb/kb_identity.c
@@ -702,8 +702,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/session_worktree_key.c
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
-    ${AIMEE_SRC_DIR}/modules/config/agent_config.c
-    ${AIMEE_SRC_DIR}/modules/config/agent_registry.c
     ${AIMEE_SRC_DIR}/modules/vault/agent_credentials.c
     ${AIMEE_SRC_DIR}/modules/routing/routing.c
     ${AIMEE_SRC_DIR}/agent_tier_lint.c
@@ -946,6 +944,9 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tool_profile.c
     ${AIMEE_SRC_DIR}/cli_profile.c
     ${AIMEE_SRC_DIR}/client_integrations.c
+    # Thin-client config reads and structured profile mutations route through
+    # the server; this is the caller-only dispatcher, not a config engine.
+    ${AIMEE_SRC_DIR}/client_config.c
     ${AIMEE_SRC_DIR}/cmd_profile.c
     ${AIMEE_SRC_DIR}/cmd_manuscript.c
     ${AIMEE_SRC_DIR}/cmd_optimize.c
@@ -1260,7 +1261,6 @@ if(NOT AIMEE_THIN_CLIENT)
 set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}
     ${AIMEE_SRC_DIR}/headers
-    ${AIMEE_SRC_DIR}/modules/config
     ${AIMEE_SRC_DIR}/modules/economizer
     ${AIMEE_SRC_DIR}/modules/governance
     ${AIMEE_SRC_DIR}/modules/workflows
@@ -1510,6 +1510,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 endif()
 
+# Native config callers use the same generic JSON-over-event-bus transport as
+# every other external Go module.  Keep that dependency explicit in CMake just
+# as it is in the Make build; the event bus itself remains Linux-only.
+if(TARGET aimee-core AND TARGET aimee-core-event-bus)
+    target_link_libraries(aimee-core PUBLIC aimee-core-event-bus)
+endif()
+
 add_executable(aimee
     ${CLI_SRCS}
     ${CLIENT_SUPPORT_SRCS}
@@ -1539,7 +1546,6 @@ add_executable(aimee
 target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}
     ${AIMEE_SRC_DIR}/headers
-    ${AIMEE_SRC_DIR}/modules/config
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/modules/db1
     ${AIMEE_SRC_DIR}/modules/db2/c)

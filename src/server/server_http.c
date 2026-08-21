@@ -1973,7 +1973,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * reused by ingress_preinject_build for the emitted retrieval_event. Gated
     * on the endpoint + flag so flag-off / non-ingress requests are byte-
     * identical on the wire (config is read only for these three paths, which
-    * already pay a config_load inside the ingress builder). */
+    * already pay a legacy_config_read inside the ingress builder). */
    if (strcmp(method, "POST") == 0 &&
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))

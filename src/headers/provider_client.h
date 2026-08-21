@@ -64,7 +64,7 @@ extern "C"
    /* A provider_def_t that OWNS its strings.
     *
     * provider_def_t is a borrowed view: its three char pointers alias storage the
-    * caller has to keep alive. That worked when the storage was a config_t the
+    * caller has to keep alive. That worked when the storage was a legacy_config_record the
     * caller was already holding. It does not work against accessors, which return
     * a per-accessor thread-local buffer that the next call to the same accessor
     * overwrites -- a resolver reading six fields would hand back three pointers

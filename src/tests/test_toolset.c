@@ -1,8 +1,9 @@
 #include "toolset.h"
+#include "config_client.h"
+#include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 static int has_tool(char tools[][TOOLSET_TOOL_MAX], int n, const char *name)
 {
@@ -12,12 +13,19 @@ static int has_tool(char tools[][TOOLSET_TOOL_MAX], int n, const char *name)
    return 0;
 }
 
-static void write_text(const char *path, const char *text)
+static int load_contract_json(toolset_registry_t *registry, const char *text, char *err,
+                              size_t err_len)
 {
-   FILE *f = fopen(path, "w");
-   assert(f != NULL);
-   fputs(text, f);
-   fclose(f);
+   cJSON *root = cJSON_Parse(text);
+   assert(root != NULL);
+   cJSON *sets = cJSON_GetObjectItemCaseSensitive(root, "toolsets");
+   cJSON *script = cJSON_GetObjectItemCaseSensitive(root, "script");
+   assert(config_client_set_value("toolsets",
+                                  sets ? cJSON_Duplicate(sets, 1) : cJSON_CreateObject()) == 0);
+   assert(config_client_set_value("script",
+                                  script ? cJSON_Duplicate(script, 1) : cJSON_CreateObject()) == 0);
+   cJSON_Delete(root);
+   return toolset_registry_load_effective(registry, err, err_len);
 }
 
 static void test_full_stack_resolves_union(void)
@@ -171,37 +179,29 @@ static void test_review_indexed_read_tools_gated_no_write(void)
 
 static void test_cycle_rejected(void)
 {
-   char path[256];
-   snprintf(path, sizeof(path), "/tmp/aimee-toolset-cycle-%ld.yaml", (long)getpid());
-   write_text(path, "toolsets:\n  a:\n    include:\n      - b\n  b:\n    include:\n      - a\n");
    toolset_registry_t reg;
-   toolset_registry_init(&reg);
    char err[TOOLSET_ERROR_MAX] = "";
-   assert(toolset_registry_load_file(&reg, path, err, sizeof(err)) != 0);
+   assert(load_contract_json(&reg,
+                             "{\"toolsets\":{\"a\":{\"include\":[\"b\"]},"
+                             "\"b\":{\"include\":[\"a\"]}}}",
+                             err, sizeof(err)) != 0);
    assert(strstr(err, "cycle") != NULL);
-   unlink(path);
    printf("  cycle_rejected: ok\n");
 }
 
 static void test_unknown_tool_dropped(void)
 {
-   char path[256];
-   snprintf(path, sizeof(path), "/tmp/aimee-toolset-unknown-%ld.yaml", (long)getpid());
-   write_text(path, "toolsets:\n"
-                    "  custom:\n"
-                    "    tools:\n"
-                    "      - read_file\n"
-                    "      - not_registered\n");
    toolset_registry_t reg;
-   toolset_registry_init(&reg);
    char err[TOOLSET_ERROR_MAX] = "";
-   assert(toolset_registry_load_file(&reg, path, err, sizeof(err)) == 0);
+   assert(load_contract_json(
+              &reg,
+              "{\"toolsets\":{\"custom\":{\"tools\":[\"read_file\",\"not_registered\"]}}}",
+              err, sizeof(err)) == 0);
    char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int n = toolset_resolve(&reg, "custom", tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
    assert(n == 1);
    assert(has_tool(tools, n, "read_file"));
    assert(!has_tool(tools, n, "not_registered"));
-   unlink(path);
    printf("  unknown_tool_dropped: ok\n");
 }
 
@@ -278,40 +278,29 @@ static void test_script_rpc_toolset(void)
 
 static void test_script_allowed_tools_config(void)
 {
-   char path[256];
-   snprintf(path, sizeof(path), "/tmp/aimee-toolset-script-%ld.yaml", (long)getpid());
-   write_text(path, "toolsets:\n"
-                    "  scripts_readonly:\n"
-                    "    tools:\n"
-                    "      - read_file\n"
-                    "script:\n"
-                    "  allowed_tools: scripts_readonly\n");
    toolset_registry_t reg;
-   toolset_registry_init(&reg);
    char err[TOOLSET_ERROR_MAX] = "";
-   assert(toolset_registry_load_file(&reg, path, err, sizeof(err)) == 0);
+   assert(load_contract_json(
+              &reg,
+              "{\"toolsets\":{\"scripts_readonly\":{\"tools\":[\"read_file\"]}},"
+              "\"script\":{\"allowed_tools\":\"scripts_readonly\"}}",
+              err, sizeof(err)) == 0);
    assert(strcmp(reg.script_allowed_tools, "scripts_readonly") == 0);
    char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int n =
        toolset_resolve(&reg, reg.script_allowed_tools, tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
    assert(n == 1);
    assert(has_tool(tools, n, "read_file"));
-   unlink(path);
    printf("  script_allowed_tools_config: ok\n");
 }
 
 static void test_script_allowed_tools_unknown_rejected(void)
 {
-   char path[256];
-   snprintf(path, sizeof(path), "/tmp/aimee-toolset-script-bad-%ld.yaml", (long)getpid());
-   write_text(path, "script:\n"
-                    "  allowed_tools: missing_set\n");
    toolset_registry_t reg;
-   toolset_registry_init(&reg);
    char err[TOOLSET_ERROR_MAX] = "";
-   assert(toolset_registry_load_file(&reg, path, err, sizeof(err)) != 0);
+   assert(load_contract_json(&reg, "{\"script\":{\"allowed_tools\":\"missing_set\"}}", err,
+                             sizeof(err)) != 0);
    assert(strstr(err, "script.allowed_tools") != NULL);
-   unlink(path);
    printf("  script_allowed_tools_unknown_rejected: ok\n");
 }
 

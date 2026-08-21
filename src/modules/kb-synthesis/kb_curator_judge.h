@@ -13,7 +13,7 @@
 #ifndef KB_CURATOR_JUDGE_H
 #define KB_CURATOR_JUDGE_H
 
-#include "config.h" /* config_t — for Tier-B provider resolution via kb_curator_llm */
+#include "config.h" /* legacy_config_record — for Tier-B provider resolution via kb_curator_llm */
 
 #include <stddef.h>
 

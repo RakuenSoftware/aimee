@@ -1,7 +1,7 @@
 /* test_workspace_turn.c: a turn whose cwd is inside a registered `detached`
  * workspace binds the active provider to a detached provider; shared workspaces
- * and unregistered cwds stay on the shared provider. Config-backed (the binder
- * reads the registered providers via config_load). */
+ * and unregistered cwds stay on the shared provider. The binder reads the
+ * registered providers through the configuration module contract. */
 #include "modules/workspace/workspace_turn.h"
 #include "modules/workspace/workspace_provider.h"
 #include "config.h"
@@ -113,9 +113,19 @@ static delegate_backend_t g_fake_docker = {.name = "docker",
                                            .get_cwd = NULL,
                                            .set_cwd = NULL};
 
+static void register_standard_workspaces(void)
+{
+   (void)config_workspace_remove("/");
+   (void)config_workspace_remove("/tmp/ws-mirror-unresolvable");
+   (void)config_workspace_remove("/tmp/ws-detached");
+   (void)config_workspace_remove("/tmp/ws-shared");
+   assert(config_workspace_add("/tmp/ws-detached", "detached", NULL, NULL) == 0);
+   assert(config_workspace_add("/tmp/ws-shared", "shared", NULL, NULL) == 0);
+}
+
 int main(void)
 {
-   /* Isolated temp HOME so config_save/load never touch the real config. */
+   /* Isolated temp HOME for the module caller's process-level helpers. */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-wsturn-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmpdir) != NULL);
@@ -124,15 +134,7 @@ int main(void)
    platform_setenv("AIMEE_NO_CACHE", "1");
 
    /* Register two workspaces: one detached, one shared (default). */
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-   cfg.workspace_count = 2;
-   snprintf(cfg.workspaces[0], MAX_PATH_LEN, "/tmp/ws-detached");
-   snprintf(cfg.workspace_providers[0], sizeof(cfg.workspace_providers[0]), "detached");
-   snprintf(cfg.workspaces[1], MAX_PATH_LEN, "/tmp/ws-shared");
-   cfg.workspace_providers[1][0] = '\0';
-   assert(config_save(&cfg) == 0);
+   register_standard_workspaces();
 
    ws_test_set_module_responder(fake_module);
 
@@ -334,13 +336,9 @@ int main(void)
       /* A registered root of "/" must NOT authorize the whole host: that is not a
        * workspace registration, it is the absence of one. */
       {
-         config_t c;
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.workspace_count = 1;
-         snprintf(c.workspaces[0], MAX_PATH_LEN, "/");
-         c.workspace_providers[0][0] = '\0';
-         assert(config_save(&c) == 0);
+         assert(config_workspace_remove("/tmp/ws-detached") == 0);
+         assert(config_workspace_remove("/tmp/ws-shared") == 0);
+         assert(config_workspace_add("/", "shared", NULL, NULL) == 0);
 
          g_acquires = 0;
          mkdir("/tmp/aimee-root-authorized", 0700);
@@ -360,13 +358,9 @@ int main(void)
           * theories. A diagnostic nobody can see is the defect, so assert the line is
           * actually emitted rather than trusting that it was added. */
          {
-            c.workspace_count = 1;
-            snprintf(c.workspaces[0], MAX_PATH_LEN, "/tmp/ws-mirror-unresolvable");
-            snprintf(c.workspace_providers[0], sizeof(c.workspace_providers[0]), "mirror");
-            snprintf(c.workspace_vcs_remote[0], sizeof(c.workspace_vcs_remote[0]),
-                     "https://example.invalid/r.git");
-            c.workspace_vcs_head[0][0] = '\0'; /* no client head -> cannot reconstruct */
-            assert(config_save(&c) == 0);
+            assert(config_workspace_remove("/") == 0);
+            assert(config_workspace_add("/tmp/ws-mirror-unresolvable", "mirror",
+                                        "https://example.invalid/r.git", "") == 0);
 
             char capture[512];
             snprintf(capture, sizeof(capture), "%s/wsturn-log-XXXXXX", platform_tmpdir());
@@ -404,14 +398,7 @@ int main(void)
          }
 
          /* restore the real roots for the cases below */
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.workspace_count = 2;
-         snprintf(c.workspaces[0], MAX_PATH_LEN, "/tmp/ws-detached");
-         snprintf(c.workspace_providers[0], sizeof(c.workspace_providers[0]), "detached");
-         snprintf(c.workspaces[1], MAX_PATH_LEN, "/tmp/ws-shared");
-         c.workspace_providers[1][0] = '\0';
-         assert(config_save(&c) == 0);
+         register_standard_workspaces();
       }
 
       /* A tree OUTSIDE every registered workspace root must be refused. Repository-

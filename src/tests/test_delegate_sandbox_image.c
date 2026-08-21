@@ -7,6 +7,7 @@
 
 #include "aimee.h"
 #include "config.h"
+#include "config_client.h"
 #include <aimee/delegates/delegate_sandbox_image.h>
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -58,24 +59,21 @@ int main(void)
    char ws_a[600];
    snprintf(ws_a, sizeof(ws_a), "%s/ws-a", home);
 
-   /* --- config round-trip: global + per-workspace image persist --- */
+   /* --- event-contract round-trip: global + per-workspace image persist --- */
    {
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      config_load(&cfg); /* defaults */
-      snprintf(cfg.delegate_sandbox_image, sizeof(cfg.delegate_sandbox_image), "global-img:1");
-      cfg.workspace_count = 1;
-      snprintf(cfg.workspaces[0], sizeof(cfg.workspaces[0]), "%s", ws_a);
-      snprintf(cfg.workspace_sandbox_image[0], sizeof(cfg.workspace_sandbox_image[0]), "ws-img:1");
-      assert(config_save(&cfg) == 0);
+      assert(config_set_delegate_sandbox_image("global-img:1") == 0);
+      cJSON *paths = cJSON_CreateArray();
+      cJSON_AddItemToArray(paths, cJSON_CreateString(ws_a));
+      assert(config_client_set_value("workspaces", paths) == 0);
+      cJSON *images = cJSON_CreateArray();
+      cJSON_AddItemToArray(images, cJSON_CreateString("ws-img:1"));
+      assert(config_client_set_value("workspace_sandbox_image", images) == 0);
+      assert(config_client_set_number("workspace_count", 1) == 0);
 
-      static config_t got;
-      memset(&got, 0, sizeof(got));
-      assert(config_load(&got) == 0);
-      assert(strcmp(got.delegate_sandbox_image, "global-img:1") == 0);
-      assert(got.workspace_count == 1);
-      assert(strcmp(got.workspaces[0], ws_a) == 0);
-      assert(strcmp(got.workspace_sandbox_image[0], "ws-img:1") == 0);
+      assert(strcmp(config_delegate_sandbox_image(), "global-img:1") == 0);
+      assert(config_workspace_count() == 1);
+      assert(strcmp(config_workspaces(0), ws_a) == 0);
+      assert(strcmp(config_workspace_sandbox_image(0), "ws-img:1") == 0);
    }
 
    /* --- resolve: cwd under a workspace -> its override (beats global) --- */
@@ -115,12 +113,10 @@ int main(void)
 
    /* --- resolve: nothing configured -> -1 (caller uses backend default) --- */
    {
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      config_load(&cfg);
-      cfg.delegate_sandbox_image[0] = '\0';
-      cfg.workspace_count = 0;
-      assert(config_save(&cfg) == 0);
+      assert(config_set_delegate_sandbox_image("") == 0);
+      assert(config_client_set_value("workspaces", cJSON_CreateArray()) == 0);
+      assert(config_client_set_value("workspace_sandbox_image", cJSON_CreateArray()) == 0);
+      assert(config_client_set_number("workspace_count", 0) == 0);
 
       char out[256] = "sentinel";
       assert(delegate_sandbox_resolve_image("/nonexistent/path/xyz", out, sizeof(out)) == -1);

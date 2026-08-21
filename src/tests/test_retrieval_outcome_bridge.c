@@ -1,5 +1,5 @@
 /* test_retrieval_outcome_bridge.c — the dogfood-autolabel -> retrieval outcome
- * bridge. Stubs the KB client + config_load so the buffer / verdict / consume
+ * bridge. Stubs the KB client and accessor so the buffer / verdict / consume
  * logic is exercised in isolation (no DB, no network).
  *
  * Covers:
@@ -21,16 +21,7 @@
 
 /* ---- test-controlled config ---- */
 static int g_flag = 1;
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->learning_implicit_retrieval_outcome = g_flag;
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values match what this file's config_load stub produced, so the
- * assertions below are unchanged. */
+/* Accessor stub exposes the flag under test. */
 int config_learning_implicit_retrieval_outcome(void)
 {
    return g_flag;

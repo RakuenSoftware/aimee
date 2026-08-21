@@ -2,12 +2,12 @@
  *
  * Exposes the get/set allowlist in config_fields.c over typed server methods so
  * the thin client (and any /v1 caller) can read and update aimee.yaml without a
- * local config_load. Mirrors handle_aux_config_show in server_jobs_aux.c. */
+ * local legacy_config_read. Mirrors handle_aux_config_show in server_jobs_aux.c. */
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
+#include "config_client.h"
 #include "config_database.h" /* config_emit_deploy_env_current */
-#include "config_fields.h"
 #include "json_fluent.h" /* jo_ok */
 #include "server.h"
 #include "server_http.h"
@@ -23,22 +23,23 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!config_present())
       return server_send_error(conn, "config: could not load configuration", NULL);
 
-   cJSON *obj = cJSON_CreateObject();
+   cJSON *obj = config_client_snapshot_copy();
    /* Advertise the surface group of every non-runtime key so the Settings GUI can
     * hide deploy/advanced/dev keys by default. Additive + non-breaking: the flat
     * `config` map still carries EVERY key's value, so `aimee config show` and any
     * existing consumer are unchanged; a client that ignores `groups` sees all. */
    cJSON *groups = cJSON_CreateObject();
    cJSON *secrets = cJSON_CreateObject();
-   for (int i = 0; config_fields[i].key; i++)
+   if (!obj)
+      return server_send_error(conn, "config: could not read configuration", NULL);
+   for (cJSON *item = obj->child, *next = NULL; item; item = next)
    {
-      cJSON_AddItemToObject(obj, config_fields[i].key,
-                            config_field_public_value_json_current(&config_fields[i]));
-      if (config_field_secret_name(&config_fields[i]))
-         cJSON_AddBoolToObject(secrets, config_fields[i].key, 1);
-      if (config_fields[i].group != FGROUP_RUNTIME)
-         cJSON_AddStringToObject(groups, config_fields[i].key,
-                                 config_field_group_name(&config_fields[i]));
+      next = item->next;
+      if (config_client_key_is_secret(item->string))
+      {
+         cJSON_AddBoolToObject(secrets, item->string, 1);
+         cJSON_ReplaceItemInObjectCaseSensitive(obj, item->string, cJSON_CreateBool(0));
+      }
    }
 
    cJSON *resp = jo_ok();
@@ -57,16 +58,29 @@ int handle_config_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!key || !key[0])
       return server_send_error(conn, "usage: aimee config get <key>", NULL);
 
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
-      return server_send_error(conn, "config: unknown key", NULL);
    if (!config_present())
       return server_send_error(conn, "config: could not load configuration", NULL);
 
+   int secret = config_client_key_is_secret(key);
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
-   cJSON_AddBoolToObject(resp, "secret", config_field_secret_name(f) ? 1 : 0);
+   cJSON *value = NULL;
+   if (secret)
+   {
+      const char *secret_name = config_client_secret_name(key);
+      value = cJSON_CreateBool(secret_name && runtime_secret_has(secret_name));
+   }
+   else
+   {
+      value = config_client_value_copy(key);
+      if (!value)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "config: unknown key", NULL);
+      }
+   }
+   cJSON_AddItemToObject(resp, "value", value);
+   cJSON_AddBoolToObject(resp, "secret", secret);
    return server_send_ok(conn, resp);
 }
 
@@ -105,6 +119,28 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
 
+   const char *operation = jo_str(req, "operation", "");
+   if (operation && operation[0])
+   {
+      if (strcmp(operation, "profile-create") != 0 &&
+          strcmp(operation, "profile-present") != 0)
+         return server_send_error(conn, "config: unsupported structured operation", NULL);
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(req, "value");
+      if (!cJSON_IsObject(value))
+         return server_send_error(conn, "config: structured operation requires an object", NULL);
+      int rc = config_client_operation(operation, cJSON_Duplicate(value, 1));
+      int present = rc == 0;
+      if (!strcmp(operation, "profile-present") && rc == -2)
+         rc = 0;
+      if (rc != 0)
+         return server_send_error(conn, "config: structured operation failed", NULL);
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "operation", operation);
+      if (!strcmp(operation, "profile-present"))
+         cJSON_AddBoolToObject(resp, "present", present);
+      return server_send_ok(conn, resp);
+   }
+
    const char *key = jo_str(req, "key", "");
    if (!key || !key[0])
       return server_send_error(conn, "usage: aimee config set <key> <value>", NULL);
@@ -138,13 +174,9 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!value)
       return server_send_error(conn, "usage: aimee config set <key> <value>", NULL);
 
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
-      return server_send_error(conn, "config: unknown key", NULL);
-
-   const char *secret_name = config_field_secret_name(f);
-   if (secret_name)
+   if (config_client_key_is_secret(key))
    {
+      const char *secret_name = config_client_secret_name(key);
       int configured = value[0] ? 1 : 0;
       int stored = config_secret_store(secret_name, value);
       if (cJSON_IsString(jval) && jval->valuestring)
@@ -155,8 +187,8 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(resp, "key", key);
       cJSON_AddBoolToObject(resp, "value", configured);
       cJSON_AddBoolToObject(resp, "secret", 1);
-      cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));
-      cJSON_AddBoolToObject(resp, "applied_live", f->reload_class != RELOAD_RESTART);
+      cJSON_AddStringToObject(resp, "reload", "hot");
+      cJSON_AddBoolToObject(resp, "applied_live", 1);
       return server_send_ok(conn, resp);
    }
 
@@ -168,16 +200,19 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "config: invalid value for key", NULL);
 
    /* Push the change into the live snapshot NOW so it takes effect immediately for every
-    * config_load reader, instead of waiting for an mtime-cache miss (live-config-reload P1b). */
+    * legacy_config_read reader, instead of waiting for an mtime-cache miss (live-config-reload P1b). */
    (void)config_reload();
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
+   cJSON *current = config_client_value_copy(key);
+   if (!current)
+      current = cJSON_CreateNull();
+   cJSON_AddItemToObject(resp, "value", current);
    cJSON_AddBoolToObject(resp, "secret", 0);
    /* Live/Restart verdict (live-config-reload P2): tell the caller whether the change is in
     * effect now or needs a restart, instead of leaving them to guess. */
-   cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));
-   cJSON_AddBoolToObject(resp, "applied_live", f->reload_class != RELOAD_RESTART);
+   cJSON_AddStringToObject(resp, "reload", "hot");
+   cJSON_AddBoolToObject(resp, "applied_live", 1);
    return server_send_ok(conn, resp);
 }

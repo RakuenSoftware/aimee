@@ -13,6 +13,20 @@
 #include "../client_integrations.c"
 #include "platform_test_util.h"
 
+static int g_test_integrations_enabled = 1;
+static const char *g_test_transport_preference = "cli-first";
+
+static cJSON *test_client_config_value(const char *key)
+{
+   if (!strcmp(key, "client_integrations_enabled"))
+      return cJSON_CreateBool(g_test_integrations_enabled);
+   if (!strcmp(key, "client_tool_transport_preference"))
+      return cJSON_CreateString(g_test_transport_preference);
+   if (!strcmp(key, "subagent_ban_enabled"))
+      return cJSON_CreateBool(1);
+   return NULL;
+}
+
 /* --- Test build_marketplace_root --- */
 
 static void test_build_marketplace_root(void)
@@ -1470,35 +1484,10 @@ static void test_generated_surface_availability_drives_fallback(void)
 
 static void test_tool_transport_preference_config(void)
 {
-   char tmpdir[512];
-   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-transport-pref-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(tmpdir) != NULL);
-
-   char old_home[512] = {0};
-   const char *prev_home = getenv("AIMEE_HOME");
-   if (prev_home)
-      snprintf(old_home, sizeof(old_home), "%s", prev_home);
-   platform_setenv("AIMEE_HOME", tmpdir);
-
-   char yaml_path[600];
-   snprintf(yaml_path, sizeof(yaml_path), "%s/aimee.yaml", tmpdir);
-   FILE *fp = fopen(yaml_path, "w");
-   assert(fp != NULL);
-   fputs("client_tool_transport_preference: mcp-first\n", fp);
-   fclose(fp);
+   g_test_transport_preference = "mcp-first";
    assert(client_tool_transport_preference() == CLIENT_TOOL_TRANSPORT_MCP_FIRST);
-
-   fp = fopen(yaml_path, "w");
-   assert(fp != NULL);
-   fputs("client_tool_transport_preference: cli-first\n", fp);
-   fclose(fp);
+   g_test_transport_preference = "cli-first";
    assert(client_tool_transport_preference() == CLIENT_TOOL_TRANSPORT_CLI_FIRST);
-
-   if (old_home[0])
-      platform_setenv("AIMEE_HOME", old_home);
-   char rm_cmd[600];
-   snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf '%s'", tmpdir);
-   system(rm_cmd);
 }
 
 static void test_client_integrations_optout_gate(void)
@@ -1536,14 +1525,8 @@ static void test_client_integrations_optout_gate(void)
    assert(client_integrations_allowed() == 1);
    platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
 
-   /* Config-driven opt-out: client_integrations_enabled: false closes the gate
-    * even with no env override. */
-   char yaml_path[600];
-   snprintf(yaml_path, sizeof(yaml_path), "%s/aimee.yaml", tmpdir);
-   FILE *fp = fopen(yaml_path, "w");
-   assert(fp != NULL);
-   fputs("client_integrations_enabled: false\n", fp);
-   fclose(fp);
+   /* Config-driven opt-out from the remote config contract closes the gate. */
+   g_test_integrations_enabled = 0;
    assert(client_integrations_allowed() == 0);
 
    /* And the env override still wins the other way: "0" cannot re-enable it once
@@ -1554,6 +1537,7 @@ static void test_client_integrations_optout_gate(void)
    /* Restore AIMEE_HOME (best-effort) and neutralize the opt-out env so later
     * code in this process sees a clean state. */
    platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
+   g_test_integrations_enabled = 1;
    if (old_home[0])
       platform_setenv("AIMEE_HOME", old_home);
 
@@ -1564,6 +1548,7 @@ static void test_client_integrations_optout_gate(void)
 
 int main(void)
 {
+   client_config_set_provider(test_client_config_value);
    printf("client_integrations: ");
 
    test_build_marketplace_root();

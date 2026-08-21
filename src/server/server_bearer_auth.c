@@ -195,14 +195,15 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
 
    char configured[AIMEE_API_BEARER_EXTRA_MAX][256];
    int configured_count = configured_bearer_snapshot(configured);
-   if (configured_count < 0 || !config_server_api_bearer_token()[0] ||
+   int primary_present = runtime_secret_has("AIMEE_API_BEARER_TOKEN");
+   if (configured_count < 0 || !primary_present ||
        config_server_api_mtls() <= 0)
    {
       /* Name the specific precondition: all three used to fail identically and
        * silently, which is what made a clean-install failure undiagnosable. */
       aimee_log(LOG_ERROR, "first_user",
                 "bootstrap rejected: extras_snapshot=%d primary_bearer=%s mtls=%d",
-                configured_count, config_server_api_bearer_token()[0] ? "present" : "MISSING",
+                configured_count, primary_present ? "present" : "MISSING",
                 config_server_api_mtls());
       return -1;
    }

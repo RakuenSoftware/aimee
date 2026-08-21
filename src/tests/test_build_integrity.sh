@@ -565,12 +565,14 @@ while IFS= read -r line; do
     fi
 done < tests/Rules.mk
 
-# 5. Every test target linking config.o must also link platform_random.o
+# 5. Every test target linking the retired, exact config.o token must also link
+# platform_random.o. Do not match client_config.o or config_client_contract.o:
+# those are event-bus callers and intentionally have no random dependency.
 # Join continuation lines, then check each target rule
 bad_targets=$(sed ':a; /\\$/N; s/\\\n//; ta' tests/Rules.mk | grep 'unit-test-' | while IFS= read -r rule; do
     target=$(echo "$rule" | cut -d: -f1 | tr -d ' ')
     deps=$(echo "$rule" | cut -d: -f2-)
-    if echo "$deps" | grep -q 'config\.o' && \
+    if echo "$deps" | grep -Eq '(^|[[:space:]])(\$\(OBJDIR\)/)?config\.o([[:space:]]|$)' && \
        ! echo "$deps" | grep -q 'platform_random\.o' && \
        ! echo "$deps" | grep -q 'TEST_CORE_OBJS\|TEST_DATA_OBJS\|CORE_OBJS\|PLATFORM_BASIC_OBJS'; then
         echo "$target"

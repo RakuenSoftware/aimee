@@ -190,9 +190,11 @@ static void test_fusion_surfaces_bridged_memory(void)
 {
    assert(mem_eval_open_temp_db() == 0);
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed = cfg.embedder_command[0] ? cfg.embedder_command : MEMORY_EMBED_TEST_FIXTURE;
+   /* The product deliberately has no implicit embedder fallback. This retrieval
+    * test selects the explicit deterministic test backend by name. */
+   assert(setenv("EMBEDDER_URL", MEMORY_EMBED_TEST_FIXTURE, 1) == 0);
+
+   const char *embed = config_embedder_command_current(NULL);
 
    /* Base hit: lexically/semantically matches the query. */
    memory_t base;
@@ -245,6 +247,7 @@ static void test_fusion_surfaces_bridged_memory(void)
    assert(bridge_on && "fusion surfaces the graph-bridged memory");
 
    mem_eval_close_temp_db();
+   unsetenv("EMBEDDER_URL");
 }
 
 static void test_corpus_load_multi_expected(void)

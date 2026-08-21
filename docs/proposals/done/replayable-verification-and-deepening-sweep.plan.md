@@ -145,7 +145,7 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
 - Pure/deterministic and unit-testable with a fake surface backend (no network).
 
 ### WP-A3 — Verifier pass (`roundtable_verify.{c,h}`)
-- `int roundtable_verify_items(agent_config_t*, const config_t*, roundtable_result_t*, ...)`:
+- `int roundtable_verify_items(agent_config_t*, const legacy_config_record*, roundtable_result_t*, ...)`:
   for each captured item — call `evidence_replay`; `UNVERIFIABLE` → move the item
   to the **rejected list**.
 - **Tolerance contract (B1):** severity is always derived from the **reproduced

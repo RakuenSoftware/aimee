@@ -154,9 +154,9 @@ typedef struct
 } roundtable_result_t;
 
 /* The ensemble/roundtable settings ONE run needs, as plain data. Previously a
- * config_t was threaded through the runtime as a value carrier -- mutated in
+ * legacy_config_record was threaded through the runtime as a value carrier -- mutated in
  * memory to overlay a preset, never persisted. That made every panel function a
- * config_t consumer for what is really a dozen scalars. Populate with
+ * legacy_config_record consumer for what is really a dozen scalars. Populate with
  * ensemble_panel_from_config(), then overlay a preset if one is requested.
  * Widths match the corresponding config fields exactly. */
 #define ENSEMBLE_PANEL_MAX_SEATS 32

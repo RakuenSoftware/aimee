@@ -57,7 +57,7 @@ that cannot attest or unseal must fail concretely rather than downgrade to an un
 ### Config touchpoint
 
 The module interprets `vault.custody` and `vault.tpm2.*` as registered at
-`src/modules/config/config_fields.c:156`; `config` parses and projects those values.
+the external config module's field metadata; `config` parses and projects those values.
 Environment/bootstrap credential import and per-provider names are input surfaces, not ownership of
 the secret lifecycle. Provider fields with no compiled and selected consumer must remain hidden.
 

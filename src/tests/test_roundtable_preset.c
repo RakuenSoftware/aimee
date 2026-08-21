@@ -1,6 +1,6 @@
 /* test_roundtable_preset.c: round-trip a named roundtable preset through
  * from_json -> save -> load and to_json, and verify apply_to_config mirrors the
- * preset onto the live config_t ensemble/roundtable fields. */
+ * preset onto the live legacy_config_record ensemble/roundtable fields. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -184,7 +184,7 @@ int main(void)
    assert(strcmp(resolved, "default") == 0);
    assert(runtime.reference_count == 3);
 
-   /* apply_to_config mirrors the preset onto the live config_t */
+   /* apply_to_config mirrors the preset onto the live legacy_config_record */
    assert(config_set_ensemble_aggregator("c-only") == 0);
    char aerr[128];
    assert(roundtable_preset_apply_to_config("deep-review", aerr, sizeof(aerr)) == 0);

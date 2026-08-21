@@ -279,7 +279,7 @@ static int gw_stage_model_pin(gw_request_t *r, void *ud)
  * policy), plus the model-pin policy. Returns total interventions (≥0) or <0 on a
  * stage error. */
 /* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
- * deprecated env default. Cached config_load, so an operator toggle applies without a restart;
+ * deprecated env default. Cached legacy_config_read, so an operator toggle applies without a restart;
  * keeps gw_stage_governance config-free. */
 static int anthropic_governance_enabled(void)
 {

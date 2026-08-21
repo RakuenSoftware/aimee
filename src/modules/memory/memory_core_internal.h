@@ -23,7 +23,7 @@ static inline void memory_autofree_impl(void *p)
 }
 #define MEMORY_AUTOFREE __attribute__((cleanup(memory_autofree_impl)))
 
-/* memory_config_load_heap() lived here because config_t is ~750 KiB and memory
+/* memory_config_load_heap() lived here because legacy_config_record is ~750 KiB and memory
  * retrieval is a deep chain where several stages read config -- stacking
  * automatic copies exhausted the 8 MiB thread stack, so the snapshots went on
  * the heap with MEMORY_AUTOFREE to cover every early return.

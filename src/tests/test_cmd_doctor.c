@@ -58,6 +58,9 @@ static void doctor_test_setup(doctor_test_env_t *env, const char *prefix)
    assert(platform_unsetenv("AIMEE_PROFILE") == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
    assert(platform_setenv("AIMEE_KB_NO_AUTOSTART", "1") == 0);
+   char db_path[4096];
+   snprintf(db_path, sizeof(db_path), "%s/aimee.db", env->tmpdir);
+   assert(config_set_db1_path(db_path) == 0);
 }
 
 static void doctor_test_teardown(doctor_test_env_t *env)
@@ -78,10 +81,7 @@ static void test_doctor_runs_on_fresh_db(void)
    doctor_test_setup(&env, "aimee-test-doctor");
 
    /* Initialize a database */
-   config_t cfg;
-   config_load(&cfg);
-   assert(config_save(&cfg) == 0);
-   assert(db1_init(cfg.db1_path) == 0);
+   assert(db1_init(config_db1_path()) == 0);
    db1_shutdown();
 
    /* Run doctor with JSON output (to avoid exit() calls interfering) */
@@ -138,14 +138,8 @@ static void test_doctor_exits_2_on_db_error(void)
    doctor_test_env_t env;
    doctor_test_setup(&env, "aimee-test-doctor-err");
 
-   /* Create config but with a DB path pointing to a non-existent location */
-   config_t cfg;
-   config_load(&cfg);
-   /* Write config but don't create the DB */
-   config_save(&cfg);
-
-   /* Remove the DB file if it was auto-created */
-   unlink(cfg.db1_path);
+   /* Leave the configured database path absent. */
+   unlink(config_db1_path());
 
    app_ctx_t ctx;
    memset(&ctx, 0, sizeof(ctx));
@@ -191,10 +185,7 @@ static void test_doctor_fix_flag_parsed(void)
    doctor_test_setup(&env, "aimee-test-doctor-fix");
 
    /* Initialize database */
-   config_t cfg;
-   config_load(&cfg);
-   assert(config_save(&cfg) == 0);
-   assert(db1_init(cfg.db1_path) == 0);
+   assert(db1_init(config_db1_path()) == 0);
    db1_shutdown();
 
    app_ctx_t ctx;
@@ -241,10 +232,7 @@ static void test_doctor_reports_kb_process_when_not_running(void)
    doctor_test_env_t env;
    doctor_test_setup(&env, "aimee-test-doctor-kb-process");
 
-   config_t cfg;
-   config_load(&cfg);
-   assert(config_save(&cfg) == 0);
-   assert(db1_init(cfg.db1_path) == 0);
+   assert(db1_init(config_db1_path()) == 0);
    db1_shutdown();
 
    char *json = doctor_checks_json();
@@ -285,10 +273,7 @@ static void test_doctor_json_preserves_existing_db2_connection(void)
    doctor_test_env_t env;
    doctor_test_setup(&env, "aimee-test-doctor-db2");
 
-   config_t cfg;
-   config_load(&cfg);
-   snprintf(cfg.db2_url, sizeof(cfg.db2_url), "shim");
-   assert(config_save(&cfg) == 0);
+   assert(config_set_db2_url("shim") == 0);
 
    db2_test_shim_open();
    assert(db2_is_initialized());
@@ -308,11 +293,8 @@ static void test_doctor_reports_guardrails_semantic_counts(void)
    doctor_test_env_t env;
    doctor_test_setup(&env, "aimee-test-doctor-gsem");
 
-   config_t cfg;
-   config_load(&cfg);
-   snprintf(cfg.guardrails_semantic_mode, sizeof(cfg.guardrails_semantic_mode), "advisory");
-   assert(config_save(&cfg) == 0);
-   assert(db1_init(cfg.db1_path) == 0);
+   assert(config_set_guardrails_semantic_mode("advisory") == 0);
+   assert(db1_init(config_db1_path()) == 0);
 
    guardrail_event_t e;
    memset(&e, 0, sizeof(e));

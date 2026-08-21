@@ -39,8 +39,8 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    return 0;
 }
 
-/* The gate now asks config for one boolean instead of loading a whole config_t,
- * so the seam is the accessor. This is a smaller stub than the config_load it
+/* The gate now asks config for one boolean instead of loading a whole legacy_config_record,
+ * so the seam is the accessor. This is a smaller stub than the legacy_config_read it
  * replaces: a bool in, a bool out, with no need to know the struct's shape. */
 int config_guardrails_blast_radius_advisory_enabled(void)
 {

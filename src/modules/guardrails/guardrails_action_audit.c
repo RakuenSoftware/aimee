@@ -19,7 +19,7 @@
 #include "guardrails.h"
 #include "log.h"
 
-/* Cached audit_action_enabled. Read once on first use; a config_load failure
+/* Cached audit_action_enabled. Read once on first use; a legacy_config_read failure
  * leaves the memset-zeroed flag at 0 (audit OFF), so the gate is fail-safe and
  * the hot path costs one branch instead of a per-call config parse. Toggling the
  * knob takes effect on restart — acceptable for a passive, default-on audit. */
@@ -34,7 +34,7 @@ static int audit_action_is_enabled(void)
 }
 
 /* Cached audit_worm_enabled (default-off). Same fail-safe read-once pattern as
- * audit_action_is_enabled: a config_load failure leaves the WORM dual-write OFF.
+ * audit_action_is_enabled: a legacy_config_read failure leaves the WORM dual-write OFF.
  * Persisted like audit_action (config.c load + config_save opt-in), so the value
  * survives a restart; the reload reapplier below clears the cache so a live
  * config.set / SIGHUP also takes effect without one. */

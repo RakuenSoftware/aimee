@@ -26,6 +26,7 @@ type ConcurrentModuleCaller struct {
 	isClosed     bool
 	closed       chan struct{}
 	closeOnce    sync.Once
+	calls        sync.WaitGroup
 	pollInterval time.Duration
 }
 
@@ -168,7 +169,9 @@ func (c *ConcurrentModuleCaller) Call(ctx context.Context, eventKind, stageID ui
 		return nil, ErrModuleRuntime
 	}
 	c.pending[id] = concurrentPending{eventKind: eventKind, reply: ch}
+	c.calls.Add(1)
 	c.mu.Unlock()
+	defer c.calls.Done()
 
 	var deadlineNS uint64
 	if deadline > 0 {
@@ -199,6 +202,16 @@ func (c *ConcurrentModuleCaller) Call(ctx context.Context, eventKind, stageID ui
 	case <-c.closed:
 		c.abandon(eventKind, id)
 		return nil, ErrModuleRuntime
+	}
+}
+
+// CloseAndWait refuses new calls, releases pending calls, and blocks until
+// every call admitted before shutdown has returned. It must run before the
+// underlying Client is detached and its shared-memory region is unmapped.
+func (c *ConcurrentModuleCaller) CloseAndWait() {
+	if c != nil {
+		c.finish(ErrModuleRuntime)
+		c.calls.Wait()
 	}
 }
 

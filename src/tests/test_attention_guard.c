@@ -11,12 +11,27 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "cli_attention_guard.h"
+#include "client_config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Stubs/fakes for handle_attention_guard's deps. read_stdin + aimee_home are
  * driven by the functional test below via these globals. */
 static const char *g_stdin_json = NULL;
 static char g_home[256] = "/tmp";
+static int g_ingress_max_raw_scans;
+static int g_require_session_worktree = 1;
+static int g_require_aimee_memory = 1;
+
+static cJSON *test_config_value(const char *key)
+{
+   if (!strcmp(key, "ingress_max_raw_scans"))
+      return cJSON_CreateNumber(g_ingress_max_raw_scans);
+   if (!strcmp(key, "require_session_worktree"))
+      return cJSON_CreateBool(g_require_session_worktree);
+   if (!strcmp(key, "require_aimee_memory"))
+      return cJSON_CreateBool(g_require_aimee_memory);
+   return NULL;
+}
 
 char *read_stdin(void)
 {
@@ -112,13 +127,10 @@ static void test_score(void)
 
 static void write_config(const char *body)
 {
-   char path[320];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", g_home);
-   FILE *f = fopen(path, "wb");
-   assert(f);
-   if (body)
-      fputs(body, f);
-   fclose(f);
+   g_ingress_max_raw_scans = body && strstr(body, "ingress_max_raw_scans: 2") ? 2 : 0;
+   g_require_session_worktree =
+       !(body && strstr(body, "require_session_worktree: false"));
+   g_require_aimee_memory = !(body && strstr(body, "require_aimee_memory: false"));
 }
 
 static void rm_path(const char *p)
@@ -133,13 +145,12 @@ static void test_guard_enforcement(void)
    /* Isolated, real temp home so config + the session log persist. */
    snprintf(g_home, sizeof(g_home), "%s/aimee_ag_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
-   char logpath[400], cfgpath[400];
+   char logpath[400];
    snprintf(logpath, sizeof(logpath), "%s/.cache/attention/agtest.json", g_home);
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
    g_stdin_json = RAW_SCAN_HOOK;
 
    /* (1) Inert default: no aimee.yaml at all -> raw scans allowed (exit 0). */
-   rm_path(cfgpath);
+   write_config(NULL);
    rm_path(logpath);
    assert(handle_attention_guard() == 0);
    assert(handle_attention_guard() == 0); /* still allowed, repeatedly */
@@ -163,7 +174,7 @@ static void test_guard_enforcement(void)
    unsetenv("AIMEE_GUARD");
 
    rm_path(logpath);
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = NULL;
    printf("enforcement OK\n");
 }
@@ -568,8 +579,6 @@ static void test_external_memory_enforcement(void)
 {
    snprintf(g_home, sizeof(g_home), "%s/aimee_mem_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
-   char cfgpath[400];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
 
 #define WRITE_MEMORY_HOOK                                                                          \
    "{\"session_id\":\"memtest\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":"            \
@@ -582,7 +591,7 @@ static void test_external_memory_enforcement(void)
    "\"/home/u/.claude/projects/p/memory/fact.md\"}}"
 
    /* (1) Default ON: no config -> a Write into the store is BLOCKED. */
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = WRITE_MEMORY_HOOK;
    assert(handle_attention_guard() == 2);
 
@@ -611,7 +620,7 @@ static void test_external_memory_enforcement(void)
    assert(handle_attention_guard() == 2);
    unsetenv("AIMEE_GUARD");
 
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = NULL;
    printf("external-memory enforcement OK\n");
 }
@@ -649,8 +658,6 @@ static void test_isolation_enforcement(void)
 {
    snprintf(g_home, sizeof(g_home), "%s/aimee_iso_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
-   char cfgpath[400];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
 
 #define EDIT_PRIMARY_HOOK                                                                          \
    "{\"session_id\":\"isotest\",\"tool_name\":\"Edit\","                                           \
@@ -665,7 +672,7 @@ static void test_isolation_enforcement(void)
    /* (1) Default ON: with no config, a mutating op on the primary checkout is
     *     BLOCKED — session-worktree isolation is required by default so two aimee
     *     sessions cannot collide on one shared git HEAD. */
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = EDIT_PRIMARY_HOOK;
    assert(handle_attention_guard() == 2);
 
@@ -719,13 +726,14 @@ static void test_isolation_enforcement(void)
 
    assert(chdir(prev_cwd) == 0);
 
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = NULL;
    printf("isolation enforcement OK\n");
 }
 
 int main(void)
 {
+   client_config_set_provider(test_config_value);
    printf("attention_guard: ");
    test_classify();
    test_weight();

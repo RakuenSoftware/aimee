@@ -145,7 +145,7 @@ Confirmed against the tree, with signatures, so the plan reuses real surfaces:
 | Go `economizer` realized-savings counters | per-turn token telemetry | **reuse** for §6 |
 
 **Honest scoping correction:** `ingress_max_raw_scans` is currently a static
-config scalar (`config_t.ingress_max_raw_scans`, default 0), counted **session-
+config scalar (`legacy_config_record.ingress_max_raw_scans`, default 0), counted **session-
 wide**. Driving it **per task/turn** from a contract is therefore *new machinery*,
 not free reuse — scoped explicitly in §4.
 

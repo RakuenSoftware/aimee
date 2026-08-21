@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parent.parent
 CONTRACTS = ROOT / "src/modules/process-contracts.json"
 INVENTORY = ROOT / "tests/baselines/modules/canonical-inventory.yaml"
 CORE = {
-    "module-runtime", "config", "ir", "translation", "protocols", "gateway",
+    "module-runtime", "ir", "translation", "protocols", "gateway",
     "vault", "execution-policy", "audit",
 }
 PROCESS_REQUIRED = {
-    "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
+    "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition",
     # db1 is the server's store. Required because a deployment without it is not
     # a smaller deployment, and a process because state belongs behind the bus.
@@ -26,7 +26,7 @@ PROCESS_REQUIRED = {
     "db1",
 }
 GO_PROCESSES = {
-    "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
+    "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
     "runtime-web", "control-web", "benchmarks", "sandbox", "economizer", "postgres",
 }

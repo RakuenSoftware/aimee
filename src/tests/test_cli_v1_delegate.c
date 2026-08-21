@@ -1820,22 +1820,14 @@ static void test_trajectory_batch_route_marshaled(void)
    printf("  PASS: test_trajectory_batch_route_marshaled\n");
 }
 
-/* cli_v1_client_endpoint()/cli_v1_client_bearer() (in cli_v1_routes.inc) call
- * aimee_home(), defined in posix/cli_client.c — which cannot be co-linked here
- * because it re-includes the same .inc. Stub it: aimee_home() honors the
- * AIMEE_HOME override exactly as the real one does. (The legacy
- * client_transport selection was removed with the NDJSON transport; the thin
- * client is now an unconditional /v1 consumer.) */
+/* The legacy home symbol remains linked by adjacent route helpers. */
 const char *aimee_home(void)
 {
    return getenv("AIMEE_HOME");
 }
 
-/* cli_v1_client_endpoint()/cli_v1_client_bearer() resolve the remote /v1
- * endpoint + bearer (AIMEE_API_ENDPOINT / AIMEE_API_BEARER env, else aimee.yaml
- * client_endpoint / bearer_token). The thin client is now an unconditional /v1
- * consumer, so cli_v1_has_remote_endpoint() is true exactly when an endpoint is
- * configured (the legacy client_transport gate was removed). */
+/* Endpoint and bearer bootstrap comes only from explicit environment/remote
+ * state. Public config storage must never become a credential source. */
 static void test_client_endpoint_selection(void)
 {
    unsetenv("AIMEE_API_ENDPOINT");
@@ -1867,7 +1859,7 @@ static void test_client_endpoint_selection(void)
    unsetenv("AIMEE_API_ENDPOINT");
    unsetenv("AIMEE_API_BEARER");
 
-   /* aimee.yaml fallback: client_endpoint + bearer_token are read by scan. */
+   /* A legacy YAML endpoint/credential is ignored. */
    char yaml[256];
    snprintf(yaml, sizeof(yaml), "%s/aimee.yaml", home);
    FILE *fp = fopen(yaml, "w");
@@ -1877,14 +1869,10 @@ static void test_client_endpoint_selection(void)
          fp);
    fclose(fp);
    ep = cli_v1_client_endpoint();
-   assert(ep && strcmp(ep, "tcp:host.example:8740") == 0);
-   free(ep);
+   assert(ep == NULL);
    bt = cli_v1_client_bearer();
-   assert(bt && strcmp(bt, "yaml-token") == 0);
-   free(bt);
-
-   /* yaml endpoint -> remote. */
-   assert(cli_v1_has_remote_endpoint() == 1);
+   assert(bt == NULL);
+   assert(cli_v1_has_remote_endpoint() == 0);
 
    unlink(yaml);
    rmdir(home);

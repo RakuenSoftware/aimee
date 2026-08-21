@@ -16,7 +16,7 @@
 #include "vault_capability.h" /* vault_agent_key_server_seal_allowed (agent-key server-vault gate) */
 #include "server_cli_oauth.h"     /* server-hosted OAuth CLI agent setup */
 #include "provider_cli_adapter.h" /* provider_cli_adapter_get: declared CLI caps */
-#include "config.h"               /* config_load / config_t */
+#include "config.h"               /* legacy_config_read / legacy_config_record */
 #include <errno.h>
 #include <pthread.h>
 #include <string.h>

@@ -34,7 +34,7 @@ static void tpm2_set_err(char *errbuf, size_t errlen, const char *msg)
  * ════════════════════════════════════════════════════════════════════════════ */
 #ifdef WITH_TPM2
 
-#include "config.h"        /* config_load, config_default_dir, CONFIG_DEFAULT_VAULT_TPM2_TCTI */
+#include "config.h"        /* legacy_config_read, config_default_dir, CONFIG_DEFAULT_VAULT_TPM2_TCTI */
 #include "platform_path.h" /* platform_mkdir_p */
 #include "vault_crypto.h"  /* vault_kek_derive, VAULT_ROOT_KEY_LEN, VAULT_SALT_LEN */
 #include <errno.h>
@@ -297,7 +297,7 @@ static int ensure_ready(tpm2_ctx_t *ctx)
 
    /* Copied out: each is compared and then read again as the fallback arm of a
     * ternary, across other config reads. Accessors return declared defaults when
-    * config cannot be read, which is what the old (void)config_load relied on. */
+    * config cannot be read, which is what the old (void)legacy_config_read relied on. */
    char cfg_tcti[CONFIG_COPY_MAX];
    char cfg_blob_path[CONFIG_COPY_MAX];
    char cfg_nv_index[CONFIG_COPY_MAX];

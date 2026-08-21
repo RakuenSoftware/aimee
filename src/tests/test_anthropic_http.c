@@ -363,28 +363,10 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    (void)instructions;
    return envelope ? strdup(envelope) : NULL;
 }
-/* The economizer seam moved from config_load to econ_mode_current(). Mirror
- * exactly what the config_load stub below produces (module_economizer = 1, so
- * mode is authoritative) so these assertions are unchanged. */
+/* Mirror the configured economizer mode for these assertions. */
 int econ_mode_current(void)
 {
    return g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
-}
-
-/* messages_run_request_pipeline reads config for the P5 anthropic-inject opt-in;
- * these whitebox tests run with it off (zeroed). */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-      cfg->module_economizer = 1;
-      cfg->economizer_mode = g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
-   }
-   return 0;
 }
 
 /* HTTP-layer stub: agent_http_last_retry_after has no upstream socket here, so 0
@@ -1226,10 +1208,8 @@ int main(void)
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. These reproduce exactly what the config_load stub they
- * replaced produced: config readable, modules unspecified (-1) so the env
- * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+/* Configuration is readable, modules are unspecified (-1) so the environment
+ * default decides, economizer is on, and the P5 injection opt-in is off. */
 int config_present(void)
 {
    return 1;

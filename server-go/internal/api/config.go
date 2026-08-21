@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
+	appconfig "github.com/JBailes/aimee/server-go/config"
 )
 
 func (s *Server) configGet(w http.ResponseWriter, _ *http.Request) {
@@ -17,7 +17,11 @@ func (s *Server) configGet(w http.ResponseWriter, _ *http.Request) {
 	}
 	values, err := s.config.Values()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		status := http.StatusInternalServerError
+		if errors.Is(err, appconfig.ErrUnavailable) {
+			status = http.StatusServiceUnavailable
+		}
+		writeError(w, status, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"config": values})
@@ -53,7 +57,9 @@ func (s *Server) configSet(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.config.SetVersioned(request.Key, request.Value, request.PreviousVersion); err != nil {
 		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "version conflict") {
+		if errors.Is(err, appconfig.ErrUnavailable) {
+			status = http.StatusServiceUnavailable
+		} else if strings.Contains(err.Error(), "version conflict") {
 			status = http.StatusConflict
 		}
 		writeError(w, status, err)

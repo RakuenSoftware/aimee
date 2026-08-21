@@ -10,7 +10,7 @@
 #ifndef KB_CURATOR_LLM_H
 #define KB_CURATOR_LLM_H
 
-#include "kb_curator_provider.h" /* kb_curator_stage_t, config_t */
+#include "kb_curator_provider.h" /* kb_curator_stage_t, legacy_config_record */
 
 #include <stddef.h>
 

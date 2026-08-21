@@ -6,17 +6,17 @@ typedef struct
 {
    char *host;
    int port;
-} config_t;
+} legacy_config_record;
 
 struct server
 {
-   config_t cfg;
+   legacy_config_record cfg;
    int running;
 };
 
-static config_t default_config(void)
+static legacy_config_record default_config(void)
 {
-   config_t c = {.host = "localhost", .port = 8080};
+   legacy_config_record c = {.host = "localhost", .port = 8080};
    return c;
 }
 

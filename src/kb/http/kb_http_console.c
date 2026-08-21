@@ -5,14 +5,15 @@
 
 #include "aimee.h" /* now_utc */
 #include "cJSON.h"
-#include "config.h"                           /* config_load / config_save (§8 tune) */
-#include "config_fields.h"                    /* typed get/set of the pipeline config keys */
+#include "config.h"
+#include "config_client.h"
 #include "kb_curator_drain.h"                 /* kb_curator_stages_json / _presets_json */
 #include "kb_service.h"                       /* kb_service_workers_json, kb_service_ctx_t */
 #include "kb_service_kb.h"                    /* kb_service_health_json */
 #include "modules/db2/c/kb_service_backend.h" /* async queue status */
 #include "modules/db2/c/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
 #include "rel_types.h"                        /* REL_TYPE_NAME_MAX */
+#include "runtime_secret.h"
 #include <openssl/crypto.h>                   /* wipe transient credential request copies */
 
 #include <stdio.h>
@@ -415,10 +416,9 @@ static cJSON *pipeline_config_json(void)
    cJSON *out = cJSON_CreateObject();
    for (size_t i = 0; i < sizeof(PIPELINE_CONFIG_KEYS) / sizeof(PIPELINE_CONFIG_KEYS[0]); i++)
    {
-      const config_field_t *f = config_field_lookup(PIPELINE_CONFIG_KEYS[i]);
-      if (f)
-         cJSON_AddItemToObject(out, PIPELINE_CONFIG_KEYS[i],
-                               config_field_public_value_json_current(f));
+      cJSON *value = config_client_value_copy(PIPELINE_CONFIG_KEYS[i]);
+      if (value)
+         cJSON_AddItemToObject(out, PIPELINE_CONFIG_KEYS[i], value);
    }
    cJSON *stages = kb_curator_stages_json();
    const cJSON *st = NULL;
@@ -427,9 +427,9 @@ static cJSON *pipeline_config_json(void)
       const char *ck = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(st, "config_key"));
       if (!ck || cJSON_GetObjectItemCaseSensitive(out, ck))
          continue; /* embedder-gated, or a key two stages share */
-      const config_field_t *f = config_field_lookup(ck);
-      if (f)
-         cJSON_AddItemToObject(out, ck, config_field_public_value_json_current(f));
+      cJSON *value = config_client_value_copy(ck);
+      if (value)
+         cJSON_AddItemToObject(out, ck, value);
    }
    cJSON_Delete(stages);
    return out;
@@ -465,7 +465,7 @@ static int console_pipeline(char *out_buf, int out_cap)
    return console_send(resp, 200, "{\"error\":\"pipeline too large\"}", out_buf, out_cap);
 }
 
-/* Render a JSON value as the text config_field_set_value parses. Returns 0 and
+/* Render a JSON value as the text module mutation contract parses. Returns 0 and
  * fills `buf` on success, -1 for a type this config surface does not accept. */
 static int pipeline_value_text(const cJSON *v, char *buf, size_t cap)
 {
@@ -512,8 +512,9 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not a pipeline config key\"}");
       return 403;
    }
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
+   const char *secret_name = config_client_secret_name(key);
+   cJSON *current = secret_name ? NULL : config_client_value_copy(key);
+   if (!secret_name && !current)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown config key\"}");
@@ -521,7 +522,7 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
    }
    char key_copy[128];
    snprintf(key_copy, sizeof(key_copy), "%s", key);
-   const char *secret_name = config_field_secret_name(f);
+   cJSON_Delete(current);
    /* Sized for the largest pipeline value: the custom-stages / user-presets JSON
     * blobs, which config_field_set_value truncates to the field width anyway. */
    char text[8192];
@@ -553,7 +554,7 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
    }
    /* config_set is the surgical single-field write: it validates against the
     * field descriptor, patches just that key in the document, and republishes
-    * the snapshot -- the same three steps this did by hand through a config_t. */
+    * the snapshot -- the same three steps this did by hand through a legacy_config_record. */
    if (config_set(key_copy, text) != 0)
    {
       OPENSSL_cleanse(text, sizeof(text));
@@ -563,7 +564,8 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
    cJSON_AddStringToObject(resp, "key", key_copy);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
+   cJSON *updated = config_client_value_copy(key_copy);
+   cJSON_AddItemToObject(resp, "value", updated ? updated : cJSON_CreateNull());
    cJSON_AddBoolToObject(resp, "secret", 0);
    OPENSSL_cleanse(text, sizeof(text));
    return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
@@ -581,7 +583,7 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
  *
  * `section` groups the fields for the console page; `restart` marks the ones
  * bound at startup (the kb API listener and the deploy topology), mirroring
- * their RELOAD_RESTART class in config_fields.c. */
+ * their restart behavior. */
 typedef struct
 {
    const char *key;
@@ -638,15 +640,18 @@ static int console_settings(char *out_buf, int out_cap)
    cJSON *arr = cJSON_AddArrayToObject(resp, "fields");
    for (size_t i = 0; i < sizeof(KB_SETTINGS) / sizeof(KB_SETTINGS[0]); i++)
    {
-      const config_field_t *f = config_field_lookup(KB_SETTINGS[i].key);
-      if (!f)
+      const char *secret_name = config_client_secret_name(KB_SETTINGS[i].key);
+      cJSON *value = secret_name
+                         ? cJSON_CreateBool(runtime_secret_has(secret_name))
+                         : config_client_value_copy(KB_SETTINGS[i].key);
+      if (!value)
          continue;
       cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "key", KB_SETTINGS[i].key);
       cJSON_AddStringToObject(o, "section", KB_SETTINGS[i].section);
       cJSON_AddBoolToObject(o, "restart", KB_SETTINGS[i].restart);
-      cJSON_AddItemToObject(o, "value", config_field_public_value_json_current(f));
-      cJSON_AddBoolToObject(o, "secret", config_field_secret_name(f) ? 1 : 0);
+      cJSON_AddItemToObject(o, "value", value);
+      cJSON_AddBoolToObject(o, "secret", config_client_key_is_secret(KB_SETTINGS[i].key));
       cJSON_AddItemToArray(arr, o);
    }
    return console_send(resp, 200, "{\"error\":\"settings too large\"}", out_buf, out_cap);
@@ -676,8 +681,9 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not a kb-owned setting\"}");
       return 403;
    }
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
+   const char *secret_name = config_client_secret_name(key);
+   cJSON *current = secret_name ? NULL : config_client_value_copy(key);
+   if (!secret_name && !current)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown config key\"}");
@@ -685,7 +691,7 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
    }
    char key_copy[128];
    snprintf(key_copy, sizeof(key_copy), "%s", key);
-   const char *secret_name = config_field_secret_name(f);
+   cJSON_Delete(current);
    char text[8192];
    int vrc = pipeline_value_text(val, text, sizeof(text));
    if (secret_name && cJSON_IsString(val) && val->valuestring)
@@ -716,7 +722,7 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
    }
    /* config_set is the surgical single-field write: it validates against the
     * field descriptor, patches just that key in the document, and republishes
-    * the snapshot -- the same three steps this did by hand through a config_t. */
+    * the snapshot -- the same three steps this did by hand through a legacy_config_record. */
    if (config_set(key_copy, text) != 0)
    {
       OPENSSL_cleanse(text, sizeof(text));
@@ -726,7 +732,8 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
    cJSON_AddStringToObject(resp, "key", key_copy);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
+   cJSON *updated = config_client_value_copy(key_copy);
+   cJSON_AddItemToObject(resp, "value", updated ? updated : cJSON_CreateNull());
    cJSON_AddBoolToObject(resp, "secret", 0);
    cJSON_AddBoolToObject(resp, "restart", ks->restart);
    OPENSSL_cleanse(text, sizeof(text));

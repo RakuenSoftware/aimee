@@ -122,34 +122,9 @@ const char *kb_ingest_detect_format(const char *filename)
 
 /* ── Stubs for the structured-PDF path (config + kb_doc_pdf) ─────────────── */
 
-static int g_pdf_flag = 0;
-int config_load(config_t *cfg)
+static void set_pdf_ingest_enabled(int enabled)
 {
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->kb_pdf_ingest_enabled = g_pdf_flag;
-   }
-   return 0;
-}
-
-/* The generated accessors read through this. Serve the same shape the
- * config_load stub above does, so both agree.
- *
- * Note this changes what the LINKER needs: with a config_load stub, LTO could
- * see kb_pdf_assets_enabled was always 0, fold the branch away, and drop the
- * call to kb_doc_pdf_render_assets entirely. An accessor is opaque, so that
- * branch now survives to link time and the symbol must exist -- hence the stub
- * below. It is never called; g_pdf_flag only enables the ingest path. */
-int config_field_read(size_t offset, size_t size, void *dst)
-{
-   if (!dst || size == 0)
-      return -1;
-   static config_t stub;
-   memset(&stub, 0, sizeof(stub));
-   stub.kb_pdf_ingest_enabled = g_pdf_flag;
-   memcpy(dst, (const char *)&stub + offset, size);
-   return 0;
+   assert(config_set_kb_pdf_ingest_enabled(enabled) == 0);
 }
 
 int kb_doc_pdf_render_assets(const char *project, const char *file_path,
@@ -227,7 +202,7 @@ static int build_pdf_body(char *body, size_t cap, int magic, const char *sclass)
 
 static void test_post_pdf_requires_sensitivity(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    char body[512];
    int n = build_pdf_body(body, sizeof(body), 1, NULL); /* no sensitivity_class */
@@ -240,7 +215,7 @@ static void test_post_pdf_requires_sensitivity(void)
 
 static void test_post_pdf_invalid_sensitivity(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    char body[512];
    int n = build_pdf_body(body, sizeof(body), 1, "secret"); /* not in the allowed set */
@@ -252,7 +227,7 @@ static void test_post_pdf_invalid_sensitivity(void)
 
 static void test_post_pdf_routed(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    g_ingest_class[0] = '\0';
    char body[512];
@@ -269,7 +244,7 @@ static void test_post_pdf_routed(void)
 
 static void test_post_pdf_flag_off_falls_through(void)
 {
-   g_pdf_flag = 0; /* structured PDF disabled */
+   set_pdf_ingest_enabled(0); /* structured PDF disabled */
    g_ingest_called = 0;
    g_last_content_hash[0] = '\0';
    char body[512];
@@ -283,7 +258,7 @@ static void test_post_pdf_flag_off_falls_through(void)
 
 static void test_post_pdf_magic_mismatch_rejected(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    g_last_content_hash[0] = '\0';
    char body[512];
@@ -398,6 +373,8 @@ static void test_get_review_ok(void)
 int main(void)
 {
    printf("kb_http_ingest: ");
+   assert(config_set_kb_pdf_ocr_enabled(0) == 0);
+   assert(config_set_kb_pdf_assets_enabled(0) == 0);
 
    test_post_docs_ok();
    test_post_docs_missing_file();

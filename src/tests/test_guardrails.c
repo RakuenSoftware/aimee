@@ -1317,7 +1317,7 @@ static void test_worktree_mapping_roundtrip(void)
    free(loaded);
 }
 
-/* app_ctx_t used to carry a config_t*, and this asserted it round-tripped. The
+/* app_ctx_t used to carry a legacy_config_record*, and this asserted it round-tripped. The
  * field is gone -- commands read config through the module -- so what is left
  * worth asserting is that the struct still zero-initialises cleanly, which is
  * what every command handler relies on. */
@@ -2173,18 +2173,7 @@ static void test_bash_command_guard_warns(void)
 
 static void write_skill_dispatch_advisory_config(int enabled)
 {
-   const char *home = getenv("HOME");
-   assert(home && home[0]);
-   char dir[512];
-   snprintf(dir, sizeof(dir), "%s/.config/aimee", home);
-   char cmd[1024];
-   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", dir);
-   assert(system(cmd) == 0);
-
-   char path[640];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
-   write_file_text(path, enabled ? "skills:\n  dispatch:\n    advisory: true\n"
-                                 : "skills:\n  dispatch:\n    advisory: false\n");
+   assert(config_set_skills_dispatch_advisory(enabled) == 0);
 }
 
 static void test_skill_dispatch_find_symbols_advisory(void)
@@ -2483,15 +2472,11 @@ static void test_semantic_advisory_pre_tool_check(void)
    platform_setenv("AIMEE_NO_CACHE", "1");
    platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", "1");
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   assert(config_load(&cfg) == 0);
-   snprintf(cfg.guardrails_semantic_mode, sizeof(cfg.guardrails_semantic_mode), "advisory");
-   snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
-            "printf '%%s' '{\"outputs\":{\"risk\":{\"overall\":0.83},"
-            "\"labels\":[\"verification_bypass\"],\"recommendation\":\"prompt\"},"
-            "\"evidence\":{\"explanation\":\"test\"}}'");
-   assert(config_save(&cfg) == 0);
+   assert(config_set("guardrails_semantic_mode", "advisory") == 0);
+   assert(config_set("guardrails_semantic_command",
+                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.83},"
+                     "\"labels\":[\"verification_bypass\"],\"recommendation\":\"prompt\"},"
+                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
 
    session_state_t state;
    memset(&state, 0, sizeof(state));
@@ -2516,11 +2501,10 @@ static void test_semantic_advisory_pre_tool_check(void)
    assert(strstr(msg, "advisory mode") != NULL);
 
    /* Still advisory mode: a "block" recommendation must be downgraded to a prompt. */
-   snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
-            "printf '%%s' '{\"outputs\":{\"risk\":{\"overall\":0.95},"
-            "\"labels\":[\"destructive_change\"],\"recommendation\":\"block\"},"
-            "\"evidence\":{\"explanation\":\"test\"}}'");
-   assert(config_save(&cfg) == 0);
+   assert(config_set("guardrails_semantic_command",
+                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.95},"
+                     "\"labels\":[\"destructive_change\"],\"recommendation\":\"block\"},"
+                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
 
    msg[0] = '\0';
    snprintf(payload, sizeof(payload),

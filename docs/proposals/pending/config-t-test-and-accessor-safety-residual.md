@@ -1,16 +1,16 @@
-# `config_t` test migration and accessor-safety residual
+# `legacy_config_record` test migration and accessor-safety residual
 
 - **State:** PENDING — residual scope only.
 - **Archived parent:** [`config-t-encapsulation.md`](../done/config-t-encapsulation.md).
 
 ## Delivered foundation
 
-Production is at zero `config_t`/`config_load` users outside the config module. Generated accessors,
+Production is at zero `legacy_config_record`/`legacy_config_read` users outside the config module. Generated accessors,
 the local converter, schema-drift checks, and a ratcheted default lint gate hold that boundary.
 
 ## Remaining work
 
-- Replace the remaining test-owned `config_t` construction and direct `config_load` calls with
+- Replace the remaining test-owned `legacy_config_record` construction and direct `legacy_config_read` calls with
   isolated config files, snapshots, or narrow test seams; keep the ratchet monotonic.
 - Finish the string-accessor audit for callers where an empty value has semantics distinct from
   “unset”.

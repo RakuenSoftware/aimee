@@ -5,15 +5,17 @@ Two committed outputs (regenerate with `make -C src docs-gen`):
   docs/gen/cli-commands.md  : every `aimee` CLI command + subcommands, from the
                                command catalogue the server serves
                                (src/server/cli_command_defs_data.h).
-  docs/gen/configuration.md : every config key: the `aimee config get/set`
-                               scalar allowlist (src/modules/config/config_fields.c) plus the
-                               config-file (JSON) sections parsed by src/config*.c.
+  docs/gen/configuration.md : every config key from the metadata shipped by the
+                               external pure-Go config module.
 
 The point is completeness: these are derived from the same tables the binary
 uses, so they cannot silently drift from the implementation the way hand-written
 lists do.
 """
 import re
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -117,7 +119,7 @@ def render_cli(entries):
     return "\n".join(out).rstrip() + "\n"
 
 
-# ─── Config: CLI-settable scalars (src/modules/config/config_fields.c) ───────────────────────
+# ─── Config: metadata owned by the external pure-Go module ────────────────
 
 CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float",
             "CFG_ECON_TIER": "string (off\\|safe\\|aggressive)"}
@@ -468,30 +470,38 @@ SECTION_DESC = {
 }
 
 
+_CONFIG_METADATA = None
+
+
+def _config_metadata():
+    """Load documentation metadata from the pinned config module dependency."""
+    global _CONFIG_METADATA
+    if _CONFIG_METADATA is not None:
+        return _CONFIG_METADATA
+    override = os.environ.get("AIMEE_CONFIG_MODULE_DIR")
+    if override:
+        module_dir = Path(override)
+    else:
+        result = subprocess.run(
+            ["go", "list", "-m", "-f", "{{.Dir}}",
+             "github.com/RakuenSoftware/aimee-module-config"],
+            cwd=ROOT / "server-go", check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        module_dir = Path(result.stdout.strip())
+    metadata_path = module_dir / "server-go" / "modules" / "config" / "metadata.json"
+    try:
+        _CONFIG_METADATA = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"gen-reference-docs: cannot read config module metadata: {exc}")
+    if _CONFIG_METADATA.get("version") != 1:
+        raise SystemExit("gen-reference-docs: unsupported config module metadata version")
+    return _CONFIG_METADATA
+
+
 def parse_config_fields():
-    # Each entry is `{"<key>", offsetof(...), <size>, <flag>, CFG_<TYPE>}`. The
-    # offsetof/sizeof macros embed commas, so match the key (first string before
-    # offsetof) and the type (CFG_* before the closing brace) positionally: they
-    # are 1:1 in source order.
-    text = (SRC / "modules" / "config" / "config_fields.c").read_text(encoding="utf-8")
-    # Bound to the config_fields[] initializer, then parse each `{...}` entry as a
-    # unit (split on `},`) so the key and its CFG_* type are paired within one
-    # entry: robust to CFG_* uses in helper functions below the table.
-    start = text.index("config_fields[] = {")
-    text = text[start:text.index("\n};", start)]
-    fields, seen = [], set()
-    for chunk in text.split("},"):
-        km = re.search(r'"([a-z0-9_]+)"\s*,\s*offsetof', chunk)
-        tm = re.search(r'(CFG_\w+)', chunk)
-        if km and tm and km.group(1) not in seen:  # a key may be registered twice
-            seen.add(km.group(1))
-            # Surface group (config_field_group_t): FGROUP_RUNTIME (default) is the
-            # everyday user surface; FGROUP_DEPLOY/ADVANCED/DEV are settable but filed
-            # off the presented "CLI-settable keys" count into their own subsections.
-            gm = re.search(r'(FGROUP_\w+)', chunk)
-            group = gm.group(1) if gm else "FGROUP_RUNTIME"
-            fields.append((km.group(1), CFG_TYPE.get(tm.group(1), tm.group(1)), group))
-    return fields
+    return [(field["key"], field["type"], field["group"])
+            for field in _config_metadata()["fields"]]
 
 
 # ─── Config: config-file (JSON) sections (src/config*.c) ──────────────────────
@@ -508,43 +518,17 @@ FOREACH_RE = re.compile(r'cJSON_ArrayForEach\(\s*(\w+)\s*,\s*(\w+)\s*\)')
 
 
 def parse_config_sections():
-    sections = {}   # section name -> sorted set of keys
-    flat = set()    # top-level scalar keys read straight off root
-    for cfile in sorted((SRC / "modules" / "config").glob("config*.c")):
-        text = cfile.read_text(encoding="utf-8")
-        var_to_section = {}
-        for m in ASSIGN_RE.finditer(text):
-            var, sect = m.group(1), m.group(2)
-            if var == "root":
-                continue
-            var_to_section[var] = sect
-        # array iteration: the loop var inherits the array's section
-        for m in FOREACH_RE.finditer(text):
-            item, arr = m.group(1), m.group(2)
-            if arr in var_to_section:
-                var_to_section[item] = var_to_section[arr]
-        # collect child keys per section-var
-        used_as_parent = set()
-        for m in CHILD_RE.finditer(text):
-            parent, key = m.group(1), m.group(2)
-            used_as_parent.add(parent)
-            if parent in var_to_section:
-                sections.setdefault(var_to_section[parent], set()).add(key)
-        # a (root,"X") whose var is never used as a parent is a flat top key
-        for var, sect in var_to_section.items():
-            if var not in used_as_parent:
-                flat.add(sect)
-    # don't double-list a name that is both a section and a stray flat read
-    flat -= set(sections)
-    return sections, flat
+    metadata = _config_metadata()
+    return ({name: set(keys) for name, keys in metadata["sections"].items()},
+            set(metadata["flat"]))
 
 
 def render_config(fields, sections, flat):
     out = ["# Configuration Reference",
            "",
            "> Auto-generated from the canonical source tables by "
-           "`scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + "
-           "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
+           "`scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config "
+           "module, env vars scanned from `getenv()` in `src/`, and the "
            "workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
@@ -617,7 +601,7 @@ def render_config(fields, sections, flat):
     out.append(f"## Config-file sections ({len(sections)})")
     out.append("")
     out.append("Set in the config JSON as `{\"<section>\": {\"<key>\": ...}}`. Keys "
-               "are derived from the section parsers in `src/config*.c`; a key shown "
+               "are derived from the external config module metadata; a key shown "
                "as a bare name that is itself a nested object is noted in the section "
                "description (see *Coverage & limitations*).")
     out.append("")
@@ -1485,12 +1469,12 @@ AGENT_FIELD_RE = re.compile(r'cJSON_GetObjectItem(?:CaseSensitive)?\(\s*\w+\s*,\
 
 
 def parse_agent_fields():
-    # DELIBERATELY the config module only. An agent object is also parsed by
+    # DELIBERATELY the routing module only. An agent object is also parsed by
     # src/modules/vault/agent_credentials.c, which reads the credential-bearing
     # fields -- and the vault is an attack surface, so generated public docs do
     # not enumerate what it holds or name the file that reads it. Operators who
     # need those field names have `aimee agent setup`, which prompts for them.
-    f = SRC / "modules" / "config" / "agent_config.c"
+    f = SRC / "modules" / "routing" / "agent_config.c"
     if not f.exists():
         return set()
     return set(AGENT_FIELD_RE.findall(f.read_text(encoding="utf-8")))
@@ -1631,9 +1615,9 @@ def main():
     GEN.mkdir(parents=True, exist_ok=True)
     cli = render_cli(_require("CLI commands", parse_cli_commands(),
                               "src/server/cli_command_defs_data.h"))
-    fields = _require("config fields", parse_config_fields(), "src/modules/config/")
+    fields = _require("config fields", parse_config_fields(), "external config module")
     sections, flat = parse_config_sections()
-    _require("config sections", sections, "src/modules/config/")
+    _require("config sections", sections, "external config module")
     # a key that is a CLI-settable scalar (or a section name) is not also a stray
     # "other top-level" key: subtract both so nothing is double-listed.
     flat = flat - {k for k, _, _ in fields} - set(sections)

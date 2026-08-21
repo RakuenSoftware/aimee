@@ -25,11 +25,11 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
-/* The file-static config_t this suite used to share is gone. It existed because
+/* The file-static legacy_config_record this suite used to share is gone. It existed because
  * ten block-scoped ~750 KiB copies in this one long main() pushed GCC past the
  * default 8 MiB stack and the optimized binary segfaulted before reaching the
  * later cases. Every case now states its precondition through write_test_config()
- * and the code under test reads it back via accessors, so no config_t is needed
+ * and the code under test reads it back via accessors, so no legacy_config_record is needed
  * here at all — which is the outcome the encapsulation proposal is chasing. */
 
 static void write_test_config(const char *yaml)
@@ -651,7 +651,7 @@ int main(void)
 
    /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 ---
     *
-    * These two cases used to zero a local config_t to express "disabled". Now that
+    * These two cases used to zero a local legacy_config_record to express "disabled". Now that
     * the function reads live config, the precondition has to be written to the
     * config file the test owns — otherwise the case silently reads whatever the
     * developer's real aimee.yaml says and stops testing the disabled path. */
