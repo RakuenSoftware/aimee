@@ -13077,6 +13077,70 @@
       }
     },
     {
+      "family": "learning",
+      "id": 71,
+      "name": "feedback_record",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rules and their weights are relational DB2 rows.",
+      "c_symbols": [
+        "db2_feedback_record"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the title is the key, so feedback on an existing title reinforces that rule rather than adding one"
+        },
+        "fields": [
+          {
+            "name": "rule_polarity",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "rule_title",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "rule_description",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "weight_override",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 100
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "rule_reinforced",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -14994,6 +15058,64 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "custody",
+      "id": 9,
+      "name": "enrollment_authority_resolve",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Certificate enrolments are relational DB2 rows.",
+      "c_symbols": [
+        "db2_enrollment_authority_resolve"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an enrolment counts only while its state is active and its revocation stamp is empty, two conditions that can disagree"
+        },
+        "fields": [
+          {
+            "name": "cert_fingerprint",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "cert_issuer",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "cert_serial_norm",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "authority_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "authority_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 32
           }
         ]
       }
@@ -17504,6 +17626,164 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 45,
+      "name": "kb_doc_read",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ingested documents are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_doc_read"
+      ],
+      "request": {
+        "policy": {
+          "reads": "any document can be read by its identifier, which carries no scope"
+        },
+        "fields": [
+          {
+            "name": "doc_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "doc_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "content_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 64
+          },
+          {
+            "name": "doc_filename",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "doc_scope",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "converter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "converter_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "doc_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "review_needed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "review_reason",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "doc_created_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "doc_updated_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 46,
+      "name": "kb_doc_set_state",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ingested documents are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_doc_set_state"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the update has no condition on the document's current state and no check that a row matched"
+        },
+        "fields": [
+          {
+            "name": "doc_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "doc_state",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "clear_review_needed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "review_reason",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
           }
         ]
       }

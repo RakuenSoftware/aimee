@@ -430,6 +430,37 @@ establish that the caller's array is larger than any real result.
 Twenty more could not be measured because their row type is not a plain struct
 of scalars and fixed strings; they need reading one at a time.
 
+## `db2_kb_doc_write` takes a whole document as an argument
+
+Every request field in `db2-envelope-generic-v1` carries a maximum byte count,
+and the generator needs one before it will emit a codec. For nearly every
+declaration the bound comes from the C buffer the value ends up in --
+`filename[256]`, `converter_version[128]` -- so the wire is no narrower than
+the code already was.
+
+`db2_kb_doc_write` has no such buffer. Its `normalized_text` argument is the
+whole converted document, and `src/kb/http/kb_http_ingest.c` sizes the buffer
+it passes as `file_len * 2 + 4095` from the uploaded file. There is no bound in
+the declaration because there is no bound in the design: the argument is as
+large as whatever someone uploads.
+
+Any number chosen here would be invented. Four kilobytes matches the other
+payload fields and would refuse most real documents. A megabyte would fit the
+envelope and still refuse a large PDF's text. Sixteen megabytes is the module
+protocol's own ceiling and would make one ingest hold a sixteen-megabyte buffer
+on both sides of the bus.
+
+The reply-side version of this problem had an answer -- the wire limit was
+never the constraint, and raising the generated client's threshold unblocked
+fifty-nine list operations. This one does not, because it is not a limit that
+was set too low. It is a document being passed by value through a request
+envelope, and the fix is a different shape: the text goes somewhere the module
+can read it and the request carries the reference. That is a decision about
+where ingested content lives, which is not this migration's to make.
+
+`db2_kb_doc_read` is published and does not carry the text, so a document's row
+crosses the boundary today; only the write does not.
+
 ## Two declarations list projects, and one of them should go
 
     int db2_canonical_index_list_projects(project_info_t *out, int max);

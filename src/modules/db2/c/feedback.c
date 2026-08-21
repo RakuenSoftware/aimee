@@ -34,7 +34,8 @@ int db2_feedback_record(const char *polarity, const char *title, const char *des
    if (!conn || !polarity || !title)
       return -1;
 
-   *reinforced = 0;
+   if (reinforced)
+      *reinforced = 0;
 
    rule_t existing;
    char err[256] = "";
@@ -62,7 +63,8 @@ int db2_feedback_record(const char *polarity, const char *title, const char *des
       (void)aimee_pg_step(st, err, sizeof(err));
       aimee_pg_finalize(st);
 
-      *reinforced = 1;
+      if (reinforced)
+         *reinforced = 1;
       db2_rules_cache_invalidate();
       return existing.id;
    }

@@ -2993,6 +2993,78 @@ int main(int argc, char **argv)
           directive_counts_by_state_directives_resolved == 0 &&
           directive_counts_by_state_directives_expired == 0);
 
+   /* An ingested document's row, a state write that matches nothing, a certificate authority lookup
+    * and a feedback rule. */
+   uint32_t kb_doc_read_doc_found = 99;
+   static char kb_doc_read_content_hash[AIMEE_DB2_KB_DOC_READ_CONTENT_HASH_MAX + 1];
+   kb_doc_read_content_hash[0] = 'x';
+   static char kb_doc_read_doc_filename[AIMEE_DB2_KB_DOC_READ_DOC_FILENAME_MAX + 1];
+   kb_doc_read_doc_filename[0] = 'x';
+   static char kb_doc_read_doc_scope[AIMEE_DB2_KB_DOC_READ_DOC_SCOPE_MAX + 1];
+   kb_doc_read_doc_scope[0] = 'x';
+   static char kb_doc_read_converter[AIMEE_DB2_KB_DOC_READ_CONVERTER_MAX + 1];
+   kb_doc_read_converter[0] = 'x';
+   static char kb_doc_read_converter_version[AIMEE_DB2_KB_DOC_READ_CONVERTER_VERSION_MAX + 1];
+   kb_doc_read_converter_version[0] = 'x';
+   static char kb_doc_read_doc_state[AIMEE_DB2_KB_DOC_READ_DOC_STATE_MAX + 1];
+   kb_doc_read_doc_state[0] = 'x';
+   uint32_t kb_doc_read_review_needed = 99;
+   static char kb_doc_read_review_reason[AIMEE_DB2_KB_DOC_READ_REVIEW_REASON_MAX + 1];
+   kb_doc_read_review_reason[0] = 'x';
+   static char kb_doc_read_doc_created_at[AIMEE_DB2_KB_DOC_READ_DOC_CREATED_AT_MAX + 1];
+   kb_doc_read_doc_created_at[0] = 'x';
+   static char kb_doc_read_doc_updated_at[AIMEE_DB2_KB_DOC_READ_DOC_UPDATED_AT_MAX + 1];
+   kb_doc_read_doc_updated_at[0] = 'x';
+   assert(aimee_db2_kb_doc_read_call(
+              call_client, &client, 9438, 0, 1, &kb_doc_read_doc_found, kb_doc_read_content_hash,
+              sizeof(kb_doc_read_content_hash), kb_doc_read_doc_filename,
+              sizeof(kb_doc_read_doc_filename), kb_doc_read_doc_scope,
+              sizeof(kb_doc_read_doc_scope), kb_doc_read_converter, sizeof(kb_doc_read_converter),
+              kb_doc_read_converter_version, sizeof(kb_doc_read_converter_version),
+              kb_doc_read_doc_state, sizeof(kb_doc_read_doc_state), &kb_doc_read_review_needed,
+              kb_doc_read_review_reason, sizeof(kb_doc_read_review_reason),
+              kb_doc_read_doc_created_at, sizeof(kb_doc_read_doc_created_at),
+              kb_doc_read_doc_updated_at, sizeof(kb_doc_read_doc_updated_at), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_doc_read_doc_found == 0 && kb_doc_read_content_hash[0] == '\0' &&
+          kb_doc_read_doc_filename[0] == '\0' && kb_doc_read_doc_scope[0] == '\0' &&
+          kb_doc_read_converter[0] == '\0' && kb_doc_read_converter_version[0] == '\0' &&
+          kb_doc_read_doc_state[0] == '\0' && kb_doc_read_review_needed == 0 &&
+          kb_doc_read_review_reason[0] == '\0' && kb_doc_read_doc_created_at[0] == '\0' &&
+          kb_doc_read_doc_updated_at[0] == '\0');
+
+   uint32_t kb_doc_set_state_acknowledged = 99;
+   assert(aimee_db2_kb_doc_set_state_call(call_client, &client, 9439, 0, 4242, "reviewed", 1,
+                                          "replayed", &kb_doc_set_state_acknowledged, NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   /* No document carries this identifier, and the write is acknowledged all the
+    * same: the update names no current state and nothing checks that a row
+    * matched. */
+   assert(kb_doc_set_state_acknowledged == 1);
+
+   uint32_t enrollment_authority_resolve_authority_found = 99;
+   static char enrollment_authority_resolve_authority_id
+       [AIMEE_DB2_ENROLLMENT_AUTHORITY_RESOLVE_AUTHORITY_ID_MAX + 1];
+   enrollment_authority_resolve_authority_id[0] = 'x';
+   assert(
+       aimee_db2_enrollment_authority_resolve_call(
+           call_client, &client, 9440, 0, "replay-fingerprint", "CN=replay", "01",
+           &enrollment_authority_resolve_authority_found, enrollment_authority_resolve_authority_id,
+           sizeof(enrollment_authority_resolve_authority_id), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(enrollment_authority_resolve_authority_found == 0 &&
+          enrollment_authority_resolve_authority_id[0] == '\0');
+
+   uint32_t feedback_record_rule_id = 99;
+   uint32_t feedback_record_rule_reinforced = 99;
+   assert(aimee_db2_feedback_record_call(call_client, &client, 9441, 0, "negative",
+                                         "replay feedback title", "replayed", 75,
+                                         &feedback_record_rule_id, &feedback_record_rule_reinforced,
+                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* No rule holds this title yet, so one is written rather than reinforced.
+    * Sending the same title again would reinforce that rule and ignore the
+    * weight entirely. */
+   assert(feedback_record_rule_id > 0 && feedback_record_rule_reinforced == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

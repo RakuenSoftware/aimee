@@ -226,3 +226,34 @@ aimee_module_call_result_t aimee_db2_console_oidc_put_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_enrollment_authority_resolve_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *cert_fingerprint, const char *cert_issuer, const char *cert_serial_norm,
+    uint32_t *authority_found, char *authority_id, size_t authority_id_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ENROLLMENT_AUTHORITY_RESOLVE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ENROLLMENT_AUTHORITY_RESOLVE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_enrollment_authority_resolve_request_encode(cert_fingerprint, cert_issuer,
+                                                             cert_serial_norm, request,
+                                                             sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENROLLMENT_AUTHORITY_RESOLVE,
+            AIMEE_DB2_STAGE_ENROLLMENT_AUTHORITY_RESOLVE, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_enrollment_authority_resolve_reply_decode(
+           response, response_len, authority_found, authority_id, authority_id_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

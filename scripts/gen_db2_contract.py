@@ -13390,6 +13390,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_directive_counts_by_state",
         "policy": {"reads": 200},
     },
+    "kb_doc_read": {
+        "key": ("maintenance", 45),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_doc_read",
+        "policy": {"reads": 200},
+    },
+    "kb_doc_set_state": {
+        "key": ("maintenance", 46),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_doc_set_state",
+        "policy": {"writes": 200},
+    },
+    "enrollment_authority_resolve": {
+        "key": ("custody", 9),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_enrollment_authority_resolve",
+        "policy": {"reads": 200},
+    },
+    "feedback_record": {
+        "key": ("learning", 71),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_feedback_record",
+        "policy": {"writes": 200},
+    },
 }
 
 

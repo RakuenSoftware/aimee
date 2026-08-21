@@ -1125,6 +1125,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *turn_id, uint32_t *fidelity_result, char *fidelity_status, size_t fidelity_status_capacity, uint32_t *supported_count, uint32_t *unsupported_count, uint32_t *abstained_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_feedback_record_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *rule_polarity, const char *rule_title, const char *rule_description, uint32_t weight_override, uint32_t *rule_id, uint32_t *rule_reinforced, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
@@ -1255,6 +1259,10 @@ extern "C"
    aimee_module_call_result_t aimee_db2_console_oidc_put_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *oidc_issuer, const char *oidc_audience, const char *oidc_jwks_url, const char *oidc_admin_claim, const char *oidc_admin_values, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_enrollment_authority_resolve_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *cert_fingerprint, const char *cert_issuer, const char *cert_serial_norm, uint32_t *authority_found, char *authority_id, size_t authority_id_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_async_pending_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
@@ -1392,5 +1400,13 @@ extern "C"
    aimee_module_call_result_t aimee_db2_corpus_pipeline_drain_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t drain_limit, uint32_t *drained, uint32_t *corpus_total, uint32_t *corpus_pending, uint32_t *corpus_running, uint32_t *corpus_failed, uint32_t *corpus_complete, uint32_t *corpus_processed, uint32_t *corpus_skipped, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_doc_read_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t doc_id, uint32_t *doc_found, char *content_hash, size_t content_hash_capacity, char *doc_filename, size_t doc_filename_capacity, char *doc_scope, size_t doc_scope_capacity, char *converter, size_t converter_capacity, char *converter_version, size_t converter_version_capacity, char *doc_state, size_t doc_state_capacity, uint32_t *review_needed, char *review_reason, size_t review_reason_capacity, char *doc_created_at, size_t doc_created_at_capacity, char *doc_updated_at, size_t doc_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_doc_set_state_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t doc_id, const char *doc_state, uint32_t clear_review_needed, const char *review_reason, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

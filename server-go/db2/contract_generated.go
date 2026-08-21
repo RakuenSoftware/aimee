@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "3c209e30f09f1954c4d62b7a15d2a046068d436f5082c78c69a88f57bbe979fa"
+const ContractSHA256 = "831b4fe2d1c047fd68394fcb2cd89864b0e24f549e90435e573ad52f4259c277"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -9310,6 +9310,86 @@ func DecodeFidelityReportByTurnRequest(request []byte) (string, error) {
 	return turnID, nil
 }
 
+const EventFeedbackRecord = EventLearning
+const StageFeedbackRecord = FamilyLearning
+const OperationFeedbackRecord uint32 = 71
+const FeedbackRecordRulePolarityMin = 1
+const FeedbackRecordRulePolarityMax = 31
+const FeedbackRecordRuleTitleMin = 1
+const FeedbackRecordRuleTitleMax = 255
+const FeedbackRecordRuleDescriptionMin = 0
+const FeedbackRecordRuleDescriptionMax = 1023
+const FeedbackRecordWeightOverrideMin uint32 = 0
+const FeedbackRecordWeightOverrideMax uint32 = 100
+
+// EncodeFeedbackRecordRequest writes the schema feedback_record declares, in order.
+func EncodeFeedbackRecordRequest(rulePolarity string, ruleTitle string, ruleDescription string, weightOverride uint32) ([]byte, error) {
+	if len(rulePolarity) < FeedbackRecordRulePolarityMin || len(rulePolarity) > FeedbackRecordRulePolarityMax || hasNUL(rulePolarity) ||
+		len(ruleTitle) < FeedbackRecordRuleTitleMin || len(ruleTitle) > FeedbackRecordRuleTitleMax || hasNUL(ruleTitle) ||
+		len(ruleDescription) < FeedbackRecordRuleDescriptionMin || len(ruleDescription) > FeedbackRecordRuleDescriptionMax || hasNUL(ruleDescription) ||
+		weightOverride < FeedbackRecordWeightOverrideMin || weightOverride > FeedbackRecordWeightOverrideMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, rulePolarity, FeedbackRecordRulePolarityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, ruleTitle, FeedbackRecordRuleTitleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, ruleDescription, FeedbackRecordRuleDescriptionMax); err != nil {
+		return nil, err
+	}
+	var weightOverrideBytes [4]byte
+	binary.LittleEndian.PutUint32(weightOverrideBytes[:], weightOverride)
+	payload = append(payload, weightOverrideBytes[:]...)
+	header, err := EncodeRequestHeader(OperationFeedbackRecord, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeFeedbackRecordRequest reads it back, checking each field against its own bound.
+func DecodeFeedbackRecordRequest(request []byte) (string, string, string, uint32, error) {
+	var rulePolarity string
+	var ruleTitle string
+	var ruleDescription string
+	var weightOverride uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFeedbackRecord || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if rulePolarity, err = takeRowText(payload, &cursor, FeedbackRecordRulePolarityMax); err != nil ||
+		len(rulePolarity) < FeedbackRecordRulePolarityMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if ruleTitle, err = takeRowText(payload, &cursor, FeedbackRecordRuleTitleMax); err != nil ||
+		len(ruleTitle) < FeedbackRecordRuleTitleMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if ruleDescription, err = takeRowText(payload, &cursor, FeedbackRecordRuleDescriptionMax); err != nil ||
+		len(ruleDescription) < FeedbackRecordRuleDescriptionMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	weightOverride = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if weightOverride < FeedbackRecordWeightOverrideMin || weightOverride > FeedbackRecordWeightOverrideMax {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	return rulePolarity, ruleTitle, ruleDescription, weightOverride, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -11254,6 +11334,71 @@ func DecodeConsoleOidcPutRequest(request []byte) (string, string, string, string
 	return oidcIssuer, oidcAudience, oidcJwksURL, oidcAdminClaim, oidcAdminValues, nil
 }
 
+const EventEnrollmentAuthorityResolve = EventCustody
+const StageEnrollmentAuthorityResolve = FamilyCustody
+const OperationEnrollmentAuthorityResolve uint32 = 9
+const EnrollmentAuthorityResolveCertFingerprintMin = 1
+const EnrollmentAuthorityResolveCertFingerprintMax = 127
+const EnrollmentAuthorityResolveCertIssuerMin = 1
+const EnrollmentAuthorityResolveCertIssuerMax = 255
+const EnrollmentAuthorityResolveCertSerialNormMin = 1
+const EnrollmentAuthorityResolveCertSerialNormMax = 127
+
+// EncodeEnrollmentAuthorityResolveRequest writes the schema enrollment_authority_resolve declares, in order.
+func EncodeEnrollmentAuthorityResolveRequest(certFingerprint string, certIssuer string, certSerialNorm string) ([]byte, error) {
+	if len(certFingerprint) < EnrollmentAuthorityResolveCertFingerprintMin || len(certFingerprint) > EnrollmentAuthorityResolveCertFingerprintMax || hasNUL(certFingerprint) ||
+		len(certIssuer) < EnrollmentAuthorityResolveCertIssuerMin || len(certIssuer) > EnrollmentAuthorityResolveCertIssuerMax || hasNUL(certIssuer) ||
+		len(certSerialNorm) < EnrollmentAuthorityResolveCertSerialNormMin || len(certSerialNorm) > EnrollmentAuthorityResolveCertSerialNormMax || hasNUL(certSerialNorm) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, certFingerprint, EnrollmentAuthorityResolveCertFingerprintMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, certIssuer, EnrollmentAuthorityResolveCertIssuerMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, certSerialNorm, EnrollmentAuthorityResolveCertSerialNormMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEnrollmentAuthorityResolve, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEnrollmentAuthorityResolveRequest reads it back, checking each field against its own bound.
+func DecodeEnrollmentAuthorityResolveRequest(request []byte) (string, string, string, error) {
+	var certFingerprint string
+	var certIssuer string
+	var certSerialNorm string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEnrollmentAuthorityResolve || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if certFingerprint, err = takeRowText(payload, &cursor, EnrollmentAuthorityResolveCertFingerprintMax); err != nil ||
+		len(certFingerprint) < EnrollmentAuthorityResolveCertFingerprintMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if certIssuer, err = takeRowText(payload, &cursor, EnrollmentAuthorityResolveCertIssuerMax); err != nil ||
+		len(certIssuer) < EnrollmentAuthorityResolveCertIssuerMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if certSerialNorm, err = takeRowText(payload, &cursor, EnrollmentAuthorityResolveCertSerialNormMax); err != nil ||
+		len(certSerialNorm) < EnrollmentAuthorityResolveCertSerialNormMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return certFingerprint, certIssuer, certSerialNorm, nil
+}
+
 const EventAsyncPendingCount = EventMaintenance
 const StageAsyncPendingCount = FamilyMaintenance
 const OperationAsyncPendingCount uint32 = 11
@@ -13153,6 +13298,137 @@ func DecodeCorpusPipelineDrainRequest(request []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return drainLimit, nil
+}
+
+const EventKBDocRead = EventMaintenance
+const StageKBDocRead = FamilyMaintenance
+const OperationKBDocRead uint32 = 45
+const KBDocReadDocIDMin uint64 = 1
+const KBDocReadDocIDMax uint64 = 9223372036854775807
+
+// EncodeKBDocReadRequest writes the schema kb_doc_read declares, in order.
+func EncodeKBDocReadRequest(docID uint64) ([]byte, error) {
+	if docID < KBDocReadDocIDMin || docID > KBDocReadDocIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var docIDBytes [8]byte
+	binary.LittleEndian.PutUint64(docIDBytes[:], docID)
+	payload = append(payload, docIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBDocRead, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocReadRequest reads it back, checking each field against its own bound.
+func DecodeKBDocReadRequest(request []byte) (uint64, error) {
+	var docID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocRead || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	docID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if docID < KBDocReadDocIDMin || docID > KBDocReadDocIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return docID, nil
+}
+
+const EventKBDocSetState = EventMaintenance
+const StageKBDocSetState = FamilyMaintenance
+const OperationKBDocSetState uint32 = 46
+const KBDocSetStateDocIDMin uint64 = 1
+const KBDocSetStateDocIDMax uint64 = 9223372036854775807
+const KBDocSetStateDocStateMin = 1
+const KBDocSetStateDocStateMax = 31
+const KBDocSetStateClearReviewNeededMin uint32 = 0
+const KBDocSetStateClearReviewNeededMax uint32 = 1
+const KBDocSetStateReviewReasonMin = 0
+const KBDocSetStateReviewReasonMax = 255
+
+// EncodeKBDocSetStateRequest writes the schema kb_doc_set_state declares, in order.
+func EncodeKBDocSetStateRequest(docID uint64, docState string, clearReviewNeeded uint32, reviewReason string) ([]byte, error) {
+	if docID < KBDocSetStateDocIDMin || docID > KBDocSetStateDocIDMax ||
+		len(docState) < KBDocSetStateDocStateMin || len(docState) > KBDocSetStateDocStateMax || hasNUL(docState) ||
+		clearReviewNeeded < KBDocSetStateClearReviewNeededMin || clearReviewNeeded > KBDocSetStateClearReviewNeededMax ||
+		len(reviewReason) < KBDocSetStateReviewReasonMin || len(reviewReason) > KBDocSetStateReviewReasonMax || hasNUL(reviewReason) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var docIDBytes [8]byte
+	binary.LittleEndian.PutUint64(docIDBytes[:], docID)
+	payload = append(payload, docIDBytes[:]...)
+	if err := putRowText(&payload, docState, KBDocSetStateDocStateMax); err != nil {
+		return nil, err
+	}
+	var clearReviewNeededBytes [4]byte
+	binary.LittleEndian.PutUint32(clearReviewNeededBytes[:], clearReviewNeeded)
+	payload = append(payload, clearReviewNeededBytes[:]...)
+	if err := putRowText(&payload, reviewReason, KBDocSetStateReviewReasonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBDocSetState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocSetStateRequest reads it back, checking each field against its own bound.
+func DecodeKBDocSetStateRequest(request []byte) (uint64, string, uint32, string, error) {
+	var docID uint64
+	var docState string
+	var clearReviewNeeded uint32
+	var reviewReason string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocSetState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	docID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if docID < KBDocSetStateDocIDMin || docID > KBDocSetStateDocIDMax {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	if docState, err = takeRowText(payload, &cursor, KBDocSetStateDocStateMax); err != nil ||
+		len(docState) < KBDocSetStateDocStateMin {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	clearReviewNeeded = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if clearReviewNeeded < KBDocSetStateClearReviewNeededMin || clearReviewNeeded > KBDocSetStateClearReviewNeededMax {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	if reviewReason, err = takeRowText(payload, &cursor, KBDocSetStateReviewReasonMax); err != nil ||
+		len(reviewReason) < KBDocSetStateReviewReasonMin {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", 0, "", ErrMalformedEnvelope
+	}
+	return docID, docState, clearReviewNeeded, reviewReason, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

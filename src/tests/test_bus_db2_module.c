@@ -2892,6 +2892,47 @@ int db2_directive_counts_by_state(int64_t *open, int64_t *suppressed, int64_t *r
    return -1;
 }
 
+int db2_kb_doc_read(int64_t id, db2_kb_doc_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
+                         const char *review_reason)
+{
+   (void)id;
+   (void)state;
+   (void)clear_review_needed;
+   (void)review_reason;
+   return -1;
+}
+
+int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
+                                     const char *cert_serial_norm, char out_authority[33])
+{
+   (void)fingerprint;
+   (void)cert_issuer;
+   (void)cert_serial_norm;
+   if (out_authority)
+      out_authority[0] = '\0';
+   return -1;
+}
+
+int db2_feedback_record(const char *polarity, const char *title, const char *description,
+                        int weight_override, int *reinforced)
+{
+   (void)polarity;
+   (void)title;
+   (void)description;
+   (void)weight_override;
+   if (reinforced)
+      *reinforced = 0;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

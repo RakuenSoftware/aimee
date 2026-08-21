@@ -7867,9 +7867,15 @@
           "line": 64
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.enrollment_authority_resolve operation finds the authority a certificate is enrolled under. The fingerprint, issuer and normalised serial must all match, so a certificate re-issued with a new serial resolves to nothing rather than to its old authority. An enrolment counts only while its state is active and its revocation stamp is empty, separate columns either of which alone would hide a row. An authority not exactly thirty-two characters is an error rather than an absence."
+      },
       "signature": "int db2_enrollment_authority_resolve ( const char * fingerprint , const char * cert_issuer , const char * cert_serial_norm , char out_authority [ 33 ] )",
       "signature_sha256": "2747c86a3b5ccf141024e643539be648e742c96d3b2a7aec3cd7fce5b21ed90f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_enrollment_authority_resolve"
     },
     {
@@ -9485,9 +9491,15 @@
           "line": 21
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.feedback_record operation records feedback as a rule, or reinforces the rule already holding that title. Reinforcement adds fifty to the weight and caps at a hundred, so two reinforcements pin any rule at the maximum whatever it started at, and the weight the caller sends is ignored entirely on that path. The title is the whole key, so unrelated feedback sharing a title merges. The update's result is discarded and the identifier comes back either way."
+      },
       "signature": "int db2_feedback_record ( const char * polarity , const char * title , const char * description , int weight_override , int * reinforced )",
       "signature_sha256": "923fbba7ce09917eddd4b35c6919078d6b4830edcb20747b2ebfeae45e9be281",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_feedback_record"
     },
     {
@@ -10233,9 +10245,15 @@
           "line": 43
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_doc_read operation reads one ingested document's row. The identifier carries no scope, and the row's own scope is returned rather than checked, so a caller holding a number reads whichever scope's document it names. The backend cannot separate a document that is not there from a read that failed -- both are the same failure -- so a zero found flag means either, and the normalized text is not part of the row this returns."
+      },
       "signature": "int db2_kb_doc_read ( int64_t id , db2_kb_doc_t * out )",
       "signature_sha256": "ad6ac07b85805c2800a6b3d341fad7714d0fb6788862f21a6512ffb4219d3182",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_read"
     },
     {
@@ -10279,9 +10297,15 @@
           "line": 47
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_doc_set_state operation sets a document's state. The update names no current state, so any state moves to any other and nothing records what it was. It does not check that a row matched either, so an identifier that names nothing is acknowledged. The review reason is written only when the review flag is being cleared, so a caller cannot record a reason and leave the flag standing. The stamp is DB2's clock."
+      },
       "signature": "int db2_kb_doc_set_state ( int64_t id , const char * state , int clear_review_needed , const char * review_reason )",
       "signature_sha256": "6228e8e3fc99798fcd783f819ad73ed555c95783fa4b0174df0f01b2fc481040",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_set_state"
     },
     {
@@ -27744,15 +27768,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "682781062c33c33b1dacbcfc9f34440ea6797c92d2948b962d5d34e928da97ee",
+  "fingerprint": "474864f9231c231cf911dd7249c068cc2d03bcef4909c216335811bb8b499e4c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 339,
+    "audit_pending": 335,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 620
+    "reviewed": 624
   }
 }

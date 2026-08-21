@@ -1156,6 +1156,14 @@
       "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
     },
     {
+      "symbol": "db2_enrollment_authority_resolve",
+      "signature_sha256": "2747c86a3b5ccf141024e643539be648e742c96d3b2a7aec3cd7fce5b21ed90f",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.enrollment_authority_resolve operation finds the authority a certificate is enrolled under. The fingerprint, issuer and normalised serial must all match, so a certificate re-issued with a new serial resolves to nothing rather than to its old authority. An enrolment counts only while its state is active and its revocation stamp is empty, separate columns either of which alone would hide a row. An authority not exactly thirty-two characters is an error rather than an absence."
+    },
+    {
       "symbol": "db2_enrollment_is_active_by_key",
       "signature_sha256": "313dfb279e65f3be168e4d333d47441c8dccb1c9daa8146dfbd61126229f3397",
       "disposition": "wire-operation",
@@ -1404,6 +1412,14 @@
       "reason": "The typed learning.feature_row_upsert operation records a computed feature row. The key is the subject and the feature-set version -- not the scope -- so a rewrite under a different scope replaces the row rather than adding one. Two scopes cannot hold different features for the same subject and version, which the scope arguments make it look as though they could. The insert's result is discarded and the operation acknowledges either way, so a refused write is reported as a kept one."
     },
     {
+      "symbol": "db2_feedback_record",
+      "signature_sha256": "923fbba7ce09917eddd4b35c6919078d6b4830edcb20747b2ebfeae45e9be281",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.feedback_record operation records feedback as a rule, or reinforces the rule already holding that title. Reinforcement adds fifty to the weight and caps at a hundred, so two reinforcements pin any rule at the maximum whatever it started at, and the weight the caller sends is ignored entirely on that path. The title is the whole key, so unrelated feedback sharing a title merges. The update's result is discarded and the identifier comes back either way."
+    },
+    {
       "symbol": "db2_fidelity_attribution_count_by_turn",
       "signature_sha256": "00d594b46960adac6cc676ef7e879c2638327cb267f6e7e09ce8fcabb878a3dd",
       "disposition": "wire-operation",
@@ -1498,6 +1514,22 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.doc_exists_by_hash operation replaces the content probe. The hash is matched exactly and within one scope, so the same content in another scope does not count -- which is what makes this usable as a per-scope duplicate check rather than a global one."
+    },
+    {
+      "symbol": "db2_kb_doc_read",
+      "signature_sha256": "ad6ac07b85805c2800a6b3d341fad7714d0fb6788862f21a6512ffb4219d3182",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_doc_read operation reads one ingested document's row. The identifier carries no scope, and the row's own scope is returned rather than checked, so a caller holding a number reads whichever scope's document it names. The backend cannot separate a document that is not there from a read that failed -- both are the same failure -- so a zero found flag means either, and the normalized text is not part of the row this returns."
+    },
+    {
+      "symbol": "db2_kb_doc_set_state",
+      "signature_sha256": "6228e8e3fc99798fcd783f819ad73ed555c95783fa4b0174df0f01b2fc481040",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_doc_set_state operation sets a document's state. The update names no current state, so any state moves to any other and nothing records what it was. It does not check that a row matched either, so an identifier that names nothing is acknowledged. The review reason is written only when the review flag is being cleared, so a caller cannot record a reason and leave the flag standing. The stamp is DB2's clock."
     },
     {
       "symbol": "db2_kb_documents_get_stored_hash",

@@ -93,3 +93,69 @@ aimee_module_call_result_t aimee_db2_corpus_pipeline_drain_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_kb_doc_read_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t doc_id, uint32_t *doc_found, char *content_hash, size_t content_hash_capacity,
+    char *doc_filename, size_t doc_filename_capacity, char *doc_scope, size_t doc_scope_capacity,
+    char *converter, size_t converter_capacity, char *converter_version,
+    size_t converter_version_capacity, char *doc_state, size_t doc_state_capacity,
+    uint32_t *review_needed, char *review_reason, size_t review_reason_capacity,
+    char *doc_created_at, size_t doc_created_at_capacity, char *doc_updated_at,
+    size_t doc_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KB_DOC_READ_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KB_DOC_READ_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_kb_doc_read_request_encode(doc_id, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KB_DOC_READ, AIMEE_DB2_STAGE_KB_DOC_READ, trace_id,
+            deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_kb_doc_read_reply_decode(
+           response, response_len, doc_found, content_hash, content_hash_capacity, doc_filename,
+           doc_filename_capacity, doc_scope, doc_scope_capacity, converter, converter_capacity,
+           converter_version, converter_version_capacity, doc_state, doc_state_capacity,
+           review_needed, review_reason, review_reason_capacity, doc_created_at,
+           doc_created_at_capacity, doc_updated_at, doc_updated_at_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_kb_doc_set_state_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t doc_id, const char *doc_state, uint32_t clear_review_needed, const char *review_reason,
+    uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KB_DOC_SET_STATE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KB_DOC_SET_STATE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_kb_doc_set_state_request_encode(doc_id, doc_state, clear_review_needed,
+                                                 review_reason, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KB_DOC_SET_STATE, AIMEE_DB2_STAGE_KB_DOC_SET_STATE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_kb_doc_set_state_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

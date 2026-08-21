@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "feedback.h"
+#include "kb_docs.h"
 #include "fidelity.h"
 #include "calibration.h"
 #include "canonical_index.h"
@@ -500,6 +502,13 @@ typedef struct
                                   int *supported_out, int *unsupported_out, int *abstained_out);
    int (*directive_counts_by_state)(int64_t *open, int64_t *suppressed, int64_t *resolved,
                                     int64_t *expired);
+   int (*kb_doc_read)(int64_t id, db2_kb_doc_t *out);
+   int (*kb_doc_set_state)(int64_t id, const char *state, int clear_review_needed,
+                           const char *review_reason);
+   int (*enrollment_authority_resolve)(const char *fingerprint, const char *cert_issuer,
+                                       const char *cert_serial_norm, char out_authority[33]);
+   int (*feedback_record)(const char *polarity, const char *title, const char *description,
+                          int weight_override, int *reinforced);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
