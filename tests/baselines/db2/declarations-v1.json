@@ -17268,9 +17268,15 @@
           "line": 1008
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.entities_list operation lists the entities a memory mentions, heaviest first. The weight is returned, so a caller can see where it was cut off -- unlike most lists here, truncation is legible. Its callers ask for sixteen, which the reply carries many times over, so the cut is the caller's array rather than the wire."
+      },
       "signature": "int db2_memory_entities_list_weighted ( int64_t memory_id , db2_memory_entity_row_t * out , int max )",
       "signature_sha256": "54ed0ef5e8da860ba31e7448b2b0e89c46a9864d8e9fd1223e48e955bcd7b2e5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_entities_list_weighted"
     },
     {
@@ -17474,9 +17480,15 @@
           "line": 936
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.event_frames_list operation lists the event frames extracted from a memory. The event time is a free-text column rather than a stamp, so it holds whatever the extractor wrote -- a date, a phrase, or nothing -- and two frames cannot be ordered by when they happened, only by when they were written. Every field is optional and an absent one is an empty string, so a frame with no actor and one with an empty actor are the same row."
+      },
       "signature": "int db2_memory_event_frames_list ( int64_t memory_id , db2_memory_event_frame_row_t * out , int max )",
       "signature_sha256": "198dafbfe879e72eafe9b5c0d677788bc1b57e97d187a4a2a21c7a5b4b8cdecc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_event_frames_list"
     },
     {
@@ -19973,9 +19985,15 @@
           "line": 143
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.scopes_list operation lists the scopes a memory is tagged with. The rows come back in an order the statement fixes -- a CASE over the scope type -- so a caller reading the first row is reading whichever type that expression ranks highest, not the one the memory was tagged with first. Truncation at the caller's array therefore drops the lowest-ranked types rather than an arbitrary set, and says nothing about having done so."
+      },
       "signature": "int db2_memory_scopes_list ( int64_t memory_id , db2_memory_scope_tag_row_t * out , int max )",
       "signature_sha256": "94f9ed5b86fa54a3558d2ce8d8013b12a017cc1fe464a38372b4f63d5ffc050e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_scopes_list"
     },
     {
@@ -20381,9 +20399,15 @@
           "line": 996
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.temporal_refs_list operation lists the time references a memory carries, heaviest first and then by insertion. That second key makes the order total, so two references of equal weight come back the same way every time -- which most lists here do not guarantee. The granularity is a free-text column, so what a reference means is the writer's word rather than a checked vocabulary."
+      },
       "signature": "int db2_memory_temporal_refs_list ( int64_t memory_id , db2_memory_temporal_ref_row_t * out , int max )",
       "signature_sha256": "fb36b7ac611e6e64313e45083e1d3855434fc6a9462b3fec01df6fe01f019205",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_temporal_refs_list"
     },
     {
@@ -20618,9 +20642,15 @@
           "line": 869
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.units_list operation lists a memory's units. The statement has no ordering, so a memory with more units than the caller's array holds answers with whichever ones the database returned first -- and which ones those are is not decided by anything. Every other list over a memory's parts here orders by weight or by id; this one does not, so it is the one whose truncation cannot be reasoned about."
+      },
       "signature": "int db2_memory_units_list ( int64_t memory_id , db2_memory_unit_row_t * out , int max )",
       "signature_sha256": "310fe46c742ca5e8df5d19dc1fed110420fd607c06c2d60d288b2a5d41726e1c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_units_list"
     },
     {
@@ -28015,15 +28045,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b210b379292cb0f1bcbdc03989c40007c21666797b6f7915a01cba8c5a9d6605",
+  "fingerprint": "f074440e30786969d871865bd13cc67ad01d8a5209a558704908932252323d00",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 297,
+    "audit_pending": 292,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 662
+    "reviewed": 667
   }
 }

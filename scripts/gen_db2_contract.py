@@ -13649,6 +13649,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_calibration_surface_list",
         "policy": {"reads": 200},
     },
+    "memory_scopes_list": {
+        "key": ("memory", 108),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_scopes_list",
+        "policy": {"reads": 200},
+    },
+    "memory_units_list": {
+        "key": ("memory", 109),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_units_list",
+        "policy": {"reads": 200},
+    },
+    "memory_entities_list": {
+        "key": ("memory", 110),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_entities_list_weighted",
+        "policy": {"reads": 200},
+    },
+    "memory_temporal_refs_list": {
+        "key": ("memory", 111),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_temporal_refs_list",
+        "policy": {"reads": 200},
+    },
+    "memory_event_frames_list": {
+        "key": ("memory", 112),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_event_frames_list",
+        "policy": {"reads": 200},
+    },
 }
 
 

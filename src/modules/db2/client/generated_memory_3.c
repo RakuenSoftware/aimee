@@ -918,3 +918,217 @@ aimee_module_call_result_t aimee_db2_memory_unit_active_meta_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_memory_scopes_list_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t memory_id, aimee_db2_memory_scopes_list_row_t *rows, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_SCOPES_LIST_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_MEMORY_SCOPES_LIST_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_MEMORY_SCOPES_LIST_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_scopes_list_request_encode(memory_id, request, sizeof(request),
+                                                   &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_SCOPES_LIST, AIMEE_DB2_STAGE_MEMORY_SCOPES_LIST,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_memory_scopes_list_reply_decode(response, response_len, rows, capacity, count) !=
+       0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_memory_units_list_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t memory_id, aimee_db2_memory_units_list_row_t *rows, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_UNITS_LIST_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_MEMORY_UNITS_LIST_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_MEMORY_UNITS_LIST_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_units_list_request_encode(memory_id, request, sizeof(request),
+                                                  &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_UNITS_LIST, AIMEE_DB2_STAGE_MEMORY_UNITS_LIST,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_memory_units_list_reply_decode(response, response_len, rows, capacity, count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_memory_entities_list_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t memory_id, aimee_db2_memory_entities_list_row_t *rows, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_ENTITIES_LIST_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_MEMORY_ENTITIES_LIST_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_MEMORY_ENTITIES_LIST_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_entities_list_request_encode(memory_id, request, sizeof(request),
+                                                     &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_ENTITIES_LIST,
+            AIMEE_DB2_STAGE_MEMORY_ENTITIES_LIST, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_memory_entities_list_reply_decode(response, response_len, rows, capacity, count) !=
+       0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_memory_temporal_refs_list_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t memory_id, aimee_db2_memory_temporal_refs_list_row_t *rows, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_temporal_refs_list_request_encode(memory_id, request, sizeof(request),
+                                                          &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_TEMPORAL_REFS_LIST,
+            AIMEE_DB2_STAGE_MEMORY_TEMPORAL_REFS_LIST, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_memory_temporal_refs_list_reply_decode(response, response_len, rows, capacity,
+                                                        count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_memory_event_frames_list_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t memory_id, aimee_db2_memory_event_frames_list_row_t *rows, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !count || (capacity > 0u && !rows))
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_REQUEST_MAX_LEN];
+   uint8_t *response = malloc(AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_RESPONSE_MAX_LEN);
+   if (!response)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   const size_t response_capacity = AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_RESPONSE_MAX_LEN;
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_event_frames_list_request_encode(memory_id, request, sizeof(request),
+                                                         &request_len) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   }
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_EVENT_FRAMES_LIST,
+            AIMEE_DB2_STAGE_MEMORY_EVENT_FRAMES_LIST, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+   {
+      free(response);
+      return transport;
+   }
+   if (aimee_db2_memory_event_frames_list_reply_decode(response, response_len, rows, capacity,
+                                                       count) != 0)
+   {
+      free(response);
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   }
+   free(response);
+
+   return AIMEE_MODULE_CALL_OK;
+}

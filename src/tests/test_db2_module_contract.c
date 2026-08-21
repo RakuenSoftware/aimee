@@ -3584,6 +3584,46 @@ int db2_calibration_surface_list(int min_rows, db2_calibration_surface_t *out, i
    return -1;
 }
 
+int db2_memory_scopes_list(int64_t memory_id, db2_memory_scope_tag_row_t *out, int max)
+{
+   (void)memory_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_units_list(int64_t memory_id, db2_memory_unit_row_t *out, int max)
+{
+   (void)memory_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_entities_list_weighted(int64_t memory_id, db2_memory_entity_row_t *out, int max)
+{
+   (void)memory_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_temporal_refs_list(int64_t memory_id, db2_memory_temporal_ref_row_t *out, int max)
+{
+   (void)memory_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_event_frames_list(int64_t memory_id, db2_memory_event_frame_row_t *out, int max)
+{
+   (void)memory_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

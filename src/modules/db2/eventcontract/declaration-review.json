@@ -3292,6 +3292,14 @@
       "reason": "Private first half of the entity refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
     },
     {
+      "symbol": "db2_memory_entities_list_weighted",
+      "signature_sha256": "54ed0ef5e8da860ba31e7448b2b0e89c46a9864d8e9fd1223e48e955bcd7b2e5",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.entities_list operation lists the entities a memory mentions, heaviest first. The weight is returned, so a caller can see where it was cut off -- unlike most lists here, truncation is legible. Its callers ask for sixteen, which the reply carries many times over, so the cut is the caller's array rather than the wire."
+    },
+    {
       "symbol": "db2_memory_episode_insert",
       "signature_sha256": "a831b248cea00d9f03ca240fdce8e3604d51c9763f7e1d1ec9d62023dc2ed5f0",
       "disposition": "private-db2",
@@ -3338,6 +3346,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of the event-frame refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_event_frames_list",
+      "signature_sha256": "198dafbfe879e72eafe9b5c0d677788bc1b57e97d187a4a2a21c7a5b4b8cdecc",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.event_frames_list operation lists the event frames extracted from a memory. The event time is a free-text column rather than a stamp, so it holds whatever the extractor wrote -- a date, a phrase, or nothing -- and two frames cannot be ordered by when they happened, only by when they were written. Every field is optional and an absent one is an empty string, so a frame with no actor and one with an empty actor are the same row."
     },
     {
       "symbol": "db2_memory_export_row_free",
@@ -4028,6 +4044,14 @@
       "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
     },
     {
+      "symbol": "db2_memory_scopes_list",
+      "signature_sha256": "94f9ed5b86fa54a3558d2ce8d8013b12a017cc1fe464a38372b4f63d5ffc050e",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.scopes_list operation lists the scopes a memory is tagged with. The rows come back in an order the statement fixes -- a CASE over the scope type -- so a caller reading the first row is reading whichever type that expression ranks highest, not the one the memory was tagged with first. Truncation at the caller's array therefore drops the lowest-ranked types rather than an arbitrary set, and says nothing about having done so."
+    },
+    {
       "symbol": "db2_memory_search_facts_patterns_by_keyword",
       "signature_sha256": "a9f12fdc5e57d883d3cf89e6da7971eba292f7354aa5bbd7e1c03ab8c1dbd5e3",
       "disposition": "wire-operation",
@@ -4148,6 +4172,14 @@
       "reason": "Private first half of the temporal-reference refresh: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
     },
     {
+      "symbol": "db2_memory_temporal_refs_list",
+      "signature_sha256": "fb36b7ac611e6e64313e45083e1d3855434fc6a9462b3fec01df6fe01f019205",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.temporal_refs_list operation lists the time references a memory carries, heaviest first and then by insertion. That second key makes the order total, so two references of equal weight come back the same way every time -- which most lists here do not guarantee. The granularity is a free-text column, so what a reference means is the writer's word rather than a checked vocabulary."
+    },
+    {
       "symbol": "db2_memory_top_l2_facts",
       "signature_sha256": "c27a355ded77ece3f4ce80e0ec4db2adda6c23276260fc0b6859d095349f403a",
       "disposition": "wire-operation",
@@ -4218,6 +4250,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of memory_refresh_units_graph: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_units_list",
+      "signature_sha256": "310fe46c742ca5e8df5d19dc1fed110420fd607c06c2d60d288b2a5d41726e1c",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.units_list operation lists a memory's units. The statement has no ordering, so a memory with more units than the caller's array holds answers with whichever ones the database returned first -- and which ones those are is not decided by anything. Every other list over a memory's parts here orders by weight or by id; this one does not, so it is the one whose truncation cannot be reasoned about."
     },
     {
       "symbol": "db2_memory_update_content",

@@ -3624,6 +3624,52 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(calibration_surface_list_count == 0);
 
+   /* Five lists over a memory that does not exist, so each answers empty. */
+   static aimee_db2_memory_scopes_list_row_t
+       memory_scopes_list_rows[AIMEE_DB2_MEMORY_SCOPES_LIST_MAX_ROWS];
+   uint32_t memory_scopes_list_count = 99;
+   assert(aimee_db2_memory_scopes_list_call(
+              call_client, &client, 9487, 0, 4242, memory_scopes_list_rows,
+              AIMEE_DB2_MEMORY_SCOPES_LIST_MAX_ROWS, &memory_scopes_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_scopes_list_count == 0);
+
+   static aimee_db2_memory_units_list_row_t
+       memory_units_list_rows[AIMEE_DB2_MEMORY_UNITS_LIST_MAX_ROWS];
+   uint32_t memory_units_list_count = 99;
+   assert(aimee_db2_memory_units_list_call(
+              call_client, &client, 9488, 0, 4242, memory_units_list_rows,
+              AIMEE_DB2_MEMORY_UNITS_LIST_MAX_ROWS, &memory_units_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_units_list_count == 0);
+
+   static aimee_db2_memory_entities_list_row_t
+       memory_entities_list_rows[AIMEE_DB2_MEMORY_ENTITIES_LIST_MAX_ROWS];
+   uint32_t memory_entities_list_count = 99;
+   assert(aimee_db2_memory_entities_list_call(
+              call_client, &client, 9489, 0, 4242, memory_entities_list_rows,
+              AIMEE_DB2_MEMORY_ENTITIES_LIST_MAX_ROWS, &memory_entities_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_entities_list_count == 0);
+
+   static aimee_db2_memory_temporal_refs_list_row_t
+       memory_temporal_refs_list_rows[AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_MAX_ROWS];
+   uint32_t memory_temporal_refs_list_count = 99;
+   assert(aimee_db2_memory_temporal_refs_list_call(
+              call_client, &client, 9490, 0, 4242, memory_temporal_refs_list_rows,
+              AIMEE_DB2_MEMORY_TEMPORAL_REFS_LIST_MAX_ROWS, &memory_temporal_refs_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_temporal_refs_list_count == 0);
+
+   static aimee_db2_memory_event_frames_list_row_t
+       memory_event_frames_list_rows[AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_MAX_ROWS];
+   uint32_t memory_event_frames_list_count = 99;
+   assert(aimee_db2_memory_event_frames_list_call(
+              call_client, &client, 9491, 0, 4242, memory_event_frames_list_rows,
+              AIMEE_DB2_MEMORY_EVENT_FRAMES_LIST_MAX_ROWS, &memory_event_frames_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_event_frames_list_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

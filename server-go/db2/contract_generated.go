@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "95d497595a4676dc1a91cc9c780ce27b7f385e14330e8a74ce2aa69a193a9ba1"
+const ContractSHA256 = "d8242b0cf3daf9da143dce791e3cae95a724cb81dc5b4bfb5597012d8eaa0c63"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2840,6 +2840,241 @@ func DecodeMemoryUnitActiveMetaRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return unitID, nil
+}
+
+const EventMemoryScopesList = EventMemory
+const StageMemoryScopesList = FamilyMemory
+const OperationMemoryScopesList uint32 = 108
+const MemoryScopesListMemoryIDMin uint64 = 1
+const MemoryScopesListMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryScopesListRequest writes the schema memory_scopes_list declares, in order.
+func EncodeMemoryScopesListRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryScopesListMemoryIDMin || memoryID > MemoryScopesListMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryScopesList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryScopesListRequest reads it back, checking each field against its own bound.
+func DecodeMemoryScopesListRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryScopesList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryScopesListMemoryIDMin || memoryID > MemoryScopesListMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+const EventMemoryUnitsList = EventMemory
+const StageMemoryUnitsList = FamilyMemory
+const OperationMemoryUnitsList uint32 = 109
+const MemoryUnitsListMemoryIDMin uint64 = 1
+const MemoryUnitsListMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryUnitsListRequest writes the schema memory_units_list declares, in order.
+func EncodeMemoryUnitsListRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryUnitsListMemoryIDMin || memoryID > MemoryUnitsListMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryUnitsList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryUnitsListRequest reads it back, checking each field against its own bound.
+func DecodeMemoryUnitsListRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryUnitsList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryUnitsListMemoryIDMin || memoryID > MemoryUnitsListMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+const EventMemoryEntitiesList = EventMemory
+const StageMemoryEntitiesList = FamilyMemory
+const OperationMemoryEntitiesList uint32 = 110
+const MemoryEntitiesListMemoryIDMin uint64 = 1
+const MemoryEntitiesListMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryEntitiesListRequest writes the schema memory_entities_list declares, in order.
+func EncodeMemoryEntitiesListRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryEntitiesListMemoryIDMin || memoryID > MemoryEntitiesListMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryEntitiesList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryEntitiesListRequest reads it back, checking each field against its own bound.
+func DecodeMemoryEntitiesListRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryEntitiesList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryEntitiesListMemoryIDMin || memoryID > MemoryEntitiesListMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+const EventMemoryTemporalRefsList = EventMemory
+const StageMemoryTemporalRefsList = FamilyMemory
+const OperationMemoryTemporalRefsList uint32 = 111
+const MemoryTemporalRefsListMemoryIDMin uint64 = 1
+const MemoryTemporalRefsListMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryTemporalRefsListRequest writes the schema memory_temporal_refs_list declares, in order.
+func EncodeMemoryTemporalRefsListRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryTemporalRefsListMemoryIDMin || memoryID > MemoryTemporalRefsListMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryTemporalRefsList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryTemporalRefsListRequest reads it back, checking each field against its own bound.
+func DecodeMemoryTemporalRefsListRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryTemporalRefsList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryTemporalRefsListMemoryIDMin || memoryID > MemoryTemporalRefsListMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+const EventMemoryEventFramesList = EventMemory
+const StageMemoryEventFramesList = FamilyMemory
+const OperationMemoryEventFramesList uint32 = 112
+const MemoryEventFramesListMemoryIDMin uint64 = 1
+const MemoryEventFramesListMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryEventFramesListRequest writes the schema memory_event_frames_list declares, in order.
+func EncodeMemoryEventFramesListRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryEventFramesListMemoryIDMin || memoryID > MemoryEventFramesListMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryEventFramesList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryEventFramesListRequest reads it back, checking each field against its own bound.
+func DecodeMemoryEventFramesListRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryEventFramesList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryEventFramesListMemoryIDMin || memoryID > MemoryEventFramesListMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
 }
 
 const EventEntityObservationCount = EventIndex

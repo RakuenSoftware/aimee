@@ -6671,6 +6671,299 @@
       }
     },
     {
+      "family": "memory",
+      "id": 108,
+      "name": "memory_scopes_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory scope tags are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_scopes_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the ordering is a preference over scope types written into the statement"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "scope_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "scope_value",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 109,
+      "name": "memory_units_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory units are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_units_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the statement has no ordering, so a memory with more units than the array holds answers with an arbitrary subset"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "unit_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "unit_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "unit_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "unit_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "unit_weight",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 110,
+      "name": "memory_entities_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory entity mentions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_entities_list_weighted"
+      ],
+      "request": {
+        "policy": {
+          "reads": "ordered by weight, so truncation drops the least weighted"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "entity_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "entity_role",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "entity_weight",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 111,
+      "name": "memory_temporal_refs_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory temporal references are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_temporal_refs_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "ordered by weight then id, so the order is total and truncation drops the tail"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "ref_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "granularity",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "ref_weight",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 112,
+      "name": "memory_event_frames_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory event frames are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_event_frames_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "ordered by insertion, so the order is the order they were written"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "frame_actor",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "frame_action",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "frame_object",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "frame_location",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "frame_event_time",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",
