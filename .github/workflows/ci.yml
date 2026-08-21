@@ -1448,13 +1448,47 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make git \
+          sudo apt-get install -y -q gcc make git postgresql-client \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev
-      - name: Build + run the opt-in tree-sitter test
+      - name: Start Postgres (pgvector) with pull retry
+        # unit-test-css-projection-pg needs BOTH the grammar and a live database:
+        # it asserts that a stylesheet's class and the component naming it reach
+        # the same node in the code graph, and the projection's edge upsert uses
+        # to_char(CURRENT_TIMESTAMP, ...), which the SQLite shim cannot run. The
+        # unit job has Postgres but not the grammar; this job had the grammar but
+        # not Postgres, so the test ran in neither. Pull with backoff for the same
+        # reason the unit job does.
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-pg-treesitter \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_test \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img"
+      - name: Build + run the opt-in tree-sitter tests
+        env:
+          AIMEE_TEST_PG_URL: postgres://aimee:aimee@localhost:5432/aimee_test
         run: |
           cd src
           make AIMEE_TREESITTER=1 build/obj/tests/unit-test-code-treesitter
           ./build/obj/tests/unit-test-code-treesitter
+          # The CSS front-end against the scanner it fronts: every case the
+          # scanner is held to, the grammar is held to as well.
+          make AIMEE_TREESITTER=1 build/obj/tests/unit-test-css-treesitter
+          ./build/obj/tests/unit-test-css-treesitter
+          # And the join, end to end, against the database beside it.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            pg_isready -h localhost -p 5432 -U aimee && break
+            echo "waiting for postgres (attempt $attempt/10)"
+            sleep 3
+          done
+          make AIMEE_TREESITTER=1 build/obj/tests/unit-test-css-projection-pg
+          ./build/obj/tests/unit-test-css-projection-pg
 
   vault-pkcs11-token:
     needs: change-scope
