@@ -34,10 +34,12 @@
  * would traverse retracted ones. Always pair with EE_VISIBLE_PROJECTION. */
 #define EE_ADMIT_CURRENT_SEMANTIC                                                                  \
    " AND (edge_class <> 'semantic'"                                                                \
-   " OR (superseded_at = '' AND suppressed = 0))"
+   " OR (lifecycle_state NOT IN ('superseded','invalidated')"                                      \
+   " AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0))"
 #define EE_ADMIT_CURRENT_SEMANTIC_E                                                                \
    " AND (e.edge_class <> 'semantic'"                                                              \
-   " OR (e.superseded_at = '' AND e.suppressed = 0))"
+   " OR (e.lifecycle_state NOT IN ('superseded','invalidated')"                                    \
+   " AND e.superseded_at = '' AND e.invalidated_at = '' AND e.suppressed = 0))"
 
 #define EE_VISIBLE_PROJECTION_E                                                                    \
    " AND (COALESCE(e.edge_origin, '') <> 'code_projection'"                                        \

@@ -41,12 +41,14 @@ static void current_target(const char *src, const char *rel, char *out, size_t c
 {
    out[0] = '\0';
    char err[256] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
-                        "SELECT target FROM entity_edges WHERE source = ?1 AND relation = ?2"
-                        " AND edge_class = 'semantic' AND superseded_at = '' AND suppressed = 0"
-                        " LIMIT 1",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "SELECT target FROM entity_edges WHERE source = ?1 AND relation = ?2"
+       " AND edge_class = 'semantic' AND superseded_at = '' AND invalidated_at = ''"
+       " AND suppressed = 0 AND lifecycle_state NOT IN ('superseded','invalidated')"
+       " ORDER BY CASE WHEN lifecycle_state IN ('persistent','promoted')"
+       " THEN 0 ELSE 1 END,id DESC LIMIT 1",
+       err, sizeof(err));
    assert(st);
    aimee_pg_bind_text(st, "?1", src);
    aimee_pg_bind_text(st, "?2", rel);
@@ -102,10 +104,19 @@ static void backdate(const char *src, const char *ts)
    aimee_pg_bind_text(open, "?1", cid);
    assert(aimee_pg_step(open, err, sizeof(err)) == AIMEE_PG_DONE);
    aimee_pg_finalize(open);
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
-                                          "UPDATE entity_edges SET asserted_at=?2,commit_id=?3"
-                                          " WHERE source=?1 AND edge_class='semantic'",
-                                          err, sizeof(err));
+   const char *backdate_sql =
+       aimee_pg_is_shim()
+           ? "UPDATE entity_edges SET asserted_at=?2,commit_id=?3"
+             " WHERE source=?1 AND edge_class='semantic'"
+           : "WITH updated AS (UPDATE entity_edges SET asserted_at=?2,commit_id=?3"
+             " WHERE source=?1 AND edge_class='semantic' RETURNING id,lifecycle_state,confidence,"
+             " authority_rank,version)"
+             " INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,"
+             " existed_after,before_lifecycle,after_lifecycle,before_confidence,after_confidence,"
+             " before_authority_rank,after_authority_rank,before_version,after_version)"
+             " SELECT ?3,id,'update',1,1,lifecycle_state,lifecycle_state,confidence,confidence,"
+             " authority_rank,authority_rank,version,version FROM updated";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, backdate_sql, err, sizeof(err));
    assert(st);
    aimee_pg_bind_text(st, "?1", src);
    aimee_pg_bind_text(st, "?2", ts);

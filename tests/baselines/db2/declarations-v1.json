@@ -2252,11 +2252,13 @@
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_db2.c",
         "src/tests/test_embedding_dim.c",
+        "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fidelity.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
         "src/tests/test_memory.c",
-        "src/tests/test_memory_embed_dim_guard.c"
+        "src/tests/test_memory_embed_dim_guard.c",
+        "src/tests/test_memory_health.c"
       ],
       "locations": [
         {
@@ -26474,7 +26476,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3785efafa1e9a23986e9791eb380121d06cd23cb7e27d8710f1023a98d22b604",
+  "fingerprint": "87c07eabc041f23ca4053aa5a53f5083693f317aa38577de73e122d05896229f",
   "module": "db2",
   "schema_version": 1,
   "summary": {

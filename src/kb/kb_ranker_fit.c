@@ -146,6 +146,65 @@ int kb_ranker_outcome_write(const char *event_id, int64_t doc_id, const char *ve
 
 /* ---- Phase 1: the training view ------------------------------------------ */
 
+static int ranker_subject_kind_matches(const char *outcome_kind, const char *ranker_kind)
+{
+   if (!outcome_kind || !outcome_kind[0])
+      return 1; /* Legacy ranker_outcome artifacts predate the discriminator. */
+   if (strcmp(outcome_kind, ranker_kind) == 0)
+      return 1;
+   return strcmp(outcome_kind, "document") == 0 && strcmp(ranker_kind, "kb_document") == 0;
+}
+
+/* Join one normalized outcome to its feature vector and append a training row.
+ * Returns 1 when appended, 0 when the outcome is outside this feature space or
+ * has no feature row, and -1 on allocation failure. */
+static int ranker_training_append(cJSON *rows, cJSON *seen_groups, const char *ranker_kind,
+                                  const char *feature_set_version, const char *group,
+                                  const char *subject_id, const char *outcome_kind,
+                                  const char *verdict, double weight, int *n_groups,
+                                  int *n_positive)
+{
+   if (!group || !subject_id || !verdict || !ranker_subject_kind_matches(outcome_kind, ranker_kind))
+      return 0;
+
+   char feat_buf[1024];
+   if (db2_feature_row_read(subject_id, ranker_kind, feature_set_version, feat_buf,
+                            sizeof(feat_buf)) != 0)
+      return 0;
+
+   cJSON *feat = cJSON_Parse(feat_buf);
+   if (!cJSON_IsObject(feat))
+   {
+      cJSON_Delete(feat);
+      feat = cJSON_CreateObject();
+   }
+   cJSON *row = cJSON_CreateObject();
+   if (!feat || !row)
+   {
+      cJSON_Delete(feat);
+      cJSON_Delete(row);
+      return -1;
+   }
+
+   int label =
+       (strcmp(verdict, DEMOTION_VERDICT_ACCEPTED) == 0 || strcmp(verdict, "useful") == 0) ? 1 : 0;
+   cJSON_AddStringToObject(row, "group", group);
+   cJSON_AddStringToObject(row, "subject_id", subject_id);
+   cJSON_AddItemToObject(row, "features", feat);
+   cJSON_AddNumberToObject(row, "label", label);
+   cJSON_AddStringToObject(row, "verdict", verdict);
+   cJSON_AddNumberToObject(row, "weight", weight);
+   cJSON_AddItemToArray(rows, row);
+
+   *n_positive += label;
+   if (group[0] && !cJSON_GetObjectItemCaseSensitive(seen_groups, group))
+   {
+      cJSON_AddBoolToObject(seen_groups, group, 1);
+      (*n_groups)++;
+   }
+   return 1;
+}
+
 int kb_ranker_training_view(const char *subject_kind, const char *feature_set_version,
                             cJSON **rows_out, int *n_groups_out, int *n_rows_out,
                             int *n_positive_out)
@@ -168,13 +227,12 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
    if (!conn)
       return -1;
 
-   /* Enumerate the ranker_outcome artifacts, then join each to its candidate's
-    * feature vector in C via db2_feature_row_read. Assembling the join in C
-    * (rather than a postgres ->>'x' JOIN) keeps it portable across the postgres
-    * runtime and the sqlite test shim — the same idiom demotion.c and
-    * kb_calibrate.c use for artifact payloads. The label is derived from the
-    * verdict. One emitted row per (retrieval_event, candidate) that has BOTH a
-    * v1 feature vector and an outcome verdict.
+   /* Enumerate the legacy ranker_outcome artifacts and the canonical P5
+    * work_outcomes table separately, then join each candidate to its feature
+    * vector in C via db2_feature_row_read. Separate simple queries preserve
+    * postgres/sqlite parity without backend-specific JSON constructors. One
+    * row is emitted per (retrieval_event, candidate) that has BOTH a feature
+    * vector and an outcome verdict.
     *
     * ranker_outcome is a surface-dedicated kind (kb_hybrid / kb_document ids),
     * distinct from the memory surface's retrieval_attribution — so this join
@@ -182,12 +240,8 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
     * memory demotion scorer (which reads retrieval_attribution) is untouched. */
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT payload::text,created_at FROM artifacts WHERE kind='ranker_outcome'"
-       " UNION ALL SELECT jsonb_build_object('retrieval_event_id',retrieval_event_id,"
-       " 'subject_id',subject_id,'subject_kind',subject_kind,'verdict',outcome,'weight',1)::text,"
-       " occurred_at FROM work_outcomes ORDER BY 2",
-       err, sizeof(err));
+       conn, "SELECT payload FROM artifacts WHERE kind='ranker_outcome' ORDER BY created_at", err,
+       sizeof(err));
    if (!st)
       return -1;
 
@@ -220,13 +274,9 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
       cJSON *wj = cJSON_GetObjectItemCaseSensitive(p, "weight");
       const char *group = cJSON_IsString(ev) ? ev->valuestring : "";
       const char *verdict = cJSON_IsString(vj) ? vj->valuestring : "";
-      if (cJSON_IsString(subject_kind_j) && strcmp(subject_kind_j->valuestring, sk) != 0)
-      {
-         cJSON_Delete(p);
-         continue;
-      }
+      const char *outcome_kind = cJSON_IsString(subject_kind_j) ? subject_kind_j->valuestring : "";
 
-      char subject_id[32];
+      char subject_id[256];
       if (cJSON_IsNumber(rid))
          snprintf(subject_id, sizeof(subject_id), "%lld", (long long)rid->valuedouble);
       else if (cJSON_IsString(rid))
@@ -237,43 +287,46 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
          continue;
       }
 
-      /* Join: does this candidate have a v1 feature vector on the ranker surface? */
-      char feat_buf[1024];
-      if (db2_feature_row_read(subject_id, sk, fsv, feat_buf, sizeof(feat_buf)) != 0)
-      {
-         cJSON_Delete(p);
-         continue; /* no feature vector → not a training row */
-      }
-      cJSON *feat = cJSON_Parse(feat_buf);
-      if (!cJSON_IsObject(feat))
-      {
-         cJSON_Delete(feat);
-         feat = cJSON_CreateObject();
-      }
-
-      /* Positive = the outcome accepted the surfaced row (used-in-answer /
-       * positively attributed). Every corrective/negative verdict is a 0. */
-      int label =
-          (strcmp(verdict, DEMOTION_VERDICT_ACCEPTED) == 0 || strcmp(verdict, "useful") == 0) ? 1
-                                                                                              : 0;
-
-      cJSON *row = cJSON_CreateObject();
-      cJSON_AddStringToObject(row, "group", group);
-      cJSON_AddStringToObject(row, "subject_id", subject_id);
-      cJSON_AddItemToObject(row, "features", feat);
-      cJSON_AddNumberToObject(row, "label", label);
-      cJSON_AddStringToObject(row, "verdict", verdict);
-      cJSON_AddNumberToObject(row, "weight", cJSON_IsNumber(wj) ? wj->valuedouble : 1.0);
-      cJSON_AddItemToArray(rows, row);
-
-      n_rows++;
-      n_positive += label;
-      if (group[0] && !cJSON_GetObjectItemCaseSensitive(seen_groups, group))
-      {
-         cJSON_AddBoolToObject(seen_groups, group, 1);
-         n_groups++;
-      }
+      int appended = ranker_training_append(
+          rows, seen_groups, sk, fsv, group, subject_id, outcome_kind, verdict,
+          cJSON_IsNumber(wj) ? wj->valuedouble : 1.0, &n_groups, &n_positive);
       cJSON_Delete(p);
+      if (appended < 0)
+      {
+         step = AIMEE_PG_ERR;
+         break;
+      }
+      n_rows += appended;
+   }
+   aimee_pg_finalize(st);
+   if (step == AIMEE_PG_ERR)
+   {
+      cJSON_Delete(rows);
+      cJSON_Delete(seen_groups);
+      return -1;
+   }
+
+   st = aimee_pg_prepare(conn,
+                         "SELECT retrieval_event_id,subject_id,subject_kind,outcome"
+                         " FROM work_outcomes ORDER BY occurred_at",
+                         err, sizeof(err));
+   if (!st)
+   {
+      cJSON_Delete(rows);
+      cJSON_Delete(seen_groups);
+      return -1;
+   }
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+   {
+      int appended = ranker_training_append(
+          rows, seen_groups, sk, fsv, aimee_pg_column_text(st, 0), aimee_pg_column_text(st, 1),
+          aimee_pg_column_text(st, 2), aimee_pg_column_text(st, 3), 1.0, &n_groups, &n_positive);
+      if (appended < 0)
+      {
+         step = AIMEE_PG_ERR;
+         break;
+      }
+      n_rows += appended;
    }
    aimee_pg_finalize(st);
    cJSON_Delete(seen_groups);
@@ -304,19 +357,16 @@ static void add_empty_view_diagnostic(cJSON *out, const char *subject_kind)
                            "an outcome verdict.");
    cJSON_AddStringToObject(
        d, "subject_space_mismatch",
-       "ranker features are written on feature_rows.subject_kind='kb_document' (the kb_hybrid "
-       "code-search path); retrieval outcomes are attributed to 'memory' row ids on the "
-       "memory-recall surface — disjoint id spaces.");
-   cJSON_AddStringToObject(d, "missing_grouping_key",
-                           "feature_rows has no retrieval_event_id/query column (PK is "
-                           "subject_id,subject_kind,feature_set_version; per-candidate upsert), so "
-                           "per-(query,candidate) "
-                           "training rows do not exist.");
+       "ranker features use feature_rows.subject_kind='kb_document'; canonical document outcomes "
+       "map to that space, while memory/assertion outcomes remain intentionally disjoint.");
+   cJSON_AddStringToObject(
+       d, "missing_grouping_key",
+       "each outcome needs a retrieval_event_id and a subject_id with a matching "
+       "feature row; feature rows alone cannot establish query groups.");
    cJSON_AddStringToObject(
        d, "prerequisite",
-       "wire the kb_hybrid surface to emit retrieval_event + attributions keyed by kb_document ids "
-       "and grouped per-query feature rows (proposal option B) before live-data promotion is "
-       "possible.");
+       "record ranker_outcome artifacts or canonical work_outcomes for surfaced document ids, "
+       "grouped by retrieval_event_id, before live-data promotion is possible.");
    cJSON_AddStringToObject(d, "joined_subject_kind", subject_kind);
    cJSON_AddItemToObject(out, "diagnostic", d);
 }
