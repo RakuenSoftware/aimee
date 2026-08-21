@@ -237,3 +237,4 @@ benchmarks/compaction-quality/.cache-ab/
 # these has happened twice, so they are named here rather than remembered
 .commitmsg
 .db2scratch/
+.db2verify/

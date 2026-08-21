@@ -7,9 +7,9 @@
 /* The vtable binds backends directly, so it names the row types they fill.
  * aimee.h and memory.h come first because the DB2 headers that declare those
  * rows are written to be included after them -- entity_edges.h uses edge_t,
- * which lives in memory.h, which in turn needs aimee.h. Naming the real types is what keeps this header and the backends from
- * drifting: a copy of a row struct here would be a second definition to keep
- * in step, which is the defect the hosted bus test had. */
+ * which lives in memory.h, which in turn needs aimee.h. Naming the real types is what keeps this
+ * header and the backends from drifting: a copy of a row struct here would be a second definition
+ * to keep in step, which is the defect the hosted bus test had. */
 #include "aimee.h"
 #include "memory.h"
 
@@ -265,10 +265,14 @@ typedef struct
    int (*release_add_doc)(int64_t release_id, int64_t doc_id);
    int (*scene_member_exists)(int64_t scene_memory_id, int64_t scene_id);
    int (*unit_edge_exists)(int64_t unit_id_a, int64_t unit_id_b);
-   int (*artifact_cite)(const char *citing_artifact_id, const char *source_kind, const char *source_id);
-   int (*artifact_link)(const char *from_artifact_id, const char *to_artifact_id, const char *link_kind);
-   int (*bandit_promotion_set)(const char *decision_point, const char *arm_id, const char *rollback_arm);
-   int (*collab_rule_propose)(const char *rule_text, const char *rule_reason, const char *proposed_by);
+   int (*artifact_cite)(const char *citing_artifact_id, const char *source_kind,
+                        const char *source_id);
+   int (*artifact_link)(const char *from_artifact_id, const char *to_artifact_id,
+                        const char *link_kind);
+   int (*bandit_promotion_set)(const char *decision_point, const char *arm_id,
+                               const char *rollback_arm);
+   int (*collab_rule_propose)(const char *rule_text, const char *rule_reason,
+                              const char *proposed_by);
    int (*file_index_delete_current_generation)(const char *project);
    int (*project_delete)(const char *project);
    int (*minhash_delete_current_generation)(const char *project);
@@ -288,11 +292,14 @@ typedef struct
    int64_t (*projection_visible_id)(const char *project);
    int64_t (*release_create)(const char *release_name);
    int (*css_migration_rules_doc)(const char *exemplar_project, char *out, size_t capacity);
-   int (*unique_file_basename)(const char *project, const char *basename, char *out, size_t capacity);
+   int (*unique_file_basename)(const char *project, const char *basename, char *out,
+                               size_t capacity);
    int (*purge_fence_heartbeat)(const char *project, const char *generation, const char *purge_id);
    int (*purge_fence_clear)(const char *project, const char *generation, const char *purge_id);
-   int (*document_stored_hash)(const char *project, const char *file_path, char *out, size_t capacity);
-   int (*document_hash_exists)(const char *project, const char *file_hash, char *sample, size_t capacity);
+   int (*document_stored_hash)(const char *project, const char *file_path, char *out,
+                               size_t capacity);
+   int (*document_hash_exists)(const char *project, const char *file_hash, char *sample,
+                               size_t capacity);
    int (*pdf_tsr_state)(const char *project, const char *document_key, char *out, size_t capacity);
    int (*match_error_keys)(const char *error_lowered, int64_t *ids_out, int max);
    int (*document_chunk_ids)(const char *project, const char *file_path, int64_t *out, int max);
@@ -300,23 +307,32 @@ typedef struct
    int (*unit_ids_for_memory)(int64_t memory_id, int64_t *out, int max);
    int (*retryable_index_failures)(int max_attempts, int limit, int64_t *out, int max);
    int (*entity_neighbors)(const char *entity, db2_entity_neighbor_t *out, int max, int limit_sql);
-   int (*entity_neighbors_filtered)(const char *entity, const char *relation_a, const char *relation_b, int order_by_weight, db2_entity_neighbor_t *out, int max, int limit_sql);
-   int (*entity_outbound_neighbors)(const char *entity, db2_entity_neighbor_t *out, int max, int limit_sql);
-   int (*entity_top_partners)(const char *entity, const char *relation, db2_entity_neighbor_t *out, int max);
-   int (*entity_top_targets)(const char *entity, const char *relation, db2_entity_neighbor_t *out, int max);
+   int (*entity_neighbors_filtered)(const char *entity, const char *relation_a,
+                                    const char *relation_b, int order_by_weight,
+                                    db2_entity_neighbor_t *out, int max, int limit_sql);
+   int (*entity_outbound_neighbors)(const char *entity, db2_entity_neighbor_t *out, int max,
+                                    int limit_sql);
+   int (*entity_top_partners)(const char *entity, const char *relation, db2_entity_neighbor_t *out,
+                              int max);
+   int (*entity_top_targets)(const char *entity, const char *relation, db2_entity_neighbor_t *out,
+                             int max);
    int (*file_definitions)(const char *project, const char *file_path, definition_t *out, int max);
-   int (*code_search)(const char *query, const char *project, code_search_hit_t *out, int max, int enrich);
-   int (*code_search_excluding_project)(const char *query, const char *excluded_project, code_search_hit_t *out, int max, int enrich);
+   int (*code_search)(const char *query, const char *project, code_search_hit_t *out, int max,
+                      int enrich);
+   int (*code_search_excluding_project)(const char *query, const char *excluded_project,
+                                        code_search_hit_t *out, int max, int enrich);
    int (*project_last_scan)(char *out, size_t capacity);
    int (*active_embedder_version)(char *out, size_t capacity);
    int (*bandit_decision_points)(char *out, size_t capacity);
    int (*corpus_pipeline_stage_counts)(db2_corpus_pipeline_stage_count_t *out, int max);
    int (*briefing_active_entities)(db2_memory_briefing_entity_t *out, int max);
    int (*entity_walk_step_typed)(const char *node, db2_entity_edge_typed_t *out, int max);
-   int (*projection_generations_list)(const char *project, code_projection_generation_row_t *out, int max);
+   int (*projection_generations_list)(const char *project, code_projection_generation_row_t *out,
+                                      int max);
    int (*entity_edge_bump_utility)(const char *entity, double utility_delta);
    int (*bandit_decision_close)(const char *decision_id, double reward);
-   int (*entity_neighbors_weighted)(const char *entity, db2_entity_edge_weighted_neighbor_t *out, int max, int limit_sql, int utility_scoring_enabled);
+   int (*entity_neighbors_weighted)(const char *entity, db2_entity_edge_weighted_neighbor_t *out,
+                                    int max, int limit_sql, int utility_scoring_enabled);
    int (*prospective_list)(const char *state, memory_prospective_t *out, int max);
    int (*prospective_list_armed)(memory_prospective_t *out, int max);
    int (*prospective_by_entity)(const char *entity_lowered, memory_prospective_t *out, int max);
@@ -328,8 +344,10 @@ typedef struct
    int (*directive_by_lexical)(const char *match_clause, memory_directive_t *out, int max);
    int (*relations_for_entity)(const char *entity, int limit, memory_relation_t *out, int max);
    int (*relations_search)(const char *relation_query, int limit, memory_relation_t *out, int max);
-   int (*relations_search_as_of)(const char *relation_query, const char *as_of, int limit, memory_relation_t *out, int max);
-   int (*relations_supporting)(const char *entity_token, int limit, memory_relation_t *out, int max);
+   int (*relations_search_as_of)(const char *relation_query, const char *as_of, int limit,
+                                 memory_relation_t *out, int max);
+   int (*relations_supporting)(const char *entity_token, int limit, memory_relation_t *out,
+                               int max);
    int (*entity_edges_for_entity)(const char *entity, edge_t *out, int max);
    int (*entity_edges_by_token)(const char *token, edge_t *out, int max, int limit_sql);
    int (*entity_top_triples)(edge_t *out, int max);
@@ -337,39 +355,52 @@ typedef struct
    int (*projection_edges_for_generation)(int64_t generation, code_projection_edge_t *out, int max);
    int (*task_edges)(int64_t task_id, task_edge_t *out, int max);
    int (*term_find)(const char *identifier, term_hit_t *out, int max);
-   int (*term_find_in_project)(const char *project, const char *identifier, term_hit_t *out, int max);
-   int (*term_find_excluding_project)(const char *excluded_project, const char *identifier, term_hit_t *out, int max);
+   int (*term_find_in_project)(const char *project, const char *identifier, term_hit_t *out,
+                               int max);
+   int (*term_find_excluding_project)(const char *excluded_project, const char *identifier,
+                                      term_hit_t *out, int max);
    int (*callers_find)(const char *project, const char *callee, caller_hit_t *out, int max);
    int (*callers_find_scoped)(const char *project, const char *callee, caller_hit_t *out, int max);
-   int (*callers_find_excluding_project)(const char *excluded_project, const char *callee, caller_hit_t *out, int max);
+   int (*callers_find_excluding_project)(const char *excluded_project, const char *callee,
+                                         caller_hit_t *out, int max);
    int (*rules_list)(rule_t *out, int max_rules);
    int (*rules_list_by_tier)(int min_weight, rule_t *out, int max_rules);
    int (*rules_list_hard)(rule_t *out, int max_rules);
    int (*anti_pattern_list)(anti_pattern_t *out, int max);
    int (*anti_pattern_list_hot)(int hit_threshold, anti_pattern_t *out, int max);
-   int (*anti_pattern_check)(const char *file_path, const char *command, anti_pattern_t *out, int max);
-   int (*task_list)(const char *state, const char *session_id, int limit, aimee_task_t *out, int max);
+   int (*anti_pattern_check)(const char *file_path, const char *command, anti_pattern_t *out,
+                             int max);
+   int (*task_list)(const char *state, const char *session_id, int limit, aimee_task_t *out,
+                    int max);
    int (*task_subtasks)(int64_t parent_task, aimee_task_t *out, int max);
-   int (*typed_fact_recall)(const char *subject, const char *relation_filter, typed_fact_t *out, int max);
+   int (*typed_fact_recall)(const char *subject, const char *relation_filter, typed_fact_t *out,
+                            int max);
    int (*memory_lint)(memory_lint_issue_t *out, int max);
    int (*decision_log_list)(const char *outcome, int limit, db2_decision_log_row_t *out, int max);
-   int (*decision_log_list_scoped)(const char *subject, const char *status, int limit, db2_decision_log_row_t *out, int max);
+   int (*decision_log_list_scoped)(const char *subject, const char *status, int limit,
+                                   db2_decision_log_row_t *out, int max);
    int (*global_constraints)(db2_memory_kv_row_t *rows, int max);
    int (*kv_section)(db2_memory_section_t section, db2_memory_kv_row_t *rows, int max);
    int (*memories_by_key)(const char *key, db2_memory_id_content_row_t *out, int max);
-   int (*session_memories)(const char *session_id, int limit, db2_memory_id_content_row_t *out, int max);
+   int (*session_memories)(const char *session_id, int limit, db2_memory_id_content_row_t *out,
+                           int max);
    int (*memory_candidates)(db2_memory_cand_filter_t filter, db2_memory_cand_row_t *rows, int max);
    int (*recall_section)(db2_memory_recall_section_t section, db2_memory_cand_row_t *rows, int max);
    int (*l2_cross_key_pairs)(int max_pairs, db2_memory_pair_row_t *out, int max);
    int (*l2_fact_decision_pairs)(int max_pairs, db2_memory_pair_row_t *out, int max);
-   int (*kb_directive_resolve)(int64_t directive_id, int64_t resolution_memory_id, const char *note);
+   int (*kb_directive_resolve)(int64_t directive_id, int64_t resolution_memory_id,
+                               const char *note);
    int (*memory_link_create)(int64_t source_id, int64_t target_id, const char *relation);
    int (*task_add_edge)(int64_t source, int64_t target, const char *relation);
    int64_t (*decision_log_active_id)(const char *subject, int64_t linked_policy_id);
    int (*entity_node_get)(const char *node_key, db2_entity_node_t *out);
-   int (*entity_node_alias_upsert)(const char *alias, const char *node_key, const char *alias_kind, const char *project, int64_t generation_id);
-   int (*entity_edge_upsert)(const char *source, const char *relation, const char *target, int64_t window_id, int relation_id, int subject_kind, int object_kind, int *out_added);
-   int (*bandit_decision_insert)(const char *id, const char *decision_point, const char *arm_id, const char *context_hash, double propensity, int is_exploration);
+   int (*entity_node_alias_upsert)(const char *alias, const char *node_key, const char *alias_kind,
+                                   const char *project, int64_t generation_id);
+   int (*entity_edge_upsert)(const char *source, const char *relation, const char *target,
+                             int64_t window_id, int relation_id, int subject_kind, int object_kind,
+                             int *out_added);
+   int (*bandit_decision_insert)(const char *id, const char *decision_point, const char *arm_id,
+                                 const char *context_hash, double propensity, int is_exploration);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
