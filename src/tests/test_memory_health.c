@@ -324,10 +324,16 @@ int main(void)
 
       aimee_pg_stmt_t *ins =
           aimee_pg_prepare(db2_conn(),
+                           /* Distinct targets: (source, relation, target) is UNIQUE on
+                            * the real schema (db2_entity_edge_build_unique_index), so
+                            * three rows on one triple cannot exist there at all. The
+                            * normalisation pass works per RELATION, which is what this
+                            * case is about, so spreading the three weights over three
+                            * targets keeps the fixture and makes it legal. */
                            "INSERT INTO entity_edges (source, relation, target, weight) VALUES "
-                           "('conv-anchor', 'rel-conv', 'conv-anchor', 3), "
-                           "('conv-anchor', 'rel-conv', 'conv-anchor', 6), "
-                           "('conv-anchor', 'rel-conv', 'conv-anchor', 9)",
+                           "('conv-anchor', 'rel-conv', 'conv-a', 3), "
+                           "('conv-anchor', 'rel-conv', 'conv-b', 6), "
+                           "('conv-anchor', 'rel-conv', 'conv-c', 9)",
                            qerr, sizeof(qerr));
       assert(ins);
       assert(aimee_pg_step(ins, qerr, sizeof(qerr)) == AIMEE_PG_DONE);

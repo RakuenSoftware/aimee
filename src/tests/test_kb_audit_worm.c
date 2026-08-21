@@ -95,8 +95,12 @@ static void test_tamper_detected(void)
    db2_kb_audit_append("primary", "u", "tool.read", "t2", "allow", "{}");
    assert(db2_kb_audit_verify_chain(NULL, 0) == 0);
    char err[160];
-   aimee_pg_exec(db2_conn(), "DROP TRIGGER kb_audit_no_update", err, sizeof err);
-   aimee_pg_exec(db2_conn(), "DROP TRIGGER kb_audit_no_delete", err, sizeof err);
+   /* Postgres spelling: a trigger name is schema-scoped there, so the ON clause
+    * is required. The sqlite shim strips it (translate_sql). */
+   assert(aimee_pg_exec(db2_conn(), "DROP TRIGGER kb_audit_no_update ON kb_audit_event", err,
+                        sizeof err) == 0);
+   assert(aimee_pg_exec(db2_conn(), "DROP TRIGGER kb_audit_no_delete ON kb_audit_event", err,
+                        sizeof err) == 0);
    assert(aimee_pg_exec(db2_conn(), "UPDATE kb_audit_event SET subject='EVIL' WHERE seq=1", err,
                         sizeof err) == 0);
    assert(db2_kb_audit_verify_chain(err, sizeof err) == -1);

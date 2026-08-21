@@ -219,8 +219,16 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
       return -1;
 
    /* For each bucket b in [0..K-1], bucket b covers confidence range
-    * [b/K, (b+1)/K).  We use integer division on applied_confidence * K
-    * to assign rows to buckets. */
+    * [b/K, (b+1)/K).  Rows are assigned by flooring applied_confidence * K.
+    *
+    * The two engines need different spellings for that. CAST(x AS INT) TRUNCATES in
+    * sqlite and ROUNDS half away from zero in Postgres, so with K=10 a confidence of
+    * 0.95 -- the common case for a promoted candidate -- came out as bucket 10, which
+    * does not exist, and the row was dropped by the `bucket < max_buckets` guard
+    * below. Every high-confidence surface calibrated on nothing at all against the
+    * real engine. Postgres therefore gets an explicit FLOOR; sqlite keeps the bare
+    * CAST, which already floors for the non-negative values this expression sees, and
+    * does not depend on sqlite having been built with its optional math functions. */
    if (max_buckets > DB2_CALIBRATION_BUCKETS)
       max_buckets = DB2_CALIBRATION_BUCKETS;
 
@@ -233,6 +241,12 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
       buckets[i].beta = 0.0;
       buckets[i].sample_n = 0;
    }
+
+   const char *bucket_expr = aimee_pg_is_shim() ? "CAST(%sapplied_confidence * ?5 AS INT)"
+                                                : "CAST(FLOOR(%sapplied_confidence * ?5) AS INT)";
+   char bucket_recent[96], bucket_direct[96];
+   snprintf(bucket_recent, sizeof(bucket_recent), bucket_expr, "");
+   snprintf(bucket_direct, sizeof(bucket_direct), bucket_expr, "ae.");
 
    char sql[1400] = "";
    /* We build the SQL with scope conditions inline — safe because all values
@@ -260,7 +274,7 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
                "  CASE"
                "    WHEN applied_confidence >= 1.0 THEN ?5 - 1"
                "    WHEN applied_confidence < 0.0 THEN 0"
-               "    ELSE CAST(applied_confidence * ?5 AS INT)"
+               "    ELSE %s"
                "  END AS bucket,"
                "  SUM(CASE WHEN verdict = 'accepted' THEN 1 ELSE 0 END) AS n_accepted,"
                "  SUM(CASE WHEN verdict = 'rejected' THEN 1 ELSE 0 END) AS n_rejected,"
@@ -268,7 +282,7 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
                " FROM recent"
                " GROUP BY bucket"
                " ORDER BY 1",
-               scope_filter);
+               scope_filter, bucket_recent);
    }
    else
    {
@@ -277,7 +291,7 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
                "  CASE"
                "    WHEN ae.applied_confidence >= 1.0 THEN ?5 - 1"
                "    WHEN ae.applied_confidence < 0.0 THEN 0"
-               "    ELSE CAST(ae.applied_confidence * ?5 AS INT)"
+               "    ELSE %s"
                "  END AS bucket,"
                "  SUM(CASE WHEN ae.verdict = 'accepted' THEN 1 ELSE 0 END) AS n_accepted,"
                "  SUM(CASE WHEN ae.verdict = 'rejected' THEN 1 ELSE 0 END) AS n_rejected,"
@@ -291,7 +305,7 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
                " GROUP BY bucket"
                " ORDER BY 1"
                " LIMIT ?6",
-               scope_filter);
+               bucket_direct, scope_filter);
    }
 
    char err[256] = "";

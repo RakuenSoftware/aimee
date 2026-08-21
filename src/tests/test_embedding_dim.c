@@ -291,13 +291,25 @@ int main(void)
    assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
    assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings RENAME TO kb_embeddings_hidden", err,
                         sizeof err) == 0);
-   assert(aimee_pg_exec(conn, "CREATE VIEW kb_embeddings AS SELECT * FROM missing_relation_xyz",
-                        err, sizeof err) == 0);
+   /* The two engines need different fixtures for the same shape, because they
+    * disagree about when a view's body is resolved: sqlite binds it lazily, so a
+    * view over a missing table is created happily and only fails on read, while
+    * Postgres resolves at CREATE time and refuses outright. Postgres gets an INDEX
+    * under the name instead -- to_regclass resolves it, so corpus_table_exists says
+    * "there is something here", and SELECT ... FROM it fails ("cannot open
+    * relation ... this operation is not supported for indexes"). Same two answers
+    * corpus_has_vectors reads: present, and unreadable. */
+   const char *hide_sql = aimee_pg_is_shim()
+                              ? "CREATE VIEW kb_embeddings AS SELECT * FROM missing_relation_xyz"
+                              : "CREATE INDEX kb_embeddings ON kb_embeddings_hidden(point_id)";
+   const char *unhide_sql =
+       aimee_pg_is_shim() ? "DROP VIEW kb_embeddings" : "DROP INDEX kb_embeddings";
+   assert(aimee_pg_exec(conn, hide_sql, err, sizeof err) == 0);
    err[0] = '\0';
    assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
    /* and the placeholder still stands */
    err[0] = '\0';
-   assert(aimee_pg_exec(conn, "DROP VIEW kb_embeddings", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, unhide_sql, err, sizeof err) == 0);
    assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings_hidden RENAME TO kb_embeddings", err,
                         sizeof err) == 0);
    assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);

@@ -150,6 +150,31 @@ static int fetch_memory_count_like(const char *pattern)
    return value;
 }
 
+/* Relax / restore foreign-key enforcement on the DB2 connection, so a fixture can
+ * name a memory_id that has no row behind it.
+ *
+ * sqlite has PRAGMA foreign_keys; Postgres has no per-session switch for FK checks
+ * alone, and the standard equivalent is session_replication_role = 'replica' -- the
+ * setting pg_restore and logical-replication apply use to load rows without firing
+ * triggers or referential actions. Both are scoped to the session, and both are put
+ * back as soon as the fixture rows are in, so nothing downstream inherits a database
+ * with its constraints switched off. */
+static void relax_foreign_keys(void)
+{
+   char err[128] = "";
+   const char *sql =
+       aimee_pg_is_shim() ? "PRAGMA foreign_keys=OFF" : "SET session_replication_role = 'replica'";
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+}
+
+static void restore_foreign_keys(void)
+{
+   char err[128] = "";
+   const char *sql =
+       aimee_pg_is_shim() ? "PRAGMA foreign_keys=ON" : "SET session_replication_role = 'origin'";
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+}
+
 static int fetch_runtime_state_int(const char *key)
 {
    char buf[32];
@@ -1561,7 +1586,33 @@ static void test_memory_find_facts_falls_back_when_vector_index_unavailable(void
 {
    setup();
    char err[128] = "";
-   assert(aimee_pg_exec(db2_conn(), "DROP VIEW IF EXISTS pg_indexes", err, sizeof(err)) == 0);
+   /* pgvec_table_ready() asks pg_indexes for a *_hnsw index on the table. The shim
+    * supplies pg_indexes as a view of its own, so dropping the view is how the
+    * answer is made "no" there. Against real Postgres pg_indexes is a system
+    * catalog view -- a superuser really can drop it, and the clone would then be
+    * missing it for every later test in this binary, since aimee_test_reset()
+    * truncates tables and does not rebuild catalogs. Drop the actual index instead,
+    * and put it back afterwards from its own recorded definition. */
+   char indexdef[1024] = "";
+   if (aimee_pg_is_shim())
+   {
+      assert(aimee_pg_exec(db2_conn(), "DROP VIEW IF EXISTS pg_indexes", err, sizeof(err)) == 0);
+   }
+   else
+   {
+      aimee_pg_stmt_t *def = aimee_pg_prepare(db2_conn(),
+                                              "SELECT indexdef FROM pg_indexes"
+                                              " WHERE tablename = 'memory_embeddings'"
+                                              "   AND indexname LIKE '%_hnsw'",
+                                              err, sizeof(err));
+      assert(def);
+      assert(aimee_pg_step(def, err, sizeof(err)) == AIMEE_PG_ROW);
+      snprintf(indexdef, sizeof(indexdef), "%s", aimee_pg_column_text(def, 0));
+      aimee_pg_finalize(def);
+      assert(indexdef[0]);
+      assert(aimee_pg_exec(db2_conn(), "DROP INDEX idx_memory_embeddings_hnsw", err, sizeof(err)) ==
+             0);
+   }
 
    memory_t m;
    assert(memory_insert(TIER_L2, KIND_FACT, "agent role model",
@@ -1572,6 +1623,9 @@ static void test_memory_find_facts_falls_back_when_vector_index_unavailable(void
    int count = memory_find_facts("agent delegates", 5, results, 8);
    assert(count >= 1);
    assert(results[0].id == m.id);
+
+   if (indexdef[0])
+      assert(aimee_pg_exec(db2_conn(), indexdef, err, sizeof(err)) == 0);
    teardown();
 }
 
@@ -1597,8 +1651,7 @@ static void test_memory_find_facts_graph_route_uses_graph_stage(void)
 {
    setup();
    char gr_err[128] = "";
-   /* PRAGMA passes through to sqlite under the test shim. */
-   assert(aimee_pg_exec(db2_conn(), "PRAGMA foreign_keys=OFF", gr_err, sizeof(gr_err)) == 0);
+   relax_foreign_keys();
 
    memory_t callsite;
    assert(memory_insert(TIER_L2, KIND_FACT, "graph-callsite",
@@ -1618,6 +1671,7 @@ static void test_memory_find_facts_graph_route_uses_graph_stage(void)
    aimee_pg_bind_int64(stmt, "?1", callsite.id);
    assert(aimee_pg_step(stmt, gr_err, sizeof(gr_err)) == AIMEE_PG_DONE);
    aimee_pg_finalize(stmt);
+   restore_foreign_keys();
 
    memory_t results[8];
    int count = memory_find_facts("what calls memory_find_facts_scoped", 5, results, 8);
@@ -3579,9 +3633,9 @@ int main(void)
    {
       setup();
       char rel_err[128] = "";
-      /* Disable FK enforcement so we can insert memory_relations freely.
-       * Under the test shim PRAGMA passes through to sqlite verbatim. */
-      (void)aimee_pg_exec(db2_conn(), "PRAGMA foreign_keys=OFF", rel_err, sizeof(rel_err));
+      /* memory_id 1 need not exist: this case is about the graph search, not the
+       * relation's owner. */
+      relax_foreign_keys();
 
       (void)aimee_pg_exec(db2_conn(),
                           "INSERT INTO memory_relations"
@@ -3590,6 +3644,7 @@ int main(void)
                           " VALUES (1, 'Alice', 'lives_in', 'Wonderland',"
                           " 'Alice lives in Wonderland', '2025-01-01', '', 1.0, pg_now_text())",
                           rel_err, sizeof(rel_err));
+      restore_foreign_keys();
 
       memory_relation_t rels[8];
       int cnt = memory_search_graph_as_of("Alice", NULL, 8, rels, 8);
@@ -3602,7 +3657,7 @@ int main(void)
    {
       setup();
       char rel2_err[128] = "";
-      (void)aimee_pg_exec(db2_conn(), "PRAGMA foreign_keys=OFF", rel2_err, sizeof(rel2_err));
+      relax_foreign_keys();
 
       (void)aimee_pg_exec(db2_conn(),
                           "INSERT INTO memory_relations"
@@ -3619,6 +3674,7 @@ int main(void)
                           " VALUES (1, 'Bob', 'works_at', 'NewCo', 'Bob works at NewCo',"
                           " '2025-06-01', '', 1.0, pg_now_text())",
                           rel2_err, sizeof(rel2_err));
+      restore_foreign_keys();
 
       memory_relation_t rels[8];
 

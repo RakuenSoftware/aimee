@@ -20,6 +20,7 @@
 #include <string.h>
 #include "feature_rows.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "support/json_canonical.h"
 #include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/lifecycle.h"
 #include "../modules/db2/c/sketch.h"
@@ -243,9 +244,18 @@ static void read_sketch_params(const char *sketch_kind, const char *scope_id,
    aimee_pg_finalize(st);
 }
 
+/* The haystacks here are JSON column values. Canonicalise the engine's spelling
+ * first: sketch params come back from a JSONB column on Postgres, which prints a
+ * space after every colon, so "\"k\":7" matches only what the sqlite shim's TEXT
+ * column happened to store verbatim. */
 static void assert_contains(const char *haystack, const char *needle)
 {
-   assert(strstr(haystack, needle) != NULL);
+   const char *canonical = json_canonical(haystack);
+   if (!strstr(canonical, needle))
+   {
+      fprintf(stderr, "assert_contains: %s\n  not in: %s\n", needle, canonical);
+      assert(0 && "assert_contains");
+   }
 }
 
 /* ---- 11. sketch_store_params_json ---- */
