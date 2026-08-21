@@ -32,6 +32,8 @@
 #include "modules/db2/c/entity_nodes.h"
 #include "css_analyze.h"
 #include "index.h"
+#include "config.h"
+#include "code_treesitter.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -194,6 +196,93 @@ static void run(void)
    printf("  unresolved class is an edge; unreferenced class is defined and unstyled: ok\n");
 }
 
+/* --- the same thing again, through the indexer ---------------------------- */
+
+#define INDEXED "cssindexed"
+
+static void write_file(const char *directory, const char *name, const char *content)
+{
+   char full[512];
+   snprintf(full, sizeof(full), "%s/%s", directory, name);
+   FILE *handle = fopen(full, "w");
+   assert(handle);
+   assert(fwrite(content, 1, strlen(content), handle) == strlen(content));
+   assert(fclose(handle) == 0);
+}
+
+/* The style graph is opt-in: index_scan_project reads css_style_graph_enabled
+ * once per scan and, with it off, keeps only the legacy lexical class-name scan
+ * -- so css_component_styles stays empty and the `styles` edge never exists.
+ * The flag is written here rather than assumed, and that it has to be is worth
+ * knowing: the component half of this join is off by default. */
+static void enable_style_graph(const char *home)
+{
+   char full[512];
+   snprintf(full, sizeof(full), "%s/aimee.yaml", home);
+   FILE *handle = fopen(full, "w");
+   assert(handle);
+   fprintf(handle, "css_style_graph_enabled: true\n");
+   assert(fclose(handle) == 0);
+}
+
+static void run_indexed(const char *home)
+{
+   void *conn = db2_conn();
+   assert(conn);
+
+   char err[256] = "";
+   aimee_pg_exec(conn,
+                 "DELETE FROM entity_edges WHERE edge_origin = 'code_projection'"
+                 " AND source LIKE 'file:" INDEXED ":%'",
+                 err, sizeof err);
+   aimee_pg_exec(conn, "DELETE FROM code_projection_generations WHERE project = '" INDEXED "'", err,
+                 sizeof err);
+
+   char root[512];
+   snprintf(root, sizeof(root), "%s/repo", home);
+   char command[640];
+   snprintf(command, sizeof(command), "rm -rf %s && mkdir -p %s", root, root);
+   assert(system(command) == 0);
+
+   write_file(root, "styles.css", ".btn { color: red }\n.unused { color: gray }\n");
+   write_file(root, "Button.tsx",
+              "export const Button = () => <button className=\"btn absent\">x</button>;\n");
+
+   enable_style_graph(home);
+   if (index_scan_project(INDEXED, root, 1) < 0)
+   {
+      fprintf(stderr, "css_projection_pg: index_scan_project failed for %s\n", root);
+      assert(0);
+   }
+
+   int64_t generation = db2_code_projection_generation_create(INDEXED);
+   assert(generation > 0);
+   assert(db2_code_projection_sync_project(INDEXED, generation) > 0);
+   assert(db2_code_projection_generation_publish(generation, INDEXED) == 0);
+
+   char stylesheet_key[GRAPH_ENDPOINT_MAX], component_key[GRAPH_ENDPOINT_MAX];
+   char btn_key[GRAPH_ENDPOINT_MAX];
+   assert(db2_entity_node_key_file(INDEXED, "styles.css", stylesheet_key, sizeof(stylesheet_key)) ==
+          0);
+   assert(db2_entity_node_key_file(INDEXED, "Button.tsx", component_key, sizeof(component_key)) ==
+          0);
+   assert(db2_entity_node_key_symbol(INDEXED, "btn", btn_key, sizeof(btn_key)) == 0);
+
+   if (!has_edge(stylesheet_key, "defines", btn_key))
+   {
+      fprintf(stderr, "css_projection_pg: the indexer did not record .btn as a definition\n");
+      report(stylesheet_key);
+      assert(0);
+   }
+   if (!has_edge(component_key, "styles", btn_key))
+   {
+      fprintf(stderr, "css_projection_pg: the indexer did not record the class token\n");
+      report(component_key);
+      assert(0);
+   }
+   printf("  through index_scan_project, on files read from disk: ok\n");
+}
+
 int main(void)
 {
    const char *url = getenv("AIMEE_TEST_PG_URL");
@@ -219,8 +308,24 @@ int main(void)
       return 1;
    }
 
+   /* This test is only meaningful against the grammar: without it, CSS yields no
+    * definitions and the whole join is absent for a reason that has nothing to do
+    * with the code under test. The shared code_treesitter.o carries the flag from
+    * whichever build last compiled it, so a default `make unit-tests` in between
+    * silently turns it into the stub -- say so rather than failing opaquely. */
+   if (!code_treesitter_available(".css"))
+   {
+      fprintf(stderr,
+              "css_projection_pg: built without AIMEE_TREESITTER (code_treesitter.o is the\n"
+              "  stub, so .css yields no definitions). Rebuild with:\n"
+              "    rm -f build/obj/code_treesitter.o build/obj/modules/css/css_treesitter.o\n"
+              "    make AIMEE_TREESITTER=1 build/obj/tests/unit-test-css-projection-pg\n");
+      return 1;
+   }
+
    printf("css_projection_pg:\n");
    run();
+   run_indexed(home);
    db2_shutdown();
    printf("All css_projection_pg tests passed.\n");
    return 0;
