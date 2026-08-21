@@ -2760,6 +2760,46 @@ int db2_cross_repo_set_trust(const char *project, const char *new_trust, const c
    return -1;
 }
 
+int db2_bandit_explore_stats(const char *decision_point, int window_seconds,
+                             long long *n_explore_out, long long *n_total_out)
+{
+   (void)decision_point;
+   (void)window_seconds;
+   if (n_explore_out)
+      *n_explore_out = 0;
+   if (n_total_out)
+      *n_total_out = 0;
+   return -1;
+}
+
+int db2_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
+                              db2_bandit_arm_stats_t *out)
+{
+   (void)decision_point;
+   (void)arm_id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int canonical_index_project_stats(const char *project, int *files_out, int *defs_out)
+{
+   (void)project;
+   if (files_out)
+      *files_out = 0;
+   if (defs_out)
+      *defs_out = 0;
+   return -1;
+}
+
+int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
+{
+   (void)k;
+   (void)m;
+   (void)len_min;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -156,6 +156,14 @@
       "reason": "The typed index.term_find_in_project operation finds an identifier within one project, or within all of them when the project is empty. The tiers are the same as index.term_find's -- exact, then prefix, then substring -- and with an empty project the two run the same statement, which is why one of them should eventually go. Its callers reach them separately today."
     },
     {
+      "symbol": "canonical_index_project_stats",
+      "signature_sha256": "8b8ea12a6b434bf666db36304c2d74d608f4f37e0b225482f15e5d274834ea3d",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.project_stats operation counts a project's indexed files and definitions. A project nobody indexed answers zero and zero, the same as one indexed and empty. Only the current generation of a project whose lifecycle is current is counted, so a project being re-indexed reads as empty until the new generation is the current one. Dotted paths are excluded by three separate patterns, which decide silently what counts as a file."
+    },
+    {
       "symbol": "canonical_index_set_exec_capture",
       "signature_sha256": "1e99a1701424fe709b6626d44151681f875541924a23045c4226c93dfe964cac",
       "disposition": "private-db2",
@@ -356,6 +364,14 @@
       "reason": "The typed learning.audit_latest_before operation reads the before-state the newest audit event recorded for an artifact. Newest means the highest identifier, not the latest stamp -- the identifiers are generated rather than sequential, so this returns whichever sorts highest, which is not the same thing. The snapshot it returns was the caller's to supply when the event was written."
     },
     {
+      "symbol": "db2_bandit_arm_stats_read",
+      "signature_sha256": "e3e5bb2de2b0c0b577b8c61500872a44873d59991de224469a8400e999f3babd",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.bandit_arm_stats_read operation reads an arm's running statistics. An arm with no row is not reported absent: the backend answers zero decisions and a Beta(1,1) prior, which is exactly what an arm recorded with those values would answer, so a caller cannot tell a new arm from a stored one. Any decision point and arm can be asked about and every one of them has an answer. The counts come back through a double, so a large one is rounded."
+    },
+    {
       "symbol": "db2_bandit_arm_stats_update",
       "signature_sha256": "a61e954e785a03e0b0fdb7b5f3cd34571a948266b93708a7be3dab9e0161400e",
       "disposition": "wire-operation",
@@ -394,6 +410,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.bandit_decision_points operation lists the decision points that have been decided, newest first, stopping at 64. What crosses is a JSON array built by hand: nothing escapes the names, so one containing a quote or a backslash produces a document the caller cannot parse, and the array is closed early when the buffer fills. A truncated list, a list cut off at 64, and a complete one all look the same."
+    },
+    {
+      "symbol": "db2_bandit_explore_stats",
+      "signature_sha256": "9203f2e61bc56fcc1ebed9bd4b7fb810814b538de5288280bd1db1935d1cbe3f",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.bandit_explore_stats operation counts a decision point's decisions and how many of them explored. The window is a cutoff computed from the module's clock and compared as text against stamps DB2 wrote, so a skew between the two moves the boundary. A window of zero means every decision ever recorded rather than none. Both counts come back through a double, so past two to the fifty-third a count is rounded rather than exact."
     },
     {
       "symbol": "db2_bandit_promotion_get",
@@ -778,6 +802,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.cross_repo_rebuild_routes operation replaces the pass that empties and rebuilds the cross-repo include route table inside one transaction. The routing heuristics are fixed policy and travel nowhere: quoted includes only, the fan-out threshold that suppresses ubiquitous headers, and the generated-build-header rejects. Each was tuned against live findings, and a caller able to send them could reroute a repository's symbol resolution."
+    },
+    {
+      "symbol": "db2_cross_repo_recompute_blocked_symbols",
+      "signature_sha256": "07f6a34da2996bcbce6e0d0bbb32453059ecaee43baa54f13decbd48a7315186",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.recompute_blocked_symbols operation rebuilds the blocked-symbol table from what trusted repositories call and define. The version is raised inside the transaction, which takes the row lock and serialises two recomputes properly. The count is not: it is read after the commit, so a recompute that lands in between is what this answers with, and the number returned can belong to a version this call did not write."
     },
     {
       "symbol": "db2_cross_repo_set_trust",

@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "canonical_index.h"
 #include "cross_repo_stats.h"
 #include "feature_rows.h"
 #include "kb_audit_worm.h"
@@ -476,6 +477,12 @@ typedef struct
    int (*cross_repo_set_trust)(const char *project, const char *new_trust, const char *actor,
                                const char *request_id, char *prior_out, size_t prior_cap,
                                int *changed_out);
+   int (*bandit_explore_stats)(const char *decision_point, int window_seconds,
+                               long long *n_explore_out, long long *n_total_out);
+   int (*bandit_arm_stats_read)(const char *decision_point, const char *arm_id,
+                                db2_bandit_arm_stats_t *out);
+   int (*project_stats)(const char *project, int *files_out, int *defs_out);
+   int (*recompute_blocked_symbols)(int k, int m, int len_min);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

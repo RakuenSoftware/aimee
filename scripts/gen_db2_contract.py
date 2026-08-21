@@ -13318,6 +13318,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_cross_repo_set_trust",
         "policy": {"writes": 200},
     },
+    "bandit_explore_stats": {
+        "key": ("learning", 64),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_explore_stats",
+        "policy": {"reads": 200},
+    },
+    "bandit_arm_stats_read": {
+        "key": ("learning", 65),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_arm_stats_read",
+        "policy": {"reads": 200},
+    },
+    "project_stats": {
+        "key": ("index", 64),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "canonical_index_project_stats",
+        "policy": {"reads": 200},
+    },
+    "recompute_blocked_symbols": {
+        "key": ("organization", 31),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_cross_repo_recompute_blocked_symbols",
+        "policy": {"writes": 200},
+    },
 }
 
 

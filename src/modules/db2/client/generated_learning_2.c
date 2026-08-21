@@ -752,3 +752,63 @@ aimee_db2_feature_row_read_call(aimee_db2_call_fn call, void *call_context, uint
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_bandit_explore_stats_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                    uint64_t deadline_ns, const char *decision_point,
+                                    uint32_t window_seconds, uint64_t *n_explore, uint64_t *n_total,
+                                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_BANDIT_EXPLORE_STATS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_BANDIT_EXPLORE_STATS_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_bandit_explore_stats_request_encode(decision_point, window_seconds, request,
+                                                     sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_BANDIT_EXPLORE_STATS,
+            AIMEE_DB2_STAGE_BANDIT_EXPLORE_STATS, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_bandit_explore_stats_reply_decode(response, response_len, n_explore, n_total) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_bandit_arm_stats_read_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *decision_point, const char *arm_id, uint64_t *arm_n_decisions,
+    uint64_t *arm_n_rewards, double *sum_reward, double *posterior_alpha, double *posterior_beta,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_BANDIT_ARM_STATS_READ_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_BANDIT_ARM_STATS_READ_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_bandit_arm_stats_read_request_encode(decision_point, arm_id, request,
+                                                      sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_BANDIT_ARM_STATS_READ,
+            AIMEE_DB2_STAGE_BANDIT_ARM_STATS_READ, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_bandit_arm_stats_read_reply_decode(response, response_len, arm_n_decisions,
+                                                    arm_n_rewards, sum_reward, posterior_alpha,
+                                                    posterior_beta) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

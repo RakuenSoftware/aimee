@@ -980,6 +980,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .corpus_pipeline_status = db2_corpus_pipeline_status,
        .corpus_pipeline_drain = db2_corpus_pipeline_drain,
        .cross_repo_set_trust = db2_cross_repo_set_trust,
+       .bandit_explore_stats = db2_bandit_explore_stats,
+       .bandit_arm_stats_read = db2_bandit_arm_stats_read,
+       .project_stats = canonical_index_project_stats,
+       .recompute_blocked_symbols = db2_cross_repo_recompute_blocked_symbols,
    };
    return &backend;
 }
@@ -5816,6 +5820,38 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char project_name[AIMEE_DB2_PROJECT_STATS_PROJECT_NAME_MAX + 1] = "";
+         if (aimee_db2_project_stats_request_decode(request_body, request_len, project_name,
+                                                    sizeof(project_name)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROJECT_STATS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->project_stats)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t file_count = 0u;
+            uint32_t definition_count = 0u;
+            {
+               int files = 0;
+               int defs = 0;
+               if (backend->project_stats(project_name, &files, &defs) == 0)
+               {
+                  file_count = files > 0 ? (uint32_t)files : 0u;
+                  definition_count = defs > 0 ? (uint32_t)defs : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_project_stats_reply_encode(file_count, definition_count, response_body,
+                                                     response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -6857,6 +6893,36 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_db2_cross_repo_set_trust_reply_encode(trust_result, prior_trust,
                                                             trust_changed, response_body,
                                                             response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t callee_repo_min = 0u;
+         uint32_t definition_repo_min = 0u;
+         uint32_t symbol_length_min = 0u;
+         if (aimee_db2_recompute_blocked_symbols_request_decode(
+                 request_body, request_len, &callee_repo_min, &definition_repo_min,
+                 &symbol_length_min) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_RECOMPUTE_BLOCKED_SYMBOLS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->recompute_blocked_symbols)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t blocked_count = 0u;
+            {
+               int blocked = backend->recompute_blocked_symbols(
+                   (int)callee_repo_min, (int)definition_repo_min, (int)symbol_length_min);
+               blocked_count = blocked > 0 ? (uint32_t)blocked : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_recompute_blocked_symbols_reply_encode(
+                    blocked_count, response_body, response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
@@ -8412,6 +8478,82 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_feature_row_read_reply_encode(features_json, response_body,
                                                         response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char decision_point[AIMEE_DB2_BANDIT_EXPLORE_STATS_DECISION_POINT_MAX + 1] = "";
+         uint32_t window_seconds = 0u;
+         if (aimee_db2_bandit_explore_stats_request_decode(request_body, request_len,
+                                                           decision_point, sizeof(decision_point),
+                                                           &window_seconds) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_BANDIT_EXPLORE_STATS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->bandit_explore_stats)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t n_explore = 0u;
+            uint64_t n_total = 0u;
+            {
+               long long explored = 0;
+               long long total = 0;
+               if (backend->bandit_explore_stats(decision_point, (int)window_seconds, &explored,
+                                                 &total) == 0)
+               {
+                  n_explore = explored > 0 ? (uint64_t)explored : 0u;
+                  n_total = total > 0 ? (uint64_t)total : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_bandit_explore_stats_reply_encode(n_explore, n_total, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char decision_point[AIMEE_DB2_BANDIT_ARM_STATS_READ_DECISION_POINT_MAX + 1] = "";
+         char arm_id[AIMEE_DB2_BANDIT_ARM_STATS_READ_ARM_ID_MAX + 1] = "";
+         if (aimee_db2_bandit_arm_stats_read_request_decode(request_body, request_len,
+                                                            decision_point, sizeof(decision_point),
+                                                            arm_id, sizeof(arm_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_BANDIT_ARM_STATS_READ_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->bandit_arm_stats_read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t arm_n_decisions = 0u;
+            uint64_t arm_n_rewards = 0u;
+            double sum_reward = 0.0;
+            double posterior_alpha = 0.0;
+            double posterior_beta = 0.0;
+            {
+               db2_bandit_arm_stats_t stats;
+               memset(&stats, 0, sizeof(stats));
+               if (backend->bandit_arm_stats_read(decision_point, arm_id, &stats) == 0)
+               {
+                  arm_n_decisions = stats.n_decisions > 0 ? (uint64_t)stats.n_decisions : 0u;
+                  arm_n_rewards = stats.n_rewards > 0 ? (uint64_t)stats.n_rewards : 0u;
+                  sum_reward = stats.sum_reward;
+                  posterior_alpha = stats.posterior_alpha;
+                  posterior_beta = stats.posterior_beta;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_bandit_arm_stats_read_reply_encode(
+                    arm_n_decisions, arm_n_rewards, sum_reward, posterior_alpha, posterior_beta,
+                    response_body, response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

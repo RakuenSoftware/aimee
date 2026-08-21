@@ -851,6 +851,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *entity_id, const char *canonical_name, uint32_t observation_count, const char *card_json, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_project_stats_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project_name, uint32_t *file_count, uint32_t *definition_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_trace_mining_record_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -1081,6 +1085,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *subject_id, const char *feature_subject_kind, const char *feature_set_version, char *features_json, size_t features_json_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_bandit_explore_stats_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *decision_point, uint32_t window_seconds, uint64_t *n_explore, uint64_t *n_total, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_bandit_arm_stats_read_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *decision_point, const char *arm_id, uint64_t *arm_n_decisions, uint64_t *arm_n_rewards, double *sum_reward, double *posterior_alpha, double *posterior_beta, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
@@ -1186,6 +1198,10 @@ extern "C"
    aimee_module_call_result_t aimee_db2_cross_repo_set_trust_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *project_name, const char *new_trust, const char *trust_actor, const char *trust_request_id, uint32_t *trust_result, char *prior_trust, size_t prior_trust_capacity, uint32_t *trust_changed, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_recompute_blocked_symbols_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t callee_repo_min, uint32_t definition_repo_min, uint32_t symbol_length_min, uint32_t *blocked_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_enrollment_active_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,

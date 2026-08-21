@@ -2884,9 +2884,15 @@
           "line": 129
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.project_stats operation counts a project's indexed files and definitions. A project nobody indexed answers zero and zero, the same as one indexed and empty. Only the current generation of a project whose lifecycle is current is counted, so a project being re-indexed reads as empty until the new generation is the current one. Dotted paths are excluded by three separate patterns, which decide silently what counts as a file."
+      },
       "signature": "int canonical_index_project_stats ( const char * project , int * files_out , int * defs_out )",
       "signature_sha256": "8b8ea12a6b434bf666db36304c2d74d608f4f37e0b225482f15e5d274834ea3d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "canonical_index_project_stats"
     },
     {
@@ -3904,9 +3910,15 @@
           "line": 44
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_arm_stats_read operation reads an arm's running statistics. An arm with no row is not reported absent: the backend answers zero decisions and a Beta(1,1) prior, which is exactly what an arm recorded with those values would answer, so a caller cannot tell a new arm from a stored one. Any decision point and arm can be asked about and every one of them has an answer. The counts come back through a double, so a large one is rounded."
+      },
       "signature": "int db2_bandit_arm_stats_read ( const char * decision_point , const char * arm_id , db2_bandit_arm_stats_t * out )",
       "signature_sha256": "e3e5bb2de2b0c0b577b8c61500872a44873d59991de224469a8400e999f3babd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_arm_stats_read"
     },
     {
@@ -4046,9 +4058,15 @@
           "line": 62
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_explore_stats operation counts a decision point's decisions and how many of them explored. The window is a cutoff computed from the module's clock and compared as text against stamps DB2 wrote, so a skew between the two moves the boundary. A window of zero means every decision ever recorded rather than none. Both counts come back through a double, so past two to the fifty-third a count is rounded rather than exact."
+      },
       "signature": "int db2_bandit_explore_stats ( const char * decision_point , int window_seconds , long long * n_explore_out , long long * n_total_out )",
       "signature_sha256": "9203f2e61bc56fcc1ebed9bd4b7fb810814b538de5288280bd1db1935d1cbe3f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_explore_stats"
     },
     {
@@ -6039,9 +6057,15 @@
           "line": 45
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "organization",
+        "reason": "The typed organization.recompute_blocked_symbols operation rebuilds the blocked-symbol table from what trusted repositories call and define. The version is raised inside the transaction, which takes the row lock and serialises two recomputes properly. The count is not: it is read after the commit, so a recompute that lands in between is what this answers with, and the number returned can belong to a version this call did not write."
+      },
       "signature": "int db2_cross_repo_recompute_blocked_symbols ( int k , int m , int len_min )",
       "signature_sha256": "07f6a34da2996bcbce6e0d0bbb32453059ecaee43baa54f13decbd48a7315186",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_cross_repo_recompute_blocked_symbols"
     },
     {
@@ -27672,15 +27696,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d33c514b798bcc119d8b99ff7636e67307c1fb10599a39f34c844be0c9175859",
+  "fingerprint": "878858c658d3f3f4331c32d08b9cbd1d7960bba846aa4f2f4f7434f27067fafd",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 351,
+    "audit_pending": 347,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 608
+    "reviewed": 612
   }
 }

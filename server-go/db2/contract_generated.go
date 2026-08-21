@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "b62f1ddbdc6e2a011c5d81f5c8a95294a6a5b9b8ba99a7e9f057ec3379a0c640"
+const ContractSHA256 = "a551fd4a70a8adb081388870e8932c04143df22240847cfc0230823799611659"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -5056,6 +5056,49 @@ func DecodeEntityProfileUpsertRequest(request []byte) (string, string, uint32, s
 	return entityID, canonicalName, observationCount, cardJson, nil
 }
 
+const EventProjectStats = EventIndex
+const StageProjectStats = FamilyIndex
+const OperationProjectStats uint32 = 64
+const ProjectStatsProjectNameMin = 1
+const ProjectStatsProjectNameMax = 255
+
+// EncodeProjectStatsRequest writes the schema project_stats declares, in order.
+func EncodeProjectStatsRequest(projectName string) ([]byte, error) {
+	if len(projectName) < ProjectStatsProjectNameMin || len(projectName) > ProjectStatsProjectNameMax || hasNUL(projectName) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, ProjectStatsProjectNameMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProjectStats, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectStatsRequest reads it back, checking each field against its own bound.
+func DecodeProjectStatsRequest(request []byte) (string, error) {
+	var projectName string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectStats || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, ProjectStatsProjectNameMax); err != nil ||
+		len(projectName) < ProjectStatsProjectNameMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return projectName, nil
+}
+
 const EventTraceMiningRecord = EventLearning
 const StageTraceMiningRecord = FamilyLearning
 const OperationTraceMiningRecord uint32 = 8
@@ -8639,6 +8682,118 @@ func DecodeFeatureRowReadRequest(request []byte) (string, string, string, error)
 	return subjectID, featureSubjectKind, featureSetVersion, nil
 }
 
+const EventBanditExploreStats = EventLearning
+const StageBanditExploreStats = FamilyLearning
+const OperationBanditExploreStats uint32 = 64
+const BanditExploreStatsDecisionPointMin = 1
+const BanditExploreStatsDecisionPointMax = 127
+const BanditExploreStatsWindowSecondsMin uint32 = 0
+const BanditExploreStatsWindowSecondsMax uint32 = 4294967295
+
+// EncodeBanditExploreStatsRequest writes the schema bandit_explore_stats declares, in order.
+func EncodeBanditExploreStatsRequest(decisionPoint string, windowSeconds uint32) ([]byte, error) {
+	if len(decisionPoint) < BanditExploreStatsDecisionPointMin || len(decisionPoint) > BanditExploreStatsDecisionPointMax || hasNUL(decisionPoint) ||
+		windowSeconds < BanditExploreStatsWindowSecondsMin || windowSeconds > BanditExploreStatsWindowSecondsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionPoint, BanditExploreStatsDecisionPointMax); err != nil {
+		return nil, err
+	}
+	var windowSecondsBytes [4]byte
+	binary.LittleEndian.PutUint32(windowSecondsBytes[:], windowSeconds)
+	payload = append(payload, windowSecondsBytes[:]...)
+	header, err := EncodeRequestHeader(OperationBanditExploreStats, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditExploreStatsRequest reads it back, checking each field against its own bound.
+func DecodeBanditExploreStatsRequest(request []byte) (string, uint32, error) {
+	var decisionPoint string
+	var windowSeconds uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditExploreStats || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionPoint, err = takeRowText(payload, &cursor, BanditExploreStatsDecisionPointMax); err != nil ||
+		len(decisionPoint) < BanditExploreStatsDecisionPointMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	windowSeconds = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if windowSeconds < BanditExploreStatsWindowSecondsMin || windowSeconds > BanditExploreStatsWindowSecondsMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return decisionPoint, windowSeconds, nil
+}
+
+const EventBanditArmStatsRead = EventLearning
+const StageBanditArmStatsRead = FamilyLearning
+const OperationBanditArmStatsRead uint32 = 65
+const BanditArmStatsReadDecisionPointMin = 1
+const BanditArmStatsReadDecisionPointMax = 127
+const BanditArmStatsReadArmIDMin = 1
+const BanditArmStatsReadArmIDMax = 127
+
+// EncodeBanditArmStatsReadRequest writes the schema bandit_arm_stats_read declares, in order.
+func EncodeBanditArmStatsReadRequest(decisionPoint string, armID string) ([]byte, error) {
+	if len(decisionPoint) < BanditArmStatsReadDecisionPointMin || len(decisionPoint) > BanditArmStatsReadDecisionPointMax || hasNUL(decisionPoint) ||
+		len(armID) < BanditArmStatsReadArmIDMin || len(armID) > BanditArmStatsReadArmIDMax || hasNUL(armID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionPoint, BanditArmStatsReadDecisionPointMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, armID, BanditArmStatsReadArmIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationBanditArmStatsRead, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeBanditArmStatsReadRequest reads it back, checking each field against its own bound.
+func DecodeBanditArmStatsReadRequest(request []byte) (string, string, error) {
+	var decisionPoint string
+	var armID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationBanditArmStatsRead || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionPoint, err = takeRowText(payload, &cursor, BanditArmStatsReadDecisionPointMax); err != nil ||
+		len(decisionPoint) < BanditArmStatsReadDecisionPointMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if armID, err = takeRowText(payload, &cursor, BanditArmStatsReadArmIDMax); err != nil ||
+		len(armID) < BanditArmStatsReadArmIDMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return decisionPoint, armID, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -10153,6 +10308,83 @@ func DecodeCrossRepoSetTrustRequest(request []byte) (string, string, string, str
 		return "", "", "", "", ErrMalformedEnvelope
 	}
 	return projectName, newTrust, trustActor, trustRequestID, nil
+}
+
+const EventRecomputeBlockedSymbols = EventOrganization
+const StageRecomputeBlockedSymbols = FamilyOrganization
+const OperationRecomputeBlockedSymbols uint32 = 31
+const RecomputeBlockedSymbolsCalleeRepoMinMin uint32 = 1
+const RecomputeBlockedSymbolsCalleeRepoMinMax uint32 = 65535
+const RecomputeBlockedSymbolsDefinitionRepoMinMin uint32 = 1
+const RecomputeBlockedSymbolsDefinitionRepoMinMax uint32 = 65535
+const RecomputeBlockedSymbolsSymbolLengthMinMin uint32 = 1
+const RecomputeBlockedSymbolsSymbolLengthMinMax uint32 = 65535
+
+// EncodeRecomputeBlockedSymbolsRequest writes the schema recompute_blocked_symbols declares, in order.
+func EncodeRecomputeBlockedSymbolsRequest(calleeRepoMin uint32, definitionRepoMin uint32, symbolLengthMin uint32) ([]byte, error) {
+	if calleeRepoMin < RecomputeBlockedSymbolsCalleeRepoMinMin || calleeRepoMin > RecomputeBlockedSymbolsCalleeRepoMinMax ||
+		definitionRepoMin < RecomputeBlockedSymbolsDefinitionRepoMinMin || definitionRepoMin > RecomputeBlockedSymbolsDefinitionRepoMinMax ||
+		symbolLengthMin < RecomputeBlockedSymbolsSymbolLengthMinMin || symbolLengthMin > RecomputeBlockedSymbolsSymbolLengthMinMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var calleeRepoMinBytes [4]byte
+	binary.LittleEndian.PutUint32(calleeRepoMinBytes[:], calleeRepoMin)
+	payload = append(payload, calleeRepoMinBytes[:]...)
+	var definitionRepoMinBytes [4]byte
+	binary.LittleEndian.PutUint32(definitionRepoMinBytes[:], definitionRepoMin)
+	payload = append(payload, definitionRepoMinBytes[:]...)
+	var symbolLengthMinBytes [4]byte
+	binary.LittleEndian.PutUint32(symbolLengthMinBytes[:], symbolLengthMin)
+	payload = append(payload, symbolLengthMinBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRecomputeBlockedSymbols, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRecomputeBlockedSymbolsRequest reads it back, checking each field against its own bound.
+func DecodeRecomputeBlockedSymbolsRequest(request []byte) (uint32, uint32, uint32, error) {
+	var calleeRepoMin uint32
+	var definitionRepoMin uint32
+	var symbolLengthMin uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRecomputeBlockedSymbols || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	calleeRepoMin = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if calleeRepoMin < RecomputeBlockedSymbolsCalleeRepoMinMin || calleeRepoMin > RecomputeBlockedSymbolsCalleeRepoMinMax {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	definitionRepoMin = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if definitionRepoMin < RecomputeBlockedSymbolsDefinitionRepoMinMin || definitionRepoMin > RecomputeBlockedSymbolsDefinitionRepoMinMax {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	symbolLengthMin = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if symbolLengthMin < RecomputeBlockedSymbolsSymbolLengthMinMin || symbolLengthMin > RecomputeBlockedSymbolsSymbolLengthMinMax {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, 0, ErrMalformedEnvelope
+	}
+	return calleeRepoMin, definitionRepoMin, symbolLengthMin, nil
 }
 
 const EventEnrollmentActive = EventCustody

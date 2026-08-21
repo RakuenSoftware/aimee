@@ -2780,6 +2780,51 @@ int main(int argc, char **argv)
    assert(strcmp(cross_repo_set_trust_prior_trust, "trusted") == 0);
    assert(cross_repo_set_trust_trust_changed == 1);
 
+   /* The bandit statistics, a project's index counts and the blocked-symbol rebuild. */
+   uint64_t bandit_explore_stats_n_explore = 99;
+   uint64_t bandit_explore_stats_n_total = 99;
+   assert(aimee_db2_bandit_explore_stats_call(
+              call_client, &client, 9426, 0, "replay-dp", 3600, &bandit_explore_stats_n_explore,
+              &bandit_explore_stats_n_total, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The one decision an earlier case recorded is inside the hour and was not
+    * an exploration. */
+   assert(bandit_explore_stats_n_explore == 0 && bandit_explore_stats_n_total == 1);
+
+   uint64_t bandit_arm_stats_read_arm_n_decisions = 99;
+   uint64_t bandit_arm_stats_read_arm_n_rewards = 99;
+   double bandit_arm_stats_read_sum_reward = 9.0;
+   double bandit_arm_stats_read_posterior_alpha = 9.0;
+   double bandit_arm_stats_read_posterior_beta = 9.0;
+   assert(aimee_db2_bandit_arm_stats_read_call(
+              call_client, &client, 9427, 0, "replay-dp", "replay-arm",
+              &bandit_arm_stats_read_arm_n_decisions, &bandit_arm_stats_read_arm_n_rewards,
+              &bandit_arm_stats_read_sum_reward, &bandit_arm_stats_read_posterior_alpha,
+              &bandit_arm_stats_read_posterior_beta, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* No row exists for this arm, and the answer says so only by being the
+    * prior: an arm actually recorded with Beta(1,1) and no decisions would
+    * come back identical. */
+   assert(bandit_arm_stats_read_arm_n_decisions == 0 && bandit_arm_stats_read_arm_n_rewards == 0 &&
+          bandit_arm_stats_read_sum_reward == 0.0 && bandit_arm_stats_read_posterior_alpha == 1.0 &&
+          bandit_arm_stats_read_posterior_beta == 1.0);
+
+   uint32_t project_stats_file_count = 99;
+   uint32_t project_stats_definition_count = 99;
+   assert(aimee_db2_project_stats_call(call_client, &client, 9428, 0, "replay-project",
+                                       &project_stats_file_count, &project_stats_definition_count,
+                                       NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The project exists -- an earlier case created it -- and has no indexed
+    * files, which reads the same as a project nobody indexed at all. */
+   assert(project_stats_file_count == 0 && project_stats_definition_count == 0);
+
+   uint32_t recompute_blocked_symbols_blocked_count = 99;
+   assert(aimee_db2_recompute_blocked_symbols_call(call_client, &client, 9429, 0, 2, 2, 4,
+                                                   &recompute_blocked_symbols_blocked_count, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   /* Nothing is indexed, so the rebuilt table is empty -- and the only trusted
+    * project was set untrusted by the trust write above, so it would be empty
+    * even with files. */
+   assert(recompute_blocked_symbols_blocked_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
