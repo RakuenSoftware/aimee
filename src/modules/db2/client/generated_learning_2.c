@@ -875,3 +875,107 @@ aimee_module_call_result_t aimee_db2_calibration_profile_write_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_demotion_score_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                              uint64_t deadline_ns, uint64_t demotion_row_id, uint32_t window_size,
+                              double half_life_days, uint32_t n_min, uint32_t *score_valid,
+                              double *demotion_score, aimee_module_cancelled_fn cancelled,
+                              void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DEMOTION_SCORE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DEMOTION_SCORE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_demotion_score_request_encode(demotion_row_id, window_size, half_life_days, n_min,
+                                               request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DEMOTION_SCORE, AIMEE_DB2_STAGE_DEMOTION_SCORE, trace_id,
+            deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_demotion_score_reply_decode(response, response_len, score_valid, demotion_score) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_decision_log_get_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t decision_id, uint32_t *decision_found, uint64_t *task_id, char *decision_options,
+    size_t decision_options_capacity, char *decision_chosen, size_t decision_chosen_capacity,
+    char *decision_rationale, size_t decision_rationale_capacity, char *decision_assumptions,
+    size_t decision_assumptions_capacity, char *decision_outcome, size_t decision_outcome_capacity,
+    char *decision_created_at, size_t decision_created_at_capacity, char *decision_status,
+    size_t decision_status_capacity, char *revisit_when, size_t revisit_when_capacity,
+    uint64_t *supersedes_id, char *decision_subject, size_t decision_subject_capacity,
+    char *decision_author, size_t decision_author_capacity, uint64_t *linked_policy_id,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DECISION_LOG_GET_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DECISION_LOG_GET_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_decision_log_get_request_encode(decision_id, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DECISION_LOG_GET, AIMEE_DB2_STAGE_DECISION_LOG_GET,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_decision_log_get_reply_decode(
+           response, response_len, decision_found, task_id, decision_options,
+           decision_options_capacity, decision_chosen, decision_chosen_capacity, decision_rationale,
+           decision_rationale_capacity, decision_assumptions, decision_assumptions_capacity,
+           decision_outcome, decision_outcome_capacity, decision_created_at,
+           decision_created_at_capacity, decision_status, decision_status_capacity, revisit_when,
+           revisit_when_capacity, supersedes_id, decision_subject, decision_subject_capacity,
+           decision_author, decision_author_capacity, linked_policy_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_fidelity_report_by_turn_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *turn_id, uint32_t *fidelity_result, char *fidelity_status,
+    size_t fidelity_status_capacity, uint32_t *supported_count, uint32_t *unsupported_count,
+    uint32_t *abstained_count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FIDELITY_REPORT_BY_TURN_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FIDELITY_REPORT_BY_TURN_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_fidelity_report_by_turn_request_encode(turn_id, request, sizeof(request),
+                                                        &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FIDELITY_REPORT_BY_TURN,
+            AIMEE_DB2_STAGE_FIDELITY_REPORT_BY_TURN, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_fidelity_report_by_turn_reply_decode(
+           response, response_len, fidelity_result, fidelity_status, fidelity_status_capacity,
+           supported_count, unsupported_count, abstained_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

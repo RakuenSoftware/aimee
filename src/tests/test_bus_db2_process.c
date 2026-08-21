@@ -2893,6 +2893,106 @@ int main(int argc, char **argv)
                                                  NULL) == AIMEE_MODULE_CALL_OK);
    assert(projection_sync_project_edge_count == 0);
 
+   /* The demotion score, a decision record, a fidelity report and the directive counts. */
+   uint32_t demotion_score_score_valid = 99;
+   double demotion_score_demotion_score = 9.0;
+   assert(aimee_db2_demotion_score_call(call_client, &client, 9434, 0, 42, 8, 30.0, 5,
+                                        &demotion_score_score_valid, &demotion_score_demotion_score,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Too few attributions to score, which the backend answers with NaN -- the
+    * same value it uses for a database it could not reach. The flag is why the
+    * wire can carry the first without carrying the second. */
+   assert(demotion_score_score_valid == 0 && demotion_score_demotion_score == 0.0);
+
+   uint32_t decision_log_get_decision_found = 99;
+   uint64_t decision_log_get_task_id = 99;
+   static char
+       decision_log_get_decision_options[AIMEE_DB2_DECISION_LOG_GET_DECISION_OPTIONS_MAX + 1];
+   decision_log_get_decision_options[0] = 'x';
+   static char decision_log_get_decision_chosen[AIMEE_DB2_DECISION_LOG_GET_DECISION_CHOSEN_MAX + 1];
+   decision_log_get_decision_chosen[0] = 'x';
+   static char
+       decision_log_get_decision_rationale[AIMEE_DB2_DECISION_LOG_GET_DECISION_RATIONALE_MAX + 1];
+   decision_log_get_decision_rationale[0] = 'x';
+   static char
+       decision_log_get_decision_assumptions[AIMEE_DB2_DECISION_LOG_GET_DECISION_ASSUMPTIONS_MAX +
+                                             1];
+   decision_log_get_decision_assumptions[0] = 'x';
+   static char
+       decision_log_get_decision_outcome[AIMEE_DB2_DECISION_LOG_GET_DECISION_OUTCOME_MAX + 1];
+   decision_log_get_decision_outcome[0] = 'x';
+   static char
+       decision_log_get_decision_created_at[AIMEE_DB2_DECISION_LOG_GET_DECISION_CREATED_AT_MAX + 1];
+   decision_log_get_decision_created_at[0] = 'x';
+   static char decision_log_get_decision_status[AIMEE_DB2_DECISION_LOG_GET_DECISION_STATUS_MAX + 1];
+   decision_log_get_decision_status[0] = 'x';
+   static char decision_log_get_revisit_when[AIMEE_DB2_DECISION_LOG_GET_REVISIT_WHEN_MAX + 1];
+   decision_log_get_revisit_when[0] = 'x';
+   uint64_t decision_log_get_supersedes_id = 99;
+   static char
+       decision_log_get_decision_subject[AIMEE_DB2_DECISION_LOG_GET_DECISION_SUBJECT_MAX + 1];
+   decision_log_get_decision_subject[0] = 'x';
+   static char decision_log_get_decision_author[AIMEE_DB2_DECISION_LOG_GET_DECISION_AUTHOR_MAX + 1];
+   decision_log_get_decision_author[0] = 'x';
+   uint64_t decision_log_get_linked_policy_id = 99;
+   assert(aimee_db2_decision_log_get_call(
+              call_client, &client, 9435, 0, 1, &decision_log_get_decision_found,
+              &decision_log_get_task_id, decision_log_get_decision_options,
+              sizeof(decision_log_get_decision_options), decision_log_get_decision_chosen,
+              sizeof(decision_log_get_decision_chosen), decision_log_get_decision_rationale,
+              sizeof(decision_log_get_decision_rationale), decision_log_get_decision_assumptions,
+              sizeof(decision_log_get_decision_assumptions), decision_log_get_decision_outcome,
+              sizeof(decision_log_get_decision_outcome), decision_log_get_decision_created_at,
+              sizeof(decision_log_get_decision_created_at), decision_log_get_decision_status,
+              sizeof(decision_log_get_decision_status), decision_log_get_revisit_when,
+              sizeof(decision_log_get_revisit_when), &decision_log_get_supersedes_id,
+              decision_log_get_decision_subject, sizeof(decision_log_get_decision_subject),
+              decision_log_get_decision_author, sizeof(decision_log_get_decision_author),
+              &decision_log_get_linked_policy_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(decision_log_get_decision_found == 0 && decision_log_get_task_id == 0 &&
+          decision_log_get_decision_options[0] == '\0' &&
+          decision_log_get_decision_chosen[0] == '\0' &&
+          decision_log_get_decision_rationale[0] == '\0' &&
+          decision_log_get_decision_assumptions[0] == '\0' &&
+          decision_log_get_decision_outcome[0] == '\0' &&
+          decision_log_get_decision_created_at[0] == '\0' &&
+          decision_log_get_decision_status[0] == '\0' && decision_log_get_revisit_when[0] == '\0' &&
+          decision_log_get_supersedes_id == 0 && decision_log_get_decision_subject[0] == '\0' &&
+          decision_log_get_decision_author[0] == '\0' && decision_log_get_linked_policy_id == 0);
+
+   uint32_t fidelity_report_by_turn_fidelity_result = 99;
+   static char fidelity_report_by_turn_fidelity_status
+       [AIMEE_DB2_FIDELITY_REPORT_BY_TURN_FIDELITY_STATUS_MAX + 1];
+   fidelity_report_by_turn_fidelity_status[0] = 'x';
+   uint32_t fidelity_report_by_turn_supported_count = 99;
+   uint32_t fidelity_report_by_turn_unsupported_count = 99;
+   uint32_t fidelity_report_by_turn_abstained_count = 99;
+   assert(aimee_db2_fidelity_report_by_turn_call(
+              call_client, &client, 9436, 0, "replay-turn",
+              &fidelity_report_by_turn_fidelity_result, fidelity_report_by_turn_fidelity_status,
+              sizeof(fidelity_report_by_turn_fidelity_status),
+              &fidelity_report_by_turn_supported_count, &fidelity_report_by_turn_unsupported_count,
+              &fidelity_report_by_turn_abstained_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(fidelity_report_by_turn_fidelity_result == 0 &&
+          fidelity_report_by_turn_fidelity_status[0] == '\0' &&
+          fidelity_report_by_turn_supported_count == 0 &&
+          fidelity_report_by_turn_unsupported_count == 0 &&
+          fidelity_report_by_turn_abstained_count == 0);
+
+   uint64_t directive_counts_by_state_directives_open = 99;
+   uint64_t directive_counts_by_state_directives_suppressed = 99;
+   uint64_t directive_counts_by_state_directives_resolved = 99;
+   uint64_t directive_counts_by_state_directives_expired = 99;
+   assert(aimee_db2_directive_counts_by_state_call(
+              call_client, &client, 9437, 0, &directive_counts_by_state_directives_open,
+              &directive_counts_by_state_directives_suppressed,
+              &directive_counts_by_state_directives_resolved,
+              &directive_counts_by_state_directives_expired, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(directive_counts_by_state_directives_open == 0 &&
+          directive_counts_by_state_directives_suppressed == 0 &&
+          directive_counts_by_state_directives_resolved == 0 &&
+          directive_counts_by_state_directives_expired == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

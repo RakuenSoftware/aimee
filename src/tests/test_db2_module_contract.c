@@ -3161,6 +3161,52 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
    return -1;
 }
 
+double db2_demotion_score(int64_t row_id, int window_size, double half_life_days, int n_min)
+{
+   (void)row_id;
+   (void)window_size;
+   (void)half_life_days;
+   (void)n_min;
+   return 0.0 / 0.0;
+}
+
+int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_fidelity_report_by_turn(const char *turn_id, char *status_out, int status_out_len,
+                                int *supported_out, int *unsupported_out, int *abstained_out)
+{
+   (void)turn_id;
+   if (status_out && status_out_len > 0)
+      status_out[0] = '\0';
+   if (supported_out)
+      *supported_out = 0;
+   if (unsupported_out)
+      *unsupported_out = 0;
+   if (abstained_out)
+      *abstained_out = 0;
+   return -1;
+}
+
+int db2_directive_counts_by_state(int64_t *open, int64_t *suppressed, int64_t *resolved,
+                                  int64_t *expired)
+{
+   if (open)
+      *open = 0;
+   if (suppressed)
+      *suppressed = 0;
+   if (resolved)
+      *resolved = 0;
+   if (expired)
+      *expired = 0;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

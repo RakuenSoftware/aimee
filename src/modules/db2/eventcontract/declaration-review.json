@@ -940,6 +940,14 @@
       "reason": "The typed maintenance.decision_log_active_id operation finds the active decision for a subject and policy. Nothing guarantees there is only one: the statement takes the first of however many match, in no particular order, so a subject with two active decisions answers with an arbitrary one and never says there was a choice. Zero means none is active; decision identifiers start at one."
     },
     {
+      "symbol": "db2_decision_log_get",
+      "signature_sha256": "7a04030be1901fd578f28e7dbbf05e981dda1d89d1aecff1f3edab23f3f2e5c5",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.decision_log_get operation reads one decision record. The identifier carries no scope, so a caller holding a number reads whatever decision it names. The supersedes and linked-policy identifiers come back as numbers with no way to tell an absent link from a link to row zero, because the column's default for both is zero. The columns are wider than the struct that receives them, so a longer rationale or option set is cut at the C buffer before the wire ever sees it."
+    },
+    {
       "symbol": "db2_decision_log_list",
       "signature_sha256": "6e52cdcaf44c1fda26b984af3145ac502ff5cf788e0eb309847004636ad5961f",
       "disposition": "wire-operation",
@@ -1020,12 +1028,28 @@
       "reason": "The typed learning.retrieval_event_by_turn operation finds the retrieval event a turn recorded. Nothing stops a turn having several -- the write does not deduplicate on the turn -- and this takes the first of them in no particular order, so a turn with two answers with an arbitrary one and never says there was a choice. The event is an artifact, so its payload is text the writer assembled rather than columns."
     },
     {
+      "symbol": "db2_demotion_score",
+      "signature_sha256": "cdac5744c3bfd93008f818a4ac3c9735cb9761a74b6af707ec51122bc90ec9c1",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.demotion_score operation scores a memory from the retrieval attributions naming it. It is a read that writes: every artifact it scores is stamped as touched, so asking twice changes what temporal maintenance sees. The backend answers NaN both for too little evidence and for a database it could not reach, and NaN is not a value the wire carries, so the reply says whether there is a score in a field of its own. A zero window, half-life or minimum each mean a default rather than none."
+    },
+    {
       "symbol": "db2_dim_change_reset",
       "signature_sha256": "8f32ca424989ca4e817c4f2bf3787162e3709076b26bf5a7ad4a530a0885bac5",
       "disposition": "wire-operation",
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.dimension_reset operation keeps schema replacement, maintenance marking, and requeue accounting inside one DB2-owned operator transaction while returning only bounded structured evidence."
+    },
+    {
+      "symbol": "db2_directive_counts_by_state",
+      "signature_sha256": "b1c8fe1ca0f2c9a73b232f6a6019d6c14859f30e9cd978f827f8d6822be35d7b",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.directive_counts_by_state operation counts epistemic directives by state. It names four states and drops every other group on the floor, so the four counts need not add up to the table and a state the writer adds later is counted nowhere. There is no scope and no filter: this is every directive the installation holds, which is the only thing the backend can answer."
     },
     {
       "symbol": "db2_directive_list",
@@ -1386,6 +1410,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.fidelity_attribution_count operation replaces the attribution count. Which artifact kind counts as a fidelity attribution is DB2 policy fixed in the statement, so a caller cannot ask for a different kind through this operation."
+    },
+    {
+      "symbol": "db2_fidelity_report_by_turn",
+      "signature_sha256": "802a328267dabc3fc1250a306322e4ecde766a600400d2fddfd25b3812ffc053",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.fidelity_report_by_turn operation reads the newest fidelity report a turn recorded. The report is an artifact whose payload is JSON the writer assembled, so the three counts are read out of text rather than columns and a field the writer omitted reads as zero. The backend separates a missing report from a malformed one, but answers the malformed case with the same value it uses for a bad argument or an unreachable database; the reply carries the three-way where it can."
     },
     {
       "symbol": "db2_health_probe",

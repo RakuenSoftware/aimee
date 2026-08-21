@@ -13366,6 +13366,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_code_projection_sync_project",
         "policy": {"writes": 200},
     },
+    "demotion_score": {
+        "key": ("learning", 68),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_demotion_score",
+        "policy": {"reads": 200},
+    },
+    "decision_log_get": {
+        "key": ("learning", 69),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_get",
+        "policy": {"reads": 200},
+    },
+    "fidelity_report_by_turn": {
+        "key": ("learning", 70),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_fidelity_report_by_turn",
+        "policy": {"reads": 200},
+    },
+    "directive_counts_by_state": {
+        "key": ("memory", 91),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_counts_by_state",
+        "policy": {"reads": 200},
+    },
 }
 
 

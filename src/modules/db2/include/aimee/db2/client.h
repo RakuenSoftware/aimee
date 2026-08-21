@@ -645,6 +645,10 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t link_source_id, uint64_t link_target_id, const char *link_relation, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_directive_counts_by_state_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t *directives_open, uint64_t *directives_suppressed, uint64_t *directives_resolved, uint64_t *directives_expired, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_observation_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *entity_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
@@ -1108,6 +1112,18 @@ extern "C"
    aimee_module_call_result_t aimee_db2_calibration_profile_write_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *target_surface, const char *artifact_kind, const char *scope_kind, const char *scope_id, const char *feature_set_version, const char *payload_json, char *artifact_id, size_t artifact_id_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_demotion_score_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t demotion_row_id, uint32_t window_size, double half_life_days, uint32_t n_min, uint32_t *score_valid, double *demotion_score, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_decision_log_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t decision_id, uint32_t *decision_found, uint64_t *task_id, char *decision_options, size_t decision_options_capacity, char *decision_chosen, size_t decision_chosen_capacity, char *decision_rationale, size_t decision_rationale_capacity, char *decision_assumptions, size_t decision_assumptions_capacity, char *decision_outcome, size_t decision_outcome_capacity, char *decision_created_at, size_t decision_created_at_capacity, char *decision_status, size_t decision_status_capacity, char *revisit_when, size_t revisit_when_capacity, uint64_t *supersedes_id, char *decision_subject, size_t decision_subject_capacity, char *decision_author, size_t decision_author_capacity, uint64_t *linked_policy_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_fidelity_report_by_turn_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *turn_id, uint32_t *fidelity_result, char *fidelity_status, size_t fidelity_status_capacity, uint32_t *supported_count, uint32_t *unsupported_count, uint32_t *abstained_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,

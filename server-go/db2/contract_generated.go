@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "db2b0ba4d25f852d848771617a5859b9fb77043c2fc7590c3e305e5bffff128b"
+const ContractSHA256 = "3c209e30f09f1954c4d62b7a15d2a046068d436f5082c78c69a88f57bbe979fa"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2002,6 +2002,37 @@ func DecodeMemoryLinkCreateRequest(request []byte) (uint64, uint64, string, erro
 		return 0, 0, "", ErrMalformedEnvelope
 	}
 	return linkSourceID, linkTargetID, linkRelation, nil
+}
+
+const EventDirectiveCountsByState = EventMemory
+const StageDirectiveCountsByState = FamilyMemory
+const OperationDirectiveCountsByState uint32 = 91
+
+
+// EncodeDirectiveCountsByStateRequest writes the schema directive_counts_by_state declares, in order.
+func EncodeDirectiveCountsByStateRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationDirectiveCountsByState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveCountsByStateRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveCountsByStateRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveCountsByState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -9093,6 +9124,190 @@ func DecodeCalibrationProfileWriteRequest(request []byte) (string, string, strin
 		return "", "", "", "", "", "", ErrMalformedEnvelope
 	}
 	return targetSurface, artifactKind, scopeKind, scopeID, featureSetVersion, payloadJson, nil
+}
+
+const EventDemotionScore = EventLearning
+const StageDemotionScore = FamilyLearning
+const OperationDemotionScore uint32 = 68
+const DemotionScoreDemotionRowIDMin uint64 = 0
+const DemotionScoreDemotionRowIDMax uint64 = 9223372036854775807
+const DemotionScoreWindowSizeMin uint32 = 0
+const DemotionScoreWindowSizeMax uint32 = 65535
+const DemotionScoreHalfLifeDaysMaxMagnitudeBits uint64 = 4741671816366391296
+const DemotionScoreNMinMin uint32 = 0
+const DemotionScoreNMinMax uint32 = 65535
+
+// EncodeDemotionScoreRequest writes the schema demotion_score declares, in order.
+func EncodeDemotionScoreRequest(demotionRowID uint64, windowSize uint32, halfLifeDays float64, nMin uint32) ([]byte, error) {
+	if demotionRowID < DemotionScoreDemotionRowIDMin || demotionRowID > DemotionScoreDemotionRowIDMax ||
+		windowSize < DemotionScoreWindowSizeMin || windowSize > DemotionScoreWindowSizeMax ||
+		math.Float64bits(halfLifeDays)&0x7fffffffffffffff > DemotionScoreHalfLifeDaysMaxMagnitudeBits ||
+		nMin < DemotionScoreNMinMin || nMin > DemotionScoreNMinMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var demotionRowIDBytes [8]byte
+	binary.LittleEndian.PutUint64(demotionRowIDBytes[:], demotionRowID)
+	payload = append(payload, demotionRowIDBytes[:]...)
+	var windowSizeBytes [4]byte
+	binary.LittleEndian.PutUint32(windowSizeBytes[:], windowSize)
+	payload = append(payload, windowSizeBytes[:]...)
+	var halfLifeDaysBytes [8]byte
+	binary.LittleEndian.PutUint64(halfLifeDaysBytes[:], math.Float64bits(halfLifeDays))
+	payload = append(payload, halfLifeDaysBytes[:]...)
+	var nMinBytes [4]byte
+	binary.LittleEndian.PutUint32(nMinBytes[:], nMin)
+	payload = append(payload, nMinBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDemotionScore, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDemotionScoreRequest reads it back, checking each field against its own bound.
+func DecodeDemotionScoreRequest(request []byte) (uint64, uint32, float64, uint32, error) {
+	var demotionRowID uint64
+	var windowSize uint32
+	var halfLifeDays float64
+	var nMin uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemotionScore || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	demotionRowID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if demotionRowID < DemotionScoreDemotionRowIDMin || demotionRowID > DemotionScoreDemotionRowIDMax {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	windowSize = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if windowSize < DemotionScoreWindowSizeMin || windowSize > DemotionScoreWindowSizeMax {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > DemotionScoreHalfLifeDaysMaxMagnitudeBits {
+			return 0, 0, 0, 0, ErrMalformedEnvelope
+		}
+		halfLifeDays = math.Float64frombits(bits)
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	nMin = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if nMin < DemotionScoreNMinMin || nMin > DemotionScoreNMinMax {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, 0, 0, ErrMalformedEnvelope
+	}
+	return demotionRowID, windowSize, halfLifeDays, nMin, nil
+}
+
+const EventDecisionLogGet = EventLearning
+const StageDecisionLogGet = FamilyLearning
+const OperationDecisionLogGet uint32 = 69
+const DecisionLogGetDecisionIDMin uint64 = 1
+const DecisionLogGetDecisionIDMax uint64 = 9223372036854775807
+
+// EncodeDecisionLogGetRequest writes the schema decision_log_get declares, in order.
+func EncodeDecisionLogGetRequest(decisionID uint64) ([]byte, error) {
+	if decisionID < DecisionLogGetDecisionIDMin || decisionID > DecisionLogGetDecisionIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var decisionIDBytes [8]byte
+	binary.LittleEndian.PutUint64(decisionIDBytes[:], decisionID)
+	payload = append(payload, decisionIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDecisionLogGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogGetRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogGetRequest(request []byte) (uint64, error) {
+	var decisionID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	decisionID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if decisionID < DecisionLogGetDecisionIDMin || decisionID > DecisionLogGetDecisionIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return decisionID, nil
+}
+
+const EventFidelityReportByTurn = EventLearning
+const StageFidelityReportByTurn = FamilyLearning
+const OperationFidelityReportByTurn uint32 = 70
+const FidelityReportByTurnTurnIDMin = 1
+const FidelityReportByTurnTurnIDMax = 127
+
+// EncodeFidelityReportByTurnRequest writes the schema fidelity_report_by_turn declares, in order.
+func EncodeFidelityReportByTurnRequest(turnID string) ([]byte, error) {
+	if len(turnID) < FidelityReportByTurnTurnIDMin || len(turnID) > FidelityReportByTurnTurnIDMax || hasNUL(turnID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, turnID, FidelityReportByTurnTurnIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationFidelityReportByTurn, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeFidelityReportByTurnRequest reads it back, checking each field against its own bound.
+func DecodeFidelityReportByTurnRequest(request []byte) (string, error) {
+	var turnID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFidelityReportByTurn || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if turnID, err = takeRowText(payload, &cursor, FidelityReportByTurnTurnIDMax); err != nil ||
+		len(turnID) < FidelityReportByTurnTurnIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return turnID, nil
 }
 
 const EventDocumentExists = EventOrganization

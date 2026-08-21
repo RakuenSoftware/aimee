@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "fidelity.h"
 #include "calibration.h"
 #include "canonical_index.h"
 #include "cross_repo_stats.h"
@@ -493,6 +494,12 @@ typedef struct
                                     char *id_out, int id_out_len);
    int (*projection_generation_meta)(int64_t gen_id, code_projection_generation_meta_t *out);
    int64_t (*projection_sync_project)(const char *project, int64_t gen_id);
+   double (*demotion_score)(int64_t row_id, int window_size, double half_life_days, int n_min);
+   int (*decision_log_get)(int64_t id, db2_decision_log_row_t *out);
+   int (*fidelity_report_by_turn)(const char *turn_id, char *status_out, int status_out_len,
+                                  int *supported_out, int *unsupported_out, int *abstained_out);
+   int (*directive_counts_by_state)(int64_t *open, int64_t *suppressed, int64_t *resolved,
+                                    int64_t *expired);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

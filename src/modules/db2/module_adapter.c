@@ -988,6 +988,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .calibration_profile_write = db2_calibration_profile_write,
        .projection_generation_meta = db2_code_projection_generation_meta,
        .projection_sync_project = db2_code_projection_sync_project,
+       .demotion_score = db2_demotion_score,
+       .decision_log_get = db2_decision_log_get,
+       .fidelity_report_by_turn = db2_fidelity_report_by_turn,
+       .directive_counts_by_state = db2_directive_counts_by_state,
    };
    return &backend;
 }
@@ -3283,6 +3287,44 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_memory_link_create_reply_encode(acknowledged, response_body,
                                                           response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_directive_counts_by_state_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DIRECTIVE_COUNTS_BY_STATE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->directive_counts_by_state)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t directives_open = 0u;
+            uint64_t directives_suppressed = 0u;
+            uint64_t directives_resolved = 0u;
+            uint64_t directives_expired = 0u;
+            {
+               int64_t open_count = 0;
+               int64_t suppressed_count = 0;
+               int64_t resolved_count = 0;
+               int64_t expired_count = 0;
+               if (backend->directive_counts_by_state(&open_count, &suppressed_count,
+                                                      &resolved_count, &expired_count) == 0)
+               {
+                  directives_open = open_count > 0 ? (uint64_t)open_count : 0u;
+                  directives_suppressed = suppressed_count > 0 ? (uint64_t)suppressed_count : 0u;
+                  directives_resolved = resolved_count > 0 ? (uint64_t)resolved_count : 0u;
+                  directives_expired = expired_count > 0 ? (uint64_t)expired_count : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_directive_counts_by_state_reply_encode(
+                    directives_open, directives_suppressed, directives_resolved, directives_expired,
+                    response_body, response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
@@ -8699,6 +8741,140 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_calibration_profile_write_reply_encode(
                     artifact_id, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t demotion_row_id = 0u;
+         uint32_t window_size = 0u;
+         double half_life_days = 0.0;
+         uint32_t n_min = 0u;
+         if (aimee_db2_demotion_score_request_decode(request_body, request_len, &demotion_row_id,
+                                                     &window_size, &half_life_days, &n_min) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DEMOTION_SCORE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->demotion_score)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t score_valid = 0u;
+            double demotion_score = 0.0;
+            {
+               double scored = backend->demotion_score((int64_t)demotion_row_id, (int)window_size,
+                                                       half_life_days, (int)n_min);
+               if (scored == scored)
+               {
+                  score_valid = 1u;
+                  demotion_score = scored;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_demotion_score_reply_encode(score_valid, demotion_score, response_body,
+                                                      response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t decision_id = 0u;
+         if (aimee_db2_decision_log_get_request_decode(request_body, request_len, &decision_id) ==
+             0)
+         {
+            if (response_capacity < AIMEE_DB2_DECISION_LOG_GET_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->decision_log_get)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t decision_found = 0u;
+            uint64_t task_id = 0u;
+            char decision_options[AIMEE_DB2_DECISION_LOG_GET_DECISION_OPTIONS_MAX + 1] = "";
+            char decision_chosen[AIMEE_DB2_DECISION_LOG_GET_DECISION_CHOSEN_MAX + 1] = "";
+            char decision_rationale[AIMEE_DB2_DECISION_LOG_GET_DECISION_RATIONALE_MAX + 1] = "";
+            char decision_assumptions[AIMEE_DB2_DECISION_LOG_GET_DECISION_ASSUMPTIONS_MAX + 1] = "";
+            char decision_outcome[AIMEE_DB2_DECISION_LOG_GET_DECISION_OUTCOME_MAX + 1] = "";
+            char decision_created_at[AIMEE_DB2_DECISION_LOG_GET_DECISION_CREATED_AT_MAX + 1] = "";
+            char decision_status[AIMEE_DB2_DECISION_LOG_GET_DECISION_STATUS_MAX + 1] = "";
+            char revisit_when[AIMEE_DB2_DECISION_LOG_GET_REVISIT_WHEN_MAX + 1] = "";
+            uint64_t supersedes_id = 0u;
+            char decision_subject[AIMEE_DB2_DECISION_LOG_GET_DECISION_SUBJECT_MAX + 1] = "";
+            char decision_author[AIMEE_DB2_DECISION_LOG_GET_DECISION_AUTHOR_MAX + 1] = "";
+            uint64_t linked_policy_id = 0u;
+            {
+               db2_decision_log_row_t row;
+               memset(&row, 0, sizeof(row));
+               if (backend->decision_log_get((int64_t)decision_id, &row) == 0)
+               {
+                  decision_found = 1u;
+                  task_id = row.task_id > 0 ? (uint64_t)row.task_id : 0u;
+                  snprintf(decision_options, sizeof(decision_options), "%s", row.options);
+                  snprintf(decision_chosen, sizeof(decision_chosen), "%s", row.chosen);
+                  snprintf(decision_rationale, sizeof(decision_rationale), "%s", row.rationale);
+                  snprintf(decision_assumptions, sizeof(decision_assumptions), "%s",
+                           row.assumptions);
+                  snprintf(decision_outcome, sizeof(decision_outcome), "%s", row.outcome);
+                  snprintf(decision_created_at, sizeof(decision_created_at), "%s", row.created_at);
+                  snprintf(decision_status, sizeof(decision_status), "%s", row.status);
+                  snprintf(revisit_when, sizeof(revisit_when), "%s", row.revisit_when);
+                  supersedes_id = row.supersedes_id > 0 ? (uint64_t)row.supersedes_id : 0u;
+                  snprintf(decision_subject, sizeof(decision_subject), "%s", row.subject);
+                  snprintf(decision_author, sizeof(decision_author), "%s", row.author);
+                  linked_policy_id = row.linked_policy_id > 0 ? (uint64_t)row.linked_policy_id : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_decision_log_get_reply_encode(
+                    decision_found, task_id, decision_options, decision_chosen, decision_rationale,
+                    decision_assumptions, decision_outcome, decision_created_at, decision_status,
+                    revisit_when, supersedes_id, decision_subject, decision_author,
+                    linked_policy_id, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char turn_id[AIMEE_DB2_FIDELITY_REPORT_BY_TURN_TURN_ID_MAX + 1] = "";
+         if (aimee_db2_fidelity_report_by_turn_request_decode(request_body, request_len, turn_id,
+                                                              sizeof(turn_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_FIDELITY_REPORT_BY_TURN_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->fidelity_report_by_turn)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t fidelity_result = 0u;
+            char fidelity_status[AIMEE_DB2_FIDELITY_REPORT_BY_TURN_FIDELITY_STATUS_MAX + 1] = "";
+            uint32_t supported_count = 0u;
+            uint32_t unsupported_count = 0u;
+            uint32_t abstained_count = 0u;
+            {
+               int supported = 0;
+               int unsupported = 0;
+               int abstained = 0;
+               int rc = backend->fidelity_report_by_turn(turn_id, fidelity_status,
+                                                         (int)sizeof(fidelity_status), &supported,
+                                                         &unsupported, &abstained);
+               fidelity_result = rc == 1 ? 1u : (rc == 0 ? 0u : 2u);
+               supported_count = supported > 0 ? (uint32_t)supported : 0u;
+               unsupported_count = unsupported > 0 ? (uint32_t)unsupported : 0u;
+               abstained_count = abstained > 0 ? (uint32_t)abstained : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_fidelity_report_by_turn_reply_encode(
+                    fidelity_result, fidelity_status, supported_count, unsupported_count,
+                    abstained_count, response_body, response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
