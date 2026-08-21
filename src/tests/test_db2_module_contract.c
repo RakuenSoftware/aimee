@@ -3533,6 +3533,41 @@ int db2_tool_registry_lookup(const char *name, tool_registry_entry_t *out)
    return -1;
 }
 
+int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t *out)
+{
+   (void)id;
+   (void)project;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int db2_workflow_pattern_insert(const char *pattern, const char *description, const char *source,
+                                const char *source_ref, double confidence, workflow_pattern_t *out)
+{
+   (void)pattern;
+   (void)description;
+   (void)source;
+   (void)source_ref;
+   (void)confidence;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_anti_pattern_insert(const char *pattern, const char *description, const char *source,
+                            const char *source_ref, double confidence, anti_pattern_t *out)
+{
+   (void)pattern;
+   (void)description;
+   (void)source;
+   (void)source_ref;
+   (void)confidence;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

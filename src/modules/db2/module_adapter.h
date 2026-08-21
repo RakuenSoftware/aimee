@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "anti_patterns.h"
+#include "workflow_patterns.h"
 #include "tool_registry.h"
 #include "rules.h"
 #include "memory_payload.h"
@@ -562,6 +564,12 @@ typedef struct
                       aimee_task_t *out);
    int (*task_get)(int64_t id, aimee_task_t *out);
    int (*tool_registry_lookup)(const char *name, tool_registry_entry_t *out);
+   int (*kb_document_fetch)(int64_t id, const char *project, db2_kb_document_row_t *out);
+   int (*workflow_pattern_insert)(const char *pattern, const char *description, const char *source,
+                                  const char *source_ref, double confidence,
+                                  workflow_pattern_t *out);
+   int (*anti_pattern_insert)(const char *pattern, const char *description, const char *source,
+                              const char *source_ref, double confidence, anti_pattern_t *out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -14276,6 +14276,134 @@
       }
     },
     {
+      "family": "learning",
+      "id": 78,
+      "name": "workflow_pattern_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Workflow patterns are relational DB2 rows.",
+      "c_symbols": [
+        "db2_workflow_pattern_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates the pattern, so the same one inserted twice becomes two rows"
+        },
+        "fields": [
+          {
+            "name": "pattern_text",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "pattern_description",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "pattern_source",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "pattern_source_ref",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "pattern_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "pattern_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 79,
+      "name": "anti_pattern_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Anti-patterns are relational DB2 rows.",
+      "c_symbols": [
+        "db2_anti_pattern_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates the pattern, so the same one inserted twice becomes two rows"
+        },
+        "fields": [
+          {
+            "name": "pattern_text",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "pattern_description",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "pattern_source",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "pattern_source_ref",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "pattern_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "pattern_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -19539,6 +19667,100 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 55,
+      "name": "kb_document_fetch",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Indexed document chunks are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_document_fetch"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty project reads across every project, because the identifier is unique on its own"
+        },
+        "fields": [
+          {
+            "name": "kb_document_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "project_name",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "document_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "document_project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "file_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "heading_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "line_start",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "line_end",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "document_content",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 8191
+          },
+          {
+            "name": "doc_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
           }
         ]
       }

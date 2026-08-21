@@ -13619,6 +13619,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_tool_registry_lookup",
         "policy": {"reads": 200},
     },
+    "kb_document_fetch": {
+        "key": ("maintenance", 55),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_document_fetch",
+        "policy": {"reads": 200},
+    },
+    "workflow_pattern_insert": {
+        "key": ("learning", 78),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_workflow_pattern_insert",
+        "policy": {"writes": 200},
+    },
+    "anti_pattern_insert": {
+        "key": ("learning", 79),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_anti_pattern_insert",
+        "policy": {"writes": 200},
+    },
 }
 
 

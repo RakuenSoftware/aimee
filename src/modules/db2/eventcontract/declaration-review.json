@@ -228,6 +228,14 @@
       "reason": "The typed learning.anti_pattern_exists_exact operation replaces the duplicate check. The match is exact: a pattern that differs by a character is a different pattern, which is what makes this usable as a duplicate guard and is worth stating because the wire cannot show it. A statement that could not run answers false, the same as an absent row."
     },
     {
+      "symbol": "db2_anti_pattern_insert",
+      "signature_sha256": "c5ec5b6f08d0a6d6848711de0fb7a09a8c122fa9e4c282a9105f431497e9679b",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.anti_pattern_insert operation records an anti-pattern. It is learning.workflow_pattern_insert against a different table, line for line, and carries the same three things: no deduplication of the pattern text, no bound on the confidence, and an output struct the backend fills from the arguments rather than from the row. Its struct also carries a hit count, which the backend sets to zero rather than reading, so it is not in this reply either."
+    },
+    {
       "symbol": "db2_anti_pattern_list",
       "signature_sha256": "a3ea18439a64fd7eb2849091e05847c42faab6e4e9952aeb871dd79e8784b0bd",
       "disposition": "wire-operation",
@@ -1530,6 +1538,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.kb_doc_set_state operation sets a document's state. The update names no current state, so any state moves to any other and nothing records what it was. It does not check that a row matched either, so an identifier that names nothing is acknowledged. The review reason is written only when the review flag is being cleared, so a caller cannot record a reason and leave the flag standing. The stamp is DB2's clock."
+    },
+    {
+      "symbol": "db2_kb_document_fetch",
+      "signature_sha256": "57b622ad9a41c3fb6be2dc8523c39e82eebaf8cc09218db9825ae4329d3b5523",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_document_fetch operation reads one indexed document chunk. An empty project is not a missing argument: the identifier is unique across the corpus, so an empty project reads whichever project's document it names and returns that project rather than checking it. The backend's own comment says this is for whole-corpus search. Only the current generation of a project the index calls current is visible, so a project mid-reindex answers as though the document were gone."
     },
     {
       "symbol": "db2_kb_documents_get_stored_hash",
@@ -4762,6 +4778,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "This reads a process configuration flag and issues no statement: it reports whether DB2 was started ephemeral. On the bus it would let one process ask another about its startup configuration, which is not a fact DB2 owns on the caller's behalf. A caller that needs it is asking about its own runtime and should read its own configuration."
+    },
+    {
+      "symbol": "db2_workflow_pattern_insert",
+      "signature_sha256": "28d0245578071308077b124731cb590da2e29b4db1cf012177b683a6d3dc9d79",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.workflow_pattern_insert operation records a workflow pattern. Nothing deduplicates the pattern text, so the same pattern learned twice becomes two rows. The confidence is stored as sent and nothing bounds it to a probability. The backend fills its output struct from the arguments rather than reading the row back, so a caller that trusted that struct was told what it sent -- which is why this operation answers with the identifier alone."
     },
     {
       "symbol": "memory_lint_run",

@@ -1217,6 +1217,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t rule_id, const char *directive_type, uint32_t set_weight, uint32_t rule_weight, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_workflow_pattern_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *pattern_text, const char *pattern_description, const char *pattern_source, const char *pattern_source_ref, double pattern_confidence, uint64_t *pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_anti_pattern_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *pattern_text, const char *pattern_description, const char *pattern_source, const char *pattern_source_ref, double pattern_confidence, uint64_t *pattern_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
@@ -1540,5 +1548,9 @@ extern "C"
    aimee_module_call_result_t aimee_db2_mining_job_complete_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *mining_job_id, uint64_t high_water_mark, const char *last_error, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_document_fetch_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t kb_document_id, const char *project_name, uint32_t *document_found, char *document_project, size_t document_project_capacity, char *file_path, size_t file_path_capacity, char *file_hash, size_t file_hash_capacity, char *heading_path, size_t heading_path_capacity, uint32_t *line_start, uint32_t *line_end, char *document_content, size_t document_content_capacity, char *doc_kind, size_t doc_kind_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

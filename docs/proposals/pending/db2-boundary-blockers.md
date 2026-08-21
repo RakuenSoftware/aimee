@@ -393,7 +393,7 @@ the envelope should carry an explicit family discriminator is a wire-format
 decision, and changing it later is a breaking change; recorded now while the
 wire is still only spoken by this repository.
 
-## Four list operations still return more rows than one reply can hold
+## Six list operations still return more rows than one reply can hold
 
 This entry used to name sixty-three. The bound was not the boundary's: a
 generated client declared its response buffer as a local array, so the reply
@@ -415,20 +415,58 @@ own threads. They are allocated now, with the rest.
 That leaves four declarations whose callers ask for more rows than a megabyte
 holds:
 
-    row type                bytes/row   rows per reply   caller asks for   n
-    project_info_t               4265              245               512   2
-    css_migration_unit_t         4405              238              1024   1
-    db2_org_spend_row_t           338             3102              4096   1
+    row type                     bytes/row   rows per reply   caller asks for   n
+    project_info_t                    4265              245               512   2
+    css_migration_unit_t              4405              238              1024   1
+    db2_org_spend_row_t                338             3102              4096   1
+    db2_evidence_vector_row_t         8357              125               512   1
+    db2_kb_convention_row_t           9536              109               500   1
 
 Each is wide for its own reason -- a project row carries a 4KB path, a CSS
 migration unit carries two -- and each caller's number is the size of an array
 it declared, which is a ceiling it chose rather than a count it needs. The
-honest options are unchanged and now apply to four operations rather than
+honest options are unchanged and now apply to six operations rather than
 sixty-three: page the reply, narrow the row to the fields the caller reads, or
 establish that the caller's array is larger than any real result.
 
-Twenty more could not be measured because their row type is not a plain struct
-of scalars and fixed strings; they need reading one at a time.
+The last two arrived with the field cap. They were unmeasurable while a utf8
+field could not exceed 4096 bytes, because the row they carry could not be
+described at all; describing it is what showed they do not fit either.
+
+Eighteen more could not be measured because their row type is not a plain
+struct of scalars and fixed strings; they need reading one at a time.
+
+## An answer that is a list and a summary has nowhere to go
+
+`db2_kb_pdf_search_chunks` returns matching PDF chunks and, alongside them, a
+`db2_kb_answerability_t`: a score, a label and four inputs saying how well the
+corpus can answer the query at all. The chunks are per-hit and the
+answerability is per-query, which is exactly why they travel together -- the
+summary is about the search, not about any one result.
+
+`db2-envelope-generic-v1` has no shape for that. A reply carries either a field
+list or a row list; the schema check that reads a row reply refuses any other
+key beside it. So the chunks can cross or the answerability can, and an
+operation that returns both needs either two round trips, with the corpus free
+to change between them, or an envelope that can carry a header alongside a
+list.
+
+Its caller asks for ten chunks, so this one is not about size. It is the only
+operation found so far whose answer has two shapes at once, and it is recorded
+here rather than split in two, because splitting it is a decision about what a
+search result is.
+
+There was a second ceiling, on one field rather than one message: a utf8 field
+could be bounded at 4096 bytes at most. Six DB2 row structs carry an
+8192-byte content or schema buffer, so six declarations could only have crossed
+by declaring a bound that truncates -- silently, at the boundary, rather than
+at the code's own limit. That cap is 8192 now.
+
+What made the old number safe was never the number. It was that no message
+could grow past the wire when its fields were that small, and nothing said so:
+the whole-reply bound existed only for row lists, and there was no bound at all
+on a request. Both are checked now against the megabyte the row lists are
+checked against, which is what the per-field cap had been standing in for.
 
 ## `db2_kb_doc_write` takes a whole document as an argument
 

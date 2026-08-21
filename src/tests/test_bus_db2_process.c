@@ -3549,6 +3549,62 @@ int main(int argc, char **argv)
    assert(tool_registry_lookup_tool_found == 0 && tool_registry_lookup_input_schema[0] == '\0' &&
           tool_registry_lookup_side_effect[0] == '\0' && tool_registry_lookup_tool_enabled == 0);
 
+   /* A document read with no project named, and the two pattern inserts that deduplicate nothing.
+    */
+   uint32_t kb_document_fetch_document_found = 99;
+   static char
+       kb_document_fetch_document_project[AIMEE_DB2_KB_DOCUMENT_FETCH_DOCUMENT_PROJECT_MAX + 1];
+   kb_document_fetch_document_project[0] = 'x';
+   static char kb_document_fetch_file_path[AIMEE_DB2_KB_DOCUMENT_FETCH_FILE_PATH_MAX + 1];
+   kb_document_fetch_file_path[0] = 'x';
+   static char kb_document_fetch_file_hash[AIMEE_DB2_KB_DOCUMENT_FETCH_FILE_HASH_MAX + 1];
+   kb_document_fetch_file_hash[0] = 'x';
+   static char kb_document_fetch_heading_path[AIMEE_DB2_KB_DOCUMENT_FETCH_HEADING_PATH_MAX + 1];
+   kb_document_fetch_heading_path[0] = 'x';
+   uint32_t kb_document_fetch_line_start = 99;
+   uint32_t kb_document_fetch_line_end = 99;
+   static char
+       kb_document_fetch_document_content[AIMEE_DB2_KB_DOCUMENT_FETCH_DOCUMENT_CONTENT_MAX + 1];
+   kb_document_fetch_document_content[0] = 'x';
+   static char kb_document_fetch_doc_kind[AIMEE_DB2_KB_DOCUMENT_FETCH_DOC_KIND_MAX + 1];
+   kb_document_fetch_doc_kind[0] = 'x';
+   assert(aimee_db2_kb_document_fetch_call(
+              call_client, &client, 9482, 0, 4242, "", &kb_document_fetch_document_found,
+              kb_document_fetch_document_project, sizeof(kb_document_fetch_document_project),
+              kb_document_fetch_file_path, sizeof(kb_document_fetch_file_path),
+              kb_document_fetch_file_hash, sizeof(kb_document_fetch_file_hash),
+              kb_document_fetch_heading_path, sizeof(kb_document_fetch_heading_path),
+              &kb_document_fetch_line_start, &kb_document_fetch_line_end,
+              kb_document_fetch_document_content, sizeof(kb_document_fetch_document_content),
+              kb_document_fetch_doc_kind, sizeof(kb_document_fetch_doc_kind), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_document_fetch_document_found == 0 && kb_document_fetch_document_project[0] == '\0' &&
+          kb_document_fetch_file_path[0] == '\0' && kb_document_fetch_file_hash[0] == '\0' &&
+          kb_document_fetch_heading_path[0] == '\0' && kb_document_fetch_line_start == 0 &&
+          kb_document_fetch_line_end == 0 && kb_document_fetch_document_content[0] == '\0' &&
+          kb_document_fetch_doc_kind[0] == '\0');
+
+   uint64_t workflow_pattern_insert_pattern_id = 99;
+   assert(aimee_db2_workflow_pattern_insert_call(
+              call_client, &client, 9483, 0, "replay workflow pattern", "replayed", "replay", "ref",
+              0.5, &workflow_pattern_insert_pattern_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(workflow_pattern_insert_pattern_id > 0);
+
+   /* The same pattern again. Nothing deduplicates the text, so this is a second
+    * row with a second identifier rather than the first one returned again. */
+   uint64_t workflow_pattern_insert_second_id = 99;
+   assert(aimee_db2_workflow_pattern_insert_call(
+              call_client, &client, 9485, 0, "replay workflow pattern", "replayed", "replay", "ref",
+              0.5, &workflow_pattern_insert_second_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(workflow_pattern_insert_second_id > 0);
+   assert(workflow_pattern_insert_second_id != workflow_pattern_insert_pattern_id);
+
+   uint64_t anti_pattern_insert_pattern_id = 99;
+   assert(aimee_db2_anti_pattern_insert_call(
+              call_client, &client, 9484, 0, "replay anti pattern", "replayed", "replay", "ref",
+              0.5, &anti_pattern_insert_pattern_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(anti_pattern_insert_pattern_id > 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

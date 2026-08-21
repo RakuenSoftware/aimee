@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/workflow_patterns.h"
 #include "c/tool_registry.h"
 #include "c/feedback.h"
 #include "c/cross_repo_stats.h"
@@ -1031,6 +1032,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .task_create = db2_task_create,
        .task_get = db2_task_get,
        .tool_registry_lookup = db2_tool_registry_lookup,
+       .kb_document_fetch = db2_kb_document_fetch,
+       .workflow_pattern_insert = db2_workflow_pattern_insert,
+       .anti_pattern_insert = db2_anti_pattern_insert,
    };
    return &backend;
 }
@@ -9788,6 +9792,79 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char pattern_text[AIMEE_DB2_WORKFLOW_PATTERN_INSERT_PATTERN_TEXT_MAX + 1] = "";
+         char pattern_description[AIMEE_DB2_WORKFLOW_PATTERN_INSERT_PATTERN_DESCRIPTION_MAX + 1] =
+             "";
+         char pattern_source[AIMEE_DB2_WORKFLOW_PATTERN_INSERT_PATTERN_SOURCE_MAX + 1] = "";
+         char pattern_source_ref[AIMEE_DB2_WORKFLOW_PATTERN_INSERT_PATTERN_SOURCE_REF_MAX + 1] = "";
+         double pattern_confidence = 0.0;
+         if (aimee_db2_workflow_pattern_insert_request_decode(
+                 request_body, request_len, pattern_text, sizeof(pattern_text), pattern_description,
+                 sizeof(pattern_description), pattern_source, sizeof(pattern_source),
+                 pattern_source_ref, sizeof(pattern_source_ref), &pattern_confidence) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_WORKFLOW_PATTERN_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->workflow_pattern_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t pattern_id = 0u;
+            {
+               workflow_pattern_t pattern;
+               memset(&pattern, 0, sizeof(pattern));
+               if (backend->workflow_pattern_insert(pattern_text, pattern_description,
+                                                    pattern_source, pattern_source_ref,
+                                                    pattern_confidence, &pattern) == 0)
+                  pattern_id = pattern.id > 0 ? (uint64_t)pattern.id : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_workflow_pattern_insert_reply_encode(
+                    pattern_id, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char pattern_text[AIMEE_DB2_ANTI_PATTERN_INSERT_PATTERN_TEXT_MAX + 1] = "";
+         char pattern_description[AIMEE_DB2_ANTI_PATTERN_INSERT_PATTERN_DESCRIPTION_MAX + 1] = "";
+         char pattern_source[AIMEE_DB2_ANTI_PATTERN_INSERT_PATTERN_SOURCE_MAX + 1] = "";
+         char pattern_source_ref[AIMEE_DB2_ANTI_PATTERN_INSERT_PATTERN_SOURCE_REF_MAX + 1] = "";
+         double pattern_confidence = 0.0;
+         if (aimee_db2_anti_pattern_insert_request_decode(
+                 request_body, request_len, pattern_text, sizeof(pattern_text), pattern_description,
+                 sizeof(pattern_description), pattern_source, sizeof(pattern_source),
+                 pattern_source_ref, sizeof(pattern_source_ref), &pattern_confidence) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ANTI_PATTERN_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->anti_pattern_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t pattern_id = 0u;
+            {
+               anti_pattern_t pattern;
+               memset(&pattern, 0, sizeof(pattern));
+               if (backend->anti_pattern_insert(pattern_text, pattern_description, pattern_source,
+                                                pattern_source_ref, pattern_confidence,
+                                                &pattern) == 0)
+                  pattern_id = pattern.id > 0 ? (uint64_t)pattern.id : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_anti_pattern_insert_reply_encode(pattern_id, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
@@ -11252,6 +11329,55 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_mining_job_complete_reply_encode(acknowledged, response_body,
                                                            response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t kb_document_id = 0u;
+         char project_name[AIMEE_DB2_KB_DOCUMENT_FETCH_PROJECT_NAME_MAX + 1] = "";
+         if (aimee_db2_kb_document_fetch_request_decode(request_body, request_len, &kb_document_id,
+                                                        project_name, sizeof(project_name)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_DOCUMENT_FETCH_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_document_fetch)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t document_found = 0u;
+            char document_project[AIMEE_DB2_KB_DOCUMENT_FETCH_DOCUMENT_PROJECT_MAX + 1] = "";
+            char file_path[AIMEE_DB2_KB_DOCUMENT_FETCH_FILE_PATH_MAX + 1] = "";
+            char file_hash[AIMEE_DB2_KB_DOCUMENT_FETCH_FILE_HASH_MAX + 1] = "";
+            char heading_path[AIMEE_DB2_KB_DOCUMENT_FETCH_HEADING_PATH_MAX + 1] = "";
+            uint32_t line_start = 0u;
+            uint32_t line_end = 0u;
+            char document_content[AIMEE_DB2_KB_DOCUMENT_FETCH_DOCUMENT_CONTENT_MAX + 1] = "";
+            char doc_kind[AIMEE_DB2_KB_DOCUMENT_FETCH_DOC_KIND_MAX + 1] = "";
+            {
+               db2_kb_document_row_t document;
+               memset(&document, 0, sizeof(document));
+               if (backend->kb_document_fetch((int64_t)kb_document_id, project_name, &document))
+               {
+                  document_found = 1u;
+                  snprintf(document_project, sizeof(document_project), "%s", document.project);
+                  snprintf(file_path, sizeof(file_path), "%s", document.file_path);
+                  snprintf(file_hash, sizeof(file_hash), "%s", document.file_hash);
+                  snprintf(heading_path, sizeof(heading_path), "%s", document.heading_path);
+                  line_start = document.line_start > 0 ? (uint32_t)document.line_start : 0u;
+                  line_end = document.line_end > 0 ? (uint32_t)document.line_end : 0u;
+                  snprintf(document_content, sizeof(document_content), "%s", document.content);
+                  snprintf(doc_kind, sizeof(doc_kind), "%s", document.doc_kind);
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_document_fetch_reply_encode(
+                    document_found, document_project, file_path, file_hash, heading_path,
+                    line_start, line_end, document_content, doc_kind, response_body,
+                    response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

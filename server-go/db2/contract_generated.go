@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "df9270e6a3fbf6b46b9e16b8165158594983b2524f702a03ce3b6c5b0e7bdebb"
+const ContractSHA256 = "301ca2c136209881972fb506f1687c3cb5d8525ccaec88c3ff09d5c773b5bacb"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -10571,6 +10571,192 @@ func DecodeRulesReinforceDirectiveRequest(request []byte) (uint32, string, uint3
 	return ruleID, directiveType, setWeight, ruleWeight, nil
 }
 
+const EventWorkflowPatternInsert = EventLearning
+const StageWorkflowPatternInsert = FamilyLearning
+const OperationWorkflowPatternInsert uint32 = 78
+const WorkflowPatternInsertPatternTextMin = 1
+const WorkflowPatternInsertPatternTextMax = 511
+const WorkflowPatternInsertPatternDescriptionMin = 0
+const WorkflowPatternInsertPatternDescriptionMax = 1023
+const WorkflowPatternInsertPatternSourceMin = 0
+const WorkflowPatternInsertPatternSourceMax = 31
+const WorkflowPatternInsertPatternSourceRefMin = 0
+const WorkflowPatternInsertPatternSourceRefMax = 63
+const WorkflowPatternInsertPatternConfidenceMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeWorkflowPatternInsertRequest writes the schema workflow_pattern_insert declares, in order.
+func EncodeWorkflowPatternInsertRequest(patternText string, patternDescription string, patternSource string, patternSourceRef string, patternConfidence float64) ([]byte, error) {
+	if len(patternText) < WorkflowPatternInsertPatternTextMin || len(patternText) > WorkflowPatternInsertPatternTextMax || hasNUL(patternText) ||
+		len(patternDescription) < WorkflowPatternInsertPatternDescriptionMin || len(patternDescription) > WorkflowPatternInsertPatternDescriptionMax || hasNUL(patternDescription) ||
+		len(patternSource) < WorkflowPatternInsertPatternSourceMin || len(patternSource) > WorkflowPatternInsertPatternSourceMax || hasNUL(patternSource) ||
+		len(patternSourceRef) < WorkflowPatternInsertPatternSourceRefMin || len(patternSourceRef) > WorkflowPatternInsertPatternSourceRefMax || hasNUL(patternSourceRef) ||
+		math.Float64bits(patternConfidence)&0x7fffffffffffffff > WorkflowPatternInsertPatternConfidenceMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, patternText, WorkflowPatternInsertPatternTextMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, patternDescription, WorkflowPatternInsertPatternDescriptionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, patternSource, WorkflowPatternInsertPatternSourceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, patternSourceRef, WorkflowPatternInsertPatternSourceRefMax); err != nil {
+		return nil, err
+	}
+	var patternConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(patternConfidenceBytes[:], math.Float64bits(patternConfidence))
+	payload = append(payload, patternConfidenceBytes[:]...)
+	header, err := EncodeRequestHeader(OperationWorkflowPatternInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeWorkflowPatternInsertRequest reads it back, checking each field against its own bound.
+func DecodeWorkflowPatternInsertRequest(request []byte) (string, string, string, string, float64, error) {
+	var patternText string
+	var patternDescription string
+	var patternSource string
+	var patternSourceRef string
+	var patternConfidence float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationWorkflowPatternInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if patternText, err = takeRowText(payload, &cursor, WorkflowPatternInsertPatternTextMax); err != nil ||
+		len(patternText) < WorkflowPatternInsertPatternTextMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if patternDescription, err = takeRowText(payload, &cursor, WorkflowPatternInsertPatternDescriptionMax); err != nil ||
+		len(patternDescription) < WorkflowPatternInsertPatternDescriptionMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if patternSource, err = takeRowText(payload, &cursor, WorkflowPatternInsertPatternSourceMax); err != nil ||
+		len(patternSource) < WorkflowPatternInsertPatternSourceMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if patternSourceRef, err = takeRowText(payload, &cursor, WorkflowPatternInsertPatternSourceRefMax); err != nil ||
+		len(patternSourceRef) < WorkflowPatternInsertPatternSourceRefMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > WorkflowPatternInsertPatternConfidenceMaxMagnitudeBits {
+			return "", "", "", "", 0, ErrMalformedEnvelope
+		}
+		patternConfidence = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	return patternText, patternDescription, patternSource, patternSourceRef, patternConfidence, nil
+}
+
+const EventAntiPatternInsert = EventLearning
+const StageAntiPatternInsert = FamilyLearning
+const OperationAntiPatternInsert uint32 = 79
+const AntiPatternInsertPatternTextMin = 1
+const AntiPatternInsertPatternTextMax = 511
+const AntiPatternInsertPatternDescriptionMin = 0
+const AntiPatternInsertPatternDescriptionMax = 1023
+const AntiPatternInsertPatternSourceMin = 0
+const AntiPatternInsertPatternSourceMax = 31
+const AntiPatternInsertPatternSourceRefMin = 0
+const AntiPatternInsertPatternSourceRefMax = 63
+const AntiPatternInsertPatternConfidenceMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeAntiPatternInsertRequest writes the schema anti_pattern_insert declares, in order.
+func EncodeAntiPatternInsertRequest(patternText string, patternDescription string, patternSource string, patternSourceRef string, patternConfidence float64) ([]byte, error) {
+	if len(patternText) < AntiPatternInsertPatternTextMin || len(patternText) > AntiPatternInsertPatternTextMax || hasNUL(patternText) ||
+		len(patternDescription) < AntiPatternInsertPatternDescriptionMin || len(patternDescription) > AntiPatternInsertPatternDescriptionMax || hasNUL(patternDescription) ||
+		len(patternSource) < AntiPatternInsertPatternSourceMin || len(patternSource) > AntiPatternInsertPatternSourceMax || hasNUL(patternSource) ||
+		len(patternSourceRef) < AntiPatternInsertPatternSourceRefMin || len(patternSourceRef) > AntiPatternInsertPatternSourceRefMax || hasNUL(patternSourceRef) ||
+		math.Float64bits(patternConfidence)&0x7fffffffffffffff > AntiPatternInsertPatternConfidenceMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, patternText, AntiPatternInsertPatternTextMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, patternDescription, AntiPatternInsertPatternDescriptionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, patternSource, AntiPatternInsertPatternSourceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, patternSourceRef, AntiPatternInsertPatternSourceRefMax); err != nil {
+		return nil, err
+	}
+	var patternConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(patternConfidenceBytes[:], math.Float64bits(patternConfidence))
+	payload = append(payload, patternConfidenceBytes[:]...)
+	header, err := EncodeRequestHeader(OperationAntiPatternInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAntiPatternInsertRequest reads it back, checking each field against its own bound.
+func DecodeAntiPatternInsertRequest(request []byte) (string, string, string, string, float64, error) {
+	var patternText string
+	var patternDescription string
+	var patternSource string
+	var patternSourceRef string
+	var patternConfidence float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAntiPatternInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if patternText, err = takeRowText(payload, &cursor, AntiPatternInsertPatternTextMax); err != nil ||
+		len(patternText) < AntiPatternInsertPatternTextMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if patternDescription, err = takeRowText(payload, &cursor, AntiPatternInsertPatternDescriptionMax); err != nil ||
+		len(patternDescription) < AntiPatternInsertPatternDescriptionMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if patternSource, err = takeRowText(payload, &cursor, AntiPatternInsertPatternSourceMax); err != nil ||
+		len(patternSource) < AntiPatternInsertPatternSourceMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if patternSourceRef, err = takeRowText(payload, &cursor, AntiPatternInsertPatternSourceRefMax); err != nil ||
+		len(patternSourceRef) < AntiPatternInsertPatternSourceRefMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > AntiPatternInsertPatternConfidenceMaxMagnitudeBits {
+			return "", "", "", "", 0, ErrMalformedEnvelope
+		}
+		patternConfidence = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	return patternText, patternDescription, patternSource, patternSourceRef, patternConfidence, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -15211,6 +15397,64 @@ func DecodeMiningJobCompleteRequest(request []byte) (string, uint64, string, err
 		return "", 0, "", ErrMalformedEnvelope
 	}
 	return miningJobID, highWaterMark, lastError, nil
+}
+
+const EventKBDocumentFetch = EventMaintenance
+const StageKBDocumentFetch = FamilyMaintenance
+const OperationKBDocumentFetch uint32 = 55
+const KBDocumentFetchKBDocumentIDMin uint64 = 1
+const KBDocumentFetchKBDocumentIDMax uint64 = 9223372036854775807
+const KBDocumentFetchProjectNameMin = 0
+const KBDocumentFetchProjectNameMax = 255
+
+// EncodeKBDocumentFetchRequest writes the schema kb_document_fetch declares, in order.
+func EncodeKBDocumentFetchRequest(kBDocumentID uint64, projectName string) ([]byte, error) {
+	if kBDocumentID < KBDocumentFetchKBDocumentIDMin || kBDocumentID > KBDocumentFetchKBDocumentIDMax ||
+		len(projectName) < KBDocumentFetchProjectNameMin || len(projectName) > KBDocumentFetchProjectNameMax || hasNUL(projectName) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var kBDocumentIDBytes [8]byte
+	binary.LittleEndian.PutUint64(kBDocumentIDBytes[:], kBDocumentID)
+	payload = append(payload, kBDocumentIDBytes[:]...)
+	if err := putRowText(&payload, projectName, KBDocumentFetchProjectNameMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBDocumentFetch, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocumentFetchRequest reads it back, checking each field against its own bound.
+func DecodeKBDocumentFetchRequest(request []byte) (uint64, string, error) {
+	var kBDocumentID uint64
+	var projectName string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocumentFetch || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	kBDocumentID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if kBDocumentID < KBDocumentFetchKBDocumentIDMin || kBDocumentID > KBDocumentFetchKBDocumentIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if projectName, err = takeRowText(payload, &cursor, KBDocumentFetchProjectNameMax); err != nil ||
+		len(projectName) < KBDocumentFetchProjectNameMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return kBDocumentID, projectName, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex
