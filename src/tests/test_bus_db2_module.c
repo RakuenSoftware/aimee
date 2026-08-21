@@ -2556,6 +2556,70 @@ int64_t db2_code_index_file_upsert(int64_t project_id, const char *rel_path, con
    return 0;
 }
 
+void db2_code_index_op_record(int64_t point_id, const char *project, const char *node_key,
+                              const char *file_path, int ok, const char *error_msg)
+{
+   (void)point_id;
+   (void)project;
+   (void)node_key;
+   (void)file_path;
+   (void)ok;
+   (void)error_msg;
+}
+
+int64_t db2_code_index_project_upsert(const char *name, const char *root)
+{
+   (void)name;
+   (void)root;
+   return 0;
+}
+
+int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
+                              const char *scope_id, char *buf, size_t len)
+{
+   (void)memory_class;
+   (void)scope_kind;
+   (void)scope_id;
+   if (buf && len)
+      buf[0] = '\0';
+   return -1;
+}
+
+int db2_demotion_profile_write(const char *memory_class, const char *scope_kind,
+                               const char *scope_id, const char *payload_json, char *id_out,
+                               int id_out_len)
+{
+   (void)memory_class;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)payload_json;
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   return -1;
+}
+
+int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
+                                             int64_t surfaced_row_id, const char *verdict,
+                                             double weight)
+{
+   (void)retrieval_event_id;
+   (void)surfaced_row_id;
+   (void)verdict;
+   (void)weight;
+   return 0;
+}
+
+int db2_css_render_snapshot_store(const char *project, const char *unit_path, const char *phase,
+                                  const char *snapshot_json, const char *now_iso)
+{
+   (void)project;
+   (void)unit_path;
+   (void)phase;
+   (void)snapshot_json;
+   (void)now_iso;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

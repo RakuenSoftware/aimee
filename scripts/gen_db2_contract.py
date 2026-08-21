@@ -13198,6 +13198,42 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_code_index_file_upsert",
         "policy": {"writes": 200},
     },
+    "code_index_op_record": {
+        "key": ("index", 60),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_op_record",
+        "policy": {"writes": 200},
+    },
+    "code_project_upsert": {
+        "key": ("index", 61),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_project_upsert",
+        "policy": {"writes": 200},
+    },
+    "demotion_profile_read": {
+        "key": ("learning", 58),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_demotion_profile_read",
+        "policy": {"reads": 200},
+    },
+    "demotion_profile_write": {
+        "key": ("learning", 59),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_demotion_profile_write",
+        "policy": {"writes": 200},
+    },
+    "retrieval_attribution_write": {
+        "key": ("learning", 60),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_demotion_retrieval_attribution_write",
+        "policy": {"writes": 200},
+    },
+    "css_render_snapshot_store": {
+        "key": ("maintenance", 40),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_css_render_snapshot_store",
+        "policy": {"writes": 200},
+    },
 }
 
 

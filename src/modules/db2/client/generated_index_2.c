@@ -661,3 +661,63 @@ aimee_db2_code_file_upsert_call(aimee_db2_call_fn call, void *call_context, uint
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_code_index_op_record_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                    uint64_t deadline_ns, uint64_t point_id, const char *project,
+                                    const char *node_key, const char *file_path, uint32_t index_ok,
+                                    const char *error_message, uint32_t *recorded,
+                                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CODE_INDEX_OP_RECORD_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_CODE_INDEX_OP_RECORD_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_code_index_op_record_request_encode(point_id, project, node_key, file_path,
+                                                     index_ok, error_message, request,
+                                                     sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CODE_INDEX_OP_RECORD,
+            AIMEE_DB2_STAGE_CODE_INDEX_OP_RECORD, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_code_index_op_record_reply_decode(response, response_len, recorded) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_code_project_upsert_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, const char *project,
+                                   const char *project_root, uint64_t *project_id,
+                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CODE_PROJECT_UPSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_CODE_PROJECT_UPSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_code_project_upsert_request_encode(project, project_root, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CODE_PROJECT_UPSERT, AIMEE_DB2_STAGE_CODE_PROJECT_UPSERT,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_code_project_upsert_reply_decode(response, response_len, project_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

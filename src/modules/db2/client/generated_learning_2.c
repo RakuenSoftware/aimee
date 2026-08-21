@@ -562,3 +562,97 @@ aimee_module_call_result_t aimee_db2_bandit_arm_stats_update_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_demotion_profile_read_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                     uint64_t deadline_ns, const char *memory_class,
+                                     const char *profile_scope_kind, const char *profile_scope_id,
+                                     char *profile_json, size_t profile_json_capacity,
+                                     aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DEMOTION_PROFILE_READ_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DEMOTION_PROFILE_READ_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_demotion_profile_read_request_encode(memory_class, profile_scope_kind,
+                                                      profile_scope_id, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DEMOTION_PROFILE_READ,
+            AIMEE_DB2_STAGE_DEMOTION_PROFILE_READ, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_demotion_profile_read_reply_decode(response, response_len, profile_json,
+                                                    profile_json_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_demotion_profile_write_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *memory_class, const char *profile_scope_kind, const char *profile_scope_id,
+    const char *payload_json, char *profile_id, size_t profile_id_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DEMOTION_PROFILE_WRITE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DEMOTION_PROFILE_WRITE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_demotion_profile_write_request_encode(memory_class, profile_scope_kind,
+                                                       profile_scope_id, payload_json, request,
+                                                       sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DEMOTION_PROFILE_WRITE,
+            AIMEE_DB2_STAGE_DEMOTION_PROFILE_WRITE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_demotion_profile_write_reply_decode(response, response_len, profile_id,
+                                                     profile_id_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_retrieval_attribution_write_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *retrieval_event_id, uint64_t surfaced_row_id, const char *attribution_verdict,
+    double attribution_weight, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RETRIEVAL_ATTRIBUTION_WRITE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RETRIEVAL_ATTRIBUTION_WRITE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_retrieval_attribution_write_request_encode(
+           retrieval_event_id, surfaced_row_id, attribution_verdict, attribution_weight, request,
+           sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RETRIEVAL_ATTRIBUTION_WRITE,
+            AIMEE_DB2_STAGE_RETRIEVAL_ATTRIBUTION_WRITE, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_retrieval_attribution_write_reply_decode(response, response_len, acknowledged) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

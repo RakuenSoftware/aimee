@@ -1144,3 +1144,33 @@ aimee_db2_decision_log_active_id_call(aimee_db2_call_fn call, void *call_context
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_css_render_snapshot_store_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *project, const char *unit_path, const char *render_phase, const char *snapshot_json,
+    const char *captured_at, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CSS_RENDER_SNAPSHOT_STORE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_CSS_RENDER_SNAPSHOT_STORE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_css_render_snapshot_store_request_encode(project, unit_path, render_phase,
+                                                          snapshot_json, captured_at, request,
+                                                          sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CSS_RENDER_SNAPSHOT_STORE,
+            AIMEE_DB2_STAGE_CSS_RENDER_SNAPSHOT_STORE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_css_render_snapshot_store_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

@@ -8898,6 +8898,122 @@
       }
     },
     {
+      "family": "index",
+      "id": 60,
+      "name": "code_index_op_record",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Index operations and their attempt counts are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_op_record"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the backend returns nothing, so the reply is a receipt for the call and never for the write, and re-recording a point raises its attempt count"
+        },
+        "fields": [
+          {
+            "name": "point_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "node_key",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "file_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "index_ok",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "error_message",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "recorded",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 61,
+      "name": "code_project_upsert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projects, their roots and their generations are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_project_upsert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "a project whose root has moved is given a new generation, and the whole read-decide-write runs in one transaction the module holds"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "project_root",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "project_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -11737,6 +11853,174 @@
             "type": "f64",
             "encoding": "ieee754-binary64-le",
             "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 58,
+      "name": "demotion_profile_read",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Demotion profiles and their scopes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_demotion_profile_read"
+      ],
+      "request": {
+        "policy": {
+          "reads": "three scopes are tried in turn -- exact, then scope kind alone, then global -- and the reply does not say which answered"
+        },
+        "fields": [
+          {
+            "name": "memory_class",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "profile_scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "profile_scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "profile_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 59,
+      "name": "demotion_profile_write",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Demotion profiles are stored as relational DB2 artifact rows.",
+      "c_symbols": [
+        "db2_demotion_profile_write"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the profile is stored as a committed artifact, and the global scope the reader falls back to is unreachable here because the wire cannot send the null this backend needs"
+        },
+        "fields": [
+          {
+            "name": "memory_class",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "profile_scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "profile_scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "payload_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "profile_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 60,
+      "name": "retrieval_attribution_write",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Retrieval attributions are stored as relational DB2 artifact rows.",
+      "c_symbols": [
+        "db2_demotion_retrieval_attribution_write"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the attribution is stored as an artifact whose payload is assembled as JSON text, and the weight is written with six decimal places"
+        },
+        "fields": [
+          {
+            "name": "retrieval_event_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "surfaced_row_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "attribution_verdict",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "attribution_weight",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4607182418800017408
           }
         ]
       },
@@ -15489,6 +15773,70 @@
             "type": "u64",
             "minimum": 0,
             "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 40,
+      "name": "css_render_snapshot_store",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "CSS render snapshots and the generation they belong to are relational DB2 rows.",
+      "c_symbols": [
+        "db2_css_render_snapshot_store"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the old snapshot is deleted before the new one is inserted, without a transaction, so a failure between them leaves no snapshot at all"
+        },
+        "fields": [
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "unit_path",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "render_phase",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "snapshot_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          },
+          {
+            "name": "captured_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
           }
         ]
       }

@@ -3595,7 +3595,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.artifact_reject operation rejects an artifact and records why. The state moves first and the audit row is written second, with no transaction around the pair, so a failure between them leaves the artifact rejected and the reason lost -- and the reply reports only the second half. The before-state is the caller's to supply, so what the audit says the artifact was is whatever the caller claimed."
+        "reason": "The typed learning.artifact_reject operation rejects an artifact and records why. The state moves first and the audit row is written second, with no transaction around the pair, so a failure between them leaves the artifact rejected and the reason lost -- and the reply reports only the second half. The before-state is the caller's to supply, and its empty-object default needs a null the wire cannot send."
       },
       "signature": "int db2_artifact_reject ( const char * id , const char * verdict_tag , const char * verdict_scope , const char * counter_example , const char * before_json )",
       "signature_sha256": "6f095caf76828c9071532d6cc5ddbaeec2b8fcd4b39cb0e90e7caac6b02a8aee",
@@ -3783,7 +3783,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.artifact_write operation records an artifact. The identifier is the caller's, and writing one that exists does nothing and is acknowledged -- so a second write with different content neither updates the artifact nor says it did not. An empty kind becomes the proposed state's defaults, an empty payload becomes an empty object, and the attempt count is fixed at one, which is what learning.artifact_write_ex exists to vary."
+        "reason": "The typed learning.artifact_write operation records an artifact. The identifier is the caller's, and writing one that exists does nothing and is acknowledged -- so a second write with different content neither updates the artifact nor says it did not. Its state, scope-kind and payload defaults apply only to a null argument, and the wire cannot send null, so an empty one is stored empty and none of the three applies here. The attempt count is fixed at one, which is what learning.artifact_write_ex varies."
       },
       "signature": "int db2_artifact_write ( const char * id , const char * kind , const char * state , const char * scope_kind , const char * scope_id , const char * operator_id , double confidence , const char * payload_json )",
       "signature_sha256": "46951c63f8c37d6934387e8ba9cad0bea59becb2f5d892c807b15db043deb426",
@@ -3819,7 +3819,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.artifact_write_ex operation records an artifact with an attempt count of the caller's choosing. It is otherwise learning.artifact_write, including the part that matters: writing an identifier that exists does nothing and is acknowledged. So the attempt count can only ever be set when the artifact is created, and a caller trying to raise it on a retry writes nothing and is told it worked."
+        "reason": "The typed learning.artifact_write_ex operation records an artifact with an attempt count of the caller's choosing. It is otherwise learning.artifact_write, including the part that matters: writing an identifier that exists does nothing and is acknowledged. So the attempt count can only be set when the artifact is created, and a caller raising it on a retry writes nothing and is told it worked. Its state, scope-kind and payload defaults need a null the wire cannot send."
       },
       "signature": "int db2_artifact_write_ex ( const char * id , const char * kind , const char * state , const char * scope_kind , const char * scope_id , const char * operator_id , double confidence , int attempt_count , const char * payload_json )",
       "signature_sha256": "64e2e37f25b125b5237bd41517a036361b458813e752d7a481bc9116d2e08a57",
@@ -3863,7 +3863,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. Writing an identifier that exists does nothing and is acknowledged, which makes an append safe to retry and makes a collision silent."
+        "reason": "The typed learning.audit_event_write operation appends an audit event. Both the before and after snapshots are the caller's to supply -- nothing reads the artifact to check either -- so this records what a caller says it did rather than what happened. Writing an identifier that exists does nothing and is acknowledged. The scope kind defaults to user only for a null argument, which the wire cannot send."
       },
       "signature": "int db2_audit_event_write ( const char * id , const char * source_artifact_id , const char * target_surface , const char * target_id , const char * operator_id , const char * scope_kind , const char * scope_id , double applied_confidence , int flagged_for_review , const char * before_json , const char * after_json )",
       "signature_sha256": "996924ace3f43aa69b680a7bca9922ce96381a673846d295c084d018b88ce508",
@@ -4485,9 +4485,15 @@
           "line": 27
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.code_index_op_record operation records how indexing one point went. The backend returns nothing -- it is a void function -- so the reply says the call was made and can never say the write landed: a statement that failed inside the module looks exactly like one that succeeded. The reply is bounded to one for that reason. Re-recording a point raises its attempt count, so the count measures calls rather than indexing attempts."
+      },
       "signature": "void db2_code_index_op_record ( int64_t point_id , const char * project , const char * node_key , const char * file_path , int ok , const char * error_msg )",
       "signature_sha256": "cc7230bdca8b77e67b26d347d3a7adff0a6e7e2f71782eed17e883dbf6894f3c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_op_record"
     },
     {
@@ -4641,9 +4647,15 @@
           "line": 74
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.code_project_upsert operation records a project or moves it to a new generation. It reads the project for update, decides whether the root changed, supersedes the old generation and writes the new one, all in one transaction the module opens and commits -- so unlike most writes here it is not one statement, and two scanners racing cannot interleave. A project whose root moved keeps its identity and loses its generation, which is what makes every generation-scoped read go quiet after a move."
+      },
       "signature": "int64_t db2_code_index_project_upsert ( const char * name , const char * root )",
       "signature_sha256": "4c8fb855dfe018aa74c7012aae9deede87096a0760eb59a9b20534f0d7806fd9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_index_project_upsert"
     },
     {
@@ -6482,9 +6494,15 @@
           "line": 43
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.css_render_snapshot_store operation replaces one CSS render snapshot. The delete runs before the insert with no transaction around them, so a failure between the two leaves the phase with no snapshot at all rather than the one it had -- worse than not writing. Both statements are scoped to the project's current generation, so a project mid-scan writes nothing and is refused."
+      },
       "signature": "int db2_css_render_snapshot_store ( const char * project , const char * unit_path , const char * phase , const char * snapshot_json , const char * now_iso )",
       "signature_sha256": "b5f2724c8cd9f6fa65138501383f9d6eb1af570b7d4639950c42ce53c78b5d06",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_css_render_snapshot_store"
     },
     {
@@ -7038,9 +7056,15 @@
           "line": 129
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.demotion_profile_read operation reads a demotion profile. It tries three scopes in turn: the one asked for, then the scope kind with no identifier, then global. So a reply may be about a scope the caller did not ask for, and nothing in it says which of the three answered -- a caller cannot tell a profile written for it from the global default it fell back to."
+      },
       "signature": "int db2_demotion_profile_read ( const char * memory_class , const char * scope_kind , const char * scope_id , char * buf , size_t len )",
       "signature_sha256": "51dca521eccbc0c052d2b52f6afea972aa1c6eef6f1aa754316c30b25b7a6b46",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_demotion_profile_read"
     },
     {
@@ -7054,9 +7078,15 @@
           "line": 122
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.demotion_profile_write operation records a demotion profile. It is not a table of its own: the profile is a committed artifact, and only its kind makes it a profile. The backend turns a null scope kind into 'global' and leaves an empty one empty -- and the wire cannot send null, so the global scope that learning.demotion_profile_read falls back to can be read through this boundary but never written through it."
+      },
       "signature": "int db2_demotion_profile_write ( const char * memory_class , const char * scope_kind , const char * scope_id , const char * payload_json , char * id_out , int id_out_len )",
       "signature_sha256": "fbb594a297fb7f86ad959c94cf8d93228b809132399cc8cd67760985613fb5f5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_demotion_profile_write"
     },
     {
@@ -7070,9 +7100,15 @@
           "line": 102
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.retrieval_attribution_write operation records that a surfaced memory earned a verdict. The attribution is stored as an artifact with a hand-assembled JSON payload, so the weight is written to six decimal places and read back as text -- a weight that needs more precision than that is silently rounded before anything can compare it. Nothing checks the retrieval event or the row it names exists."
+      },
       "signature": "int db2_demotion_retrieval_attribution_write ( const char * retrieval_event_id , int64_t surfaced_row_id , const char * verdict , double weight )",
       "signature_sha256": "40dea5af1c5de4aa996d9a3da093047be58b6a989cbe34f8741ebac6b09ee4dd",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_demotion_retrieval_attribution_write"
     },
     {
@@ -8909,7 +8945,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "learning",
-        "reason": "The typed learning.evidence_enqueue operation replaces the evidence queue insert. Enqueuing something already queued does nothing and is acknowledged, so a caller cannot tell a new job from a repeat."
+        "reason": "The typed learning.evidence_enqueue operation replaces the evidence queue insert. Enqueuing something already queued does nothing and is acknowledged, so a caller cannot tell a new job from a repeat. The collection defaults to evidence only for a null argument, which the wire cannot send."
       },
       "signature": "int db2_evidence_enqueue ( const char * artifact_id , const char * collection )",
       "signature_sha256": "37928e1972a0f07035a37a7de325f942191c33449e2b99c057b006b629651689",
@@ -19051,7 +19087,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
-        "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
+        "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate. The approver defaults to operator only for a null argument, which the wire cannot send."
       },
       "signature": "int db2_memory_promotion_record_l4_approval ( int64_t memory_id , const char * approver , const char * note )",
       "signature_sha256": "17003e46e85876231f57f99d229d9f06770970e58b39958f063ddf3927578f72",
@@ -27552,15 +27588,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "cdeb4c0df1504e96343b349c376740f3b65b998d9c056404789ef4db954f3f41",
+  "fingerprint": "ad9928901b24698917895995ca804488da0b2822968cacb2ef51b947920c30f9",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 371,
+    "audit_pending": 365,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 588
+    "reviewed": 594
   }
 }

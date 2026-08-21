@@ -2526,6 +2526,66 @@ int main(int argc, char **argv)
     * nothing -- the same zero a failed write gives. */
    assert(code_file_upsert_file_id == 0);
 
+   /* The project, profile and snapshot writers, in an order that means something:
+    * code_project_upsert creates the project the CSS snapshot needs, and demotion_profile_write
+    * writes the global profile the read after it falls back to. */
+   uint64_t code_project_upsert_project_id = 99;
+   assert(aimee_db2_code_project_upsert_call(call_client, &client, 9391, 0, "replay-project",
+                                             "replay/root", &code_project_upsert_project_id, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   /* Creates the project, which is what lets the CSS snapshot below write
+    * into a current generation. Identifiers start at one. */
+   assert(code_project_upsert_project_id > 0);
+
+   uint32_t code_index_op_record_recorded = 99;
+   assert(aimee_db2_code_index_op_record_call(
+              call_client, &client, 9392, 0, 4242, "replay-project", "node", "src/replay.c", 1u, "",
+              &code_index_op_record_recorded, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Always one: the backend returns nothing, so this says the call was
+    * made and can never say the row landed. */
+   assert(code_index_op_record_recorded == 1);
+
+   static char
+       demotion_profile_write_profile_id[AIMEE_DB2_DEMOTION_PROFILE_WRITE_PROFILE_ID_MAX + 1];
+   demotion_profile_write_profile_id[0] = 'x';
+   assert(aimee_db2_demotion_profile_write_call(
+              call_client, &client, 9393, 0, "fact", "", "", "{\"floor\":0.1}",
+              demotion_profile_write_profile_id, sizeof(demotion_profile_write_profile_id), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* The written profile's artifact identifier comes back, which is how a
+    * caller knows it was stored -- it is an artifact, not a profile row. */
+   assert(demotion_profile_write_profile_id[0] != '\0');
+
+   static char
+       demotion_profile_read_profile_json[AIMEE_DB2_DEMOTION_PROFILE_READ_PROFILE_JSON_MAX + 1];
+   demotion_profile_read_profile_json[0] = 'x';
+   assert(aimee_db2_demotion_profile_read_call(call_client, &client, 9394, 0, "fact", "user",
+                                               "replay", demotion_profile_read_profile_json,
+                                               sizeof(demotion_profile_read_profile_json), NULL,
+                                               NULL) == AIMEE_MODULE_CALL_OK);
+   /* Empty, even though a profile was just written with an empty scope
+    * kind. The backend maps a null scope kind to "global" and leaves an
+    * empty one empty, and the wire cannot send null -- so the global
+    * scope this read falls back to cannot be written from here. The
+    * first draft of this case asserted the profile came back. */
+   assert(demotion_profile_read_profile_json[0] == '\0');
+
+   uint32_t retrieval_attribution_write_acknowledged = 99;
+   assert(aimee_db2_retrieval_attribution_write_call(
+              call_client, &client, 9395, 0, "replay-event", 4242, "helpful", 0.75,
+              &retrieval_attribution_write_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(retrieval_attribution_write_acknowledged == 1);
+
+   uint32_t css_render_snapshot_store_acknowledged = 99;
+   assert(aimee_db2_css_render_snapshot_store_call(
+              call_client, &client, 9396, 0, "replay-project", "src/a.css", "before", "{}",
+              "2026-01-01T00:00:00Z", &css_render_snapshot_store_acknowledged, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* Lands because the project above is current: the statement takes its
+    * generation from the project row, so this would write nothing for a
+    * project that had not just been created. */
+   assert(css_render_snapshot_store_acknowledged == 1);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

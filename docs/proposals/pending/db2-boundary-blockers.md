@@ -223,6 +223,47 @@ session notes rather than the tree, because it is a one-off check rather than a
 gate: the compiler enforces it wherever both declarations are in scope, which
 is now everywhere DB2's own tests are concerned.
 
+## A default that needs a null argument stops applying at the boundary
+
+Several backends give an absent argument a default the same way:
+
+    db2_artifact_write(id, kind, state ? state : "proposed", ...)
+    db2_demotion_profile_write(..., scope_kind ? scope_kind : "global", ...)
+    db2_evidence_enqueue(artifact_id, collection ? collection : "evidence")
+
+A caller in the same process can pass a null pointer or an empty string, and
+those mean different things: null takes the default, empty is stored as empty.
+A caller across the wire has only one of the two. The envelope carries a
+length-prefixed string, and a string a caller leaves out arrives as the empty
+one -- there is no null on the wire and adding one would mean a presence flag
+per string field.
+
+So every default of this shape stops applying the moment its operation crosses.
+Nothing breaks: the empty string is stored where the default would have gone,
+and a caller that wants the default can send it. But an operation whose reason
+does not say so describes behaviour it no longer has.
+
+Twelve published operations carry one, and their reasons now name it. Sixteen
+more are in declarations still to be reviewed, listed here so they are caught
+rather than rediscovered:
+
+    db2_artifact_write_evidence          scope_kind -> "user", payload -> "{}"
+    db2_calibration_profile_write        scope_kind -> "global", version -> "v1"
+    db2_cross_repo_review_upsert         evidence_json -> "{}"
+    db2_evidence_store_vector            collection -> "evidence", embedding -> "[]"
+    db2_kb_documents_insert_chunk_pdf    chunk_strategy -> "heading"
+    db2_kb_doc_regions_insert            content_type -> "text"
+    db2_kb_doc_asset_insert              content_type -> "image/png"
+    db2_learning_proposal_insert         evidence_refs -> "[]"
+    db2_memory_contradiction_log         resolution -> "pending"
+    db2_memory_coref_audit_insert        outcome -> "none"
+    db2_memory_entity_insert             role -> "mention"
+
+Whether any of these defaults should move into the schema, or into the wire as
+an explicit value, is a decision per default rather than one for the boundary:
+a default in a C signature and a default in a column mean different things to
+everything that reads the table directly.
+
 ## Operation ids are unique per family, and the envelope does not say the family
 
 Every operation carries an id that is unique within its family, so

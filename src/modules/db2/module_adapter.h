@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "css_render.h"
+#include "demotion.h"
 #include "code_index.h"
 #include "code_index_ops.h"
 #include "agent_outcomes.h"
@@ -429,6 +431,18 @@ typedef struct
    int (*code_file_hash)(const char *project, const char *file_path, char *out, int out_len);
    int (*file_modified_since)(int64_t project_id, const char *rel_path, time_t mtime);
    int64_t (*code_file_upsert)(int64_t project_id, const char *rel_path, const char *scanned_at);
+   void (*code_index_op_record)(int64_t point_id, const char *project, const char *node_key,
+                                const char *file_path, int ok, const char *error_msg);
+   int64_t (*code_project_upsert)(const char *name, const char *root);
+   int (*demotion_profile_read)(const char *memory_class, const char *scope_kind,
+                                const char *scope_id, char *buf, size_t len);
+   int (*demotion_profile_write)(const char *memory_class, const char *scope_kind,
+                                 const char *scope_id, const char *payload_json, char *id_out,
+                                 int id_out_len);
+   int (*retrieval_attribution_write)(const char *retrieval_event_id, int64_t surfaced_row_id,
+                                      const char *verdict, double weight);
+   int (*css_render_snapshot_store)(const char *project, const char *unit_path, const char *phase,
+                                    const char *snapshot_json, const char *now_iso);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "8ddb3240345f73f182858c445fc09d52c943061b95eac8042bc6d08a74f1e8c7"
+const ContractSHA256 = "203236a673a296d14e5643b2808dc854655c158e57beef4e90bd1e3d8623053c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4677,6 +4677,166 @@ func DecodeCodeFileUpsertRequest(request []byte) (uint64, string, string, error)
 	return projectID, filePath, scannedAt, nil
 }
 
+const EventCodeIndexOpRecord = EventIndex
+const StageCodeIndexOpRecord = FamilyIndex
+const OperationCodeIndexOpRecord uint32 = 60
+const CodeIndexOpRecordPointIDMin uint64 = 0
+const CodeIndexOpRecordPointIDMax uint64 = 9223372036854775807
+const CodeIndexOpRecordProjectMin = 0
+const CodeIndexOpRecordProjectMax = 127
+const CodeIndexOpRecordNodeKeyMin = 0
+const CodeIndexOpRecordNodeKeyMax = 511
+const CodeIndexOpRecordFilePathMin = 0
+const CodeIndexOpRecordFilePathMax = 1023
+const CodeIndexOpRecordIndexOKMin uint32 = 0
+const CodeIndexOpRecordIndexOKMax uint32 = 1
+const CodeIndexOpRecordErrorMessageMin = 0
+const CodeIndexOpRecordErrorMessageMax = 511
+
+// EncodeCodeIndexOpRecordRequest writes the schema code_index_op_record declares, in order.
+func EncodeCodeIndexOpRecordRequest(pointID uint64, project string, nodeKey string, filePath string, indexOK uint32, errorMessage string) ([]byte, error) {
+	if pointID < CodeIndexOpRecordPointIDMin || pointID > CodeIndexOpRecordPointIDMax ||
+		len(project) < CodeIndexOpRecordProjectMin || len(project) > CodeIndexOpRecordProjectMax || hasNUL(project) ||
+		len(nodeKey) < CodeIndexOpRecordNodeKeyMin || len(nodeKey) > CodeIndexOpRecordNodeKeyMax || hasNUL(nodeKey) ||
+		len(filePath) < CodeIndexOpRecordFilePathMin || len(filePath) > CodeIndexOpRecordFilePathMax || hasNUL(filePath) ||
+		indexOK < CodeIndexOpRecordIndexOKMin || indexOK > CodeIndexOpRecordIndexOKMax ||
+		len(errorMessage) < CodeIndexOpRecordErrorMessageMin || len(errorMessage) > CodeIndexOpRecordErrorMessageMax || hasNUL(errorMessage) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var pointIDBytes [8]byte
+	binary.LittleEndian.PutUint64(pointIDBytes[:], pointID)
+	payload = append(payload, pointIDBytes[:]...)
+	if err := putRowText(&payload, project, CodeIndexOpRecordProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, nodeKey, CodeIndexOpRecordNodeKeyMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, CodeIndexOpRecordFilePathMax); err != nil {
+		return nil, err
+	}
+	var indexOKBytes [4]byte
+	binary.LittleEndian.PutUint32(indexOKBytes[:], indexOK)
+	payload = append(payload, indexOKBytes[:]...)
+	if err := putRowText(&payload, errorMessage, CodeIndexOpRecordErrorMessageMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCodeIndexOpRecord, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCodeIndexOpRecordRequest reads it back, checking each field against its own bound.
+func DecodeCodeIndexOpRecordRequest(request []byte) (uint64, string, string, string, uint32, string, error) {
+	var pointID uint64
+	var project string
+	var nodeKey string
+	var filePath string
+	var indexOK uint32
+	var errorMessage string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCodeIndexOpRecord || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	pointID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if pointID < CodeIndexOpRecordPointIDMin || pointID > CodeIndexOpRecordPointIDMax {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, CodeIndexOpRecordProjectMax); err != nil ||
+		len(project) < CodeIndexOpRecordProjectMin {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if nodeKey, err = takeRowText(payload, &cursor, CodeIndexOpRecordNodeKeyMax); err != nil ||
+		len(nodeKey) < CodeIndexOpRecordNodeKeyMin {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, CodeIndexOpRecordFilePathMax); err != nil ||
+		len(filePath) < CodeIndexOpRecordFilePathMin {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	indexOK = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if indexOK < CodeIndexOpRecordIndexOKMin || indexOK > CodeIndexOpRecordIndexOKMax {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if errorMessage, err = takeRowText(payload, &cursor, CodeIndexOpRecordErrorMessageMax); err != nil ||
+		len(errorMessage) < CodeIndexOpRecordErrorMessageMin {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", "", 0, "", ErrMalformedEnvelope
+	}
+	return pointID, project, nodeKey, filePath, indexOK, errorMessage, nil
+}
+
+const EventCodeProjectUpsert = EventIndex
+const StageCodeProjectUpsert = FamilyIndex
+const OperationCodeProjectUpsert uint32 = 61
+const CodeProjectUpsertProjectMin = 1
+const CodeProjectUpsertProjectMax = 127
+const CodeProjectUpsertProjectRootMin = 0
+const CodeProjectUpsertProjectRootMax = 4095
+
+// EncodeCodeProjectUpsertRequest writes the schema code_project_upsert declares, in order.
+func EncodeCodeProjectUpsertRequest(project string, projectRoot string) ([]byte, error) {
+	if len(project) < CodeProjectUpsertProjectMin || len(project) > CodeProjectUpsertProjectMax || hasNUL(project) ||
+		len(projectRoot) < CodeProjectUpsertProjectRootMin || len(projectRoot) > CodeProjectUpsertProjectRootMax || hasNUL(projectRoot) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, CodeProjectUpsertProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, projectRoot, CodeProjectUpsertProjectRootMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCodeProjectUpsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCodeProjectUpsertRequest reads it back, checking each field against its own bound.
+func DecodeCodeProjectUpsertRequest(request []byte) (string, string, error) {
+	var project string
+	var projectRoot string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCodeProjectUpsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, CodeProjectUpsertProjectMax); err != nil ||
+		len(project) < CodeProjectUpsertProjectMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if projectRoot, err = takeRowText(payload, &cursor, CodeProjectUpsertProjectRootMax); err != nil ||
+		len(projectRoot) < CodeProjectUpsertProjectRootMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return project, projectRoot, nil
+}
+
 const EventTraceMiningRecord = EventLearning
 const StageTraceMiningRecord = FamilyLearning
 const OperationTraceMiningRecord uint32 = 8
@@ -7816,6 +7976,233 @@ func DecodeBanditArmStatsUpdateRequest(request []byte) (string, string, float64,
 	return decisionPoint, armID, rewardDelta, posteriorAlpha, posteriorBeta, nil
 }
 
+const EventDemotionProfileRead = EventLearning
+const StageDemotionProfileRead = FamilyLearning
+const OperationDemotionProfileRead uint32 = 58
+const DemotionProfileReadMemoryClassMin = 1
+const DemotionProfileReadMemoryClassMax = 63
+const DemotionProfileReadProfileScopeKindMin = 0
+const DemotionProfileReadProfileScopeKindMax = 31
+const DemotionProfileReadProfileScopeIDMin = 0
+const DemotionProfileReadProfileScopeIDMax = 127
+
+// EncodeDemotionProfileReadRequest writes the schema demotion_profile_read declares, in order.
+func EncodeDemotionProfileReadRequest(memoryClass string, profileScopeKind string, profileScopeID string) ([]byte, error) {
+	if len(memoryClass) < DemotionProfileReadMemoryClassMin || len(memoryClass) > DemotionProfileReadMemoryClassMax || hasNUL(memoryClass) ||
+		len(profileScopeKind) < DemotionProfileReadProfileScopeKindMin || len(profileScopeKind) > DemotionProfileReadProfileScopeKindMax || hasNUL(profileScopeKind) ||
+		len(profileScopeID) < DemotionProfileReadProfileScopeIDMin || len(profileScopeID) > DemotionProfileReadProfileScopeIDMax || hasNUL(profileScopeID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, memoryClass, DemotionProfileReadMemoryClassMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, profileScopeKind, DemotionProfileReadProfileScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, profileScopeID, DemotionProfileReadProfileScopeIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDemotionProfileRead, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDemotionProfileReadRequest reads it back, checking each field against its own bound.
+func DecodeDemotionProfileReadRequest(request []byte) (string, string, string, error) {
+	var memoryClass string
+	var profileScopeKind string
+	var profileScopeID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemotionProfileRead || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if memoryClass, err = takeRowText(payload, &cursor, DemotionProfileReadMemoryClassMax); err != nil ||
+		len(memoryClass) < DemotionProfileReadMemoryClassMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if profileScopeKind, err = takeRowText(payload, &cursor, DemotionProfileReadProfileScopeKindMax); err != nil ||
+		len(profileScopeKind) < DemotionProfileReadProfileScopeKindMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if profileScopeID, err = takeRowText(payload, &cursor, DemotionProfileReadProfileScopeIDMax); err != nil ||
+		len(profileScopeID) < DemotionProfileReadProfileScopeIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return memoryClass, profileScopeKind, profileScopeID, nil
+}
+
+const EventDemotionProfileWrite = EventLearning
+const StageDemotionProfileWrite = FamilyLearning
+const OperationDemotionProfileWrite uint32 = 59
+const DemotionProfileWriteMemoryClassMin = 1
+const DemotionProfileWriteMemoryClassMax = 63
+const DemotionProfileWriteProfileScopeKindMin = 0
+const DemotionProfileWriteProfileScopeKindMax = 31
+const DemotionProfileWriteProfileScopeIDMin = 0
+const DemotionProfileWriteProfileScopeIDMax = 127
+const DemotionProfileWritePayloadJsonMin = 0
+const DemotionProfileWritePayloadJsonMax = 4095
+
+// EncodeDemotionProfileWriteRequest writes the schema demotion_profile_write declares, in order.
+func EncodeDemotionProfileWriteRequest(memoryClass string, profileScopeKind string, profileScopeID string, payloadJson string) ([]byte, error) {
+	if len(memoryClass) < DemotionProfileWriteMemoryClassMin || len(memoryClass) > DemotionProfileWriteMemoryClassMax || hasNUL(memoryClass) ||
+		len(profileScopeKind) < DemotionProfileWriteProfileScopeKindMin || len(profileScopeKind) > DemotionProfileWriteProfileScopeKindMax || hasNUL(profileScopeKind) ||
+		len(profileScopeID) < DemotionProfileWriteProfileScopeIDMin || len(profileScopeID) > DemotionProfileWriteProfileScopeIDMax || hasNUL(profileScopeID) ||
+		len(payloadJson) < DemotionProfileWritePayloadJsonMin || len(payloadJson) > DemotionProfileWritePayloadJsonMax || hasNUL(payloadJson) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, memoryClass, DemotionProfileWriteMemoryClassMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, profileScopeKind, DemotionProfileWriteProfileScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, profileScopeID, DemotionProfileWriteProfileScopeIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, payloadJson, DemotionProfileWritePayloadJsonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDemotionProfileWrite, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDemotionProfileWriteRequest reads it back, checking each field against its own bound.
+func DecodeDemotionProfileWriteRequest(request []byte) (string, string, string, string, error) {
+	var memoryClass string
+	var profileScopeKind string
+	var profileScopeID string
+	var payloadJson string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemotionProfileWrite || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if memoryClass, err = takeRowText(payload, &cursor, DemotionProfileWriteMemoryClassMax); err != nil ||
+		len(memoryClass) < DemotionProfileWriteMemoryClassMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if profileScopeKind, err = takeRowText(payload, &cursor, DemotionProfileWriteProfileScopeKindMax); err != nil ||
+		len(profileScopeKind) < DemotionProfileWriteProfileScopeKindMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if profileScopeID, err = takeRowText(payload, &cursor, DemotionProfileWriteProfileScopeIDMax); err != nil ||
+		len(profileScopeID) < DemotionProfileWriteProfileScopeIDMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if payloadJson, err = takeRowText(payload, &cursor, DemotionProfileWritePayloadJsonMax); err != nil ||
+		len(payloadJson) < DemotionProfileWritePayloadJsonMin {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", ErrMalformedEnvelope
+	}
+	return memoryClass, profileScopeKind, profileScopeID, payloadJson, nil
+}
+
+const EventRetrievalAttributionWrite = EventLearning
+const StageRetrievalAttributionWrite = FamilyLearning
+const OperationRetrievalAttributionWrite uint32 = 60
+const RetrievalAttributionWriteRetrievalEventIDMin = 1
+const RetrievalAttributionWriteRetrievalEventIDMax = 127
+const RetrievalAttributionWriteSurfacedRowIDMin uint64 = 0
+const RetrievalAttributionWriteSurfacedRowIDMax uint64 = 9223372036854775807
+const RetrievalAttributionWriteAttributionVerdictMin = 0
+const RetrievalAttributionWriteAttributionVerdictMax = 63
+const RetrievalAttributionWriteAttributionWeightMaxMagnitudeBits uint64 = 4607182418800017408
+
+// EncodeRetrievalAttributionWriteRequest writes the schema retrieval_attribution_write declares, in order.
+func EncodeRetrievalAttributionWriteRequest(retrievalEventID string, surfacedRowID uint64, attributionVerdict string, attributionWeight float64) ([]byte, error) {
+	if len(retrievalEventID) < RetrievalAttributionWriteRetrievalEventIDMin || len(retrievalEventID) > RetrievalAttributionWriteRetrievalEventIDMax || hasNUL(retrievalEventID) ||
+		surfacedRowID < RetrievalAttributionWriteSurfacedRowIDMin || surfacedRowID > RetrievalAttributionWriteSurfacedRowIDMax ||
+		len(attributionVerdict) < RetrievalAttributionWriteAttributionVerdictMin || len(attributionVerdict) > RetrievalAttributionWriteAttributionVerdictMax || hasNUL(attributionVerdict) ||
+		math.Float64bits(attributionWeight)&0x7fffffffffffffff > RetrievalAttributionWriteAttributionWeightMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, retrievalEventID, RetrievalAttributionWriteRetrievalEventIDMax); err != nil {
+		return nil, err
+	}
+	var surfacedRowIDBytes [8]byte
+	binary.LittleEndian.PutUint64(surfacedRowIDBytes[:], surfacedRowID)
+	payload = append(payload, surfacedRowIDBytes[:]...)
+	if err := putRowText(&payload, attributionVerdict, RetrievalAttributionWriteAttributionVerdictMax); err != nil {
+		return nil, err
+	}
+	var attributionWeightBytes [8]byte
+	binary.LittleEndian.PutUint64(attributionWeightBytes[:], math.Float64bits(attributionWeight))
+	payload = append(payload, attributionWeightBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRetrievalAttributionWrite, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRetrievalAttributionWriteRequest reads it back, checking each field against its own bound.
+func DecodeRetrievalAttributionWriteRequest(request []byte) (string, uint64, string, float64, error) {
+	var retrievalEventID string
+	var surfacedRowID uint64
+	var attributionVerdict string
+	var attributionWeight float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRetrievalAttributionWrite || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if retrievalEventID, err = takeRowText(payload, &cursor, RetrievalAttributionWriteRetrievalEventIDMax); err != nil ||
+		len(retrievalEventID) < RetrievalAttributionWriteRetrievalEventIDMin {
+		return "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, "", 0, ErrMalformedEnvelope
+	}
+	surfacedRowID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if surfacedRowID < RetrievalAttributionWriteSurfacedRowIDMin || surfacedRowID > RetrievalAttributionWriteSurfacedRowIDMax {
+		return "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if attributionVerdict, err = takeRowText(payload, &cursor, RetrievalAttributionWriteAttributionVerdictMax); err != nil ||
+		len(attributionVerdict) < RetrievalAttributionWriteAttributionVerdictMin {
+		return "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > RetrievalAttributionWriteAttributionWeightMaxMagnitudeBits {
+			return "", 0, "", 0, ErrMalformedEnvelope
+		}
+		attributionWeight = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return "", 0, "", 0, ErrMalformedEnvelope
+	}
+	return retrievalEventID, surfacedRowID, attributionVerdict, attributionWeight, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -10925,6 +11312,93 @@ func DecodeDecisionLogActiveIDRequest(request []byte) (string, uint64, error) {
 		return "", 0, ErrMalformedEnvelope
 	}
 	return decisionSubject, linkedPolicy, nil
+}
+
+const EventCssRenderSnapshotStore = EventMaintenance
+const StageCssRenderSnapshotStore = FamilyMaintenance
+const OperationCssRenderSnapshotStore uint32 = 40
+const CssRenderSnapshotStoreProjectMin = 1
+const CssRenderSnapshotStoreProjectMax = 127
+const CssRenderSnapshotStoreUnitPathMin = 1
+const CssRenderSnapshotStoreUnitPathMax = 1023
+const CssRenderSnapshotStoreRenderPhaseMin = 1
+const CssRenderSnapshotStoreRenderPhaseMax = 31
+const CssRenderSnapshotStoreSnapshotJsonMin = 0
+const CssRenderSnapshotStoreSnapshotJsonMax = 4095
+const CssRenderSnapshotStoreCapturedAtMin = 0
+const CssRenderSnapshotStoreCapturedAtMax = 63
+
+// EncodeCssRenderSnapshotStoreRequest writes the schema css_render_snapshot_store declares, in order.
+func EncodeCssRenderSnapshotStoreRequest(project string, unitPath string, renderPhase string, snapshotJson string, capturedAt string) ([]byte, error) {
+	if len(project) < CssRenderSnapshotStoreProjectMin || len(project) > CssRenderSnapshotStoreProjectMax || hasNUL(project) ||
+		len(unitPath) < CssRenderSnapshotStoreUnitPathMin || len(unitPath) > CssRenderSnapshotStoreUnitPathMax || hasNUL(unitPath) ||
+		len(renderPhase) < CssRenderSnapshotStoreRenderPhaseMin || len(renderPhase) > CssRenderSnapshotStoreRenderPhaseMax || hasNUL(renderPhase) ||
+		len(snapshotJson) < CssRenderSnapshotStoreSnapshotJsonMin || len(snapshotJson) > CssRenderSnapshotStoreSnapshotJsonMax || hasNUL(snapshotJson) ||
+		len(capturedAt) < CssRenderSnapshotStoreCapturedAtMin || len(capturedAt) > CssRenderSnapshotStoreCapturedAtMax || hasNUL(capturedAt) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, project, CssRenderSnapshotStoreProjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, unitPath, CssRenderSnapshotStoreUnitPathMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, renderPhase, CssRenderSnapshotStoreRenderPhaseMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, snapshotJson, CssRenderSnapshotStoreSnapshotJsonMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, capturedAt, CssRenderSnapshotStoreCapturedAtMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCssRenderSnapshotStore, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCssRenderSnapshotStoreRequest reads it back, checking each field against its own bound.
+func DecodeCssRenderSnapshotStoreRequest(request []byte) (string, string, string, string, string, error) {
+	var project string
+	var unitPath string
+	var renderPhase string
+	var snapshotJson string
+	var capturedAt string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCssRenderSnapshotStore || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if project, err = takeRowText(payload, &cursor, CssRenderSnapshotStoreProjectMax); err != nil ||
+		len(project) < CssRenderSnapshotStoreProjectMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if unitPath, err = takeRowText(payload, &cursor, CssRenderSnapshotStoreUnitPathMax); err != nil ||
+		len(unitPath) < CssRenderSnapshotStoreUnitPathMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if renderPhase, err = takeRowText(payload, &cursor, CssRenderSnapshotStoreRenderPhaseMax); err != nil ||
+		len(renderPhase) < CssRenderSnapshotStoreRenderPhaseMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if snapshotJson, err = takeRowText(payload, &cursor, CssRenderSnapshotStoreSnapshotJsonMax); err != nil ||
+		len(snapshotJson) < CssRenderSnapshotStoreSnapshotJsonMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if capturedAt, err = takeRowText(payload, &cursor, CssRenderSnapshotStoreCapturedAtMax); err != nil ||
+		len(capturedAt) < CssRenderSnapshotStoreCapturedAtMin {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return project, unitPath, renderPhase, snapshotJson, capturedAt, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex
