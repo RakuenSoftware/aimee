@@ -12,6 +12,16 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 FORBIDDEN = ("config_" + "t", "config_" + "load")
 EXTERNAL_MODULE = "github.com/RakuenSoftware/aimee-module-config"
+FROZEN_EVIDENCE = (
+    Path("benchmarks/fixtures/gemma4-unified/ab-v1"),
+    Path("benchmarks/results/gemma4-unified/ab-v1"),
+    Path("benchmarks/hashline/corpus.generated.json"),
+)
+
+
+def is_frozen_evidence(relative: Path) -> bool:
+    """Published benchmark bytes are evidence, not executable repository code."""
+    return any(relative == root or root in relative.parents for root in FROZEN_EVIDENCE)
 
 
 def tracked_files() -> list[Path]:
@@ -25,7 +35,8 @@ def tracked_files() -> list[Path]:
 def main() -> int:
     failures: list[str] = []
     for path in tracked_files():
-        if ".ci-logs" in path.relative_to(ROOT).parts:
+        relative = path.relative_to(ROOT)
+        if ".ci-logs" in relative.parts or is_frozen_evidence(relative):
             continue
         if not path.is_file():
             continue
@@ -35,7 +46,7 @@ def main() -> int:
             continue
         for token in FORBIDDEN:
             if re.search(rf"\b{re.escape(token)}\b", text):
-                failures.append(f"{path.relative_to(ROOT)} contains retired token {token!r}")
+                failures.append(f"{relative} contains retired token {token!r}")
 
     native_root = ROOT / "src/modules/config"
     for suffix in ("*.c", "*.h", "*.cpp", "*.hpp"):
