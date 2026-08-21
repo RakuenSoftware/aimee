@@ -11192,9 +11192,15 @@
           "line": 39
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_release_promote operation retires the active release, promotes another and points the runtime at it. Three statements, no transaction, and none of the updates checks that a row matched. Promoting a release that does not exist therefore retires the one that did, succeeds, and leaves the installation with no active release and a runtime pointer to a release that was never there. The replay does exactly that."
+      },
       "signature": "int db2_kb_release_promote ( int64_t id )",
       "signature_sha256": "733f06867ad4372b8a784420e9e9eb1614c1b0b0b4a1eecc8d966f72410f6698",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_release_promote"
     },
     {
@@ -11208,9 +11214,15 @@
           "line": 29
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_release_read operation reads one documentation release. The two stamps are separate columns rather than a history, so a release promoted, retired and promoted again carries only the last of each and nothing says which came first. A release that is not there and a read that failed are the same failure, so a zero found flag means either."
+      },
       "signature": "int db2_kb_release_read ( int64_t id , db2_kb_release_t * out )",
       "signature_sha256": "cd8e8e3019ddfa4ec925d68b3b93701c35c79b93688818e617ab8a8abd3dfbe6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_release_read"
     },
     {
@@ -11224,9 +11236,15 @@
           "line": 43
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_release_rollback operation promotes a release back. A target of zero means the most recently retired one, found by a separate read before the promote, so a rollback racing another promote can pick a release that stopped being the newest retired one in between. With a target it is maintenance.kb_release_promote and carries everything that carries -- including retiring the active release before checking the target exists."
+      },
       "signature": "int db2_kb_release_rollback ( int64_t target_id )",
       "signature_sha256": "d1bf19f681c37ff31a7987ed556e949787beed1d24706086f5e7b823f804b04d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_release_rollback"
     },
     {
@@ -14890,9 +14908,15 @@
           "line": 28
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposal_archive operation archives a learning proposal and records why. The update names no current state, so a proposal already committed is archived too and the commitment is lost from the state column. Nothing checks that a row matched, so archiving a proposal that does not exist is acknowledged. An empty reason is accepted and stored as one, so a proposal can be archived with nothing saying why."
+      },
       "signature": "int db2_learning_proposal_archive ( int id , const char * reason )",
       "signature_sha256": "61e7c34297715d15a30cd2dc8bad578a76c70d8160bba6ddf94943b54b6b5aa4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposal_archive"
     },
     {
@@ -27792,15 +27816,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ac598a0b22d878cbebcf71466b3a317982084ffa98cc9ef11af8c61e48b08f48",
+  "fingerprint": "6ed08e1523fb3f8fddb7d975d3f8ebabb6204efee350595d9e5b0ccc383f50a8",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 331,
+    "audit_pending": 327,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 628
+    "reviewed": 632
   }
 }

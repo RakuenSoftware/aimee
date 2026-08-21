@@ -1684,6 +1684,30 @@
       "reason": "The typed custody.release_get_active operation reads the pointer to the release the system currently answers as. Zero covers three different situations: no key, a value that does not parse, and a value that is not positive. The parse happens through atoll, which returns zero for garbage without saying so, and the catalog records both collapses rather than letting a zero read as a confident no release."
     },
     {
+      "symbol": "db2_kb_release_promote",
+      "signature_sha256": "733f06867ad4372b8a784420e9e9eb1614c1b0b0b4a1eecc8d966f72410f6698",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_release_promote operation retires the active release, promotes another and points the runtime at it. Three statements, no transaction, and none of the updates checks that a row matched. Promoting a release that does not exist therefore retires the one that did, succeeds, and leaves the installation with no active release and a runtime pointer to a release that was never there. The replay does exactly that."
+    },
+    {
+      "symbol": "db2_kb_release_read",
+      "signature_sha256": "cd8e8e3019ddfa4ec925d68b3b93701c35c79b93688818e617ab8a8abd3dfbe6",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_release_read operation reads one documentation release. The two stamps are separate columns rather than a history, so a release promoted, retired and promoted again carries only the last of each and nothing says which came first. A release that is not there and a read that failed are the same failure, so a zero found flag means either."
+    },
+    {
+      "symbol": "db2_kb_release_rollback",
+      "signature_sha256": "d1bf19f681c37ff31a7987ed556e949787beed1d24706086f5e7b823f804b04d",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_release_rollback operation promotes a release back. A target of zero means the most recently retired one, found by a separate read before the promote, so a rollback racing another promote can pick a release that stopped being the newest retired one in between. With a target it is maintenance.kb_release_promote and carries everything that carries -- including retiring the active release before checking the target exists."
+    },
+    {
       "symbol": "db2_kb_runtime_state_get",
       "signature_sha256": "198befae8a0e7d7e3b5292c44fbd81bb9dcadfa37939f837d7957ed0a6a56791",
       "disposition": "wire-operation",
@@ -2914,6 +2938,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.commits_in_last_7_days operation replaces the recent-commit count. The seven-day window and the clock it is measured against are both DB2's and never cross, so a caller cannot widen the window or supply its own now; the count is only meaningful beside that fact."
+    },
+    {
+      "symbol": "db2_learning_proposal_archive",
+      "signature_sha256": "61e7c34297715d15a30cd2dc8bad578a76c70d8160bba6ddf94943b54b6b5aa4",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposal_archive operation archives a learning proposal and records why. The update names no current state, so a proposal already committed is archived too and the commitment is lost from the state column. Nothing checks that a row matched, so archiving a proposal that does not exist is acknowledged. An empty reason is accepted and stored as one, so a proposal can be archived with nothing saying why."
     },
     {
       "symbol": "db2_learning_proposal_bump_corroboration",

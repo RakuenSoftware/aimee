@@ -2971,6 +2971,33 @@ int db2_learning_proposals_settled_counts(int window_days, int64_t *committed, i
    return -1;
 }
 
+int db2_kb_release_read(int64_t id, db2_kb_release_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_kb_release_promote(int64_t id)
+{
+   (void)id;
+   return -1;
+}
+
+int db2_kb_release_rollback(int64_t target_id)
+{
+   (void)target_id;
+   return -1;
+}
+
+int db2_learning_proposal_archive(int id, const char *reason)
+{
+   (void)id;
+   (void)reason;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "kb_releases.h"
 #include "db2_learning.h"
 #include "feedback.h"
 #include "kb_docs.h"
@@ -516,6 +517,10 @@ typedef struct
                                    int embeddings_added);
    int (*count_embeddings_for_version)(const char *version);
    int (*proposals_settled_counts)(int window_days, int64_t *committed, int64_t *terminal);
+   int (*kb_release_read)(int64_t id, db2_kb_release_t *out);
+   int (*kb_release_promote)(int64_t id);
+   int (*kb_release_rollback)(int64_t target_id);
+   int (*proposal_archive)(int id, const char *reason);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

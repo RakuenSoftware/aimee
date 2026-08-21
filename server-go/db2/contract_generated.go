@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "267522571723b92b8abaf3fbbc5c5a2b98eeb8d7fdbee7036f5f702ea4c79417"
+const ContractSHA256 = "85a924fe18c054767ed7b3fd69ecf45b2eab9716cd3eb1ac8e076faadfdb86db"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -9437,6 +9437,64 @@ func DecodeProposalsSettledCountsRequest(request []byte) (uint32, error) {
 	return windowDays, nil
 }
 
+const EventProposalArchive = EventLearning
+const StageProposalArchive = FamilyLearning
+const OperationProposalArchive uint32 = 73
+const ProposalArchiveProposalIDMin uint32 = 1
+const ProposalArchiveProposalIDMax uint32 = 2147483647
+const ProposalArchiveArchiveReasonMin = 0
+const ProposalArchiveArchiveReasonMax = 511
+
+// EncodeProposalArchiveRequest writes the schema proposal_archive declares, in order.
+func EncodeProposalArchiveRequest(proposalID uint32, archiveReason string) ([]byte, error) {
+	if proposalID < ProposalArchiveProposalIDMin || proposalID > ProposalArchiveProposalIDMax ||
+		len(archiveReason) < ProposalArchiveArchiveReasonMin || len(archiveReason) > ProposalArchiveArchiveReasonMax || hasNUL(archiveReason) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var proposalIDBytes [4]byte
+	binary.LittleEndian.PutUint32(proposalIDBytes[:], proposalID)
+	payload = append(payload, proposalIDBytes[:]...)
+	if err := putRowText(&payload, archiveReason, ProposalArchiveArchiveReasonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProposalArchive, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProposalArchiveRequest reads it back, checking each field against its own bound.
+func DecodeProposalArchiveRequest(request []byte) (uint32, string, error) {
+	var proposalID uint32
+	var archiveReason string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProposalArchive || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	proposalID = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if proposalID < ProposalArchiveProposalIDMin || proposalID > ProposalArchiveProposalIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if archiveReason, err = takeRowText(payload, &cursor, ProposalArchiveArchiveReasonMax); err != nil ||
+		len(archiveReason) < ProposalArchiveArchiveReasonMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return proposalID, archiveReason, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -13665,6 +13723,147 @@ func DecodeCountEmbeddingsForVersionRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return embeddingVersion, nil
+}
+
+const EventKBReleaseRead = EventMaintenance
+const StageKBReleaseRead = FamilyMaintenance
+const OperationKBReleaseRead uint32 = 50
+const KBReleaseReadReleaseIDMin uint64 = 1
+const KBReleaseReadReleaseIDMax uint64 = 9223372036854775807
+
+// EncodeKBReleaseReadRequest writes the schema kb_release_read declares, in order.
+func EncodeKBReleaseReadRequest(releaseID uint64) ([]byte, error) {
+	if releaseID < KBReleaseReadReleaseIDMin || releaseID > KBReleaseReadReleaseIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var releaseIDBytes [8]byte
+	binary.LittleEndian.PutUint64(releaseIDBytes[:], releaseID)
+	payload = append(payload, releaseIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBReleaseRead, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBReleaseReadRequest reads it back, checking each field against its own bound.
+func DecodeKBReleaseReadRequest(request []byte) (uint64, error) {
+	var releaseID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBReleaseRead || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	releaseID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if releaseID < KBReleaseReadReleaseIDMin || releaseID > KBReleaseReadReleaseIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return releaseID, nil
+}
+
+const EventKBReleasePromote = EventMaintenance
+const StageKBReleasePromote = FamilyMaintenance
+const OperationKBReleasePromote uint32 = 51
+const KBReleasePromoteReleaseIDMin uint64 = 1
+const KBReleasePromoteReleaseIDMax uint64 = 9223372036854775807
+
+// EncodeKBReleasePromoteRequest writes the schema kb_release_promote declares, in order.
+func EncodeKBReleasePromoteRequest(releaseID uint64) ([]byte, error) {
+	if releaseID < KBReleasePromoteReleaseIDMin || releaseID > KBReleasePromoteReleaseIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var releaseIDBytes [8]byte
+	binary.LittleEndian.PutUint64(releaseIDBytes[:], releaseID)
+	payload = append(payload, releaseIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBReleasePromote, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBReleasePromoteRequest reads it back, checking each field against its own bound.
+func DecodeKBReleasePromoteRequest(request []byte) (uint64, error) {
+	var releaseID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBReleasePromote || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	releaseID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if releaseID < KBReleasePromoteReleaseIDMin || releaseID > KBReleasePromoteReleaseIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return releaseID, nil
+}
+
+const EventKBReleaseRollback = EventMaintenance
+const StageKBReleaseRollback = FamilyMaintenance
+const OperationKBReleaseRollback uint32 = 52
+const KBReleaseRollbackTargetReleaseIDMin uint64 = 0
+const KBReleaseRollbackTargetReleaseIDMax uint64 = 9223372036854775807
+
+// EncodeKBReleaseRollbackRequest writes the schema kb_release_rollback declares, in order.
+func EncodeKBReleaseRollbackRequest(targetReleaseID uint64) ([]byte, error) {
+	if targetReleaseID < KBReleaseRollbackTargetReleaseIDMin || targetReleaseID > KBReleaseRollbackTargetReleaseIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var targetReleaseIDBytes [8]byte
+	binary.LittleEndian.PutUint64(targetReleaseIDBytes[:], targetReleaseID)
+	payload = append(payload, targetReleaseIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBReleaseRollback, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBReleaseRollbackRequest reads it back, checking each field against its own bound.
+func DecodeKBReleaseRollbackRequest(request []byte) (uint64, error) {
+	var targetReleaseID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBReleaseRollback || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	targetReleaseID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if targetReleaseID < KBReleaseRollbackTargetReleaseIDMin || targetReleaseID > KBReleaseRollbackTargetReleaseIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return targetReleaseID, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

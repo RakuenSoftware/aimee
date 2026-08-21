@@ -13438,6 +13438,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_learning_proposals_settled_counts",
         "policy": {"reads": 200},
     },
+    "kb_release_read": {
+        "key": ("maintenance", 50),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_release_read",
+        "policy": {"reads": 200},
+    },
+    "kb_release_promote": {
+        "key": ("maintenance", 51),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_release_promote",
+        "policy": {"writes": 200},
+    },
+    "kb_release_rollback": {
+        "key": ("maintenance", 52),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_release_rollback",
+        "policy": {"writes": 200},
+    },
+    "proposal_archive": {
+        "key": ("learning", 73),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_learning_proposal_archive",
+        "policy": {"writes": 200},
+    },
 }
 
 

@@ -1001,6 +1001,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kb_ingest_queue_complete = db2_kb_ingest_queue_complete,
        .count_embeddings_for_version = db2_kb_service_count_embeddings_for_version,
        .proposals_settled_counts = db2_learning_proposals_settled_counts,
+       .kb_release_read = db2_kb_release_read,
+       .kb_release_promote = db2_kb_release_promote,
+       .kb_release_rollback = db2_kb_release_rollback,
+       .proposal_archive = db2_learning_proposal_archive,
    };
    return &backend;
 }
@@ -8997,6 +9001,31 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         uint32_t proposal_id = 0u;
+         char archive_reason[AIMEE_DB2_PROPOSAL_ARCHIVE_ARCHIVE_REASON_MAX + 1] = "";
+         if (aimee_db2_proposal_archive_request_decode(request_body, request_len, &proposal_id,
+                                                       archive_reason, sizeof(archive_reason)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROPOSAL_ARCHIVE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->proposal_archive)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->proposal_archive((int)proposal_id, archive_reason) == 0 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_proposal_archive_reply_encode(acknowledged, response_body,
+                                                        response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
@@ -10304,6 +10333,93 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_count_embeddings_for_version_reply_encode(
                     embedding_count, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t release_id = 0u;
+         if (aimee_db2_kb_release_read_request_decode(request_body, request_len, &release_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_RELEASE_READ_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_release_read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t release_found = 0u;
+            char release_name[AIMEE_DB2_KB_RELEASE_READ_RELEASE_NAME_MAX + 1] = "";
+            char release_state[AIMEE_DB2_KB_RELEASE_READ_RELEASE_STATE_MAX + 1] = "";
+            char promoted_at[AIMEE_DB2_KB_RELEASE_READ_PROMOTED_AT_MAX + 1] = "";
+            char retired_at[AIMEE_DB2_KB_RELEASE_READ_RETIRED_AT_MAX + 1] = "";
+            char release_created_at[AIMEE_DB2_KB_RELEASE_READ_RELEASE_CREATED_AT_MAX + 1] = "";
+            {
+               db2_kb_release_t release;
+               memset(&release, 0, sizeof(release));
+               if (backend->kb_release_read((int64_t)release_id, &release) == 0)
+               {
+                  release_found = 1u;
+                  snprintf(release_name, sizeof(release_name), "%s", release.name);
+                  snprintf(release_state, sizeof(release_state), "%s", release.state);
+                  snprintf(promoted_at, sizeof(promoted_at), "%s", release.promoted_at);
+                  snprintf(retired_at, sizeof(retired_at), "%s", release.retired_at);
+                  snprintf(release_created_at, sizeof(release_created_at), "%s",
+                           release.created_at);
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_release_read_reply_encode(
+                    release_found, release_name, release_state, promoted_at, retired_at,
+                    release_created_at, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t release_id = 0u;
+         if (aimee_db2_kb_release_promote_request_decode(request_body, request_len, &release_id) ==
+             0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_RELEASE_PROMOTE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_release_promote)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->kb_release_promote((int64_t)release_id) == 0 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_release_promote_reply_encode(acknowledged, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t target_release_id = 0u;
+         if (aimee_db2_kb_release_rollback_request_decode(request_body, request_len,
+                                                          &target_release_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_RELEASE_ROLLBACK_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_release_rollback)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged = backend->kb_release_rollback((int64_t)target_release_id) == 0 ? 1u : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_release_rollback_reply_encode(acknowledged, response_body,
+                                                           response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

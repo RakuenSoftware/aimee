@@ -249,3 +249,94 @@ aimee_module_call_result_t aimee_db2_count_embeddings_for_version_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_kb_release_read_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t release_id, uint32_t *release_found, char *release_name, size_t release_name_capacity,
+    char *release_state, size_t release_state_capacity, char *promoted_at,
+    size_t promoted_at_capacity, char *retired_at, size_t retired_at_capacity,
+    char *release_created_at, size_t release_created_at_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KB_RELEASE_READ_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KB_RELEASE_READ_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_kb_release_read_request_encode(release_id, request, sizeof(request),
+                                                &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KB_RELEASE_READ, AIMEE_DB2_STAGE_KB_RELEASE_READ,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_kb_release_read_reply_decode(
+           response, response_len, release_found, release_name, release_name_capacity,
+           release_state, release_state_capacity, promoted_at, promoted_at_capacity, retired_at,
+           retired_at_capacity, release_created_at, release_created_at_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_kb_release_promote_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint64_t release_id, uint32_t *acknowledged,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KB_RELEASE_PROMOTE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KB_RELEASE_PROMOTE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_kb_release_promote_request_encode(release_id, request, sizeof(request),
+                                                   &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KB_RELEASE_PROMOTE, AIMEE_DB2_STAGE_KB_RELEASE_PROMOTE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_kb_release_promote_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_kb_release_rollback_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint64_t target_release_id,
+                                   uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_KB_RELEASE_ROLLBACK_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_KB_RELEASE_ROLLBACK_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_kb_release_rollback_request_encode(target_release_id, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_KB_RELEASE_ROLLBACK, AIMEE_DB2_STAGE_KB_RELEASE_ROLLBACK,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_kb_release_rollback_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
