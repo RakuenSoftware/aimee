@@ -1,5 +1,6 @@
 /* test_memory_retrieval_eval.c: unit tests for corpus-based memory retrieval evaluation */
 #include <assert.h>
+#include "modules/db2/c/db2_test_shim.h"
 #include <sqlite3.h>
 #include "platform_test_util.h"
 #include <math.h>
@@ -727,6 +728,11 @@ int main(int argc, char **argv)
    int cli_rc = maybe_run_cli_mode(argc, argv, &handled);
    if (handled)
       return cli_rc;
+
+   /* The eval scratch store needs a disposable database when the test shim is
+    * backed by Postgres; a no-op under the sqlite shim, which makes its own
+    * in-memory handle. */
+   assert(db2_test_shim_prepare_eval_store() == 0);
 
    printf("test_mrr_hit_first... ");
    test_mrr_hit_first();

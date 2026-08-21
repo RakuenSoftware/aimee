@@ -59,6 +59,11 @@ static char g_pg_test_db[256];   /* the per-process clone database name */
 static int g_pg_mode;            /* 1 once the clone is live */
 static int g_pg_atexit_registered;
 
+/* The empty database handed to the eval scratch store (db2_test_shim_prepare_eval_store),
+ * kept separate from the schema-bearing clone above. */
+static char g_pg_eval_db[256];
+static char g_pg_eval_url[1400];
+
 /* Split a libpq URL into everything-up-to-and-including the last '/', the
  * database name, and any query suffix. Only the URL form the harness passes is
  * handled: scheme://[user@]host[:port]/dbname[?params]. */
@@ -117,6 +122,24 @@ static void pg_drop_clone(void)
    g_pg_test_db[0] = '\0';
 }
 
+static void pg_drop_eval_db(void)
+{
+   if (!g_pg_eval_db[0])
+      return;
+   char prefix[1024], dbname[256], suffix[256];
+   if (pg_split_url(g_pg_eval_url, prefix, sizeof(prefix), dbname, sizeof(dbname), suffix,
+                    sizeof(suffix)) == 0)
+   {
+      char admin_url[1400];
+      snprintf(admin_url, sizeof(admin_url), "%spostgres%s", prefix, suffix);
+      char sql[512], err[512] = "";
+      snprintf(sql, sizeof(sql), "DROP DATABASE IF EXISTS \"%s\" WITH (FORCE)", g_pg_eval_db);
+      (void)pg_admin_exec(admin_url, sql, err, sizeof(err));
+   }
+   g_pg_eval_db[0] = '\0';
+   g_pg_eval_url[0] = '\0';
+}
+
 static void pg_atexit(void)
 {
    if (g_pg_mode)
@@ -125,6 +148,7 @@ static void pg_atexit(void)
       g_pg_mode = 0;
    }
    pg_drop_clone();
+   pg_drop_eval_db();
 }
 
 /* A failing test aborts, and abort() does not run atexit handlers — so without
@@ -136,6 +160,7 @@ static void pg_atexit(void)
 static void pg_fatal_signal(int sig)
 {
    pg_drop_clone();
+   pg_drop_eval_db();
    signal(sig, SIG_DFL);
    raise(sig);
 }
@@ -189,6 +214,9 @@ static void pg_open_clone(const char *template_url)
    }
 
    snprintf(g_pg_test_url, sizeof(g_pg_test_url), "%s%s%s", prefix, g_pg_test_db, suffix);
+   /* Installed before db2_init, not after: a failure in there aborts, and the
+    * handlers are what drop the clone that has already been created. */
+   pg_install_cleanup();
 
    db2_set_embedding_dim_default(CONFIG_EMBEDDER_DIMS_DEFAULT);
    db2_set_embedding_dim(CONFIG_EMBEDDER_DIMS_DEFAULT);
@@ -202,8 +230,53 @@ static void pg_open_clone(const char *template_url)
       abort();
    }
 
-   pg_install_cleanup();
    g_pg_mode = 1;
+}
+
+int db2_test_shim_prepare_eval_store(void)
+{
+   const char *template_url = getenv("AIMEE_TEST_DB2_TEMPLATE_URL");
+   if (!template_url || !template_url[0])
+      return 0; /* sqlite shim: the eval store opens an in-memory handle itself */
+   if (g_pg_eval_url[0])
+      return 0; /* already prepared */
+
+   char prefix[1024], dbname[256], suffix[256];
+   if (pg_split_url(template_url, prefix, sizeof(prefix), dbname, sizeof(dbname), suffix,
+                    sizeof(suffix)) != 0)
+   {
+      fprintf(stderr, "db2 test shim: cannot parse AIMEE_TEST_DB2_TEMPLATE_URL (%s)\n",
+              template_url);
+      return -1;
+   }
+
+   /* An EMPTY database, not a clone of the template. db2_eval_open_temp_store_pg
+    * carves a throwaway SCHEMA and puts it first on search_path -- but CREATE TABLE
+    * IF NOT EXISTS resolves through the whole path, so against a database that
+    * already carries the schema in `public` every table is found, skipped, and the
+    * following ALTER ... ADD CONSTRAINT then fails on the public copy. The eval
+    * store needs somewhere with nothing in it. */
+   snprintf(g_pg_eval_db, sizeof(g_pg_eval_db), "%s_eval_p%d", dbname, (int)getpid());
+
+   char admin_url[1400];
+   snprintf(admin_url, sizeof(admin_url), "%spostgres%s", prefix, suffix);
+
+   char sql[768];
+   char err[512] = "";
+   snprintf(sql, sizeof(sql), "DROP DATABASE IF EXISTS \"%s\" WITH (FORCE)", g_pg_eval_db);
+   (void)pg_admin_exec(admin_url, sql, err, sizeof(err));
+   snprintf(sql, sizeof(sql), "CREATE DATABASE \"%s\"", g_pg_eval_db);
+   if (pg_admin_exec(admin_url, sql, err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "db2 test shim: CREATE DATABASE \"%s\" failed: %s\n", g_pg_eval_db, err);
+      g_pg_eval_db[0] = '\0';
+      return -1;
+   }
+
+   snprintf(g_pg_eval_url, sizeof(g_pg_eval_url), "%s%s%s", prefix, g_pg_eval_db, suffix);
+   setenv("AIMEE_DB2_EVAL_URL", g_pg_eval_url, 1);
+   pg_install_cleanup();
+   return 0;
 }
 
 /* Between tests: restore the freshly-seeded state without paying for a reconnect

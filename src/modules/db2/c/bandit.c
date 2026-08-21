@@ -7,6 +7,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
+#include "../support/db2_log.h" /* aimee_log */
 
 #include <stdio.h>
 #include <string.h>
@@ -191,19 +192,29 @@ int db2_bandit_arm_stats_update(const char *decision_point, const char *arm_id, 
    now_utc(ts, sizeof(ts));
 
    char err[256] = "";
+   /* The numeric parameters carry an explicit ::double precision. A libpq
+    * parameter arrives untyped, and "?3*?3" is then unknown * unknown, which
+    * Postgres rejects outright ("operator is not unique: * unknown"). The whole
+    * statement failed, the step result was discarded, and every arm's posterior
+    * stayed pinned at its prior against the real engine -- the bandit learned
+    * nothing. The sqlite shim binds by value and has no such notion, which is why
+    * the suite never saw it. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "INSERT INTO bandit_arm_stats"
        "  (decision_point, arm_id, n_decisions, n_rewards, sum_reward, sum_reward_sq,"
        "   posterior_alpha, posterior_beta, updated_at)"
-       "  VALUES (?1, ?2, 1, 1, ?3, ?3*?3, ?4, ?5, ?6)"
+       "  VALUES (?1, ?2, 1, 1, ?3::double precision,"
+       "          (?3::double precision)*(?3::double precision),"
+       "          ?4::double precision, ?5::double precision, ?6)"
        "  ON CONFLICT (decision_point, arm_id) DO UPDATE"
        "    SET n_decisions = bandit_arm_stats.n_decisions + 1,"
        "        n_rewards   = bandit_arm_stats.n_rewards + 1,"
-       "        sum_reward  = bandit_arm_stats.sum_reward + ?3,"
-       "        sum_reward_sq = bandit_arm_stats.sum_reward_sq + ?3*?3,"
-       "        posterior_alpha = ?4,"
-       "        posterior_beta  = ?5,"
+       "        sum_reward  = bandit_arm_stats.sum_reward + ?3::double precision,"
+       "        sum_reward_sq = bandit_arm_stats.sum_reward_sq"
+       "                      + (?3::double precision)*(?3::double precision),"
+       "        posterior_alpha = ?4::double precision,"
+       "        posterior_beta  = ?5::double precision,"
        "        updated_at      = ?6",
        err, sizeof(err));
    if (!st)
@@ -215,8 +226,14 @@ int db2_bandit_arm_stats_update(const char *decision_point, const char *arm_id, 
    aimee_pg_bind_double(st, "?4", posterior_alpha);
    aimee_pg_bind_double(st, "?5", posterior_beta);
    aimee_pg_bind_text(st, "?6", ts);
-   aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+   if (step == AIMEE_PG_ERR)
+   {
+      aimee_log(LOG_WARN, "bandit", "arm stats update failed for %s/%s: %s", decision_point, arm_id,
+                err);
+      return -1;
+   }
    return 0;
 }
 

@@ -1428,6 +1428,7 @@
     {
       "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_code_project_lifecycle.c",
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_org_vault_rewrap.c",
@@ -1591,9 +1592,11 @@
         "src/modules/roadmap/roadmap_reassess.c",
         "src/modules/roadmap/roadmap_report.c",
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
         "src/tests/test_code_index_ops.c",
+        "src/tests/test_code_project_lifecycle.c",
         "src/tests/test_cross_repo_build.c",
         "src/tests/test_cross_repo_identity.c",
         "src/tests/test_cross_repo_route.c",
@@ -1769,10 +1772,12 @@
         "src/modules/kb-synthesis/kb_curator_extract.c",
         "src/modules/kb-synthesis/kb_curator_extract_code.c",
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_code_index_ops.c",
         "src/tests/test_corpus_jobs.c",
         "src/tests/test_corpus_structural.c",
         "src/tests/test_corpus_terms_gaps.c",
+        "src/tests/test_css_render.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_fact_lifecycle.c",
@@ -1780,6 +1785,7 @@
         "src/tests/test_kb.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
+        "src/tests/test_kb_reflection.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
         "src/tests/test_memory.c",
         "src/tests/test_memory_advanced.c",
@@ -1928,6 +1934,7 @@
         "src/modules/roadmap/roadmap_reassess.c",
         "src/modules/roadmap/roadmap_report.c",
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_content_scope_pg.c",
         "src/tests/test_corpus_structural.c",
@@ -1996,6 +2003,7 @@
         "src/modules/kb-synthesis/kb_curator_extract_code.c",
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/support/kb_txn_stub.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_code_index_ops.c",
         "src/tests/test_code_project_lifecycle.c",
         "src/tests/test_code_projection.c",
@@ -2008,6 +2016,8 @@
         "src/tests/test_cross_repo_review.c",
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
+        "src/tests/test_css_migration.c",
+        "src/tests/test_css_render.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_pool.c",
@@ -2118,6 +2128,7 @@
         "src/modules/roadmap/roadmap_reassess.c",
         "src/modules/roadmap/roadmap_report.c",
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
         "src/tests/test_code_index_ops.c",
@@ -2131,6 +2142,7 @@
         "src/tests/test_cross_repo_identity.c",
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
+        "src/tests/test_css_render.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
@@ -2145,6 +2157,7 @@
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
         "src/tests/test_kb_p2b_egress_live.c",
+        "src/tests/test_kb_reflection.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
         "src/tests/test_kb_vault_key_use_live.c",
         "src/tests/test_kb_vault_rewrap_live.c",
@@ -2233,8 +2246,12 @@
       "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_db2.c",
+        "src/tests/test_embedding_dim.c",
+        "src/tests/test_fidelity.c",
         "src/tests/test_kb_http_routes.c",
-        "src/tests/test_kb_tenancy_shim_guard.c"
+        "src/tests/test_kb_tenancy_shim_guard.c",
+        "src/tests/test_memory.c",
+        "src/tests/test_memory_embed_dim_guard.c"
       ],
       "locations": [
         {
@@ -2313,6 +2330,7 @@
         "src/modules/roadmap/roadmap_reassess.c",
         "src/modules/roadmap/roadmap_report.c",
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
         "src/tests/test_code_index_ops.c",
@@ -2326,6 +2344,7 @@
         "src/tests/test_cross_repo_identity.c",
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
+        "src/tests/test_css_render.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
@@ -2340,6 +2359,7 @@
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
         "src/tests/test_kb_p2b_egress_live.c",
+        "src/tests/test_kb_reflection.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
         "src/tests/test_kb_vault_key_use_live.c",
         "src/tests/test_kb_vault_rewrap_live.c",
@@ -2489,6 +2509,7 @@
         "src/modules/roadmap/roadmap_reassess.c",
         "src/modules/roadmap/roadmap_report.c",
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
         "src/tests/test_code_index_ops.c",
@@ -2502,6 +2523,7 @@
         "src/tests/test_cross_repo_identity.c",
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
+        "src/tests/test_css_render.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
@@ -2516,6 +2538,7 @@
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
         "src/tests/test_kb_p2b_egress_live.c",
+        "src/tests/test_kb_reflection.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
         "src/tests/test_kb_vault_key_use_live.c",
         "src/tests/test_kb_vault_rewrap_live.c",
@@ -4997,6 +5020,7 @@
         "src/modules/roadmap/roadmap_reassess.c",
         "src/modules/roadmap/roadmap_report.c",
         "src/tests/support/kb_txn_stub.c",
+        "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
         "src/tests/test_code_index_ops.c",
@@ -5014,6 +5038,8 @@
         "src/tests/test_cross_repo_review.c",
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
+        "src/tests/test_css_migration.c",
+        "src/tests/test_css_render.c",
         "src/tests/test_curator_promote.c",
         "src/tests/test_curator_synthesize.c",
         "src/tests/test_curiosity.c",
@@ -5034,6 +5060,7 @@
         "src/tests/test_kb_maintenance.c",
         "src/tests/test_kb_mining.c",
         "src/tests/test_kb_p2b_egress_live.c",
+        "src/tests/test_kb_reflection.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
         "src/tests/test_kb_vault_key_use_live.c",
         "src/tests/test_kb_vault_rewrap_live.c",
@@ -21924,9 +21951,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_artifacts.c",
-        "src/tests/test_css_migration.c",
-        "src/tests/test_css_render.c",
         "src/tests/test_curator_code_unit.c",
         "src/tests/test_curator_contradictions.c",
         "src/tests/test_curator_index_claims.c",
@@ -21941,7 +21965,6 @@
         "src/tests/test_curator_serve.c",
         "src/tests/test_curator_synthesize.c",
         "src/tests/test_curator_version.c",
-        "src/tests/test_kb_reflection.c",
         "src/tests/test_kb_releases_db.c"
       ],
       "locations": [
@@ -22093,6 +22116,21 @@
     },
     {
       "consumers": [
+        "src/tests/test_memory_retrieval_eval.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_test_shim.h",
+          "line": 55
+        }
+      ],
+      "signature": "int db2_test_shim_prepare_eval_store ( void )",
+      "signature_sha256": "6f3e30aa04207a335e70809f532c7a3178b9efad0100137a273e8b950e88f961",
+      "status": "private-test-only",
+      "symbol": "db2_test_shim_prepare_eval_store"
+    },
+    {
+      "consumers": [
         "src/tests/test_curator_code_unit.c",
         "src/tests/test_curator_contradictions.c",
         "src/tests/test_curator_index_claims.c",
@@ -22112,7 +22150,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_test_shim.h",
-          "line": 54
+          "line": 62
         }
       ],
       "signature": "int db2_test_shim_skip_on_postgres ( const char * test_name )",
@@ -25902,15 +25940,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d49755f68094611b7f31248273eaa52c81ef6e512037ab7f035a21677757ae0f",
+  "fingerprint": "35032e52c4121a4d6bc5a30f5c0826d7b4002d444f9a0f734ee31f0215f1ca86",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 673,
-    "declarations": 1403,
+    "declarations": 1404,
     "headers": 138,
     "internal_unconsumed": 154,
-    "private_test_only": 282,
+    "private_test_only": 283,
     "reviewed": 294
   }
 }

@@ -37,6 +37,20 @@ DB2_TEST_BACKEND_LIB = $(PQ_LIB)
 $(OBJDIR)/db2/db2_test_shim.o: C_FLAGS += -DAIMEE_TEST_PG_BACKEND=1
 endif
 
+# db2_test_shim.o's flags depend on AIMEE_TEST_PG, and a flag change is invisible to
+# make: its source and headers are untouched, so switching modes in the same OBJDIR
+# reuses the object built for the OTHER backend. Everything then links and 90-odd
+# binaries abort at startup with "built with AIMEE_TEST_PG=1 ... but
+# AIMEE_TEST_DB2_TEMPLATE_URL is unset" -- a wall of failures with nothing wrong in
+# the tree. Depend on a stamp named after the mode: flipping modes deletes the other
+# stamp and creates this one, which is then newer than the object and forces the
+# rebuild (and the relink that follows it). Same mode twice in a row rebuilds nothing.
+DB2_TEST_BACKEND_STAMP = \
+    $(OBJDIR)/tests/.db2-test-backend-$(if $(filter 1,$(AIMEE_TEST_PG)),pg,sqlite)
+$(DB2_TEST_BACKEND_STAMP):
+	@mkdir -p $(dir $@) && rm -f $(OBJDIR)/tests/.db2-test-backend-* && touch $@
+$(OBJDIR)/db2/db2_test_shim.o: $(DB2_TEST_BACKEND_STAMP)
+
 # Test output prefix: defaults to $(OBJDIR)/tests so any `make unit-tests`
 # invocation with a non-default OBJDIR (sanitizers, coverage, build-integrity,
 # ...) automatically gets an isolated test-binary directory. Prevents parallel
@@ -1103,10 +1117,16 @@ $(TESTPREFIX)/unit-test-db2: $(OBJDIR)/tests/test_db2.o $(OBJDIR)/db2/db2_init.o
                             $(OBJDIR)/db2/entity_edges.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
+# Names the sqlite shim object directly rather than $(DB2_TEST_BACKEND_OBJ): this is
+# a white-box test OF the shim, not of DB2 through it. It hands aimee_pg_prepare_ex a
+# raw sqlite3* and drives the RESOURCE classification with sqlite3_hard_heap_limit64,
+# neither of which means anything to libpq. Under AIMEE_TEST_PG=1 the backend swap
+# would point it at db_postgres.o and every assertion would be about the wrong
+# implementation.
 $(TESTPREFIX)/unit-test-pg-prepare-classification: \
                                       $(OBJDIR)/tests/test_pg_prepare_classification.o \
-                                      $(DB2_TEST_BACKEND_OBJ)
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) $(DB2_TEST_BACKEND_LIB) -lsqlite3 -lm
+                                      $(OBJDIR)/tests/aimee_pg_sqlite_shim.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lsqlite3 -lm
 
 $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
                                       $(OBJDIR)/db2/db_schema.o
@@ -3534,12 +3554,19 @@ db2-test-template: $(TESTPREFIX)/db2-test-template
 # every time on purpose: a schema change that never reached the template would
 # otherwise be tested against a stale copy, which is the failure mode this whole
 # mode exists to close.
+#
+# AIMEE_TEST_PG=1 is set here, not left to the caller. The template URL alone only
+# tells the shim to clone; the BACKEND is the link-time choice above, so without it
+# the suite would build against the sqlite shim and then hand it a postgres URL to
+# open as a file. Passing it as a command-line variable to the sub-make overrides
+# whatever the environment says, so `make unit-tests-pg URL=...` means one thing.
+# Shard variables reach the inner unit-tests through MAKEFLAGS as usual.
 .PHONY: unit-tests-pg
 unit-tests-pg:
 	@test -n "$$AIMEE_TEST_DB2_TEMPLATE_URL" || \
 	  { echo "unit-tests-pg requires AIMEE_TEST_DB2_TEMPLATE_URL" >&2; exit 1; }
-	$(MAKE) db2-test-template
-	$(MAKE) unit-tests
+	$(MAKE) AIMEE_TEST_PG=1 db2-test-template
+	$(MAKE) AIMEE_TEST_PG=1 unit-tests
 
 $(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
 $(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include

@@ -29,7 +29,11 @@ static void close_db(void)
 static void exec_sql(const char *sql)
 {
    char err[512] = "";
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "exec_sql failed: %s\n  sql: %s\n", err, sql);
+      assert(0 && "exec_sql");
+   }
 }
 
 static void seed_event(int64_t id, const char *session, const char *type, const char *role,
@@ -107,7 +111,10 @@ static void test_disabled_job_is_skipped(void)
 {
    open_db();
    assert(db2_mining_seed_job_defaults() == 0);
-   exec_sql("UPDATE mining_jobs SET enabled = 0 WHERE id = 'recurrence'");
+   /* FALSE, not 0: mining_jobs.enabled is BOOLEAN on Postgres, which does not
+    * coerce an integer literal to it. sqlite has understood TRUE/FALSE since
+    * 3.23, and mining.c's own seed INSERT already spells it that way. */
+   exec_sql("UPDATE mining_jobs SET enabled = FALSE WHERE id = 'recurrence'");
    for (int i = 1; i <= 5; i++)
       seed_event(i, "sess-skip", "delegate_exit", "review", "tool-json-invalid", "");
 

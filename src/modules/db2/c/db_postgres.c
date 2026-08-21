@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h> /* strcasecmp: boolean text spellings from libpq */
 
 /* --- SQL placeholder rewriter ------------------------------------ */
 
@@ -1922,22 +1923,53 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int col)
    return PQgetvalue(s->result, s->row_index, col);
 }
 
+/* Postgres renders BOOLEAN as "t"/"f" in the text format libpq hands back, so the
+ * numeric accessors below would read every true as 0 -- strtoll stops at the 't'.
+ * The sqlite shim stores booleans as 0/1 integers and has always returned them
+ * correctly, so a boolean column read through aimee_pg_column_int silently flipped
+ * to false the moment the same code ran against the real engine (audit_events
+ * .flagged_for_review and mining_jobs.enabled are both read this way). Recognise the
+ * two spellings here, at the one place the impedance mismatch actually lives, rather
+ * than casting at each of the call sites. No integer or float literal Postgres emits
+ * begins with 't' or 'f', so this cannot shadow a real numeric value.
+ *
+ * Returns 1 for true, 0 for false, -1 when `v` is not a boolean spelling. */
+static int pg_boolean_value(const char *v)
+{
+   if (!v)
+      return -1;
+   if ((v[0] == 't' || v[0] == 'T') && (v[1] == '\0' || strcasecmp(v, "true") == 0))
+      return 1;
+   if ((v[0] == 'f' || v[0] == 'F') && (v[1] == '\0' || strcasecmp(v, "false") == 0))
+      return 0;
+   return -1;
+}
+
 int aimee_pg_column_int(aimee_pg_stmt_t *s, int col)
 {
    const char *v = aimee_pg_column_text(s, col);
-   return v ? atoi(v) : 0;
+   if (!v)
+      return 0;
+   int b = pg_boolean_value(v);
+   return b >= 0 ? b : atoi(v);
 }
 
 int64_t aimee_pg_column_int64(aimee_pg_stmt_t *s, int col)
 {
    const char *v = aimee_pg_column_text(s, col);
-   return v ? (int64_t)strtoll(v, NULL, 10) : 0;
+   if (!v)
+      return 0;
+   int b = pg_boolean_value(v);
+   return b >= 0 ? (int64_t)b : (int64_t)strtoll(v, NULL, 10);
 }
 
 double aimee_pg_column_double(aimee_pg_stmt_t *s, int col)
 {
    const char *v = aimee_pg_column_text(s, col);
-   return v ? strtod(v, NULL) : 0.0;
+   if (!v)
+      return 0.0;
+   int b = pg_boolean_value(v);
+   return b >= 0 ? (double)b : strtod(v, NULL);
 }
 
 #endif /* !AIMEE_DISABLE_POSTGRES */

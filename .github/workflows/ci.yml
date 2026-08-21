@@ -493,6 +493,121 @@ jobs:
             unit-tests
           ccache --show-stats
 
+  # The same unit-test binaries, linked against real libpq instead of the sqlite
+  # shim, so DB2's SQL is EXECUTED by the engine that runs it in production rather
+  # than TRANSLATED into another one.
+  #
+  # WHY THIS IS NOT REDUNDANT WITH unit-tests. The shim rewrites DB2's SQL to
+  # something sqlite accepts (tests/aimee_pg_sqlite_shim.c), so the places the two
+  # engines differ are exactly the places it cannot vouch for -- and each one that
+  # existed was a real defect the green suite reported as passing: confidence decay
+  # never ran (unary minus on an untyped parameter is ambiguous in Postgres), the
+  # bandit's posterior never moved (?3*?3 likewise), calibration dropped every
+  # high-confidence row (CAST(x AS INT) rounds in Postgres and truncates in sqlite),
+  # and every BOOLEAN column read back as false ("t" is not a number). None of those
+  # are visible from a sqlite run, by construction.
+  #
+  # Sharded like unit-tests for the same reason, and gated by the same aggregate
+  # `unit-tests` job, so a red result here blocks the merge.
+  unit-test-shards-pg:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    name: unit-tests-pg (${{ matrix.label }}/2)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_index: 0
+            label: 1
+          - shard_index: 1
+            label: 2
+    env:
+      # The template the per-process clones are copied from. Every test binary
+      # does CREATE DATABASE <template>_p<pid> TEMPLATE <template>, so this user
+      # needs CREATEDB and a connection to `postgres` -- both true for the image's
+      # bootstrap superuser.
+      AIMEE_TEST_DB2_TEMPLATE_URL: postgres://aimee:aimee@localhost:5432/aimee_test_tpl
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
+          restore-keys: |
+            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
+            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
+      - name: Start Postgres (pgvector) with pull retry
+        # Same image and retry rationale as unit-tests: the runner pulls service
+        # images with no retry, so a transient Docker Hub timeout would fail a
+        # required check. max_connections is raised because each of the parallel
+        # test processes opens its own clone AND a 16-connection DB2 pool.
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-pg-tpl \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img" -c max_connections=500 -c fsync=off -c full_page_writes=off \
+                   -c synchronous_commit=off
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make ccache \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U aimee && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-pg-tpl || true; exit 1
+      - name: Unit tests (real Postgres)
+        run: |
+          # Same deterministic root-owned helpers the sqlite shards install: the
+          # trust-walk tests assert on ownership and mode, which runner image
+          # metadata does not guarantee.
+          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          for helper in cat env yes true; do
+            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+              "/run/aimee-test-helpers/$helper"
+          done
+          printf '%s\n' 'deterministic root-owned test fixture' | \
+            sudo tee /run/aimee-test-helpers/root-file >/dev/null
+          sudo chown root:root /run/aimee-test-helpers/root-file
+          sudo chmod 0644 /run/aimee-test-helpers/root-file
+          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
+          ccache --max-size=750M
+          ccache --zero-stats
+          cd src
+          # unit-tests-pg rebuilds the template and then runs the suite; the shard
+          # variables pass straight through to the inner `make unit-tests`.
+          make -j"$(nproc)" CC="ccache gcc" \
+            GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            UNIT_TEST_SHARD_COUNT=2 \
+            UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
+            UNIT_TEST_SKIP_P1=1 \
+            unit-tests-pg
+          ccache --show-stats
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs --tail 200 aimee-pg-tpl || true
+
   db2-process-replay:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -546,7 +661,7 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, db2-process-replay, p1-rls-gate]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -556,15 +671,20 @@ jobs:
           CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
           DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
           SHARDS_RESULT: ${{ needs.unit-test-shards.result }}
+          SHARDS_PG_RESULT: ${{ needs.unit-test-shards-pg.result }}
           DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
         run: |
           if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
-            echo "Documentation-only change: unit shards and P1 gate skipped."
+            echo "Documentation-only change: unit shards (sqlite and Postgres) and P1 gate skipped."
             exit 0
           fi
           [ "$SHARDS_RESULT" = success ] || {
             echo "Unit-test shard result: $SHARDS_RESULT" >&2
+            exit 1
+          }
+          [ "$SHARDS_PG_RESULT" = success ] || {
+            echo "Unit-test (real Postgres) shard result: $SHARDS_PG_RESULT" >&2
             exit 1
           }
           [ "$P1_RESULT" = success ] || {
@@ -575,7 +695,7 @@ jobs:
             echo "DB2 process replay result: $DB2_REPLAY_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards, DB2 process replay, and the P1 RLS gate passed."
+          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, and the P1 RLS gate passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.

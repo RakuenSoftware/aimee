@@ -12,6 +12,8 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/css_graph.h"
 #include "../modules/db2/c/css_migration.h"
 #include "../modules/db2/c/typed_facts.h"
@@ -125,9 +127,9 @@ int main(void)
 
    /* Operational migration state is generation-scoped: a re-added checkout
     * cannot inherit the prior generation's verified unit. */
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(sqlite3_exec(db, "UPDATE projects SET current_generation=2 WHERE name='mig'", NULL, NULL,
-                       NULL) == SQLITE_OK);
+   char gen_err[256] = "";
+   assert(aimee_pg_exec(db2_conn(), "UPDATE projects SET current_generation=2 WHERE name='mig'",
+                        gen_err, sizeof(gen_err)) == 0);
    assert(db2_css_migration_list("mig", NULL, units, 16) == 0);
 
    db2_test_shim_close();

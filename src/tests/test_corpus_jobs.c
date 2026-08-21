@@ -47,7 +47,7 @@ static void test_doc_write_seeds_job_and_version(void)
    assert(strcmp(job.stage, "ingested") == 0);
    assert(strcmp(job.stage_status, "pending") == 0);
    assert(strcmp(job.content_hash, "seed-hash") == 0);
-   assert(query_int("SELECT COUNT(*) FROM document_versions WHERE is_current = 1") == 1);
+   assert(query_int("SELECT COUNT(*) FROM document_versions WHERE is_current = true") == 1);
 
    int64_t same_id = db2_kb_doc_write("seed-hash", "docs/sample.md", "global", "passthrough", "",
                                       "# Sample\n", &was_existing);
@@ -63,11 +63,11 @@ static void test_doc_write_seeds_job_and_version(void)
               "SELECT COUNT(*) FROM document_versions WHERE doc_key = 'global:docs/sample.md'") ==
           2);
    assert(query_int("SELECT COUNT(*) FROM document_versions WHERE doc_key = 'global:docs/sample.md'"
-                    " AND is_current = 1 AND doc_id > 1") == 1);
+                    " AND is_current = true AND doc_id > 1") == 1);
    assert(query_int("SELECT MAX(version_no) FROM document_versions"
                     " WHERE doc_key = 'global:docs/sample.md'") == 2);
    assert(query_int("SELECT COUNT(*) FROM document_versions WHERE doc_key = 'global:docs/sample.md'"
-                    " AND is_current = 0 AND superseded_at != ''") == 1);
+                    " AND is_current = false AND superseded_at != ''") == 1);
 
    close_db();
    printf("  doc_write_seeds_job_and_version: ok\n");
