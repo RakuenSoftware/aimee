@@ -286,3 +286,33 @@ aimee_module_call_result_t aimee_db2_anti_pattern_check_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_bandit_decision_insert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *bandit_decision_id, const char *decision_point, const char *arm_id,
+    const char *context_hash, double propensity, uint32_t is_exploration, uint32_t *acknowledged,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_BANDIT_DECISION_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_BANDIT_DECISION_INSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_bandit_decision_insert_request_encode(bandit_decision_id, decision_point, arm_id,
+                                                       context_hash, propensity, is_exploration,
+                                                       request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_BANDIT_DECISION_INSERT,
+            AIMEE_DB2_STAGE_BANDIT_DECISION_INSERT, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_bandit_decision_insert_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

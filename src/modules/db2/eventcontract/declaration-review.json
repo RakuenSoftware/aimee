@@ -316,6 +316,14 @@
       "reason": "The typed learning.bandit_decision_close operation records the reward for a decision and closes it. The reward is stored as given -- nothing normalizes it, so what a bandit compares later is on whatever scale the caller chose -- and the closing stamp is DB2's clock. The statement is not checked to have matched a row, so closing a decision that does not exist, or one already closed, is acknowledged and overwrites the earlier reward."
     },
     {
+      "symbol": "db2_bandit_decision_insert",
+      "signature_sha256": "c613958674dd2f54412bdbc11b92441d555d38a63333514cf6213152eaaec290",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.bandit_decision_insert operation records that an arm was chosen. The identifier is the caller's rather than the database's, so two callers choosing the same one silently record one decision -- the second insert does nothing and is acknowledged, which is what makes a retry safe and a collision invisible. The propensity is bounded to a probability; the decision stamp is DB2's clock."
+    },
+    {
       "symbol": "db2_bandit_decision_points_list",
       "signature_sha256": "483c7f0927f0cf4c56cf64f33ec23b40f97492c6a8d1dbc24d53be5735fc4f88",
       "disposition": "wire-operation",
@@ -980,12 +988,36 @@
       "reason": "The typed index.entity_top_targets operation ranks the entities one entity points at through a relation. It is index.entity_top_partners with one direction instead of two, and the reply is identical, so the names are the only thing distinguishing a directed ranking from an undirected one. Like its partner it matches the endpoint case-insensitively, unlike the plain neighbour listings which do not."
     },
     {
+      "symbol": "db2_entity_edge_upsert",
+      "signature_sha256": "2433680b17176bd084bd1a36cd51b17f2ae169eadba3c3768cb614e1b1bfedef",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_edge_upsert operation records an edge or strengthens it. An edge that already exists has its weight raised by one and keeps everything else, so the window, relation identifier and endpoint kinds a caller sends are only used when the edge is new -- resending them changes nothing. The added flag is what says which of the two happened, and it is the only way to tell."
+    },
+    {
       "symbol": "db2_entity_edge_walk_step_typed",
       "signature_sha256": "9cd0f34761beaed0803c828533b14f1560638a00cbbeb0f11616c188740988f4",
       "disposition": "wire-operation",
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_walk_step_typed operation returns the edges touching a node, heaviest first, at most fifty. The node may be either end, so the reply's source and target say which way each edge points rather than repeating the argument. An edge with no recorded relation identifier or endpoint kind reads back as the co-discussed relation and the other kind, so a default and a real value are indistinguishable in the reply."
+    },
+    {
+      "symbol": "db2_entity_node_alias_upsert",
+      "signature_sha256": "4f141bba332e16f0df1e3224b74b14cc0d2bafe7643dd4c2a13789ecee6a5655",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_node_alias_upsert operation records that an alias names a node. The node is a foreign key, so an alias for one nobody created is refused, and every alias disappears when its node does. One alias may still name several nodes -- the key is the pair -- so this does not make an alias unambiguous. Re-recording a pair replaces its kind, project and generation together, so the last writer decides all three."
+    },
+    {
+      "symbol": "db2_entity_node_get",
+      "signature_sha256": "0dca799a4d51e26b62367b5856c5a332fb34b2e5caa407bb112b8b8374dbe8e7",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_node_get operation reads one entity graph node. The node kind is a number rather than a name -- the column stores an enumerator, and neither the row nor this boundary says what any value means -- so a caller reading it is relying on an enumeration nothing here publishes. The found flag separates a node that does not exist from one whose every field is empty, which the strings alone could not."
     },
     {
       "symbol": "db2_entity_node_key_file",

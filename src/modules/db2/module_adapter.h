@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "bandit.h"
+#include "entity_nodes.h"
 #include "kb_service_backend.h"
 #include "memory_relations.h"
 #include "tasks.h"
@@ -364,6 +366,10 @@ typedef struct
    int (*memory_link_create)(int64_t source_id, int64_t target_id, const char *relation);
    int (*task_add_edge)(int64_t source, int64_t target, const char *relation);
    int64_t (*decision_log_active_id)(const char *subject, int64_t linked_policy_id);
+   int (*entity_node_get)(const char *node_key, db2_entity_node_t *out);
+   int (*entity_node_alias_upsert)(const char *alias, const char *node_key, const char *alias_kind, const char *project, int64_t generation_id);
+   int (*entity_edge_upsert)(const char *source, const char *relation, const char *target, int64_t window_id, int relation_id, int subject_kind, int object_kind, int *out_added);
+   int (*bandit_decision_insert)(const char *id, const char *decision_point, const char *arm_id, const char *context_hash, double propensity, int is_exploration);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -3937,9 +3937,15 @@
           "line": 25
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.bandit_decision_insert operation records that an arm was chosen. The identifier is the caller's rather than the database's, so two callers choosing the same one silently record one decision -- the second insert does nothing and is acknowledged, which is what makes a retry safe and a collision invisible. The propensity is bounded to a probability; the decision stamp is DB2's clock."
+      },
       "signature": "int db2_bandit_decision_insert ( const char * id , const char * decision_point , const char * arm_id , const char * context_hash , double propensity , int is_exploration )",
       "signature_sha256": "c613958674dd2f54412bdbc11b92441d555d38a63333514cf6213152eaaec290",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_bandit_decision_insert"
     },
     {
@@ -8333,9 +8339,15 @@
           "line": 39
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_edge_upsert operation records an edge or strengthens it. An edge that already exists has its weight raised by one and keeps everything else, so the window, relation identifier and endpoint kinds a caller sends are only used when the edge is new -- resending them changes nothing. The added flag is what says which of the two happened, and it is the only way to tell."
+      },
       "signature": "int db2_entity_edge_upsert ( const char * source , const char * relation , const char * target , int64_t window_id , int relation_id , int subject_kind , int object_kind , int * out_added )",
       "signature_sha256": "2433680b17176bd084bd1a36cd51b17f2ae169eadba3c3768cb614e1b1bfedef",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_upsert"
     },
     {
@@ -8501,9 +8513,15 @@
           "line": 57
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_node_alias_upsert operation records that an alias names a node. The node is a foreign key, so an alias for one nobody created is refused, and every alias disappears when its node does. One alias may still name several nodes -- the key is the pair -- so this does not make an alias unambiguous. Re-recording a pair replaces its kind, project and generation together, so the last writer decides all three."
+      },
       "signature": "int db2_entity_node_alias_upsert ( const char * alias , const char * node_key , const char * alias_kind , const char * project , int64_t generation_id )",
       "signature_sha256": "4f141bba332e16f0df1e3224b74b14cc0d2bafe7643dd4c2a13789ecee6a5655",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_node_alias_upsert"
     },
     {
@@ -8547,9 +8565,15 @@
           "line": 54
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_node_get operation reads one entity graph node. The node kind is a number rather than a name -- the column stores an enumerator, and neither the row nor this boundary says what any value means -- so a caller reading it is relying on an enumeration nothing here publishes. The found flag separates a node that does not exist from one whose every field is empty, which the strings alone could not."
+      },
       "signature": "int db2_entity_node_get ( const char * node_key , db2_entity_node_t * out )",
       "signature_sha256": "0dca799a4d51e26b62367b5856c5a332fb34b2e5caa407bb112b8b8374dbe8e7",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_node_get"
     },
     {
@@ -27462,15 +27486,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f3648f94c339bb58afd5f3a346ef8dd3abdf01c4cc9617d438277d59311c4b57",
+  "fingerprint": "c1aa89e726b2e2e24b22ef1e714c42fe45b42940120bba8527444ee1467113f1",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 386,
+    "audit_pending": 382,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 573
+    "reviewed": 577
   }
 }

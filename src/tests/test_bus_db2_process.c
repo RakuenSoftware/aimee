@@ -2362,6 +2362,69 @@ int main(int argc, char **argv)
                                                 NULL) == AIMEE_MODULE_CALL_OK);
    assert(active_decision == 0);
 
+   /* The node, alias, edge and decision writers, against empty tables. Each write is refused or
+    * acknowledged on its own terms, which the reasons record. */
+   uint32_t bandit_decision_insert_acknowledged = 99;
+   assert(aimee_db2_bandit_decision_insert_call(
+              call_client, &client, 9361, 0, "replay-decision", "replay-dp", "arm-one", "hash", 0.5,
+              0u, &bandit_decision_insert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Nothing refuses this: the identifier is the caller's and the table
+    * has no foreign key, so the insert lands on any schema. Re-inserting
+    * the same identifier is acknowledged too, which is the collision the
+    * reason records -- one decision stored, two callers told it worked. */
+   assert(bandit_decision_insert_acknowledged == 1);
+
+   uint32_t entity_edge_upsert_acknowledged = 99;
+   uint32_t entity_edge_upsert_edge_added = 99;
+   assert(aimee_db2_entity_edge_upsert_call(
+              call_client, &client, 9362, 0, "replay-src", "mentions", "replay-dst", 0, 12, 99, 99,
+              &entity_edge_upsert_acknowledged, &entity_edge_upsert_edge_added, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* Created rather than strengthened, so both flags are set; a second
+    * call would raise the weight and clear the added flag, which is the
+    * only way a caller can tell the two apart. */
+   assert(entity_edge_upsert_acknowledged == 1 && entity_edge_upsert_edge_added == 1);
+
+   uint32_t entity_node_alias_upsert_acknowledged = 99;
+   assert(aimee_db2_entity_node_alias_upsert_call(
+              call_client, &client, 9363, 0, "replay-alias", "replay-node", "exact", "demo", 7,
+              &entity_node_alias_upsert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Refused: the node the alias names is a foreign key, so an alias for
+    * one nobody created does not land. The first draft of this case
+    * asserted the opposite, and the database said otherwise. */
+   assert(entity_node_alias_upsert_acknowledged == 0);
+
+   uint32_t entity_node_get_found = 99;
+   uint32_t entity_node_get_node_kind = 99;
+   uint64_t entity_node_get_last_seen_generation = 99;
+   static char entity_node_get_node_project[AIMEE_DB2_ENTITY_NODE_GET_NODE_PROJECT_MAX + 1];
+   entity_node_get_node_project[0] = 'x';
+   static char entity_node_get_display_name[AIMEE_DB2_ENTITY_NODE_GET_DISPLAY_NAME_MAX + 1];
+   entity_node_get_display_name[0] = 'x';
+   static char entity_node_get_full_key[AIMEE_DB2_ENTITY_NODE_GET_FULL_KEY_MAX + 1];
+   entity_node_get_full_key[0] = 'x';
+   static char entity_node_get_node_file_path[AIMEE_DB2_ENTITY_NODE_GET_NODE_FILE_PATH_MAX + 1];
+   entity_node_get_node_file_path[0] = 'x';
+   static char entity_node_get_node_symbol[AIMEE_DB2_ENTITY_NODE_GET_NODE_SYMBOL_MAX + 1];
+   entity_node_get_node_symbol[0] = 'x';
+   static char entity_node_get_node_origin[AIMEE_DB2_ENTITY_NODE_GET_NODE_ORIGIN_MAX + 1];
+   entity_node_get_node_origin[0] = 'x';
+   assert(aimee_db2_entity_node_get_call(
+              call_client, &client, 9364, 0, "replay-node", &entity_node_get_found,
+              &entity_node_get_node_kind, &entity_node_get_last_seen_generation,
+              entity_node_get_node_project, sizeof(entity_node_get_node_project),
+              entity_node_get_display_name, sizeof(entity_node_get_display_name),
+              entity_node_get_full_key, sizeof(entity_node_get_full_key),
+              entity_node_get_node_file_path, sizeof(entity_node_get_node_file_path),
+              entity_node_get_node_symbol, sizeof(entity_node_get_node_symbol),
+              entity_node_get_node_origin, sizeof(entity_node_get_node_origin), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(entity_node_get_found == 0 && entity_node_get_node_kind == 0 &&
+          entity_node_get_last_seen_generation == 0 && entity_node_get_node_project[0] == '\0' &&
+          entity_node_get_display_name[0] == '\0' && entity_node_get_full_key[0] == '\0' &&
+          entity_node_get_node_file_path[0] == '\0' && entity_node_get_node_symbol[0] == '\0' &&
+          entity_node_get_node_origin[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

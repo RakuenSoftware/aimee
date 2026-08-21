@@ -2381,6 +2381,52 @@ int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id
    return 0;
 }
 
+int db2_entity_node_get(const char *node_key, db2_entity_node_t *out)
+{
+   (void)node_key;
+   (void)out;
+   return -1;
+}
+
+int db2_entity_node_alias_upsert(const char *alias, const char *node_key, const char *alias_kind,
+                                 const char *project, int64_t generation_id)
+{
+   (void)alias;
+   (void)node_key;
+   (void)alias_kind;
+   (void)project;
+   (void)generation_id;
+   return 0;
+}
+
+int db2_entity_edge_upsert(const char *source, const char *relation, const char *target,
+                           int64_t window_id, int relation_id, int subject_kind, int object_kind,
+                           int *out_added)
+{
+   (void)source;
+   (void)relation;
+   (void)target;
+   (void)window_id;
+   (void)relation_id;
+   (void)subject_kind;
+   (void)object_kind;
+   if (out_added)
+      *out_added = 0;
+   return 0;
+}
+
+int db2_bandit_decision_insert(const char *id, const char *decision_point, const char *arm_id,
+                               const char *context_hash, double propensity, int is_exploration)
+{
+   (void)id;
+   (void)decision_point;
+   (void)arm_id;
+   (void)context_hash;
+   (void)propensity;
+   (void)is_exploration;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

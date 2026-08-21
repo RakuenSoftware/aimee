@@ -8514,6 +8514,240 @@
       }
     },
     {
+      "family": "index",
+      "id": 54,
+      "name": "entity_node_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity graph nodes and their origins are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_node_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the node kind crosses as the number the schema stores, so a caller has to know what the numbers mean"
+        },
+        "fields": [
+          {
+            "name": "node_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "node_kind",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "last_seen_generation",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "node_project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "display_name",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "full_key",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "node_file_path",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "node_symbol",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "node_origin",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 55,
+      "name": "entity_node_alias_upsert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity nodes and the aliases naming them are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_node_alias_upsert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the node the alias names is a foreign key, and re-recording a pair replaces its kind, project and generation together"
+        },
+        "fields": [
+          {
+            "name": "alias",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "node_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "alias_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "alias_project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "alias_generation",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 56,
+      "name": "entity_edge_upsert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges, their weights and their endpoint kinds are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_upsert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "an edge that exists has its weight raised by one rather than being rewritten, and the reply says which of the two happened"
+        },
+        "fields": [
+          {
+            "name": "edge_source",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "edge_relation",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "edge_target",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "window_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "relation_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "subject_kind",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "object_kind",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "edge_added",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -10735,6 +10969,76 @@
           ]
         },
         "maximum_rows": 256
+      }
+    },
+    {
+      "family": "learning",
+      "id": 49,
+      "name": "bandit_decision_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Bandit decisions, their arms and their propensities are relational DB2 rows.",
+      "c_symbols": [
+        "db2_bandit_decision_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the identifier is the caller's, and re-inserting one that exists does nothing and is acknowledged"
+        },
+        "fields": [
+          {
+            "name": "bandit_decision_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "decision_point",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "arm_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "context_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "propensity",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4607182418800017408
+          },
+          {
+            "name": "is_exploration",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
       }
     },
     {

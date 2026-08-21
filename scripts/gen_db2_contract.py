@@ -13108,6 +13108,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_decision_log_active_id",
         "policy": {"reads": 200},
     },
+    "entity_node_get": {
+        "key": ("index", 54),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_node_get",
+        "policy": {"reads": 200},
+    },
+    "entity_node_alias_upsert": {
+        "key": ("index", 55),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_node_alias_upsert",
+        "policy": {"writes": 200},
+    },
+    "entity_edge_upsert": {
+        "key": ("index", 56),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_upsert",
+        "policy": {"writes": 200},
+    },
+    "bandit_decision_insert": {
+        "key": ("learning", 49),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_bandit_decision_insert",
+        "policy": {"writes": 200},
+    },
 }
 
 
