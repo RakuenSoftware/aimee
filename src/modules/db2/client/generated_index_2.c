@@ -813,3 +813,66 @@ aimee_db2_project_stats_call(aimee_db2_call_fn call, void *call_context, uint64_
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_projection_generation_meta_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t generation_id, uint32_t *generation_found, char *project_name,
+    size_t project_name_capacity, char *generation_state, size_t generation_state_capacity,
+    char *source_hash, size_t source_hash_capacity, char *extractor_version,
+    size_t extractor_version_capacity, char *pipeline_version, size_t pipeline_version_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROJECTION_GENERATION_META_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_PROJECTION_GENERATION_META_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_projection_generation_meta_request_encode(generation_id, request, sizeof(request),
+                                                           &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROJECTION_GENERATION_META,
+            AIMEE_DB2_STAGE_PROJECTION_GENERATION_META, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_projection_generation_meta_reply_decode(
+           response, response_len, generation_found, project_name, project_name_capacity,
+           generation_state, generation_state_capacity, source_hash, source_hash_capacity,
+           extractor_version, extractor_version_capacity, pipeline_version,
+           pipeline_version_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_projection_sync_project_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *project_name, uint64_t generation_id, uint64_t *edge_count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROJECTION_SYNC_PROJECT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_PROJECTION_SYNC_PROJECT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_projection_sync_project_request_encode(project_name, generation_id, request,
+                                                        sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROJECTION_SYNC_PROJECT,
+            AIMEE_DB2_STAGE_PROJECTION_SYNC_PROJECT, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_projection_sync_project_reply_decode(response, response_len, edge_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

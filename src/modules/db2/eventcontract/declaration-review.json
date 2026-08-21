@@ -340,6 +340,14 @@
       "reason": "The typed learning.artifact_write operation records an artifact. The identifier is the caller's, and writing one that exists does nothing and is acknowledged -- so a second write with different content neither updates the artifact nor says it did not. Its state, scope-kind and payload defaults apply only to a null argument, and the wire cannot send null, so an empty one is stored empty and none of the three applies here. The attempt count is fixed at one, which is what learning.artifact_write_ex varies."
     },
     {
+      "symbol": "db2_artifact_write_evidence",
+      "signature_sha256": "e65d26f2b58942a67033e48b40ebd258b0b4cea7f2d59b8705ccf347b8515b9d",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_write_evidence operation captures evidence as an artifact, collapsing a repeat onto the row already there. The key is the kind and the content hash and nothing else: evidence captured under one scope answers a capture under another, and the identifier that comes back belongs to the first scope's row. The lookup and the insert are separate statements outside a transaction, so two captures racing both miss and both insert."
+    },
+    {
       "symbol": "db2_artifact_write_ex",
       "signature_sha256": "64e2e37f25b125b5237bd41517a036361b458813e752d7a481bc9116d2e08a57",
       "disposition": "wire-operation",
@@ -442,6 +450,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "Returning a raw calibration-profile JSON blob leaks storage and serialization across the boundary; a typed learning.calibration_threshold operation owns scoped fallback and profile interpretation in one request."
+    },
+    {
+      "symbol": "db2_calibration_profile_write",
+      "signature_sha256": "b4fdaee3f791f218ef0327da43fa2fba3e701dee0fbd06be592866b737c24852",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.calibration_profile_write operation records a calibration profile. It is not a table of its own: the profile is a committed artifact whose kind, surface and feature-set version are stamped by a second statement, with nothing wrapping the pair, so a failure between them leaves a committed profile the surface-filtered reads cannot see. That statement's result is discarded and an identifier comes back regardless. The kind is stored in the model-version column."
     },
     {
       "symbol": "db2_calibration_surfaces_with_data",
@@ -636,6 +652,14 @@
       "reason": "The typed index.projection_generation_create operation opens a pending projection generation. It stamps the running build as both the extractor and the pipeline version, and over the bus that is the DB2 module's build, not the caller's -- the snapshot-diff route refuses to compare across extractor versions, so a module and daemon at different builds would make every generation incomparable with the ones before it. A project that is not current creates nothing and answers zero."
     },
     {
+      "symbol": "db2_code_projection_generation_meta",
+      "signature_sha256": "48ef0690f7a298c3246980e8f8e21c693e2d404da34f7ba76aef39a8caa758b0",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.projection_generation_meta operation reads one code-projection generation's metadata. The backend separates a generation that does not exist from a read that failed, and the wire carries that as a flag rather than as an all-empty answer. The identifier names a generation and not a project, so a caller holding one reads whichever project's generation it belongs to; nothing here confines the read to a project the caller already named."
+    },
+    {
       "symbol": "db2_code_projection_generation_publish",
       "signature_sha256": "3eb7f11c2c8d51b7bd57683b17552dc4492ee001cb692afd3fc89c1c13f324e5",
       "disposition": "wire-operation",
@@ -682,6 +706,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.project_fingerprint operation replaces the fingerprint read. The value is an md5 DB2 computes over the file paths and hashes of the project's current generation, so it is a summary of that generation rather than an identifier: it changes when the generation does, and comparing one project's fingerprint against another's is meaningless. A project with no files fingerprints the empty string rather than failing."
+    },
+    {
+      "symbol": "db2_code_projection_sync_project",
+      "signature_sha256": "9258529b5852f37d75fcbb425657c042f516559fd719b72f6d1265b8859907df",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.projection_sync_project operation projects a project's files and calls into the graph for one generation. The file list is capped at 4096: a larger project is projected in part and answers a count that says nothing about what was left out. Nothing wraps the run, so a failure partway keeps the edges already written. A project not indexed, or not current, is refused the same way an error is, and the reply carries zero for both."
     },
     {
       "symbol": "db2_code_projection_visible_id",

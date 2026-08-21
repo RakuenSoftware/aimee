@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "calibration.h"
 #include "canonical_index.h"
 #include "cross_repo_stats.h"
 #include "feature_rows.h"
@@ -483,6 +484,15 @@ typedef struct
                                 db2_bandit_arm_stats_t *out);
    int (*project_stats)(const char *project, int *files_out, int *defs_out);
    int (*recompute_blocked_symbols)(int k, int m, int len_min);
+   int (*artifact_write_evidence)(const char *kind, const char *scope_kind, const char *scope_id,
+                                  const char *operator_id, const char *content_hash,
+                                  const char *payload_json, char *id_out, int id_out_len);
+   int (*calibration_profile_write)(const char *target_surface, const char *kind,
+                                    const char *scope_kind, const char *scope_id,
+                                    const char *feature_set_version, const char *payload_json,
+                                    char *id_out, int id_out_len);
+   int (*projection_generation_meta)(int64_t gen_id, code_projection_generation_meta_t *out);
+   int64_t (*projection_sync_project)(const char *project, int64_t gen_id);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

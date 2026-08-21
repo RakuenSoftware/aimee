@@ -3115,6 +3115,52 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
    return -1;
 }
 
+int db2_artifact_write_evidence(const char *kind, const char *scope_kind, const char *scope_id,
+                                const char *operator_id, const char *content_hash,
+                                const char *payload_json, char *id_out, int id_out_len)
+{
+   (void)kind;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)operator_id;
+   (void)content_hash;
+   (void)payload_json;
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   return -1;
+}
+
+int db2_calibration_profile_write(const char *target_surface, const char *kind,
+                                  const char *scope_kind, const char *scope_id,
+                                  const char *feature_set_version, const char *payload_json,
+                                  char *id_out, int id_out_len)
+{
+   (void)target_surface;
+   (void)kind;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)feature_set_version;
+   (void)payload_json;
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   return -1;
+}
+
+int db2_code_projection_generation_meta(int64_t gen_id, code_projection_generation_meta_t *out)
+{
+   (void)gen_id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
+{
+   (void)project;
+   (void)gen_id;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

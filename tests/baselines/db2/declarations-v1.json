@@ -3806,9 +3806,15 @@
           "line": 50
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.artifact_write_evidence operation captures evidence as an artifact, collapsing a repeat onto the row already there. The key is the kind and the content hash and nothing else: evidence captured under one scope answers a capture under another, and the identifier that comes back belongs to the first scope's row. The lookup and the insert are separate statements outside a transaction, so two captures racing both miss and both insert."
+      },
       "signature": "int db2_artifact_write_evidence ( const char * kind , const char * scope_kind , const char * scope_id , const char * operator_id , const char * content_hash , const char * payload_json , char * id_out , int id_out_len )",
       "signature_sha256": "e65d26f2b58942a67033e48b40ebd258b0b4cea7f2d59b8705ccf347b8515b9d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_artifact_write_evidence"
     },
     {
@@ -4185,9 +4191,15 @@
           "line": 69
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.calibration_profile_write operation records a calibration profile. It is not a table of its own: the profile is a committed artifact whose kind, surface and feature-set version are stamped by a second statement, with nothing wrapping the pair, so a failure between them leaves a committed profile the surface-filtered reads cannot see. That statement's result is discarded and an identifier comes back regardless. The kind is stored in the model-version column."
+      },
       "signature": "int db2_calibration_profile_write ( const char * target_surface , const char * kind , const char * scope_kind , const char * scope_id , const char * feature_set_version , const char * payload_json , char * id_out , int id_out_len )",
       "signature_sha256": "b4fdaee3f791f218ef0327da43fa2fba3e701dee0fbd06be592866b737c24852",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_calibration_profile_write"
     },
     {
@@ -5018,9 +5030,15 @@
           "line": 139
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.projection_generation_meta operation reads one code-projection generation's metadata. The backend separates a generation that does not exist from a read that failed, and the wire carries that as a flag rather than as an all-empty answer. The identifier names a generation and not a project, so a caller holding one reads whichever project's generation it belongs to; nothing here confines the read to a project the caller already named."
+      },
       "signature": "int db2_code_projection_generation_meta ( int64_t gen_id , code_projection_generation_meta_t * out )",
       "signature_sha256": "48ef0690f7a298c3246980e8f8e21c693e2d404da34f7ba76aef39a8caa758b0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_generation_meta"
     },
     {
@@ -5186,9 +5204,15 @@
           "line": 160
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.projection_sync_project operation projects a project's files and calls into the graph for one generation. The file list is capped at 4096: a larger project is projected in part and answers a count that says nothing about what was left out. Nothing wraps the run, so a failure partway keeps the edges already written. A project not indexed, or not current, is refused the same way an error is, and the reply carries zero for both."
+      },
       "signature": "int64_t db2_code_projection_sync_project ( const char * project , int64_t gen_id )",
       "signature_sha256": "9258529b5852f37d75fcbb425657c042f516559fd719b72f6d1265b8859907df",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_code_projection_sync_project"
     },
     {
@@ -27696,15 +27720,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a7654400e1bf310e63799c27362fdbaae429ad2aa8bdbc12b8f8c02726696f18",
+  "fingerprint": "f8257f0a1c2b135c1d1c24b92031d2cb0daed18e478772e152f5ec09f3f241a7",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 347,
+    "audit_pending": 343,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 612
+    "reviewed": 616
   }
 }

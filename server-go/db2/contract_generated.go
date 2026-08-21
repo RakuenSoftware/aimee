@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a551fd4a70a8adb081388870e8932c04143df22240847cfc0230823799611659"
+const ContractSHA256 = "db2b0ba4d25f852d848771617a5859b9fb77043c2fc7590c3e305e5bffff128b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -5099,6 +5099,111 @@ func DecodeProjectStatsRequest(request []byte) (string, error) {
 	return projectName, nil
 }
 
+const EventProjectionGenerationMeta = EventIndex
+const StageProjectionGenerationMeta = FamilyIndex
+const OperationProjectionGenerationMeta uint32 = 65
+const ProjectionGenerationMetaGenerationIDMin uint64 = 1
+const ProjectionGenerationMetaGenerationIDMax uint64 = 9223372036854775807
+
+// EncodeProjectionGenerationMetaRequest writes the schema projection_generation_meta declares, in order.
+func EncodeProjectionGenerationMetaRequest(generationID uint64) ([]byte, error) {
+	if generationID < ProjectionGenerationMetaGenerationIDMin || generationID > ProjectionGenerationMetaGenerationIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var generationIDBytes [8]byte
+	binary.LittleEndian.PutUint64(generationIDBytes[:], generationID)
+	payload = append(payload, generationIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProjectionGenerationMeta, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectionGenerationMetaRequest reads it back, checking each field against its own bound.
+func DecodeProjectionGenerationMetaRequest(request []byte) (uint64, error) {
+	var generationID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectionGenerationMeta || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	generationID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if generationID < ProjectionGenerationMetaGenerationIDMin || generationID > ProjectionGenerationMetaGenerationIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return generationID, nil
+}
+
+const EventProjectionSyncProject = EventIndex
+const StageProjectionSyncProject = FamilyIndex
+const OperationProjectionSyncProject uint32 = 66
+const ProjectionSyncProjectProjectNameMin = 1
+const ProjectionSyncProjectProjectNameMax = 255
+const ProjectionSyncProjectGenerationIDMin uint64 = 1
+const ProjectionSyncProjectGenerationIDMax uint64 = 9223372036854775807
+
+// EncodeProjectionSyncProjectRequest writes the schema projection_sync_project declares, in order.
+func EncodeProjectionSyncProjectRequest(projectName string, generationID uint64) ([]byte, error) {
+	if len(projectName) < ProjectionSyncProjectProjectNameMin || len(projectName) > ProjectionSyncProjectProjectNameMax || hasNUL(projectName) ||
+		generationID < ProjectionSyncProjectGenerationIDMin || generationID > ProjectionSyncProjectGenerationIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, ProjectionSyncProjectProjectNameMax); err != nil {
+		return nil, err
+	}
+	var generationIDBytes [8]byte
+	binary.LittleEndian.PutUint64(generationIDBytes[:], generationID)
+	payload = append(payload, generationIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProjectionSyncProject, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProjectionSyncProjectRequest reads it back, checking each field against its own bound.
+func DecodeProjectionSyncProjectRequest(request []byte) (string, uint64, error) {
+	var projectName string
+	var generationID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProjectionSyncProject || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, ProjectionSyncProjectProjectNameMax); err != nil ||
+		len(projectName) < ProjectionSyncProjectProjectNameMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	generationID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if generationID < ProjectionSyncProjectGenerationIDMin || generationID > ProjectionSyncProjectGenerationIDMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return projectName, generationID, nil
+}
+
 const EventTraceMiningRecord = EventLearning
 const StageTraceMiningRecord = FamilyLearning
 const OperationTraceMiningRecord uint32 = 8
@@ -8792,6 +8897,202 @@ func DecodeBanditArmStatsReadRequest(request []byte) (string, string, error) {
 		return "", "", ErrMalformedEnvelope
 	}
 	return decisionPoint, armID, nil
+}
+
+const EventArtifactWriteEvidence = EventLearning
+const StageArtifactWriteEvidence = FamilyLearning
+const OperationArtifactWriteEvidence uint32 = 66
+const ArtifactWriteEvidenceArtifactKindMin = 1
+const ArtifactWriteEvidenceArtifactKindMax = 63
+const ArtifactWriteEvidenceScopeKindMin = 0
+const ArtifactWriteEvidenceScopeKindMax = 31
+const ArtifactWriteEvidenceScopeIDMin = 0
+const ArtifactWriteEvidenceScopeIDMax = 127
+const ArtifactWriteEvidenceOperatorIDMin = 0
+const ArtifactWriteEvidenceOperatorIDMax = 127
+const ArtifactWriteEvidenceContentHashMin = 0
+const ArtifactWriteEvidenceContentHashMax = 127
+const ArtifactWriteEvidencePayloadJsonMin = 0
+const ArtifactWriteEvidencePayloadJsonMax = 4095
+
+// EncodeArtifactWriteEvidenceRequest writes the schema artifact_write_evidence declares, in order.
+func EncodeArtifactWriteEvidenceRequest(artifactKind string, scopeKind string, scopeID string, operatorID string, contentHash string, payloadJson string) ([]byte, error) {
+	if len(artifactKind) < ArtifactWriteEvidenceArtifactKindMin || len(artifactKind) > ArtifactWriteEvidenceArtifactKindMax || hasNUL(artifactKind) ||
+		len(scopeKind) < ArtifactWriteEvidenceScopeKindMin || len(scopeKind) > ArtifactWriteEvidenceScopeKindMax || hasNUL(scopeKind) ||
+		len(scopeID) < ArtifactWriteEvidenceScopeIDMin || len(scopeID) > ArtifactWriteEvidenceScopeIDMax || hasNUL(scopeID) ||
+		len(operatorID) < ArtifactWriteEvidenceOperatorIDMin || len(operatorID) > ArtifactWriteEvidenceOperatorIDMax || hasNUL(operatorID) ||
+		len(contentHash) < ArtifactWriteEvidenceContentHashMin || len(contentHash) > ArtifactWriteEvidenceContentHashMax || hasNUL(contentHash) ||
+		len(payloadJson) < ArtifactWriteEvidencePayloadJsonMin || len(payloadJson) > ArtifactWriteEvidencePayloadJsonMax || hasNUL(payloadJson) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactKind, ArtifactWriteEvidenceArtifactKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeKind, ArtifactWriteEvidenceScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeID, ArtifactWriteEvidenceScopeIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, operatorID, ArtifactWriteEvidenceOperatorIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, contentHash, ArtifactWriteEvidenceContentHashMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, payloadJson, ArtifactWriteEvidencePayloadJsonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationArtifactWriteEvidence, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactWriteEvidenceRequest reads it back, checking each field against its own bound.
+func DecodeArtifactWriteEvidenceRequest(request []byte) (string, string, string, string, string, string, error) {
+	var artifactKind string
+	var scopeKind string
+	var scopeID string
+	var operatorID string
+	var contentHash string
+	var payloadJson string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactWriteEvidence || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactKind, err = takeRowText(payload, &cursor, ArtifactWriteEvidenceArtifactKindMax); err != nil ||
+		len(artifactKind) < ArtifactWriteEvidenceArtifactKindMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if scopeKind, err = takeRowText(payload, &cursor, ArtifactWriteEvidenceScopeKindMax); err != nil ||
+		len(scopeKind) < ArtifactWriteEvidenceScopeKindMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if scopeID, err = takeRowText(payload, &cursor, ArtifactWriteEvidenceScopeIDMax); err != nil ||
+		len(scopeID) < ArtifactWriteEvidenceScopeIDMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if operatorID, err = takeRowText(payload, &cursor, ArtifactWriteEvidenceOperatorIDMax); err != nil ||
+		len(operatorID) < ArtifactWriteEvidenceOperatorIDMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if contentHash, err = takeRowText(payload, &cursor, ArtifactWriteEvidenceContentHashMax); err != nil ||
+		len(contentHash) < ArtifactWriteEvidenceContentHashMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if payloadJson, err = takeRowText(payload, &cursor, ArtifactWriteEvidencePayloadJsonMax); err != nil ||
+		len(payloadJson) < ArtifactWriteEvidencePayloadJsonMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return artifactKind, scopeKind, scopeID, operatorID, contentHash, payloadJson, nil
+}
+
+const EventCalibrationProfileWrite = EventLearning
+const StageCalibrationProfileWrite = FamilyLearning
+const OperationCalibrationProfileWrite uint32 = 67
+const CalibrationProfileWriteTargetSurfaceMin = 1
+const CalibrationProfileWriteTargetSurfaceMax = 127
+const CalibrationProfileWriteArtifactKindMin = 1
+const CalibrationProfileWriteArtifactKindMax = 63
+const CalibrationProfileWriteScopeKindMin = 0
+const CalibrationProfileWriteScopeKindMax = 31
+const CalibrationProfileWriteScopeIDMin = 0
+const CalibrationProfileWriteScopeIDMax = 127
+const CalibrationProfileWriteFeatureSetVersionMin = 0
+const CalibrationProfileWriteFeatureSetVersionMax = 63
+const CalibrationProfileWritePayloadJsonMin = 0
+const CalibrationProfileWritePayloadJsonMax = 4095
+
+// EncodeCalibrationProfileWriteRequest writes the schema calibration_profile_write declares, in order.
+func EncodeCalibrationProfileWriteRequest(targetSurface string, artifactKind string, scopeKind string, scopeID string, featureSetVersion string, payloadJson string) ([]byte, error) {
+	if len(targetSurface) < CalibrationProfileWriteTargetSurfaceMin || len(targetSurface) > CalibrationProfileWriteTargetSurfaceMax || hasNUL(targetSurface) ||
+		len(artifactKind) < CalibrationProfileWriteArtifactKindMin || len(artifactKind) > CalibrationProfileWriteArtifactKindMax || hasNUL(artifactKind) ||
+		len(scopeKind) < CalibrationProfileWriteScopeKindMin || len(scopeKind) > CalibrationProfileWriteScopeKindMax || hasNUL(scopeKind) ||
+		len(scopeID) < CalibrationProfileWriteScopeIDMin || len(scopeID) > CalibrationProfileWriteScopeIDMax || hasNUL(scopeID) ||
+		len(featureSetVersion) < CalibrationProfileWriteFeatureSetVersionMin || len(featureSetVersion) > CalibrationProfileWriteFeatureSetVersionMax || hasNUL(featureSetVersion) ||
+		len(payloadJson) < CalibrationProfileWritePayloadJsonMin || len(payloadJson) > CalibrationProfileWritePayloadJsonMax || hasNUL(payloadJson) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, targetSurface, CalibrationProfileWriteTargetSurfaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactKind, CalibrationProfileWriteArtifactKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeKind, CalibrationProfileWriteScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeID, CalibrationProfileWriteScopeIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featureSetVersion, CalibrationProfileWriteFeatureSetVersionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, payloadJson, CalibrationProfileWritePayloadJsonMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationCalibrationProfileWrite, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCalibrationProfileWriteRequest reads it back, checking each field against its own bound.
+func DecodeCalibrationProfileWriteRequest(request []byte) (string, string, string, string, string, string, error) {
+	var targetSurface string
+	var artifactKind string
+	var scopeKind string
+	var scopeID string
+	var featureSetVersion string
+	var payloadJson string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCalibrationProfileWrite || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if targetSurface, err = takeRowText(payload, &cursor, CalibrationProfileWriteTargetSurfaceMax); err != nil ||
+		len(targetSurface) < CalibrationProfileWriteTargetSurfaceMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if artifactKind, err = takeRowText(payload, &cursor, CalibrationProfileWriteArtifactKindMax); err != nil ||
+		len(artifactKind) < CalibrationProfileWriteArtifactKindMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if scopeKind, err = takeRowText(payload, &cursor, CalibrationProfileWriteScopeKindMax); err != nil ||
+		len(scopeKind) < CalibrationProfileWriteScopeKindMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if scopeID, err = takeRowText(payload, &cursor, CalibrationProfileWriteScopeIDMax); err != nil ||
+		len(scopeID) < CalibrationProfileWriteScopeIDMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if featureSetVersion, err = takeRowText(payload, &cursor, CalibrationProfileWriteFeatureSetVersionMax); err != nil ||
+		len(featureSetVersion) < CalibrationProfileWriteFeatureSetVersionMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if payloadJson, err = takeRowText(payload, &cursor, CalibrationProfileWritePayloadJsonMax); err != nil ||
+		len(payloadJson) < CalibrationProfileWritePayloadJsonMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return targetSurface, artifactKind, scopeKind, scopeID, featureSetVersion, payloadJson, nil
 }
 
 const EventDocumentExists = EventOrganization

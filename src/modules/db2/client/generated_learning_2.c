@@ -812,3 +812,66 @@ aimee_module_call_result_t aimee_db2_bandit_arm_stats_read_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_artifact_write_evidence_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *artifact_kind, const char *scope_kind, const char *scope_id,
+    const char *operator_id, const char *content_hash, const char *payload_json, char *artifact_id,
+    size_t artifact_id_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ARTIFACT_WRITE_EVIDENCE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ARTIFACT_WRITE_EVIDENCE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_artifact_write_evidence_request_encode(
+           artifact_kind, scope_kind, scope_id, operator_id, content_hash, payload_json, request,
+           sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ARTIFACT_WRITE_EVIDENCE,
+            AIMEE_DB2_STAGE_ARTIFACT_WRITE_EVIDENCE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_artifact_write_evidence_reply_decode(response, response_len, artifact_id,
+                                                      artifact_id_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_calibration_profile_write_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *target_surface, const char *artifact_kind, const char *scope_kind,
+    const char *scope_id, const char *feature_set_version, const char *payload_json,
+    char *artifact_id, size_t artifact_id_capacity, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_CALIBRATION_PROFILE_WRITE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_CALIBRATION_PROFILE_WRITE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_calibration_profile_write_request_encode(
+           target_surface, artifact_kind, scope_kind, scope_id, feature_set_version, payload_json,
+           request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_CALIBRATION_PROFILE_WRITE,
+            AIMEE_DB2_STAGE_CALIBRATION_PROFILE_WRITE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_calibration_profile_write_reply_decode(response, response_len, artifact_id,
+                                                        artifact_id_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

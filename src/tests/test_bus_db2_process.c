@@ -2825,6 +2825,74 @@ int main(int argc, char **argv)
     * even with files. */
    assert(recompute_blocked_symbols_blocked_count == 0);
 
+   /* Evidence capture, a calibration profile, and the code-projection generation reads. */
+   static char
+       artifact_write_evidence_artifact_id[AIMEE_DB2_ARTIFACT_WRITE_EVIDENCE_ARTIFACT_ID_MAX + 1];
+   artifact_write_evidence_artifact_id[0] = 'x';
+   assert(aimee_db2_artifact_write_evidence_call(
+              call_client, &client, 9430, 0, "replay_evidence", "user", "replay", "replay-operator",
+              "replay-hash", "{\"seen\":true}", artifact_write_evidence_artifact_id,
+              sizeof(artifact_write_evidence_artifact_id), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Nothing was captured under this content hash before, so a row is written
+    * and its identifier comes back. A second capture of the same hash under any
+    * other scope would answer with this same identifier. */
+   assert(artifact_write_evidence_artifact_id[0] != '\0');
+
+   static char
+       calibration_profile_write_artifact_id[AIMEE_DB2_CALIBRATION_PROFILE_WRITE_ARTIFACT_ID_MAX +
+                                             1];
+   calibration_profile_write_artifact_id[0] = 'x';
+   assert(aimee_db2_calibration_profile_write_call(
+              call_client, &client, 9431, 0, "replay.surface", "calibration_profile", "user",
+              "replay", "v1", "{\"bins\":1}", calibration_profile_write_artifact_id,
+              sizeof(calibration_profile_write_artifact_id), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The identifier is generated before the write and returned whatever the
+    * stamping statement did, so this says a profile was asked for rather than
+    * that a readable one exists. */
+   assert(calibration_profile_write_artifact_id[0] != '\0');
+
+   uint32_t projection_generation_meta_generation_found = 99;
+   static char projection_generation_meta_project_name
+       [AIMEE_DB2_PROJECTION_GENERATION_META_PROJECT_NAME_MAX + 1];
+   projection_generation_meta_project_name[0] = 'x';
+   static char projection_generation_meta_generation_state
+       [AIMEE_DB2_PROJECTION_GENERATION_META_GENERATION_STATE_MAX + 1];
+   projection_generation_meta_generation_state[0] = 'x';
+   static char
+       projection_generation_meta_source_hash[AIMEE_DB2_PROJECTION_GENERATION_META_SOURCE_HASH_MAX +
+                                              1];
+   projection_generation_meta_source_hash[0] = 'x';
+   static char projection_generation_meta_extractor_version
+       [AIMEE_DB2_PROJECTION_GENERATION_META_EXTRACTOR_VERSION_MAX + 1];
+   projection_generation_meta_extractor_version[0] = 'x';
+   static char projection_generation_meta_pipeline_version
+       [AIMEE_DB2_PROJECTION_GENERATION_META_PIPELINE_VERSION_MAX + 1];
+   projection_generation_meta_pipeline_version[0] = 'x';
+   assert(
+       aimee_db2_projection_generation_meta_call(
+           call_client, &client, 9432, 0, 1, &projection_generation_meta_generation_found,
+           projection_generation_meta_project_name, sizeof(projection_generation_meta_project_name),
+           projection_generation_meta_generation_state,
+           sizeof(projection_generation_meta_generation_state),
+           projection_generation_meta_source_hash, sizeof(projection_generation_meta_source_hash),
+           projection_generation_meta_extractor_version,
+           sizeof(projection_generation_meta_extractor_version),
+           projection_generation_meta_pipeline_version,
+           sizeof(projection_generation_meta_pipeline_version), NULL,
+           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(projection_generation_meta_generation_found == 0 &&
+          projection_generation_meta_project_name[0] == '\0' &&
+          projection_generation_meta_generation_state[0] == '\0' &&
+          projection_generation_meta_source_hash[0] == '\0' &&
+          projection_generation_meta_extractor_version[0] == '\0' &&
+          projection_generation_meta_pipeline_version[0] == '\0');
+
+   uint64_t projection_sync_project_edge_count = 99;
+   assert(aimee_db2_projection_sync_project_call(call_client, &client, 9433, 0, "replay-project", 1,
+                                                 &projection_sync_project_edge_count, NULL,
+                                                 NULL) == AIMEE_MODULE_CALL_OK);
+   assert(projection_sync_project_edge_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

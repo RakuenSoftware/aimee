@@ -855,6 +855,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *project_name, uint32_t *file_count, uint32_t *definition_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_projection_generation_meta_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t generation_id, uint32_t *generation_found, char *project_name, size_t project_name_capacity, char *generation_state, size_t generation_state_capacity, char *source_hash, size_t source_hash_capacity, char *extractor_version, size_t extractor_version_capacity, char *pipeline_version, size_t pipeline_version_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_projection_sync_project_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project_name, uint64_t generation_id, uint64_t *edge_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_trace_mining_record_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -1092,6 +1100,14 @@ extern "C"
    aimee_module_call_result_t aimee_db2_bandit_arm_stats_read_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *decision_point, const char *arm_id, uint64_t *arm_n_decisions, uint64_t *arm_n_rewards, double *sum_reward, double *posterior_alpha, double *posterior_beta, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_artifact_write_evidence_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *artifact_kind, const char *scope_kind, const char *scope_id, const char *operator_id, const char *content_hash, const char *payload_json, char *artifact_id, size_t artifact_id_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_calibration_profile_write_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *target_surface, const char *artifact_kind, const char *scope_kind, const char *scope_id, const char *feature_set_version, const char *payload_json, char *artifact_id, size_t artifact_id_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,

@@ -13342,6 +13342,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_cross_repo_recompute_blocked_symbols",
         "policy": {"writes": 200},
     },
+    "artifact_write_evidence": {
+        "key": ("learning", 66),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_write_evidence",
+        "policy": {"writes": 200},
+    },
+    "calibration_profile_write": {
+        "key": ("learning", 67),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_calibration_profile_write",
+        "policy": {"writes": 200},
+    },
+    "projection_generation_meta": {
+        "key": ("index", 65),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_generation_meta",
+        "policy": {"reads": 200},
+    },
+    "projection_sync_project": {
+        "key": ("index", 66),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_projection_sync_project",
+        "policy": {"writes": 200},
+    },
 }
 
 

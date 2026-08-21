@@ -9206,6 +9206,122 @@
       }
     },
     {
+      "family": "index",
+      "id": 65,
+      "name": "projection_generation_meta",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Code projection generations are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_generation_meta"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a generation of any project can be read by its identifier, which names no project"
+        },
+        "fields": [
+          {
+            "name": "generation_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "generation_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "project_name",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "generation_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "source_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "extractor_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "pipeline_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
+      "family": "index",
+      "id": 66,
+      "name": "projection_sync_project",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Files, code calls and projection edges are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_projection_sync_project"
+      ],
+      "request": {
+        "policy": {
+          "writes": "each edge is its own statement with no transaction over the run, and the file list is capped at 4096 whatever the project holds"
+        },
+        "fields": [
+          {
+            "name": "project_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "generation_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "edge_count",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -12519,6 +12635,146 @@
             "type": "f64",
             "encoding": "ieee754-binary64-le",
             "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 66,
+      "name": "artifact_write_evidence",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Evidence artifacts are relational DB2 rows.",
+      "c_symbols": [
+        "db2_artifact_write_evidence"
+      ],
+      "request": {
+        "policy": {
+          "writes": "identical evidence collapses onto the existing row by kind and content hash alone, and the scope plays no part in that"
+        },
+        "fields": [
+          {
+            "name": "artifact_kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "operator_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "content_hash",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "payload_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 67,
+      "name": "calibration_profile_write",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Calibration profiles are relational DB2 artifact rows.",
+      "c_symbols": [
+        "db2_calibration_profile_write"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the artifact is committed first and stamped by a second statement with no transaction over the pair"
+        },
+        "fields": [
+          {
+            "name": "target_surface",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "artifact_kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "feature_set_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "payload_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "artifact_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
           }
         ]
       }
