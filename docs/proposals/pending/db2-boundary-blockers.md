@@ -163,28 +163,62 @@ call.
 Until one of those exists the sixty-six stay unreviewed, and the count is worth
 watching: it is roughly one in seven of what is left.
 
-## Six declarations run whatever the host process installed into them
+## Ten declarations run whatever the host process installed into them
 
 `src/modules/db2/include/aimee/db2/host_contracts.h` lets the surrounding
-process hand DB2 three function pointers: one to embed a text, one to extract
-facts from it, one to scan a turn for a retraction cue. Three registration
-functions and three consumers make up the set:
+process hand DB2 function pointers -- twelve registration functions, covering
+embedding, fact extraction, retraction scanning, the fact gate, MDL scoring,
+audit hashing, identity keys, CSS analysis and the vault's crypto. The
+providers live in the process that installed them, and the module process
+installs none.
 
-    aimee_db2_register_embed_provider        db2_kb_embed_text
-    aimee_db2_register_fact_extract_provider db2_fact_ingest_text
-    aimee_db2_register_fact_scan_provider    db2_typed_fact_ingress
+The first count here said six, and it was wrong in a way worth naming: it came
+from grepping each declaration's own body for a provider global. Four
+declarations never mention one. They call a file-static helper that does, and a
+body-only search cannot see through a single call. Following calls to a fixed
+point inside each file finds ten, four of them already published:
 
-The providers live in the process that installed them, and the module process
-installs none. `db2_typed_fact_ingress` treats a missing scanner as "no answer"
-and declines to retract, which is the safe direction and also a silent one: the
-operation would work, return zero, and never say that the reason was an absent
-provider rather than an absent fact.
+    operation             declaration                    provider
+    artifact_write        db2_artifact_write             mdl_score
+    artifact_set_state    db2_artifact_set_state         mdl_score
+    artifact_reject       db2_artifact_reject            mdl_score
+    kb_audit_append       db2_kb_audit_append            audit_hash
+    (pending)             db2_artifact_review_rollback   mdl_score
+    (pending)             db2_fact_ingest_text           fact_extract
+    (pending)             db2_typed_fact_ingress         fact_scan
+    (pending)             db2_kb_pdf_search_chunks       embed
+    (pending)             db2_fact_commit                fact_gate
+    (pending)             db2_kb_embed_text              embed
+
+What a missing provider does splits three ways, and only one of them is loud.
+
+`db2_kb_audit_append` fails. The row hash comes from the provider, and without
+it the append returns an error before it reaches the table. The replay proves
+this: `custody.kb_audit_append` is answered, acknowledges nothing, and the
+audit table stays empty. An operation that cannot succeed in the module process
+is published because the boundary is real and the wire format is settled; what
+is unsettled is which process hashes the row.
+
+`db2_kb_pdf_search_chunks` degrades and says so in its own comment: the vector
+leg is skipped and the lexical leg answers alone. Fewer results, no error, and
+the code is explicit that this is the intended shape.
+
+The rest degrade silently, which is the part to watch. The three artifact
+writers succeed and quietly skip the MDL feature row, so in the module process
+artifacts accumulate with no MDL features and nothing anywhere records that the
+scorer was absent rather than the artifact unscorable. `db2_fact_commit`
+without its gate leaves the verdict at DEFER and writes no semantic edge --
+every edge withheld, and withheld looks exactly like rejected.
+`db2_typed_fact_ingress` treats a missing scanner as "no answer" and declines
+to retract, which is the safe direction and an equally quiet one.
 
 This is a smaller problem than the tenant scope and a different kind. The seam
 is deliberate and documented; what is undecided is which side of the boundary
 each provider belongs on once DB2 is its own process. Embedding in particular
 is a question about where model inference runs, not about DB2. Recorded here so
-that these six are not migrated as though they were ordinary reads and writes.
+that these ten are not migrated as though they were ordinary reads and writes
+-- and so that the four reached only through a helper are not lost again to the
+next body-only search.
 
 ## One test declares its own copies of six DB2 row types and stubs them untyped
 

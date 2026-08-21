@@ -16,6 +16,9 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "feature_rows.h"
+#include "kb_audit_worm.h"
+#include "kb_payload.h"
 #include "enrollments.h"
 #include "entity_profiles.h"
 #include "epistemic_directives.h"
@@ -456,6 +459,15 @@ typedef struct
    void (*enrollment_touch_last_seen)(const char *fingerprint, const char *scope);
    int (*retrieval_event_by_turn)(const char *turn_id, char *id_out, int id_out_len,
                                   char *payload_out, int payload_out_len);
+   int (*kb_audit_append)(const char *actor_role, const char *actor_principal, const char *action,
+                          const char *subject, const char *verdict, const char *detail);
+   int (*feature_row_upsert)(const char *subject_id, const char *subject_kind,
+                             const char *scope_kind, const char *scope_id,
+                             const char *feature_set_version, const char *features_json,
+                             const char *computed_at);
+   int (*feature_row_read)(const char *subject_id, const char *subject_kind,
+                           const char *feature_set_version, char *buf, size_t len);
+   int (*async_enqueue)(const char *kind, int64_t document_id, const char *project);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

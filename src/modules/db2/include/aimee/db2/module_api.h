@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "45fc35dfc2c28df60ef89db4df44537614ce649608a9607d199cd5a2fe804b93"
+#define AIMEE_DB2_CONTRACT_SHA256 "89a02ef052f7bb0e4e3b51f69ad541eb4a54106bb689c3a4483ab0f5805ebc91"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -3201,6 +3201,46 @@
 #define AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RESPONSE_MIN_LEN                          32u
 #define AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_RESPONSE_MAX_LEN                          4254u
 #define AIMEE_DB2_RETRIEVAL_EVENT_BY_TURN_ERROR_LEN                                 24u
+#define AIMEE_DB2_EVENT_FEATURE_ROW_UPSERT                                          AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_FEATURE_ROW_UPSERT                                          AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_FEATURE_ROW_UPSERT                                      62u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_REQUEST_MIN_LEN                                52u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_REQUEST_MAX_LEN                                4749u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MIN                                 1u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MAX                                 255u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SUBJECT_KIND_MIN                       0u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SUBJECT_KIND_MAX                       63u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_KIND_MIN                         0u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_KIND_MAX                         31u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_ID_MIN                           0u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_ID_MAX                           127u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SET_VERSION_MIN                        0u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SET_VERSION_MAX                        63u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURES_JSON_MIN                              0u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURES_JSON_MAX                              4095u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_COMPUTED_AT_MIN                                0u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_COMPUTED_AT_MAX                                63u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_ACKNOWLEDGED_MIN                               0u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_ACKNOWLEDGED_MAX                               1u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_RESPONSE_MIN_LEN                               28u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_RESPONSE_MAX_LEN                               28u
+#define AIMEE_DB2_FEATURE_ROW_UPSERT_ERROR_LEN                                      24u
+#define AIMEE_DB2_EVENT_FEATURE_ROW_READ                                            AIMEE_DB2_EVENT_LEARNING
+#define AIMEE_DB2_STAGE_FEATURE_ROW_READ                                            AIMEE_DB2_FAMILY_LEARNING
+#define AIMEE_DB2_OPERATION_FEATURE_ROW_READ                                        63u
+#define AIMEE_DB2_FEATURE_ROW_READ_REQUEST_MIN_LEN                                  36u
+#define AIMEE_DB2_FEATURE_ROW_READ_REQUEST_MAX_LEN                                  417u
+#define AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MIN                                   1u
+#define AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MAX                                   255u
+#define AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SUBJECT_KIND_MIN                         0u
+#define AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SUBJECT_KIND_MAX                         63u
+#define AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SET_VERSION_MIN                          0u
+#define AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SET_VERSION_MAX                          63u
+#define AIMEE_DB2_FEATURE_ROW_READ_FEATURES_JSON_MIN                                0u
+#define AIMEE_DB2_FEATURE_ROW_READ_FEATURES_JSON_MAX                                4095u
+#define AIMEE_DB2_FEATURE_ROW_READ_RESPONSE_MIN_LEN                                 28u
+#define AIMEE_DB2_FEATURE_ROW_READ_RESPONSE_MAX_LEN                                 4123u
+#define AIMEE_DB2_FEATURE_ROW_READ_ERROR_LEN                                        24u
 #define AIMEE_DB2_EVENT_DOCUMENT_EXISTS                                             AIMEE_DB2_EVENT_ORGANIZATION
 #define AIMEE_DB2_STAGE_DOCUMENT_EXISTS                                             AIMEE_DB2_FAMILY_ORGANIZATION
 #define AIMEE_DB2_OPERATION_DOCUMENT_EXISTS                                         6u
@@ -3579,6 +3619,28 @@
 #define AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_RESPONSE_MIN_LEN                       28u
 #define AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_RESPONSE_MAX_LEN                       28u
 #define AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_ERROR_LEN                              24u
+#define AIMEE_DB2_EVENT_KB_AUDIT_APPEND                                             AIMEE_DB2_EVENT_CUSTODY
+#define AIMEE_DB2_STAGE_KB_AUDIT_APPEND                                             AIMEE_DB2_FAMILY_CUSTODY
+#define AIMEE_DB2_OPERATION_KB_AUDIT_APPEND                                         6u
+#define AIMEE_DB2_KB_AUDIT_APPEND_REQUEST_MIN_LEN                                   48u
+#define AIMEE_DB2_KB_AUDIT_APPEND_REQUEST_MAX_LEN                                   2858u
+#define AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_ROLE_MIN                                    0u
+#define AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_ROLE_MAX                                    63u
+#define AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_PRINCIPAL_MIN                               0u
+#define AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_PRINCIPAL_MAX                               255u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MIN                                  1u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MAX                                  127u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_SUBJECT_MIN                                 0u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_SUBJECT_MAX                                 255u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_VERDICT_MIN                                 0u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_VERDICT_MAX                                 63u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_DETAIL_MIN                                  0u
+#define AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_DETAIL_MAX                                  2047u
+#define AIMEE_DB2_KB_AUDIT_APPEND_ACKNOWLEDGED_MIN                                  0u
+#define AIMEE_DB2_KB_AUDIT_APPEND_ACKNOWLEDGED_MAX                                  1u
+#define AIMEE_DB2_KB_AUDIT_APPEND_RESPONSE_MIN_LEN                                  28u
+#define AIMEE_DB2_KB_AUDIT_APPEND_RESPONSE_MAX_LEN                                  28u
+#define AIMEE_DB2_KB_AUDIT_APPEND_ERROR_LEN                                         24u
 #define AIMEE_DB2_EVENT_ASYNC_PENDING_COUNT                                         AIMEE_DB2_EVENT_MAINTENANCE
 #define AIMEE_DB2_STAGE_ASYNC_PENDING_COUNT                                         AIMEE_DB2_FAMILY_MAINTENANCE
 #define AIMEE_DB2_OPERATION_ASYNC_PENDING_COUNT                                     11u
@@ -4171,6 +4233,22 @@
 #define AIMEE_DB2_RESOLVE_CONTRADICTION_RESPONSE_MIN_LEN                            28u
 #define AIMEE_DB2_RESOLVE_CONTRADICTION_RESPONSE_MAX_LEN                            28u
 #define AIMEE_DB2_RESOLVE_CONTRADICTION_ERROR_LEN                                   24u
+#define AIMEE_DB2_EVENT_ASYNC_ENQUEUE                                               AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_ASYNC_ENQUEUE                                               AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_ASYNC_ENQUEUE                                           42u
+#define AIMEE_DB2_ASYNC_ENQUEUE_REQUEST_MIN_LEN                                     40u
+#define AIMEE_DB2_ASYNC_ENQUEUE_REQUEST_MAX_LEN                                     230u
+#define AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MIN                                        1u
+#define AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MAX                                        63u
+#define AIMEE_DB2_ASYNC_ENQUEUE_DOCUMENT_ID_MIN                                     0ull
+#define AIMEE_DB2_ASYNC_ENQUEUE_DOCUMENT_ID_MAX                                     9223372036854775807ull
+#define AIMEE_DB2_ASYNC_ENQUEUE_JOB_PROJECT_MIN                                     0u
+#define AIMEE_DB2_ASYNC_ENQUEUE_JOB_PROJECT_MAX                                     127u
+#define AIMEE_DB2_ASYNC_ENQUEUE_ACKNOWLEDGED_MIN                                    0u
+#define AIMEE_DB2_ASYNC_ENQUEUE_ACKNOWLEDGED_MAX                                    1u
+#define AIMEE_DB2_ASYNC_ENQUEUE_RESPONSE_MIN_LEN                                    28u
+#define AIMEE_DB2_ASYNC_ENQUEUE_RESPONSE_MAX_LEN                                    28u
+#define AIMEE_DB2_ASYNC_ENQUEUE_ERROR_LEN                                           24u
 #define AIMEE_DB2_STRING_ACK_ARGUMENT_MAX                                           255u
 #define AIMEE_DB2_STRING_COUNT_ARGUMENT_MAX                                         511u
 #define AIMEE_DB2_STRING_PAIR_FIRST_MAX                                             511u
@@ -30747,6 +30825,324 @@ static inline int aimee_db2_retrieval_event_by_turn_reply_decode(const uint8_t *
    return 0;
 }
 
+static inline int aimee_db2_feature_row_upsert_request_encode(const char *subject_id, const char *feature_subject_kind, const char *feature_scope_kind, const char *feature_scope_id, const char *feature_set_version, const char *features_json, const char *computed_at,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!subject_id || !feature_subject_kind || !feature_scope_kind || !feature_scope_id || !feature_set_version || !features_json || !computed_at || !output || !output_len)
+      return -1;
+   size_t subject_id_len = 0u;
+   while (subject_id_len <= AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MAX && subject_id[subject_id_len])
+      ++subject_id_len;
+   size_t feature_subject_kind_len = 0u;
+   while (feature_subject_kind_len <= AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SUBJECT_KIND_MAX && feature_subject_kind[feature_subject_kind_len])
+      ++feature_subject_kind_len;
+   size_t feature_scope_kind_len = 0u;
+   while (feature_scope_kind_len <= AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_KIND_MAX && feature_scope_kind[feature_scope_kind_len])
+      ++feature_scope_kind_len;
+   size_t feature_scope_id_len = 0u;
+   while (feature_scope_id_len <= AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_ID_MAX && feature_scope_id[feature_scope_id_len])
+      ++feature_scope_id_len;
+   size_t feature_set_version_len = 0u;
+   while (feature_set_version_len <= AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SET_VERSION_MAX && feature_set_version[feature_set_version_len])
+      ++feature_set_version_len;
+   size_t features_json_len = 0u;
+   while (features_json_len <= AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURES_JSON_MAX && features_json[features_json_len])
+      ++features_json_len;
+   size_t computed_at_len = 0u;
+   while (computed_at_len <= AIMEE_DB2_FEATURE_ROW_UPSERT_COMPUTED_AT_MAX && computed_at[computed_at_len])
+      ++computed_at_len;
+   if (subject_id_len < AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MIN || subject_id_len > AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MAX ||
+       feature_subject_kind_len > AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SUBJECT_KIND_MAX ||
+       feature_scope_kind_len > AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_KIND_MAX ||
+       feature_scope_id_len > AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_ID_MAX ||
+       feature_set_version_len > AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SET_VERSION_MAX ||
+       features_json_len > AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURES_JSON_MAX ||
+       computed_at_len > AIMEE_DB2_FEATURE_ROW_UPSERT_COMPUTED_AT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_FEATURE_ROW_UPSERT_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)subject_id_len);
+   memcpy(payload + cursor + 4u, subject_id, subject_id_len);
+   cursor += 4u + (uint32_t)subject_id_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)feature_subject_kind_len);
+   memcpy(payload + cursor + 4u, feature_subject_kind, feature_subject_kind_len);
+   cursor += 4u + (uint32_t)feature_subject_kind_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)feature_scope_kind_len);
+   memcpy(payload + cursor + 4u, feature_scope_kind, feature_scope_kind_len);
+   cursor += 4u + (uint32_t)feature_scope_kind_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)feature_scope_id_len);
+   memcpy(payload + cursor + 4u, feature_scope_id, feature_scope_id_len);
+   cursor += 4u + (uint32_t)feature_scope_id_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)feature_set_version_len);
+   memcpy(payload + cursor + 4u, feature_set_version, feature_set_version_len);
+   cursor += 4u + (uint32_t)feature_set_version_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)features_json_len);
+   memcpy(payload + cursor + 4u, features_json, features_json_len);
+   cursor += 4u + (uint32_t)features_json_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)computed_at_len);
+   memcpy(payload + cursor + 4u, computed_at, computed_at_len);
+   cursor += 4u + (uint32_t)computed_at_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_FEATURE_ROW_UPSERT, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_feature_row_upsert_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *subject_id, size_t subject_id_capacity, char *feature_subject_kind, size_t feature_subject_kind_capacity, char *feature_scope_kind, size_t feature_scope_kind_capacity, char *feature_scope_id, size_t feature_scope_id_capacity, char *feature_set_version, size_t feature_set_version_capacity, char *features_json, size_t features_json_capacity, char *computed_at, size_t computed_at_capacity)
+{
+   if (subject_id && subject_id_capacity)
+      subject_id[0] = '\0';
+   if (feature_subject_kind && feature_subject_kind_capacity)
+      feature_subject_kind[0] = '\0';
+   if (feature_scope_kind && feature_scope_kind_capacity)
+      feature_scope_kind[0] = '\0';
+   if (feature_scope_id && feature_scope_id_capacity)
+      feature_scope_id[0] = '\0';
+   if (feature_set_version && feature_set_version_capacity)
+      feature_set_version[0] = '\0';
+   if (features_json && features_json_capacity)
+      features_json[0] = '\0';
+   if (computed_at && computed_at_capacity)
+      computed_at[0] = '\0';
+   if (!subject_id || subject_id_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MAX + 1u || !feature_subject_kind || feature_subject_kind_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SUBJECT_KIND_MAX + 1u || !feature_scope_kind || feature_scope_kind_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_KIND_MAX + 1u || !feature_scope_id || feature_scope_id_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_ID_MAX + 1u || !feature_set_version || feature_set_version_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SET_VERSION_MAX + 1u || !features_json || features_json_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURES_JSON_MAX + 1u || !computed_at || computed_at_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_UPSERT_COMPUTED_AT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FEATURE_ROW_UPSERT || header.flags != 0u ||
+       input_len < AIMEE_DB2_FEATURE_ROW_UPSERT_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_FEATURE_ROW_UPSERT_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, subject_id,
+                                 AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (subject_id[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_FEATURE_ROW_UPSERT_SUBJECT_ID_MIN)
+         return -1;
+   }
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, feature_subject_kind,
+                                 AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SUBJECT_KIND_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, feature_scope_kind,
+                                 AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_KIND_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, feature_scope_id,
+                                 AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SCOPE_ID_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, feature_set_version,
+                                 AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURE_SET_VERSION_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, features_json,
+                                 AIMEE_DB2_FEATURE_ROW_UPSERT_FEATURES_JSON_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, computed_at,
+                                 AIMEE_DB2_FEATURE_ROW_UPSERT_COMPUTED_AT_MAX) != 0)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_feature_row_upsert_reply_encode(uint32_t acknowledged,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (acknowledged > AIMEE_DB2_FEATURE_ROW_UPSERT_ACKNOWLEDGED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_FEATURE_ROW_UPSERT_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, acknowledged);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_FEATURE_ROW_UPSERT, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_feature_row_upsert_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *acknowledged)
+{
+   if (acknowledged)
+      *acknowledged = 0u;
+   if (!acknowledged)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FEATURE_ROW_UPSERT ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *acknowledged = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*acknowledged > AIMEE_DB2_FEATURE_ROW_UPSERT_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_feature_row_read_request_encode(const char *subject_id, const char *feature_subject_kind, const char *feature_set_version,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!subject_id || !feature_subject_kind || !feature_set_version || !output || !output_len)
+      return -1;
+   size_t subject_id_len = 0u;
+   while (subject_id_len <= AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MAX && subject_id[subject_id_len])
+      ++subject_id_len;
+   size_t feature_subject_kind_len = 0u;
+   while (feature_subject_kind_len <= AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SUBJECT_KIND_MAX && feature_subject_kind[feature_subject_kind_len])
+      ++feature_subject_kind_len;
+   size_t feature_set_version_len = 0u;
+   while (feature_set_version_len <= AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SET_VERSION_MAX && feature_set_version[feature_set_version_len])
+      ++feature_set_version_len;
+   if (subject_id_len < AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MIN || subject_id_len > AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MAX ||
+       feature_subject_kind_len > AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SUBJECT_KIND_MAX ||
+       feature_set_version_len > AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SET_VERSION_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_FEATURE_ROW_READ_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)subject_id_len);
+   memcpy(payload + cursor + 4u, subject_id, subject_id_len);
+   cursor += 4u + (uint32_t)subject_id_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)feature_subject_kind_len);
+   memcpy(payload + cursor + 4u, feature_subject_kind, feature_subject_kind_len);
+   cursor += 4u + (uint32_t)feature_subject_kind_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)feature_set_version_len);
+   memcpy(payload + cursor + 4u, feature_set_version, feature_set_version_len);
+   cursor += 4u + (uint32_t)feature_set_version_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_FEATURE_ROW_READ, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_feature_row_read_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *subject_id, size_t subject_id_capacity, char *feature_subject_kind, size_t feature_subject_kind_capacity, char *feature_set_version, size_t feature_set_version_capacity)
+{
+   if (subject_id && subject_id_capacity)
+      subject_id[0] = '\0';
+   if (feature_subject_kind && feature_subject_kind_capacity)
+      feature_subject_kind[0] = '\0';
+   if (feature_set_version && feature_set_version_capacity)
+      feature_set_version[0] = '\0';
+   if (!subject_id || subject_id_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MAX + 1u || !feature_subject_kind || feature_subject_kind_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SUBJECT_KIND_MAX + 1u || !feature_set_version || feature_set_version_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SET_VERSION_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FEATURE_ROW_READ || header.flags != 0u ||
+       input_len < AIMEE_DB2_FEATURE_ROW_READ_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_FEATURE_ROW_READ_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, subject_id,
+                                 AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (subject_id[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_FEATURE_ROW_READ_SUBJECT_ID_MIN)
+         return -1;
+   }
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, feature_subject_kind,
+                                 AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SUBJECT_KIND_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, feature_set_version,
+                                 AIMEE_DB2_FEATURE_ROW_READ_FEATURE_SET_VERSION_MAX) != 0)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_feature_row_read_reply_encode(const char *features_json,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!features_json || !output || !output_len)
+      return -1;
+   size_t features_json_len = 0u;
+   while (features_json_len <= AIMEE_DB2_FEATURE_ROW_READ_FEATURES_JSON_MAX && features_json[features_json_len])
+      ++features_json_len;
+   if (features_json_len > AIMEE_DB2_FEATURE_ROW_READ_FEATURES_JSON_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_FEATURE_ROW_READ_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)features_json_len);
+   memcpy(payload + cursor + 4u, features_json, features_json_len);
+   cursor += 4u + (uint32_t)features_json_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_FEATURE_ROW_READ, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_feature_row_read_reply_decode(const uint8_t *input, size_t input_len,
+                                                 char *features_json, size_t features_json_capacity)
+{
+   if (features_json && features_json_capacity)
+      features_json[0] = '\0';
+   if (!features_json || features_json_capacity < (size_t)AIMEE_DB2_FEATURE_ROW_READ_FEATURES_JSON_MAX + 1u)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_FEATURE_ROW_READ ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, features_json,
+                                 AIMEE_DB2_FEATURE_ROW_READ_FEATURES_JSON_MAX) != 0)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
 static inline int aimee_db2_document_exists_request_encode(uint64_t document_id, uint8_t *output,
                                                    size_t capacity)
 {
@@ -33970,6 +34366,177 @@ static inline int aimee_db2_enrollment_touch_last_seen_reply_decode(const uint8_
    *recorded = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*recorded < AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_RECORDED_MIN || *recorded > AIMEE_DB2_ENROLLMENT_TOUCH_LAST_SEEN_RECORDED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_kb_audit_append_request_encode(const char *actor_role, const char *actor_principal, const char *audit_action, const char *audit_subject, const char *audit_verdict, const char *audit_detail,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!actor_role || !actor_principal || !audit_action || !audit_subject || !audit_verdict || !audit_detail || !output || !output_len)
+      return -1;
+   size_t actor_role_len = 0u;
+   while (actor_role_len <= AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_ROLE_MAX && actor_role[actor_role_len])
+      ++actor_role_len;
+   size_t actor_principal_len = 0u;
+   while (actor_principal_len <= AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_PRINCIPAL_MAX && actor_principal[actor_principal_len])
+      ++actor_principal_len;
+   size_t audit_action_len = 0u;
+   while (audit_action_len <= AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MAX && audit_action[audit_action_len])
+      ++audit_action_len;
+   size_t audit_subject_len = 0u;
+   while (audit_subject_len <= AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_SUBJECT_MAX && audit_subject[audit_subject_len])
+      ++audit_subject_len;
+   size_t audit_verdict_len = 0u;
+   while (audit_verdict_len <= AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_VERDICT_MAX && audit_verdict[audit_verdict_len])
+      ++audit_verdict_len;
+   size_t audit_detail_len = 0u;
+   while (audit_detail_len <= AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_DETAIL_MAX && audit_detail[audit_detail_len])
+      ++audit_detail_len;
+   if (actor_role_len > AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_ROLE_MAX ||
+       actor_principal_len > AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_PRINCIPAL_MAX ||
+       audit_action_len < AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MIN || audit_action_len > AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MAX ||
+       audit_subject_len > AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_SUBJECT_MAX ||
+       audit_verdict_len > AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_VERDICT_MAX ||
+       audit_detail_len > AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_DETAIL_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_AUDIT_APPEND_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)actor_role_len);
+   memcpy(payload + cursor + 4u, actor_role, actor_role_len);
+   cursor += 4u + (uint32_t)actor_role_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)actor_principal_len);
+   memcpy(payload + cursor + 4u, actor_principal, actor_principal_len);
+   cursor += 4u + (uint32_t)actor_principal_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)audit_action_len);
+   memcpy(payload + cursor + 4u, audit_action, audit_action_len);
+   cursor += 4u + (uint32_t)audit_action_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)audit_subject_len);
+   memcpy(payload + cursor + 4u, audit_subject, audit_subject_len);
+   cursor += 4u + (uint32_t)audit_subject_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)audit_verdict_len);
+   memcpy(payload + cursor + 4u, audit_verdict, audit_verdict_len);
+   cursor += 4u + (uint32_t)audit_verdict_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)audit_detail_len);
+   memcpy(payload + cursor + 4u, audit_detail, audit_detail_len);
+   cursor += 4u + (uint32_t)audit_detail_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KB_AUDIT_APPEND, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_audit_append_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *actor_role, size_t actor_role_capacity, char *actor_principal, size_t actor_principal_capacity, char *audit_action, size_t audit_action_capacity, char *audit_subject, size_t audit_subject_capacity, char *audit_verdict, size_t audit_verdict_capacity, char *audit_detail, size_t audit_detail_capacity)
+{
+   if (actor_role && actor_role_capacity)
+      actor_role[0] = '\0';
+   if (actor_principal && actor_principal_capacity)
+      actor_principal[0] = '\0';
+   if (audit_action && audit_action_capacity)
+      audit_action[0] = '\0';
+   if (audit_subject && audit_subject_capacity)
+      audit_subject[0] = '\0';
+   if (audit_verdict && audit_verdict_capacity)
+      audit_verdict[0] = '\0';
+   if (audit_detail && audit_detail_capacity)
+      audit_detail[0] = '\0';
+   if (!actor_role || actor_role_capacity < (size_t)AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_ROLE_MAX + 1u || !actor_principal || actor_principal_capacity < (size_t)AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_PRINCIPAL_MAX + 1u || !audit_action || audit_action_capacity < (size_t)AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MAX + 1u || !audit_subject || audit_subject_capacity < (size_t)AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_SUBJECT_MAX + 1u || !audit_verdict || audit_verdict_capacity < (size_t)AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_VERDICT_MAX + 1u || !audit_detail || audit_detail_capacity < (size_t)AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_DETAIL_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_AUDIT_APPEND || header.flags != 0u ||
+       input_len < AIMEE_DB2_KB_AUDIT_APPEND_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_KB_AUDIT_APPEND_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, actor_role,
+                                 AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_ROLE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, actor_principal,
+                                 AIMEE_DB2_KB_AUDIT_APPEND_ACTOR_PRINCIPAL_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, audit_action,
+                                 AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (audit_action[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_ACTION_MIN)
+         return -1;
+   }
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, audit_subject,
+                                 AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_SUBJECT_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, audit_verdict,
+                                 AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_VERDICT_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, audit_detail,
+                                 AIMEE_DB2_KB_AUDIT_APPEND_AUDIT_DETAIL_MAX) != 0)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_kb_audit_append_reply_encode(uint32_t acknowledged,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (acknowledged > AIMEE_DB2_KB_AUDIT_APPEND_ACKNOWLEDGED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_AUDIT_APPEND_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, acknowledged);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_KB_AUDIT_APPEND, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_audit_append_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *acknowledged)
+{
+   if (acknowledged)
+      *acknowledged = 0u;
+   if (!acknowledged)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_AUDIT_APPEND ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *acknowledged = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*acknowledged > AIMEE_DB2_KB_AUDIT_APPEND_ACKNOWLEDGED_MAX)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -38397,6 +38964,140 @@ static inline int aimee_db2_resolve_contradiction_reply_decode(const uint8_t *in
    *acknowledged = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*acknowledged > AIMEE_DB2_RESOLVE_CONTRADICTION_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_async_enqueue_request_encode(const char *job_kind, uint64_t document_id, const char *job_project,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!job_kind || !job_project || !output || !output_len)
+      return -1;
+   size_t job_kind_len = 0u;
+   while (job_kind_len <= AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MAX && job_kind[job_kind_len])
+      ++job_kind_len;
+   size_t job_project_len = 0u;
+   while (job_project_len <= AIMEE_DB2_ASYNC_ENQUEUE_JOB_PROJECT_MAX && job_project[job_project_len])
+      ++job_project_len;
+   if (job_kind_len < AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MIN || job_kind_len > AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MAX ||
+       document_id > AIMEE_DB2_ASYNC_ENQUEUE_DOCUMENT_ID_MAX ||
+       job_project_len > AIMEE_DB2_ASYNC_ENQUEUE_JOB_PROJECT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ASYNC_ENQUEUE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)job_kind_len);
+   memcpy(payload + cursor + 4u, job_kind, job_kind_len);
+   cursor += 4u + (uint32_t)job_kind_len;
+   aimee_db2_put_u64(payload + cursor, document_id);
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)job_project_len);
+   memcpy(payload + cursor + 4u, job_project, job_project_len);
+   cursor += 4u + (uint32_t)job_project_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_ASYNC_ENQUEUE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_async_enqueue_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *job_kind, size_t job_kind_capacity, uint64_t *document_id, char *job_project, size_t job_project_capacity)
+{
+   if (job_kind && job_kind_capacity)
+      job_kind[0] = '\0';
+   if (document_id)
+      *document_id = 0u;
+   if (job_project && job_project_capacity)
+      job_project[0] = '\0';
+   if (!job_kind || job_kind_capacity < (size_t)AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MAX + 1u || !document_id || !job_project || job_project_capacity < (size_t)AIMEE_DB2_ASYNC_ENQUEUE_JOB_PROJECT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ASYNC_ENQUEUE || header.flags != 0u ||
+       input_len < AIMEE_DB2_ASYNC_ENQUEUE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_ASYNC_ENQUEUE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, job_kind,
+                                 AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (job_kind[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_ASYNC_ENQUEUE_JOB_KIND_MIN)
+         return -1;
+   }
+   if (cursor + 8u > payload_len)
+      return -1;
+   *document_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*document_id > AIMEE_DB2_ASYNC_ENQUEUE_DOCUMENT_ID_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, job_project,
+                                 AIMEE_DB2_ASYNC_ENQUEUE_JOB_PROJECT_MAX) != 0)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_async_enqueue_reply_encode(uint32_t acknowledged,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (acknowledged > AIMEE_DB2_ASYNC_ENQUEUE_ACKNOWLEDGED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_ASYNC_ENQUEUE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, acknowledged);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_ASYNC_ENQUEUE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_async_enqueue_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *acknowledged)
+{
+   if (acknowledged)
+      *acknowledged = 0u;
+   if (!acknowledged)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_ASYNC_ENQUEUE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *acknowledged = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*acknowledged > AIMEE_DB2_ASYNC_ENQUEUE_ACKNOWLEDGED_MAX)
       return -1;
    if (cursor != payload_len)
       return -1;

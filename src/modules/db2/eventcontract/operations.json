@@ -12228,6 +12228,134 @@
       }
     },
     {
+      "family": "learning",
+      "id": 62,
+      "name": "feature_row_upsert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Feature rows and the versions they were computed under are relational DB2 rows.",
+      "c_symbols": [
+        "db2_feature_row_upsert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the row is keyed on subject and feature-set version, so the scope is replaced by a rewrite rather than being part of what identifies the row"
+        },
+        "fields": [
+          {
+            "name": "subject_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "feature_subject_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "feature_scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "feature_scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "feature_set_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "features_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          },
+          {
+            "name": "computed_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 63,
+      "name": "feature_row_read",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Feature rows and the versions they were computed under are relational DB2 rows.",
+      "c_symbols": [
+        "db2_feature_row_read"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the scope is not part of the lookup, so a row written under any scope answers"
+        },
+        "fields": [
+          {
+            "name": "subject_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "feature_subject_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "feature_set_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "features_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -13819,6 +13947,76 @@
             "name": "recorded",
             "type": "u32",
             "minimum": 1,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "custody",
+      "id": 6,
+      "name": "kb_audit_append",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The audit chain, its sequence and its hashes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_audit_append"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the sequence and previous hash are read inside the transaction and the row is chained to them, so two appends racing leave one refused rather than queued"
+        },
+        "fields": [
+          {
+            "name": "actor_role",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "actor_principal",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "audit_action",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "audit_subject",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "audit_verdict",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "audit_detail",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 2047
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
             "maximum": 1
           }
         ]
@@ -16117,6 +16315,58 @@
             "type": "u64",
             "minimum": 0,
             "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 42,
+      "name": "async_enqueue",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Asynchronous jobs and the documents they work on are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_async_enqueue"
+      ],
+      "request": {
+        "policy": {
+          "writes": "one job per kind and document, so enqueuing a second does nothing whatever state the first is in"
+        },
+        "fields": [
+          {
+            "name": "job_kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "document_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "job_project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
           }
         ]
       },

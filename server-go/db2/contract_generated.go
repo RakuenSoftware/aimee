@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "45fc35dfc2c28df60ef89db4df44537614ce649608a9607d199cd5a2fe804b93"
+const ContractSHA256 = "89a02ef052f7bb0e4e3b51f69ad541eb4a54106bb689c3a4483ab0f5805ebc91"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -8465,6 +8465,180 @@ func DecodeRetrievalEventByTurnRequest(request []byte) (string, error) {
 	return turnID, nil
 }
 
+const EventFeatureRowUpsert = EventLearning
+const StageFeatureRowUpsert = FamilyLearning
+const OperationFeatureRowUpsert uint32 = 62
+const FeatureRowUpsertSubjectIDMin = 1
+const FeatureRowUpsertSubjectIDMax = 255
+const FeatureRowUpsertFeatureSubjectKindMin = 0
+const FeatureRowUpsertFeatureSubjectKindMax = 63
+const FeatureRowUpsertFeatureScopeKindMin = 0
+const FeatureRowUpsertFeatureScopeKindMax = 31
+const FeatureRowUpsertFeatureScopeIDMin = 0
+const FeatureRowUpsertFeatureScopeIDMax = 127
+const FeatureRowUpsertFeatureSetVersionMin = 0
+const FeatureRowUpsertFeatureSetVersionMax = 63
+const FeatureRowUpsertFeaturesJsonMin = 0
+const FeatureRowUpsertFeaturesJsonMax = 4095
+const FeatureRowUpsertComputedAtMin = 0
+const FeatureRowUpsertComputedAtMax = 63
+
+// EncodeFeatureRowUpsertRequest writes the schema feature_row_upsert declares, in order.
+func EncodeFeatureRowUpsertRequest(subjectID string, featureSubjectKind string, featureScopeKind string, featureScopeID string, featureSetVersion string, featuresJson string, computedAt string) ([]byte, error) {
+	if len(subjectID) < FeatureRowUpsertSubjectIDMin || len(subjectID) > FeatureRowUpsertSubjectIDMax || hasNUL(subjectID) ||
+		len(featureSubjectKind) < FeatureRowUpsertFeatureSubjectKindMin || len(featureSubjectKind) > FeatureRowUpsertFeatureSubjectKindMax || hasNUL(featureSubjectKind) ||
+		len(featureScopeKind) < FeatureRowUpsertFeatureScopeKindMin || len(featureScopeKind) > FeatureRowUpsertFeatureScopeKindMax || hasNUL(featureScopeKind) ||
+		len(featureScopeID) < FeatureRowUpsertFeatureScopeIDMin || len(featureScopeID) > FeatureRowUpsertFeatureScopeIDMax || hasNUL(featureScopeID) ||
+		len(featureSetVersion) < FeatureRowUpsertFeatureSetVersionMin || len(featureSetVersion) > FeatureRowUpsertFeatureSetVersionMax || hasNUL(featureSetVersion) ||
+		len(featuresJson) < FeatureRowUpsertFeaturesJsonMin || len(featuresJson) > FeatureRowUpsertFeaturesJsonMax || hasNUL(featuresJson) ||
+		len(computedAt) < FeatureRowUpsertComputedAtMin || len(computedAt) > FeatureRowUpsertComputedAtMax || hasNUL(computedAt) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, subjectID, FeatureRowUpsertSubjectIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featureSubjectKind, FeatureRowUpsertFeatureSubjectKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featureScopeKind, FeatureRowUpsertFeatureScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featureScopeID, FeatureRowUpsertFeatureScopeIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featureSetVersion, FeatureRowUpsertFeatureSetVersionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featuresJson, FeatureRowUpsertFeaturesJsonMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, computedAt, FeatureRowUpsertComputedAtMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationFeatureRowUpsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeFeatureRowUpsertRequest reads it back, checking each field against its own bound.
+func DecodeFeatureRowUpsertRequest(request []byte) (string, string, string, string, string, string, string, error) {
+	var subjectID string
+	var featureSubjectKind string
+	var featureScopeKind string
+	var featureScopeID string
+	var featureSetVersion string
+	var featuresJson string
+	var computedAt string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFeatureRowUpsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if subjectID, err = takeRowText(payload, &cursor, FeatureRowUpsertSubjectIDMax); err != nil ||
+		len(subjectID) < FeatureRowUpsertSubjectIDMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if featureSubjectKind, err = takeRowText(payload, &cursor, FeatureRowUpsertFeatureSubjectKindMax); err != nil ||
+		len(featureSubjectKind) < FeatureRowUpsertFeatureSubjectKindMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if featureScopeKind, err = takeRowText(payload, &cursor, FeatureRowUpsertFeatureScopeKindMax); err != nil ||
+		len(featureScopeKind) < FeatureRowUpsertFeatureScopeKindMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if featureScopeID, err = takeRowText(payload, &cursor, FeatureRowUpsertFeatureScopeIDMax); err != nil ||
+		len(featureScopeID) < FeatureRowUpsertFeatureScopeIDMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if featureSetVersion, err = takeRowText(payload, &cursor, FeatureRowUpsertFeatureSetVersionMax); err != nil ||
+		len(featureSetVersion) < FeatureRowUpsertFeatureSetVersionMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if featuresJson, err = takeRowText(payload, &cursor, FeatureRowUpsertFeaturesJsonMax); err != nil ||
+		len(featuresJson) < FeatureRowUpsertFeaturesJsonMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if computedAt, err = takeRowText(payload, &cursor, FeatureRowUpsertComputedAtMax); err != nil ||
+		len(computedAt) < FeatureRowUpsertComputedAtMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return subjectID, featureSubjectKind, featureScopeKind, featureScopeID, featureSetVersion, featuresJson, computedAt, nil
+}
+
+const EventFeatureRowRead = EventLearning
+const StageFeatureRowRead = FamilyLearning
+const OperationFeatureRowRead uint32 = 63
+const FeatureRowReadSubjectIDMin = 1
+const FeatureRowReadSubjectIDMax = 255
+const FeatureRowReadFeatureSubjectKindMin = 0
+const FeatureRowReadFeatureSubjectKindMax = 63
+const FeatureRowReadFeatureSetVersionMin = 0
+const FeatureRowReadFeatureSetVersionMax = 63
+
+// EncodeFeatureRowReadRequest writes the schema feature_row_read declares, in order.
+func EncodeFeatureRowReadRequest(subjectID string, featureSubjectKind string, featureSetVersion string) ([]byte, error) {
+	if len(subjectID) < FeatureRowReadSubjectIDMin || len(subjectID) > FeatureRowReadSubjectIDMax || hasNUL(subjectID) ||
+		len(featureSubjectKind) < FeatureRowReadFeatureSubjectKindMin || len(featureSubjectKind) > FeatureRowReadFeatureSubjectKindMax || hasNUL(featureSubjectKind) ||
+		len(featureSetVersion) < FeatureRowReadFeatureSetVersionMin || len(featureSetVersion) > FeatureRowReadFeatureSetVersionMax || hasNUL(featureSetVersion) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, subjectID, FeatureRowReadSubjectIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featureSubjectKind, FeatureRowReadFeatureSubjectKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, featureSetVersion, FeatureRowReadFeatureSetVersionMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationFeatureRowRead, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeFeatureRowReadRequest reads it back, checking each field against its own bound.
+func DecodeFeatureRowReadRequest(request []byte) (string, string, string, error) {
+	var subjectID string
+	var featureSubjectKind string
+	var featureSetVersion string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationFeatureRowRead || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if subjectID, err = takeRowText(payload, &cursor, FeatureRowReadSubjectIDMax); err != nil ||
+		len(subjectID) < FeatureRowReadSubjectIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if featureSubjectKind, err = takeRowText(payload, &cursor, FeatureRowReadFeatureSubjectKindMax); err != nil ||
+		len(featureSubjectKind) < FeatureRowReadFeatureSubjectKindMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if featureSetVersion, err = takeRowText(payload, &cursor, FeatureRowReadFeatureSetVersionMax); err != nil ||
+		len(featureSetVersion) < FeatureRowReadFeatureSetVersionMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return subjectID, featureSubjectKind, featureSetVersion, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -10038,6 +10212,104 @@ func DecodeEnrollmentTouchLastSeenRequest(request []byte) (string, string, error
 		return "", "", ErrMalformedEnvelope
 	}
 	return certFingerprint, enrollmentScope, nil
+}
+
+const EventKBAuditAppend = EventCustody
+const StageKBAuditAppend = FamilyCustody
+const OperationKBAuditAppend uint32 = 6
+const KBAuditAppendActorRoleMin = 0
+const KBAuditAppendActorRoleMax = 63
+const KBAuditAppendActorPrincipalMin = 0
+const KBAuditAppendActorPrincipalMax = 255
+const KBAuditAppendAuditActionMin = 1
+const KBAuditAppendAuditActionMax = 127
+const KBAuditAppendAuditSubjectMin = 0
+const KBAuditAppendAuditSubjectMax = 255
+const KBAuditAppendAuditVerdictMin = 0
+const KBAuditAppendAuditVerdictMax = 63
+const KBAuditAppendAuditDetailMin = 0
+const KBAuditAppendAuditDetailMax = 2047
+
+// EncodeKBAuditAppendRequest writes the schema kb_audit_append declares, in order.
+func EncodeKBAuditAppendRequest(actorRole string, actorPrincipal string, auditAction string, auditSubject string, auditVerdict string, auditDetail string) ([]byte, error) {
+	if len(actorRole) < KBAuditAppendActorRoleMin || len(actorRole) > KBAuditAppendActorRoleMax || hasNUL(actorRole) ||
+		len(actorPrincipal) < KBAuditAppendActorPrincipalMin || len(actorPrincipal) > KBAuditAppendActorPrincipalMax || hasNUL(actorPrincipal) ||
+		len(auditAction) < KBAuditAppendAuditActionMin || len(auditAction) > KBAuditAppendAuditActionMax || hasNUL(auditAction) ||
+		len(auditSubject) < KBAuditAppendAuditSubjectMin || len(auditSubject) > KBAuditAppendAuditSubjectMax || hasNUL(auditSubject) ||
+		len(auditVerdict) < KBAuditAppendAuditVerdictMin || len(auditVerdict) > KBAuditAppendAuditVerdictMax || hasNUL(auditVerdict) ||
+		len(auditDetail) < KBAuditAppendAuditDetailMin || len(auditDetail) > KBAuditAppendAuditDetailMax || hasNUL(auditDetail) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, actorRole, KBAuditAppendActorRoleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, actorPrincipal, KBAuditAppendActorPrincipalMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditAction, KBAuditAppendAuditActionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditSubject, KBAuditAppendAuditSubjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditVerdict, KBAuditAppendAuditVerdictMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, auditDetail, KBAuditAppendAuditDetailMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBAuditAppend, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBAuditAppendRequest reads it back, checking each field against its own bound.
+func DecodeKBAuditAppendRequest(request []byte) (string, string, string, string, string, string, error) {
+	var actorRole string
+	var actorPrincipal string
+	var auditAction string
+	var auditSubject string
+	var auditVerdict string
+	var auditDetail string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBAuditAppend || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if actorRole, err = takeRowText(payload, &cursor, KBAuditAppendActorRoleMax); err != nil ||
+		len(actorRole) < KBAuditAppendActorRoleMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if actorPrincipal, err = takeRowText(payload, &cursor, KBAuditAppendActorPrincipalMax); err != nil ||
+		len(actorPrincipal) < KBAuditAppendActorPrincipalMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if auditAction, err = takeRowText(payload, &cursor, KBAuditAppendAuditActionMax); err != nil ||
+		len(auditAction) < KBAuditAppendAuditActionMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if auditSubject, err = takeRowText(payload, &cursor, KBAuditAppendAuditSubjectMax); err != nil ||
+		len(auditSubject) < KBAuditAppendAuditSubjectMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if auditVerdict, err = takeRowText(payload, &cursor, KBAuditAppendAuditVerdictMax); err != nil ||
+		len(auditVerdict) < KBAuditAppendAuditVerdictMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if auditDetail, err = takeRowText(payload, &cursor, KBAuditAppendAuditDetailMax); err != nil ||
+		len(auditDetail) < KBAuditAppendAuditDetailMin {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return actorRole, actorPrincipal, auditAction, auditSubject, auditVerdict, auditDetail, nil
 }
 
 const EventAsyncPendingCount = EventMaintenance
@@ -11792,6 +12064,75 @@ func DecodeResolveContradictionRequest(request []byte) (uint64, uint64, uint64, 
 		return 0, 0, 0, ErrMalformedEnvelope
 	}
 	return memoryAID, memoryBID, resolutionMemoryID, nil
+}
+
+const EventAsyncEnqueue = EventMaintenance
+const StageAsyncEnqueue = FamilyMaintenance
+const OperationAsyncEnqueue uint32 = 42
+const AsyncEnqueueJobKindMin = 1
+const AsyncEnqueueJobKindMax = 63
+const AsyncEnqueueDocumentIDMin uint64 = 0
+const AsyncEnqueueDocumentIDMax uint64 = 9223372036854775807
+const AsyncEnqueueJobProjectMin = 0
+const AsyncEnqueueJobProjectMax = 127
+
+// EncodeAsyncEnqueueRequest writes the schema async_enqueue declares, in order.
+func EncodeAsyncEnqueueRequest(jobKind string, documentID uint64, jobProject string) ([]byte, error) {
+	if len(jobKind) < AsyncEnqueueJobKindMin || len(jobKind) > AsyncEnqueueJobKindMax || hasNUL(jobKind) ||
+		documentID < AsyncEnqueueDocumentIDMin || documentID > AsyncEnqueueDocumentIDMax ||
+		len(jobProject) < AsyncEnqueueJobProjectMin || len(jobProject) > AsyncEnqueueJobProjectMax || hasNUL(jobProject) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, jobKind, AsyncEnqueueJobKindMax); err != nil {
+		return nil, err
+	}
+	var documentIDBytes [8]byte
+	binary.LittleEndian.PutUint64(documentIDBytes[:], documentID)
+	payload = append(payload, documentIDBytes[:]...)
+	if err := putRowText(&payload, jobProject, AsyncEnqueueJobProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationAsyncEnqueue, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAsyncEnqueueRequest reads it back, checking each field against its own bound.
+func DecodeAsyncEnqueueRequest(request []byte) (string, uint64, string, error) {
+	var jobKind string
+	var documentID uint64
+	var jobProject string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAsyncEnqueue || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if jobKind, err = takeRowText(payload, &cursor, AsyncEnqueueJobKindMax); err != nil ||
+		len(jobKind) < AsyncEnqueueJobKindMin {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	documentID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if documentID < AsyncEnqueueDocumentIDMin || documentID > AsyncEnqueueDocumentIDMax {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	if jobProject, err = takeRowText(payload, &cursor, AsyncEnqueueJobProjectMax); err != nil ||
+		len(jobProject) < AsyncEnqueueJobProjectMin {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, "", ErrMalformedEnvelope
+	}
+	return jobKind, documentID, jobProject, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

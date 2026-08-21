@@ -1260,6 +1260,22 @@
       "reason": "The typed learning.failed_query_bump operation replaces the failure tally. It is two statements with no transaction around them -- an upsert and then a read -- so the count it answers with can include a bump another caller made in between. That is the backend's behaviour and is on the record because a single number cannot show it."
     },
     {
+      "symbol": "db2_feature_row_read",
+      "signature_sha256": "b4fa8c8185115abc84ef7b9d5e19f2e6a6c2a11e20c8a1537c34f2cf29c483e3",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.feature_row_read operation reads a computed feature row. The scope plays no part in the lookup, so a row written under one scope answers a read from any other -- the writer's scope arguments narrow nothing. An empty version is matched as the empty string rather than ignored, so a caller that omits it reads only rows written with it omitted too."
+    },
+    {
+      "symbol": "db2_feature_row_upsert",
+      "signature_sha256": "438ad088de320e72f4616259f5af237e12a799c74aeeda0c038bacd74328a4d6",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.feature_row_upsert operation records a computed feature row. The key is the subject and the feature-set version -- not the scope -- so a rewrite under a different scope replaces the row rather than adding one. Two scopes cannot hold different features for the same subject and version, which the scope arguments make it look as though they could. The insert's result is discarded and the operation acknowledges either way, so a refused write is reported as a kept one."
+    },
+    {
       "symbol": "db2_fidelity_attribution_count_by_turn",
       "signature_sha256": "00d594b46960adac6cc676ef7e879c2638327cb267f6e7e09ce8fcabb878a3dd",
       "disposition": "wire-operation",
@@ -1298,6 +1314,22 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.async_pending_count operation replaces the queue-depth read. It counts only jobs still pending, so a job already being worked on is not in the answer -- a caller using this as a backlog gauge is measuring what has not started rather than what is outstanding."
+    },
+    {
+      "symbol": "db2_kb_async_enqueue",
+      "signature_sha256": "01c0a394e439914914407bbe1c98f6163ccd8c73fe35fe4467a365d0ef3725b5",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.async_enqueue operation queues asynchronous work for a document. There is one job per kind and document, so enqueuing a second does nothing -- whatever state the first is in, including finished. A document processed once and then changed cannot be re-queued through this until the old job is removed, and the acknowledgement looks the same either way."
+    },
+    {
+      "symbol": "db2_kb_audit_append",
+      "signature_sha256": "37179aa4ec01292798b7d1e59cfd6eb53e91cb8915a7616ddff0a65ff9e55d75",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.kb_audit_append operation appends to the tamper-evident audit chain. It hashes each row through a provider the surrounding process installs and the module process installs none, so across the bus every append is refused. Where the provider is present, the sequence and previous hash are read inside the transaction and the row chained to them, which read-committed does not serialise: two appends racing read the same tail and the primary key refuses one rather than queueing it."
     },
     {
       "symbol": "db2_kb_blob_ref_referenced",

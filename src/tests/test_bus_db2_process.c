@@ -2638,6 +2638,45 @@ int main(int argc, char **argv)
    assert(retrieval_event_by_turn_retrieval_event_id[0] == '\0' &&
           retrieval_event_by_turn_retrieval_payload[0] == '\0');
 
+   /* The audit chain, feature rows and the async queue. feature_row_upsert writes the row the read
+    * after it finds, and it reads with no scope at all -- which is the point: the scope narrows
+    * nothing. */
+   uint32_t kb_audit_append_acknowledged = 99;
+   assert(aimee_db2_kb_audit_append_call(call_client, &client, 9411, 0, "operator",
+                                         "replay-principal", "replay.action", "replay-subject",
+                                         "ok", "replayed", &kb_audit_append_acknowledged, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   /* Refused, and not because of the chain: the row hash comes from a provider
+    * the surrounding process installs, and the module process installs none, so
+    * every append across the bus fails before it reaches the table. */
+   assert(kb_audit_append_acknowledged == 0);
+
+   uint32_t feature_row_upsert_acknowledged = 99;
+   assert(aimee_db2_feature_row_upsert_call(
+              call_client, &client, 9412, 0, "replay-subject", "memory", "user", "replay", "v1",
+              "{\"score\":1}", "2026-01-01T00:00:00Z", &feature_row_upsert_acknowledged, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(feature_row_upsert_acknowledged == 1);
+
+   static char feature_row_read_features_json[AIMEE_DB2_FEATURE_ROW_READ_FEATURES_JSON_MAX + 1];
+   feature_row_read_features_json[0] = 'x';
+   assert(aimee_db2_feature_row_read_call(call_client, &client, 9413, 0, "replay-subject", "memory",
+                                          "v1", feature_row_read_features_json,
+                                          sizeof(feature_row_read_features_json), NULL,
+                                          NULL) == AIMEE_MODULE_CALL_OK);
+   /* Reads back the row written above without naming its scope, which is the
+    * finding: the scope arguments on the write narrow nothing, so a row written
+    * under one scope answers a read from any other. The features column is
+    * jsonb, so what comes back is Postgres's normalisation of the text sent --
+    * a caller that compares its own bytes to what it reads will not match. */
+   assert(strcmp(feature_row_read_features_json, "{\"score\": 1}") == 0);
+
+   uint32_t async_enqueue_acknowledged = 99;
+   assert(aimee_db2_async_enqueue_call(call_client, &client, 9414, 0, "reembed", 4242,
+                                       "replay-project", &async_enqueue_acknowledged, NULL,
+                                       NULL) == AIMEE_MODULE_CALL_OK);
+   assert(async_enqueue_acknowledged == 1);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

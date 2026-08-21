@@ -9323,9 +9323,15 @@
           "line": 27
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.feature_row_read operation reads a computed feature row. The scope plays no part in the lookup, so a row written under one scope answers a read from any other -- the writer's scope arguments narrow nothing. An empty version is matched as the empty string rather than ignored, so a caller that omits it reads only rows written with it omitted too."
+      },
       "signature": "int db2_feature_row_read ( const char * subject_id , const char * subject_kind , const char * feature_set_version , char * buf , size_t len )",
       "signature_sha256": "b4fa8c8185115abc84ef7b9d5e19f2e6a6c2a11e20c8a1537c34f2cf29c483e3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_feature_row_read"
     },
     {
@@ -9343,9 +9349,15 @@
           "line": 20
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.feature_row_upsert operation records a computed feature row. The key is the subject and the feature-set version -- not the scope -- so a rewrite under a different scope replaces the row rather than adding one. Two scopes cannot hold different features for the same subject and version, which the scope arguments make it look as though they could. The insert's result is discarded and the operation acknowledges either way, so a refused write is reported as a kept one."
+      },
       "signature": "int db2_feature_row_upsert ( const char * subject_id , const char * subject_kind , const char * scope_kind , const char * scope_id , const char * feature_set_version , const char * features_json , const char * computed_at )",
       "signature_sha256": "438ad088de320e72f4616259f5af237e12a799c74aeeda0c038bacd74328a4d6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_feature_row_upsert"
     },
     {
@@ -9838,9 +9850,15 @@
           "line": 108
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.async_enqueue operation queues asynchronous work for a document. There is one job per kind and document, so enqueuing a second does nothing -- whatever state the first is in, including finished. A document processed once and then changed cannot be re-queued through this until the old job is removed, and the acknowledgement looks the same either way."
+      },
       "signature": "int db2_kb_async_enqueue ( const char * kind , int64_t document_id , const char * project )",
       "signature_sha256": "01c0a394e439914914407bbe1c98f6163ccd8c73fe35fe4467a365d0ef3725b5",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_async_enqueue"
     },
     {
@@ -9855,9 +9873,15 @@
           "line": 25
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.kb_audit_append operation appends to the tamper-evident audit chain. It hashes each row through a provider the surrounding process installs and the module process installs none, so across the bus every append is refused. Where the provider is present, the sequence and previous hash are read inside the transaction and the row chained to them, which read-committed does not serialise: two appends racing read the same tail and the primary key refuses one rather than queueing it."
+      },
       "signature": "int db2_kb_audit_append ( const char * actor_role , const char * actor_principal , const char * action , const char * subject , const char * verdict , const char * detail )",
       "signature_sha256": "37179aa4ec01292798b7d1e59cfd6eb53e91cb8915a7616ddff0a65ff9e55d75",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_audit_append"
     },
     {
@@ -27618,15 +27642,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "258b3c3d9fc392e6e260e89587e989ff4a12a6814b413e6271aaf16f29fcae78",
+  "fingerprint": "05c918808aab35b831f47aca1af515231ae1bde2663f182b00b94e6b75ba7b8f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 360,
+    "audit_pending": 356,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 599
+    "reviewed": 603
   }
 }

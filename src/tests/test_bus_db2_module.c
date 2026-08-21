@@ -2672,6 +2672,51 @@ int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int 
    return -1;
 }
 
+int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
+                        const char *subject, const char *verdict, const char *detail)
+{
+   (void)actor_role;
+   (void)actor_principal;
+   (void)action;
+   (void)subject;
+   (void)verdict;
+   (void)detail;
+   return 0;
+}
+
+int db2_feature_row_upsert(const char *subject_id, const char *subject_kind, const char *scope_kind,
+                           const char *scope_id, const char *feature_set_version,
+                           const char *features_json, const char *computed_at)
+{
+   (void)subject_id;
+   (void)subject_kind;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)feature_set_version;
+   (void)features_json;
+   (void)computed_at;
+   return 0;
+}
+
+int db2_feature_row_read(const char *subject_id, const char *subject_kind,
+                         const char *feature_set_version, char *buf, size_t len)
+{
+   (void)subject_id;
+   (void)subject_kind;
+   (void)feature_set_version;
+   if (buf && len)
+      buf[0] = '\0';
+   return -1;
+}
+
+int db2_kb_async_enqueue(const char *kind, int64_t document_id, const char *project)
+{
+   (void)kind;
+   (void)document_id;
+   (void)project;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

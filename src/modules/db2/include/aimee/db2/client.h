@@ -1073,6 +1073,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *turn_id, char *retrieval_event_id, size_t retrieval_event_id_capacity, char *retrieval_payload, size_t retrieval_payload_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_feature_row_upsert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *subject_id, const char *feature_subject_kind, const char *feature_scope_kind, const char *feature_scope_id, const char *feature_set_version, const char *features_json, const char *computed_at, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_feature_row_read_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *subject_id, const char *feature_subject_kind, const char *feature_set_version, char *features_json, size_t features_json_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
@@ -1183,6 +1191,10 @@ extern "C"
    aimee_module_call_result_t aimee_db2_enrollment_touch_last_seen_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *cert_fingerprint, const char *enrollment_scope, uint32_t *recorded, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_audit_append_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *actor_role, const char *actor_principal, const char *audit_action, const char *audit_subject, const char *audit_verdict, const char *audit_detail, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_async_pending_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
@@ -1308,5 +1320,9 @@ extern "C"
    aimee_module_call_result_t aimee_db2_resolve_contradiction_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t memory_a_id, uint64_t memory_b_id, uint64_t resolution_memory_id, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_async_enqueue_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *job_kind, uint64_t document_id, const char *job_project, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

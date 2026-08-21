@@ -13264,6 +13264,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_demotion_retrieval_event_by_turn",
         "policy": {"reads": 200},
     },
+    "kb_audit_append": {
+        "key": ("custody", 6),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_audit_append",
+        "policy": {"writes": 200},
+    },
+    "feature_row_upsert": {
+        "key": ("learning", 62),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_feature_row_upsert",
+        "policy": {"writes": 200},
+    },
+    "feature_row_read": {
+        "key": ("learning", 63),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_feature_row_read",
+        "policy": {"reads": 200},
+    },
+    "async_enqueue": {
+        "key": ("maintenance", 42),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_async_enqueue",
+        "policy": {"writes": 200},
+    },
 }
 
 

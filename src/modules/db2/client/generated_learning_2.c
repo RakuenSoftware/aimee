@@ -688,3 +688,67 @@ aimee_db2_retrieval_event_by_turn_call(aimee_db2_call_fn call, void *call_contex
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_feature_row_upsert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *subject_id, const char *feature_subject_kind, const char *feature_scope_kind,
+    const char *feature_scope_id, const char *feature_set_version, const char *features_json,
+    const char *computed_at, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FEATURE_ROW_UPSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FEATURE_ROW_UPSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_feature_row_upsert_request_encode(subject_id, feature_subject_kind,
+                                                   feature_scope_kind, feature_scope_id,
+                                                   feature_set_version, features_json, computed_at,
+                                                   request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FEATURE_ROW_UPSERT, AIMEE_DB2_STAGE_FEATURE_ROW_UPSERT,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_feature_row_upsert_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_feature_row_read_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, const char *subject_id,
+                                const char *feature_subject_kind, const char *feature_set_version,
+                                char *features_json, size_t features_json_capacity,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_FEATURE_ROW_READ_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_FEATURE_ROW_READ_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_feature_row_read_request_encode(subject_id, feature_subject_kind,
+                                                 feature_set_version, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_FEATURE_ROW_READ, AIMEE_DB2_STAGE_FEATURE_ROW_READ,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_feature_row_read_reply_decode(response, response_len, features_json,
+                                               features_json_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
