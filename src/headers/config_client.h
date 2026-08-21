@@ -21,6 +21,9 @@ cJSON *config_client_snapshot_copy(void);
 int config_client_set_number(const char *key, double value);
 int config_client_set_string(const char *key, const char *value);
 int config_client_set_value(const char *key, cJSON *value);
+/* Invoke a named module operation and return its complete response. Takes
+ * ownership of value; the caller owns the returned JSON object. */
+cJSON *config_client_operation_response(const char *operation, cJSON *value);
 /* Invoke a named module-owned mutation. Takes ownership of value when non-NULL.
  * Returns -2 for exists/not-found and -3 for a full bounded registry. */
 int config_client_operation(const char *operation, cJSON *value);

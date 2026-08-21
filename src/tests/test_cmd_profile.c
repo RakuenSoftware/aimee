@@ -1,4 +1,4 @@
-/* test_cmd_profile.c: profile command filesystem behavior. */
+/* test_cmd_profile.c: profile commands are thin event-bus clients. */
 
 #include <assert.h>
 #include <stdio.h>
@@ -14,7 +14,8 @@ static int g_profile_created;
 
 static cJSON *profile_operation(const char *operation, const cJSON *value)
 {
-   const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "name"));
+   const char *name =
+       value ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "name")) : NULL;
    cJSON *response = cJSON_CreateObject();
    /* Production /v1 envelopes report status:"ok". Keep this test on the real
     * wire shape so a client cannot accidentally accept only an in-process
@@ -22,15 +23,18 @@ static cJSON *profile_operation(const char *operation, const cJSON *value)
    cJSON_AddStringToObject(response, "status", "ok");
    if (!strcmp(operation, "profile-create") && name && !strcmp(name, "coder"))
       g_profile_created = 1;
+   if (!strcmp(operation, "profile-delete") && name && !strcmp(name, "coder"))
+      g_profile_created = 0;
    if (!strcmp(operation, "profile-present"))
       cJSON_AddBoolToObject(response, "present",
                             g_profile_created && name && !strcmp(name, "coder"));
+   if (!strcmp(operation, "profile-list"))
+   {
+      cJSON *profiles = cJSON_AddArrayToObject(response, "profiles");
+      if (g_profile_created)
+         cJSON_AddItemToArray(profiles, cJSON_CreateString("coder"));
+   }
    return response;
-}
-
-static void join3(char *out, size_t outsz, const char *a, const char *b, const char *c)
-{
-   snprintf(out, outsz, "%s/%s/%s", a, b, c);
 }
 
 static void test_create_show_delete_profile(void)
@@ -43,21 +47,20 @@ static void test_create_show_delete_profile(void)
 
    char *create_args[] = {(char *)"create", (char *)"coder"};
    assert(cmd_profile_run(2, create_args) == 0);
+   assert(access(root, F_OK) != 0);
+
+   char *list_args[] = {(char *)"list"};
+   assert(cmd_profile_run(1, list_args) == 0);
 
    char *show_args[] = {(char *)"show", (char *)"coder"};
    assert(cmd_profile_run(2, show_args) == 0);
 
    char *delete_args[] = {(char *)"delete", (char *)"coder", (char *)"--force"};
    assert(cmd_profile_run(3, delete_args) == 0);
-
-   char dir[512];
-   join3(dir, sizeof(dir), root, "profiles", "coder");
-   assert(access(dir, F_OK) != 0);
-
-   char profiles[512];
-   snprintf(profiles, sizeof(profiles), "%s/profiles", root);
-   rmdir(profiles);
-   rmdir(root);
+   assert(g_profile_created == 0);
+   assert(cmd_profile_run(2, show_args) != 0);
+   assert(cmd_profile_run(1, list_args) == 0);
+   assert(access(root, F_OK) != 0);
    printf("  PASS: test_create_show_delete_profile\n");
 }
 

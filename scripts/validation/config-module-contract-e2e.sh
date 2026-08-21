@@ -95,6 +95,21 @@ config_get | grep -q '"max_iterations":444'
 grep -q '^max_iterations: 444' "$CONFIG_FILE"
 printf 'PASS mutation crossed the bus and persisted atomically\n'
 
+CREATED=$(config_set '{"operation":"profile-create","value":{"name":"contract-profile"}}')
+printf '%s' "$CREATED" | grep -q '"status":"ok"'
+[ -f "$AIMEE_HOME/profiles/contract-profile/aimee.yaml" ]
+[ "$(stat -c '%a' "$AIMEE_HOME/profiles/contract-profile/aimee.yaml")" = "600" ]
+PRESENT=$(config_set '{"operation":"profile-present","value":{"name":"contract-profile"}}')
+printf '%s' "$PRESENT" | grep -q '"present":true'
+LISTED=$(config_set '{"operation":"profile-list"}')
+printf '%s' "$LISTED" | grep -q '"profiles":\["contract-profile"\]'
+DELETED=$(config_set '{"operation":"profile-delete","value":{"name":"contract-profile"}}')
+printf '%s' "$DELETED" | grep -q '"status":"ok"'
+[ ! -e "$AIMEE_HOME/profiles/contract-profile" ]
+ABSENT=$(config_set '{"operation":"profile-present","value":{"name":"contract-profile"}}')
+printf '%s' "$ABSENT" | grep -q '"present":false'
+printf 'PASS complete profile lifecycle crossed the bidirectional bus contract\n'
+
 BEFORE=$(sha256sum "$CONFIG_FILE" | cut -d' ' -f1)
 INVALID=$(config_set '{"key":"not.editable","value":true}')
 printf '%s' "$INVALID" | grep -q '"status":"error"'

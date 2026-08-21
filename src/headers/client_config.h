@@ -17,6 +17,8 @@ void client_config_set_operation_provider(cJSON *(*provider)(const char *operati
  * of value. */
 int client_config_operation(const char *operation, cJSON *value);
 int client_config_profile_present(const char *name);
+/* Return an owned array of profile-name strings, or NULL on failure. */
+cJSON *client_config_profile_list(void);
 
 int client_config_bool(const char *key, int fallback);
 int client_config_int(const char *key, int fallback);

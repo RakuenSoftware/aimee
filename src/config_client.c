@@ -332,19 +332,21 @@ int config_client_set_string(const char *key, const char *value)
    return config_client_set_value(key, cJSON_CreateString(value ? value : ""));
 }
 
-int config_client_operation(const char *operation, cJSON *value)
+cJSON *config_client_operation_response(const char *operation, cJSON *value)
 {
    if (!operation || !operation[0])
    {
       cJSON_Delete(value);
-      return -1;
+      config_client_error("invalid config operation");
+      return NULL;
    }
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "operation", operation))
    {
       cJSON_Delete(request);
       cJSON_Delete(value);
-      return -1;
+      config_client_error("cannot allocate config request");
+      return NULL;
    }
    if (value)
       cJSON_AddItemToObject(request, "value", value);
@@ -355,8 +357,16 @@ int config_client_operation(const char *operation, cJSON *value)
    if (!response)
    {
       config_client_error(config_client_result_name(result));
-      return -1;
+      return NULL;
    }
+   return response;
+}
+
+int config_client_operation(const char *operation, cJSON *value)
+{
+   cJSON *response = config_client_operation_response(operation, value);
+   if (!response)
+      return -1;
    int rc = 0;
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "ok")))
    {

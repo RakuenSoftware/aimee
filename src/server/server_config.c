@@ -122,21 +122,46 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *operation = jo_str(req, "operation", "");
    if (operation && operation[0])
    {
-      if (strcmp(operation, "profile-create") != 0 && strcmp(operation, "profile-present") != 0)
+      int has_value = strcmp(operation, "profile-list") != 0;
+      if (strcmp(operation, "profile-create") != 0 && strcmp(operation, "profile-present") != 0 &&
+          strcmp(operation, "profile-list") != 0 && strcmp(operation, "profile-delete") != 0)
          return server_send_error(conn, "config: unsupported structured operation", NULL);
       cJSON *value = cJSON_GetObjectItemCaseSensitive(req, "value");
-      if (!cJSON_IsObject(value))
+      if (has_value && !cJSON_IsObject(value))
          return server_send_error(conn, "config: structured operation requires an object", NULL);
-      int rc = config_client_operation(operation, cJSON_Duplicate(value, 1));
-      int present = rc == 0;
-      if (!strcmp(operation, "profile-present") && rc == -2)
-         rc = 0;
-      if (rc != 0)
+      cJSON *module_response =
+          config_client_operation_response(operation, has_value ? cJSON_Duplicate(value, 1) : NULL);
+      if (!cJSON_IsObject(module_response) ||
+          !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(module_response, "ok")))
+      {
+         cJSON_Delete(module_response);
          return server_send_error(conn, "config: structured operation failed", NULL);
+      }
       cJSON *resp = jo_ok();
       cJSON_AddStringToObject(resp, "operation", operation);
       if (!strcmp(operation, "profile-present"))
-         cJSON_AddBoolToObject(resp, "present", present);
+      {
+         cJSON *present = cJSON_GetObjectItemCaseSensitive(module_response, "present");
+         if (!cJSON_IsBool(present))
+         {
+            cJSON_Delete(module_response);
+            cJSON_Delete(resp);
+            return server_send_error(conn, "config: malformed profile-present response", NULL);
+         }
+         cJSON_AddBoolToObject(resp, "present", cJSON_IsTrue(present));
+      }
+      if (!strcmp(operation, "profile-list"))
+      {
+         cJSON *profiles = cJSON_GetObjectItemCaseSensitive(module_response, "profiles");
+         if (!cJSON_IsArray(profiles))
+         {
+            cJSON_Delete(module_response);
+            cJSON_Delete(resp);
+            return server_send_error(conn, "config: malformed profile-list response", NULL);
+         }
+         cJSON_AddItemToObject(resp, "profiles", cJSON_Duplicate(profiles, 1));
+      }
+      cJSON_Delete(module_response);
       return server_send_ok(conn, resp);
    }
 

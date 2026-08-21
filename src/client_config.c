@@ -89,6 +89,15 @@ int client_config_profile_present(const char *name)
    return rc;
 }
 
+cJSON *client_config_profile_list(void)
+{
+   cJSON *response = client_config_operation_response("profile-list", NULL);
+   cJSON *profiles = cJSON_GetObjectItemCaseSensitive(response, "profiles");
+   cJSON *copy = cJSON_IsArray(profiles) ? cJSON_Duplicate(profiles, 1) : NULL;
+   cJSON_Delete(response);
+   return copy;
+}
+
 cJSON *client_config_value(const char *key)
 {
    if (!key || !key[0])

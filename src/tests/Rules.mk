@@ -2050,7 +2050,6 @@ $(TESTPREFIX)/unit-test-cli-profile: $(OBJDIR)/tests/test_cli_profile.o $(OBJDIR
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-profile: $(OBJDIR)/tests/test_cmd_profile.o $(OBJDIR)/cmd_profile.o \
-                            $(OBJDIR)/aimee_home.o $(OBJDIR)/posix/platform_path.o \
                             $(OBJDIR)/client_config.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
