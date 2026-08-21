@@ -308,7 +308,7 @@ static void cmd_diagnose_investigate(app_ctx_t *ctx, int argc, char **argv)
 #endif
 
    /* Reopen DB and show updated status. */
-   if (db1_init(config_db1_path()) == 0)
+   if (db1_store_ready())
    {
       printf("\n--- Updated Diagnosis Status ---\n");
       char *report = db1_diagnose_render_status(diag_id);

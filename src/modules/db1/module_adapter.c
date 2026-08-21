@@ -152,6 +152,39 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    case AIMEE_DB1_STAGE_TELEMETRY:
       return aimee_db1_stage_telemetry(request_body, request_len, response_body, response_capacity,
                                        response_len);
+   case AIMEE_DB1_STAGE_GUARDRAIL_STATE:
+      return aimee_db1_stage_guardrail_state(request_body, request_len, response_body,
+                                             response_capacity, response_len);
+   case AIMEE_DB1_STAGE_ENSEMBLE:
+      return aimee_db1_stage_ensemble(request_body, request_len, response_body, response_capacity,
+                                      response_len);
+   case AIMEE_DB1_STAGE_WORKFLOW:
+      return aimee_db1_stage_workflow(request_body, request_len, response_body, response_capacity,
+                                      response_len);
+   case AIMEE_DB1_STAGE_PKI:
+      return aimee_db1_stage_pki(request_body, request_len, response_body, response_capacity,
+                                 response_len);
+   case AIMEE_DB1_STAGE_MGMT_NONCE:
+      return aimee_db1_stage_mgmt_nonce(request_body, request_len, response_body, response_capacity,
+                                        response_len);
+   case AIMEE_DB1_STAGE_MGMT_JWKS:
+      return aimee_db1_stage_mgmt_jwks(request_body, request_len, response_body, response_capacity,
+                                       response_len);
+   case AIMEE_DB1_STAGE_LIFECYCLE:
+      return aimee_db1_stage_lifecycle(request_body, request_len, response_body, response_capacity,
+                                       response_len);
+   case AIMEE_DB1_STAGE_JTI_REPLAY:
+      return aimee_db1_stage_jti_replay(request_body, request_len, response_body, response_capacity,
+                                        response_len);
+   case AIMEE_DB1_STAGE_CHECKPOINTS:
+      return aimee_db1_stage_checkpoints(request_body, request_len, response_body,
+                                         response_capacity, response_len);
+   case AIMEE_DB1_STAGE_IDENTITY:
+      return aimee_db1_stage_identity(request_body, request_len, response_body, response_capacity,
+                                      response_len);
+   case AIMEE_DB1_STAGE_ROUNDTABLE:
+      return aimee_db1_stage_roundtable(request_body, request_len, response_body, response_capacity,
+                                        response_len);
    default:
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }

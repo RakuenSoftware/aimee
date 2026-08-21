@@ -370,7 +370,10 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
-   cJSON_AddStringToObject(resp, "state", db1_is_initialized() ? "ok" : "unavailable");
+   /* Probed, not inferred: module availability is registry state that survives
+    * the module's death for ~37s, and this endpoint exists to be believed at
+    * the start of an outage. See db1_store_probe.c. */
+   cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
    server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
@@ -770,8 +773,8 @@ static int handle_init_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cwd = jcwd->valuestring;
 
    cJSON *resp = jo_ok();
-   cJSON_AddBoolToObject(resp, "local_ready", db1_is_initialized() ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "db1_ready", db1_is_initialized() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "local_ready", db1_store_ready() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "db1_ready", db1_store_ready() ? 1 : 0);
 
    if (cwd)
    {
@@ -807,7 +810,7 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   if (!db1_is_initialized())
+   if (!db1_store_ready())
       return server_send_error(conn, "server storage unavailable", NULL);
    hud_status_t hs;
    if (hud_gather(&hs) != 0)
@@ -2160,10 +2163,10 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       return -1;
    }
    /* Ensure the config dir (parent of the socket, pid file, and DB1 file)
-    * exists before we write the pid file or open DB1. On a fresh AIMEE_HOME
-    * (e.g. a deploy not seeded by install.sh) nothing else has created it yet,
-    * so without this both server_pid_write and db1_init silently fail and DB1
-    * stays unavailable for the whole process lifetime. */
+    * exists before we write the pid file. On a fresh AIMEE_HOME (e.g. a deploy
+    * not seeded by install.sh) nothing else has created it yet, so without this
+    * server_pid_write silently fails -- and the module, which opens the DB1
+    * file in that same directory, has nowhere to create it either. */
    {
       char cfg_dir[sizeof(ctx->socket_path)];
       snprintf(cfg_dir, sizeof(cfg_dir), "%s", socket_path);
@@ -2178,31 +2181,28 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Record our pid so future server_init calls can detect us deterministically
     * (and `aimee server start/restart` can probe liveness). */
    server_pid_write(socket_path);
-   /* Initialize DB1 (aimee-server is DB1's exclusive owner). */
-   /* Copied out: named twice here, and the warning path must report the SAME
-    * path db1_init was given. */
-   char db1_path[MAX_PATH_LEN];
-   snprintf(db1_path, sizeof(db1_path), "%s", config_db1_path());
-   if (db1_init(db1_path) != 0)
-      LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
-               db1_path);
-   else
-   {
-      db1_apply_server_pragmas();
-      int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
-      if (orphaned < 0)
-         LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
-      else if (orphaned > 0)
-         LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
-      if (server_mgmt_status_init() != 0)
-         LOG_WARN("server", "management status nonce initialization failed");
-      const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
-      if (trust_path && trust_path[0] &&
-          server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
-                                         kb_client_mtls_management_jwks_fetch,
-                                         NULL) != SERVER_MGMT_JWKS_CACHE_OK)
-         LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
-   }
+   /* This process opens no database. DB1 is a module, and every family it
+    * serves is reached over the bus -- so the connection the server used to
+    * hold here was one it never read or wrote through, and the cache and mmap
+    * tuning that went with it was being applied to the one process where it
+    * could not matter. The module applies it now.
+    *
+    * The three restart chores below reach the store over the bus. Each already
+    * warns when it cannot, which is also what happens when the module has not
+    * attached yet: nothing in this process launches it. */
+   int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
+   if (orphaned < 0)
+      LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
+   else if (orphaned > 0)
+      LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
+   if (server_mgmt_status_init() != 0)
+      LOG_WARN("server", "management status nonce initialization failed");
+   const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   if (trust_path && trust_path[0] &&
+       server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
+                                      kb_client_mtls_management_jwks_fetch,
+                                      NULL) != SERVER_MGMT_JWKS_CACHE_OK)
+      LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
    /* Container cleanup is independent of DB availability. No worker pool exists
     * yet, so a matching container cannot belong to this server generation. */
    int orphan_containers = delegate_backend_docker_remove_orphans();
@@ -2488,10 +2488,12 @@ void server_shutdown(server_ctx_t *ctx)
    platform_evloop_destroy(&ctx->evloop);
    /* Drop our pid file so a future server can detect that we are gone. */
    server_pid_clear(ctx->socket_path);
-   /* Drain any audit rows still queued in the async writer before closing DB1, so
-    * rows enqueued near shutdown are not lost (the writer thread is detached). The
-    * request/compute pools are already drained above, so no new rows arrive. */
+   /* Drain any audit rows still queued in the async writer, so rows enqueued
+    * near shutdown are not lost (the writer thread is detached). The
+    * request/compute pools are already drained above, so no new rows arrive.
+    *
+    * Nothing to close afterwards: this process opens no DB1 connection, and
+    * the module closes its own when it stops. */
    agent_audit_async_flush();
-   db1_shutdown();
    LOG_INFO("server", "shut down");
 }

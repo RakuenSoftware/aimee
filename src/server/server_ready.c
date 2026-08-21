@@ -8,10 +8,13 @@
  * server_http.c and its unit test deliberately stay free of.
  *
  * Dependencies sampled:
- *   db1  — db1_is_initialized(). Deliberately a no-I/O check, not the
+ *   db1  — db1_store_ready(). Deliberately a no-I/O check, not the
  *          store/load/remove round-trip `aimee doctor` uses: doctor runs once
  *          on demand, this runs on a timer, and a periodic write probe would
- *          make the readiness endpoint its own source of load.
+ *          make the readiness endpoint its own source of load. It asks whether
+ *          the DB1 MODULE is attached, which is what "usable from here" means
+ *          now that this process holds no connection of its own; it is still a
+ *          local lookup and still does no I/O.
  *   kb   — kb_client_health(). One HTTP call to aimee-kb, off the request path.
  *   modules — required same-container process modules attached to the local bus.
  *
@@ -173,7 +176,7 @@ void server_ready_sample_now(void)
    ready_snapshot_t s;
    memset(&s, 0, sizeof(s));
 
-   s.db1 = db1_is_initialized() ? DEP_OK : DEP_FAIL;
+   s.db1 = db1_store_ready() ? DEP_OK : DEP_FAIL;
 
    kb_health_t h;
    memset(&h, 0, sizeof(h));

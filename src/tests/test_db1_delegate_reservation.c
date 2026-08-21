@@ -54,19 +54,25 @@ static void teardown_db(void)
    unlink_siblings();
 }
 
-/* The Go control plane owns this schema; mirror the columns C depends on. */
+/* DB1 owns this schema now, so this asserts the table is there rather than
+ * making one.
+ *
+ * It used to create it, with a comment saying the Go control plane owned the
+ * schema and C was mirroring the columns it depended on. That was true while
+ * the Go workflow engine ran its own CREATE TABLE against DB1's file. It is not
+ * true now: the engine reaches the store through the module, and the module
+ * declares this table like every other. Mirroring a schema is exactly the
+ * duplication that ended with two processes disagreeing about a column order,
+ * so the test asserts the real one instead of standing up a copy that could
+ * drift from it. */
 static void create_reservation_table(void)
 {
-   char *err = NULL;
-   assert(sqlite3_exec(db1_conn(),
-                       "CREATE TABLE lifecycle_delegate_job ("
-                       " execution_key TEXT PRIMARY KEY,"
-                       " job_id INTEGER NOT NULL,"
-                       " work_item_id TEXT NOT NULL DEFAULT '',"
-                       " participant_token TEXT NOT NULL DEFAULT '',"
-                       " cancel_attempts INTEGER NOT NULL DEFAULT 0,"
-                       " updated_at TEXT NOT NULL DEFAULT '')",
-                       NULL, NULL, &err) == SQLITE_OK);
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT execution_key, job_id, work_item_id, participant_token,"
+                             " cancel_attempts, updated_at FROM lifecycle_delegate_job",
+                             -1, &st, NULL) == SQLITE_OK);
+   sqlite3_finalize(st);
 }
 
 static int cancel_attempts_for(const char *key)

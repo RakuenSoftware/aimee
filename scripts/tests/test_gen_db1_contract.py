@@ -143,7 +143,20 @@ class CatalogTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             catalog = self.catalog(root)
+            # Reserve one, because the real catalog no longer has any: every
+            # family is served. A test that waited for the repo to supply the
+            # state it is testing stops testing anything the day the migration
+            # finishes -- which is the day this one broke.
             catalog["catalog_complete"] = True
+            # A fresh reserved family rather than deactivating a served one:
+            # every family now retires sources, and un-serving one of those
+            # trips retired-reserved before completeness is ever considered.
+            reserved = dict(catalog["families"][0])
+            reserved.update({"id": len(catalog["families"]) + 1, "name": "zz_reserved",
+                             "event_kind": 11776 + len(catalog["families"]) + 1,
+                             "active": False, "covers": "secrets", "sources": ["secrets"],
+                             "retired_sources": []})
+            catalog["families"].append(reserved)
             self.write(root, catalog)
             self.assertRule(root, "catalog-complete")
         finally:
@@ -226,7 +239,15 @@ class CatalogTests(unittest.TestCase):
             root = Path(tmp.name)
             catalog = self.catalog(root)
             active = next(f for f in catalog["families"] if f["active"])
-            active["retired_sources"] = sorted(set(active["retired_sources"]) | {"db1_init.c"})
+            # Read a still-linked source out of the Makefile rather than naming
+            # one. Every hardcoded choice here has eventually migrated -- first
+            # checkpoints.c, then wfe_store.c, then db1_init.c -- and each time
+            # this test failed for the wrong reason.
+            makefile = (root / contract.MAKEFILE).read_text(encoding="utf-8")
+            line = next(l for l in makefile.splitlines() if l.startswith("DB1_SRCS ="))
+            linked = sorted(t.split("/")[-1] for t in line.split() if t.endswith(".c"))
+            self.assertTrue(linked, "the daemon links no db1 source at all")
+            active["retired_sources"] = sorted(set(active["retired_sources"]) | {linked[0]})
             self.write(root, catalog)
             self.assertRule(root, "retired-still-linked")
         finally:
@@ -239,11 +260,20 @@ class CatalogTests(unittest.TestCase):
         tmp = sandbox()
         try:
             root = Path(tmp.name)
+            # Put a source back in the daemon's link and un-retire it, rather
+            # than naming one that happens to still be there: every family is
+            # served now, so there is no longer such a source, and every earlier
+            # version of this test named one that later migrated -- first
+            # checkpoints.c, then wfe_store.c. The state under test is built
+            # here so it cannot expire again.
+            catalog = self.catalog(root)
+            family = next(f for f in catalog["families"] if f["retired_sources"])
+            retired = family["retired_sources"][0]
+            family["retired_sources"] = [s for s in family["retired_sources"] if s != retired]
+            self.write(root, catalog)
             makefile = root / contract.MAKEFILE
             text = makefile.read_text(encoding="utf-8")
-            self.assertIn("modules/db1/checkpoints.c", text)
-            makefile.write_text(text.replace(" modules/db1/checkpoints.c", "", 1),
-                                encoding="utf-8")
+            self.assertNotIn(f"modules/db1/{retired}", text)
             self.assertRule(root, "retired-unclaimed")
         finally:
             tmp.cleanup()

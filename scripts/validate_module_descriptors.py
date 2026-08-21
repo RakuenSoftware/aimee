@@ -29,7 +29,8 @@ C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
 # third-party sources a module compiles but does not own. Vendor sources remain
 # restricted to src/vendor/; see export_c_repositories for the ownership rule.
 C_BUILD_OPTIONAL_KEYS = {
-    "compile_definitions", "generated_headers", "header_dependencies", "vendor_sources",
+    "compile_definitions", "generated_headers", "header_dependencies", "shared_sources",
+    "vendor_sources",
 }
 BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 C_DEFINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -227,6 +228,11 @@ def schema() -> dict[str, object]:
                     "system_libraries": {
                         "type": "array",
                         "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
+                        "uniqueItems": True,
+                    },
+                    "shared_sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
                         "uniqueItems": True,
                     },
                     "vendor_sources": {

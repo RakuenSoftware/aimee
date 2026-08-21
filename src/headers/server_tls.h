@@ -76,6 +76,11 @@ extern "C"
    /* Initialize from <config>/tls/server.crt plus the Vault-held private key. */
    int server_tls_init_default(void);
 
+   /* Wait for the store the mTLS ramp needs before server_tls_init_default runs.
+      The caller supplies the probe so this translation unit keeps no DB1
+      dependency. No-op unless mTLS is configured on. */
+   void server_tls_wait_for_store(int (*store_ready)(void));
+
    /* Live cert reload (live-config-reload): re-read the same public cert and
     * Vault key (or explicit test key path) and atomically swap the SSL_CTX;
     * in-flight connections keep the old until they drain). Validate-or-keep: a cert that fails

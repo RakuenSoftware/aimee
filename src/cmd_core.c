@@ -123,7 +123,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
    else if (songwriter)
       config_persist_mode("songwriter");
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("failed to initialize database");
    db1_shutdown();
 
@@ -250,7 +250,7 @@ void cmd_setup(app_ctx_t *ctx, int argc, char **argv)
    /* 1. Initialize database and config if missing — db1_init creates
     * the file and applies the DB1 schema if the connection is fresh. */
    (void)config_persist_defaults();
-   if (db1_init(config_db1_path()) == 0)
+   if (db1_store_ready())
       db1_shutdown();
 
    /* 2. Check for aimee.workspace.yaml in CWD */
@@ -492,7 +492,7 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -548,7 +548,7 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
 
 void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -696,7 +696,6 @@ void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 void cmd_mode(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 
@@ -818,7 +817,6 @@ void cmd_implement(app_ctx_t *ctx, int argc, char **argv)
 void cmd_tdd(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 
@@ -870,7 +868,7 @@ void cmd_env(app_ctx_t *ctx, int argc, char **argv)
 
    if (argc < 1 || strcmp(argv[0], "detect") == 0)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("env detect: could not initialize DB1");
       agent_introspect_env();
       /* Display results */
@@ -990,7 +988,7 @@ void cmd_notify(app_ctx_t *ctx, int argc, char **argv)
  */
 void cmd_clarify(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("clarify: could not initialize DB1");
 
    if (argc == 0)

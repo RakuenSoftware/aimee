@@ -5,6 +5,10 @@
 
 #include <stddef.h>
 
+/* The ceiling the unbounded forms pass, and the wire's max_rows. */
+#define DB1_WORK_ITEM_LIST_MAX  512
+#define DB1_LIFECYCLE_EVENT_MAX 512
+
 typedef struct
 {
    char work_item_id[80];
@@ -32,6 +36,16 @@ typedef struct
    double cum_cost_usd;
    double work_item_max_cost_usd; /* 0 = no cap */
    int override_count;
+   /* The workflow engine's own view of a run. These four were columns the Go
+    * engine read directly from this file; they are on the struct now because
+    * the engine reads rows through the module instead. reserved_cost_usd and
+    * reservation_state are the live budget claim, source_path is where the
+    * proposal came from, and updated_at is what the engine's API surfaces to a
+    * human deciding whether a run is stuck. */
+   double reserved_cost_usd;
+   char reservation_state[24]; /* "" | reserved | unresolved | actual */
+   char source_path[1024];
+   char updated_at[32];
 } db1_work_item_t;
 
 typedef struct
@@ -159,6 +173,10 @@ int db1_work_item_delete(const char *work_item_id);
 int db1_work_item_reap_stale_parks(long grace_secs);
 
 /* List work items (newest first). Caller frees *out. Returns count or -1. */
+/* The bounded forms are what cross the boundary: a reply has to have a ceiling,
+ * and these lists had one only by accident of how many rows existed. The
+ * unbounded names are kept for their 45 call sites and pass the ceiling. */
+int db1_work_item_list_bounded(db1_work_item_t **out, int max);
 int db1_work_item_list(db1_work_item_t **out);
 
 /* List work items LEAST-RECENTLY-UPDATED first — the scheduler's fairness
@@ -168,6 +186,7 @@ int db1_work_item_list(db1_work_item_t **out);
  * while the rest never advanced). Staleness-first makes starvation
  * self-correcting: whoever was skipped longest goes first next sweep.
  * Caller frees *out. Returns count or -1. */
+int db1_work_item_list_lru_bounded(db1_work_item_t **out, int max);
 int db1_work_item_list_lru(db1_work_item_t **out);
 
 /* Append an audit event. */
@@ -175,6 +194,8 @@ int db1_lifecycle_event_add(const char *work_item_id, const char *stage, const c
                             const char *actor, const char *detail, const char *content_hash,
                             double cost);
 /* List events for a work item (oldest first). Caller frees *out. Returns count. */
+int db1_lifecycle_event_list_bounded(const char *work_item_id, db1_lifecycle_event_t **out,
+                                     int max);
 int db1_lifecycle_event_list(const char *work_item_id, db1_lifecycle_event_t **out);
 
 /* Per-stage attempt counter (for loop-back max_attempts). */
@@ -182,10 +203,63 @@ int db1_stage_attempt_inc(const char *work_item_id, const char *stage);   /* new
 int db1_stage_attempt_reset(const char *work_item_id, const char *stage); /* re-arm the loop */
 int db1_stage_attempt_get(const char *work_item_id, const char *stage);
 
-/* Coarse transaction control for an atomic advance critical section (the engine
- * uses these so it never touches the raw handle). Return 0 on success. */
-int db1_lifecycle_txn_begin(void);
-int db1_lifecycle_txn_commit(void);
-int db1_lifecycle_txn_rollback(void);
+/* One step's outcome, applied atomically.
+ *
+ * wfe_engine.c used to open a transaction, make up to five separate calls and
+ * commit -- which cannot cross a module boundary, because the module would have
+ * to hold an open transaction between requests on a shared connection behind
+ * the gate mutex, and a caller that died in between would wedge every other
+ * writer. The decision is still the engine's; only the applying moved.
+ *
+ * Exactly one disposition, and the writes that go with it:
+ *
+ *   PAUSE     set_pause(pause_reason, pause_stage)
+ *   TERMINAL  set_terminal(state), and abandon_children when asked
+ *   ADVANCE   set_stage(next_stage), set_pr_ref when the node opened one, and
+ *             a second pause when the step's own cost crossed the cap
+ *
+ * cost_usd > 0 is added first, before any of them, exactly where the engine
+ * added it. Every disposition writes the audit event; park_reason writes a
+ * second one for the advance-then-park case.
+ *
+ * The whole thing is one transaction: on any failed write nothing is applied,
+ * which is what stops a work item reaching a state no single write produced --
+ * a cost recorded without the outcome that justified it, or a stage advanced
+ * without the cost. */
+typedef enum
+{
+   DB1_WORK_ITEM_OUTCOME_PAUSE = 0,
+   DB1_WORK_ITEM_OUTCOME_TERMINAL = 1,
+   DB1_WORK_ITEM_OUTCOME_ADVANCE = 2
+} db1_work_item_disposition_t;
+
+typedef struct
+{
+   char work_item_id[80];
+   char node_id[64];
+   int disposition;
+   char state[24];        /* TERMINAL: accepted | rejected | abandoned */
+   char pause_reason[32]; /* PAUSE, and the ADVANCE park */
+   char pause_stage[64];
+   char next_stage[64]; /* ADVANCE */
+   char pr_ref[256];
+   int abandon_children;
+   double cost_usd;
+   char event_kind[32];
+   char event_detail[128];
+   char event_hash[72];
+   char park_reason[32]; /* "" when the advance did not cross the cap */
+} db1_work_item_outcome_t;
+
+int db1_work_item_record_outcome(const db1_work_item_outcome_t *outcome);
+
+/* The transaction helpers are gone from this header. They existed so the engine
+ * could wrap several of these calls in one critical section, which is the one
+ * thing a module boundary cannot carry: the store would have to hold an open
+ * transaction between requests, on a shared connection behind the gate mutex,
+ * and a caller that died in between would block every other writer. The engine
+ * now decides the step's outcome and hands it over in a single call
+ * (db1_work_item_record_outcome), which opens and closes its own transaction
+ * inside the store where it belongs. */
 
 #endif /* DEC_DB1_LIFECYCLE_H */

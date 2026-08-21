@@ -552,7 +552,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    {
       const char *parent_env = getenv("AIMEE_PARENT_DELEGATION_ID");
       const char *depth_env = getenv("AIMEE_DELEGATE_DEPTH");
-      int known = db1_init(config_db1_path()) == 0;
+      int known = db1_store_ready();
       int active = known ? db1_delegation_spawn_is_active(parent_env) : 0;
       if (delegate_chain_env_should_clear(depth_env, parent_env, known, active))
       {

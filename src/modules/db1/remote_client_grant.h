@@ -37,9 +37,23 @@ extern "C"
       int tier; /* 0=off, 1=data, 2=full */
    } db1_remote_client_grant_t;
 
+   /* The grant a claim produced, beside the verdict that produced it. A claim
+    * answers two things at once -- what the record is, and whether this caller
+    * created it, re-entered it, or was refused because somebody else owns the
+    * slot -- and a reply carrying only the record cannot say which. */
+   typedef struct
+   {
+      int result; /* db1_remote_client_claim_result_t */
+      db1_remote_client_grant_t grant;
+   } db1_remote_client_claim_row_t;
+
+   int db1_remote_client_claim_row(const char *principal, const char *new_bearer_sha256,
+                                   int64_t now, db1_remote_client_claim_row_t *out);
+
    /* Atomically claim the appliance's first-user slot and create its unbound
     * enrollment record.  Re-entry by the same principal returns the existing
-    * record; a different principal can never replace the first owner. */
+    * record; a different principal can never replace the first owner.
+    * A thin unpacking of db1_remote_client_claim_row. */
    db1_remote_client_claim_result_t db1_remote_client_claim(const char *principal,
                                                             const char *new_bearer_sha256,
                                                             int64_t now,

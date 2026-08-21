@@ -41,8 +41,24 @@ extern "C"
    /* Atomically consume a fully verified management token. The row is durable before OK is
     * returned and is never removed on a downstream failure. `consumed_at` is supplied by the
     * caller so authorization and replay tests use the same clock instant. */
+   /* The token and the instant it was consumed, as one input.
+    *
+    * consume() takes them as two arguments, and a request that is a struct is
+    * the whole request -- so the pair travels as one row and the two-argument
+    * form below unpacks it. The clock stays the caller's either way, which is
+    * the point of passing it in: authorization and the replay check must agree
+    * on the instant. */
+   typedef struct
+   {
+      server_management_jti_t token;
+      int64_t consumed_at;
+   } db1_management_jti_consume_t;
+
    server_management_jti_result_t
-   server_management_jti_consume(const server_management_jti_t *token, int64_t consumed_at);
+   db1_management_jti_consume_row(const db1_management_jti_consume_t *in);
+
+   server_management_jti_result_t db1_management_jti_consume(const server_management_jti_t *token,
+                                                             int64_t consumed_at);
 
 #ifdef SERVER_MANAGEMENT_JTI_TEST_API
    /* Focused-test entry point. It is absent from the production header surface. */

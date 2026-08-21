@@ -23,6 +23,7 @@ extern "C"
 #define ENSEMBLE_AGENT_NAME_MAX    64
 #define ENSEMBLE_ROLE_NAME_MAX     64
 #define ENSEMBLE_PHASE_NAME_MAX    64
+#define ENSEMBLE_ERR_LEN           256
 
    typedef struct
    {
@@ -42,20 +43,72 @@ extern "C"
       char updated_at[32];
    } ensemble_info_t;
 
-   /* Template helpers (no DB). */
-   int db1_ensemble_template_path(const char *project_root, const char *name, char *buf,
-                                  size_t bufsz);
-   cJSON *db1_ensemble_template_load(const char *project_root, const char *name, char *err,
-                                     size_t errlen);
-   int db1_ensemble_role_needs_dissent(const char *role);
+   /* What a read of one ensemble returns: the row, the turn prompt built from
+    * it, and the verdict.
+    *
+    * These travel together in one reply because they are one observation. Asked
+    * separately -- the row from one call, the prompt from the next -- a turn
+    * taken in between would pair turn N's row with turn N+1's prompt, and the
+    * result reads as a consistent ensemble that never existed.
+    *
+    * rc and err carry the ensemble's own answer ("expected 'alice', got 'bob'",
+    * "already complete"). Those are verdicts, not store failures, so they ride
+    * a successful reply; a broken store is still a failed one. */
+   typedef struct
+   {
+      int rc;
+      char err[ENSEMBLE_ERR_LEN];
+      ensemble_info_t info;
+      char *prompt;
+      char *context;
+   } ensemble_view_t;
 
-   int db1_ensemble_create(const char *project_root, const char *template_name, const char *channel,
-                           cJSON *assignments, int *out_id, char *err, size_t errlen);
+   /* An id and the verdict that produced it. Two operations answer this shape:
+    * starting a run and finding the current one for a channel. Both can fail
+    * for a reason worth reading ("template 'x' not found", "no ensemble for
+    * channel 'y'"), and a bare status would flatten every one of them to -1. */
+   typedef struct
+   {
+      int rc;
+      char err[ENSEMBLE_ERR_LEN];
+      int id;
+   } ensemble_id_result_t;
+
+   int db1_ensemble_create_id(const char *project_root, const char *config_dir,
+                              const char *template_name, const char *channel,
+                              const char *assignments_json, ensemble_id_result_t *out);
+   int db1_ensemble_find_current_id(const char *channel, ensemble_id_result_t *out);
+
+   /* Read one ensemble, and advance one. The public functions below are thin
+    * unpackings of these, kept so callers need not change shape. */
+   int db1_ensemble_view(int id, ensemble_view_t *out);
+   int db1_ensemble_advance_view(int id, const char *sender, const char *text,
+                                 ensemble_view_t *out);
+
+   /* Template resolution, phase walking and prompt building are NOT declared
+    * here: they have no caller outside ensemble.c and they are the ensemble's
+    * behaviour rather than its surface. Publishing them made the boundary look
+    * wider than it is.
+    *
+    * create() takes both roots rather than resolving the second itself. The
+    * store is a separate process and cannot read the daemon's configuration --
+    * the same reason db1_module_init.c refuses to guess the database path. A
+    * module that guessed "the default location" would keep working until an
+    * operator moved it, and then quietly resolve templates somewhere else. */
+   /* assignments_json rather than a cJSON tree: a pointer does not cross a
+    * process boundary, and the caller already holds the document. */
+   int db1_ensemble_create(const char *project_root, const char *config_dir,
+                           const char *template_name, const char *channel,
+                           const char *assignments_json, int *out_id, char *err, size_t errlen);
    int db1_ensemble_get(int id, ensemble_info_t *out, char **prompt_out, char **context_out,
                         char *err, size_t errlen);
    int db1_ensemble_pause(int id, const char *reason, char *err, size_t errlen);
    int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_info_t *out,
                             char **prompt_out, char *err, size_t errlen);
+   /* Unlike the reads above, every way this fails is the store failing --
+    * out of memory, or SQLite refusing the query. There is no verdict to
+    * relay, so it answers with rows or with nothing. */
+   int db1_ensemble_list_rows(ensemble_info_t **out, int *out_count);
    int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t errlen);
    int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char *err,
                                             size_t errlen);

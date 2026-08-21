@@ -53,13 +53,13 @@ int main(void)
 
    /* Consume once, then never again. */
    server_identity_jti_t first = token("id-jti-00000001", 100, 190, "data");
-   assert(server_identity_jti_consume(&first, 101) == SERVER_IDENTITY_JTI_OK);
-   assert(server_identity_jti_consume(&first, 101) == SERVER_IDENTITY_JTI_REPLAY);
+   assert(db1_identity_jti_consume(&first, 101) == SERVER_IDENTITY_JTI_OK);
+   assert(db1_identity_jti_consume(&first, 101) == SERVER_IDENTITY_JTI_REPLAY);
 
    /* The record is durable: a restart must not reopen the window. */
    db1_shutdown();
    assert(db1_init(path) == 0);
-   assert(server_identity_jti_consume(&first, 102) == SERVER_IDENTITY_JTI_REPLAY);
+   assert(db1_identity_jti_consume(&first, 102) == SERVER_IDENTITY_JTI_REPLAY);
 
    /* Saturation denies rather than evicting a live entry. */
    server_identity_jti_t second = token("id-jti-00000002", 100, 190, "full");
@@ -74,26 +74,26 @@ int main(void)
     * server's identity verifier accepts 8, and a store that rejected what the
     * verifier accepts would deny valid tokens. */
    server_identity_jti_t shortest = token("id-00001", 100, 190, "data");
-   assert(server_identity_jti_consume(&shortest, 101) == SERVER_IDENTITY_JTI_OK);
+   assert(db1_identity_jti_consume(&shortest, 101) == SERVER_IDENTITY_JTI_OK);
 
    /* Malformed records are refused before touching the store. */
    server_identity_jti_t bad = token("id-jti-00000004", 100, 190, "superuser");
-   assert(server_identity_jti_consume(&bad, 101) == SERVER_IDENTITY_JTI_INVALID);
+   assert(db1_identity_jti_consume(&bad, 101) == SERVER_IDENTITY_JTI_INVALID);
    bad = token("short", 100, 190, "data"); /* below the 8-character floor */
-   assert(server_identity_jti_consume(&bad, 101) == SERVER_IDENTITY_JTI_INVALID);
+   assert(db1_identity_jti_consume(&bad, 101) == SERVER_IDENTITY_JTI_INVALID);
    bad = token("id-jti-00000005", 100, 190, "data");
    bad.team_id = 0;
-   assert(server_identity_jti_consume(&bad, 101) == SERVER_IDENTITY_JTI_INVALID);
+   assert(db1_identity_jti_consume(&bad, 101) == SERVER_IDENTITY_JTI_INVALID);
    bad = token("id-jti-00000006", 100, 190, "data");
-   assert(server_identity_jti_consume(&bad, 191) == SERVER_IDENTITY_JTI_INVALID); /* past exp */
-   assert(server_identity_jti_consume(&bad, 99) == SERVER_IDENTITY_JTI_INVALID);  /* before iat */
+   assert(db1_identity_jti_consume(&bad, 191) == SERVER_IDENTITY_JTI_INVALID); /* past exp */
+   assert(db1_identity_jti_consume(&bad, 99) == SERVER_IDENTITY_JTI_INVALID);  /* before iat */
    assert(scalar("SELECT count(*) FROM server_identity_jti WHERE jti LIKE 'id-jti-00000%'") == 2);
 
    /* Expired rows are collected; a row expiring exactly now is not yet stale. */
    server_identity_jti_t old = token("id-jti-00000007", 100, 150, "data");
-   assert(server_identity_jti_consume(&old, 101) == SERVER_IDENTITY_JTI_OK);
+   assert(db1_identity_jti_consume(&old, 101) == SERVER_IDENTITY_JTI_OK);
    server_identity_jti_t later = token("id-jti-00000008", 200, 400, "data");
-   assert(server_identity_jti_consume(&later, 201) == SERVER_IDENTITY_JTI_OK);
+   assert(db1_identity_jti_consume(&later, 201) == SERVER_IDENTITY_JTI_OK);
    assert(scalar("SELECT count(*) FROM server_identity_jti WHERE jti='id-jti-00000007'") == 0);
 
    /* The management store is a genuinely separate table — consuming here must

@@ -115,6 +115,7 @@
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
     "server-go/modules/delegates/executor_test.go",
+    "server-go/modules/delegates/executor_roster_test.go",
     "server-go/modules/delegates/capabilities_test.go",
     "server-go/modules/delegates/chain_test.go",
     "server-go/modules/delegates/paths_test.go",

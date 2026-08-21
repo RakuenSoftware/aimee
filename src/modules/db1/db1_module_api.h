@@ -104,6 +104,9 @@
 #define AIMEE_DB1_OP_CLARIFY_WEAKEST_DIM        41u
 #define AIMEE_DB1_OP_CLARIFY_NEXT_QUESTION      42u
 #define AIMEE_DB1_OP_CLARIFY_CRYSTALLIZE        43u
+#define AIMEE_DB1_OP_WM_DELETE                  44u
+#define AIMEE_DB1_OP_WM_CLEAR                   45u
+#define AIMEE_DB1_OP_WM_GC                      46u
 
 /* Family 4: queued agent work: logs, coordination jobs and the cron that
  * drives them. */
@@ -369,6 +372,275 @@
 #define AIMEE_DB1_OP_DIAGNOSE_CONCLUDE                      43u
 #define AIMEE_DB1_OP_DIAGNOSE_ABANDON                       44u
 #define AIMEE_DB1_OP_DIAGNOSE_SUGGEST_PROBES                48u
+
+/* Family 9: per-session guardrail state: the hook's view of a session, stored
+ * as a scalar row plus five child tables and read back as one nested struct. */
+
+#define AIMEE_DB1_EVENT_GUARDRAIL_STATE 11785u
+#define AIMEE_DB1_STAGE_GUARDRAIL_STATE 9u
+
+#define AIMEE_DB1_OP_SESSION_STATE_LOAD         1u
+#define AIMEE_DB1_OP_SESSION_STATE_SAVE         2u
+#define AIMEE_DB1_OP_SESSION_STATE_DELETE       3u
+#define AIMEE_DB1_OP_SESSION_STATE_EXISTS       4u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST         5u
+#define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY  6u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED 7u
+
+/* Family 10: multi-agent ensemble runs: one table holding a run's state, plus
+ * the template interpretation and prompt building that only the run itself
+ * uses. Template files are resolved from roots the caller names. */
+
+#define AIMEE_DB1_EVENT_ENSEMBLE 11786u
+#define AIMEE_DB1_STAGE_ENSEMBLE 10u
+
+#define AIMEE_DB1_OP_ENSEMBLE_CREATE                  1u
+#define AIMEE_DB1_OP_ENSEMBLE_VIEW                    2u
+#define AIMEE_DB1_OP_ENSEMBLE_ADVANCE                 3u
+#define AIMEE_DB1_OP_ENSEMBLE_PAUSE                   4u
+#define AIMEE_DB1_OP_ENSEMBLE_LIST                    5u
+#define AIMEE_DB1_OP_ENSEMBLE_FIND_CURRENT_BY_CHANNEL 6u
+
+/* Family 11: the workflow engine's plans, traces, pipelines and bindings --
+ * everything the engine stores that no multi-call transaction spans. */
+
+#define AIMEE_DB1_EVENT_WORKFLOW 11787u
+#define AIMEE_DB1_STAGE_WORKFLOW 11u
+
+#define AIMEE_DB1_OP_EXECUTION_TRACE_INSERT                 1u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_COUNT_FOR_SESSION      2u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_RECENT            3u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_GET                    4u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_TOOL_CALLS        5u
+#define AIMEE_DB1_OP_EXECUTION_TRACE_LIST_AFTER_ID          6u
+#define AIMEE_DB1_OP_WFE_BIND                               7u
+#define AIMEE_DB1_OP_WFE_BINDING_GET                        8u
+#define AIMEE_DB1_OP_WFE_UNBIND                             9u
+#define AIMEE_DB1_OP_WFE_LEASE_RENEW                        10u
+#define AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET                   11u
+#define AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS             12u
+#define AIMEE_DB1_OP_WFE_LEASE_RECLAIM_STALE                13u
+#define AIMEE_DB1_OP_PIPELINE_CREATE                        14u
+#define AIMEE_DB1_OP_PIPELINE_GET                           15u
+#define AIMEE_DB1_OP_PIPELINE_UPDATE                        16u
+#define AIMEE_DB1_OP_PIPELINE_LINK_PLAN                     17u
+#define AIMEE_DB1_OP_PIPELINE_LINK_JOB                      18u
+#define AIMEE_DB1_OP_PIPELINE_CANCEL                        19u
+#define AIMEE_DB1_OP_PIPELINE_LIST_ACTIVE                   20u
+#define AIMEE_DB1_OP_ROADMAP_DISPATCH_UPSERT                21u
+#define AIMEE_DB1_OP_ROADMAP_DISPATCH_GET                   22u
+#define AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_STATUS            23u
+#define AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_PHASE             24u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_ENSURE                    25u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_GET                       26u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_SET_STATE                 27u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_CLAIM                     28u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_HEARTBEAT                 29u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_FINISH                    30u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_SET_COORD_JOB             31u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_INCREMENT_VERIFY_ATTEMPTS 32u
+#define AIMEE_DB1_OP_ROADMAP_UNIT_SELECT_NEXT               33u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_CREATE                  34u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_GET                     35u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_LIST_IDS                36u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_EXISTS                  37u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_COUNT_STEPS             38u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RUNNING_IDS        39u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RECENT_SUMMARIES   40u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_SET_STATUS              41u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_BY_ID            42u
+#define AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_STALE            43u
+#define AIMEE_DB1_OP_PLAN_STEP_SET_STATUS                   44u
+#define AIMEE_DB1_OP_PLAN_STEP_SET_STATUS_OUTPUT            45u
+#define AIMEE_DB1_OP_PLAN_STEP_CANCEL_ACTIVE_FOR_PLAN       46u
+#define AIMEE_DB1_OP_PLAN_STEP_CANCEL_ORPHANS               47u
+#define AIMEE_DB1_OP_STEP_EVIDENCE_INSERT                   48u
+#define AIMEE_DB1_OP_STEP_EVIDENCE_GET_LATEST               49u
+
+/* Family 12: roundtable pipeline runs, passes, attempts and gates: the review
+ * pipeline's own state machine, split from workflow because one family's
+ * generated client cannot hold both. */
+
+#define AIMEE_DB1_EVENT_ROUNDTABLE 11788u
+#define AIMEE_DB1_STAGE_ROUNDTABLE 12u
+
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_CREATE               1u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_GET                  2u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_UPDATE               3u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_SET_STATE            4u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_CAS_STATE            5u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_LIST                 6u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_COUNT_ACTIVE         7u
+#define AIMEE_DB1_OP_ROUNDTABLE_RUN_BRANCH_OWNER         8u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_CREATE              9u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_GET                 10u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_UPDATE              11u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_LATEST              12u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_MAX_NO              13u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_MAX_GROUP           14u
+#define AIMEE_DB1_OP_ROUNDTABLE_PASS_GROUP_AGG           15u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_CREATE           16u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_GET_BY_RUN       17u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_CURRENT          18u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_UPDATE           19u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_MAX_NO           20u
+#define AIMEE_DB1_OP_ROUNDTABLE_ATTEMPT_SUPERSEDE_OTHERS 21u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_CREATE              22u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_GET                 23u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_UPDATE              24u
+#define AIMEE_DB1_OP_ROUNDTABLE_GATE_AGE_EXCEEDS_HOURS   25u
+
+/* Family 13: the appliance's first-user remote-client grant: the enrollment
+ * bearer, the certificate it binds to, and the tier that grant carries. */
+
+#define AIMEE_DB1_EVENT_IDENTITY 11789u
+#define AIMEE_DB1_STAGE_IDENTITY 13u
+
+#define AIMEE_DB1_OP_REMOTE_CLIENT_CLAIM   1u
+#define AIMEE_DB1_OP_REMOTE_CLIENT_ABANDON 2u
+#define AIMEE_DB1_OP_REMOTE_CLIENT_BIND    3u
+#define AIMEE_DB1_OP_REMOTE_CLIENT_TIER    4u
+
+/* Family 14: session checkpoint rows: a label, the session it belongs to and
+ * the snapshot it captured. */
+
+#define AIMEE_DB1_EVENT_CHECKPOINTS 11790u
+#define AIMEE_DB1_STAGE_CHECKPOINTS 14u
+
+#define AIMEE_DB1_OP_CHECKPOINT_INSERT 1u
+#define AIMEE_DB1_OP_CHECKPOINT_GET    2u
+#define AIMEE_DB1_OP_CHECKPOINT_LIST   3u
+#define AIMEE_DB1_OP_CHECKPOINT_DELETE 4u
+
+/* Family 15: single-use JTI replay windows for the identity and management
+ * token paths. Reserved: these entry points are not named db1_, which the
+ * catalog requires, and each has a _consume_for_test twin that a production
+ * wire has no place for. */
+
+#define AIMEE_DB1_EVENT_JTI_REPLAY 11791u
+#define AIMEE_DB1_STAGE_JTI_REPLAY 15u
+
+#define AIMEE_DB1_OP_IDENTITY_JTI_CONSUME   1u
+#define AIMEE_DB1_OP_MANAGEMENT_JTI_CONSUME 2u
+
+/* Family 16: work-item state and its audit log. Split from workflow because
+ * wfe_engine.c wraps sixteen of these writes in two transactions it opens and
+ * commits across separate calls, which is a redesign of that engine's write
+ * path rather than a wire question. */
+
+#define AIMEE_DB1_EVENT_LIFECYCLE 11792u
+#define AIMEE_DB1_STAGE_LIFECYCLE 16u
+
+#define AIMEE_DB1_OP_WORK_ITEM_CREATE                    1u
+#define AIMEE_DB1_OP_WORK_ITEM_GET                       2u
+#define AIMEE_DB1_OP_WORK_ITEM_ID_BY_PROPOSAL            3u
+#define AIMEE_DB1_OP_WORK_ITEM_ID_BY_PR_REF              4u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_STAGE                 5u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_PR_REF                6u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_WORKTREE              7u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_SUBMITTER             8u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_PARENT                9u
+#define AIMEE_DB1_OP_WORK_ITEM_ABANDON_CHILDREN          10u
+#define AIMEE_DB1_OP_WORK_ITEM_CHILD_COUNTS              11u
+#define AIMEE_DB1_OP_WORK_ITEM_COUNT_ACTIVE_BY_SUBMITTER 12u
+#define AIMEE_DB1_OP_WORK_ITEM_COUNT_RECENT_BY_SUBMITTER 13u
+#define AIMEE_DB1_OP_WORK_ITEM_SUBMIT_CAPPED             14u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_TERMINAL              15u
+#define AIMEE_DB1_OP_WORK_ITEM_GATE_APPLY                16u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_PAUSE                 17u
+#define AIMEE_DB1_OP_WORK_ITEM_CLEAR_PAUSE               18u
+#define AIMEE_DB1_OP_WORK_ITEM_CLEAR_PAUSE_IF            19u
+#define AIMEE_DB1_OP_WORK_ITEM_ADD_COST                  20u
+#define AIMEE_DB1_OP_WORK_ITEM_SET_COST_CAP              21u
+#define AIMEE_DB1_OP_WORK_ITEM_INC_OVERRIDE              22u
+#define AIMEE_DB1_OP_WORK_ITEM_DELETE                    23u
+#define AIMEE_DB1_OP_WORK_ITEM_REAP_STALE_PARKS          24u
+#define AIMEE_DB1_OP_WORK_ITEM_LIST                      25u
+#define AIMEE_DB1_OP_WORK_ITEM_LIST_LRU                  26u
+#define AIMEE_DB1_OP_LIFECYCLE_EVENT_ADD                 27u
+#define AIMEE_DB1_OP_LIFECYCLE_EVENT_LIST                28u
+#define AIMEE_DB1_OP_STAGE_ATTEMPT_INC                   29u
+#define AIMEE_DB1_OP_STAGE_ATTEMPT_RESET                 30u
+#define AIMEE_DB1_OP_STAGE_ATTEMPT_GET                   31u
+#define AIMEE_DB1_OP_WORK_ITEM_RECORD_OUTCOME            32u
+#define AIMEE_DB1_OP_WFE_CHILDREN_LIST                   33u
+#define AIMEE_DB1_OP_WFE_ACTIVE_ROOT_COUNT               34u
+#define AIMEE_DB1_OP_WFE_WORK_ITEM_ID_BY_GIT_PROPOSAL    35u
+#define AIMEE_DB1_OP_WFE_EXECUTED_TURN_COUNT             36u
+#define AIMEE_DB1_OP_WFE_STAGE_LOOP_COUNT                37u
+#define AIMEE_DB1_OP_WFE_RUNNER_FAILURES_SINCE_PROGRESS  38u
+#define AIMEE_DB1_OP_WFE_CAPACITY_WAITS_SINCE_PROGRESS   39u
+#define AIMEE_DB1_OP_WFE_DESCENDANT_IDS                  40u
+#define AIMEE_DB1_OP_WFE_RESUME_TRANSIENT                41u
+#define AIMEE_DB1_OP_WFE_RESUME_WALL_CAPS                42u
+#define AIMEE_DB1_OP_WFE_ABANDON_EXHAUSTED_WALL_CAPS     43u
+#define AIMEE_DB1_OP_WFE_RESUME_READY_PARENTS            44u
+#define AIMEE_DB1_OP_WFE_DELEGATE_JOB_SAVE               45u
+#define AIMEE_DB1_OP_WFE_DELEGATE_JOBS_TERMINAL_CLAIM    46u
+#define AIMEE_DB1_OP_WFE_BUDGET_RESERVE                  47u
+#define AIMEE_DB1_OP_WFE_BUDGET_TOTALS                   48u
+#define AIMEE_DB1_OP_WFE_BUDGET_RELEASE                  49u
+#define AIMEE_DB1_OP_WFE_BUDGET_HEARTBEAT                50u
+#define AIMEE_DB1_OP_WFE_BUDGET_RECONCILE                51u
+#define AIMEE_DB1_OP_WFE_MOVE                            52u
+#define AIMEE_DB1_OP_WFE_RECORD_RETRY                    53u
+#define AIMEE_DB1_OP_WFE_PARK_WITH_DETAIL                54u
+#define AIMEE_DB1_OP_WFE_RESUME                          55u
+#define AIMEE_DB1_OP_WFE_FINISH                          56u
+#define AIMEE_DB1_OP_WFE_STOP_TREE                       57u
+#define AIMEE_DB1_OP_WFE_RECONCILE_ORPHANS               58u
+#define AIMEE_DB1_OP_WFE_PARK_BUDGET_TREE                59u
+#define AIMEE_DB1_OP_WFE_DELETE_TREE                     60u
+#define AIMEE_DB1_OP_WFE_RESOLVE_GATE                    61u
+#define AIMEE_DB1_OP_WFE_REJECT_GATE                     62u
+#define AIMEE_DB1_OP_WFE_PARK_RUNNER_FAILURE             63u
+#define AIMEE_DB1_OP_WFE_RECOVER_LOST_REPLAY             64u
+#define AIMEE_DB1_OP_WFE_RECORD_REQUESTED_CHANGES        65u
+#define AIMEE_DB1_OP_WFE_CLAIM_FROZEN_CREATES            66u
+#define AIMEE_DB1_OP_WFE_CREATE_WORK_ITEM                67u
+#define AIMEE_DB1_OP_WFE_LATEST_STAGE_RETRY_DETAIL       68u
+
+/* Family 17: the management-JWKS cache row: the envelope the server verified,
+ * when it is valid for, and the digests that pin it. Digests cross as hex
+ * because the wire has no bytes. */
+
+#define AIMEE_DB1_EVENT_MGMT_JWKS 11793u
+#define AIMEE_DB1_STAGE_MGMT_JWKS 17u
+
+#define AIMEE_DB1_OP_MGMT_JWKS_READ       1u
+#define AIMEE_DB1_OP_MGMT_JWKS_GENERATION 2u
+#define AIMEE_DB1_OP_MGMT_JWKS_INSTALL    3u
+
+/* Family 18: management challenge nonces and the revocation high-water mark:
+ * issued once, consumed once, and the counter that stops a replayed status
+ * report rolling the server backwards. */
+
+#define AIMEE_DB1_EVENT_MGMT_NONCE 11794u
+#define AIMEE_DB1_STAGE_MGMT_NONCE 18u
+
+#define AIMEE_DB1_OP_MGMT_NONCE_CLEAR     1u
+#define AIMEE_DB1_OP_MGMT_NONCE_ISSUE     2u
+#define AIMEE_DB1_OP_MGMT_NONCE_CONSUME   3u
+#define AIMEE_DB1_OP_MGMT_STATUS_HWM_READ 4u
+#define AIMEE_DB1_OP_MGMT_STATUS_HWM_SET  5u
+
+/* Family 19: the client-certificate roster and the mTLS ramp: which
+ * certificates exist, when each was last presented, and how far the ramp from
+ * optional to required has come. */
+
+#define AIMEE_DB1_EVENT_PKI 11795u
+#define AIMEE_DB1_STAGE_PKI 19u
+
+#define AIMEE_DB1_OP_PKI_CERT_UPSERT       1u
+#define AIMEE_DB1_OP_PKI_CERT_LIST         2u
+#define AIMEE_DB1_OP_PKI_REVOKED_SERIALS   3u
+#define AIMEE_DB1_OP_PKI_CERT_REVOKE       4u
+#define AIMEE_DB1_OP_PKI_CERT_CHECK        5u
+#define AIMEE_DB1_OP_PKI_NOTE_PRESENTATION 6u
+#define AIMEE_DB1_OP_PKI_RAMP_INIT         7u
+#define AIMEE_DB1_OP_PKI_RAMP_READY        8u
+#define AIMEE_DB1_OP_PKI_RAMP_ADVANCE      9u
+#define AIMEE_DB1_OP_PKI_RAMP_GET          10u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and

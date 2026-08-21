@@ -694,7 +694,7 @@ int64_t auto_snapshot_record(const char *path)
    if (!sid || !sid[0])
       return 0;
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       return 0;
 
    int64_t snap_id = agent_tools_get_snap_id();

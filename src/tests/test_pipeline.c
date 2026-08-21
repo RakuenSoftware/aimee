@@ -26,7 +26,9 @@ static int insert_plan(const char *task, const char *action)
    cJSON_AddStringToObject(step, "success_predicate", "");
    cJSON_AddStringToObject(step, "rollback", "");
    cJSON_AddItemToArray(steps, step);
-   int plan_id = db1_execution_plan_create("test-agent", task, steps);
+   char *steps_doc = cJSON_PrintUnformatted(steps);
+   int plan_id = db1_execution_plan_create("test-agent", task, steps_doc);
+   free(steps_doc);
    cJSON_Delete(steps);
    return plan_id;
 }

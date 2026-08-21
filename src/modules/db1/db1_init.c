@@ -19,7 +19,14 @@
 static sqlite3 *g_conn = NULL;
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
 
-#define DB1_BUSY_MAX_RETRIES 15
+/* Sized against the callers' deadlines, not picked round. The jitter below
+   averages ~85ms, so 15 attempts gave up after roughly 1.3s while the shortest
+   client deadline (db1_client sessions, 2000ms) still had most of a second
+   unused -- a write that could have waited was failed instead, and under four
+   concurrent external writers that cost ~4% of session creates on a loaded
+   host. 20 attempts average ~1.7s, still inside that 2s budget, and the caller's
+   own deadline remains the real bound. */
+#define DB1_BUSY_MAX_RETRIES 20
 
 static int db1_busy_cb(void *arg, int count)
 {

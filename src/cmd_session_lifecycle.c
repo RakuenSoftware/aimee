@@ -1489,8 +1489,8 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
    /* Check if this session has a changelog in working memory */
    int launch_has_changelog = 0;
    {
-      /* Ensure db1 is open for the wm_get lookup. Idempotent. */
-      db1_init(config_db1_path());
+      /* No open needed: the read below goes to the store over the bus, and
+         db1_wm_get says so itself when it cannot be reached. */
       wm_entry_t wm_entry;
       if (db1_wm_get(session_id(), "session_changelog", &wm_entry) == 0)
          launch_has_changelog = 1;

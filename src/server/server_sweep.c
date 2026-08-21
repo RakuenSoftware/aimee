@@ -241,12 +241,22 @@ static void file_candidate(sweep_file_ctx_t *fc, const char *key, const sweep_ca
       mkdir(parent, 0700);
       mkdir(dir, 0700);
    }
+   /* mkstemps, not a name built from the clock. The counter here is per sweep
+    * RUN, so it only separates proposals within one sweep; two sweeps filing in
+    * the same second from one server produced the same path, and the later one
+    * silently replaced a proposal a work-item row already pointed at. handle_dev_sweep
+    * is a request handler and the daemon serves connections concurrently, so that
+    * is reachable. Creating the file atomically settles it without needing a name
+    * that is unique by argument. */
    char ppath[1200];
-   snprintf(ppath, sizeof(ppath), "%s/sw-%ld-%d-%d.md", dir, (long)time(NULL), (int)getpid(),
+   snprintf(ppath, sizeof(ppath), "%s/sw-%ld-%d-%d-XXXXXX.md", dir, (long)time(NULL), (int)getpid(),
             fc->filed + fc->file_rejected);
-   FILE *pf = fopen(ppath, "wb");
+   int pfd = mkstemps(ppath, 3);
+   FILE *pf = (pfd >= 0) ? fdopen(pfd, "wb") : NULL;
    if (!pf)
    {
+      if (pfd >= 0)
+         close(pfd);
       dstr_free(&md);
       fc->file_rejected++;
       return;
