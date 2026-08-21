@@ -22338,9 +22338,15 @@
           "line": 53
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.rules_find_by_title operation finds a rule by its title, matched without regard to case. learning.rules_insert applies no such test when writing, so two rules whose titles differ only in case both exist and this answers with whichever the database returns first -- there is no ordering and no limit. learning.feedback_record reinforces through this same lookup, so it reinforces an arbitrary one of them."
+      },
       "signature": "int db2_rules_find_by_title ( const char * title , rule_t * out )",
       "signature_sha256": "f99698b4a4078ab7a852524cc9cc80ab85ba0768e5cab8796c0be931a154597a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_find_by_title"
     },
     {
@@ -22385,9 +22391,15 @@
           "line": 31
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.rules_insert operation writes a rule. Nothing deduplicates the title, and learning.rules_find_by_title matches titles without regard to case, so this is the write that creates the ambiguity that read then resolves arbitrarily. The weight is stored as sent: learning.feedback_record, writing to the same table, caps it at a hundred, and this does not, so the ceiling depends on which path a rule arrived through. An empty polarity becomes positive."
+      },
       "signature": "int db2_rules_insert ( const char * polarity , const char * title , const char * description , int weight )",
       "signature_sha256": "a3fa67e06020505816506d39c8ab5dca186c46023e2b5abf76d93c1e2f6cb536",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_insert"
     },
     {
@@ -22480,9 +22492,15 @@
           "line": 72
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.rules_reinforce_directive operation sets a rule's directive type and stamps it reinforced, optionally setting its weight. The backend decides whether to set the weight from the sign of the argument, and a negative number is not something this envelope can carry, so the request says so in a flag of its own instead. Nothing checks a row matched. Unlike learning.rules_update_directive_type this does touch updated_at, so the two writes leave the same column in different states."
+      },
       "signature": "int db2_rules_reinforce_directive ( int id , const char * directive_type , int weight_override )",
       "signature_sha256": "03aa4446fe083d8212223a7e04143edae89c0860b797ba9f6039349baafce8ce",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_reinforce_directive"
     },
     {
@@ -22526,9 +22544,15 @@
           "line": 67
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.rules_update_directive_type operation sets how binding a rule is. The header names three values -- hard, soft and session -- and nothing enforces them, so a fourth is stored and read back. Nothing checks a row matched, so setting the type of a rule that does not exist is acknowledged. The row's updated_at is not touched, so a rule whose bindingness changed looks unmodified to anything watching that column."
+      },
       "signature": "int db2_rules_update_directive_type ( int id , const char * directive_type )",
       "signature_sha256": "f1ccfe382f422ded514b08cddd5111ae77411e852535761456c33ffa89e7c5d9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_update_directive_type"
     },
     {
@@ -27924,15 +27948,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "66636ef000b8058800028d11076d8acca5cb238dbc04cd66c7006e94e1186524",
+  "fingerprint": "1ac8641234b69cd01b91a0bb4921ef69e15e7f1e5e6833a3ce22299cd6fc5a39",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 309,
+    "audit_pending": 305,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 650
+    "reviewed": 654
   }
 }

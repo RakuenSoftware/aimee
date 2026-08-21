@@ -3431,6 +3431,69 @@ int main(int argc, char **argv)
           memory_unit_active_meta_unit_type[0] == '\0' &&
           memory_unit_active_meta_unit_kind[0] == '\0');
 
+   /* Rules: two titles differing only in case, and two writes against a rule that does not exist.
+    */
+   uint32_t rules_insert_acknowledged = 99;
+   assert(aimee_db2_rules_insert_call(
+              call_client, &client, 9474, 0, "negative", "Replay Rule Title", "replayed", 40,
+              &rules_insert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rules_insert_acknowledged == 1);
+
+   /* The same title in different case. Nothing deduplicates titles here, so this
+    * is a second row -- and learning.rules_find_by_title matches case-insensitively,
+    * so from that read's side the two are the same rule. */
+   rules_insert_acknowledged = 99;
+   assert(aimee_db2_rules_insert_call(
+              call_client, &client, 9478, 0, "negative", "replay rule title", "replayed twice", 60,
+              &rules_insert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rules_insert_acknowledged == 1);
+
+   uint32_t rules_find_by_title_rule_found = 99;
+   uint32_t rules_find_by_title_rule_id = 99;
+   static char
+       rules_find_by_title_rule_polarity[AIMEE_DB2_RULES_FIND_BY_TITLE_RULE_POLARITY_MAX + 1];
+   rules_find_by_title_rule_polarity[0] = 'x';
+   static char
+       rules_find_by_title_rule_description[AIMEE_DB2_RULES_FIND_BY_TITLE_RULE_DESCRIPTION_MAX + 1];
+   rules_find_by_title_rule_description[0] = 'x';
+   uint32_t rules_find_by_title_rule_weight = 99;
+   static char rules_find_by_title_rule_domain[AIMEE_DB2_RULES_FIND_BY_TITLE_RULE_DOMAIN_MAX + 1];
+   rules_find_by_title_rule_domain[0] = 'x';
+   static char
+       rules_find_by_title_directive_type[AIMEE_DB2_RULES_FIND_BY_TITLE_DIRECTIVE_TYPE_MAX + 1];
+   rules_find_by_title_directive_type[0] = 'x';
+   static char
+       rules_find_by_title_rule_expires_at[AIMEE_DB2_RULES_FIND_BY_TITLE_RULE_EXPIRES_AT_MAX + 1];
+   rules_find_by_title_rule_expires_at[0] = 'x';
+   assert(aimee_db2_rules_find_by_title_call(
+              call_client, &client, 9475, 0, "REPLAY RULE TITLE", &rules_find_by_title_rule_found,
+              &rules_find_by_title_rule_id, rules_find_by_title_rule_polarity,
+              sizeof(rules_find_by_title_rule_polarity), rules_find_by_title_rule_description,
+              sizeof(rules_find_by_title_rule_description), &rules_find_by_title_rule_weight,
+              rules_find_by_title_rule_domain, sizeof(rules_find_by_title_rule_domain),
+              rules_find_by_title_directive_type, sizeof(rules_find_by_title_directive_type),
+              rules_find_by_title_rule_expires_at, sizeof(rules_find_by_title_rule_expires_at),
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Both rules answer this title. Which one comes back is not decided by
+    * anything -- the statement has neither an ordering nor a limit -- so the
+    * assertion can only say that it is one of the two, which is the finding. */
+   assert(rules_find_by_title_rule_found == 1);
+   assert(rules_find_by_title_rule_weight == 40 || rules_find_by_title_rule_weight == 60);
+
+   uint32_t rules_update_directive_type_acknowledged = 99;
+   assert(aimee_db2_rules_update_directive_type_call(call_client, &client, 9476, 0, 4242, "hard",
+                                                     &rules_update_directive_type_acknowledged,
+                                                     NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* No rule carries this identifier, and neither write checks that a row
+    * matched, so both are acknowledged. */
+   assert(rules_update_directive_type_acknowledged == 1);
+
+   uint32_t rules_reinforce_directive_acknowledged = 99;
+   assert(aimee_db2_rules_reinforce_directive_call(call_client, &client, 9477, 0, 4242, "soft", 1,
+                                                   75, &rules_reinforce_directive_acknowledged,
+                                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rules_reinforce_directive_acknowledged == 1);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

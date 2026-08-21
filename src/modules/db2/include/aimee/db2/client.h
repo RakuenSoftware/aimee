@@ -1201,6 +1201,22 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t proposal_id, const char *archive_reason, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_rules_find_by_title_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *rule_title, uint32_t *rule_found, uint32_t *rule_id, char *rule_polarity, size_t rule_polarity_capacity, char *rule_description, size_t rule_description_capacity, uint32_t *rule_weight, char *rule_domain, size_t rule_domain_capacity, char *directive_type, size_t directive_type_capacity, char *rule_expires_at, size_t rule_expires_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_rules_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *rule_polarity, const char *rule_title, const char *rule_description, uint32_t rule_weight, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_rules_update_directive_type_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t rule_id, const char *directive_type, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_rules_reinforce_directive_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t rule_id, const char *directive_type, uint32_t set_weight, uint32_t rule_weight, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,

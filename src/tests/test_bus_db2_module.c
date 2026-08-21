@@ -3160,6 +3160,38 @@ int db2_memory_unit_active_meta(int64_t unit_id, double *weight_out, char *unit_
    return 0;
 }
 
+int db2_rules_find_by_title(const char *title, rule_t *out)
+{
+   (void)title;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_rules_insert(const char *polarity, const char *title, const char *description, int weight)
+{
+   (void)polarity;
+   (void)title;
+   (void)description;
+   (void)weight;
+   return -1;
+}
+
+int db2_rules_update_directive_type(int id, const char *directive_type)
+{
+   (void)id;
+   (void)directive_type;
+   return -1;
+}
+
+int db2_rules_reinforce_directive(int id, const char *directive_type, int weight_override)
+{
+   (void)id;
+   (void)directive_type;
+   (void)weight_override;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -14032,6 +14032,250 @@
       }
     },
     {
+      "family": "learning",
+      "id": 74,
+      "name": "rules_find_by_title",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rules are relational DB2 rows.",
+      "c_symbols": [
+        "db2_rules_find_by_title"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the title is matched case-insensitively and the statement has no ordering, so two rules differing only in case answer with an arbitrary one"
+        },
+        "fields": [
+          {
+            "name": "rule_title",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "rule_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "rule_polarity",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "rule_description",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "rule_weight",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "rule_domain",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "directive_type",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "rule_expires_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 75,
+      "name": "rules_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rules are relational DB2 rows.",
+      "c_symbols": [
+        "db2_rules_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates the title, so the same rule inserted twice becomes two rows"
+        },
+        "fields": [
+          {
+            "name": "rule_polarity",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "rule_title",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "rule_description",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "rule_weight",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 76,
+      "name": "rules_update_directive_type",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rules are relational DB2 rows.",
+      "c_symbols": [
+        "db2_rules_update_directive_type"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the directive type is stored as sent, and nothing checks a row matched"
+        },
+        "fields": [
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          {
+            "name": "directive_type",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 77,
+      "name": "rules_reinforce_directive",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Rules are relational DB2 rows.",
+      "c_symbols": [
+        "db2_rules_reinforce_directive"
+      ],
+      "request": {
+        "policy": {
+          "writes": "whether the weight is set at all is part of the request, because the backend decides it from the sign of a number the wire cannot make negative"
+        },
+        "fields": [
+          {
+            "name": "rule_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          {
+            "name": "directive_type",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "set_weight",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "rule_weight",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",

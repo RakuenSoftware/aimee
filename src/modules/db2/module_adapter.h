@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "rules.h"
 #include "memory_payload.h"
 #include "mining.h"
 #include "ontology_evolution.h"
@@ -551,6 +552,11 @@ typedef struct
                               const char *artifact_ref, const char *artifact_hash);
    int (*memory_unit_active_meta)(int64_t unit_id, double *weight_out, char *unit_type_out,
                                   int unit_type_len, char *unit_kind_out, int unit_kind_len);
+   int (*rules_find_by_title)(const char *title, rule_t *out);
+   int (*rules_insert)(const char *polarity, const char *title, const char *description,
+                       int weight);
+   int (*rules_update_directive_type)(int id, const char *directive_type);
+   int (*rules_reinforce_directive)(int id, const char *directive_type, int weight_override);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

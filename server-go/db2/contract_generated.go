@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "797991f44fb07fd59c504ca431ca8643d770e1f5ddb2a03b7c3ce570376a9de2"
+const ContractSHA256 = "f4f8b34b7b141fd65b8a1c112ea9822ec97d8e7021c7a9e9c91bf4e90fbb82c7"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -10300,6 +10300,275 @@ func DecodeProposalArchiveRequest(request []byte) (uint32, string, error) {
 		return 0, "", ErrMalformedEnvelope
 	}
 	return proposalID, archiveReason, nil
+}
+
+const EventRulesFindByTitle = EventLearning
+const StageRulesFindByTitle = FamilyLearning
+const OperationRulesFindByTitle uint32 = 74
+const RulesFindByTitleRuleTitleMin = 1
+const RulesFindByTitleRuleTitleMax = 255
+
+// EncodeRulesFindByTitleRequest writes the schema rules_find_by_title declares, in order.
+func EncodeRulesFindByTitleRequest(ruleTitle string) ([]byte, error) {
+	if len(ruleTitle) < RulesFindByTitleRuleTitleMin || len(ruleTitle) > RulesFindByTitleRuleTitleMax || hasNUL(ruleTitle) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, ruleTitle, RulesFindByTitleRuleTitleMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationRulesFindByTitle, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRulesFindByTitleRequest reads it back, checking each field against its own bound.
+func DecodeRulesFindByTitleRequest(request []byte) (string, error) {
+	var ruleTitle string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesFindByTitle || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if ruleTitle, err = takeRowText(payload, &cursor, RulesFindByTitleRuleTitleMax); err != nil ||
+		len(ruleTitle) < RulesFindByTitleRuleTitleMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return ruleTitle, nil
+}
+
+const EventRulesInsert = EventLearning
+const StageRulesInsert = FamilyLearning
+const OperationRulesInsert uint32 = 75
+const RulesInsertRulePolarityMin = 0
+const RulesInsertRulePolarityMax = 15
+const RulesInsertRuleTitleMin = 1
+const RulesInsertRuleTitleMax = 255
+const RulesInsertRuleDescriptionMin = 0
+const RulesInsertRuleDescriptionMax = 1023
+const RulesInsertRuleWeightMin uint32 = 0
+const RulesInsertRuleWeightMax uint32 = 2147483647
+
+// EncodeRulesInsertRequest writes the schema rules_insert declares, in order.
+func EncodeRulesInsertRequest(rulePolarity string, ruleTitle string, ruleDescription string, ruleWeight uint32) ([]byte, error) {
+	if len(rulePolarity) < RulesInsertRulePolarityMin || len(rulePolarity) > RulesInsertRulePolarityMax || hasNUL(rulePolarity) ||
+		len(ruleTitle) < RulesInsertRuleTitleMin || len(ruleTitle) > RulesInsertRuleTitleMax || hasNUL(ruleTitle) ||
+		len(ruleDescription) < RulesInsertRuleDescriptionMin || len(ruleDescription) > RulesInsertRuleDescriptionMax || hasNUL(ruleDescription) ||
+		ruleWeight < RulesInsertRuleWeightMin || ruleWeight > RulesInsertRuleWeightMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, rulePolarity, RulesInsertRulePolarityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, ruleTitle, RulesInsertRuleTitleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, ruleDescription, RulesInsertRuleDescriptionMax); err != nil {
+		return nil, err
+	}
+	var ruleWeightBytes [4]byte
+	binary.LittleEndian.PutUint32(ruleWeightBytes[:], ruleWeight)
+	payload = append(payload, ruleWeightBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRulesInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRulesInsertRequest reads it back, checking each field against its own bound.
+func DecodeRulesInsertRequest(request []byte) (string, string, string, uint32, error) {
+	var rulePolarity string
+	var ruleTitle string
+	var ruleDescription string
+	var ruleWeight uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if rulePolarity, err = takeRowText(payload, &cursor, RulesInsertRulePolarityMax); err != nil ||
+		len(rulePolarity) < RulesInsertRulePolarityMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if ruleTitle, err = takeRowText(payload, &cursor, RulesInsertRuleTitleMax); err != nil ||
+		len(ruleTitle) < RulesInsertRuleTitleMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if ruleDescription, err = takeRowText(payload, &cursor, RulesInsertRuleDescriptionMax); err != nil ||
+		len(ruleDescription) < RulesInsertRuleDescriptionMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	ruleWeight = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if ruleWeight < RulesInsertRuleWeightMin || ruleWeight > RulesInsertRuleWeightMax {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	return rulePolarity, ruleTitle, ruleDescription, ruleWeight, nil
+}
+
+const EventRulesUpdateDirectiveType = EventLearning
+const StageRulesUpdateDirectiveType = FamilyLearning
+const OperationRulesUpdateDirectiveType uint32 = 76
+const RulesUpdateDirectiveTypeRuleIDMin uint32 = 1
+const RulesUpdateDirectiveTypeRuleIDMax uint32 = 2147483647
+const RulesUpdateDirectiveTypeDirectiveTypeMin = 0
+const RulesUpdateDirectiveTypeDirectiveTypeMax = 15
+
+// EncodeRulesUpdateDirectiveTypeRequest writes the schema rules_update_directive_type declares, in order.
+func EncodeRulesUpdateDirectiveTypeRequest(ruleID uint32, directiveType string) ([]byte, error) {
+	if ruleID < RulesUpdateDirectiveTypeRuleIDMin || ruleID > RulesUpdateDirectiveTypeRuleIDMax ||
+		len(directiveType) < RulesUpdateDirectiveTypeDirectiveTypeMin || len(directiveType) > RulesUpdateDirectiveTypeDirectiveTypeMax || hasNUL(directiveType) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var ruleIDBytes [4]byte
+	binary.LittleEndian.PutUint32(ruleIDBytes[:], ruleID)
+	payload = append(payload, ruleIDBytes[:]...)
+	if err := putRowText(&payload, directiveType, RulesUpdateDirectiveTypeDirectiveTypeMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationRulesUpdateDirectiveType, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRulesUpdateDirectiveTypeRequest reads it back, checking each field against its own bound.
+func DecodeRulesUpdateDirectiveTypeRequest(request []byte) (uint32, string, error) {
+	var ruleID uint32
+	var directiveType string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesUpdateDirectiveType || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	ruleID = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if ruleID < RulesUpdateDirectiveTypeRuleIDMin || ruleID > RulesUpdateDirectiveTypeRuleIDMax {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if directiveType, err = takeRowText(payload, &cursor, RulesUpdateDirectiveTypeDirectiveTypeMax); err != nil ||
+		len(directiveType) < RulesUpdateDirectiveTypeDirectiveTypeMin {
+		return 0, "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return ruleID, directiveType, nil
+}
+
+const EventRulesReinforceDirective = EventLearning
+const StageRulesReinforceDirective = FamilyLearning
+const OperationRulesReinforceDirective uint32 = 77
+const RulesReinforceDirectiveRuleIDMin uint32 = 1
+const RulesReinforceDirectiveRuleIDMax uint32 = 2147483647
+const RulesReinforceDirectiveDirectiveTypeMin = 0
+const RulesReinforceDirectiveDirectiveTypeMax = 15
+const RulesReinforceDirectiveSetWeightMin uint32 = 0
+const RulesReinforceDirectiveSetWeightMax uint32 = 1
+const RulesReinforceDirectiveRuleWeightMin uint32 = 0
+const RulesReinforceDirectiveRuleWeightMax uint32 = 2147483647
+
+// EncodeRulesReinforceDirectiveRequest writes the schema rules_reinforce_directive declares, in order.
+func EncodeRulesReinforceDirectiveRequest(ruleID uint32, directiveType string, setWeight uint32, ruleWeight uint32) ([]byte, error) {
+	if ruleID < RulesReinforceDirectiveRuleIDMin || ruleID > RulesReinforceDirectiveRuleIDMax ||
+		len(directiveType) < RulesReinforceDirectiveDirectiveTypeMin || len(directiveType) > RulesReinforceDirectiveDirectiveTypeMax || hasNUL(directiveType) ||
+		setWeight < RulesReinforceDirectiveSetWeightMin || setWeight > RulesReinforceDirectiveSetWeightMax ||
+		ruleWeight < RulesReinforceDirectiveRuleWeightMin || ruleWeight > RulesReinforceDirectiveRuleWeightMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var ruleIDBytes [4]byte
+	binary.LittleEndian.PutUint32(ruleIDBytes[:], ruleID)
+	payload = append(payload, ruleIDBytes[:]...)
+	if err := putRowText(&payload, directiveType, RulesReinforceDirectiveDirectiveTypeMax); err != nil {
+		return nil, err
+	}
+	var setWeightBytes [4]byte
+	binary.LittleEndian.PutUint32(setWeightBytes[:], setWeight)
+	payload = append(payload, setWeightBytes[:]...)
+	var ruleWeightBytes [4]byte
+	binary.LittleEndian.PutUint32(ruleWeightBytes[:], ruleWeight)
+	payload = append(payload, ruleWeightBytes[:]...)
+	header, err := EncodeRequestHeader(OperationRulesReinforceDirective, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeRulesReinforceDirectiveRequest reads it back, checking each field against its own bound.
+func DecodeRulesReinforceDirectiveRequest(request []byte) (uint32, string, uint32, uint32, error) {
+	var ruleID uint32
+	var directiveType string
+	var setWeight uint32
+	var ruleWeight uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationRulesReinforceDirective || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	ruleID = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if ruleID < RulesReinforceDirectiveRuleIDMin || ruleID > RulesReinforceDirectiveRuleIDMax {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	if directiveType, err = takeRowText(payload, &cursor, RulesReinforceDirectiveDirectiveTypeMax); err != nil ||
+		len(directiveType) < RulesReinforceDirectiveDirectiveTypeMin {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	setWeight = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if setWeight < RulesReinforceDirectiveSetWeightMin || setWeight > RulesReinforceDirectiveSetWeightMax {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	ruleWeight = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if ruleWeight < RulesReinforceDirectiveRuleWeightMin || ruleWeight > RulesReinforceDirectiveRuleWeightMax {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", 0, 0, ErrMalformedEnvelope
+	}
+	return ruleID, directiveType, setWeight, ruleWeight, nil
 }
 
 const EventDocumentExists = EventOrganization

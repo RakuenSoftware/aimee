@@ -4436,6 +4436,22 @@
       "reason": "The typed learning.rules_delete_by_directive_type operation deletes every rule carrying a directive type -- unlike learning.rules_delete_by_id beside it, one call can remove an unbounded number of rules, and the reply's count is the only record of how many. The rules cache it drops afterwards is a static inside the module process, but it is keyed on a signature read from the rules table, so another process notices the deletion on its next read regardless."
     },
     {
+      "symbol": "db2_rules_find_by_title",
+      "signature_sha256": "f99698b4a4078ab7a852524cc9cc80ab85ba0768e5cab8796c0be931a154597a",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_find_by_title operation finds a rule by its title, matched without regard to case. learning.rules_insert applies no such test when writing, so two rules whose titles differ only in case both exist and this answers with whichever the database returns first -- there is no ordering and no limit. learning.feedback_record reinforces through this same lookup, so it reinforces an arbitrary one of them."
+    },
+    {
+      "symbol": "db2_rules_insert",
+      "signature_sha256": "a3fa67e06020505816506d39c8ab5dca186c46023e2b5abf76d93c1e2f6cb536",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_insert operation writes a rule. Nothing deduplicates the title, and learning.rules_find_by_title matches titles without regard to case, so this is the write that creates the ambiguity that read then resolves arbitrarily. The weight is stored as sent: learning.feedback_record, writing to the same table, caps it at a hundred, and this does not, so the ceiling depends on which path a rule arrived through. An empty polarity becomes positive."
+    },
+    {
       "symbol": "db2_rules_list",
       "signature_sha256": "d4982b016b8869725a9a267656e6403234b574d9f5b5031ad0ea5785dd6866cc",
       "disposition": "wire-operation",
@@ -4458,6 +4474,22 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.rules_list_hard operation lists the rules typed hard. The type is matched as that literal string, so a rule typed anything else is absent however heavy it is -- weight and hardness are separate here, which the shared ordering by weight hides. Like the two listings beside it, nothing limits the statement."
+    },
+    {
+      "symbol": "db2_rules_reinforce_directive",
+      "signature_sha256": "03aa4446fe083d8212223a7e04143edae89c0860b797ba9f6039349baafce8ce",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_reinforce_directive operation sets a rule's directive type and stamps it reinforced, optionally setting its weight. The backend decides whether to set the weight from the sign of the argument, and a negative number is not something this envelope can carry, so the request says so in a flag of its own instead. Nothing checks a row matched. Unlike learning.rules_update_directive_type this does touch updated_at, so the two writes leave the same column in different states."
+    },
+    {
+      "symbol": "db2_rules_update_directive_type",
+      "signature_sha256": "f1ccfe382f422ded514b08cddd5111ae77411e852535761456c33ffa89e7c5d9",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.rules_update_directive_type operation sets how binding a rule is. The header names three values -- hard, soft and session -- and nothing enforces them, so a fourth is stored and read back. Nothing checks a row matched, so setting the type of a rule that does not exist is acknowledged. The row's updated_at is not touched, so a rule whose bindingness changed looks unmodified to anything watching that column."
     },
     {
       "symbol": "db2_set_embedder_model_id",

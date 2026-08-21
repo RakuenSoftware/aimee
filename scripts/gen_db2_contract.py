@@ -13570,6 +13570,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_unit_active_meta",
         "policy": {"reads": 200},
     },
+    "rules_find_by_title": {
+        "key": ("learning", 74),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_find_by_title",
+        "policy": {"reads": 200},
+    },
+    "rules_insert": {
+        "key": ("learning", 75),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_insert",
+        "policy": {"writes": 200},
+    },
+    "rules_update_directive_type": {
+        "key": ("learning", 76),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_update_directive_type",
+        "policy": {"writes": 200},
+    },
+    "rules_reinforce_directive": {
+        "key": ("learning", 77),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_rules_reinforce_directive",
+        "policy": {"writes": 200},
+    },
 }
 
 

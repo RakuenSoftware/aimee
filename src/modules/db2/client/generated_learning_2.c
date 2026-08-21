@@ -1068,3 +1068,127 @@ aimee_db2_proposal_archive_call(aimee_db2_call_fn call, void *call_context, uint
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_rules_find_by_title_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *rule_title, uint32_t *rule_found, uint32_t *rule_id, char *rule_polarity,
+    size_t rule_polarity_capacity, char *rule_description, size_t rule_description_capacity,
+    uint32_t *rule_weight, char *rule_domain, size_t rule_domain_capacity, char *directive_type,
+    size_t directive_type_capacity, char *rule_expires_at, size_t rule_expires_at_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RULES_FIND_BY_TITLE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RULES_FIND_BY_TITLE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_rules_find_by_title_request_encode(rule_title, request, sizeof(request),
+                                                    &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RULES_FIND_BY_TITLE, AIMEE_DB2_STAGE_RULES_FIND_BY_TITLE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_rules_find_by_title_reply_decode(
+           response, response_len, rule_found, rule_id, rule_polarity, rule_polarity_capacity,
+           rule_description, rule_description_capacity, rule_weight, rule_domain,
+           rule_domain_capacity, directive_type, directive_type_capacity, rule_expires_at,
+           rule_expires_at_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_rules_insert_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                            uint64_t deadline_ns, const char *rule_polarity, const char *rule_title,
+                            const char *rule_description, uint32_t rule_weight,
+                            uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+                            void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RULES_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RULES_INSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_rules_insert_request_encode(rule_polarity, rule_title, rule_description,
+                                             rule_weight, request, sizeof(request),
+                                             &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RULES_INSERT, AIMEE_DB2_STAGE_RULES_INSERT, trace_id,
+            deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_rules_insert_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_rules_update_directive_type_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t rule_id, const char *directive_type, uint32_t *acknowledged,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RULES_UPDATE_DIRECTIVE_TYPE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RULES_UPDATE_DIRECTIVE_TYPE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_rules_update_directive_type_request_encode(rule_id, directive_type, request,
+                                                            sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RULES_UPDATE_DIRECTIVE_TYPE,
+            AIMEE_DB2_STAGE_RULES_UPDATE_DIRECTIVE_TYPE, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_rules_update_directive_type_reply_decode(response, response_len, acknowledged) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_rules_reinforce_directive_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t rule_id, const char *directive_type, uint32_t set_weight, uint32_t rule_weight,
+    uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_RULES_REINFORCE_DIRECTIVE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_RULES_REINFORCE_DIRECTIVE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_rules_reinforce_directive_request_encode(rule_id, directive_type, set_weight,
+                                                          rule_weight, request, sizeof(request),
+                                                          &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_RULES_REINFORCE_DIRECTIVE,
+            AIMEE_DB2_STAGE_RULES_REINFORCE_DIRECTIVE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_rules_reinforce_directive_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
