@@ -6257,6 +6257,149 @@
       }
     },
     {
+      "family": "memory",
+      "id": 100,
+      "name": "memory_state_fields",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory validity and counters are relational DB2 columns.",
+      "c_symbols": [
+        "db2_memory_get_state_fields"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one row by identifier, with no scope"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "state_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "has_valid_until",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "observation_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "use_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 101,
+      "name": "memory_last_retro_scan",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The contradiction log is a relational DB2 table.",
+      "c_symbols": [
+        "db2_memory_last_retro_scan"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the newest contradiction-log row whose free-text details column holds one particular word"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "last_retro_scan_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 102,
+      "name": "memory_conflicting_l2",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, their keys and confidences are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_find_conflicting_l2"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a conflict is any confident L2 memory on the same key whose content differs by a single byte"
+        },
+        "fields": [
+          {
+            "name": "memory_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "memory_content",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 4095
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "conflict_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "existing_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

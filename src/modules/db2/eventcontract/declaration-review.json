@@ -3324,6 +3324,14 @@
       "reason": "The typed memory.fact_history operation replaces the version walk. The caller sends the normalised key; forming the versioned keys from it is the handler's, so the naming convention does not become a caller's business. It is unscoped, unlike every other search here -- a fact's history is its history whatever the session. Its statement has no LIMIT: the database returns every version and the limit only decides how many are read back, which is a cost the wire cannot show and so is recorded in the policy."
     },
     {
+      "symbol": "db2_memory_find_conflicting_l2",
+      "signature_sha256": "2b0623710e96f534174086d37713bfafdfcb4d61a36771990d024665f9af13a9",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.conflicting_l2 operation finds a confident memory that disagrees with what a caller is about to write. Disagreement is a byte comparison, so the same statement with different spacing conflicts with itself. The confidence threshold of four fifths is written into the statement rather than passed, so a caller cannot ask a different question. One conflicting memory is returned of however many there are, and which one is not decided by anything."
+    },
+    {
       "symbol": "db2_memory_find_facts_like",
       "signature_sha256": "e8c8fcd777337efcf964e3bb39a9a55b1e9300eb3abf4f9c4a8f26dfc46dfd77",
       "disposition": "wire-operation",
@@ -3402,6 +3410,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.get_source_session operation replaces the session read and is the companion to memory.set_source_session. The backend succeeds only for a non-empty session and reports an absent memory and a blank column identically, so the wire reply is non-empty on ok and everything else is not_found rather than inventing a distinction the backend cannot make."
+    },
+    {
+      "symbol": "db2_memory_get_state_fields",
+      "signature_sha256": "2f09e05300ac185f058754ae740d380775cc2bb9c509171baa6e6d0c1b896cf3",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.state_fields operation reads whether a memory has an end date and how often it has been observed and used. The end date is collapsed to a yes or no before it leaves the backend, so a caller cannot learn when -- only that there is one. Both counts are sixty-four bit columns read back through an int. A memory that is not there and a database that could not be reached are both a zero flag."
     },
     {
       "symbol": "db2_memory_get_surprise",
@@ -3554,6 +3570,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.l2_fact_decision_pairs operation finds facts and decisions that mention each other. Like memory.l2_cross_key_pairs it is a self-join with a substring comparison, so its cost is the product of the two sets and no index helps -- but the two draw from different tiers, so a fact and a decision at the same tier are never paired. Both sides need a confidence above a half."
+    },
+    {
+      "symbol": "db2_memory_last_retro_scan",
+      "signature_sha256": "ea3f487b73847bbb93a4967188f10a29cd44bf0385e1b3f159227a4185b02dcb",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.last_retro_scan operation reads when the retroactive contradiction scan last ran. It finds that by taking the newest contradiction-log row whose free-text details column is exactly 'retroactive_scan', so anything else written into that column with that value moves the answer and a scan recorded with different wording is invisible. There is no scope: this is the whole log. An empty answer means no scan, or a read that failed."
     },
     {
       "symbol": "db2_memory_lifecycle_counts",

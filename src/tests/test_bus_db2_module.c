@@ -3059,6 +3059,36 @@ int db2_memory_get_evidence_fields(int64_t memory_id, double *evidence, int *obs
    return 0;
 }
 
+int db2_memory_get_state_fields(int64_t memory_id, int *has_valid_until, int *observations,
+                                int *use_count)
+{
+   (void)memory_id;
+   if (has_valid_until)
+      *has_valid_until = 0;
+   if (observations)
+      *observations = 0;
+   if (use_count)
+      *use_count = 0;
+   return 0;
+}
+
+int db2_memory_last_retro_scan(char *out, int out_len)
+{
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return 0;
+}
+
+int db2_memory_find_conflicting_l2(const char *key, const char *content,
+                                   double *existing_confidence_out)
+{
+   (void)key;
+   (void)content;
+   if (existing_confidence_out)
+      *existing_confidence_out = 0.0;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

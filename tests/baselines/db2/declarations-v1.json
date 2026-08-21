@@ -17519,9 +17519,15 @@
           "line": 743
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.conflicting_l2 operation finds a confident memory that disagrees with what a caller is about to write. Disagreement is a byte comparison, so the same statement with different spacing conflicts with itself. The confidence threshold of four fifths is written into the statement rather than passed, so a caller cannot ask a different question. One conflicting memory is returned of however many there are, and which one is not decided by anything."
+      },
       "signature": "int db2_memory_find_conflicting_l2 ( const char * key , const char * content , double * existing_confidence_out )",
       "signature_sha256": "2b0623710e96f534174086d37713bfafdfcb4d61a36771990d024665f9af13a9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_find_conflicting_l2"
     },
     {
@@ -17771,9 +17777,15 @@
           "line": 108
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.state_fields operation reads whether a memory has an end date and how often it has been observed and used. The end date is collapsed to a yes or no before it leaves the backend, so a caller cannot learn when -- only that there is one. Both counts are sixty-four bit columns read back through an int. A memory that is not there and a database that could not be reached are both a zero flag."
+      },
       "signature": "int db2_memory_get_state_fields ( int64_t memory_id , int * has_valid_until , int * observations , int * use_count )",
       "signature_sha256": "2f09e05300ac185f058754ae740d380775cc2bb9c509171baa6e6d0c1b896cf3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_get_state_fields"
     },
     {
@@ -18232,9 +18244,15 @@
           "line": 566
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.last_retro_scan operation reads when the retroactive contradiction scan last ran. It finds that by taking the newest contradiction-log row whose free-text details column is exactly 'retroactive_scan', so anything else written into that column with that value moves the answer and a scan recorded with different wording is invisible. There is no scope: this is the whole log. An empty answer means no scan, or a read that failed."
+      },
       "signature": "int db2_memory_last_retro_scan ( char * out , int out_len )",
       "signature_sha256": "ea3f487b73847bbb93a4967188f10a29cd44bf0385e1b3f159227a4185b02dcb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_last_retro_scan"
     },
     {
@@ -27864,15 +27882,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "00950f24c95d036c1cc847a3fea302e48065f9cdc7d13dece6994377b2b698e5",
+  "fingerprint": "1a2efba14ed19b3b7d86fd99e1a2eb0af92d5bcd4791ce8f69c7e155c999841f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 319,
+    "audit_pending": 316,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 640
+    "reviewed": 643
   }
 }

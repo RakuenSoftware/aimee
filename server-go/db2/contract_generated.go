@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "bbffd5c14c8876a3a24b6229579f1e1e96d2c4b4c304db1a8754852779c47b13"
+const ContractSHA256 = "3db8a2637eb41690632b592664423804bd3bb4e9f97ea56959a7b380ae77794b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -2460,6 +2460,138 @@ func DecodeMemoryEvidenceFieldsRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return memoryID, nil
+}
+
+const EventMemoryStateFields = EventMemory
+const StageMemoryStateFields = FamilyMemory
+const OperationMemoryStateFields uint32 = 100
+const MemoryStateFieldsMemoryIDMin uint64 = 1
+const MemoryStateFieldsMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryStateFieldsRequest writes the schema memory_state_fields declares, in order.
+func EncodeMemoryStateFieldsRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryStateFieldsMemoryIDMin || memoryID > MemoryStateFieldsMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryStateFields, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryStateFieldsRequest reads it back, checking each field against its own bound.
+func DecodeMemoryStateFieldsRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryStateFields || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryStateFieldsMemoryIDMin || memoryID > MemoryStateFieldsMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+const EventMemoryLastRetroScan = EventMemory
+const StageMemoryLastRetroScan = FamilyMemory
+const OperationMemoryLastRetroScan uint32 = 101
+
+
+// EncodeMemoryLastRetroScanRequest writes the schema memory_last_retro_scan declares, in order.
+func EncodeMemoryLastRetroScanRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationMemoryLastRetroScan, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryLastRetroScanRequest reads it back, checking each field against its own bound.
+func DecodeMemoryLastRetroScanRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryLastRetroScan || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventMemoryConflictingL2 = EventMemory
+const StageMemoryConflictingL2 = FamilyMemory
+const OperationMemoryConflictingL2 uint32 = 102
+const MemoryConflictingL2MemoryKeyMin = 1
+const MemoryConflictingL2MemoryKeyMax = 511
+const MemoryConflictingL2MemoryContentMin = 0
+const MemoryConflictingL2MemoryContentMax = 4095
+
+// EncodeMemoryConflictingL2Request writes the schema memory_conflicting_l2 declares, in order.
+func EncodeMemoryConflictingL2Request(memoryKey string, memoryContent string) ([]byte, error) {
+	if len(memoryKey) < MemoryConflictingL2MemoryKeyMin || len(memoryKey) > MemoryConflictingL2MemoryKeyMax || hasNUL(memoryKey) ||
+		len(memoryContent) < MemoryConflictingL2MemoryContentMin || len(memoryContent) > MemoryConflictingL2MemoryContentMax || hasNUL(memoryContent) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, memoryKey, MemoryConflictingL2MemoryKeyMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, memoryContent, MemoryConflictingL2MemoryContentMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryConflictingL2, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryConflictingL2Request reads it back, checking each field against its own bound.
+func DecodeMemoryConflictingL2Request(request []byte) (string, string, error) {
+	var memoryKey string
+	var memoryContent string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryConflictingL2 || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if memoryKey, err = takeRowText(payload, &cursor, MemoryConflictingL2MemoryKeyMax); err != nil ||
+		len(memoryKey) < MemoryConflictingL2MemoryKeyMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if memoryContent, err = takeRowText(payload, &cursor, MemoryConflictingL2MemoryContentMax); err != nil ||
+		len(memoryContent) < MemoryConflictingL2MemoryContentMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return memoryKey, memoryContent, nil
 }
 
 const EventEntityObservationCount = EventIndex

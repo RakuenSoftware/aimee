@@ -13510,6 +13510,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_get_evidence_fields",
         "policy": {"reads": 200},
     },
+    "memory_state_fields": {
+        "key": ("memory", 100),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_get_state_fields",
+        "policy": {"reads": 200},
+    },
+    "memory_last_retro_scan": {
+        "key": ("memory", 101),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_last_retro_scan",
+        "policy": {"reads": 200},
+    },
+    "memory_conflicting_l2": {
+        "key": ("memory", 102),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_find_conflicting_l2",
+        "policy": {"reads": 200},
+    },
 }
 
 

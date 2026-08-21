@@ -531,6 +531,11 @@ typedef struct
    double (*memory_surprise)(int64_t memory_id, double default_value);
    int (*memory_confidence_by_key)(const char *key, double *confidence_out);
    int (*memory_evidence_fields)(int64_t memory_id, double *evidence, int *observations);
+   int (*memory_state_fields)(int64_t memory_id, int *has_valid_until, int *observations,
+                              int *use_count);
+   int (*memory_last_retro_scan)(char *out, int out_len);
+   int (*memory_conflicting_l2)(const char *key, const char *content,
+                                double *existing_confidence_out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

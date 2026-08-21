@@ -3271,6 +3271,37 @@ int main(int argc, char **argv)
           memory_evidence_fields_evidence_strength == 0.0 &&
           memory_evidence_fields_observation_count == 0);
 
+   /* Memory state fields, the retroactive scan stamp and an L2 conflict check, none of which has
+    * anything to find. */
+   uint32_t memory_state_fields_state_found = 99;
+   uint32_t memory_state_fields_has_valid_until = 99;
+   uint32_t memory_state_fields_observation_count = 99;
+   uint32_t memory_state_fields_use_count = 99;
+   assert(aimee_db2_memory_state_fields_call(
+              call_client, &client, 9463, 0, 4242, &memory_state_fields_state_found,
+              &memory_state_fields_has_valid_until, &memory_state_fields_observation_count,
+              &memory_state_fields_use_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_state_fields_state_found == 0 && memory_state_fields_has_valid_until == 0 &&
+          memory_state_fields_observation_count == 0 && memory_state_fields_use_count == 0);
+
+   static char memory_last_retro_scan_last_retro_scan_at
+       [AIMEE_DB2_MEMORY_LAST_RETRO_SCAN_LAST_RETRO_SCAN_AT_MAX + 1];
+   memory_last_retro_scan_last_retro_scan_at[0] = 'x';
+   assert(aimee_db2_memory_last_retro_scan_call(call_client, &client, 9464, 0,
+                                                memory_last_retro_scan_last_retro_scan_at,
+                                                sizeof(memory_last_retro_scan_last_retro_scan_at),
+                                                NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_last_retro_scan_last_retro_scan_at[0] == '\0');
+
+   uint32_t memory_conflicting_l2_conflict_found = 99;
+   double memory_conflicting_l2_existing_confidence = 9.0;
+   assert(aimee_db2_memory_conflicting_l2_call(
+              call_client, &client, 9465, 0, "a-key-no-memory-holds", "replayed content",
+              &memory_conflicting_l2_conflict_found, &memory_conflicting_l2_existing_confidence,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_conflicting_l2_conflict_found == 0 &&
+          memory_conflicting_l2_existing_confidence == 0.0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
