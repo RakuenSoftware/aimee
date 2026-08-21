@@ -1,5 +1,6 @@
 /* css_analyze.c: CSS structural analyzer. See css_analyze.h. */
 #include "css_analyze.h"
+#include "css_treesitter.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -598,10 +599,10 @@ static void css_emit_rules(css_stylesheet_t *ss, const char *sel_list, int line,
    }
 }
 
-css_stylesheet_t *css_analyze(const char *text, size_t len)
+/* The hand-rolled parser. Reached when the tree-sitter front-end is not
+ * compiled in, or could not parse -- see css_analyze below. */
+static css_stylesheet_t *css_analyze_scanned(const char *text, size_t len)
 {
-   if (!text)
-      return NULL;
    css_stylesheet_t *ss = css_ss_new();
    if (!ss)
       return NULL;
@@ -746,6 +747,21 @@ css_stylesheet_t *css_analyze(const char *text, size_t len)
    }
 
    return ss;
+}
+
+css_stylesheet_t *css_analyze(const char *text, size_t len)
+{
+   if (!text)
+      return NULL;
+   /* Prefer the tree-sitter front-end where it is compiled in; fall back to the
+    * scanner above otherwise, and in the default build, where
+    * css_treesitter_analyze is a stub. The same arrangement extract_calls uses.
+    * The two produce the same css_stylesheet_t, so which one answered is not
+    * something a caller has to know. */
+   css_stylesheet_t *parsed = css_treesitter_analyze(text, len);
+   if (parsed)
+      return parsed;
+   return css_analyze_scanned(text, len);
 }
 
 void css_stylesheet_free(css_stylesheet_t *ss)

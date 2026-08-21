@@ -178,11 +178,22 @@ TEST_MCP_CLIENT_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
                        $(OBJDIR)/cJSON.o \
                        $(PLATFORM_BASIC_OBJS)
 
+# What a test linking css_analyze.o needs alongside it. css_analyze calls the
+# tree-sitter front-end first, so that object comes too: the stub in the default
+# build, which returns NULL and leaves the scanner answering exactly as before,
+# and the grammar walk under AIMEE_TREESITTER -- which then needs the vendored
+# runtime it calls into. Named once because eight targets link css_analyze.o, and
+# a per-target copy of this is a per-target chance to forget it.
+CSS_TS_OBJS = $(OBJDIR)/modules/css/css_treesitter.o
+ifdef AIMEE_TREESITTER
+CSS_TS_OBJS += $(TS_VENDOR_OBJS)
+endif
+
 TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
                  $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/posix/memory.o \
                  $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_effective.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
                  $(OBJDIR)/workflow_learn.o \
-                 $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
+                 $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
                  $(OBJDIR)/tasks.o $(OBJDIR)/render.o \
                  $(DB1_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/agent_hints.o $(OBJDIR)/db2/agent_outcomes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/collab_rules.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_nodes.o $(OBJDIR)/db2/code_projection.o $(OBJDIR)/db2/shadow_delta.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/memory_export.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/prospective_memories.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/tasks.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/trace_mining.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/learning.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/db2/sketch.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/sketch.o \
                  $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o \
@@ -1221,7 +1232,7 @@ $(TESTPREFIX)/unit-test-css-graph: \
                                        $(OBJDIR)/tests/test_css_graph.o \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
-                                       $(OBJDIR)/modules/css/css_analyze.o \
+                                       $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
@@ -1235,7 +1246,7 @@ $(TESTPREFIX)/unit-test-css-insights: \
                                        $(OBJDIR)/db2/css_insights.o \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
-                                       $(OBJDIR)/modules/css/css_analyze.o \
+                                       $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
@@ -1268,7 +1279,7 @@ $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
-                                       $(OBJDIR)/modules/css/css_analyze.o \
+                                       $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
@@ -1286,7 +1297,7 @@ $(TESTPREFIX)/unit-test-css-render: \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
-                                       $(OBJDIR)/modules/css/css_analyze.o \
+                                       $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
@@ -1513,7 +1524,7 @@ $(TESTPREFIX)/unit-test-memory: $(CONFIG_ACCESSOR_OBJS) $(OBJDIR)/tests/test_mem
                         $(OBJDIR)/aimee_home.o \
                         $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) \
                         $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o \
-                        $(OBJDIR)/tasks.o $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o \
+                        $(OBJDIR)/tasks.o $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o \
                         $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
                         $(OBJDIR)/kb/kb.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/kb/kb_mdl.o \
                         $(OBJDIR)/db2/feature_rows.o \
@@ -1528,7 +1539,7 @@ $(TESTPREFIX)/unit-test-tasks: $(OBJDIR)/tests/test_tasks.o $(OBJDIR)/tasks.o $(
                        $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/tasks.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/posix/memory.o \
                        $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o \
                        $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o \
-                       $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o \
+                       $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o \
                        $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
                        $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/db2/feature_rows.o \
                        $(OBJDIR)/render.o $(OBJDIR)/cJSON.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS)
@@ -1618,7 +1629,7 @@ $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-extractors: $(OBJDIR)/tests/test_extractors.o $(OBJDIR)/extractors.o \
-                           $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/modules/db1/db.o $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
+                           $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS) $(OBJDIR)/db2/css_graph.o $(OBJDIR)/modules/db1/db.o $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
                            $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_elements.o $(OBJDIR)/modules/config/config_econ.o $(OBJDIR)/modules/config/config_mode.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                            $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/posix/memory.o \
@@ -1632,11 +1643,15 @@ $(TESTPREFIX)/unit-test-extractors: $(OBJDIR)/tests/test_extractors.o $(OBJDIR)/
 # --- New tests ---
 
 # CSS analyzer (WP-A) — pure leaf, depends only on css_analyze.o + libc.
-$(TESTPREFIX)/unit-test-css-analyze: $(OBJDIR)/tests/test_css_analyze.o $(OBJDIR)/modules/css/css_analyze.o
+# Under AIMEE_TREESITTER these same assertions run through the grammar, because
+# css_analyze prefers it -- so every case the scanner is held to, the grammar is
+# held to as well, and neither can drift from the other unnoticed. That is what
+# makes the front-end a front-end rather than a second answer.
+$(TESTPREFIX)/unit-test-css-analyze: $(OBJDIR)/tests/test_css_analyze.o $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # CSS interim static oracle (WP-E) — leaf: css_oracle.o + css_analyze.o + libc.
-$(TESTPREFIX)/unit-test-css-oracle: $(OBJDIR)/tests/test_css_oracle.o $(OBJDIR)/modules/css/css_oracle.o $(OBJDIR)/modules/css/css_analyze.o
+$(TESTPREFIX)/unit-test-css-oracle: $(OBJDIR)/tests/test_css_oracle.o $(OBJDIR)/modules/css/css_oracle.o $(OBJDIR)/modules/css/css_analyze.o $(CSS_TS_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # CSS rendered computed-style oracle core (#4-full) — leaf: css_render_oracle.o + cJSON + libc.
@@ -4030,6 +4045,19 @@ $(TESTPREFIX)/unit-test-code-treesitter: $(OBJDIR)/tests/test_code_treesitter.o 
                                          $(TS_VENDOR_OBJS) \
                                          $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+# The CSS front-end against the scanner it replaces. Opt-in for the same reason
+# as the target above: it links the fetched runtime and the vendored grammar.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-css-treesitter
+$(TESTPREFIX)/unit-test-css-treesitter: | $(CORE_CONNECTION_LIB)
+$(TESTPREFIX)/unit-test-css-treesitter: $(OBJDIR)/tests/test_css_treesitter.o \
+                                        $(OBJDIR)/modules/css/css_analyze.o \
+                                        $(CSS_TS_OBJS) \
+                                        $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+# Under AIMEE_TREESITTER this object is the grammar walk rather than the stub.
+$(OBJDIR)/modules/css/css_treesitter.o: C_FLAGS += -DAIMEE_TREESITTER -Ivendor/tree-sitter/lib/include
+$(OBJDIR)/modules/css/css_treesitter.o: | vendor/tree-sitter/lib/src/lib.c
 endif
 
 # Cross-repo dependency graph S2a/S2b: pure resolver core (import resolution +

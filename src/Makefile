@@ -398,7 +398,7 @@ endif
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
 DATA_SRCS = code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
-            index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
+            index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_treesitter.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
             context_discover.c tasks.c modules/learning/learning_router.c modules/learning/learning_implicit.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c modules/gateway/gateway_policy.c modules/gateway/gateway_pipeline.c modules/gateway/gateway_delegate.c \
             modules/workspace/workspace.c session_worktree_key.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/config/agent_config.c modules/vault/agent_credentials.c modules/config/agent_registry.c modules/routing/routing.c agent_tier_lint.c cmd_describe.c \
             history.c role_templates.c modules/skills/skill.c modules/skills/skill_rollback.c conversation.c \
@@ -751,7 +751,7 @@ KB_DB2_HOST_ADAPTER_OBJS = $(DB2_HOST_ADAPTER_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_MEMORY_SPLIT_SRCS = modules/memory/memory_core_search_c.c modules/memory/memory_core_search_b.c modules/memory/memory_core_helpers_b.c modules/memory/memory_core_helpers.c modules/memory/memory_core_crud.c modules/memory/memory_core_search.c modules/memory/memory_core_scope_embed.c modules/memory/memory_core_tiers.c
 # ^ KB-real only (#error-guarded); NEVER add to DATA_SRCS/server build.
 KB_DATA_SRCS = $(KB_MEMORY_SPLIT_SRCS) code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
-               index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
+               index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_treesitter.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
                dogfood.c modules/learning/learning_router.c modules/learning/learning_implicit.c integrity_gate.c session_briefing.c modules/workspace/workspace.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c modules/workspace/workspace_scope.c modules/memory/memory_profile_pack.c wiki_render.c kb/kb.c kb/kb_fusion.c kb/kb_neardup.c kb/kb_conventions.c sketch.c modules/learning/learning_evidence.c modules/learning/learning_bundle.c kb/kb_calibrate.c kb/kb_demote.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c kb/kb_mdl.c
 KB_DATA_OBJS = $(KB_DATA_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_PLATFORM_OBJS = $(PLATFORM_BASIC_OBJS) $(filter %/agent_bridge.o %/cli_client.o %/memory.o,$(PLATFORM_EXTRA_OBJS) $(PLATFORM_AGENT_OBJS))
@@ -794,10 +794,16 @@ TS_VENDOR_OBJS = $(OBJDIR)/vendor/ts_runtime.o \
                  $(OBJDIR)/vendor/ts_elixir.o $(OBJDIR)/vendor/ts_elixir_scan.o \
                  $(OBJDIR)/vendor/ts_powershell.o $(OBJDIR)/vendor/ts_powershell_scan.o
 $(OBJDIR)/kb/code_treesitter.o: C_FLAGS += -DAIMEE_TREESITTER -Ivendor/tree-sitter/lib/include
+# css_treesitter.c is the same arrangement for the CSS style graph: the grammar
+# front-end under the flag, a stub without it, and css_analyze falling back to
+# its scanner either way. It is the KB build that indexes stylesheets, so like
+# code_treesitter.o only that object carries the flag.
+$(OBJDIR)/kb/modules/css/css_treesitter.o: C_FLAGS += -DAIMEE_TREESITTER -Ivendor/tree-sitter/lib/include
 # code_treesitter.c includes tree_sitter/api.h, which the fetch produces — so on a cold
 # checkout the fetch must run before this object compiles. Order-only: trigger the fetch
 # if the headers are missing, but don't recompile just because lib.c is newer.
 $(OBJDIR)/kb/code_treesitter.o: | vendor/tree-sitter/lib/src/lib.c
+$(OBJDIR)/kb/modules/css/css_treesitter.o: | vendor/tree-sitter/lib/src/lib.c
 # Any missing vendored source triggers a single fetch of the whole set.
 vendor/tree-sitter/lib/src/lib.c \
 vendor/tree-sitter-c/src/parser.c \
