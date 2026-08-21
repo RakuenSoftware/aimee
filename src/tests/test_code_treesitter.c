@@ -239,6 +239,19 @@ int main(void)
 
    /* --- CSS (@keyframes name) --- */
    want(".css", "@keyframes spin { from {} to {} }\n.cls { color: red }\n", "spin", "type");
+   /* A class is what a component names to reach a style, so it is a definition like
+    * any other language's -- which is what lets a stylesheet and a component meet in
+    * the graph. Ids likewise; a tag or attribute selector names nothing of its own. */
+   want(".css", ".cls { color: red }\n", "cls", "class");
+   want(".css", "#header { color: red }\n", "header", "class");
+   /* Compound and combinator selectors nest, and each name in them is defined. */
+   want(".css", "a.btn { color: red }\n", "btn", "class");
+   want(".css", ".card .btn { color: red }\n", "card", "class");
+   want(".css", ".card .btn { color: red }\n", "btn", "class");
+   want(".css", ".a.b { color: red }\n", "a", "class");
+   want(".css", ".a.b { color: red }\n", "b", "class");
+   /* Rules inside an at-rule are still rules. */
+   want(".css", "@media (min-width: 1px) { .inner { color: red } }\n", "inner", "class");
 
    /* --- Scala (object/class/trait → type; def → function, incl. members in a
     * template_body; def also works as a top-level .sc script member) --- */
@@ -359,10 +372,14 @@ int main(void)
    wantcall(".py", "top()\n", "", "top"); /* file-scope: empty caller */
    /* caller tracking follows the enclosing function. */
    wantcall(".c", "void outer(){ x(); }\nvoid inner(){ deep(); }\n", "inner", "deep");
-   /* Bash/CSS have no useful call extraction -> -1 (caller falls back). */
+   /* CSS references a custom property by name: `var(--token)` is the reference and
+    * --token is what it names, not `var`. Other CSS functions (rgb, calc, url) name
+    * no symbol and are not references. */
+   wantcall(".css", ".a { color: var(--brand) }\n", "", "--brand");
    {
       call_ref_t cc[8];
-      assert(code_treesitter_calls(".css", "a{color:red}\n", cc, 8) == -1);
+      assert(code_treesitter_calls(".css", "a{color:rgb(1,2,3)}\n", cc, 8) == 0);
+      /* Bash has no useful call extraction -> -1 (caller falls back). */
       assert(code_treesitter_calls(".sh", "f(){ g; }\n", cc, 8) == -1);
       assert(code_treesitter_calls(".md", c_src, cc, 8) == -1); /* unmapped ext */
    }

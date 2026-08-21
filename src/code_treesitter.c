@@ -521,18 +521,64 @@ static int classify_dart(TSNode node, const char **kind, TSNode *name_root)
    return 1;
 }
 
-/* CSS has no functions/types; the one named, referenceable construct is a @keyframes
- * animation. Surface its name as a "type"; selectors (rule_set) are not symbols. */
+/* The name a CSS selector node introduces: its OWN class_name/id_name, which is the
+ * last such child. Compound and combinator selectors nest (`a.btn` is a class_selector
+ * holding a tag_name; `.a.b` is a class_selector holding a class_selector), so taking
+ * the first would name the wrong one -- the walk reaches the nested selectors on its
+ * own and each names itself. */
+static int css_own_name(TSNode node, const char *want, TSNode *out)
+{
+   int found = 0;
+   uint32_t n = ts_node_named_child_count(node);
+   for (uint32_t i = 0; i < n; i++)
+   {
+      TSNode child = ts_node_named_child(node, i);
+      if (strcmp(ts_node_type(child), want) == 0)
+      {
+         *out = child;
+         found = 1;
+      }
+   }
+   return found;
+}
+
+/* CSS's named, referenceable constructs: a class or id selector, which is what a
+ * component's markup names to reach a style, and a @keyframes animation. A class is
+ * exactly the kind of symbol the graph exists to join across files -- `.btn` defined in
+ * a stylesheet and named by a component -- so it is emitted as a definition like any
+ * other language's, rather than left to a CSS-only index.
+ *
+ * Kinds stay inside the vocabulary code_projection maps: "class" and "type" both become
+ * a struct-like node there. A tag or attribute selector names nothing of its own and is
+ * not a definition. */
 static int classify_css(TSNode node, const char **kind, TSNode *name_root)
 {
-   if (strcmp(ts_node_type(node), "keyframes_statement") != 0)
-      return 0;
-   TSNode nm;
-   if (!child_of_type(node, "keyframes_name", &nm))
-      return 0;
-   *kind = "type";
-   *name_root = nm;
-   return 1;
+   const char *type = ts_node_type(node);
+
+   if (strcmp(type, "keyframes_statement") == 0)
+   {
+      TSNode nm;
+      if (!child_of_type(node, "keyframes_name", &nm))
+         return 0;
+      *kind = "type";
+      *name_root = nm;
+      return 1;
+   }
+   if (strcmp(type, "class_selector") == 0)
+   {
+      if (!css_own_name(node, "class_name", name_root))
+         return 0;
+      *kind = "class";
+      return 1;
+   }
+   if (strcmp(type, "id_selector") == 0)
+   {
+      if (!css_own_name(node, "id_name", name_root))
+         return 0;
+      *kind = "class";
+      return 1;
+   }
+   return 0;
 }
 
 /* Scala: `def` → function; class/object/trait/type/enum → type. The name comes via
@@ -784,7 +830,15 @@ static int is_descendable(const char *t)
        "call", "do_block",
        /* PowerShell: top-level defs are wrapped in a statement_list under `program`;
         * class bodies hold their method definitions */
-       "statement_list", "class_statement", NULL};
+       "statement_list", "class_statement",
+       /* CSS: a rule's selectors hold the class and id names it defines, and at-rules
+        * hold rules. The compound and combinator selectors are descended because they
+        * nest -- `.card .btn` is a descendant_selector of two class_selectors, and both
+        * are names the stylesheet defines. These types belong to no other grammar. */
+       "rule_set", "selectors", "class_selector", "id_selector", "descendant_selector",
+       "child_selector", "sibling_selector", "adjacent_sibling_selector", "namespace_selector",
+       "pseudo_class_selector", "pseudo_element_selector", "media_statement", "supports_statement",
+       "scope_statement", "at_rule", NULL};
    for (int i = 0; set[i]; i++)
       if (strcmp(t, set[i]) == 0)
          return 1;
@@ -900,6 +954,36 @@ static int is_call_node(const char *t)
           strcmp(t, "object_creation_expression") == 0;
 }
 
+/* CSS's reference is `var(--token)`, and the name it references is the argument rather
+ * than the function: recording `var` would make every custom-property reference in a
+ * stylesheet the same edge, which is no edge at all. Other CSS functions (rgb, calc,
+ * url) name no symbol and are not references. Returns 0 if this is not one. */
+static int css_call_callee_name(TSNode call, const char *content, char *out, int cap)
+{
+   TSNode fn;
+   if (!child_of_type(call, "function_name", &fn))
+      return 0;
+   char name[32];
+   node_text(fn, content, name, (int)sizeof(name));
+   if (strcmp(name, "var") != 0)
+      return 0;
+
+   TSNode arguments;
+   if (!child_of_type(call, "arguments", &arguments))
+      return 0;
+   uint32_t n = ts_node_named_child_count(arguments);
+   for (uint32_t i = 0; i < n; i++)
+   {
+      TSNode argument = ts_node_named_child(arguments, i);
+      node_text(argument, content, out, cap);
+      /* The first argument is the property; a second is the fallback value. */
+      if (out[0] == '-' && out[1] == '-')
+         return 1;
+      return 0;
+   }
+   return 0;
+}
+
 /* The called name: the callee expression (the `function`/`name`/`method` field, else the
  * first child) reduced to its last identifier. Returns 0 if none. */
 static int call_callee_name(TSNode call, const char *content, char *out, int cap)
@@ -947,7 +1031,9 @@ static void walk_calls(ts_lang_t lang, TSNode node, const char *content, const c
    if (is_call_node(ts_node_type(node)) && !is_def)
    {
       char callee[sizeof(out->callee)];
-      if (call_callee_name(node, content, callee, (int)sizeof(callee)) && callee[0])
+      int named = lang == TSL_CSS ? css_call_callee_name(node, content, callee, (int)sizeof(callee))
+                                  : call_callee_name(node, content, callee, (int)sizeof(callee));
+      if (named && callee[0])
       {
          snprintf(out[*count].caller, sizeof(out[*count].caller), "%s", caller ? caller : "");
          snprintf(out[*count].callee, sizeof(out[*count].callee), "%s", callee);
@@ -968,7 +1054,7 @@ int code_treesitter_calls(const char *ext, const char *content, call_ref_t *out,
    const TSLanguage *lang = ts_language_for_ext(ext, &which);
    if (!lang || !content || !out || max <= 0)
       return -1;
-   if (which == TSL_BASH || which == TSL_CSS)
+   if (which == TSL_BASH)
       return -1; /* no useful call extraction — defer to the hand-rolled path */
 
    TSParser *parser = ts_parser_new();
