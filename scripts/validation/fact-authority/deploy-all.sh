@@ -15,7 +15,7 @@ x 'mkdir -p /root/.config/aimee /usr/local/libexec/aimee-modules /root/pgtests'
 p /tmp/bins.tgz /tmp/bins.tgz
 p /tmp/mm.tgz   /tmp/mm.tgz
 x 'cd /usr/local/bin && tar xzf /tmp/bins.tgz && chmod +x aimee aimee-server aimee-kb'
-x 'cd /usr/local/libexec/aimee-modules && tar xzf /tmp/mm.tgz && chmod +x aimee-module-memory'
+x 'cd /usr/local/libexec/aimee-modules && tar xzf /tmp/mm.tgz && chmod +x aimee-module-memory aimee-module-config 2>/dev/null; true'
 
 # The Postgres-backed test binaries, when they have been staged. Without these a
 # rebuilt container silently loses run-pg-tests.sh -- the one thing that
@@ -39,7 +39,7 @@ for s in psql provision start-kb start-server reset-kb seed-facts \
          test-rerank-live test-retrieve-live test-chat-memory-stages \
          test-retract test-server-retract test-context-block test-provenance \
          test-memory-delete test-drain-supersede run-pg-tests \
-         install-postgres-module explore explore-cli; do
+         install-postgres-module install-config-module explore explore-cli; do
   [ -f "/tmp/${s}.sh" ] && p "/tmp/${s}.sh" "/root/${s}.sh"
 done
 x 'chmod +x /root/*.sh'
@@ -55,6 +55,10 @@ x 'cd /root && ln -sf install-memory-module.sh imm.sh; ln -sf install-memory-mod
    ln -sf test-chat-memory-stages.sh tcms.sh; ln -sf probe-query-pollution.sh pqp.sh'
 
 x 'bash /root/provision.sh' 2>&1 | tail -2
+
+# Config grants before either daemon: both refuse to start without the config
+# module, and a grant written after startup is not seen.
+x 'bash /root/install-config-module.sh grants'
 
 # BOTH grants before EITHER daemon. A daemon reads modules.d once at startup, so
 # a grant written afterwards is not seen and the module's attach is denied --

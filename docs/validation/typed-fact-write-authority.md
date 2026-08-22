@@ -467,3 +467,135 @@ blocked by the missing `kb grant set` command above.
 That is a stronger posture than the derivation alone (the network path is refused
 twice before authority is even considered), but it is not the same claim, and the
 test now fails loudly rather than passing green if either wall answers first.
+
+## Re-verification against merged `testing`
+
+Everything above was proven on this branch alone. `testing` then merged in a
+config-module extraction and the P6 epistemic-kind work, so the whole suite was
+re-run against binaries built from the merged tree. Four things had to be fixed
+before any of it meant anything again, and each one had been passing green while
+proving nothing.
+
+### The daemons no longer start on their own
+
+Config became a process module. Both daemons now refuse to run without it:
+
+    aimee-kb: config module unavailable: config module unavailable
+
+`install-config-module.sh` installs the grant (principal_ref 2, serves 4609) on
+both buses and starts an instance on each. The ordering is awkward enough to
+deserve its own script: the grant must exist **before** the daemon starts (a
+daemon reads `modules.d` once), and the module can only attach **after**, once
+the daemon has created the bus socket -- so the start scripts launch it in the
+background while their daemon is still coming up.
+
+### A migration that its own trigger refuses
+
+`schema.sql:1995` creates `entity_edges_semantic_guard`, which enforces that a
+row with `edge_class='semantic'` may only be written inside an open
+`fact_graph_commits` row. The one-shot P6 block at `schema.sql:15289` then runs:
+
+    UPDATE entity_edges SET epistemic_kind='world_fact';
+
+with no commit open. Every semantic edge trips the guard, the `DO` block raises,
+and because the apply is one transaction the **entire schema rolls back**:
+
+    aimee: db2_init: schema apply failed: ERROR: semantic facts must be changed
+    through fact_mutation
+    aimee-kb: DB2 not ready (...); retry 13/24 in 5s
+
+aimee-kb never becomes ready. The server's knowledge calls then fail
+(`TCP connect failed: 127.0.0.1:8741`) and every memory write answers
+`failed to store memory` -- three layers away from the cause.
+
+It is invisible on an empty database, because the UPDATE touches no rows. It
+fires on any database that already holds semantic facts: every real deployment,
+every upgrade. CI against a fresh template will not catch it.
+
+The UPDATE also looks redundant -- the `ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+epistemic_kind TEXT NOT NULL DEFAULT 'world_fact'` immediately above it already
+gives every existing row that value. (The sibling UPDATE on `memories` is not
+redundant; it also computes `expiry_days_migration_override`.) So dropping the
+`entity_edges` UPDATE appears to be the fix, but that is a schema change under
+the frozen-boundary rules and belongs to whoever owns P6.
+`unblock-p6-migration.sh` documents it and works around it for this container;
+it does not fix it.
+
+### The suite was judging liveness by a column that no longer means that
+
+Retraction now sets `lifecycle_state='invalidated'` and `invalidated_at`. Only a
+supersession sets `superseded_at`. Every test here judged "current vs gone" by
+`superseded_at='' AND suppressed=0`, which is true of an invalidated row -- so a
+**successful** retraction read as a blocked one, and `seed-facts.sh` reported
+rows as freshly seeded when they were the previous run's invalidated ones.
+
+### The seed was protecting nothing, silently
+
+Three compounding failures, all invisible because the seed's writes were
+redirected to `/dev/null`:
+
+- `entity_edges` carries more than one write guard --
+  `entity_edges_semantic_guard` and `semantic_evidence_event_guard` ("semantic
+  assertion mutation committed without its evidence event"). Both refuse a raw
+  INSERT or DELETE of a semantic edge. Suspending one leaves the other, so the
+  seed now suspends every user trigger on the table and restores them
+  immediately. That is the right call here specifically: the premise of the test
+  is rows written by an earlier build.
+- `authority_rank`, not `confidence_class`, is what retraction gates on:
+  `if (actor->rank < rows[i].authority_rank) continue`. A row seeded `'A'`
+  without rank 30 looks Class A and is retractable by anyone. The tests were
+  seeding exactly that.
+- and `lifecycle_state` has to be `persistent`, or the selector skips the row.
+
+`seed-facts.sh` now asserts it left two live rows behind, because a seed that
+silently did nothing is how all of the above survived a full run.
+
+### Results after the corrections
+
+Against binaries built from merged `testing`, on real PostgreSQL, with the
+memory module on both buses and the postgres and config modules attached:
+
+| probe | result |
+|---|---|
+| `test-retract` (kb, loopback owner bearer = a person) | PASS -- retracts Class A, control retracts too |
+| `test-server-retract` (agent over TCP) | PASS -- refused; UDS person retracts both |
+| `test-transport-authority` (same body, both transports) | PASS -- TCP 1->1, UDS 1->0 |
+| `test-drain-supersede` (gap 2) | PASS -- Class A `age=30` survives and stands ALONE; positive control commits a Class B fact, so the drain demonstrably ran |
+| `test-provenance` | PASS -- `user_stated` vs `agent_message` vs column default |
+| `test-memory-delete` | PASS -- TCP refused above the authority decision, UDS person destroys |
+| `test-context-block` | **FAILS LOUDLY** -- see below |
+
+`test-retract` was also relabelled. It called the loopback-owner-bearer leg "the
+attack" and expected refusal, which became wrong once the policy settled that an
+owner bearer on loopback IS the operator. Left alone it would report a security
+failure every time the system behaved correctly.
+
+### EXTRACT_INDEX (5889) is not answering, and it was hiding behind a green test
+
+`test-context-block` asks the kb to serve a block for the query "please forget
+my email" and checks that the agent's own words do not retract the user's fact.
+It passed. It was passing for the wrong reason:
+
+    WARN memory: retraction scan gave no answer; not retracting this turn
+
+`db2_typed_fact_ingress` runs the §4 correction pre-scan through the memory
+module's EXTRACT_INDEX stage. When that stage does not answer it returns without
+reaching the authority decision at all, so both facts survive no matter what the
+authority rules say. The test now counts those warnings across the run and fails
+if any appeared -- and it does fail, which is the honest result.
+
+The same stage backs pattern extraction, which reports the same thing:
+
+    WARN kb.memory.facts: pattern extraction gave no answer for memory 28..35
+
+The module is attached and its grant serves 5889 (`serve=5889,...,5894`), and
+the Go module implements both halves on that stage (`handleScanTurn` when the
+request carries the scan magic, `handleExtract` otherwise). So this is a
+protocol-level mismatch between the C caller and the module, not a missing
+placement or a denied grant. Both consumers fail closed, which is why nothing
+looked broken: turns that say "forget my X" quietly never retract, and pattern
+extraction quietly contributes nothing. The LLM drain lane is unaffected, which
+is why `test-drain-supersede` still has a working positive control.
+
+Not diagnosed further here. It is a real functional gap, it is not an authority
+defect, and the authority conclusions above do not rest on it.

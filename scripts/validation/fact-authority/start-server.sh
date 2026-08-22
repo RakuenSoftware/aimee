@@ -5,7 +5,10 @@ set -u
 # ORIGINAL process alive holding the old module policy, and a freshly installed
 # grant looked like it was being ignored (module attach denied) when in fact
 # nothing had reloaded it.
-pkill -f aimee-server 2>/dev/null
+# Scoped to OUR binary path. CT 9078 is shared with other sessions running
+# their own stacks from /opt/... -- a bare `pkill -f aimee-server` matches theirs
+# too and takes down work that has nothing to do with this branch.
+pkill -f '/usr/local/bin/aimee-server' 2>/dev/null
 sleep 2
 export AIMEE_HOME=/root
 export AIMEE_KB_API_URL="http://127.0.0.1:8741"
@@ -48,6 +51,12 @@ ulimit -S -s 65536 || true
 bash /root/make-scope-repo.sh 2>/dev/null || true
 cd /root/proj 2>/dev/null || cd /root
 nohup /usr/local/bin/aimee-server --socket=/root/aimee-server.sock >/root/server.log 2>&1 &
+# The daemon now refuses to run without the config module, and the module can
+# only attach once the daemon has created the bus socket -- so it is launched
+# here, in the background, while the daemon is still coming up. Started before
+# the daemon it would find no socket; started after the wait below, the daemon
+# would already have given up.
+bash /root/install-config-module.sh start-server >/root/config-start-server.log 2>&1 &
 echo $! > /root/server.pid
 sleep 10
 echo "server pid=$(cat /root/server.pid)"

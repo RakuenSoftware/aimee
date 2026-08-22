@@ -4,7 +4,10 @@ set -u
 # Restart, not "start a second one". Without this a re-run left the ORIGINAL kb
 # alive holding the previous environment, so a changed SYNTHESIS_ENDPOINT looked
 # like it was being ignored -- the same trap start-server.sh had.
-pkill -f aimee-kb 2>/dev/null
+# Scoped to OUR binary path. CT 9078 is shared with other sessions running
+# their own stacks from /opt/... -- a bare `pkill -f aimee-kb` matches theirs
+# too and takes down work that has nothing to do with this branch.
+pkill -f '/usr/local/bin/aimee-kb' 2>/dev/null
 sleep 2
 export AIMEE_HOME=/root/.config/aimee
 export AIMEE_DB2_URL="postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared"
@@ -24,6 +27,12 @@ export SYNTHESIS_ENDPOINT="${AIMEE_E2E_SYNTH:-http://192.168.1.100:8762}"
 ulimit -S -s 65536 || true
 cd /root
 nohup /usr/local/bin/aimee-kb --http-port=8741 >/root/kb.log 2>&1 &
+# The daemon now refuses to run without the config module, and the module can
+# only attach once the daemon has created the bus socket -- so it is launched
+# here, in the background, while the daemon is still coming up. Started before
+# the daemon it would find no socket; started after the wait below, the daemon
+# would already have given up.
+bash /root/install-config-module.sh start-kb >/root/config-start-kb.log 2>&1 &
 echo $! > /root/kb.pid
 sleep 8
 echo "kb pid=$(cat /root/kb.pid)"

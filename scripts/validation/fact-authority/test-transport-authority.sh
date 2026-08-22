@@ -27,7 +27,11 @@ q() { PGPASSWORD=aimee-e2e psql -q -h 127.0.0.1 -U aimee -d aimee_shared -Atc "$
 
 REL=age
 live() {
-  q "select count(*) from entity_edges where relation='$REL' and superseded_at='' and suppressed=0"
+# A retired fact is lifecycle_state='invalidated' + invalidated_at; only a
+# supersession sets superseded_at. Judging liveness by superseded_at/suppressed
+# alone calls an invalidated row "current", which makes a successful retraction
+# read as a blocked one.
+  q "select count(*) from entity_edges where relation='$REL' and superseded_at='' and invalidated_at='' and suppressed=0"
 }
 
 # A Class A row on a functional relation is the thing worth protecting; seed one
@@ -39,12 +43,24 @@ live() {
 # same source/relation/target fails the unique index while the "is it live?"
 # guard says the seed is needed. The test then reports "nothing to retract" on
 # every run after the first.
+# entity_edges carries MORE THAN ONE write guard -- entity_edges_semantic_guard
+# and semantic_evidence_event_guard ("semantic assertion mutation committed
+# without its evidence event"). Naming one leaves the other, so this suspends
+# every user trigger on the table for the seed. They refuse raw INSERT/DELETE of a semantic edge
+# outside an open fact_mutation commit, so the seed silently does nothing
+# without this -- and the test then reports "nothing to retract".
+q "ALTER TABLE entity_edges DISABLE TRIGGER USER" >/dev/null
 q "delete from entity_edges where source='user' and relation='$REL'" >/dev/null
 # entity_edges has no created_at/updated_at: the typed-fact layer stamps
 # asserted_at (and superseded_at on correction). Naming the wrong columns fails
 # the insert, and with psql errors suppressed that reads as "nothing to retract".
-q "insert into entity_edges (source,relation,target,edge_class,confidence_class,confidence,asserted_at,superseded_at,suppressed)
-   values ('user','$REL','52','semantic','A',1.0,'2026-01-01T00:00:00Z','',0)" >/dev/null
+# authority_rank 30 (FACT_ACTOR_USER) is what db2_fact_mutation_invalidate
+# gates on -- confidence_class 'A' alone leaves a row anyone may retract, so the
+# test would protect nothing while looking correct.
+q "insert into entity_edges (source,relation,target,edge_class,confidence_class,confidence,
+     authority_rank,lifecycle_state,asserted_at,invalidated_at,superseded_at,suppressed)
+   values ('user','$REL','52','semantic','A',1.0,30,'persistent','2026-01-01T00:00:00Z','','',0)" >/dev/null
+q "ALTER TABLE entity_edges ENABLE TRIGGER USER" >/dev/null
 
 before=$(live)
 echo "Class A '$REL' edges live before: $before"
