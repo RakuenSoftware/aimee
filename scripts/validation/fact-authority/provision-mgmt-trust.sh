@@ -38,8 +38,34 @@ RIG=/usr/local/bin/write-tier-enforce-live
 [ -x "$RIG" ] || { echo "FAIL: $RIG not installed" >&2; exit 1; }
 [ -f "$DB1" ] || { echo "FAIL: DB1 not found at $DB1" >&2; exit 1; }
 
-kid="$("$RIG" provision --db1 "$DB1" --bundle "$BUNDLE" --key "$TOKEN_KEY")" || {
-  echo "FAIL: trust chain provisioning failed" >&2; exit 1; }
+# IDEMPOTENT, and that is not a nicety.
+#
+# `provision` mints a fresh token key every time, but it CANNOT replace an
+# envelope already installed at the same generation -- db1 refuses it ("db1
+# refused the signed JWKS envelope"). Re-running therefore left a NEW key on disk
+# beside the OLD envelope in the store, and every token minted afterwards failed
+# verification as `invalid`. The probe then reported "the account leg never
+# reached the authority decision", which is true and says nothing about the code.
+#
+# That is a silent mismatch produced by re-running setup, so it is caught here
+# rather than left to surface three layers away as a failed authority probe.
+already=0
+if [ -s "$BUNDLE" ] && [ -s "$TOKEN_KEY" ]; then
+  rows="$(sqlite3 "$DB1" "select count(*) from server_management_jwks_cache" 2>/dev/null | tail -1)"
+  [ "${rows:-0}" -gt 0 ] && already=1
+fi
+
+if [ "$already" = "1" ] && [ "${FORCE:-0}" != "1" ]; then
+  echo "already provisioned: keeping the existing key and envelope"
+  echo "  (re-provisioning would mint a new key the stored envelope cannot verify;"
+  echo "   run with FORCE=1 to clear the envelope and start over)"
+  kid="$(grep -o '"token_kid"[^,]*' "$BUNDLE" 2>/dev/null | head -1)"
+else
+  # Clearing first is what makes a forced re-provision actually take.
+  [ "$already" = "1" ] && sqlite3 "$DB1" "delete from server_management_jwks_cache" >/dev/null 2>&1
+  kid="$("$RIG" provision --db1 "$DB1" --bundle "$BUNDLE" --key "$TOKEN_KEY")" || {
+    echo "FAIL: trust chain provisioning failed" >&2; exit 1; }
+fi
 
 # The loader refuses an untrusted owner or a writable file, so state the posture
 # rather than assuming the rig left it right.

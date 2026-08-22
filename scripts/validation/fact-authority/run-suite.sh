@@ -43,7 +43,27 @@ run() { # $1 = label, $2.. = command
   fi
 }
 
-seed() { bash /root/seed-facts.sh >/dev/null 2>&1; }
+# A FAILED SEED MUST NOT LOOK LIKE A FAILED PROBE.
+#
+# This used to be `bash seed-facts.sh >/dev/null 2>&1` with the exit status
+# thrown away. seed-facts.sh already asserts that two live rows landed, so it
+# knows when it failed -- the runner just was not listening. When a seed did
+# fail, the next probe found nothing to retract and reported ITS OWN assertion
+# failing, which points at the authority code and not at the setup. That is the
+# same shape as a probe stopped at an auth wall, which this suite has been
+# fooled by twice, and it produced one unexplained intermittent failure of
+# "same body, both transports" before being tracked down.
+seed() {
+  local out
+  if ! out="$(bash /root/seed-facts.sh 2>&1)"; then
+    echo "  SEED FAILED -- the probes below would fail for the wrong reason:"
+    printf '%s\n' "$out" | tail -3 | sed 's/^/      /'
+    seed_failures=$((seed_failures + 1))
+    return 1
+  fi
+  return 0
+}
+seed_failures=0
 
 # Bringing the kb up means its MODULES too. A probe that restarts a daemon
 # orphans every module attached to its bus, and nothing restarts them -- so the
@@ -179,7 +199,9 @@ run "grant administration path"    bash /root/test-grant-admin.sh
 hdr "embedding"
 # Last, because it restarts the kb pointed at a stub embedder and leaves that
 # pointing in place; nothing after it should depend on the earlier config.
-run "EMBED call path" bash /root/test-embed-stage.sh
+# test-embed-persist supersedes the earlier call-path-only probe: it proves the
+# same call path AND that vectors persist, with the same control.
+run "EMBED store -> persist" bash /root/test-embed-persist.sh
 bring_up_kb
 
 hdr "summary"
@@ -196,6 +218,15 @@ if [ "$capnew" -gt 0 ]; then
   echo "      results above as unproven until this is zero."
   fail=$((fail + 1))
   failed_names="$failed_names module-stages-reachable"
+fi
+# Same reasoning as the capability_absent counter above: a probe that ran
+# against an unseeded store proves nothing, so a failed seed cannot be allowed
+# to leave a green summary behind it.
+if [ "${seed_failures:-0}" -gt 0 ]; then
+  echo "  WARNING: $seed_failures seed(s) failed, so the probes after them ran"
+  echo "      against a store that did not hold the facts they act on."
+  fail=$((fail + 1))
+  failed_names="$failed_names seed-facts"
 fi
 printf '  pass %d   fail %d   skip %d\n' "$pass" "$fail" "$skip"
 [ -n "$failed_names" ] && printf '  failed:%s\n' "$failed_names"

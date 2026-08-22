@@ -7444,7 +7444,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 248
+          "line": 250
         }
       ],
       "signature": "int db2_entity_edge_backfill_utility_touched_at ( void )",
@@ -7457,7 +7457,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 278
+          "line": 280
         }
       ],
       "signature": "int db2_entity_edge_build_unique_index ( int * out_already_exists )",
@@ -7502,7 +7502,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 263
+          "line": 265
         }
       ],
       "signature": "int db2_entity_edge_dedup_audit ( db2_entity_edge_dedup_report_t * out )",
@@ -7517,7 +7517,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 269
+          "line": 271
         }
       ],
       "signature": "int db2_entity_edge_dedup_migrate ( const char * rollback_path , int dry_run , db2_entity_edge_dedup_report_t * out )",
@@ -7536,7 +7536,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 186
+          "line": 188
         }
       ],
       "signature": "int db2_entity_edge_explain_by_entity ( const char * entity , db2_entity_edge_explain_t * out , int max )",
@@ -7600,7 +7600,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 224
+          "line": 226
         }
       ],
       "signature": "int db2_entity_edge_neighbors_weighted ( const char * entity , db2_entity_edge_weighted_neighbor_t * out , int max , int limit_sql , int utility_scoring_enabled )",
@@ -7660,7 +7660,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 218
+          "line": 220
         }
       ],
       "signature": "double db2_entity_edge_prune_priority ( int weight , double decayed_utility , double utility_weight )",
@@ -7736,7 +7736,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 242
+          "line": 244
         }
       ],
       "signature": "int db2_entity_edge_two_hop_neighbors ( const char * entity , int max , int limit_per_hop , db2_entity_edge_hop_t * out )",
@@ -7749,7 +7749,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 273
+          "line": 275
         }
       ],
       "signature": "int db2_entity_edge_unique_index_exists ( void )",
@@ -7797,7 +7797,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 212
+          "line": 214
         }
       ],
       "signature": "double db2_entity_edge_utility_decay ( double raw_score , const char * touched_at , int half_life_days )",
@@ -20791,21 +20791,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_agent.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_edges.h",
-          "line": 169
-        }
-      ],
-      "signature": "int db2_relation_schema_list ( db2_relation_schema_row_t * out , int max )",
-      "signature_sha256": "10dd91843bf251014cebe6b8fbcd5c3a603c5dba63f87320467eeff06b26275d",
-      "status": "audit-pending",
-      "symbol": "db2_relation_schema_list"
-    },
-    {
-      "consumers": [
         "src/tests/test_report_enrichments.c"
       ],
       "locations": [
@@ -26486,12 +26471,12 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "556fa38013ffc132927b72ad4fa919e84fb265a43bfbe08f0ea629fb8058d2e0",
+  "fingerprint": "634b90f6c4392754e0d41108c15bdda72ab79d1987a1d29a5a598281a2fcc525",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 695,
-    "declarations": 1438,
+    "audit_pending": 694,
+    "declarations": 1437,
     "headers": 140,
     "internal_unconsumed": 162,
     "private_test_only": 287,

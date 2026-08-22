@@ -71,9 +71,27 @@ case "$line" in
     # The mapping itself is pinned deterministically by
     # unit-test-server-tls-init-cause; what is missing is only the live
     # reproduction of the ramp refusing.
-    echo "  SKIP: the ramp completes here even with db1 absent, so this branch"
-    echo "        cannot be staged on this box. The cause mapping is covered by"
-    echo "        unit-test-server-tls-init-cause." ;;
+    # WHY it cannot be staged, established rather than assumed:
+    #
+    # Removing db1 to make the ramp fail does not work, because the GRANT check
+    # fires first. db1.grant names the binary, parse_grant_file resolves it with
+    # realpath(), and a grant naming an absent file is invalid -- which fails the
+    # whole module endpoint, so aimee-server refuses to start at all:
+    #
+    #   ERROR obs_bus: module grant policy is invalid: /root/modules.d/server
+    #
+    # Measured: with the binary moved aside the server did not come up, so the
+    # ramp never ran to fail. Removing the grant TOO just means mTLS is not
+    # configured. Reaching the ramp-failure branch needs db1 present-but-not-
+    # answering -- a module that attaches and then refuses -- which nothing here
+    # can stage.
+    #
+    # So this is not "unclear": the branch is unreachable by the means available,
+    # and the cause mapping it would have exercised is pinned deterministically by
+    # unit-test-server-tls-init-cause instead.
+    echo "  SKIP: the ramp-failure branch is unreachable here. Removing db1 makes"
+    echo "        its grant invalid, which stops the SERVER starting before the"
+    echo "        ramp runs; the mapping is covered by unit-test-server-tls-init-cause." ;;
   *)
     echo "  FAIL: unexpected message"; rc=1 ;;
 esac

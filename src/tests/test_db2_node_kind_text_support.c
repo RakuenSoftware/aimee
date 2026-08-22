@@ -59,9 +59,44 @@ static void test_remaining_int_boundaries(void)
       assert_node_kind(values[i], "other");
 }
 
+/* relations.schema_list publishes memory_ontology_rules(). It previously read
+ * `memory_relation_schema`, a table nothing in the tree writes, so it served an
+ * empty list while memory_ontology_validate() enforced a different, static
+ * table. These assertions tie the published set to the enforced one: if a rule
+ * is ever advertised that the validator would reject, the surface is lying
+ * about what the system does, and that is the failure this catches. */
+static void test_published_rules_are_the_enforced_rules(void)
+{
+   const memory_ontology_rule_t *rules = NULL;
+   int n = memory_ontology_rules(&rules);
+
+   /* An empty list is the exact symptom of the defect being fixed here: it is
+    * what the DB-backed reader returned on every deployment. */
+   assert(n > 0);
+   assert(rules != NULL);
+
+   for (int i = 0; i < n; i++)
+   {
+      /* Every advertised triple must actually pass the validator. */
+      assert(memory_ontology_validate(rules[i].sk, rules[i].rel, rules[i].ok) == 1);
+
+      /* The sentinel terminates the table and is not a rule; publishing it
+       * would advertise (other, other, other), which reads as "anything
+       * goes" for a relation that is merely experimental. */
+      assert(
+          !(rules[i].sk == NODE_OTHER && rules[i].rel == REL_OTHER && rules[i].ok == NODE_OTHER));
+
+      /* The surface labels each code; an unmapped code would publish "other"
+       * for a kind that is not NODE_OTHER, which misnames the rule. */
+      assert(memory_ontology_node_kind_to_text(rules[i].sk) != NULL);
+      assert(memory_ontology_relation_to_text(rules[i].rel) != NULL);
+   }
+}
+
 int main(void)
 {
    test_complete_signed_16_bit_partition();
    test_remaining_int_boundaries();
+   test_published_rules_are_the_enforced_rules();
    return 0;
 }

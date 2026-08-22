@@ -1432,3 +1432,133 @@ the theory that db1 state was what let the ramp succeed without the module. It
 skips there too. So the ramp genuinely does not require the db1 module in this
 configuration, and the earlier explanation was wrong. The branch remains
 unstaged, now for a reason that has been tested rather than assumed.
+
+## Final round: the last read surface, and three probes that lied
+
+### `relations.schema_list` — settled, and not by populating the table
+
+This was the one item left standing as "a data-model decision, recorded rather
+than guessed at". It is now decided, and the answer was neither of the two
+obvious ones.
+
+`memory_relation_schema` has a `CREATE TABLE`, an index, and **no writer
+anywhere in the tree**. Nothing inserts a row. Meanwhile
+`memory_ontology_validate()` — the function that actually decides whether a
+triple is allowed — never reads that table. It enforces a static C table in
+`memory_episodes.c`.
+
+So the surface was served from one place and enforced from another, and the
+place it was served from was permanently empty. Every deployment answered
+`{"rows":[]}`, and the CLI consumer omits the section entirely when the list is
+empty, so the emptiness was invisible: a reader would conclude the graph has no
+relation schema at all.
+
+Two fixes were considered and both are wrong:
+
+1. **Serve the typed-fact seed through it.** Tried earlier and reverted.
+   `memory_relation_schema` is keyed by `memory_relation_kind_t`, the code-graph
+   ontology (`depends_on`, `implements`, `fixes`, `calls`, `tests`) — a
+   different vocabulary from the typed-fact seed (`works_for`, `has_email`,
+   `lives_in`). Every seed relation mapped to `REL_OTHER(99)`, producing
+   seventeen rows all saying "other": worse than empty, because it looks like an
+   answer.
+
+2. **Seed the table from the code-graph ontology.** Also wrong, just slower to
+   hurt. The validator would still not read it, so this creates a second source
+   of truth for the same question, free to drift from the one that decides.
+
+The fix serves the surface from the enforcing table itself, via a new
+`memory_ontology_rules()` accessor, and **deletes** `db2_relation_schema_list()`
+so there is only one answer. The rows now carry the integer codes and their
+names:
+
+    {"relation_id":11,"subject_kind":0,"object_kind":0,
+     "relation":"co_edited","subject":"file","object":"file"}
+
+Measured live: 18 rules, none `REL_OTHER(99)`, every row resolving to a named
+relation. `test-graph-surfaces.sh` was upgraded from recording the emptiness to
+asserting against it.
+
+A unit test in `test_db2_node_kind_text_support.c` now ties the published set to
+the enforced one: every advertised triple must pass `memory_ontology_validate()`,
+the sentinel must not be published, and the list must be non-empty — an empty
+list being the exact symptom of the defect.
+
+The CLI cannot reach this surface (`aimee memory ontology list` is not in the
+`/v1` route map, and the thin client only addresses `/v1` routes). That is
+existing, lint-enforced design rather than a regression, and the surface is
+reachable by the path the product itself uses — the kb action endpoint.
+
+### Three probes that reported failures the product did not have
+
+All three had the same shape: **a probe that cannot tell its own setup failing
+from the thing it is testing failing.** That shape has now cost time three times
+in this branch, so each fix names it.
+
+**1. `test-embed-persist.sh` stored a fixed key.** It stored
+`persist-probe-up` with fixed content, which works exactly once. On the second
+run the key and text already exist, the store is a no-op, no memory row appears,
+so no embedding rows appear — and the probe reported "nothing persisted with the
+embedder reachable" on a system where embedding was working perfectly.
+
+This false failure was expensive because the kb log was full of `embedding HTTP
+request failed` lines that looked like corroboration. They were the probe's own
+leg-2 control, which kills the embedder on purpose. A direct `curl` to the stub
+then returned an empty body — taken after leg 2 had already killed it, so that
+measurement was of a closed port, not a bad reply.
+
+The key is now unique per run. Re-measured: 60 → 82 rows (+22: one `memory` row
+and its `unit` rows), with the embedder-down control at 0 growth.
+
+`check-stub-embedder.sh` was added so the stub's own contract is proven before
+anything is concluded from an EMBED result: `/health` names a `serving_id`,
+`/embed` returns a bare JSON array of 384 floats for a RAW TEXT body, and
+`/embed_batch` returns one vector per input string. A probe that cannot
+distinguish "wrong reply" from "nothing listening" cannot diagnose anything, and
+both were reached inside one run.
+
+**2. `enroll-first-user.sh` read success as failure.** The enrollment bearer is
+returned only *until the identity is paired* — after that the standing grant
+lives on the mTLS certificate, so there is nothing to hand back. A container
+that has enrolled once answers `{"state":"paired","tier":"full"}` with no
+bearer, and the script called that "no enrollment bearer in the response",
+reporting the finished state as a broken one.
+
+Chasing it did surface the real precondition. The route collapses several
+distinct causes into one 500, but `first_user_bootstrap_locked()` logs which one
+fired, and here it was `mtls=0`: enrollment requires
+`config_server_api_mtls() > 0`. The script now accepts the paired state, and on
+a genuine failure prints the server's own `first_user` log line and names the
+mTLS precondition.
+
+**3. `run-suite.sh` discarded the seed's exit status.** `seed()` was
+`bash seed-facts.sh >/dev/null 2>&1`. `seed-facts.sh` already asserts that two
+live rows landed — the runner just was not listening. When a seed failed, the
+next probe found nothing to retract and reported *its own* assertion failing,
+pointing at the authority code rather than the setup. That produced one
+unexplained intermittent failure of "same body, both transports" before being
+tracked down. A failed seed now prints the reason and adds `seed-facts` to the
+failure list, on the same reasoning as the `capability_absent` counter: a probe
+that ran against an unseeded store proves nothing.
+
+### Final state
+
+Both containers, from the rebuilt binaries:
+
+    CT 9078 (long-running)     suite  pass 17   fail 0   skip 1
+    CT 9079 (built from bare)  suite  pass 17   fail 0   skip 1
+    9079, two consecutive runs        pass 17   fail 0   skip 1  (stable)
+    non-loopback retraction (host)    PASS on both, with loopback control
+    explore.sh                        flagged 0 on both
+    explore-cli.sh                    flagged 0 on both
+    capability_absent during probes:  0
+
+Tree:
+
+    make -C src lint          64 checks, all passed
+    make -C src unit-tests    all passed (incl. ASan/UBSan variants)
+
+The one SKIP is the TLS ramp-failure branch, which is unreachable in this
+configuration: removing `aimee-module-db1` makes `db1.grant` invalid, and the
+server refuses to start before the ramp can run. That is a tested reason, not an
+assumed one.

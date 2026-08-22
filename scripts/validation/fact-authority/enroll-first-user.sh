@@ -48,19 +48,45 @@ echo "=== 1. claim the first user as a webchat user ==="
 deploy="$(uds POST /v1/deploy/apply '{}' -H "X-Aimee-Webuser: $WEBUSER")"
 echo "  response: $(printf '%s' "$deploy" | tr '\n' ' ' | head -c 240)"
 
-BEARER="$(printf '%s' "$deploy" | python3 -c '
+read -r STATE TIER BEARER <<EOF
+$(printf '%s' "$deploy" | python3 -c '
 import json,sys
 try:
     d = json.load(sys.stdin)
 except Exception:
-    sys.exit(0)
+    d = {}
 e = d.get("enrollment") or {}
-sys.stdout.write(e.get("bearer_token") or e.get("bearer") or "")
-')"
-if [ -z "$BEARER" ]; then
-  echo "FAIL: no enrollment bearer in the response." >&2
-  echo "      Without it the next step cannot be the real flow, and falling back" >&2
-  echo "      to writing the grant row directly is the shortcut this replaces." >&2
+print(e.get("state") or "-", e.get("tier") or "-",
+      e.get("bearer_token") or e.get("bearer") or "-")
+')
+EOF
+
+# ALREADY ENROLLED IS A SUCCESS, and reading it as a failure cost real time.
+#
+# The bearer is enrollment-only: the server returns it until the identity is
+# PAIRED, and after that there is nothing to hand back, because the standing
+# grant lives on the mTLS certificate rather than on a token. So a container
+# that has enrolled once answers {"state":"paired","tier":"full"} with no
+# bearer, and this script used to call that "no enrollment bearer in the
+# response" -- reporting the finished state as a broken one, on a box where
+# enrollment had in fact worked.
+if [ "$STATE" = "paired" ] && [ "$TIER" = "full" ]; then
+  echo "  already enrolled: state=paired tier=full"
+  echo "  (no bearer is returned after pairing -- the grant is on the"
+  echo "   certificate, which is the product's design, not a failure)"
+  exit 0
+fi
+
+if [ -z "$BEARER" ] || [ "$BEARER" = "-" ]; then
+  echo "FAIL: no enrollment bearer, and the identity is not paired either" >&2
+  echo "      (state=$STATE tier=$TIER)" >&2
+  # The route collapses several distinct preconditions into one 500, but the
+  # server LOGS which one fired -- and the one that actually bit here was mTLS
+  # being disabled, since first_user_bootstrap_locked() requires
+  # config_server_api_mtls() > 0. Surface it rather than making the next reader
+  # find it.
+  grep -a "first_user" /root/server.log 2>/dev/null | tail -2 | sed 's/^/      /' >&2
+  echo "      if that says mtls=0, run set-mtls-mode.sh optional and restart" >&2
   exit 1
 fi
 echo "  enrollment bearer: ${BEARER:0:12}... (${#BEARER} chars)"

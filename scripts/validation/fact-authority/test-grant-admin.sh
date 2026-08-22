@@ -69,13 +69,34 @@ o3="$(call "$OWNER" GET '/v1/write-tier-grants?server_id=fact-authority-srv&team
 echo "  $(printf '%s' "$o3" | tr '\n' ' ' | head -c 220)"
 
 echo
-case "$o1$o2" in
-  *'"tier"'*|*'"changed"'*|*'"created"'*|*'"ok"'*)
-    echo "PASS: the kb endpoint administers grants; that is the real procedure" ;;
+# Leg 2 must SUCCEED and leg 4 must show the grant. Until a tenant existed this
+# probe could only ever watch it refuse, which cannot tell a working
+# authorization path from a broken one -- the same shape as a probe stopped at an
+# auth wall, which this suite has been fooled by twice.
+case "$o1" in
+  *'"changed"'*|*'"tier"'*)
+    echo "PASS: the owner administered a grant through the kb endpoint" ;;
   *)
-    echo "NOTE: neither caller could set a grant here. Both answers are recorded"
-    echo "      above so the documentation can state the true requirement rather"
-    echo "      than a command that does not exist."
-    rc=0 ;;
+    echo "FAIL: the owner could not administer a grant"
+    echo "      $(printf '%s' "$o1" | head -c 200)"
+    rc=1 ;;
+esac
+case "$o3" in
+  *'"grants"'*)
+    echo "PASS: the grant reads back from the listing" ;;
+  *)
+    echo "FAIL: the grant does not read back, so leg 2 changed nothing durable"
+    rc=1 ;;
+esac
+# The OIDC subject is NOT a member of that team, so it must be refused. Without
+# this the run cannot distinguish "authorized correctly" from "authorizes anyone".
+case "$o2" in
+  *'not a member of that team'*|*refused*)
+    echo "PASS: a non-member was refused, so membership is actually enforced" ;;
+  *'"changed"'*)
+    echo "FAIL: a principal with no membership administered a grant"
+    rc=1 ;;
+  *)
+    echo "NOTE: the non-member leg answered something else: $(printf '%s' "$o2" | head -c 120)" ;;
 esac
 exit $rc

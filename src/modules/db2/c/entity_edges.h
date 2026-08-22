@@ -153,20 +153,22 @@ extern "C"
     * Returns rows updated. */
    int db2_entity_edge_normalize_weights(void);
 
-   /* (relation_id, subject_kind, object_kind) triple from
-    * memory_relation_schema. Subject/object kinds use the integer codes
-    * from memory_ontology_node_kind_t with 99 as the wildcard "any". */
+   /* (relation_id, subject_kind, object_kind) triple carried by
+    * relations.schema_list. Subject/object kinds use the integer codes from
+    * memory_ontology_node_kind_t with 99 as the wildcard "any".
+    *
+    * The rows are served from the ontology's static rule table (see
+    * memory_ontology_rules) because that is what memory_ontology_validate()
+    * enforces. The `memory_relation_schema` TABLE has DDL and an index but no
+    * writer anywhere in the tree, so the reader that used to back this surface
+    * could only ever return zero rows; it was removed rather than left as a
+    * second, always-empty source of truth for the same question. */
    typedef struct
    {
       int relation_id;
       int subject_kind;
       int object_kind;
    } db2_relation_schema_row_t;
-
-   /* List the memory_relation_schema rows ordered by
-    * (relation_id, subject_kind, object_kind). Returns rows written
-    * into |out|. */
-   int db2_relation_schema_list(db2_relation_schema_row_t *out, int max);
 
    /* Rich edge row for `graph explain`: full provenance + scoring fields. */
    typedef struct

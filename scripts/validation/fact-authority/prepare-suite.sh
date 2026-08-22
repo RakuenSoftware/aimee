@@ -59,7 +59,12 @@ step "7. chat provider and capture proxy (the live-model probes)"
 bash /root/icp.sh >/dev/null 2>&1
 bash /root/slp.sh 2>&1 | grep -E "proxy /v1/models|endpoint" | sed 's/^/  /'
 
-step "8. seed the facts the authority probes act on"
+step "8. tenant: team, membership, admin grant, server registration"
+# Without these the grant routes can only ever refuse, and a probe that only
+# observes refusals cannot tell a working authorization path from a broken one.
+bash /root/provision-tenant.sh 7 fact-authority-srv 2>&1 | tail -5 | sed 's/^/  /'
+
+step "9. seed the facts the authority probes act on"
 bash /root/seed-facts.sh 2>&1 | tail -3 | sed 's/^/  /'
 
 step "ready"

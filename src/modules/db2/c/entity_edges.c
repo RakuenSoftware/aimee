@@ -895,32 +895,13 @@ int db2_entity_edge_normalize_weights(void)
    return (rc == AIMEE_PG_DONE) ? changes : 0;
 }
 
-int db2_relation_schema_list(db2_relation_schema_row_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   void *conn = db2_conn();
-   if (!conn)
-      return 0;
-
-   static const char *sql =
-       "SELECT relation_id, subject_kind, object_kind FROM memory_relation_schema"
-       " ORDER BY relation_id, subject_kind, object_kind";
-   char err[EE_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   int n = 0;
-   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      out[n].relation_id = aimee_pg_column_int(st, 0);
-      out[n].subject_kind = aimee_pg_column_int(st, 1);
-      out[n].object_kind = aimee_pg_column_int(st, 2);
-      n++;
-   }
-   aimee_pg_finalize(st);
-   return n;
-}
+/* db2_relation_schema_list() lived here and SELECTed from
+ * memory_relation_schema. Nothing in the tree ever inserts into that table, and
+ * memory_ontology_validate() does not consult it, so the function returned zero
+ * rows on every deployment and relations.schema_list published an empty list
+ * while a different table did the enforcing. The surface now reads the ontology
+ * rules directly (memory_ontology_rules), so this reader is gone rather than
+ * kept as a second source of truth that can never agree with the first. */
 
 /* --- Phase 1: entity edge uniqueness migration --- */
 

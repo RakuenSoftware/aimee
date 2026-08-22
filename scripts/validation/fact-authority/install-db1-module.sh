@@ -22,6 +22,21 @@ set -u
 CONF=/root
 SOCK=/root/server-module-bus.sock
 BIN=/usr/local/libexec/aimee-modules/aimee-module-db1
+# Same guard as the postgres module, and for the same reason: parse_grant_file
+# resolves `executable` with realpath(), so a grant naming a binary that is not
+# there is INVALID, and one invalid grant fails the whole module endpoint --
+# aimee-server then refuses to start outright:
+#
+#   ERROR obs_bus: module grant policy is invalid: /root/modules.d/server
+#
+# Measured while trying to stage a ramp failure by moving this binary aside: the
+# server did not start at all, so the grant check preempts everything downstream
+# of it. Writing a grant for an absent binary is never the right move.
+[ -x "$BIN" ] || {
+  echo "db1: $BIN is missing; refusing to write a grant that would stop the server starting" >&2
+  exit 1
+}
+
 mkdir -p "$CONF/modules.d/server"
 
 cat > "$CONF/modules.d/server/db1.grant" <<EOF
