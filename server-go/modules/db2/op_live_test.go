@@ -1249,6 +1249,50 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "file_modified_since",
+			stage: db2contract.StageFileModifiedSince,
+			// The guarded cast has to plan: a regular expression, a timestamp
+			// cast and a time-zone conversion, none of which a fake executes.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeFileModifiedSinceRequest(
+					2147483000, "live-probe-no-such-file.c", 1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				modified, err := db2contract.DecodeFileModifiedSinceReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if modified != 1 {
+					t.Fatal("a file with no row read as unmodified; it would never " +
+						"be indexed")
+				}
+			},
+		},
+		{
+			name:  "projection_generations_list",
+			stage: db2contract.StageProjectionGenerationsList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectionGenerationsListRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProjectionGenerationsListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "kb_ingest_queue_stats",
+			stage:  db2contract.StageKBIngestQueueStats,
+			encode: db2contract.EncodeKBIngestQueueStatsRequest,
+			decoded: func(t *testing.T, body []byte) {
+				// Four filtered aggregates in one pass; a fake cannot run
+				// FILTER at all.
+				if _, _, _, _, err := db2contract.DecodeKBIngestQueueStatsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -2348,6 +2392,68 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "code_file_upsert",
+			stage: db2contract.StageCodeFileUpsert,
+			// Seeded, because the INSERT ... SELECT takes its generation from a
+			// current project row: without one it inserts nothing and the probe
+			// would exercise the refusal rather than the upsert.
+			//
+			// Twice, so the ON CONFLICT path runs and refreshes the derived
+			// columns.
+			repeat: 2,
+			seed:   []string{liveProbeUpsertProject},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCodeFileUpsertRequest(
+					liveProbeUpsertProjectID, "vendor/pkg/main.go", "2026-01-01 00:00:00")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				id, err := db2contract.DecodeCodeFileUpsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if id == 0 {
+					t.Fatal("no file row came back for a current project")
+				}
+			},
+		},
+		{
+			name:  "async_enqueue",
+			stage: db2contract.StageAsyncEnqueue,
+			// Twice: the second takes the conflict path, which is what stops a
+			// duplicate job being queued.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeAsyncEnqueueRequest(
+					"extract_doc", 900011, "replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeAsyncEnqueueReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the enqueue did not run")
+				}
+			},
+		},
+		{
+			name:  "kb_documents_set_tsr_state",
+			stage: db2contract.StageKBDocumentsSetTsrState,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocumentsSetTsrStateRequest(
+					"replay-project", "live-probe-no-such-file.pdf", "done")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBDocumentsSetTsrStateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
 	}
 }
 
@@ -2481,6 +2587,15 @@ const (
 	liveProbeTaskID = 900010
 	liveProbeTask   = `INSERT INTO tasks (id, title, state, created_at, updated_at)
  VALUES (900010, 'live probe task', 'open', '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+)
+
+// A current project for the file upsert, which takes its generation from one.
+const (
+	liveProbeUpsertProjectID = 900011
+	liveProbeUpsertProject   = `INSERT INTO projects
+ (id, name, root, scanned_at, lifecycle_state, current_generation)
+ VALUES (900011, 'live-probe-upsert-project', '/live-probe',
+ '2026-01-01 00:00:00', 'current', 1)`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
