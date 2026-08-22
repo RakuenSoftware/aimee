@@ -4332,6 +4332,51 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
    return -1;
 }
 
+int db2_prospective_get(int64_t id, memory_prospective_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int64_t db2_prospective_insert(const char *trigger_text, const char *action_text,
+                               const char *anchor_entity, const char *anchor_file,
+                               const char *recurrence, const char *valid_until,
+                               const char *source_session)
+{
+   (void)trigger_text;
+   (void)action_text;
+   (void)anchor_entity;
+   (void)anchor_file;
+   (void)recurrence;
+   (void)valid_until;
+   (void)source_session;
+   return 0;
+}
+
+int db2_prospective_record_trigger(int64_t id, int terminal)
+{
+   (void)id;
+   (void)terminal;
+   return -1;
+}
+
+int db2_memory_lookup_by_key(const char *key, int64_t *id_out, char *content_out, int content_len,
+                             double *confidence_out, char *tier_out, int tier_len)
+{
+   (void)key;
+   if (id_out)
+      *id_out = 0;
+   if (content_out && content_len > 0)
+      content_out[0] = '\0';
+   if (confidence_out)
+      *confidence_out = 0.0;
+   if (tier_out && tier_len > 0)
+      tier_out[0] = '\0';
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

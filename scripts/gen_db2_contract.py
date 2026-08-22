@@ -14147,6 +14147,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_calibration_audit_stats",
         "policy": {"reads": 200},
     },
+    "prospective_get": {
+        "key": ("memory", 151),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_get",
+        "policy": {"reads": 200},
+    },
+    "prospective_insert": {
+        "key": ("memory", 152),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_insert",
+        "policy": {"writes": 200},
+    },
+    "prospective_record_trigger": {
+        "key": ("memory", 153),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_prospective_record_trigger",
+        "policy": {"writes": 200},
+    },
+    "memory_lookup_by_key": {
+        "key": ("memory", 154),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lookup_by_key",
+        "policy": {"reads": 200},
+    },
 }
 
 

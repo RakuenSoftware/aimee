@@ -19336,9 +19336,15 @@
           "line": 208
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.memory_lookup_by_key operation finds a memory by its normalised key. The query names no ordering and no limit, so it takes whichever row the database offers first -- which is only safe because the key is meant to be unique, and nothing shown here enforces that. The content is bounded at two kilobytes to match the buffer its caller passes, so a longer memory is truncated at the boundary exactly as it is truncated in the code today."
+      },
       "signature": "int db2_memory_lookup_by_key ( const char * key , int64_t * id_out , char * content_out , int content_len , double * confidence_out , char * tier_out , int tier_len )",
       "signature_sha256": "3b945550c4f9d4ea094d57e81299a3801688782b51d01e9062047d9a115cbd38",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lookup_by_key"
     },
     {
@@ -22353,9 +22359,15 @@
           "line": 32
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_get operation reads one prospective memory: a trigger, and what to do when it fires. The trigger is text matched by whatever surfaces it rather than a condition this boundary evaluates, so what would fire it is the writer's phrasing. Its expiry is a stamp nothing here enforces, so an expired prospective reads exactly like a live one and only a caller holding a clock can tell -- the same shape learning.proposal_get has."
+      },
       "signature": "int db2_prospective_get ( int64_t id , memory_prospective_t * out )",
       "signature_sha256": "f56226ab816cf9d48baaadb26a721e1774cb6af6315bbcf0d0d0cba05f16a709",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_get"
     },
     {
@@ -22368,9 +22380,15 @@
           "line": 26
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_insert operation arms a prospective memory. The trigger and the action are required and the rest may be empty; nothing checks that the anchor names anything, so a prospective can be armed against a file that does not exist. Its answer is the new identifier or zero, and zero is every failure at once -- a refused argument, an absent connection and a statement that ran without returning are one answer, which no caller can act on differently."
+      },
       "signature": "int64_t db2_prospective_insert ( const char * trigger_text , const char * action_text , const char * anchor_entity , const char * anchor_file , const char * recurrence , const char * valid_until , const char * source_session )",
       "signature_sha256": "a9e7605a4cd0432e8b67b72e32b2cc63e197f0edf3892c1f323b8bcad20bcd96",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_insert"
     },
     {
@@ -22488,9 +22506,15 @@
           "line": 49
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prospective_record_trigger operation counts a firing, and closes the prospective when the firing is terminal. Terminal is the caller's judgement rather than the row's: the same prospective can be recurring or one-shot depending on what the caller passes, and the recurrence column is not consulted. The update reports success on an identifier that names nothing, because a statement that changed no rows still ran -- so acknowledged means attempted."
+      },
       "signature": "int db2_prospective_record_trigger ( int64_t id , int terminal )",
       "signature_sha256": "7e033842151443acf26ac324146b91ad3a1cdff8c78d59fdf946313f23f4bd6c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_prospective_record_trigger"
     },
     {
@@ -28579,15 +28603,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "92c4bab1a546aa7a0636b7ffe136e47bf8062b2939b73eab5e6a051444e0a5dd",
+  "fingerprint": "7e8c11982a3e3b9d9396d5171333d709810e0d787b6eb12d3250fcd7d2739e91",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 203,
+    "audit_pending": 199,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 756
+    "reviewed": 760
   }
 }

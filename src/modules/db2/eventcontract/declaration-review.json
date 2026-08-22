@@ -4292,6 +4292,14 @@
       "reason": "The typed memory.load_eval_corpus operation replaces the corpus loader. It tries three plans in order and the first to return a row wins, so the reply carries the label of the plan that answered: which corpus a caller got is not recoverable from the identifiers. Each plan carries its own LIMIT of 100, so the request limit bounds what is read back rather than what the plan selects. Identifiers cross; it is unscoped."
     },
     {
+      "symbol": "db2_memory_lookup_by_key",
+      "signature_sha256": "3b945550c4f9d4ea094d57e81299a3801688782b51d01e9062047d9a115cbd38",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.memory_lookup_by_key operation finds a memory by its normalised key. The query names no ordering and no limit, so it takes whichever row the database offers first -- which is only safe because the key is meant to be unique, and nothing shown here enforces that. The content is bounded at two kilobytes to match the buffer its caller passes, so a longer memory is truncated at the boundary exactly as it is truncated in the code today."
+    },
+    {
       "symbol": "db2_memory_lookup_primary_entity",
       "signature_sha256": "bb2933e3d46abd9dade0a0ffdf3abd166ff7ff30133ba3e828e4a173297ff39f",
       "disposition": "private-db2",
@@ -5020,6 +5028,22 @@
       "reason": "The typed memory.prospective_counts operation counts prospective memories by state. The backend returns nothing -- it is a void function -- so a database it could not reach is four zeros and an empty table is four zeros, and the reply cannot separate them. It names four states and drops every other group, so the four need not add up to the table. There is no scope: this is every prospective memory the installation holds."
     },
     {
+      "symbol": "db2_prospective_get",
+      "signature_sha256": "f56226ab816cf9d48baaadb26a721e1774cb6af6315bbcf0d0d0cba05f16a709",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.prospective_get operation reads one prospective memory: a trigger, and what to do when it fires. The trigger is text matched by whatever surfaces it rather than a condition this boundary evaluates, so what would fire it is the writer's phrasing. Its expiry is a stamp nothing here enforces, so an expired prospective reads exactly like a live one and only a caller holding a clock can tell -- the same shape learning.proposal_get has."
+    },
+    {
+      "symbol": "db2_prospective_insert",
+      "signature_sha256": "a9e7605a4cd0432e8b67b72e32b2cc63e197f0edf3892c1f323b8bcad20bcd96",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.prospective_insert operation arms a prospective memory. The trigger and the action are required and the rest may be empty; nothing checks that the anchor names anything, so a prospective can be armed against a file that does not exist. Its answer is the new identifier or zero, and zero is every failure at once -- a refused argument, an absent connection and a statement that ran without returning are one answer, which no caller can act on differently."
+    },
+    {
       "symbol": "db2_prospective_list",
       "signature_sha256": "d5baff5272d0a803f59245a58cc184fac3622bea35b106d86eada39ef1ed95e1",
       "disposition": "wire-operation",
@@ -5058,6 +5082,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.prospective_by_trigger_terms operation finds the armed prospective memories whose trigger text matches a turn. The turn becomes a full-text query and the trigger is stemmed as English, so matching is about word stems rather than the words as written, and a trigger in another language matches differently than its author would expect."
+    },
+    {
+      "symbol": "db2_prospective_record_trigger",
+      "signature_sha256": "7e033842151443acf26ac324146b91ad3a1cdff8c78d59fdf946313f23f4bd6c",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.prospective_record_trigger operation counts a firing, and closes the prospective when the firing is terminal. Terminal is the caller's judgement rather than the row's: the same prospective can be recurring or one-shot depending on what the caller passes, and the recurrence column is not consulted. The update reports success on an identifier that names nothing, because a statement that changed no rows still ran -- so acknowledged means attempted."
     },
     {
       "symbol": "db2_prospective_set_state",

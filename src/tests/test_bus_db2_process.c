@@ -4910,6 +4910,109 @@ int main(int argc, char **argv)
     * fixed frame that is always returned. */
    assert(calibration_audit_stats_count == 0);
 
+   /* Batch 65: a prospective memory armed, read and triggered, and a memory by key. */
+   uint64_t prospective_insert_prospective_id = 99;
+   assert(aimee_db2_prospective_insert_call(
+              call_client, &client, 9574, 0, "replay trigger", "replay action", "replay-entity",
+              "replay/file.c", "once", "", "replay-session", &prospective_insert_prospective_id,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Armed. The anchor names a file nothing checks exists, which is the
+    * looseness this write has: the trigger and the action are required and
+    * everything else may be anything at all. */
+   assert(prospective_insert_prospective_id == 1);
+
+   uint32_t prospective_get_prospective_found = 99;
+   static char prospective_get_trigger_text[AIMEE_DB2_PROSPECTIVE_GET_TRIGGER_TEXT_MAX + 1];
+   prospective_get_trigger_text[0] = 'x';
+   static char prospective_get_action_text[AIMEE_DB2_PROSPECTIVE_GET_ACTION_TEXT_MAX + 1];
+   prospective_get_action_text[0] = 'x';
+   static char prospective_get_anchor_entity[AIMEE_DB2_PROSPECTIVE_GET_ANCHOR_ENTITY_MAX + 1];
+   prospective_get_anchor_entity[0] = 'x';
+   static char prospective_get_anchor_file[AIMEE_DB2_PROSPECTIVE_GET_ANCHOR_FILE_MAX + 1];
+   prospective_get_anchor_file[0] = 'x';
+   static char prospective_get_recurrence[AIMEE_DB2_PROSPECTIVE_GET_RECURRENCE_MAX + 1];
+   prospective_get_recurrence[0] = 'x';
+   static char
+       prospective_get_prospective_state[AIMEE_DB2_PROSPECTIVE_GET_PROSPECTIVE_STATE_MAX + 1];
+   prospective_get_prospective_state[0] = 'x';
+   static char prospective_get_valid_until[AIMEE_DB2_PROSPECTIVE_GET_VALID_UNTIL_MAX + 1];
+   prospective_get_valid_until[0] = 'x';
+   static char prospective_get_source_session[AIMEE_DB2_PROSPECTIVE_GET_SOURCE_SESSION_MAX + 1];
+   prospective_get_source_session[0] = 'x';
+   uint32_t prospective_get_trigger_count = 99;
+   static char
+       prospective_get_last_triggered_at[AIMEE_DB2_PROSPECTIVE_GET_LAST_TRIGGERED_AT_MAX + 1];
+   prospective_get_last_triggered_at[0] = 'x';
+   static char
+       prospective_get_prospective_created_at[AIMEE_DB2_PROSPECTIVE_GET_PROSPECTIVE_CREATED_AT_MAX +
+                                              1];
+   prospective_get_prospective_created_at[0] = 'x';
+   static char
+       prospective_get_prospective_updated_at[AIMEE_DB2_PROSPECTIVE_GET_PROSPECTIVE_UPDATED_AT_MAX +
+                                              1];
+   prospective_get_prospective_updated_at[0] = 'x';
+   assert(aimee_db2_prospective_get_call(
+              call_client, &client, 9575, 0, 1, &prospective_get_prospective_found,
+              prospective_get_trigger_text, sizeof(prospective_get_trigger_text),
+              prospective_get_action_text, sizeof(prospective_get_action_text),
+              prospective_get_anchor_entity, sizeof(prospective_get_anchor_entity),
+              prospective_get_anchor_file, sizeof(prospective_get_anchor_file),
+              prospective_get_recurrence, sizeof(prospective_get_recurrence),
+              prospective_get_prospective_state, sizeof(prospective_get_prospective_state),
+              prospective_get_valid_until, sizeof(prospective_get_valid_until),
+              prospective_get_source_session, sizeof(prospective_get_source_session),
+              &prospective_get_trigger_count, prospective_get_last_triggered_at,
+              sizeof(prospective_get_last_triggered_at), prospective_get_prospective_created_at,
+              sizeof(prospective_get_prospective_created_at),
+              prospective_get_prospective_updated_at,
+              sizeof(prospective_get_prospective_updated_at), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Read between the arming and the trigger, so the count is still zero and
+    * nothing has fired. The expiry is empty and nothing here enforces one
+    * anyway: an expired prospective would read exactly like this. */
+   assert(prospective_get_prospective_found == 1 &&
+          !strcmp(prospective_get_trigger_text, "replay trigger") &&
+          !strcmp(prospective_get_action_text, "replay action") &&
+          !strcmp(prospective_get_anchor_entity, "replay-entity") &&
+          !strcmp(prospective_get_anchor_file, "replay/file.c") &&
+          !strcmp(prospective_get_recurrence, "once") &&
+          !strcmp(prospective_get_prospective_state, "armed") &&
+          prospective_get_valid_until[0] == '\0' &&
+          !strcmp(prospective_get_source_session, "replay-session") &&
+          prospective_get_trigger_count == 0 && prospective_get_last_triggered_at[0] == '\0' &&
+          prospective_get_prospective_created_at[0] != '\0' &&
+          prospective_get_prospective_updated_at[0] != '\0');
+
+   uint32_t prospective_record_trigger_acknowledged = 99;
+   assert(aimee_db2_prospective_record_trigger_call(call_client, &client, 9576, 0, 1, 0,
+                                                    &prospective_record_trigger_acknowledged, NULL,
+                                                    NULL) == AIMEE_MODULE_CALL_OK);
+   /* Counted, not closed: terminal was 0, so the state stays armed and only the
+    * count moves. Terminal is the caller's judgement and not the row's -- the
+    * recurrence column says `once` and this call ignored it. The
+    * acknowledgement would read the same for an identifier naming nothing,
+    * because a statement that changed no rows still ran. */
+   assert(prospective_record_trigger_acknowledged == 1);
+
+   uint32_t memory_lookup_by_key_memory_found = 99;
+   uint64_t memory_lookup_by_key_memory_id = 99;
+   static char
+       memory_lookup_by_key_memory_content[AIMEE_DB2_MEMORY_LOOKUP_BY_KEY_MEMORY_CONTENT_MAX + 1];
+   memory_lookup_by_key_memory_content[0] = 'x';
+   double memory_lookup_by_key_confidence = 9.0;
+   static char memory_lookup_by_key_memory_tier[AIMEE_DB2_MEMORY_LOOKUP_BY_KEY_MEMORY_TIER_MAX + 1];
+   memory_lookup_by_key_memory_tier[0] = 'x';
+   assert(aimee_db2_memory_lookup_by_key_call(
+              call_client, &client, 9577, 0, "replay-key", &memory_lookup_by_key_memory_found,
+              &memory_lookup_by_key_memory_id, memory_lookup_by_key_memory_content,
+              sizeof(memory_lookup_by_key_memory_content), &memory_lookup_by_key_confidence,
+              memory_lookup_by_key_memory_tier, sizeof(memory_lookup_by_key_memory_tier), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* No memory holds this key, and the answer is the same shape a lookup that
+    * could not run would produce -- the backend returns 0 for both. */
+   assert(memory_lookup_by_key_memory_found == 0 && memory_lookup_by_key_memory_id == 0 &&
+          memory_lookup_by_key_memory_content[0] == '\0' &&
+          memory_lookup_by_key_confidence == 0.0 && memory_lookup_by_key_memory_tier[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

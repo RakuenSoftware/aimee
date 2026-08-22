@@ -1126,6 +1126,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .demotion_candidates = db2_demotion_candidates,
        .calibration_conformal_window = db2_calibration_conformal_window,
        .calibration_audit_stats = db2_calibration_audit_stats,
+       .prospective_get = db2_prospective_get,
+       .prospective_insert = db2_prospective_insert,
+       .prospective_record_trigger = db2_prospective_record_trigger,
+       .memory_lookup_by_key = db2_memory_lookup_by_key,
    };
    return &backend;
 }
@@ -5992,6 +5996,178 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_memory_first_episode_card_reply_encode(
                     episode_card_id, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t prospective_id = 0u;
+         if (aimee_db2_prospective_get_request_decode(request_body, request_len, &prospective_id) ==
+             0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_GET_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_get)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t prospective_found = 0u;
+            char trigger_text[AIMEE_DB2_PROSPECTIVE_GET_TRIGGER_TEXT_MAX + 1] = "";
+            char action_text[AIMEE_DB2_PROSPECTIVE_GET_ACTION_TEXT_MAX + 1] = "";
+            char anchor_entity[AIMEE_DB2_PROSPECTIVE_GET_ANCHOR_ENTITY_MAX + 1] = "";
+            char anchor_file[AIMEE_DB2_PROSPECTIVE_GET_ANCHOR_FILE_MAX + 1] = "";
+            char recurrence[AIMEE_DB2_PROSPECTIVE_GET_RECURRENCE_MAX + 1] = "";
+            char prospective_state[AIMEE_DB2_PROSPECTIVE_GET_PROSPECTIVE_STATE_MAX + 1] = "";
+            char valid_until[AIMEE_DB2_PROSPECTIVE_GET_VALID_UNTIL_MAX + 1] = "";
+            char source_session[AIMEE_DB2_PROSPECTIVE_GET_SOURCE_SESSION_MAX + 1] = "";
+            uint32_t trigger_count = 0u;
+            char last_triggered_at[AIMEE_DB2_PROSPECTIVE_GET_LAST_TRIGGERED_AT_MAX + 1] = "";
+            char prospective_created_at[AIMEE_DB2_PROSPECTIVE_GET_PROSPECTIVE_CREATED_AT_MAX + 1] =
+                "";
+            char prospective_updated_at[AIMEE_DB2_PROSPECTIVE_GET_PROSPECTIVE_UPDATED_AT_MAX + 1] =
+                "";
+            {
+               memory_prospective_t prospective;
+               memset(&prospective, 0, sizeof(prospective));
+               if (backend->prospective_get((int64_t)prospective_id, &prospective) == 0)
+               {
+                  prospective_found = 1u;
+                  snprintf(trigger_text, sizeof(trigger_text), "%s", prospective.trigger_text);
+                  snprintf(action_text, sizeof(action_text), "%s", prospective.action_text);
+                  snprintf(anchor_entity, sizeof(anchor_entity), "%s", prospective.anchor_entity);
+                  snprintf(anchor_file, sizeof(anchor_file), "%s", prospective.anchor_file);
+                  snprintf(recurrence, sizeof(recurrence), "%s", prospective.recurrence);
+                  snprintf(prospective_state, sizeof(prospective_state), "%s", prospective.state);
+                  snprintf(valid_until, sizeof(valid_until), "%s", prospective.valid_until);
+                  snprintf(source_session, sizeof(source_session), "%s",
+                           prospective.source_session);
+                  trigger_count =
+                      prospective.trigger_count > 0 ? (uint32_t)prospective.trigger_count : 0u;
+                  snprintf(last_triggered_at, sizeof(last_triggered_at), "%s",
+                           prospective.last_triggered_at);
+                  snprintf(prospective_created_at, sizeof(prospective_created_at), "%s",
+                           prospective.created_at);
+                  snprintf(prospective_updated_at, sizeof(prospective_updated_at), "%s",
+                           prospective.updated_at);
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_get_reply_encode(
+                    prospective_found, trigger_text, action_text, anchor_entity, anchor_file,
+                    recurrence, prospective_state, valid_until, source_session, trigger_count,
+                    last_triggered_at, prospective_created_at, prospective_updated_at,
+                    response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char trigger_text[AIMEE_DB2_PROSPECTIVE_INSERT_TRIGGER_TEXT_MAX + 1] = "";
+         char action_text[AIMEE_DB2_PROSPECTIVE_INSERT_ACTION_TEXT_MAX + 1] = "";
+         char anchor_entity[AIMEE_DB2_PROSPECTIVE_INSERT_ANCHOR_ENTITY_MAX + 1] = "";
+         char anchor_file[AIMEE_DB2_PROSPECTIVE_INSERT_ANCHOR_FILE_MAX + 1] = "";
+         char recurrence[AIMEE_DB2_PROSPECTIVE_INSERT_RECURRENCE_MAX + 1] = "";
+         char valid_until[AIMEE_DB2_PROSPECTIVE_INSERT_VALID_UNTIL_MAX + 1] = "";
+         char source_session[AIMEE_DB2_PROSPECTIVE_INSERT_SOURCE_SESSION_MAX + 1] = "";
+         if (aimee_db2_prospective_insert_request_decode(
+                 request_body, request_len, trigger_text, sizeof(trigger_text), action_text,
+                 sizeof(action_text), anchor_entity, sizeof(anchor_entity), anchor_file,
+                 sizeof(anchor_file), recurrence, sizeof(recurrence), valid_until,
+                 sizeof(valid_until), source_session, sizeof(source_session)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint64_t prospective_id = 0u;
+            {
+               int64_t written = backend->prospective_insert(trigger_text, action_text,
+                                                             anchor_entity, anchor_file, recurrence,
+                                                             valid_until, source_session);
+               prospective_id = written > 0 ? (uint64_t)written : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_insert_reply_encode(prospective_id, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t prospective_id = 0u;
+         uint32_t terminal = 0u;
+         if (aimee_db2_prospective_record_trigger_request_decode(request_body, request_len,
+                                                                 &prospective_id, &terminal) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_PROSPECTIVE_RECORD_TRIGGER_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->prospective_record_trigger)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            acknowledged =
+                backend->prospective_record_trigger((int64_t)prospective_id, (int)terminal) == 0
+                    ? 1u
+                    : 0u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_prospective_record_trigger_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char memory_key[AIMEE_DB2_MEMORY_LOOKUP_BY_KEY_MEMORY_KEY_MAX + 1] = "";
+         if (aimee_db2_memory_lookup_by_key_request_decode(request_body, request_len, memory_key,
+                                                           sizeof(memory_key)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_LOOKUP_BY_KEY_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_lookup_by_key)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t memory_found = 0u;
+            uint64_t memory_id = 0u;
+            char memory_content[AIMEE_DB2_MEMORY_LOOKUP_BY_KEY_MEMORY_CONTENT_MAX + 1] = "";
+            double confidence = 0.0;
+            char memory_tier[AIMEE_DB2_MEMORY_LOOKUP_BY_KEY_MEMORY_TIER_MAX + 1] = "";
+            {
+               int64_t found_id = 0;
+               double found_confidence = 0.0;
+               memory_found =
+                   backend->memory_lookup_by_key(memory_key, &found_id, memory_content,
+                                                 (int)sizeof(memory_content), &found_confidence,
+                                                 memory_tier, (int)sizeof(memory_tier))
+                       ? 1u
+                       : 0u;
+               memory_id = found_id > 0 ? (uint64_t)found_id : 0u;
+               confidence = memory_found ? found_confidence : 0.0;
+               if (!memory_found)
+               {
+                  memory_content[0] = '\0';
+                  memory_tier[0] = '\0';
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_lookup_by_key_reply_encode(memory_found, memory_id, memory_content,
+                                                            confidence, memory_tier, response_body,
+                                                            response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

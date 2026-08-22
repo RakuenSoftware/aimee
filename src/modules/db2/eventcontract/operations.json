@@ -9292,6 +9292,304 @@
       }
     },
     {
+      "family": "memory",
+      "id": 151,
+      "name": "prospective_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one prospective memory by identifier, which carries no scope"
+        },
+        "fields": [
+          {
+            "name": "prospective_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "prospective_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "trigger_text",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "action_text",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "anchor_entity",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "anchor_file",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "recurrence",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "prospective_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "valid_until",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "source_session",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "trigger_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "last_triggered_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "prospective_created_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "prospective_updated_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 152,
+      "name": "prospective_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "a refused write and a write that produced no row both answer with zero"
+        },
+        "fields": [
+          {
+            "name": "trigger_text",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "action_text",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "anchor_entity",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "anchor_file",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "recurrence",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "valid_until",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "source_session",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "prospective_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 153,
+      "name": "prospective_record_trigger",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Prospective memories are relational DB2 rows.",
+      "c_symbols": [
+        "db2_prospective_record_trigger"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the update succeeds whether or not the identifier names a row"
+        },
+        "fields": [
+          {
+            "name": "prospective_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "terminal",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 154,
+      "name": "memory_lookup_by_key",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_lookup_by_key"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the key is unique by convention rather than by constraint, so this takes one row"
+        },
+        "fields": [
+          {
+            "name": "memory_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "memory_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "memory_content",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 2047
+          },
+          {
+            "name": "confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          },
+          {
+            "name": "memory_tier",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

@@ -711,6 +711,14 @@ typedef struct
    int (*calibration_audit_stats)(const char *target_surface, const char *kind,
                                   const char *scope_kind, const char *scope_id, int window_rows,
                                   db2_calibration_bucket_t *buckets, int max_buckets);
+   int (*prospective_get)(int64_t id, memory_prospective_t *out);
+   int64_t (*prospective_insert)(const char *trigger_text, const char *action_text,
+                                 const char *anchor_entity, const char *anchor_file,
+                                 const char *recurrence, const char *valid_until,
+                                 const char *source_session);
+   int (*prospective_record_trigger)(int64_t id, int terminal);
+   int (*memory_lookup_by_key)(const char *key, int64_t *id_out, char *content_out, int content_len,
+                               double *confidence_out, char *tier_out, int tier_len);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "021b9d5a9c3c4dfb198dcfd0ed8673b799860d865b5dd16036de2e6f30f33b2f"
+const ContractSHA256 = "533ed69daf075fc381863d6ecf879ffffc1b5b636560007ce377d3c391d0ab8d"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -5150,6 +5150,267 @@ func DecodeMemoryFirstEpisodeCardRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return memoryID, nil
+}
+
+const EventProspectiveGet = EventMemory
+const StageProspectiveGet = FamilyMemory
+const OperationProspectiveGet uint32 = 151
+const ProspectiveGetProspectiveIDMin uint64 = 1
+const ProspectiveGetProspectiveIDMax uint64 = 9223372036854775807
+
+// EncodeProspectiveGetRequest writes the schema prospective_get declares, in order.
+func EncodeProspectiveGetRequest(prospectiveID uint64) ([]byte, error) {
+	if prospectiveID < ProspectiveGetProspectiveIDMin || prospectiveID > ProspectiveGetProspectiveIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var prospectiveIDBytes [8]byte
+	binary.LittleEndian.PutUint64(prospectiveIDBytes[:], prospectiveID)
+	payload = append(payload, prospectiveIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProspectiveGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveGetRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveGetRequest(request []byte) (uint64, error) {
+	var prospectiveID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	prospectiveID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if prospectiveID < ProspectiveGetProspectiveIDMin || prospectiveID > ProspectiveGetProspectiveIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return prospectiveID, nil
+}
+
+const EventProspectiveInsert = EventMemory
+const StageProspectiveInsert = FamilyMemory
+const OperationProspectiveInsert uint32 = 152
+const ProspectiveInsertTriggerTextMin = 1
+const ProspectiveInsertTriggerTextMax = 511
+const ProspectiveInsertActionTextMin = 1
+const ProspectiveInsertActionTextMax = 1023
+const ProspectiveInsertAnchorEntityMin = 0
+const ProspectiveInsertAnchorEntityMax = 127
+const ProspectiveInsertAnchorFileMin = 0
+const ProspectiveInsertAnchorFileMax = 127
+const ProspectiveInsertRecurrenceMin = 0
+const ProspectiveInsertRecurrenceMax = 15
+const ProspectiveInsertValidUntilMin = 0
+const ProspectiveInsertValidUntilMax = 31
+const ProspectiveInsertSourceSessionMin = 0
+const ProspectiveInsertSourceSessionMax = 127
+
+// EncodeProspectiveInsertRequest writes the schema prospective_insert declares, in order.
+func EncodeProspectiveInsertRequest(triggerText string, actionText string, anchorEntity string, anchorFile string, recurrence string, validUntil string, sourceSession string) ([]byte, error) {
+	if len(triggerText) < ProspectiveInsertTriggerTextMin || len(triggerText) > ProspectiveInsertTriggerTextMax || hasNUL(triggerText) ||
+		len(actionText) < ProspectiveInsertActionTextMin || len(actionText) > ProspectiveInsertActionTextMax || hasNUL(actionText) ||
+		len(anchorEntity) < ProspectiveInsertAnchorEntityMin || len(anchorEntity) > ProspectiveInsertAnchorEntityMax || hasNUL(anchorEntity) ||
+		len(anchorFile) < ProspectiveInsertAnchorFileMin || len(anchorFile) > ProspectiveInsertAnchorFileMax || hasNUL(anchorFile) ||
+		len(recurrence) < ProspectiveInsertRecurrenceMin || len(recurrence) > ProspectiveInsertRecurrenceMax || hasNUL(recurrence) ||
+		len(validUntil) < ProspectiveInsertValidUntilMin || len(validUntil) > ProspectiveInsertValidUntilMax || hasNUL(validUntil) ||
+		len(sourceSession) < ProspectiveInsertSourceSessionMin || len(sourceSession) > ProspectiveInsertSourceSessionMax || hasNUL(sourceSession) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, triggerText, ProspectiveInsertTriggerTextMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, actionText, ProspectiveInsertActionTextMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, anchorEntity, ProspectiveInsertAnchorEntityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, anchorFile, ProspectiveInsertAnchorFileMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, recurrence, ProspectiveInsertRecurrenceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, validUntil, ProspectiveInsertValidUntilMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, sourceSession, ProspectiveInsertSourceSessionMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationProspectiveInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveInsertRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveInsertRequest(request []byte) (string, string, string, string, string, string, string, error) {
+	var triggerText string
+	var actionText string
+	var anchorEntity string
+	var anchorFile string
+	var recurrence string
+	var validUntil string
+	var sourceSession string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if triggerText, err = takeRowText(payload, &cursor, ProspectiveInsertTriggerTextMax); err != nil ||
+		len(triggerText) < ProspectiveInsertTriggerTextMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if actionText, err = takeRowText(payload, &cursor, ProspectiveInsertActionTextMax); err != nil ||
+		len(actionText) < ProspectiveInsertActionTextMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if anchorEntity, err = takeRowText(payload, &cursor, ProspectiveInsertAnchorEntityMax); err != nil ||
+		len(anchorEntity) < ProspectiveInsertAnchorEntityMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if anchorFile, err = takeRowText(payload, &cursor, ProspectiveInsertAnchorFileMax); err != nil ||
+		len(anchorFile) < ProspectiveInsertAnchorFileMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if recurrence, err = takeRowText(payload, &cursor, ProspectiveInsertRecurrenceMax); err != nil ||
+		len(recurrence) < ProspectiveInsertRecurrenceMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if validUntil, err = takeRowText(payload, &cursor, ProspectiveInsertValidUntilMax); err != nil ||
+		len(validUntil) < ProspectiveInsertValidUntilMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if sourceSession, err = takeRowText(payload, &cursor, ProspectiveInsertSourceSessionMax); err != nil ||
+		len(sourceSession) < ProspectiveInsertSourceSessionMin {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return triggerText, actionText, anchorEntity, anchorFile, recurrence, validUntil, sourceSession, nil
+}
+
+const EventProspectiveRecordTrigger = EventMemory
+const StageProspectiveRecordTrigger = FamilyMemory
+const OperationProspectiveRecordTrigger uint32 = 153
+const ProspectiveRecordTriggerProspectiveIDMin uint64 = 1
+const ProspectiveRecordTriggerProspectiveIDMax uint64 = 9223372036854775807
+const ProspectiveRecordTriggerTerminalMin uint32 = 0
+const ProspectiveRecordTriggerTerminalMax uint32 = 1
+
+// EncodeProspectiveRecordTriggerRequest writes the schema prospective_record_trigger declares, in order.
+func EncodeProspectiveRecordTriggerRequest(prospectiveID uint64, terminal uint32) ([]byte, error) {
+	if prospectiveID < ProspectiveRecordTriggerProspectiveIDMin || prospectiveID > ProspectiveRecordTriggerProspectiveIDMax ||
+		terminal < ProspectiveRecordTriggerTerminalMin || terminal > ProspectiveRecordTriggerTerminalMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var prospectiveIDBytes [8]byte
+	binary.LittleEndian.PutUint64(prospectiveIDBytes[:], prospectiveID)
+	payload = append(payload, prospectiveIDBytes[:]...)
+	var terminalBytes [4]byte
+	binary.LittleEndian.PutUint32(terminalBytes[:], terminal)
+	payload = append(payload, terminalBytes[:]...)
+	header, err := EncodeRequestHeader(OperationProspectiveRecordTrigger, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeProspectiveRecordTriggerRequest reads it back, checking each field against its own bound.
+func DecodeProspectiveRecordTriggerRequest(request []byte) (uint64, uint32, error) {
+	var prospectiveID uint64
+	var terminal uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationProspectiveRecordTrigger || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	prospectiveID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if prospectiveID < ProspectiveRecordTriggerProspectiveIDMin || prospectiveID > ProspectiveRecordTriggerProspectiveIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	terminal = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if terminal < ProspectiveRecordTriggerTerminalMin || terminal > ProspectiveRecordTriggerTerminalMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return prospectiveID, terminal, nil
+}
+
+const EventMemoryLookupByKey = EventMemory
+const StageMemoryLookupByKey = FamilyMemory
+const OperationMemoryLookupByKey uint32 = 154
+const MemoryLookupByKeyMemoryKeyMin = 1
+const MemoryLookupByKeyMemoryKeyMax = 511
+
+// EncodeMemoryLookupByKeyRequest writes the schema memory_lookup_by_key declares, in order.
+func EncodeMemoryLookupByKeyRequest(memoryKey string) ([]byte, error) {
+	if len(memoryKey) < MemoryLookupByKeyMemoryKeyMin || len(memoryKey) > MemoryLookupByKeyMemoryKeyMax || hasNUL(memoryKey) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, memoryKey, MemoryLookupByKeyMemoryKeyMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryLookupByKey, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryLookupByKeyRequest reads it back, checking each field against its own bound.
+func DecodeMemoryLookupByKeyRequest(request []byte) (string, error) {
+	var memoryKey string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryLookupByKey || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if memoryKey, err = takeRowText(payload, &cursor, MemoryLookupByKeyMemoryKeyMax); err != nil ||
+		len(memoryKey) < MemoryLookupByKeyMemoryKeyMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return memoryKey, nil
 }
 
 const EventEntityObservationCount = EventIndex

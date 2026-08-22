@@ -885,6 +885,22 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t memory_id, uint64_t *episode_card_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_prospective_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t prospective_id, uint32_t *prospective_found, char *trigger_text, size_t trigger_text_capacity, char *action_text, size_t action_text_capacity, char *anchor_entity, size_t anchor_entity_capacity, char *anchor_file, size_t anchor_file_capacity, char *recurrence, size_t recurrence_capacity, char *prospective_state, size_t prospective_state_capacity, char *valid_until, size_t valid_until_capacity, char *source_session, size_t source_session_capacity, uint32_t *trigger_count, char *last_triggered_at, size_t last_triggered_at_capacity, char *prospective_created_at, size_t prospective_created_at_capacity, char *prospective_updated_at, size_t prospective_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_prospective_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *trigger_text, const char *action_text, const char *anchor_entity, const char *anchor_file, const char *recurrence, const char *valid_until, const char *source_session, uint64_t *prospective_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_prospective_record_trigger_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t prospective_id, uint32_t terminal, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_lookup_by_key_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *memory_key, uint32_t *memory_found, uint64_t *memory_id, char *memory_content, size_t memory_content_capacity, double *confidence, char *memory_tier, size_t memory_tier_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_observation_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *entity_id, uint32_t *count, aimee_module_cancelled_fn cancelled,
