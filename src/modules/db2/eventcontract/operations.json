@@ -22519,6 +22519,208 @@
           }
         ]
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 63,
+      "name": "kb_project_status",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ingested documents and their chunks are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_service_collect_project_status"
+      ],
+      "request": {
+        "policy": {
+          "reads": "counts for one project, gathered per statement rather than together"
+        },
+        "fields": [
+          {
+            "name": "project_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "status_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "resolved_project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "file_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "chunk_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "token_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "embedding_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 64,
+      "name": "kb_reembed_status",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Re-embedding progress is a relational DB2 row.",
+      "c_symbols": [
+        "db2_kb_service_collect_reembed_status"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the one re-embedding job, if there is one"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "have_job",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "target_version",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "last_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "total_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "done_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "started_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "finished_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 65,
+      "name": "kb_async_queue_status",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "multi-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Asynchronous jobs are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_service_async_queue_status"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one grouped count over the whole asynchronous queue"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "queue_pending",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "queue_running",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "queue_done",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "queue_failed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "queue_total",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "queue_processed",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        ]
+      }
     }
   ]
 }

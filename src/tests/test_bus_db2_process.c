@@ -4097,6 +4097,70 @@ int main(int argc, char **argv)
           kb_async_job_get_claimed_at[0] == '\0' && kb_async_job_get_job_created_at[0] == '\0' &&
           kb_async_job_get_job_updated_at[0] == '\0');
 
+   /* Three status collectors over a corpus with one empty project. */
+   uint32_t kb_project_status_status_found = 99;
+   static char
+       kb_project_status_resolved_project[AIMEE_DB2_KB_PROJECT_STATUS_RESOLVED_PROJECT_MAX + 1];
+   kb_project_status_resolved_project[0] = 'x';
+   uint32_t kb_project_status_file_count = 99;
+   uint32_t kb_project_status_chunk_count = 99;
+   uint32_t kb_project_status_token_count = 99;
+   uint32_t kb_project_status_embedding_count = 99;
+   assert(aimee_db2_kb_project_status_call(
+              call_client, &client, 9527, 0, "replay-project", &kb_project_status_status_found,
+              kb_project_status_resolved_project, sizeof(kb_project_status_resolved_project),
+              &kb_project_status_file_count, &kb_project_status_chunk_count,
+              &kb_project_status_token_count, &kb_project_status_embedding_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* The project an earlier case created is there and has nothing indexed, so every
+    * count is zero and the name comes back resolved -- which is what separates a
+    * project that exists and is empty from one that does not exist, since both
+    * would otherwise be six zeros. */
+   assert(kb_project_status_status_found == 1);
+   assert(strcmp(kb_project_status_resolved_project, "replay-project") == 0);
+   assert(kb_project_status_file_count == 0 && kb_project_status_chunk_count == 0 &&
+          kb_project_status_token_count == 0 && kb_project_status_embedding_count == 0);
+
+   uint32_t kb_reembed_status_have_job = 99;
+   static char kb_reembed_status_target_version[AIMEE_DB2_KB_REEMBED_STATUS_TARGET_VERSION_MAX + 1];
+   kb_reembed_status_target_version[0] = 'x';
+   uint32_t kb_reembed_status_last_id = 99;
+   uint32_t kb_reembed_status_total_count = 99;
+   uint32_t kb_reembed_status_done_count = 99;
+   static char kb_reembed_status_started_at[AIMEE_DB2_KB_REEMBED_STATUS_STARTED_AT_MAX + 1];
+   kb_reembed_status_started_at[0] = 'x';
+   static char kb_reembed_status_finished_at[AIMEE_DB2_KB_REEMBED_STATUS_FINISHED_AT_MAX + 1];
+   kb_reembed_status_finished_at[0] = 'x';
+   assert(aimee_db2_kb_reembed_status_call(
+              call_client, &client, 9528, 0, &kb_reembed_status_have_job,
+              kb_reembed_status_target_version, sizeof(kb_reembed_status_target_version),
+              &kb_reembed_status_last_id, &kb_reembed_status_total_count,
+              &kb_reembed_status_done_count, kb_reembed_status_started_at,
+              sizeof(kb_reembed_status_started_at), kb_reembed_status_finished_at,
+              sizeof(kb_reembed_status_finished_at), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_reembed_status_have_job == 0 && kb_reembed_status_target_version[0] == '\0' &&
+          kb_reembed_status_last_id == 0 && kb_reembed_status_total_count == 0 &&
+          kb_reembed_status_done_count == 0 && kb_reembed_status_started_at[0] == '\0' &&
+          kb_reembed_status_finished_at[0] == '\0');
+
+   uint32_t kb_async_queue_status_queue_pending = 99;
+   uint32_t kb_async_queue_status_queue_running = 99;
+   uint32_t kb_async_queue_status_queue_done = 99;
+   uint32_t kb_async_queue_status_queue_failed = 99;
+   uint32_t kb_async_queue_status_queue_total = 99;
+   uint32_t kb_async_queue_status_queue_processed = 99;
+   assert(aimee_db2_kb_async_queue_status_call(
+              call_client, &client, 9529, 0, &kb_async_queue_status_queue_pending,
+              &kb_async_queue_status_queue_running, &kb_async_queue_status_queue_done,
+              &kb_async_queue_status_queue_failed, &kb_async_queue_status_queue_total,
+              &kb_async_queue_status_queue_processed, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The one job maintenance.async_enqueue put here earlier is still pending, and
+    * the total accounts for it -- which is the point of returning a total beside
+    * the states rather than leaving a caller to add them up and hope. */
+   assert(kb_async_queue_status_queue_pending == 1 && kb_async_queue_status_queue_total == 1);
+   assert(kb_async_queue_status_queue_running == 0 && kb_async_queue_status_queue_done == 0 &&
+          kb_async_queue_status_queue_failed == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

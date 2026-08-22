@@ -3597,6 +3597,28 @@ int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out
    return -1;
 }
 
+int db2_kb_service_collect_project_status(const char *project, db2_kb_service_project_status_t *out)
+{
+   (void)project;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_kb_service_collect_reembed_status(db2_kb_service_reembed_status_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

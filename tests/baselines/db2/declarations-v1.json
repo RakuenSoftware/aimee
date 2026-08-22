@@ -11803,9 +11803,15 @@
           "line": 357
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_async_queue_status operation counts the asynchronous job queue. It returns a total as well as the four states, so a caller can tell whether the states account for the queue -- which the other counting operations in this module leave it to guess. The processed figure is not a state but a running tally the drain keeps, so it counts work rather than rows and does not belong in that sum."
+      },
       "signature": "int db2_kb_service_async_queue_status ( db2_kb_service_async_queue_stats_t * out )",
       "signature_sha256": "af0955c2930ed2385934274ca225599435469e11314b65e7d09c6578a2048e2f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_async_queue_status"
     },
     {
@@ -12058,9 +12064,15 @@
           "line": 367
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_project_status operation counts what a project has ingested. The project name comes back as well as going in, because the backend resolves it through an alias -- so a caller can see which project actually answered. The token count is a sum of a stored per-chunk figure rather than a count of anything, so it is as accurate as whatever wrote it, and an int, so a large corpus overflows where the chunk count would not."
+      },
       "signature": "int db2_kb_service_collect_project_status ( const char * project , db2_kb_service_project_status_t * out )",
       "signature_sha256": "ae5670151c003545bcf84ddf9d0d02a281a278ce0cc0daa2f1d26aa55d3be84d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collect_project_status"
     },
     {
@@ -12073,9 +12085,15 @@
           "line": 91
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_reembed_status operation reads how a re-embedding run is going. There is at most one, so no identifier is needed and none is returned -- which also means a caller cannot tell a second run from the same run restarted. Progress is a done count against a total captured when the run began, so memories added since are outside both and the fraction can reach one while work remains."
+      },
       "signature": "int db2_kb_service_collect_reembed_status ( db2_kb_service_reembed_status_t * out )",
       "signature_sha256": "8591e6fc300417ef73fc079defe35de469f161ec61b0cfad0c52b9a15f160e94",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_collect_reembed_status"
     },
     {
@@ -28255,15 +28273,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f2d28cdcb164283a527b695f580e2158660fae81a8f4692cf51c5cc6358d0b7f",
+  "fingerprint": "ee9b60023ce306849e77e17ca827f2283cd2eefa50e1904e0c938e3a227ea59d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 257,
+    "audit_pending": 254,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 702
+    "reviewed": 705
   }
 }

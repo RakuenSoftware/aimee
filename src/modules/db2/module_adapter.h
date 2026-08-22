@@ -623,6 +623,9 @@ typedef struct
    int (*kb_ingest_queue_stats)(db2_kb_ingest_queue_stats_t *out);
    int (*kb_ingest_queue_claim_next)(db2_kb_ingest_job_t *out);
    int (*kb_async_job_get)(int64_t job_id, db2_kb_service_async_job_t *out);
+   int (*kb_project_status)(const char *project, db2_kb_service_project_status_t *out);
+   int (*kb_reembed_status)(db2_kb_service_reembed_status_t *out);
+   int (*kb_async_queue_status)(db2_kb_service_async_queue_stats_t *out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

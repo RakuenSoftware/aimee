@@ -1721,4 +1721,16 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t async_job_id, uint32_t *job_found, uint64_t *document_id, char *job_kind, size_t job_kind_capacity, char *project_name, size_t project_name_capacity, char *job_status, size_t job_status_capacity, uint32_t *attempts, char *last_error, size_t last_error_capacity, char *claimed_by, size_t claimed_by_capacity, char *claimed_at, size_t claimed_at_capacity, char *job_created_at, size_t job_created_at_capacity, char *job_updated_at, size_t job_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_kb_project_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project_name, uint32_t *status_found, char *resolved_project, size_t resolved_project_capacity, uint32_t *file_count, uint32_t *chunk_count, uint32_t *token_count, uint32_t *embedding_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_reembed_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *have_job, char *target_version, size_t target_version_capacity, uint32_t *last_id, uint32_t *total_count, uint32_t *done_count, char *started_at, size_t started_at_capacity, char *finished_at, size_t finished_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_async_queue_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *queue_pending, uint32_t *queue_running, uint32_t *queue_done, uint32_t *queue_failed, uint32_t *queue_total, uint32_t *queue_processed, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
 #endif /* AIMEE_DB2_CLIENT_H */

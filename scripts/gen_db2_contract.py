@@ -13889,6 +13889,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_kb_service_async_job_get",
         "policy": {"reads": 200},
     },
+    "kb_project_status": {
+        "key": ("maintenance", 63),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_collect_project_status",
+        "policy": {"reads": 200},
+    },
+    "kb_reembed_status": {
+        "key": ("maintenance", 64),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_collect_reembed_status",
+        "policy": {"reads": 200},
+    },
+    "kb_async_queue_status": {
+        "key": ("maintenance", 65),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_async_queue_status",
+        "policy": {"reads": 200},
+    },
 }
 
 

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "754a91e5c75ddc61d5a9d84debbd2e9375a3d1a69fc879030c3fcc6fd528932b"
+const ContractSHA256 = "7eaaafedec44c49261de7c63e16db9cf982659e29c1897a4767ec5a32345581c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -17359,6 +17359,111 @@ func DecodeKBAsyncJobGetRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return asyncJobID, nil
+}
+
+const EventKBProjectStatus = EventMaintenance
+const StageKBProjectStatus = FamilyMaintenance
+const OperationKBProjectStatus uint32 = 63
+const KBProjectStatusProjectNameMin = 1
+const KBProjectStatusProjectNameMax = 255
+
+// EncodeKBProjectStatusRequest writes the schema kb_project_status declares, in order.
+func EncodeKBProjectStatusRequest(projectName string) ([]byte, error) {
+	if len(projectName) < KBProjectStatusProjectNameMin || len(projectName) > KBProjectStatusProjectNameMax || hasNUL(projectName) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, KBProjectStatusProjectNameMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBProjectStatus, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBProjectStatusRequest reads it back, checking each field against its own bound.
+func DecodeKBProjectStatusRequest(request []byte) (string, error) {
+	var projectName string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBProjectStatus || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, KBProjectStatusProjectNameMax); err != nil ||
+		len(projectName) < KBProjectStatusProjectNameMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return projectName, nil
+}
+
+const EventKBReembedStatus = EventMaintenance
+const StageKBReembedStatus = FamilyMaintenance
+const OperationKBReembedStatus uint32 = 64
+
+
+// EncodeKBReembedStatusRequest writes the schema kb_reembed_status declares, in order.
+func EncodeKBReembedStatusRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationKBReembedStatus, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBReembedStatusRequest reads it back, checking each field against its own bound.
+func DecodeKBReembedStatusRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBReembedStatus || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventKBAsyncQueueStatus = EventMaintenance
+const StageKBAsyncQueueStatus = FamilyMaintenance
+const OperationKBAsyncQueueStatus uint32 = 65
+
+
+// EncodeKBAsyncQueueStatusRequest writes the schema kb_async_queue_status declares, in order.
+func EncodeKBAsyncQueueStatusRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationKBAsyncQueueStatus, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBAsyncQueueStatusRequest reads it back, checking each field against its own bound.
+func DecodeKBAsyncQueueStatusRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBAsyncQueueStatus || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

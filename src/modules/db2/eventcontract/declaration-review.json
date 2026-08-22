@@ -1948,6 +1948,14 @@
       "reason": "The one declaration in a DB2 header implemented outside the module: it resolves the host executable and spawns a drain worker, issuing no statement. It must not become a wire operation. A bus caller able to reach it could ask the DB2 module to start a process on the host, which is exactly the authority the module boundary exists to withhold. The declaration belongs in the KB service headers."
     },
     {
+      "symbol": "db2_kb_service_async_queue_status",
+      "signature_sha256": "af0955c2930ed2385934274ca225599435469e11314b65e7d09c6578a2048e2f",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_async_queue_status operation counts the asynchronous job queue. It returns a total as well as the four states, so a caller can tell whether the states account for the queue -- which the other counting operations in this module leave it to guess. The processed figure is not a state but a running tally the drain keeps, so it counts work rather than rows and does not belong in that sum."
+    },
+    {
       "symbol": "db2_kb_service_clear_current_project",
       "signature_sha256": "58993e81a3310fb0215c1d4cf65b846e5ffaf2a5d5f515de168815bf6776a745",
       "disposition": "wire-operation",
@@ -2026,6 +2034,22 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The cJSON retirement facade is caller-specific serialization; a typed learning mutation performs the rule transition atomically."
+    },
+    {
+      "symbol": "db2_kb_service_collect_project_status",
+      "signature_sha256": "ae5670151c003545bcf84ddf9d0d02a281a278ce0cc0daa2f1d26aa55d3be84d",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_project_status operation counts what a project has ingested. The project name comes back as well as going in, because the backend resolves it through an alias -- so a caller can see which project actually answered. The token count is a sum of a stored per-chunk figure rather than a count of anything, so it is as accurate as whatever wrote it, and an int, so a large corpus overflows where the chunk count would not."
+    },
+    {
+      "symbol": "db2_kb_service_collect_reembed_status",
+      "signature_sha256": "8591e6fc300417ef73fc079defe35de469f161ec61b0cfad0c52b9a15f160e94",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_reembed_status operation reads how a re-embedding run is going. There is at most one, so no identifier is needed and none is returned -- which also means a caller cannot tell a second run from the same run restarted. Progress is a done count against a total captured when the run began, so memories added since are outside both and the fraction can reach one while work remains."
     },
     {
       "symbol": "db2_kb_service_count_embeddings_for_version",
