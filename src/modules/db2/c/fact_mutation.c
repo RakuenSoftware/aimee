@@ -141,13 +141,23 @@ int db2_fact_actor_from_request(int require_operator, fact_actor_t *out)
    return -1;
 }
 
-int db2_fact_actor_capture_memory(int64_t memory_id)
+int db2_fact_actor_capture_memory(int64_t memory_id, int user_authority)
 {
    if (memory_id <= 0)
       return -1;
    fact_actor_t actor;
-   if (db2_fact_actor_from_request(0, &actor) != 0 &&
-       db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0)
+   /* A note stored at MODEL authority is model-composed text, whoever was
+    * authenticated when it was stored. Recording the request's identity here
+    * would let an authenticated person's agent-composed note carry a USER actor,
+    * and the drain reads THIS row rather than provenance_category -- so those
+    * facts entered at Class A. See the header. */
+   if (!user_authority)
+   {
+      if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0)
+         return -1;
+   }
+   else if (db2_fact_actor_from_request(0, &actor) != 0 &&
+            db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0)
       return -1;
    void *conn = db2_conn();
    if (!conn)

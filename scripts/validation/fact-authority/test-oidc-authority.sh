@@ -41,6 +41,15 @@ retract() { # $1 = source, $2 = authorization header value ("" for none)
   fi
 }
 
+# Mint FRESH tokens rather than reuse whatever is on disk. kb_oidc applies a
+# hard token-age ceiling (AIMEE_KB_OIDC_MAX_TOKEN_AGE, default 900s) on `iat`
+# independently of `exp`, so a token minted at setup time is refused once the
+# run happens more than fifteen minutes later -- and the refusal is the same
+# "unauthorized" a forged token gets, so the whole suite reads as a broken
+# account path when nothing is broken.
+if ! bash /root/make-oidc-idp.sh >/dev/null 2>&1; then
+  echo "FAIL: could not mint fresh OIDC tokens" >&2; exit 1
+fi
 for f in token.jwt rogue.jwt; do
   [ -s "$DIR/$f" ] || { echo "FAIL: $DIR/$f missing -- run make-oidc-idp.sh first" >&2; exit 1; }
 done

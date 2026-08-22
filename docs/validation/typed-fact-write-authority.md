@@ -878,3 +878,106 @@ Every account form the design names is exercised against running daemons:
 | no account (bare bearer) | the negative leg of all four |
 
 Nothing in the authority path is now covered by assertion alone.
+
+## The P6 migration, fixed rather than worked around
+
+`unblock-p6-migration.sh` is gone. The migration itself is fixed:
+
+    UPDATE entity_edges SET epistemic_kind='world_fact'
+      WHERE epistemic_kind IS DISTINCT FROM 'world_fact';
+
+The `ALTER TABLE ... ADD COLUMN ... DEFAULT 'world_fact'` immediately above
+already gives every existing row that value, so on the ordinary upgrade path the
+predicate matches zero rows and the statement is a no-op -- the guard never
+fires and the schema applies. The predicate is kept rather than the statement
+deleted so a database carrying other values is still corrected, and if those rows
+are semantic it is still refused loudly, which is what the guard is for.
+
+`test-p6-migration.sh` reproduces the exact broken condition and is falsifiable
+in the way that matters: it clears the one-shot marker, restarts the kb, and then
+checks that **the marker came back**. A kb that started because the block was
+SKIPPED looks identical to one that started because the block SUCCEEDED, and
+skipping is precisely what the workaround did.
+
+    semantic edges in the store: 8
+    PASS: aimee-kb became ready with semantic facts present
+    PASS: the one-shot block RAN to completion (it set the marker itself)
+    epistemic_kind on semantic edges: world_fact|8
+
+## Gap 2, re-examined against the merged tree
+
+Re-running the drain probe after the merge showed the model's contradicting
+write minting **Class A** and superseding the user's fact. Two separate things
+were behind that, and only one of them was a defect.
+
+### The defect: a note's authority did not reach its recorded actor
+
+`db2_fact_actor_capture_memory` derived the actor from the REQUEST alone. The
+drain reads that row, not `provenance_category`. So a person storing a note whose
+provenance is `agent_message` recorded a **USER** actor, and the drain then minted
+Class-A facts from model-composed text:
+
+    memory  provenance      actor_role  authority_rank
+    50      agent_message   user        30
+    49      agent_message   user        30
+    44      agent_message   (none)      (none)     <- older row, fell back to MODEL
+
+Row 44 is why this passed before: memories queued before the actor table existed
+fall back to MODEL, so the earlier green was partly luck.
+
+Two derivations of one fact -- `provenance_category` from the write's authority,
+the actor row from the request -- could disagree about the same memory. They no
+longer can: the write's own authority now CAPS the captured actor. A caller's
+identity may lower the recorded authority, never raise it above what the note
+claims. A person storing agent-composed text is still storing agent-composed
+text.
+
+This was load-bearing. At Class A the note's actor had rank 30, which satisfies
+`may_replace` (`actor->rank >= priors[i].authority_rank`, 30 >= 30) and genuinely
+superseded the user's value. With the cap the note mints Class B and cannot.
+
+### Not a defect: my original guard is now dead code
+
+The merge wrapped the old `db2_entity_edge_upsert_semantic` body -- including the
+class-rank guard added for gap 2 -- in `#if 0 /* superseded by fact_mutation;
+retained temporarily for blame continuity */`, leaving that function a
+compatibility shim that delegates to `db2_fact_mutation_assert`. The guard is
+therefore unreachable.
+
+That is fine, and the replacement is better. `db2_fact_mutation_assert` runs an
+authority-rank check over the functional-relation priors and, when the incoming
+actor cannot outrank the incumbent, QUARANTINES the write -- inserting it as a
+`candidate` rather than dropping it, so the proposal stays on record for review
+instead of vanishing. The original guard simply discarded it.
+
+### The test was wrong a third time
+
+`show()` judged currency by `superseded_at`/`invalidated_at`/`suppressed`, none
+of which a quarantined row sets. A `candidate` therefore read as a live fact
+sitting beside the user's value -- reporting a breach of gap 2 that had not
+happened. Currency is `lifecycle_state IN ('persistent','promoted')`, the
+product's own definition in `db2_fact_current_count`, and the test now prints the
+lifecycle rather than collapsing it. It also asserts and exits non-zero instead
+of only printing:
+
+    30  class=A  persistent  [current]
+    41  class=B  candidate   [not current]
+    PASS: the user's Class-A value is the only current one
+
+The expectation was reworded to match the design: the requirement is that the
+user's value is the only CURRENT one, not that the model's write disappears.
+Asserting absence would fail on correct behaviour.
+
+## Two test-hygiene fixes found by re-running
+
+- `test-oidc-authority.sh` now mints its own tokens. kb applies a hard token-age
+  ceiling on `iat` (`AIMEE_KB_OIDC_MAX_TOKEN_AGE`, default 900s) independently of
+  `exp`, so a token minted at setup was refused once the run happened more than
+  fifteen minutes later -- with the same `unauthorized` a forged token gets, so
+  the suite read as a broken account path when nothing was broken.
+- The Authorization-truncation defect was swept for other instances, as a
+  pattern rather than a single site. Every other Authorization buffer in the tree
+  is already sized for long tokens (`server_http_*`: `KB_IDENTITY_TOKEN_WIRE_MAX`
+  = 4096 or 4105; `kb_tls_serve.c`: `KB_TLS_AUTH_MAX` = 8192), and the Go
+  listeners use `Header.Get` with no fixed buffer at all. `kb_http_conn.c` was
+  the only production instance.

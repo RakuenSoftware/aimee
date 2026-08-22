@@ -1248,7 +1248,11 @@ cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const ch
     * synchronous fact work on the store hot path; the drain's pattern pass now
     * captures the high-precision triples the old inline call did. */
    {
-      if (config_typed_facts_enabled() && out.id > 0 && db2_fact_actor_capture_memory(out.id) == 0)
+      /* The note's own authority caps the captured actor: it is the same value
+       * that chose provenance_category just above, and the two must not be able
+       * to disagree about one memory. */
+      if (config_typed_facts_enabled() && out.id > 0 &&
+          db2_fact_actor_capture_memory(out.id, authority == (int)MEMORY_AUTHORITY_USER) == 0)
          (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
    }
    cJSON *obj = kbs_memory_row_to_json(&out);

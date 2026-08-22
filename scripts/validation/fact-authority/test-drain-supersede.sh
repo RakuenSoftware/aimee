@@ -18,6 +18,7 @@
 # `age` satisfies all three.
 # Run AS ROOT in the container.
 set -u
+drain_rc=0
 B="$(cat /root/kb-bearer.txt)"
 P=/root/psql.sh
 
@@ -49,9 +50,21 @@ reset_age() {
 # supersession sets superseded_at. Judging liveness by superseded_at/suppressed
 # alone calls an invalidated row "current", so a fact that was correctly
 # retracted still reads as standing.
+# "Current" is lifecycle_state IN ('persistent','promoted') -- the product's own
+# definition (db2_fact_current_count). superseded_at/invalidated_at/suppressed
+# alone is NOT enough: a write the authority guard refuses is inserted as a
+# CANDIDATE (fm: `if (quarantined) desired = FACT_LIFECYCLE_CANDIDATE`), which
+# has none of those three set. Judged by the old predicate a quarantined row
+# reads as a live fact sitting beside the user's value, which is precisely the
+# failure gap 2 is about -- so the test reported a breach that had not happened.
+# The lifecycle is printed rather than collapsed, so a future change of state is
+# visible instead of silently re-classified.
 show() {
   $P "select '    ' || target || '  class=' || confidence_class ||
-             case when superseded_at='' and invalidated_at='' and suppressed=0 then '  [current]' else '  [archived]' end
+             '  ' || lifecycle_state ||
+             case when lifecycle_state in ('persistent','promoted')
+                       and superseded_at='' and invalidated_at='' and suppressed=0
+                  then '  [current]' else '  [not current]' end
         from entity_edges where source='user' and relation='age' order by id"
 }
 
@@ -91,8 +104,26 @@ sleep 6
 echo
 echo "current values of user/age after the drain:"
 show
-echo "  (expected: 30 [current] and ALONE -- the Class-B write must neither"
-echo "   supersede the user's value nor sit beside it on a functional relation)"
+echo "  (expected: 30 is the only CURRENT value; the model's contradicting"
+echo "   write must not supersede it and must not itself be current)"
+
+# The requirement is that the user's value still stands ALONE AS CURRENT. It is
+# not that the model's write vanishes: fact_mutation QUARANTINES a write whose
+# actor cannot outrank the incumbent, inserting it as a `candidate` rather than
+# dropping it, so the proposal stays on record for review. Asserting that the
+# row is absent would fail on correct behaviour.
+cur="$($P "select count(*) from entity_edges where source='user' and relation='age'
+             and lifecycle_state in ('persistent','promoted') and superseded_at=''
+             and invalidated_at='' and suppressed=0")"
+cur_t="$($P "select target from entity_edges where source='user' and relation='age'
+               and lifecycle_state in ('persistent','promoted') and superseded_at=''
+               and invalidated_at='' and suppressed=0")"
+if [ "${cur:-0}" = "1" ] && [ "${cur_t:-}" = "30" ]; then
+  echo "  PASS: the user's Class-A value is the only current one"
+else
+  echo "  FAIL: expected exactly one current value '30', got ${cur:-0} (${cur_t:-none})"
+  drain_rc=1
+fi
 
 echo
 echo "=== positive control: the same path with no prior fact to outrank ==="
@@ -119,3 +150,5 @@ echo
 echo "=== job outcomes ==="
 $P "select '    ' || kind || ' ' || status || ' attempts=' || attempts
       from kb_async_jobs where kind='memory_facts' order by id desc limit 4"
+
+exit $drain_rc
