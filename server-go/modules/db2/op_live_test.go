@@ -277,6 +277,54 @@ func liveReads() []liveRequest {
 			},
 		},
 		{
+			name:  "visible_source_hash",
+			stage: db2contract.StageVisibleSourceHash,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeVisibleSourceHashRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeVisibleSourceHashReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "projection_visible_id",
+			stage: db2contract.StageProjectionVisibleID,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectionVisibleIDRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProjectionVisibleIDReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_profile_card",
+			stage: db2contract.StageEntityProfileCard,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityProfileCardRequest("Replay-Entity")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityProfileCardReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "code_file_hash",
+			stage: db2contract.StageCodeFileHash,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCodeFileHashRequest("replay-project", "src/main.c")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCodeFileHashReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
 			name:  "enrollment_list",
 			stage: db2contract.StageEnrollmentList,
 			encode: func() ([]byte, error) {
@@ -364,6 +412,38 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("the directive was neither raised nor found")
+				}
+			},
+		},
+		{
+			name:  "file_index_delete_current_generation",
+			stage: db2contract.StageFileIndexDeleteCurrentGeneration,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeFileIndexDeleteCurrentGenerationRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				deleted, err := db2contract.DecodeFileIndexDeleteCurrentGenerationReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if deleted != 1 {
+					t.Fatal("the delete did not run")
+				}
+			},
+		},
+		{
+			name:  "minhash_delete_current_generation",
+			stage: db2contract.StageMinhashDeleteCurrentGeneration,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMinhashDeleteCurrentGenerationRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMinhashDeleteCurrentGenerationReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("both deletes did not run")
 				}
 			},
 		},
