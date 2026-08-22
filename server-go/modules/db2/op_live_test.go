@@ -706,6 +706,141 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "collab_rule_approve",
+			stage: db2contract.StageCollabRuleApprove,
+			// The interesting statement is the one with the cap subquery in its
+			// WHERE, which a fake cannot execute. Seeded with a proposed rule so
+			// the transition matches, and the epoch bump then has to run too --
+			// including its ON CONFLICT upsert against a TEXT column it casts
+			// through INTEGER.
+			seed: []string{liveProbeProposedRule},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCollabRuleApproveRequest(liveProbeRuleID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeCollabRuleApproveReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("a proposed rule under the active cap did not approve")
+				}
+			},
+		},
+		{
+			name:  "collab_rule_reject",
+			stage: db2contract.StageCollabRuleReject,
+			seed:  []string{liveProbeProposedRule},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCollabRuleRejectRequest(liveProbeRuleID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				changed, err := db2contract.DecodeCollabRuleRejectReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if changed != 1 {
+					t.Fatal("a proposed rule did not reject")
+				}
+			},
+		},
+		{
+			name:  "collab_rule_retire",
+			stage: db2contract.StageCollabRuleRetire,
+			// Active rather than proposed: retire moves from a different state
+			// than its two neighbours, so seeding it the same way would probe a
+			// transition that always misses.
+			seed: []string{liveProbeActiveRule},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCollabRuleRetireRequest(liveProbeRuleID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeCollabRuleRetireReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("an active rule did not retire")
+				}
+			},
+		},
+		{
+			name:  "proposal_mark_committed",
+			stage: db2contract.StageProposalMarkCommitted,
+			// Twice, because being repeatable is the behaviour: it has no state
+			// predicate, so the second call re-commits an already-committed
+			// proposal and must still acknowledge.
+			repeat: 2,
+			seed:   []string{liveProbeProposal},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProposalMarkCommittedRequest(liveProbeProposalID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeProposalMarkCommittedReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("mark_committed did not acknowledge")
+				}
+			},
+		},
+		{
+			name:   "proposal_bump_corroboration",
+			stage:  db2contract.StageProposalBumpCorroboration,
+			seed:   []string{liveProbeProposal},
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProposalBumpCorroborationRequest(liveProbeProposalID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeProposalBumpCorroborationReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the bump did not acknowledge")
+				}
+			},
+		},
+		{
+			name:  "rules_delete_by_id",
+			stage: db2contract.StageRulesDeleteByID,
+			seed:  []string{liveProbeRule},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRulesDeleteByIDRequest(liveProbeRuleID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				deleted, err := db2contract.DecodeRulesDeleteByIDReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if deleted != 1 {
+					t.Fatal("a seeded rule was not removed")
+				}
+			},
+		},
+		{
+			name:  "rules_delete_by_directive_type",
+			stage: db2contract.StageRulesDeleteByDirectiveType,
+			seed:  []string{liveProbeRule},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRulesDeleteByDirectiveTypeRequest("hard")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				deleted, err := db2contract.DecodeRulesDeleteByDirectiveTypeReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				// A count, not a flag. One row is seeded, so one is the answer;
+				// a port that returned a flag would also pass this, which is why
+				// the fake test covers the many-row case.
+				if deleted != 1 {
+					t.Fatalf("deleted = %d for one seeded rule", deleted)
+				}
+			},
+		},
 	}
 }
 
@@ -724,6 +859,30 @@ const (
 	liveProbePendingGeneration = `INSERT INTO code_projection_generations
  (id, project, state, started_at) VALUES
  (900001, 'live-probe-project', 'pending', '2026-01-01 00:00:00')`
+)
+
+// Seed rows for the learning-write probes. Fixed identifiers for the same
+// reason as the projection ones: a probe has to name what it acts on.
+const (
+	liveProbeRuleID       = 900002
+	liveProbeProposalID   = 900003
+	liveProbeProposedRule = `INSERT INTO collab_rules (id, text, status, created_at)
+ VALUES (900002, 'live probe rule', 'proposed', '2026-01-01 00:00:00')`
+	liveProbeActiveRule = `INSERT INTO collab_rules (id, text, status, created_at)
+ VALUES (900002, 'live probe rule', 'active', '2026-01-01 00:00:00')`
+	liveProbeRule = `INSERT INTO rules
+ (id, polarity, title, directive_type, created_at, updated_at)
+ VALUES (900002, 'positive', 'live probe rule', 'hard',
+ '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+	// learning_proposals.signal_id is a foreign key, so the signal has to exist
+	// before the proposal does. Both statements are in the same seed entry
+	// because neither is useful without the other.
+	liveProbeProposal = `WITH signal AS (
+ INSERT INTO learning_signals (id, signal_type, created_at)
+ VALUES (900003, 'live-probe', '2026-01-01 00:00:00') RETURNING id)
+ INSERT INTO learning_proposals (id, signal_id, sink, state, created_at, updated_at)
+ SELECT 900003, signal.id, 'rules', 'pending',
+ '2026-01-01 00:00:00', '2026-01-01 00:00:00' FROM signal`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
