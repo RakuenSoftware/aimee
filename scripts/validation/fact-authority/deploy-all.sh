@@ -38,7 +38,8 @@ for s in psql provision start-kb start-server reset-kb seed-facts \
          start-logging-proxy show-upstream-prompt probe-query-pollution \
          test-rerank-live test-retrieve-live test-chat-memory-stages \
          test-retract test-server-retract test-context-block test-provenance \
-         test-memory-delete test-drain-supersede run-pg-tests; do
+         test-memory-delete test-drain-supersede run-pg-tests \
+         install-postgres-module explore explore-cli; do
   [ -f "/tmp/${s}.sh" ] && p "/tmp/${s}.sh" "/root/${s}.sh"
 done
 x 'chmod +x /root/*.sh'
@@ -48,7 +49,7 @@ x 'cd /root && ln -sf install-memory-module.sh imm.sh; ln -sf install-memory-mod
    ln -sf start-memory-module.sh smm.sh; ln -sf restore-stack.sh restore.sh;
    ln -sf test-server-retract.sh t.sh; ln -sf test-context-block.sh tcb.sh;
    ln -sf test-provenance.sh tp.sh; ln -sf test-memory-delete.sh td.sh;
-   ln -sf test-drain-supersede.sh tds.sh; ln -sf install-chat-provider.sh icp.sh;
+   ln -sf test-drain-supersede.sh tds.sh; ln -sf install-postgres-module.sh ipm.sh; ln -sf install-chat-provider.sh icp.sh;
    ln -sf start-logging-proxy.sh slp.sh; ln -sf show-upstream-prompt.sh sup.sh;
    ln -sf test-rerank-live.sh trl.sh; ln -sf test-retrieve-live.sh trv.sh;
    ln -sf test-chat-memory-stages.sh tcms.sh; ln -sf probe-query-pollution.sh pqp.sh'

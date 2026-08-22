@@ -329,11 +329,10 @@ locally. It is not.
 
 - **The module's other stages.** aimee-server calls four memory stages --
   EXTRACT_INDEX, WRITE, RETRIEVE (the PII recall gate) and RERANK (the ingress
-  confidence tier). The module is installed and ATTACHED on the server's own bus
-  with its own grant, verified running, and the first two are the same code paths
-  proven on the kb side. RETRIEVE and RERANK are still unexercised: both are
-  reached only from a chat turn with a live provider, which this container has
-  none of.
+  confidence tier). All four are now exercised: EXTRACT_INDEX and WRITE are the
+  same code paths proven on the kb side, RETRIEVE by the PII cycling above, and
+  RERANK by the envelope cycling under "the persona was the query". EMBED (5891)
+  is NOT exercised -- it needs an embedder, and none is configured here.
 
   An attempt to call them directly over the bus was abandoned. It needs a second
   principal granted `request=` for those events, and the grant written for it was
@@ -343,3 +342,128 @@ locally. It is not.
   is worth knowing independently of this work. The grants were removed and both
   daemons restored, with the full e2e suite re-run afterwards to confirm the
   restore rather than assume it.
+
+## The exploratory pass
+
+Everything above is a targeted probe: each one answers a question that was asked
+before it was written, so it can only find what was already suspected. The
+exploratory pass (`explore.sh`, `explore-cli.sh`) instead walks the surfaces a
+user actually touches and reports whatever comes back. It found four things the
+targeted probes could not.
+
+### The CLI surface had never been touched
+
+Every `aimee memory *` command answered `aimee-server unavailable / endpoint:
+none configured`. The HTTP surface underneath was green throughout, so nothing
+in the earlier work noticed that the layer a person actually types into had
+never once been run. It needs `AIMEE_API_ENDPOINT=unix:/root/aimee-http.sock`;
+with that set, store / list / search / stats all work. Calling the work "e2e
+tested" while the entry point was untested was overclaiming, which is the
+specific thing an exploratory pass exists to catch.
+
+### `aimee status` reported a store that was not there
+
+`status` said `DB2 schema not ready` / `store: unavailable` while memory
+store, list and search demonstrably worked against that same database. A false
+negative, and an expensive one -- it points an operator at the database when the
+database is fine.
+
+The cause is the `postgres` module. Its manifest places it in kb
+(`serve: [11265]`), the kb answers `AIMEE_POSTGRES_EVENT_HEALTH` through it, and
+it was never started; the working store paths go through the kb's own libpq
+connection and never consult the probe. `install-postgres-module.sh` starts it,
+and two things had to be right:
+
+- the grant must exist **before** the kb starts, or the attach is denied;
+- the module is a separate process with its own environment, so it needs its own
+  `AIMEE_DB2_URL`. Without it the probe answers `AIMEE_DB2_URL is unset` and the
+  kb reports the same "schema not ready" -- the deployment fault and the database
+  fault are indistinguishable from the operator's side.
+
+With the module up, `store: ok`.
+
+### `relations.schema_list` can only ever return empty
+
+It returns `{"rows":[]}` against a graph holding 20 relation types.
+`db2_relation_schema_list` (`entity_edges.c`) selects from
+`memory_relation_schema`, and that table is **never written**: across the tree,
+the only code that names it is that one SELECT. The surface is therefore dead by
+construction rather than empty by circumstance.
+
+It is not a hazard to the authority work and not on this charter's path: the only
+consumer (`cmd_memory_vector.c`) omits an informational `schema_rules` array when
+the list is empty, and nothing enforces anything from it. The kind constraints
+that *are* enforced -- including the kind fixup added on the pattern path -- come
+from the compiled `rel_types_seed_lookup` table, which is populated. Recorded
+because a reader of that surface would reasonably conclude the graph has no
+relation schema at all.
+
+### `memory.entity_profile` cannot see the typed-fact graph
+
+`entity_profile` 404s for `user` and `Dana` while returning a card for
+`deployment runbook` -- even though `user` and `Dana` are both sources of live
+`entity_edges` rows and `deployment runbook` has `relation_count: 0`.
+
+`db2_memory_entity_profile_stats` (`memory_relations.c`) counts mentions from
+`memory_entities` and relations from `memory_relations`. The typed-fact layer
+writes to `entity_edges`. The two graph representations are disjoint, so a
+profile reflects the older one only: an entity known **only** through typed facts
+has no profile, and one that has a profile reports zero relations while holding
+several.
+
+Left unfixed deliberately. Reconciling two graph tables is a data-model decision,
+not a defect repair, and it does not touch the authority guarantees this change
+is about.
+
+### `aimee kb grant set` does not exist
+
+Reaching the authority derivation over TCP needs a write-tier grant. The server
+says so itself, in the 403 body (`server_http.c:1685`):
+
+> an operator issues one with `aimee kb grant set` (see docs/UPGRADING.md)
+
+That command cannot run. `aimee kb grant list` answers `'grant' is not a
+subcommand of 'kb'`.
+
+Every other piece of it is present and unit-tested: the flag marshaller
+(`cli_v1_routes_b.c:1610`), the outcome renderers (`cli_v1_routes_c.c:2377+`),
+the print-table entry (`cli_v1_routes_d.c:51`), and the KB endpoints
+(`kb_http_grants.c`: `POST /v1/write-tier-grants/set`, `/revoke`, `GET
+/v1/write-tier-grants`). What is missing is the connection: there are no
+`{"kb", "grant ...", "kb.grant.*"}` rows in `cli_dispatch_defs_data.h`, and
+**no handler anywhere resolves the method `kb.grant.set`** -- the KB exposes the
+capability under REST paths that nothing maps those methods onto.
+
+So an operator who hits the 403 is sent to a command that cannot dispatch. Not
+repaired here: wiring it spans the dispatch table, a method-to-REST mapping, and
+an admin credential path for the call, which is feature completion rather than
+the defect repair this charter covers.
+
+## What the transport test does and does not prove
+
+`test-transport-authority.sh` sends the *same* retraction body -- including
+`"authority":"user"` -- over both transports:
+
+    TCP  127.0.0.1:8740   ATTEST_TCP_BEARER     not a person -> MODEL
+    UDS  aimee-http.sock  ATTEST_UDS_PEERCRED   a person     -> USER
+
+Result: TCP retracted nothing, UDS retracted the Class A fact. The security
+property holds end to end -- **a network caller cannot retract a Class A fact by
+asserting authority in the body, and a real person can.**
+
+The reason it holds is worth stating precisely, because two earlier versions of
+this test passed for reasons that proved nothing:
+
+1. with no bearer, TCP was refused at the **authentication** wall;
+2. with a bearer, TCP was refused at the **write-tier capability** wall
+   (`server_http.c:1673`) -- over the network a bearer is read/query only.
+
+Neither reached `server_attested_memory_authority`. The third wall, the
+derivation itself, is therefore *not* what stops the TCP caller here; it is
+covered by the unit matrix over `attested_transport_t` and, live, by the UDS
+positive control. Reaching it over TCP requires the write-tier grant, which is
+blocked by the missing `kb grant set` command above.
+
+That is a stronger posture than the derivation alone (the network path is refused
+twice before authority is even considered), but it is not the same claim, and the
+test now fails loudly rather than passing green if either wall answers first.
