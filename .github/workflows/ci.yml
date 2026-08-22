@@ -523,14 +523,16 @@ jobs:
   # and every BOOLEAN column read back as false ("t" is not a number). None of those
   # are visible from a sqlite run, by construction.
   #
-  # Sharded like unit-tests for the same reason, and gated by the same aggregate
-  # `unit-tests` job, so a red result here blocks the merge.
+  # Sharded independently from the sqlite suite: real-engine memory tests also
+  # exercise dependency backoff and can exceed one runner's wall-clock budget in
+  # a two-way partition. The aggregate `unit-tests` job still gates every shard,
+  # so repartitioning shortens the critical path without dropping coverage.
   unit-test-shards-pg:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    name: unit-tests-pg (${{ matrix.label }}/2)
+    name: unit-tests-pg (${{ matrix.label }}/3)
     strategy:
       fail-fast: false
       matrix:
@@ -539,6 +541,8 @@ jobs:
             label: 1
           - shard_index: 1
             label: 2
+          - shard_index: 2
+            label: 3
     env:
       # The template the per-process clones are copied from. Every test binary
       # does CREATE DATABASE <template>_p<pid> TEMPLATE <template>, so this user
@@ -615,7 +619,7 @@ jobs:
           # variables pass straight through to the inner `make unit-tests`.
           make -j"$(nproc)" CC="ccache gcc" \
             GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-            UNIT_TEST_SHARD_COUNT=2 \
+            UNIT_TEST_SHARD_COUNT=3 \
             UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
             UNIT_TEST_SKIP_P1=1 \
             unit-tests-pg
