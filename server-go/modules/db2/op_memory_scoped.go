@@ -234,7 +234,11 @@ var recallSectionBodies = map[uint32]struct{ body, ordering string }{
 	recallSectionOpenCommitments: {
 		`SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m
  WHERE m.lifecycle_state = 'pending'`,
-		"COALESCE(m.ttl_at, m.created_at) ASC, m.id ASC",
+		// NULLIF because ttl_at is NOT NULL DEFAULT the empty string, so a bare
+		// COALESCE always returns it and never reaches created_at. The empty
+		// string then sorts before every real date, which put commitments with
+		// no deadline ahead of ones that were due.
+		"COALESCE(NULLIF(m.ttl_at, ''), m.created_at) ASC, m.id ASC",
 	},
 }
 

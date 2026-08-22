@@ -1411,11 +1411,16 @@ int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memo
                 "m.id") " DESC, COALESCE(m.last_used_at, m.updated_at) DESC, m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_OPEN_COMMITMENTS:
+      /* NULLIF because ttl_at is NOT NULL DEFAULT '': a bare COALESCE over it
+       * always returns it and never reaches created_at, and '' sorts before
+       * every real date -- so commitments with no deadline were surfaced ahead
+       * of ones that were actually due. */
       sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
             " WHERE m.lifecycle_state = 'pending'" DB2_MEMORY_SCOPE_FILTER_SQL(
-                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, COALESCE(m.ttl_at, "
-                                                                       "m.created_at) ASC, m.id "
-                                                                       "ASC LIMIT ?1";
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, "
+                                                                       "COALESCE(NULLIF(m.ttl_at, "
+                                                                       "''), m.created_at) ASC,"
+                                                                       " m.id ASC LIMIT ?1";
       break;
    default:
       return 0;

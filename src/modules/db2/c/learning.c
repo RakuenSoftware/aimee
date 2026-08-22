@@ -282,7 +282,13 @@ int db2_learning_proposals_settled_counts(int window_days, int64_t *committed, i
        " SUM(CASE WHEN state = 'committed' THEN 1 ELSE 0 END),"
        " SUM(CASE WHEN state IN ('committed', 'archived') THEN 1 ELSE 0 END)"
        " FROM learning_proposals"
-       " WHERE COALESCE(committed_at, updated_at, created_at) >= pg_now_text(?1)";
+       /* NULLIF because all three columns are NOT NULL DEFAULT '': without it
+        * COALESCE always returns committed_at, which is '' for anything not
+        * committed, and '' loses the comparison. Every archived proposal was
+        * therefore excluded, so terminal_count could never differ from
+        * committed_count and the second reply field was dead. */
+       " WHERE COALESCE(NULLIF(committed_at, ''), NULLIF(updated_at, ''), created_at)"
+       "       >= pg_now_text(?1)";
    char err[LRN_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

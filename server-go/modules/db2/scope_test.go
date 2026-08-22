@@ -324,3 +324,57 @@ func TestEverySectionStatementDiffersFromItsNeighbours(t *testing.T) {
 		candidates[body] = filter
 	}
 }
+
+func TestOpenCommitmentsOrderUndatedLast(t *testing.T) {
+	// memories.ttl_at is NOT NULL with an empty-string default, so a bare
+	// COALESCE over it never reaches its fallback -- and the empty string sorts
+	// before every real date, which put commitments with no deadline ahead of
+	// ones that were due. NULLIF is what makes the fallback reachable.
+	//
+	// A statement test rather than a result test, because the fault is in an
+	// ORDER BY expression: a fake returns rows in whatever order it was given.
+	store := &fakeStore{rows: &fakeRows{}}
+	handler := NewDispatchHandler(store)
+	request, err := db2contract.EncodeRecallSectionRequest(
+		recallSectionOpenCommitments, 1, "w", "p")
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if _, status := handler(
+		invocation(db2contract.StageRecallSection), request); status != bus.ModuleStatusOK {
+		t.Fatalf("status = %v", status)
+	}
+	if !strings.Contains(store.lastSQL, "COALESCE(NULLIF(m.ttl_at, ''), m.created_at)") {
+		t.Errorf("the deadline fallback is unreachable again: %q", store.lastSQL)
+	}
+}
+
+func TestNoScopedStatementCoalescesOverANonNullableColumn(t *testing.T) {
+	// The shape, not the instance. A COALESCE whose first argument cannot be
+	// NULL is dead code that reads as though absence is handled, and the empty
+	// string it yields then loses every comparison it is put into. These are the
+	// columns in these statements that are declared NOT NULL with an empty
+	// default; each needs a NULLIF to mean what it looks like it means.
+	nonNullable := []string{"m.ttl_at", "m.valid_until", "m.valid_from"}
+	for _, testCase := range scopedOperations() {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := &fakeStore{rows: &fakeRows{}}
+			handler := NewDispatchHandler(store)
+			request, err := testCase.build(1, "w", "p")
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			if _, status := handler(invocation(testCase.stage), request); status !=
+				bus.ModuleStatusOK {
+				t.Fatalf("status = %v", status)
+			}
+			for _, column := range nonNullable {
+				bare := "COALESCE(" + column + ","
+				if strings.Contains(store.lastSQL, bare) {
+					t.Errorf("COALESCE over %s cannot reach its fallback; it needs "+
+						"NULLIF: %q", column, store.lastSQL)
+				}
+			}
+		})
+	}
+}
