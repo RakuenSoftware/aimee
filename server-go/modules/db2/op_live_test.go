@@ -115,6 +115,55 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "entity_list_active",
+			stage: db2contract.StageEntityListActive,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityListActiveRequest(1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityListActiveReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_edge_co_targets",
+			stage: db2contract.StageEntityEdgeCoTargets,
+			encode: func() ([]byte, error) {
+				// The union, the visibility projection and its join to
+				// code_projection_generations all have to resolve. A fake
+				// proves none of that.
+				return db2contract.EncodeEntityEdgeCoTargetsRequest("replay-src", "mentions", 0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityEdgeCoTargetsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "code_index_project_list",
+			stage:  db2contract.StageCodeIndexProjectList,
+			encode: db2contract.EncodeCodeIndexProjectListRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCodeIndexProjectListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "enrollment_list",
+			stage: db2contract.StageEnrollmentList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEnrollmentListRequest(8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEnrollmentListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
