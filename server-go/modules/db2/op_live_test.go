@@ -804,6 +804,44 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "unique_file_basename",
+			stage: db2contract.StageUniqueFileBasename,
+			// A basename nothing carries, so the answer is empty for the right
+			// reason. What this proves is that regexp_replace and the
+			// generation join resolve against the real schema; a fake cannot
+			// run either.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeUniqueFileBasenameRequest(
+					"replay-project", "live-probe-no-such-file.c")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				path, err := db2contract.DecodeUniqueFileBasenameReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if path != "" {
+					t.Fatalf("path = %q for a basename nothing carries", path)
+				}
+			},
+		},
+		{
+			name:  "verdict_suppressed",
+			stage: db2contract.StageVerdictSuppressed,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeVerdictSuppressedRequest(
+					"live-probe-tag", "live-probe-scope")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				suppressed, err := db2contract.DecodeVerdictSuppressedReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if suppressed != 0 {
+					t.Fatal("a tag nobody has refused reads as suppressed")
+				}
+			},
+		},
 	}
 }
 
@@ -1524,6 +1562,62 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "minhash_delete_file",
+			stage: db2contract.StageMinhashDeleteFile,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMinhashDeleteFileRequest(
+					"replay-project", "src/live-probe.c")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMinhashDeleteFileReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("both deletes did not run")
+				}
+			},
+		},
+		{
+			name:  "entity_edge_bump_utility",
+			stage: db2contract.StageEntityEdgeBumpUtility,
+			// The clamp is a SQL expression over a DOUBLE PRECISION column, so
+			// it has to be executed rather than inspected.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityEdgeBumpUtilityRequest("live-probe-entity", 0.5)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeEntityEdgeBumpUtilityReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the bump did not run")
+				}
+			},
+		},
+		{
+			name:  "artifact_flag_review",
+			stage: db2contract.StageArtifactFlagReview,
+			// Seeded because this one refuses when nothing changed, and because
+			// the jsonb merge is the point: it has to run against a real JSONB
+			// column with a real object in it.
+			seed: []string{liveProbeArtifact},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactFlagReviewRequest(
+					liveProbeArtifactID, "live probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeArtifactFlagReviewReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("an artifact that exists was not flagged")
+				}
+			},
+		},
 	}
 }
 
@@ -1618,6 +1712,15 @@ const (
  (id, decision_point, arm_id, decided_at)
  VALUES ('live-probe-decision', 'live-probe-point', 'live-probe-arm',
  '2026-01-01 00:00:00')`
+)
+
+// An artifact carrying a payload with a key of its own, so the flag probe
+// exercises a merge rather than a replace.
+const (
+	liveProbeArtifactID = "live-probe-artifact"
+	liveProbeArtifact   = `INSERT INTO artifacts (id, kind, state, payload)
+ VALUES ('live-probe-artifact', 'live-probe', 'committed',
+ '{"kept": "value"}'::jsonb)`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
