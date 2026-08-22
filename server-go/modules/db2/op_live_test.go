@@ -430,6 +430,34 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "runtime_state_get",
+			stage: db2contract.StageRuntimeStateGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRuntimeStateGetRequest("live-probe-never-set")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				value, err := db2contract.DecodeRuntimeStateGetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if value != "" {
+					t.Fatalf("value = %q for a key nothing has set", value)
+				}
+			},
+		},
+		{
+			name:  "count_embeddings_for_version",
+			stage: db2contract.StageCountEmbeddingsForVersion,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCountEmbeddingsForVersionRequest("live-probe-v0")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCountEmbeddingsForVersionReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -841,6 +869,86 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "vector_index_op_remove",
+			stage: db2contract.StageVectorIndexOpRemove,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeVectorIndexOpRemoveRequest(900004)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				recorded, err := db2contract.DecodeVectorIndexOpRemoveReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if recorded != 1 {
+					t.Fatal("the delete did not run")
+				}
+			},
+		},
+		{
+			name:  "reset_stuck_vector_ops",
+			stage: db2contract.StageResetStuckVectorOps,
+			// Both queues have to exist for this to answer: the operation
+			// touches vector_index_ops and code_index_ops, and a port that
+			// reset only the first would pass a fake and fail here only if the
+			// second table were missing. It is here mainly to prove both
+			// statements parse against the real schema.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeResetStuckVectorOpsRequest(3)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeResetStuckVectorOpsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_release_promote",
+			stage: db2contract.StageKBReleasePromote,
+			// A release and an active pointer naming a different one, so the
+			// retire, the promote and the pointer upsert all match something.
+			seed: []string{
+				liveProbeRetiredRelease,
+				liveProbeRelease,
+				liveProbeActivePointer,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBReleasePromoteRequest(liveProbeReleaseID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBReleasePromoteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("an existing release did not promote")
+				}
+			},
+		},
+		{
+			name:  "kb_release_rollback",
+			stage: db2contract.StageKBReleaseRollback,
+			// Zero, which is the branch that resolves a target for itself from
+			// the most recently retired release. Passing an identifier would
+			// probe the same code path as promote and prove nothing new.
+			seed: []string{
+				liveProbeRetiredRelease,
+				liveProbeRelease,
+				liveProbeActivePointer,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBReleaseRollbackRequest(0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBReleaseRollbackReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("a retired release was not rolled back to")
+				}
+			},
+		},
 	}
 }
 
@@ -883,6 +991,22 @@ const (
  INSERT INTO learning_proposals (id, signal_id, sink, state, created_at, updated_at)
  SELECT 900003, signal.id, 'rules', 'pending',
  '2026-01-01 00:00:00', '2026-01-01 00:00:00' FROM signal`
+)
+
+// Seed rows for the release probes. The rollback branch needs a retired release
+// to find, and the promote branch needs an active pointer to retire, so both
+// probes seed all three.
+const (
+	liveProbeReleaseID = 900005
+	liveProbeRelease   = `INSERT INTO doc_releases (id, name, state, created_at)
+ VALUES (900005, 'live-probe-release', 'draft', '2026-01-01 00:00:00')`
+	liveProbeRetiredRelease = `INSERT INTO doc_releases
+ (id, name, state, created_at, retired_at)
+ VALUES (900006, 'live-probe-release-prior', 'retired',
+ '2026-01-01 00:00:00', '2026-01-02 00:00:00')`
+	liveProbeActivePointer = `INSERT INTO kb_runtime_state (state_key, state_value)
+ VALUES ('active_release_id', '900006')
+ ON CONFLICT (state_key) DO UPDATE SET state_value = EXCLUDED.state_value`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
