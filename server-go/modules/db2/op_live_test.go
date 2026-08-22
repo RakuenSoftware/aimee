@@ -1406,6 +1406,124 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "decision_log_set_outcome",
+			stage: db2contract.StageDecisionLogSetOutcome,
+			// Seeded, because these three refuse when nothing changed: against
+			// an empty schema every one of them would probe the refusal rather
+			// than the write.
+			seed: []string{liveProbeDecision},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDecisionLogSetOutcomeRequest(
+					liveProbeDecisionID, "live probe outcome")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeDecisionLogSetOutcomeReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("a decision that exists did not take its outcome")
+				}
+			},
+		},
+		{
+			name:  "decision_log_set_status",
+			stage: db2contract.StageDecisionLogSetStatus,
+			seed:  []string{liveProbeDecision},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDecisionLogSetStatusRequest(
+					liveProbeDecisionID, "retired")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeDecisionLogSetStatusReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("a decision that exists did not take its status")
+				}
+			},
+		},
+		{
+			name:  "decision_log_set_revisit",
+			stage: db2contract.StageDecisionLogSetRevisit,
+			seed:  []string{liveProbeDecision},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDecisionLogSetRevisitRequest(
+					liveProbeDecisionID, "2026-06-01")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeDecisionLogSetRevisitReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("a decision that exists did not take its revisit date")
+				}
+			},
+		},
+		{
+			name:  "proposal_archive",
+			stage: db2contract.StageProposalArchive,
+			// Twice: repeatability is the behaviour, and the second call
+			// archives an already-archived proposal.
+			repeat: 2,
+			seed:   []string{liveProbeProposal},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProposalArchiveRequest(
+					liveProbeProposalID, "live probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeProposalArchiveReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the archive did not acknowledge")
+				}
+			},
+		},
+		{
+			name:  "rules_update_directive_type",
+			stage: db2contract.StageRulesUpdateDirectiveType,
+			seed:  []string{liveProbeRule},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRulesUpdateDirectiveTypeRequest(
+					liveProbeRuleID, "soft")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeRulesUpdateDirectiveTypeReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
+		{
+			name:  "bandit_decision_close",
+			stage: db2contract.StageBanditDecisionClose,
+			// Seeded so the UPDATE matches, which is what exercises the
+			// DOUBLE PRECISION bind and the timestamp expression. It would
+			// acknowledge either way -- the reply reports the statement, not a
+			// row -- so an unseeded probe would prove neither.
+			seed: []string{liveProbeBanditDecision},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditDecisionCloseRequest(
+					liveProbeBanditDecisionID, 0.75)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeBanditDecisionCloseReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the close did not run")
+				}
+			},
+		},
 	}
 }
 
@@ -1486,6 +1604,20 @@ const (
  VALUES ('live_probe_relation', 'provisional')`
 	liveProbeEvaluation = `INSERT INTO ontology_evaluations (rel_type, status)
  VALUES ('live_probe_relation', 'pending')`
+)
+
+// Seed rows for the learning-setter probes.
+const (
+	liveProbeDecisionID       = 900007
+	liveProbeBanditDecisionID = "live-probe-decision"
+	liveProbeDecision         = `INSERT INTO decision_log
+ (id, options, chosen, status, created_at)
+ VALUES (900007, 'live probe options', 'live probe chosen', 'active',
+ '2026-01-01 00:00:00')`
+	liveProbeBanditDecision = `INSERT INTO bandit_decisions
+ (id, decision_point, arm_id, decided_at)
+ VALUES ('live-probe-decision', 'live-probe-point', 'live-probe-arm',
+ '2026-01-01 00:00:00')`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
