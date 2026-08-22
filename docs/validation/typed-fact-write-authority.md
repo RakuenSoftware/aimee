@@ -570,7 +570,7 @@ attack" and expected refusal, which became wrong once the policy settled that an
 owner bearer on loopback IS the operator. Left alone it would report a security
 failure every time the system behaved correctly.
 
-### EXTRACT_INDEX (5889) is not answering, and it was hiding behind a green test
+### EXTRACT_INDEX (5889): a wrong diagnosis, corrected
 
 `test-context-block` asks the kb to serve a block for the query "please forget
 my email" and checks that the agent's own words do not retract the user's fact.
@@ -588,17 +588,38 @@ The same stage backs pattern extraction, which reports the same thing:
 
     WARN kb.memory.facts: pattern extraction gave no answer for memory 28..35
 
-The module is attached and its grant serves 5889 (`serve=5889,...,5894`), and
-the Go module implements both halves on that stage (`handleScanTurn` when the
-request carries the scan magic, `handleExtract` otherwise). So this is a
-protocol-level mismatch between the C caller and the module, not a missing
-placement or a denied grant. Both consumers fail closed, which is why nothing
-looked broken: turns that say "forget my X" quietly never retract, and pattern
-extraction quietly contributes nothing. The LLM drain lane is unaffected, which
-is why `test-drain-supersede` still has a working positive control.
+**This diagnosis was wrong, and the correction is worth more than the original
+entry.** It read: "the module is attached and its grant serves 5889, and the Go
+module implements both halves on that stage, so this is a protocol-level
+mismatch between the C caller and the module, not a missing placement or a
+denied grant."
 
-Not diagnosed further here. It is a real functional gap, it is not an authority
-defect, and the authority conclusions above do not rest on it.
+Every clause of that was inference. The grant did serve 5889 and the Go module
+did implement the stage, so I concluded the fault must be between them. What I
+never checked was whether the module was ATTACHED at the moment of the call --
+"the module is attached" was assumed from a `state: RUNNING` line, and a running
+process is not an attached one.
+
+Once obs_bus started naming its own failures (see below), one line settled it:
+
+    WARN obs_bus: module stage call failed: event=5889 stage=1 result=capability_absent
+
+Not a protocol mismatch. The kb-side memory module was not on the bus at all.
+The cause was ordinary and mundane: `test-p6-migration.sh` restarts aimee-kb to
+apply the schema, every module attached to that bus dies with it, and nothing
+brought them back -- so the rest of the run executed with memory and postgres
+detached. `run-suite.sh` now re-attaches after any daemon restart and counts
+`capability_absent` across the run, because a probe whose stage never ran still
+prints PASS.
+
+With the modules attached, `test-context-block` passes: the retraction pre-scan
+answers, the agent's own words do not retract the user's fact, and the run is
+about the authority decision rather than about a stage that was never reached.
+
+The general lesson is the one this whole record keeps arriving at: a component
+that "should" work by construction is not evidence, and a symptom shared by four
+different causes ("gave no answer") is worth one line of instrumentation before
+it is worth a theory.
 
 ## Correction: authority is the account, not the transport
 
@@ -1149,3 +1170,37 @@ populate the table or retire the surface is a data-model decision about an
 ontology this branch does not touch, and it is left as one. The probe asserts
 only that the surface is not serving the WRONG ontology, which is the failure I
 introduced and would not want reintroduced.
+
+## Running the suite
+
+`run-suite.sh` sequences every probe under the configuration each one needs and
+prints one summary. Until it existed, that knowledge lived in scattered comments
+and in whoever last ran them, and getting it wrong produces a green run that
+proves nothing:
+
+- two probes need OPPOSITE mTLS postures, and each refuses the wrong one
+- several destroy the rows they act on, so a re-seed belongs between them
+- a probe that restarts a daemon orphans every module on that bus
+
+The last of those is what it was built to catch. `test-p6-migration.sh` restarts
+aimee-kb to apply the schema; the kb-side memory and postgres modules died with
+it and nothing brought them back, so every probe after it ran with those stages
+missing. They still printed PASS, because each consumer of a missing stage
+reports "no answer" and carries on.
+
+So the runner does two things beyond sequencing. It re-attaches modules after any
+restart, and it counts `capability_absent` across the run:
+
+    WARNING: N module stage call(s) were refused as capability_absent
+             A probe whose stage never ran can still print PASS, so treat the
+             results above as unproven until this is zero.
+
+A skipped probe is reported as a skip and never folded into the pass count.
+
+Current state, on CT 9078 against real PostgreSQL, both daemons and all modules
+attached:
+
+    pass 13   fail 0   skip 1
+
+The skip is the TLS ramp-failure branch, which cannot be staged on this box.
+Everything else is exercised against running daemons.
