@@ -11,7 +11,7 @@ import re
 import struct
 import subprocess
 import sys
-from typing import NoReturn
+from typing import NamedTuple, NoReturn
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -14382,6 +14382,7 @@ def _derived_go(catalog: dict[str, object]) -> str:
             emitted.append(_string_pair_ack_go(operation))
         elif wire == "db2-envelope-generic-v1":
             emitted.append(_generic_go(operation))
+            emitted.append(_generic_go_reply(operation))
         elif wire == "db2-envelope-string-ack-v1":
             emitted.append(_string_ack_go(operation))
         elif wire == "db2-envelope-u64-ack-v1":
@@ -16061,19 +16062,26 @@ def _generic_go_type(field: dict[str, object]) -> str:
             "f64": "float64"}[field["type"]]
 
 
-def _generic_go(operation: dict[str, object]) -> str:
-    """Go constants and codecs for one db2-envelope-generic-v1 operation.
+class _GoFields(NamedTuple):
+    """Everything one Go field list contributes to a codec."""
+    bounds: list[str]
+    parameters: str
+    results: str
+    zeros: str
+    checks: list[str]
+    writes: list[str]
+    reads: list[str]
 
-    The Go side mirrors the C one field for field; it exists so a Go caller and
-    a C module cannot disagree about a schema neither of them wrote.
+
+def _generic_go_fields(name: str, fields: list[dict[str, object]]) -> _GoFields:
+    """Bounds, signature parts, checks, writes and reads for one field list.
+
+    Shared by the request and the reply. They encode identically -- the same
+    field types, the same little-endian layout, the same per-field bound -- so
+    writing it twice is how the two would come to disagree.
     """
-    name = _go_name(str(operation["name"]))
-    family = _go_name(str(operation["family"]))
-    lower = str(operation["name"])
-    request_fields = _generic_fields(operation["request"], "request", allow_empty=True)
-
     bounds = []
-    for field in request_fields:
+    for field in fields:
         upper = _go_name(str(field["name"]))
         if field["type"] == "utf8":
             bounds.append(f"const {name}{upper}Min = {field['minimum_bytes']}")
@@ -16090,13 +16098,13 @@ def _generic_go(operation: dict[str, object]) -> str:
             bounds.append(f"const {name}{upper}Max {kind} = {field['maximum']}")
 
     parameters = ", ".join(f"{_go_lower(str(field['name']))} {_generic_go_type(field)}"
-                           for field in request_fields)
-    results = ", ".join(_generic_go_type(field) for field in request_fields)
+                           for field in fields)
+    results = ", ".join(_generic_go_type(field) for field in fields)
     zeros = ", ".join({"string": '""', "uint32": "0", "int32": "0", "uint64": "0",
-                       "float64": "0"}[_generic_go_type(field)] for field in request_fields)
+                       "float64": "0"}[_generic_go_type(field)] for field in fields)
 
     writes, reads, checks = [], [], []
-    for field in request_fields:
+    for field in fields:
         upper = _go_name(str(field["name"]))
         local = _go_lower(str(field["name"]))
         if field["type"] == "utf8":
@@ -16188,6 +16196,234 @@ def _generic_go(operation: dict[str, object]) -> str:
 		{local} = math.Float64frombits(bits)
 	}}""")
 
+    return _GoFields(bounds, parameters, results, zeros, checks, writes, reads)
+
+
+def _reply_only_bounds(operation: dict[str, object], name: str, lower: str,
+                       bounds: list[str]) -> list[str]:
+    """Reply bounds the request has not already declared.
+
+    A field may appear in both -- `code_search` takes a project and returns one --
+    and a bound is named after its field, so both halves generate the same
+    constant. C tolerates that: a repeated #define with an identical replacement
+    list is legal, and the compiler has been accepting it. Go does not, and a
+    redeclared const is a build error.
+
+    Skipping the duplicate is right only if the two agree. If they ever do not,
+    the C has been quietly redefining a macro and this is where that surfaces,
+    so it fails rather than picking one.
+    """
+    request_fields = _generic_fields(operation["request"], "request", allow_empty=True)
+    if not request_fields:
+        return bounds
+    declared = {_go_const_name(line): line
+                for line in _generic_go_fields(name, request_fields).bounds}
+    kept = []
+    for line in bounds:
+        key = _go_const_name(line)
+        existing = declared.get(key)
+        if existing is None:
+            kept.append(line)
+        elif existing != line:
+            fail("generic-go",
+                 f"{lower} declares {key} twice with different bounds: "
+                 f"{existing!r} and {line!r}")
+    return kept
+
+
+def _go_const_name(line: str) -> str:
+    """The identifier a generated `const NAME [type] = value` line declares."""
+    return line.split("=", 1)[0].split()[1]
+
+
+def _generic_go_reply(operation: dict[str, object]) -> str:
+    """Go reply codecs for one db2-envelope-generic-v1 operation.
+
+    Without these a Go handler can decode a request and cannot answer, which is
+    the state the port started in: 446 request codecs and none for a generic
+    reply. Everything a Go implementation of an operation does ends here.
+
+    Two shapes, matching the schema's two: a flat field list, or a row count
+    followed by that many rows. They share the per-field codec with the request,
+    because on the wire a field is a field wherever it appears.
+    """
+    name = _go_name(str(operation["name"]))
+    lower = str(operation["name"])
+    reply = operation.get("reply")
+    if not isinstance(reply, dict):
+        return ""
+
+    if "row" in reply:
+        return _generic_go_reply_rows(operation, name, lower, reply)
+
+    fields = _generic_fields(reply, "reply", allow_empty=True)
+    if not fields:
+        return ""
+    parts = _generic_go_fields(name, fields)
+    bounds = _reply_only_bounds(operation, name, lower, parts.bounds)
+    declarations = "\n".join(f"\tvar {_go_lower(str(field['name']))} {_generic_go_type(field)}"
+                             for field in fields)
+    returned = ", ".join(_go_lower(str(field["name"])) for field in fields)
+    joined_checks = " ||\n\t\t".join(parts.checks)
+    check_block = f"\tif {joined_checks} {{\n\t\treturn nil, ErrMalformedEnvelope\n\t}}\n" \
+        if joined_checks else ""
+    return f"""{chr(10).join(bounds)}
+
+// Encode{name}Reply writes the reply schema {lower} declares, in order.
+func Encode{name}Reply({parts.parameters}) ([]byte, error) {{
+{check_block}	var payload []byte
+{chr(10).join(parts.writes)}
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Reply reads it back, checking each field against its own bound.
+func Decode{name}Reply(reply []byte) ({parts.results}, error) {{
+{declarations}
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return {parts.zeros}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	cursor := 0
+{chr(10).join(parts.reads)}
+	if cursor != len(payload) {{
+		return {parts.zeros}, ErrMalformedEnvelope
+	}}
+	return {returned}, nil
+}}
+
+"""
+
+
+def _generic_go_reply_rows(operation: dict[str, object], name: str, lower: str,
+                           reply: dict[str, object]) -> str:
+    """A row-list reply: a u32 count, then that many rows of the row schema."""
+    row = reply["row"]
+    assert isinstance(row, dict)
+    fields = _generic_fields(row, "reply row")
+    maximum = int(reply["maximum_rows"])
+    parts = _generic_go_fields(name, fields)
+    bounds = _reply_only_bounds(operation, name, lower, parts.bounds)
+
+    # gofmt aligns a run of struct members and a run of literal keys, and the
+    # generator has no Go toolchain to defer to, so it aligns them itself.
+    width = max(len(_go_name(str(field["name"]))) for field in fields)
+    members = "\n".join(
+        f"\t{_go_name(str(field['name'])):<{width}} {_generic_go_type(field)}"
+        for field in fields)
+    # The shared codec is written against bare locals, so a row is unpacked into
+    # them to encode and packed out of them to decode. Naming them once here is
+    # what lets the field codec stay identical to the request's.
+    from_row = "\n".join(
+        f"\t\t{_go_lower(str(field['name']))} := row.{_go_name(str(field['name']))}"
+        for field in fields)
+    to_row = ",\n".join(
+        f"\t\t\t{_go_name(str(field['name'])) + ':':<{width + 1}} {_go_lower(str(field['name']))}"
+        for field in fields)
+    declarations = "\n".join(f"\t\tvar {_go_lower(str(field['name']))} {_generic_go_type(field)}"
+                             for field in fields)
+    # The shared reads return the request's zero list on a malformed field, which
+    # is not what a row decoder returns. Rewriting that one expression is exact
+    # and checked; regenerating the reads with a different tail would duplicate
+    # eighty lines of codec to change a return statement.
+    reads_source = [block.replace(f"return {parts.zeros}, ErrMalformedEnvelope",
+                                  "return nil, ErrMalformedEnvelope")
+                    for block in parts.reads]
+    if parts.reads and reads_source == parts.reads:
+        fail("generic-go", f"{lower}: the row decoder's error return did not rewrite")
+    joined_checks = " ||\n\t\t\t".join(parts.checks)
+    check_block = f"\t\tif {joined_checks} {{\n\t\t\treturn nil, ErrMalformedEnvelope\n\t\t}}\n" \
+        if joined_checks else ""
+    writes = "\n".join(_indent_go(block) for block in parts.writes)
+    reads = "\n".join(_indent_go(block) for block in reads_source)
+    return f"""{chr(10).join(bounds)}
+const {name}MaxRows = {maximum}
+
+// {name}Row is one row of the {lower} reply.
+type {name}Row struct {{
+{members}
+}}
+
+// Encode{name}Reply writes the row count and then each row, in schema order.
+func Encode{name}Reply(rows []{name}Row) ([]byte, error) {{
+	if len(rows) > {name}MaxRows {{
+		return nil, ErrMalformedEnvelope
+	}}
+	var payload []byte
+	var countBytes [4]byte
+	binary.LittleEndian.PutUint32(countBytes[:], uint32(len(rows)))
+	payload = append(payload, countBytes[:]...)
+	for _, row := range rows {{
+{from_row}
+{check_block}{writes}
+	}}
+	header, err := EncodeReplyHeader(Operation{name}, ResultOK, uint32(len(payload)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return append(header, payload...), nil
+}}
+
+// Decode{name}Reply reads it back. A count past the ceiling is refused before
+// any row is read, so a malformed length cannot drive the loop.
+func Decode{name}Reply(reply []byte) ([]{name}Row, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != Operation{name} || header.Result != ResultOK ||
+		len(reply) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	if len(payload) < 4 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	count := int(binary.LittleEndian.Uint32(payload))
+	if count > {name}MaxRows {{
+		return nil, ErrMalformedEnvelope
+	}}
+	cursor := 4
+	rows := make([]{name}Row, 0, count)
+	for index := 0; index < count; index++ {{
+{declarations}
+{reads}
+		rows = append(rows, {name}Row{{
+{to_row},
+		}})
+	}}
+	if cursor != len(payload) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return rows, nil
+}}
+
+"""
+
+
+def _indent_go(block: str) -> str:
+    """One more tab on every non-empty line of a generated Go block."""
+    return "\n".join(f"\t{line}" if line.strip() else line for line in block.splitlines())
+
+
+def _generic_go(operation: dict[str, object]) -> str:
+    """Go constants and codecs for one db2-envelope-generic-v1 operation.
+
+    The Go side mirrors the C one field for field; it exists so a Go caller and
+    a C module cannot disagree about a schema neither of them wrote.
+    """
+    name = _go_name(str(operation["name"]))
+    family = _go_name(str(operation["family"]))
+    lower = str(operation["name"])
+    request_fields = _generic_fields(operation["request"], "request", allow_empty=True)
+
+    request = _generic_go_fields(name, request_fields)
+    bounds, parameters = request.bounds, request.parameters
+    results, zeros = request.results, request.zeros
+    checks, writes, reads = request.checks, request.writes, request.reads
+
     declarations = "\n".join(f"\tvar {_go_lower(str(field['name']))} {_generic_go_type(field)}"
                               for field in request_fields)
     joined_bounds = "\n".join(bounds)
@@ -16198,18 +16434,24 @@ def _generic_go(operation: dict[str, object]) -> str:
     # error, and `if {} {` is not Go.
     check_block = f"\tif {joined_checks} {{\n\t\treturn nil, ErrMalformedEnvelope\n\t}}\n" \
         if joined_checks else ""
-    results_list = f"{results}, error" if results else "error"
+    # Parenthesised only when there is more than one result: Go writes a lone
+    # return type bare, and `(error)` is what gofmt has been quietly objecting
+    # to in every zero-field operation this generator has ever emitted.
+    results_list = f"({results}, error)" if results else "error"
     zeros_list = f"{zeros}, " if zeros else ""
     returned = ", ".join(_go_lower(str(field["name"])) for field in request_fields)
     returned_list = f"{returned}, nil" if returned else "nil"
     declaration_block = f"{declarations}\n" if declarations else ""
     write_block = f"{joined_writes}\n" if joined_writes else ""
     read_block = f"{joined_reads}\n" if joined_reads else ""
+    # An operation with no request fields has no bounds, and the blank line that
+    # would separate them from the comment becomes a second blank line, which
+    # gofmt collapses. The newline belongs to the bounds, not to the template.
+    bounds_block = f"\n{joined_bounds}" if joined_bounds else ""
 
     return f"""const Event{name} = Event{family}
 const Stage{name} = Family{family}
-const Operation{name} uint32 = {operation['id']}
-{joined_bounds}
+const Operation{name} uint32 = {operation['id']}{bounds_block}
 
 // Encode{name}Request writes the schema {lower} declares, in order.
 func Encode{name}Request({parameters}) ([]byte, error) {{
@@ -16222,7 +16464,7 @@ func Encode{name}Request({parameters}) ([]byte, error) {{
 }}
 
 // Decode{name}Request reads it back, checking each field against its own bound.
-func Decode{name}Request(request []byte) ({results_list}) {{
+func Decode{name}Request(request []byte) {results_list} {{
 {declaration_block}	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != Operation{name} || header.Flags != 0 ||

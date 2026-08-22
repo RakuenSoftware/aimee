@@ -1624,6 +1624,26 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(
             generator._generic_go_type({"name": "result", "type": "i32"}), "int32")
 
+    def test_generated_go_is_gofmt_clean(self) -> None:
+        """The Go the generator writes is formatted the way Go is formatted.
+
+        It was not, until the reply codecs went in: every zero-field operation
+        carried a stray blank line and a parenthesised lone return type, and
+        nothing checked, so nothing said. A generator that emits Go nobody can
+        run gofmt over is one whose output a person has to reformat by hand
+        before reading a diff of it.
+        """
+        gofmt = shutil.which("gofmt")
+        if gofmt is None:
+            self.skipTest("gofmt is not installed")
+        target = REPO_ROOT / "server-go/db2/contract_generated.go"
+        result = subprocess.run(
+            [gofmt, "-l", str(target)],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "", "generated Go is not gofmt-clean")
+
     def test_cli_is_cwd_independent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(

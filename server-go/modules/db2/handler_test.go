@@ -16,22 +16,25 @@ import (
 )
 
 type wireBaseline struct {
-	Operations []struct {
-		Name    string `json:"name"`
-		Request struct {
-			Positive string `json:"positive"`
-			Negative []struct {
-				Hex      string `json:"hex"`
-				Mutation string `json:"mutation"`
-			} `json:"negative"`
-		} `json:"request"`
-		Reply struct {
-			Positive []struct {
-				Flags uint32 `json:"flags"`
-				Hex   string `json:"hex"`
-			} `json:"positive"`
-		} `json:"reply"`
-	} `json:"operations"`
+	Operations []wireOperation `json:"operations"`
+}
+
+// wireOperation is named rather than anonymous so a lookup can return one.
+type wireOperation struct {
+	Name    string `json:"name"`
+	Request struct {
+		Positive string `json:"positive"`
+		Negative []struct {
+			Hex      string `json:"hex"`
+			Mutation string `json:"mutation"`
+		} `json:"negative"`
+	} `json:"request"`
+	Reply struct {
+		Positive []struct {
+			Flags uint32 `json:"flags"`
+			Hex   string `json:"hex"`
+		} `json:"positive"`
+	} `json:"reply"`
 }
 
 type fakeHealthRow struct {
@@ -63,18 +66,27 @@ func loadHealthBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
-	if len(baseline.Operations) != 9 || baseline.Operations[0].Name != "health" ||
-		baseline.Operations[1].Name != "embedding_dimension" ||
-		baseline.Operations[2].Name != "pool_status" ||
-		baseline.Operations[3].Name != "embedding_refusals" ||
-		baseline.Operations[4].Name != "postgres_status" ||
-		baseline.Operations[5].Name != "reembed_status" ||
-		baseline.Operations[6].Name != "reembed_clear" ||
-		baseline.Operations[7].Name != "reembed_clear_maintenance" ||
-		baseline.Operations[8].Name != "embedder_serving_id" {
-		t.Fatalf("unexpected operation baseline: %+v", baseline.Operations)
-	}
 	return baseline
+}
+
+// healthOperation finds the health vectors by name.
+//
+// This used to pin the first nine operations by position and index the health
+// one at [0]. That was drift-proof when the catalog was nine operations long and
+// stopped being so the moment a tenth was added -- these tests have been failing
+// since, unnoticed, because the package they cover is deliberately absent from
+// the module registry and nothing runs it in anger. Looking the operation up by
+// name is drift-proof by construction and does not care how the catalog grows.
+func healthOperation(t *testing.T) wireOperation {
+	t.Helper()
+	baseline := loadHealthBaseline(t)
+	for _, operation := range baseline.Operations {
+		if operation.Name == "health" {
+			return operation
+		}
+	}
+	t.Fatalf("no health operation in a baseline of %d", len(baseline.Operations))
+	return wireOperation{}
 }
 
 func decodeHex(t *testing.T, value string) []byte {
@@ -95,7 +107,7 @@ func evidenceForFlags(flags uint32) db2contract.HealthEvidence {
 }
 
 func TestHealthHandlerReplaysSharedCBaseline(t *testing.T) {
-	operation := loadHealthBaseline(t).Operations[0]
+	operation := healthOperation(t)
 	request := decodeHex(t, operation.Request.Positive)
 	for _, vector := range operation.Reply.Positive {
 		vector := vector
@@ -127,7 +139,7 @@ func TestHealthHandlerReplaysSharedCBaseline(t *testing.T) {
 }
 
 func TestHealthHandlerRejectsEverySharedMalformedRequest(t *testing.T) {
-	operation := loadHealthBaseline(t).Operations[0]
+	operation := healthOperation(t)
 	for _, vector := range operation.Request.Negative {
 		vector := vector
 		t.Run(vector.Mutation, func(t *testing.T) {
