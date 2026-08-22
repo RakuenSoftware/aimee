@@ -185,6 +185,20 @@ func liveReads() []liveRequest {
 			},
 		},
 		{
+			name:  "directive_find_by_cause_topic",
+			stage: db2contract.StageDirectiveFindByCauseTopic,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveFindByCauseTopicRequest(
+					"retrieval_failure", "replay-topic")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeDirectiveFindByCauseTopicReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
 			name:  "enrollment_list",
 			stage: db2contract.StageEnrollmentList,
 			encode: func() ([]byte, error) {
@@ -249,6 +263,29 @@ func liveWrites() []liveRequest {
 				}
 				if id == 0 {
 					t.Fatal("the insert returned no identifier")
+				}
+			},
+		},
+		{
+			name:  "directive_insert_ignore",
+			stage: db2contract.StageDirectiveInsertIgnore,
+			// Twice: the first raises the directive, the second hits
+			// idx_directives_dedup_topic and takes the conflict path. Both
+			// halves of the operation run, which is the only way to prove the
+			// natural-key lookup is a statement.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveInsertIgnoreRequest(
+					"live probe question?", "live-probe-topic", "", "",
+					"retrieval_failure", 5, 0, 0, "", "live-probe", "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, _, _, err := db2contract.DecodeDirectiveInsertIgnoreReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the directive was neither raised nor found")
 				}
 			},
 		},
