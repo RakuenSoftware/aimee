@@ -1063,6 +1063,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .memory_summarise_clusters = db2_memory_summarise_clusters,
        .memory_l1_session_clusters = db2_memory_l1_session_clusters,
        .memory_dedupe_candidates = db2_memory_active_kind_dedupe_candidates,
+       .memory_episodes_search = db2_memory_episodes_search,
+       .memory_session_content = db2_memory_l1_session_content,
+       .memory_session_created_at = db2_memory_l1_session_created_at,
+       .memory_search_by_pattern = db2_memory_search_by_pattern,
+       .memory_prior_in_session = db2_memory_list_prior_in_session,
    };
    return &backend;
 }
@@ -5183,6 +5188,263 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_CANCELLED;
             }
             if (aimee_db2_memory_dedupe_candidates_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char search_query[AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MAX + 1] = "";
+         uint32_t row_limit = 0u;
+         if (aimee_db2_memory_episodes_search_request_decode(
+                 request_body, request_len, search_query, sizeof(search_query), &row_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_EPISODES_SEARCH_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_episodes_search)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_episodes_search_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               memory_episode_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_episodes_search(
+                      search_query, (int)row_limit, listed,
+                      (int)AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].episode_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  rows[index].memory_id =
+                      listed[index].memory_id > 0 ? (uint64_t)listed[index].memory_id : 0u;
+                  snprintf(rows[index].episode_key, sizeof(rows[index].episode_key), "%s",
+                           listed[index].episode_key);
+                  snprintf(rows[index].episode_text, sizeof(rows[index].episode_text), "%s",
+                           listed[index].episode_text);
+                  snprintf(rows[index].source_session, sizeof(rows[index].source_session), "%s",
+                           listed[index].source_session);
+                  snprintf(rows[index].reference_time, sizeof(rows[index].reference_time), "%s",
+                           listed[index].reference_time);
+                  snprintf(rows[index].episode_created_at, sizeof(rows[index].episode_created_at),
+                           "%s", listed[index].created_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_episodes_search_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char session_id[AIMEE_DB2_MEMORY_SESSION_CONTENT_SESSION_ID_MAX + 1] = "";
+         if (aimee_db2_memory_session_content_request_decode(request_body, request_len, session_id,
+                                                             sizeof(session_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SESSION_CONTENT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_session_content)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_session_content_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_SESSION_CONTENT_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_content_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_SESSION_CONTENT_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_session_content(
+                      session_id, listed, (int)AIMEE_DB2_MEMORY_SESSION_CONTENT_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].memory_content, sizeof(rows[index].memory_content), "%s",
+                           listed[index].content);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_session_content_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char session_id[AIMEE_DB2_MEMORY_SESSION_CREATED_AT_SESSION_ID_MAX + 1] = "";
+         if (aimee_db2_memory_session_created_at_request_decode(
+                 request_body, request_len, session_id, sizeof(session_id)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SESSION_CREATED_AT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_session_created_at)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_session_created_at_row_t
+                rows[AIMEE_DB2_MEMORY_SESSION_CREATED_AT_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_memory_created_at_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_SESSION_CREATED_AT_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_session_created_at(
+                      session_id, listed, (int)AIMEE_DB2_MEMORY_SESSION_CREATED_AT_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].memory_created_at, sizeof(rows[index].memory_created_at),
+                           "%s", listed[index].created_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_session_created_at_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char search_pattern[AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX + 1] = "";
+         if (aimee_db2_memory_search_by_pattern_request_decode(
+                 request_body, request_len, search_pattern, sizeof(search_pattern)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_search_by_pattern)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_search_by_pattern_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_search_match_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_search_by_pattern(
+                      search_pattern, listed, (int)AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].memory_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].memory_key, sizeof(rows[index].memory_key), "%s",
+                           listed[index].key);
+                  snprintf(rows[index].memory_content, sizeof(rows[index].memory_content), "%s",
+                           listed[index].content);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_search_by_pattern_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char session_id[AIMEE_DB2_MEMORY_PRIOR_IN_SESSION_SESSION_ID_MAX + 1] = "";
+         uint64_t before_memory_id = 0u;
+         uint32_t row_limit = 0u;
+         if (aimee_db2_memory_prior_in_session_request_decode(request_body, request_len, session_id,
+                                                              sizeof(session_id), &before_memory_id,
+                                                              &row_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_PRIOR_IN_SESSION_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_prior_in_session)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_memory_prior_in_session_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_MEMORY_PRIOR_IN_SESSION_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_memory_prior_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_MEMORY_PRIOR_IN_SESSION_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->memory_prior_in_session(
+                      session_id, (int64_t)before_memory_id, (int)row_limit, listed,
+                      (int)AIMEE_DB2_MEMORY_PRIOR_IN_SESSION_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].memory_content, sizeof(rows[index].memory_content), "%s",
+                           listed[index].content);
+                  snprintf(rows[index].memory_key, sizeof(rows[index].memory_key), "%s",
+                           listed[index].key);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_prior_in_session_reply_encode(
                     rows, count, response_body, response_capacity, response_len) != 0)
             {
                free(rows);

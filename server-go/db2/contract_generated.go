@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "deecc0fd68f90feeacdce141a5ace6d8ba959c673a2b2cf3c3367ed99d3c5095"
+const ContractSHA256 = "87021b625ef51a843e18c4ec448f943a8e9b4bc104cc5206e046fa9ee42c703c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -3939,6 +3939,266 @@ func DecodeMemoryDedupeCandidatesRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return memoryKind, nil
+}
+
+const EventMemoryEpisodesSearch = EventMemory
+const StageMemoryEpisodesSearch = FamilyMemory
+const OperationMemoryEpisodesSearch uint32 = 132
+const MemoryEpisodesSearchSearchQueryMin = 0
+const MemoryEpisodesSearchSearchQueryMax = 511
+const MemoryEpisodesSearchRowLimitMin uint32 = 0
+const MemoryEpisodesSearchRowLimitMax uint32 = 65535
+
+// EncodeMemoryEpisodesSearchRequest writes the schema memory_episodes_search declares, in order.
+func EncodeMemoryEpisodesSearchRequest(searchQuery string, rowLimit uint32) ([]byte, error) {
+	if len(searchQuery) < MemoryEpisodesSearchSearchQueryMin || len(searchQuery) > MemoryEpisodesSearchSearchQueryMax || hasNUL(searchQuery) ||
+		rowLimit < MemoryEpisodesSearchRowLimitMin || rowLimit > MemoryEpisodesSearchRowLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, searchQuery, MemoryEpisodesSearchSearchQueryMax); err != nil {
+		return nil, err
+	}
+	var rowLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
+	payload = append(payload, rowLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryEpisodesSearch, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryEpisodesSearchRequest reads it back, checking each field against its own bound.
+func DecodeMemoryEpisodesSearchRequest(request []byte) (string, uint32, error) {
+	var searchQuery string
+	var rowLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryEpisodesSearch || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if searchQuery, err = takeRowText(payload, &cursor, MemoryEpisodesSearchSearchQueryMax); err != nil ||
+		len(searchQuery) < MemoryEpisodesSearchSearchQueryMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if rowLimit < MemoryEpisodesSearchRowLimitMin || rowLimit > MemoryEpisodesSearchRowLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return searchQuery, rowLimit, nil
+}
+
+const EventMemorySessionContent = EventMemory
+const StageMemorySessionContent = FamilyMemory
+const OperationMemorySessionContent uint32 = 133
+const MemorySessionContentSessionIDMin = 1
+const MemorySessionContentSessionIDMax = 127
+
+// EncodeMemorySessionContentRequest writes the schema memory_session_content declares, in order.
+func EncodeMemorySessionContentRequest(sessionID string) ([]byte, error) {
+	if len(sessionID) < MemorySessionContentSessionIDMin || len(sessionID) > MemorySessionContentSessionIDMax || hasNUL(sessionID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, sessionID, MemorySessionContentSessionIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemorySessionContent, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemorySessionContentRequest reads it back, checking each field against its own bound.
+func DecodeMemorySessionContentRequest(request []byte) (string, error) {
+	var sessionID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemorySessionContent || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if sessionID, err = takeRowText(payload, &cursor, MemorySessionContentSessionIDMax); err != nil ||
+		len(sessionID) < MemorySessionContentSessionIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return sessionID, nil
+}
+
+const EventMemorySessionCreatedAt = EventMemory
+const StageMemorySessionCreatedAt = FamilyMemory
+const OperationMemorySessionCreatedAt uint32 = 134
+const MemorySessionCreatedAtSessionIDMin = 1
+const MemorySessionCreatedAtSessionIDMax = 127
+
+// EncodeMemorySessionCreatedAtRequest writes the schema memory_session_created_at declares, in order.
+func EncodeMemorySessionCreatedAtRequest(sessionID string) ([]byte, error) {
+	if len(sessionID) < MemorySessionCreatedAtSessionIDMin || len(sessionID) > MemorySessionCreatedAtSessionIDMax || hasNUL(sessionID) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, sessionID, MemorySessionCreatedAtSessionIDMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemorySessionCreatedAt, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemorySessionCreatedAtRequest reads it back, checking each field against its own bound.
+func DecodeMemorySessionCreatedAtRequest(request []byte) (string, error) {
+	var sessionID string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemorySessionCreatedAt || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if sessionID, err = takeRowText(payload, &cursor, MemorySessionCreatedAtSessionIDMax); err != nil ||
+		len(sessionID) < MemorySessionCreatedAtSessionIDMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return sessionID, nil
+}
+
+const EventMemorySearchByPattern = EventMemory
+const StageMemorySearchByPattern = FamilyMemory
+const OperationMemorySearchByPattern uint32 = 135
+const MemorySearchByPatternSearchPatternMin = 1
+const MemorySearchByPatternSearchPatternMax = 511
+
+// EncodeMemorySearchByPatternRequest writes the schema memory_search_by_pattern declares, in order.
+func EncodeMemorySearchByPatternRequest(searchPattern string) ([]byte, error) {
+	if len(searchPattern) < MemorySearchByPatternSearchPatternMin || len(searchPattern) > MemorySearchByPatternSearchPatternMax || hasNUL(searchPattern) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, searchPattern, MemorySearchByPatternSearchPatternMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemorySearchByPattern, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemorySearchByPatternRequest reads it back, checking each field against its own bound.
+func DecodeMemorySearchByPatternRequest(request []byte) (string, error) {
+	var searchPattern string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemorySearchByPattern || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if searchPattern, err = takeRowText(payload, &cursor, MemorySearchByPatternSearchPatternMax); err != nil ||
+		len(searchPattern) < MemorySearchByPatternSearchPatternMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return searchPattern, nil
+}
+
+const EventMemoryPriorInSession = EventMemory
+const StageMemoryPriorInSession = FamilyMemory
+const OperationMemoryPriorInSession uint32 = 136
+const MemoryPriorInSessionSessionIDMin = 1
+const MemoryPriorInSessionSessionIDMax = 127
+const MemoryPriorInSessionBeforeMemoryIDMin uint64 = 1
+const MemoryPriorInSessionBeforeMemoryIDMax uint64 = 9223372036854775807
+const MemoryPriorInSessionRowLimitMin uint32 = 0
+const MemoryPriorInSessionRowLimitMax uint32 = 65535
+
+// EncodeMemoryPriorInSessionRequest writes the schema memory_prior_in_session declares, in order.
+func EncodeMemoryPriorInSessionRequest(sessionID string, beforeMemoryID uint64, rowLimit uint32) ([]byte, error) {
+	if len(sessionID) < MemoryPriorInSessionSessionIDMin || len(sessionID) > MemoryPriorInSessionSessionIDMax || hasNUL(sessionID) ||
+		beforeMemoryID < MemoryPriorInSessionBeforeMemoryIDMin || beforeMemoryID > MemoryPriorInSessionBeforeMemoryIDMax ||
+		rowLimit < MemoryPriorInSessionRowLimitMin || rowLimit > MemoryPriorInSessionRowLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, sessionID, MemoryPriorInSessionSessionIDMax); err != nil {
+		return nil, err
+	}
+	var beforeMemoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(beforeMemoryIDBytes[:], beforeMemoryID)
+	payload = append(payload, beforeMemoryIDBytes[:]...)
+	var rowLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
+	payload = append(payload, rowLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryPriorInSession, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryPriorInSessionRequest reads it back, checking each field against its own bound.
+func DecodeMemoryPriorInSessionRequest(request []byte) (string, uint64, uint32, error) {
+	var sessionID string
+	var beforeMemoryID uint64
+	var rowLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryPriorInSession || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if sessionID, err = takeRowText(payload, &cursor, MemoryPriorInSessionSessionIDMax); err != nil ||
+		len(sessionID) < MemoryPriorInSessionSessionIDMin {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	beforeMemoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if beforeMemoryID < MemoryPriorInSessionBeforeMemoryIDMin || beforeMemoryID > MemoryPriorInSessionBeforeMemoryIDMax {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if rowLimit < MemoryPriorInSessionRowLimitMin || rowLimit > MemoryPriorInSessionRowLimitMax {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, 0, ErrMalformedEnvelope
+	}
+	return sessionID, beforeMemoryID, rowLimit, nil
 }
 
 const EventEntityObservationCount = EventIndex

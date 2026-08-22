@@ -3472,6 +3472,51 @@ int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe
    return 0;
 }
 
+int db2_memory_episodes_search(const char *query, int limit, memory_episode_t *out, int max)
+{
+   (void)query;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_l1_session_content(const char *session_id, db2_memory_content_row_t *rows, int max)
+{
+   (void)session_id;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_l1_session_created_at(const char *session_id, db2_memory_created_at_row_t *rows,
+                                     int max)
+{
+   (void)session_id;
+   (void)rows;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_search_by_pattern(const char *pattern, db2_memory_search_match_t *out, int max)
+{
+   (void)pattern;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_list_prior_in_session(const char *session_id, int64_t before_id, int limit,
+                                     db2_memory_prior_row_t *out, int max)
+{
+   (void)session_id;
+   (void)before_id;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

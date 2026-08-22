@@ -8204,6 +8204,293 @@
       }
     },
     {
+      "family": "memory",
+      "id": 132,
+      "name": "memory_episodes_search",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, episodes and their sessions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_episodes_search"
+      ],
+      "request": {
+        "policy": {
+          "reads": "an empty query matches every episode, and a non-empty one is a case-folded substring"
+        },
+        "fields": [
+          {
+            "name": "search_query",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "row_limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "episode_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "episode_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "episode_text",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "source_session",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "reference_time",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "episode_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 133,
+      "name": "memory_session_content",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, episodes and their sessions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_l1_session_content"
+      ],
+      "request": {
+        "policy": {
+          "reads": "session-tier memories for one session, oldest first, with no limit of its own"
+        },
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 134,
+      "name": "memory_session_created_at",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, episodes and their sessions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_l1_session_created_at"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the same rows memory.session_content returns, reduced to their stamps"
+        },
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 135,
+      "name": "memory_search_by_pattern",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, episodes and their sessions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_search_by_pattern"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the pattern is used as a SQL LIKE pattern, so its metacharacters are the caller's to escape"
+        },
+        "fields": [
+          {
+            "name": "search_pattern",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "memory",
+      "id": 136,
+      "name": "memory_prior_in_session",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memories, episodes and their sessions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_list_prior_in_session"
+      ],
+      "request": {
+        "policy": {
+          "reads": "memories written before one identifier in the same session, newest first"
+        },
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "before_memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "row_limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "memory_content",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 2047
+            },
+            {
+              "name": "memory_key",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

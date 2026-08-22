@@ -3908,6 +3908,52 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_dedupe_candidates_count == 0);
 
+   /* Five session and search reads, none of which has anything to find. */
+   static aimee_db2_memory_episodes_search_row_t
+       memory_episodes_search_rows[AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS];
+   uint32_t memory_episodes_search_count = 99;
+   assert(aimee_db2_memory_episodes_search_call(
+              call_client, &client, 9512, 0, "a-phrase-no-episode-holds", 16,
+              memory_episodes_search_rows, AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS,
+              &memory_episodes_search_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_episodes_search_count == 0);
+
+   static aimee_db2_memory_session_content_row_t
+       memory_session_content_rows[AIMEE_DB2_MEMORY_SESSION_CONTENT_MAX_ROWS];
+   uint32_t memory_session_content_count = 99;
+   assert(aimee_db2_memory_session_content_call(
+              call_client, &client, 9513, 0, "replay-session", memory_session_content_rows,
+              AIMEE_DB2_MEMORY_SESSION_CONTENT_MAX_ROWS, &memory_session_content_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_session_content_count == 0);
+
+   static aimee_db2_memory_session_created_at_row_t
+       memory_session_created_at_rows[AIMEE_DB2_MEMORY_SESSION_CREATED_AT_MAX_ROWS];
+   uint32_t memory_session_created_at_count = 99;
+   assert(aimee_db2_memory_session_created_at_call(
+              call_client, &client, 9514, 0, "replay-session", memory_session_created_at_rows,
+              AIMEE_DB2_MEMORY_SESSION_CREATED_AT_MAX_ROWS, &memory_session_created_at_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_session_created_at_count == 0);
+
+   static aimee_db2_memory_search_by_pattern_row_t
+       memory_search_by_pattern_rows[AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS];
+   uint32_t memory_search_by_pattern_count = 99;
+   assert(aimee_db2_memory_search_by_pattern_call(
+              call_client, &client, 9515, 0, "a-pattern-no-memory-holds",
+              memory_search_by_pattern_rows, AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS,
+              &memory_search_by_pattern_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_search_by_pattern_count == 0);
+
+   static aimee_db2_memory_prior_in_session_row_t
+       memory_prior_in_session_rows[AIMEE_DB2_MEMORY_PRIOR_IN_SESSION_MAX_ROWS];
+   uint32_t memory_prior_in_session_count = 99;
+   assert(aimee_db2_memory_prior_in_session_call(
+              call_client, &client, 9516, 0, "replay-session", 4242, 16,
+              memory_prior_in_session_rows, AIMEE_DB2_MEMORY_PRIOR_IN_SESSION_MAX_ROWS,
+              &memory_prior_in_session_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_prior_in_session_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

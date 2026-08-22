@@ -13799,6 +13799,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_active_kind_dedupe_candidates",
         "policy": {"reads": 200},
     },
+    "memory_episodes_search": {
+        "key": ("memory", 132),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_episodes_search",
+        "policy": {"reads": 200},
+    },
+    "memory_session_content": {
+        "key": ("memory", 133),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_l1_session_content",
+        "policy": {"reads": 200},
+    },
+    "memory_session_created_at": {
+        "key": ("memory", 134),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_l1_session_created_at",
+        "policy": {"reads": 200},
+    },
+    "memory_search_by_pattern": {
+        "key": ("memory", 135),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_search_by_pattern",
+        "policy": {"reads": 200},
+    },
+    "memory_prior_in_session": {
+        "key": ("memory", 136),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_list_prior_in_session",
+        "policy": {"reads": 200},
+    },
 }
 
 

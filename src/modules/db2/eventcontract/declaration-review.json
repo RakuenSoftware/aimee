@@ -3396,6 +3396,14 @@
       "reason": "Private first half of memory_refresh_episode_relations: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
     },
     {
+      "symbol": "db2_memory_episodes_search",
+      "signature_sha256": "576fdfc1176d59012732bfb36cc7a066312ee73c590f62b2fa4d05fbc9224e08",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.episodes_search operation searches episodes by substring. An empty query is not an empty result: the statement tests for it explicitly and matches everything, so a caller that forgot to fill the query reads the whole corpus rather than nothing. A non-empty query is wrapped in wildcards on both sides, so it matches anywhere in the text and a query containing a LIKE metacharacter matches more than its own words."
+    },
+    {
       "symbol": "db2_memory_event_frame_insert",
       "signature_sha256": "a0912bc43ca9af930803524396ae9d0c27a71c45374b699c1bad8dc168447727",
       "disposition": "private-db2",
@@ -3676,6 +3684,22 @@
       "reason": "The typed memory.l1_session_clusters operation counts session-tier memories per session, leaving out one session the caller names -- which is how a caller excludes its own. An empty exclusion excludes nothing, so the natural way to ask for all of them is to send nothing, and memories whose session is empty are excluded by the statement regardless. A session that recorded nothing is absent rather than zero."
     },
     {
+      "symbol": "db2_memory_l1_session_content",
+      "signature_sha256": "fa71d387ef5832e34de5c4a10810194a9237d2765b5a80cfe41813c2be7b605e",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.session_content operation lists what one session recorded, oldest first. The statement carries no limit -- the caller's array is the only bound, and its caller asks for two hundred and fifty-six -- so a session that recorded more is read in part with nothing saying so. It returns content alone, so two identical contents from the same session are two indistinguishable rows and a caller cannot tell which memory either came from."
+    },
+    {
+      "symbol": "db2_memory_l1_session_created_at",
+      "signature_sha256": "a5ede5ca072d65657ec11783dc3fae264afe5b211ce58f0ec039a9d44dca76a2",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.session_created_at operation lists when one session's memories were written, oldest first. It is memory.session_content over the same rows in the same order with a different column, so a caller wanting both makes two round trips and must trust that nothing changed between them -- the two answers are only aligned if the session was quiet. Neither carries an identifier that would let a caller pair them."
+    },
+    {
       "symbol": "db2_memory_l2_cross_key_pairs",
       "signature_sha256": "6f0721f230e908692ff419c4f8975a5a71ee7939125c7b569fa4c18181325dfb",
       "disposition": "wire-operation",
@@ -3842,6 +3866,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.low_effectiveness operation lists the memories scoring below a threshold, worst first. A memory whose effectiveness was never scored is null rather than zero and the statement requires a value, so it is absent from this list entirely -- an unscored memory and a well-performing one are equally invisible here, and the two are not the same thing. The tier column is four bytes wide, so a tier name longer than three characters is truncated before the wire sees it."
+    },
+    {
+      "symbol": "db2_memory_list_prior_in_session",
+      "signature_sha256": "ee2917cbb053a7754a0cd1958a02f6282e7391939ad64af306eb5c87e20bb2b6",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.prior_in_session operation lists what a session recorded before a given memory, newest first. Before means a lower identifier rather than an earlier stamp, which is the same thing only while identifiers are assigned in order -- and nothing here guarantees that across a restore or a merge. The tier is not filtered, unlike the other session reads here, so this one sees every tier and they see one."
     },
     {
       "symbol": "db2_memory_list_recall_section",
@@ -4194,6 +4226,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.scopes_list operation lists the scopes a memory is tagged with. The rows come back in an order the statement fixes -- a CASE over the scope type -- so a caller reading the first row is reading whichever type that expression ranks highest, not the one the memory was tagged with first. Truncation at the caller's array therefore drops the lowest-ranked types rather than an arbitrary set, and says nothing about having done so."
+    },
+    {
+      "symbol": "db2_memory_search_by_pattern",
+      "signature_sha256": "822904145d69c977d046009183cf6f7402fd925c2c993afc420dd5efe72b502b",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.search_by_pattern operation searches the two session-facing tiers by pattern. The pattern reaches LIKE as written, so a caller sending text that happens to contain an underscore or a percent sign is searching for something wider than it typed -- and neither the backend nor this boundary escapes them. Only the L1 and L2 tiers are searched, so a memory promoted past them is unreachable here however well it matches."
     },
     {
       "symbol": "db2_memory_search_facts_patterns_by_keyword",

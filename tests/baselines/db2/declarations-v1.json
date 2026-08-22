@@ -17470,9 +17470,15 @@
           "line": 156
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.episodes_search operation searches episodes by substring. An empty query is not an empty result: the statement tests for it explicitly and matches everything, so a caller that forgot to fill the query reads the whole corpus rather than nothing. A non-empty query is wrapped in wildcards on both sides, so it matches anywhere in the text and a query containing a LIKE metacharacter matches more than its own words."
+      },
       "signature": "int db2_memory_episodes_search ( const char * query , int limit , memory_episode_t * out , int max )",
       "signature_sha256": "576fdfc1176d59012732bfb36cc7a066312ee73c590f62b2fa4d05fbc9224e08",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_episodes_search"
     },
     {
@@ -18280,9 +18286,15 @@
           "line": 533
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.session_content operation lists what one session recorded, oldest first. The statement carries no limit -- the caller's array is the only bound, and its caller asks for two hundred and fifty-six -- so a session that recorded more is read in part with nothing saying so. It returns content alone, so two identical contents from the same session are two indistinguishable rows and a caller cannot tell which memory either came from."
+      },
       "signature": "int db2_memory_l1_session_content ( const char * session_id , db2_memory_content_row_t * rows , int max )",
       "signature_sha256": "fa71d387ef5832e34de5c4a10810194a9237d2765b5a80cfe41813c2be7b605e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_l1_session_content"
     },
     {
@@ -18295,9 +18307,15 @@
           "line": 522
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.session_created_at operation lists when one session's memories were written, oldest first. It is memory.session_content over the same rows in the same order with a different column, so a caller wanting both makes two round trips and must trust that nothing changed between them -- the two answers are only aligned if the session was quiet. Neither carries an identifier that would let a caller pair them."
+      },
       "signature": "int db2_memory_l1_session_created_at ( const char * session_id , db2_memory_created_at_row_t * rows , int max )",
       "signature_sha256": "a5ede5ca072d65657ec11783dc3fae264afe5b211ce58f0ec039a9d44dca76a2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_l1_session_created_at"
     },
     {
@@ -18877,9 +18895,15 @@
           "line": 850
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.prior_in_session operation lists what a session recorded before a given memory, newest first. Before means a lower identifier rather than an earlier stamp, which is the same thing only while identifiers are assigned in order -- and nothing here guarantees that across a restore or a merge. The tier is not filtered, unlike the other session reads here, so this one sees every tier and they see one."
+      },
       "signature": "int db2_memory_list_prior_in_session ( const char * session_id , int64_t before_id , int limit , db2_memory_prior_row_t * out , int max )",
       "signature_sha256": "ee2917cbb053a7754a0cd1958a02f6282e7391939ad64af306eb5c87e20bb2b6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_list_prior_in_session"
     },
     {
@@ -20114,9 +20138,15 @@
           "line": 37
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.search_by_pattern operation searches the two session-facing tiers by pattern. The pattern reaches LIKE as written, so a caller sending text that happens to contain an underscore or a percent sign is searching for something wider than it typed -- and neither the backend nor this boundary escapes them. Only the L1 and L2 tiers are searched, so a memory promoted past them is unreachable here however well it matches."
+      },
       "signature": "int db2_memory_search_by_pattern ( const char * pattern , db2_memory_search_match_t * out , int max )",
       "signature_sha256": "822904145d69c977d046009183cf6f7402fd925c2c993afc420dd5efe72b502b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_search_by_pattern"
     },
     {
@@ -28165,15 +28195,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f2e4f6a14dbf0b6828ec44dee0b98d0a16db42792ee5f1c78aa304ee7ce3d767",
+  "fingerprint": "c58b1d8d5f4a9be472243d399b2c6f88e55dad3755fd31c4a2b0668bba0ea91f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 272,
+    "audit_pending": 267,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 687
+    "reviewed": 692
   }
 }

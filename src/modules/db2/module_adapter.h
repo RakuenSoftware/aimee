@@ -604,6 +604,13 @@ typedef struct
    int (*memory_l1_session_clusters)(const char *excluded_source, int min_count,
                                      db2_memory_l1_cluster_row_t *rows, int max);
    int (*memory_dedupe_candidates)(const char *kind, db2_memory_dedupe_candidate_t *out, int max);
+   int (*memory_episodes_search)(const char *query, int limit, memory_episode_t *out, int max);
+   int (*memory_session_content)(const char *session_id, db2_memory_content_row_t *rows, int max);
+   int (*memory_session_created_at)(const char *session_id, db2_memory_created_at_row_t *rows,
+                                    int max);
+   int (*memory_search_by_pattern)(const char *pattern, db2_memory_search_match_t *out, int max);
+   int (*memory_prior_in_session)(const char *session_id, int64_t before_id, int limit,
+                                  db2_memory_prior_row_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
