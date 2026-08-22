@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "fa688bfc7fb6ca589afd14c1f16fca91b968abe2e0c6d13b21993ad938ccf9e1"
+const ContractSHA256 = "754a91e5c75ddc61d5a9d84debbd2e9375a3d1a69fc879030c3fcc6fd528932b"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -17203,6 +17203,162 @@ func DecodeKBDocRegionsForChunkRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return chunkID, nil
+}
+
+const EventKBIngestQueueRecent = EventMaintenance
+const StageKBIngestQueueRecent = FamilyMaintenance
+const OperationKBIngestQueueRecent uint32 = 59
+const KBIngestQueueRecentRowLimitMin uint32 = 0
+const KBIngestQueueRecentRowLimitMax uint32 = 65535
+
+// EncodeKBIngestQueueRecentRequest writes the schema kb_ingest_queue_recent declares, in order.
+func EncodeKBIngestQueueRecentRequest(rowLimit uint32) ([]byte, error) {
+	if rowLimit < KBIngestQueueRecentRowLimitMin || rowLimit > KBIngestQueueRecentRowLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var rowLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
+	payload = append(payload, rowLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBIngestQueueRecent, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBIngestQueueRecentRequest reads it back, checking each field against its own bound.
+func DecodeKBIngestQueueRecentRequest(request []byte) (uint32, error) {
+	var rowLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBIngestQueueRecent || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if rowLimit < KBIngestQueueRecentRowLimitMin || rowLimit > KBIngestQueueRecentRowLimitMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return rowLimit, nil
+}
+
+const EventKBIngestQueueStats = EventMaintenance
+const StageKBIngestQueueStats = FamilyMaintenance
+const OperationKBIngestQueueStats uint32 = 60
+
+
+// EncodeKBIngestQueueStatsRequest writes the schema kb_ingest_queue_stats declares, in order.
+func EncodeKBIngestQueueStatsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationKBIngestQueueStats, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBIngestQueueStatsRequest reads it back, checking each field against its own bound.
+func DecodeKBIngestQueueStatsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBIngestQueueStats || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventKBIngestQueueClaimNext = EventMaintenance
+const StageKBIngestQueueClaimNext = FamilyMaintenance
+const OperationKBIngestQueueClaimNext uint32 = 61
+
+
+// EncodeKBIngestQueueClaimNextRequest writes the schema kb_ingest_queue_claim_next declares, in order.
+func EncodeKBIngestQueueClaimNextRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationKBIngestQueueClaimNext, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBIngestQueueClaimNextRequest reads it back, checking each field against its own bound.
+func DecodeKBIngestQueueClaimNextRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBIngestQueueClaimNext || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventKBAsyncJobGet = EventMaintenance
+const StageKBAsyncJobGet = FamilyMaintenance
+const OperationKBAsyncJobGet uint32 = 62
+const KBAsyncJobGetAsyncJobIDMin uint64 = 1
+const KBAsyncJobGetAsyncJobIDMax uint64 = 9223372036854775807
+
+// EncodeKBAsyncJobGetRequest writes the schema kb_async_job_get declares, in order.
+func EncodeKBAsyncJobGetRequest(asyncJobID uint64) ([]byte, error) {
+	if asyncJobID < KBAsyncJobGetAsyncJobIDMin || asyncJobID > KBAsyncJobGetAsyncJobIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var asyncJobIDBytes [8]byte
+	binary.LittleEndian.PutUint64(asyncJobIDBytes[:], asyncJobID)
+	payload = append(payload, asyncJobIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBAsyncJobGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBAsyncJobGetRequest reads it back, checking each field against its own bound.
+func DecodeKBAsyncJobGetRequest(request []byte) (uint64, error) {
+	var asyncJobID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBAsyncJobGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	asyncJobID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if asyncJobID < KBAsyncJobGetAsyncJobIDMin || asyncJobID > KBAsyncJobGetAsyncJobIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return asyncJobID, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

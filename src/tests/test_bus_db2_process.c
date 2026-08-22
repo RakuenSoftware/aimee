@@ -4011,6 +4011,92 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(kb_doc_regions_for_chunk_count == 0);
 
+   /* The ingest queue's reads, over an empty queue. */
+   static aimee_db2_kb_ingest_queue_recent_row_t
+       kb_ingest_queue_recent_rows[AIMEE_DB2_KB_INGEST_QUEUE_RECENT_MAX_ROWS];
+   uint32_t kb_ingest_queue_recent_count = 99;
+   assert(aimee_db2_kb_ingest_queue_recent_call(
+              call_client, &client, 9523, 0, 16, kb_ingest_queue_recent_rows,
+              AIMEE_DB2_KB_INGEST_QUEUE_RECENT_MAX_ROWS, &kb_ingest_queue_recent_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_ingest_queue_recent_count == 0);
+
+   uint32_t kb_ingest_queue_stats_queue_pending = 99;
+   uint32_t kb_ingest_queue_stats_queue_running = 99;
+   uint32_t kb_ingest_queue_stats_done_last_24h = 99;
+   uint32_t kb_ingest_queue_stats_failed_last_24h = 99;
+   assert(aimee_db2_kb_ingest_queue_stats_call(
+              call_client, &client, 9524, 0, &kb_ingest_queue_stats_queue_pending,
+              &kb_ingest_queue_stats_queue_running, &kb_ingest_queue_stats_done_last_24h,
+              &kb_ingest_queue_stats_failed_last_24h, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_ingest_queue_stats_queue_pending == 0 && kb_ingest_queue_stats_queue_running == 0 &&
+          kb_ingest_queue_stats_done_last_24h == 0 && kb_ingest_queue_stats_failed_last_24h == 0);
+
+   uint32_t kb_ingest_queue_claim_next_job_claimed = 99;
+   uint64_t kb_ingest_queue_claim_next_ingest_job_id = 99;
+   static char kb_ingest_queue_claim_next_project_name
+       [AIMEE_DB2_KB_INGEST_QUEUE_CLAIM_NEXT_PROJECT_NAME_MAX + 1];
+   kb_ingest_queue_claim_next_project_name[0] = 'x';
+   static char
+       kb_ingest_queue_claim_next_root_path[AIMEE_DB2_KB_INGEST_QUEUE_CLAIM_NEXT_ROOT_PATH_MAX + 1];
+   kb_ingest_queue_claim_next_root_path[0] = 'x';
+   static char kb_ingest_queue_claim_next_workspace_name
+       [AIMEE_DB2_KB_INGEST_QUEUE_CLAIM_NEXT_WORKSPACE_NAME_MAX + 1];
+   kb_ingest_queue_claim_next_workspace_name[0] = 'x';
+   uint32_t kb_ingest_queue_claim_next_force_reindex = 99;
+   assert(aimee_db2_kb_ingest_queue_claim_next_call(
+              call_client, &client, 9525, 0, &kb_ingest_queue_claim_next_job_claimed,
+              &kb_ingest_queue_claim_next_ingest_job_id, kb_ingest_queue_claim_next_project_name,
+              sizeof(kb_ingest_queue_claim_next_project_name), kb_ingest_queue_claim_next_root_path,
+              sizeof(kb_ingest_queue_claim_next_root_path),
+              kb_ingest_queue_claim_next_workspace_name,
+              sizeof(kb_ingest_queue_claim_next_workspace_name),
+              &kb_ingest_queue_claim_next_force_reindex, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_ingest_queue_claim_next_job_claimed == 0 &&
+          kb_ingest_queue_claim_next_ingest_job_id == 0 &&
+          kb_ingest_queue_claim_next_project_name[0] == '\0' &&
+          kb_ingest_queue_claim_next_root_path[0] == '\0' &&
+          kb_ingest_queue_claim_next_workspace_name[0] == '\0' &&
+          kb_ingest_queue_claim_next_force_reindex == 0);
+
+   uint32_t kb_async_job_get_job_found = 99;
+   uint64_t kb_async_job_get_document_id = 99;
+   static char kb_async_job_get_job_kind[AIMEE_DB2_KB_ASYNC_JOB_GET_JOB_KIND_MAX + 1];
+   kb_async_job_get_job_kind[0] = 'x';
+   static char kb_async_job_get_project_name[AIMEE_DB2_KB_ASYNC_JOB_GET_PROJECT_NAME_MAX + 1];
+   kb_async_job_get_project_name[0] = 'x';
+   static char kb_async_job_get_job_status[AIMEE_DB2_KB_ASYNC_JOB_GET_JOB_STATUS_MAX + 1];
+   kb_async_job_get_job_status[0] = 'x';
+   uint32_t kb_async_job_get_attempts = 99;
+   static char kb_async_job_get_last_error[AIMEE_DB2_KB_ASYNC_JOB_GET_LAST_ERROR_MAX + 1];
+   kb_async_job_get_last_error[0] = 'x';
+   static char kb_async_job_get_claimed_by[AIMEE_DB2_KB_ASYNC_JOB_GET_CLAIMED_BY_MAX + 1];
+   kb_async_job_get_claimed_by[0] = 'x';
+   static char kb_async_job_get_claimed_at[AIMEE_DB2_KB_ASYNC_JOB_GET_CLAIMED_AT_MAX + 1];
+   kb_async_job_get_claimed_at[0] = 'x';
+   static char kb_async_job_get_job_created_at[AIMEE_DB2_KB_ASYNC_JOB_GET_JOB_CREATED_AT_MAX + 1];
+   kb_async_job_get_job_created_at[0] = 'x';
+   static char kb_async_job_get_job_updated_at[AIMEE_DB2_KB_ASYNC_JOB_GET_JOB_UPDATED_AT_MAX + 1];
+   kb_async_job_get_job_updated_at[0] = 'x';
+   assert(aimee_db2_kb_async_job_get_call(
+              call_client, &client, 9526, 0, 4242, &kb_async_job_get_job_found,
+              &kb_async_job_get_document_id, kb_async_job_get_job_kind,
+              sizeof(kb_async_job_get_job_kind), kb_async_job_get_project_name,
+              sizeof(kb_async_job_get_project_name), kb_async_job_get_job_status,
+              sizeof(kb_async_job_get_job_status), &kb_async_job_get_attempts,
+              kb_async_job_get_last_error, sizeof(kb_async_job_get_last_error),
+              kb_async_job_get_claimed_by, sizeof(kb_async_job_get_claimed_by),
+              kb_async_job_get_claimed_at, sizeof(kb_async_job_get_claimed_at),
+              kb_async_job_get_job_created_at, sizeof(kb_async_job_get_job_created_at),
+              kb_async_job_get_job_updated_at, sizeof(kb_async_job_get_job_updated_at), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_async_job_get_job_found == 0 && kb_async_job_get_document_id == 0 &&
+          kb_async_job_get_job_kind[0] == '\0' && kb_async_job_get_project_name[0] == '\0' &&
+          kb_async_job_get_job_status[0] == '\0' && kb_async_job_get_attempts == 0 &&
+          kb_async_job_get_last_error[0] == '\0' && kb_async_job_get_claimed_by[0] == '\0' &&
+          kb_async_job_get_claimed_at[0] == '\0' && kb_async_job_get_job_created_at[0] == '\0' &&
+          kb_async_job_get_job_updated_at[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

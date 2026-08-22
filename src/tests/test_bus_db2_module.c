@@ -3568,6 +3568,35 @@ int db2_kb_doc_regions_for_chunk(int64_t chunk_id, db2_kb_pdf_region_t *out, int
    return 0;
 }
 
+int db2_kb_ingest_queue_recent(db2_kb_ingest_recent_t *rows, int max_rows)
+{
+   (void)rows;
+   (void)max_rows;
+   return 0;
+}
+
+int db2_kb_ingest_queue_stats(db2_kb_ingest_queue_stats_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out)
+{
+   (void)job_id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

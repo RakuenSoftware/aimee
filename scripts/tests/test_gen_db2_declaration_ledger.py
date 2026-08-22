@@ -47,8 +47,8 @@ class DeclarationLedgerTests(unittest.TestCase):
         self.assertEqual(value["summary"], {
             "headers": 138,
             "declarations": 1397,
-            "reviewed": 698,
-            "audit_pending": 261,
+            "reviewed": 702,
+            "audit_pending": 257,
             "internal_unconsumed": 152,
             "private_test_only": 286,
         })

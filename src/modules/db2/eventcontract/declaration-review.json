@@ -1668,6 +1668,14 @@
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
     },
     {
+      "symbol": "db2_kb_ingest_queue_claim_next",
+      "signature_sha256": "ccbf6edfcc4e25af741c9fee41754785269dab457140661196052dccf028ce94",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_ingest_queue_claim_next operation takes the next ingest job and marks it running. It is the one work-claiming operation in this migration that does it correctly: the row is chosen and updated in a single statement whose subquery locks it and skips rows another worker already holds, so two workers claiming at once get different jobs rather than the same one. Priority orders the queue, then identifier."
+    },
+    {
       "symbol": "db2_kb_ingest_queue_complete",
       "signature_sha256": "7f00d3baa5d985580a811ac258209ee492fdc194b2f3a94716331195a158f869",
       "disposition": "wire-operation",
@@ -1684,12 +1692,28 @@
       "reason": "The typed maintenance.ingest_queue_fail operation replaces the failure write. The completion stamp is DB2's clock, and the statement has no condition on the job's current state, so a job that already succeeded is moved to failed just the same. The backend discards the step result, so the acknowledgement means the statement was prepared and nothing more: a job identifier that matches nothing is acknowledged."
     },
     {
+      "symbol": "db2_kb_ingest_queue_recent",
+      "signature_sha256": "303dd3f32c4de51920ab6bdf25534579c1ee628849a30ea504184db4f1e53a79",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_ingest_queue_recent operation lists recent ingest jobs, running first and pending next by a CASE the statement carries. So this is not a recency list despite its name: a job running for an hour outranks one that finished a second ago. It carries no job identifier, so a caller cannot follow a particular job across two calls or pair a row here with maintenance.kb_ingest_queue_complete."
+    },
+    {
       "symbol": "db2_kb_ingest_queue_reset_running",
       "signature_sha256": "d988bf89196e1349726f02ce68d7e40a89630074fc8beb2431206110eaa11213",
       "disposition": "wire-operation",
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.ingest_queue_reset_running operation replaces the startup recovery that returns queue rows abandoned by a dead worker to the pending pool. The two states and the clearing of started_at are fixed policy. Clearing the claim instant is the part that matters: a row left marked as claimed by a process that no longer exists is work that never runs again, and a caller able to skip the clear would hand back a row that still looks taken."
+    },
+    {
+      "symbol": "db2_kb_ingest_queue_stats",
+      "signature_sha256": "69c9ae0c9aad913f94b52b7aa1b5184bd815f7a9146732ed4f9d03103f60e0f2",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_ingest_queue_stats operation counts the ingest queue. The four numbers come from three separate statements outside a transaction -- one grouping, then a count of the day's completions, then of its failures -- so a job finishing between them is counted in one and not the other, and the four need not describe any single moment. The two day counts are windows the backend fixes; the request cannot move them."
     },
     {
       "symbol": "db2_kb_pdf_quarantine_confirm",
@@ -1906,6 +1930,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The cJSON list builder cannot be the stable wire shape; DB2 returns a bounded typed anti-pattern record set for caller serialization."
+    },
+    {
+      "symbol": "db2_kb_service_async_job_get",
+      "signature_sha256": "d3bb407b18c1c73cbdf6be0a70e15c104e6e5df901dee381128a6c6629ddc6bc",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_async_job_get operation reads one asynchronous job. It returns who claimed it and when, so a stuck job is diagnosable -- but nothing says what a claim expires after, so whether one is stale is the caller's judgement. The attempt count rises on every claim, so a job retried by a worker that keeps dying reads like one genuinely retried that often. Found is 1 here and 0 is no such job, the opposite of most reads in this module."
     },
     {
       "symbol": "db2_kb_service_async_queue_spawn_worker",

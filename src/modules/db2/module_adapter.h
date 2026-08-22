@@ -619,6 +619,10 @@ typedef struct
                              int max);
    int (*kb_doc_list_review)(int limit, int64_t cursor_id, db2_kb_doc_t *out, int max_out);
    int (*kb_doc_regions_for_chunk)(int64_t chunk_id, db2_kb_pdf_region_t *out, int max);
+   int (*kb_ingest_queue_recent)(db2_kb_ingest_recent_t *rows, int max_rows);
+   int (*kb_ingest_queue_stats)(db2_kb_ingest_queue_stats_t *out);
+   int (*kb_ingest_queue_claim_next)(db2_kb_ingest_job_t *out);
+   int (*kb_async_job_get)(int64_t job_id, db2_kb_service_async_job_t *out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

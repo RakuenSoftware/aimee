@@ -1705,4 +1705,20 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t chunk_id, aimee_db2_kb_doc_regions_for_chunk_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_kb_ingest_queue_recent_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t row_limit, aimee_db2_kb_ingest_queue_recent_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_ingest_queue_stats_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *queue_pending, uint32_t *queue_running, uint32_t *done_last_24h, uint32_t *failed_last_24h, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_ingest_queue_claim_next_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *job_claimed, uint64_t *ingest_job_id, char *project_name, size_t project_name_capacity, char *root_path, size_t root_path_capacity, char *workspace_name, size_t workspace_name_capacity, uint32_t *force_reindex, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_async_job_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t async_job_id, uint32_t *job_found, uint64_t *document_id, char *job_kind, size_t job_kind_capacity, char *project_name, size_t project_name_capacity, char *job_status, size_t job_status_capacity, uint32_t *attempts, char *last_error, size_t last_error_capacity, char *claimed_by, size_t claimed_by_capacity, char *claimed_at, size_t claimed_at_capacity, char *job_created_at, size_t job_created_at_capacity, char *job_updated_at, size_t job_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
 #endif /* AIMEE_DB2_CLIENT_H */

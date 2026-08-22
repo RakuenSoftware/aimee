@@ -10796,9 +10796,15 @@
           "line": 341
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_ingest_queue_claim_next operation takes the next ingest job and marks it running. It is the one work-claiming operation in this migration that does it correctly: the row is chosen and updated in a single statement whose subquery locks it and skips rows another worker already holds, so two workers claiming at once get different jobs rather than the same one. Priority orders the queue, then identifier."
+      },
       "signature": "int db2_kb_ingest_queue_claim_next ( db2_kb_ingest_job_t * out )",
       "signature_sha256": "ccbf6edfcc4e25af741c9fee41754785269dab457140661196052dccf028ce94",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_ingest_queue_claim_next"
     },
     {
@@ -10874,9 +10880,15 @@
           "line": 346
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_ingest_queue_recent operation lists recent ingest jobs, running first and pending next by a CASE the statement carries. So this is not a recency list despite its name: a job running for an hour outranks one that finished a second ago. It carries no job identifier, so a caller cannot follow a particular job across two calls or pair a row here with maintenance.kb_ingest_queue_complete."
+      },
       "signature": "int db2_kb_ingest_queue_recent ( db2_kb_ingest_recent_t * rows , int max_rows )",
       "signature_sha256": "303dd3f32c4de51920ab6bdf25534579c1ee628849a30ea504184db4f1e53a79",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_ingest_queue_recent"
     },
     {
@@ -10910,9 +10922,15 @@
           "line": 345
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_ingest_queue_stats operation counts the ingest queue. The four numbers come from three separate statements outside a transaction -- one grouping, then a count of the day's completions, then of its failures -- so a job finishing between them is counted in one and not the other, and the four need not describe any single moment. The two day counts are windows the backend fixes; the request cannot move them."
+      },
       "signature": "int db2_kb_ingest_queue_stats ( db2_kb_ingest_queue_stats_t * out )",
       "signature_sha256": "69c9ae0c9aad913f94b52b7aa1b5184bd815f7a9146732ed4f9d03103f60e0f2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_ingest_queue_stats"
     },
     {
@@ -11722,9 +11740,15 @@
           "line": 358
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_async_job_get operation reads one asynchronous job. It returns who claimed it and when, so a stuck job is diagnosable -- but nothing says what a claim expires after, so whether one is stale is the caller's judgement. The attempt count rises on every claim, so a job retried by a worker that keeps dying reads like one genuinely retried that often. Found is 1 here and 0 is no such job, the opposite of most reads in this module."
+      },
       "signature": "int db2_kb_service_async_job_get ( int64_t job_id , db2_kb_service_async_job_t * out )",
       "signature_sha256": "d3bb407b18c1c73cbdf6be0a70e15c104e6e5df901dee381128a6c6629ddc6bc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_async_job_get"
     },
     {
@@ -28231,15 +28255,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8099fefb2f60a78fd8d153cfce0e0e59efd2c9bbc67e67887ed1280e796bd2ec",
+  "fingerprint": "f2d28cdcb164283a527b695f580e2158660fae81a8f4692cf51c5cc6358d0b7f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 261,
+    "audit_pending": 257,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 698
+    "reviewed": 702
   }
 }

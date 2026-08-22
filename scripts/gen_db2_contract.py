@@ -13865,6 +13865,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_kb_doc_regions_for_chunk",
         "policy": {"reads": 200},
     },
+    "kb_ingest_queue_recent": {
+        "key": ("maintenance", 59),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_ingest_queue_recent",
+        "policy": {"reads": 200},
+    },
+    "kb_ingest_queue_stats": {
+        "key": ("maintenance", 60),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_ingest_queue_stats",
+        "policy": {"reads": 200},
+    },
+    "kb_ingest_queue_claim_next": {
+        "key": ("maintenance", 61),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_ingest_queue_claim_next",
+        "policy": {"writes": 200},
+    },
+    "kb_async_job_get": {
+        "key": ("maintenance", 62),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_service_async_job_get",
+        "policy": {"reads": 200},
+    },
 }
 
 
