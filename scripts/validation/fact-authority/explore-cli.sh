@@ -24,6 +24,12 @@ try() {
   case "$out" in
     *unavailable*|*'no command catalogue'*|*'capability absent'*|*'no such table'*|\
     *panic*|*Segmentation*|*'status":"error'*) flag=" <-- LOOK"; fails=$((fails+1)) ;;
+    # A command that does not dispatch is exactly the `aimee kb grant set` case:
+    # documented, referenced by an error message as the remedy, and missing. The
+    # sweep could not see it, because "unknown command" was not in this list --
+    # so the one defect a CLI sweep is best placed to find was invisible to it.
+    *'unknown command'*|*'is not a subcommand'*)
+      flag=" <-- LOOK (command does not dispatch)"; fails=$((fails+1)) ;;
   esac
   printf '%-40s %s%s\n' "$label" "$(printf '%s' "$out" | tr '\n' ' ' | head -c 160)" "$flag"
 }
@@ -36,7 +42,12 @@ try "memory search"     $A memory search deployment
 try "memory store"      $A memory store cli-probe "The CLI probe stored this fact."
 try "memory list after" $A memory list --limit 3
 try "kb health"         $A kb health
-try "describe"          $A describe
+# `describe` is NOT a command. CAP_DESCRIBE_READ/_ADMIN exist in server.h and one
+# sits in a CAPS_ bundle, but no route or method-registry entry consults them, so
+# probing `aimee describe` was testing my own invention. Replaced with commands
+# that do exist, and the flag list above now catches the case either way.
+try "help --all"        $A help --all
+try "config show"       $A config show
 
 echo
 echo "flagged: $fails"
