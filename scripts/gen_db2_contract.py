@@ -21,6 +21,7 @@ PROCESS_CONTRACTS = Path("src/modules/process-contracts.json")
 HEADER = Path("src/modules/db2/include/aimee/db2/module_api.h")
 CLIENT_HEADER = Path("src/modules/db2/include/aimee/db2/client.h")
 CLIENT_SOURCE_DIR = Path("src/modules/db2/client")
+BACKEND_SOURCE_DIR = Path("src/modules/db2/c")
 GO_CONTRACT = Path("server-go/db2/contract_generated.go")
 BASELINE = Path("tests/baselines/modules/db2-wire-v1.json")
 DECLARATION_REVIEW = Path("src/modules/db2/eventcontract/declaration-review.json")
@@ -38,6 +39,40 @@ RESULT_CODES = ("ok", "not_found", "conflict", "denied", "retryable", "invalid_s
 ENVELOPE_REQUEST_MAGIC = 0x51523244  # "D2RQ", little-endian
 ENVELOPE_REPLY_MAGIC = 0x52523244  # "D2RR", little-endian
 ENVELOPE_HEADER_LEN = 24
+# The macro every scope-filtered statement is built with. A statement carrying
+# it reads the four reserved parameters that db2_memory_scope_bind_current
+# fills from a __thread static, so an operation reaching such a statement only
+# answers correctly when it has been told the scope.
+SCOPE_FILTER_MACRO = "DB2_MEMORY_SCOPE_FILTER_SQL"
+# Matches a function definition opening a line: a return type and a db2_ name
+# followed by its parameter list, with no trailing semicolon so declarations in
+# headers do not match.
+BACKEND_DEFINITION = re.compile(r"^\w[\w \*]*?\b(db2_[a-z0-9_]+)\s*\([^;]*\)\s*$", re.M)
+
+
+def _scope_filtered_symbols(root: Path) -> frozenset[str]:
+    """Backend functions whose SQL is scope-filtered, read from the source.
+
+    Derived rather than listed. A list of names is a second statement of the
+    same fact, and the two drift silently: sixteen operations reached a
+    scope-filtered statement while declaring themselves unscoped, which the
+    catalog recorded and nothing checked. Reading the source makes the catalog
+    answerable to the code it describes.
+    """
+    found: set[str] = set()
+    for path in sorted((root / BACKEND_SOURCE_DIR).glob("*.c")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        definitions = [(match.start(), match.group(1))
+                       for match in BACKEND_DEFINITION.finditer(text)]
+        for use in re.finditer(SCOPE_FILTER_MACRO, text):
+            owner = None
+            for offset, name in definitions:
+                if offset >= use.start():
+                    break
+                owner = name
+            if owner:
+                found.add(owner)
+    return frozenset(found)
 # What the bus wire carries in one payload (BUS_WIRE_MAX_PAYLOAD), less the
 # envelope: the ceiling on a reply that crosses whole.
 WIRE_REPLY_MAX = (1 << 20) - ENVELOPE_HEADER_LEN
@@ -156,7 +191,10 @@ def _string(value: object, label: str, maximum: int = 128) -> str:
     return value
 
 
-def validate_catalog(value: object) -> dict[str, object]:
+def validate_catalog(value: object, scope_filtered: frozenset[str] | None = None
+                     ) -> dict[str, object]:
+    if scope_filtered is None:
+        scope_filtered = _scope_filtered_symbols(ROOT)
     catalog = _keys(value, {
         "schema_version", "module", "wire_version", "catalog_complete", "families",
         "body_envelope", "result_codes", "operations",
@@ -343,19 +381,13 @@ def validate_catalog(value: object) -> dict[str, object]:
         # that static does not follow a call across a process boundary. An
         # operation whose answer depends on it must be told the scope, so the
         # scope has to be visible in the request shape.
-        expected_scope = "session" if name in ("top_l2_facts",
-                                               "list_session_scope_priority",
-                                               "collect_alias_matches",
-                                               "collect_entity_matches",
-                                               "collect_event_frame_matches",
-                                               "collect_relation_token_matches",
-                                               "collect_summary_matches",
-                                               "collect_temporal_matches",
-                                               "find_facts_like",
-                                               "list_session_scope_priority_like",
-                                               "negation_fts_search",
-                                               "search_facts_patterns_by_keyword",
-                                               "list_rows") else "none"
+        #
+        # Read from the C rather than listed here. A list is a second statement
+        # of the same fact and the two drifted: sixteen operations reached a
+        # scope-filtered statement while declaring themselves unscoped. The
+        # filter admits every row when the scope is inactive, so out of process
+        # that is not a smaller answer, it is every workspace's rows.
+        expected_scope = "session" if scope_filtered & set(operation["c_symbols"]) else "none"
         # A described operation states its own transaction and idempotency, and
         # the review entry beside it says why. The lists below cover the
         # operations that predate the described format; extending them to every
@@ -370,9 +402,11 @@ def validate_catalog(value: object) -> dict[str, object]:
             if operation["idempotency"] not in ("safe", "unsafe"):
                 fail("operation-semantics",
                      f"{name} declares an unknown idempotency {operation['idempotency']!r}")
-            if operation["scope"] != "none":
+            if operation["scope"] != expected_scope:
                 fail("operation-semantics",
-                     f"{name} is scoped, which the described format does not carry")
+                     f"{name} declares scope {operation['scope']!r}; its backend "
+                     f"{'reaches' if expected_scope == 'session' else 'does not reach'} a "
+                     "scope-filtered statement")
         elif operation["scope"] != expected_scope or \
                 operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
@@ -33315,7 +33349,8 @@ func DecodeHealthResponse(response []byte) (HealthEvidence, error) {{
 
 
 def generated(root: Path) -> tuple[bytes, bytes, bytes, bytes, bytes]:
-    catalog = validate_catalog(load_json(root / CATALOG))
+    catalog = validate_catalog(load_json(root / CATALOG),
+                               _scope_filtered_symbols(root))
     _validate_repository_bindings(root, catalog)
     _validate_declaration_gate(root, catalog)
     return (header_bytes(catalog), client_header_bytes(catalog), client_source_bytes(catalog),
@@ -33395,7 +33430,8 @@ def _client_sources(root: Path, catalog: dict[str, object],
 
 
 def run(root: Path, write: bool) -> None:
-    catalog = validate_catalog(load_json(root / CATALOG))
+    catalog = validate_catalog(load_json(root / CATALOG),
+                               _scope_filtered_symbols(root))
     header, client_header, client_source, go_contract, baseline = generated(root)
     outputs = (
         (HEADER, header),

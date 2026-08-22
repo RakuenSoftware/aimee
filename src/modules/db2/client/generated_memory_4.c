@@ -52,7 +52,8 @@ aimee_module_call_result_t aimee_db2_directive_get_call(
 
 aimee_module_call_result_t
 aimee_db2_briefing_key_facts_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
-                                  uint64_t deadline_ns, aimee_db2_briefing_key_facts_row_t *rows,
+                                  uint64_t deadline_ns, uint32_t scope_flags, const char *workspace,
+                                  const char *project, aimee_db2_briefing_key_facts_row_t *rows,
                                   uint32_t capacity, uint32_t *count,
                                   aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
@@ -68,7 +69,8 @@ aimee_db2_briefing_key_facts_call(aimee_db2_call_fn call, void *call_context, ui
    const size_t response_capacity = AIMEE_DB2_BRIEFING_KEY_FACTS_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_briefing_key_facts_request_encode(request, sizeof(request), &request_len) != 0)
+   if (aimee_db2_briefing_key_facts_request_encode(scope_flags, workspace, project, request,
+                                                   sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -95,6 +97,7 @@ aimee_db2_briefing_key_facts_call(aimee_db2_call_fn call, void *call_context, ui
 
 aimee_module_call_result_t aimee_db2_briefing_recent_activity_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t scope_flags, const char *workspace, const char *project,
     aimee_db2_briefing_recent_activity_row_t *rows, uint32_t capacity, uint32_t *count,
     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
@@ -110,8 +113,8 @@ aimee_module_call_result_t aimee_db2_briefing_recent_activity_call(
    const size_t response_capacity = AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_briefing_recent_activity_request_encode(request, sizeof(request), &request_len) !=
-       0)
+   if (aimee_db2_briefing_recent_activity_request_encode(scope_flags, workspace, project, request,
+                                                         sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -169,6 +172,7 @@ aimee_module_call_result_t aimee_db2_memory_tier_kind_counts_call(
 
 aimee_module_call_result_t aimee_db2_memory_key_facts_provenance_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t scope_flags, const char *workspace, const char *project,
     aimee_db2_memory_key_facts_provenance_row_t *rows, uint32_t capacity, uint32_t *count,
     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
@@ -184,8 +188,8 @@ aimee_module_call_result_t aimee_db2_memory_key_facts_provenance_call(
    const size_t response_capacity = AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_memory_key_facts_provenance_request_encode(request, sizeof(request),
-                                                            &request_len) != 0)
+   if (aimee_db2_memory_key_facts_provenance_request_encode(
+           scope_flags, workspace, project, request, sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -472,8 +476,9 @@ aimee_module_call_result_t aimee_db2_memory_dedupe_candidates_call(
 
 aimee_module_call_result_t aimee_db2_memory_episodes_search_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    const char *search_query, uint32_t row_limit, aimee_db2_memory_episodes_search_row_t *rows,
-    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    const char *search_query, uint32_t row_limit, uint32_t scope_flags, const char *workspace,
+    const char *project, aimee_db2_memory_episodes_search_row_t *rows, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -487,8 +492,9 @@ aimee_module_call_result_t aimee_db2_memory_episodes_search_call(
    const size_t response_capacity = AIMEE_DB2_MEMORY_EPISODES_SEARCH_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_memory_episodes_search_request_encode(search_query, row_limit, request,
-                                                       sizeof(request), &request_len) != 0)
+   if (aimee_db2_memory_episodes_search_request_encode(search_query, row_limit, scope_flags,
+                                                       workspace, project, request, sizeof(request),
+                                                       &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -589,8 +595,9 @@ aimee_module_call_result_t aimee_db2_memory_session_created_at_call(
 
 aimee_module_call_result_t aimee_db2_memory_search_by_pattern_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    const char *search_pattern, aimee_db2_memory_search_by_pattern_row_t *rows, uint32_t capacity,
-    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    const char *search_pattern, uint32_t scope_flags, const char *workspace, const char *project,
+    aimee_db2_memory_search_by_pattern_row_t *rows, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -604,7 +611,8 @@ aimee_module_call_result_t aimee_db2_memory_search_by_pattern_call(
    const size_t response_capacity = AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_memory_search_by_pattern_request_encode(search_pattern, request, sizeof(request),
+   if (aimee_db2_memory_search_by_pattern_request_encode(search_pattern, scope_flags, workspace,
+                                                         project, request, sizeof(request),
                                                          &request_len) != 0)
    {
       free(response);
@@ -676,6 +684,7 @@ aimee_module_call_result_t aimee_db2_memory_prior_in_session_call(
 
 aimee_module_call_result_t aimee_db2_lifecycle_stale_pending_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t scope_flags, const char *workspace, const char *project,
     aimee_db2_lifecycle_stale_pending_row_t *rows, uint32_t capacity, uint32_t *count,
     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
@@ -691,8 +700,8 @@ aimee_module_call_result_t aimee_db2_lifecycle_stale_pending_call(
    const size_t response_capacity = AIMEE_DB2_LIFECYCLE_STALE_PENDING_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_lifecycle_stale_pending_request_encode(request, sizeof(request), &request_len) !=
-       0)
+   if (aimee_db2_lifecycle_stale_pending_request_encode(scope_flags, workspace, project, request,
+                                                        sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -719,8 +728,9 @@ aimee_module_call_result_t aimee_db2_lifecycle_stale_pending_call(
 
 aimee_module_call_result_t aimee_db2_lifecycle_newly_superseded_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    const char *since, aimee_db2_lifecycle_newly_superseded_row_t *rows, uint32_t capacity,
-    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    const char *since, uint32_t scope_flags, const char *workspace, const char *project,
+    aimee_db2_lifecycle_newly_superseded_row_t *rows, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -734,8 +744,8 @@ aimee_module_call_result_t aimee_db2_lifecycle_newly_superseded_call(
    const size_t response_capacity = AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_lifecycle_newly_superseded_request_encode(since, request, sizeof(request),
-                                                           &request_len) != 0)
+   if (aimee_db2_lifecycle_newly_superseded_request_encode(
+           since, scope_flags, workspace, project, request, sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;

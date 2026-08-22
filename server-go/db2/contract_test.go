@@ -3609,16 +3609,19 @@ func TestUnitIdsForMemoryMatchesEverySharedCVector(t *testing.T) {
 func TestBriefingActiveEntitiesMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "briefing_active_entities")]
 
-	request, err := EncodeBriefingActiveEntitiesRequest(operation.Request.Limit)
+	request, err := EncodeBriefingActiveEntitiesRequest(operation.Request.Limit, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	limit, err := DecodeBriefingActiveEntitiesRequest(request)
-	if err != nil || limit != operation.Request.Limit {
+	limit, scopeFlags, workspace, project, err := DecodeBriefingActiveEntitiesRequest(request)
+	if err != nil || limit != operation.Request.Limit ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, err := DecodeBriefingActiveEntitiesRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, err := DecodeBriefingActiveEntitiesRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3726,17 +3729,20 @@ func TestProspectiveByTriggerTermsMatchesEverySharedCVector(t *testing.T) {
 func TestRelationsForEntityMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "relations_for_entity")]
 
-	request, err := EncodeRelationsForEntityRequest(operation.Request.Entity, operation.Request.Limit)
+	request, err := EncodeRelationsForEntityRequest(operation.Request.Entity, operation.Request.Limit, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	entity, limit, err := DecodeRelationsForEntityRequest(request)
+	entity, limit, scopeFlags, workspace, project, err := DecodeRelationsForEntityRequest(request)
 	if err != nil || entity != operation.Request.Entity ||
-		limit != operation.Request.Limit {
+		limit != operation.Request.Limit ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, _, err := DecodeRelationsForEntityRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, _, err := DecodeRelationsForEntityRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3746,17 +3752,20 @@ func TestRelationsForEntityMatchesEverySharedCVector(t *testing.T) {
 func TestRelationsSearchMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "relations_search")]
 
-	request, err := EncodeRelationsSearchRequest(operation.Request.RelationQuery, operation.Request.Limit)
+	request, err := EncodeRelationsSearchRequest(operation.Request.RelationQuery, operation.Request.Limit, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	relationQuery, limit, err := DecodeRelationsSearchRequest(request)
+	relationQuery, limit, scopeFlags, workspace, project, err := DecodeRelationsSearchRequest(request)
 	if err != nil || relationQuery != operation.Request.RelationQuery ||
-		limit != operation.Request.Limit {
+		limit != operation.Request.Limit ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, _, err := DecodeRelationsSearchRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, _, err := DecodeRelationsSearchRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3766,18 +3775,21 @@ func TestRelationsSearchMatchesEverySharedCVector(t *testing.T) {
 func TestRelationsSearchAsOfMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "relations_search_as_of")]
 
-	request, err := EncodeRelationsSearchAsOfRequest(operation.Request.RelationQuery, operation.Request.AsOf, operation.Request.Limit)
+	request, err := EncodeRelationsSearchAsOfRequest(operation.Request.RelationQuery, operation.Request.AsOf, operation.Request.Limit, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	relationQuery, asOf, limit, err := DecodeRelationsSearchAsOfRequest(request)
+	relationQuery, asOf, limit, scopeFlags, workspace, project, err := DecodeRelationsSearchAsOfRequest(request)
 	if err != nil || relationQuery != operation.Request.RelationQuery ||
 		asOf != operation.Request.AsOf ||
-		limit != operation.Request.Limit {
+		limit != operation.Request.Limit ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, _, _, err := DecodeRelationsSearchAsOfRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, _, _, err := DecodeRelationsSearchAsOfRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3787,17 +3799,20 @@ func TestRelationsSearchAsOfMatchesEverySharedCVector(t *testing.T) {
 func TestRelationsSupportingMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "relations_supporting")]
 
-	request, err := EncodeRelationsSupportingRequest(operation.Request.EntityToken, operation.Request.Limit)
+	request, err := EncodeRelationsSupportingRequest(operation.Request.EntityToken, operation.Request.Limit, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	entityToken, limit, err := DecodeRelationsSupportingRequest(request)
+	entityToken, limit, scopeFlags, workspace, project, err := DecodeRelationsSupportingRequest(request)
 	if err != nil || entityToken != operation.Request.EntityToken ||
-		limit != operation.Request.Limit {
+		limit != operation.Request.Limit ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, _, err := DecodeRelationsSupportingRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, _, err := DecodeRelationsSupportingRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3828,15 +3843,18 @@ func TestTypedFactRecallMatchesEverySharedCVector(t *testing.T) {
 func TestGlobalConstraintsMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "global_constraints")]
 
-	request, err := EncodeGlobalConstraintsRequest()
+	request, err := EncodeGlobalConstraintsRequest(operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	if err := DecodeGlobalConstraintsRequest(request); err != nil {
+	scopeFlags, workspace, project, err := DecodeGlobalConstraintsRequest(request)
+	if err != nil || scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if err := DecodeGlobalConstraintsRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, err := DecodeGlobalConstraintsRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3846,16 +3864,19 @@ func TestGlobalConstraintsMatchesEverySharedCVector(t *testing.T) {
 func TestKvSectionMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "kv_section")]
 
-	request, err := EncodeKvSectionRequest(operation.Request.KvSection)
+	request, err := EncodeKvSectionRequest(operation.Request.KvSection, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	kvSection, err := DecodeKvSectionRequest(request)
-	if err != nil || kvSection != operation.Request.KvSection {
+	kvSection, scopeFlags, workspace, project, err := DecodeKvSectionRequest(request)
+	if err != nil || kvSection != operation.Request.KvSection ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, err := DecodeKvSectionRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, err := DecodeKvSectionRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3904,16 +3925,19 @@ func TestSessionMemoriesMatchesEverySharedCVector(t *testing.T) {
 func TestMemoryCandidatesMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_candidates")]
 
-	request, err := EncodeMemoryCandidatesRequest(operation.Request.CandidateFilter)
+	request, err := EncodeMemoryCandidatesRequest(operation.Request.CandidateFilter, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	candidateFilter, err := DecodeMemoryCandidatesRequest(request)
-	if err != nil || candidateFilter != operation.Request.CandidateFilter {
+	candidateFilter, scopeFlags, workspace, project, err := DecodeMemoryCandidatesRequest(request)
+	if err != nil || candidateFilter != operation.Request.CandidateFilter ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, err := DecodeMemoryCandidatesRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, err := DecodeMemoryCandidatesRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -3923,16 +3947,19 @@ func TestMemoryCandidatesMatchesEverySharedCVector(t *testing.T) {
 func TestRecallSectionMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "recall_section")]
 
-	request, err := EncodeRecallSectionRequest(operation.Request.RecallSection)
+	request, err := EncodeRecallSectionRequest(operation.Request.RecallSection, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	recallSection, err := DecodeRecallSectionRequest(request)
-	if err != nil || recallSection != operation.Request.RecallSection {
+	recallSection, scopeFlags, workspace, project, err := DecodeRecallSectionRequest(request)
+	if err != nil || recallSection != operation.Request.RecallSection ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, err := DecodeRecallSectionRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, err := DecodeRecallSectionRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -4594,15 +4621,18 @@ func TestDirectiveGetMatchesEverySharedCVector(t *testing.T) {
 func TestBriefingKeyFactsMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "briefing_key_facts")]
 
-	request, err := EncodeBriefingKeyFactsRequest()
+	request, err := EncodeBriefingKeyFactsRequest(operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	if err := DecodeBriefingKeyFactsRequest(request); err != nil {
+	scopeFlags, workspace, project, err := DecodeBriefingKeyFactsRequest(request)
+	if err != nil || scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if err := DecodeBriefingKeyFactsRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, err := DecodeBriefingKeyFactsRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -4612,15 +4642,18 @@ func TestBriefingKeyFactsMatchesEverySharedCVector(t *testing.T) {
 func TestBriefingRecentActivityMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "briefing_recent_activity")]
 
-	request, err := EncodeBriefingRecentActivityRequest()
+	request, err := EncodeBriefingRecentActivityRequest(operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	if err := DecodeBriefingRecentActivityRequest(request); err != nil {
+	scopeFlags, workspace, project, err := DecodeBriefingRecentActivityRequest(request)
+	if err != nil || scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if err := DecodeBriefingRecentActivityRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, err := DecodeBriefingRecentActivityRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -4648,15 +4681,18 @@ func TestMemoryTierKindCountsMatchesEverySharedCVector(t *testing.T) {
 func TestMemoryKeyFactsProvenanceMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_key_facts_provenance")]
 
-	request, err := EncodeMemoryKeyFactsProvenanceRequest()
+	request, err := EncodeMemoryKeyFactsProvenanceRequest(operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	if err := DecodeMemoryKeyFactsProvenanceRequest(request); err != nil {
+	scopeFlags, workspace, project, err := DecodeMemoryKeyFactsProvenanceRequest(request)
+	if err != nil || scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if err := DecodeMemoryKeyFactsProvenanceRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, err := DecodeMemoryKeyFactsProvenanceRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -4784,17 +4820,20 @@ func TestMemoryDedupeCandidatesMatchesEverySharedCVector(t *testing.T) {
 func TestMemoryEpisodesSearchMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_episodes_search")]
 
-	request, err := EncodeMemoryEpisodesSearchRequest(operation.Request.SearchQuery, operation.Request.RowLimit)
+	request, err := EncodeMemoryEpisodesSearchRequest(operation.Request.SearchQuery, operation.Request.RowLimit, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	searchQuery, rowLimit, err := DecodeMemoryEpisodesSearchRequest(request)
+	searchQuery, rowLimit, scopeFlags, workspace, project, err := DecodeMemoryEpisodesSearchRequest(request)
 	if err != nil || searchQuery != operation.Request.SearchQuery ||
-		rowLimit != operation.Request.RowLimit {
+		rowLimit != operation.Request.RowLimit ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, _, err := DecodeMemoryEpisodesSearchRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, _, err := DecodeMemoryEpisodesSearchRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -4842,16 +4881,19 @@ func TestMemorySessionCreatedAtMatchesEverySharedCVector(t *testing.T) {
 func TestMemorySearchByPatternMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "memory_search_by_pattern")]
 
-	request, err := EncodeMemorySearchByPatternRequest(operation.Request.SearchPattern)
+	request, err := EncodeMemorySearchByPatternRequest(operation.Request.SearchPattern, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	searchPattern, err := DecodeMemorySearchByPatternRequest(request)
-	if err != nil || searchPattern != operation.Request.SearchPattern {
+	searchPattern, scopeFlags, workspace, project, err := DecodeMemorySearchByPatternRequest(request)
+	if err != nil || searchPattern != operation.Request.SearchPattern ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, err := DecodeMemorySearchByPatternRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, err := DecodeMemorySearchByPatternRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -4882,15 +4924,18 @@ func TestMemoryPriorInSessionMatchesEverySharedCVector(t *testing.T) {
 func TestLifecycleStalePendingMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "lifecycle_stale_pending")]
 
-	request, err := EncodeLifecycleStalePendingRequest()
+	request, err := EncodeLifecycleStalePendingRequest(operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	if err := DecodeLifecycleStalePendingRequest(request); err != nil {
+	scopeFlags, workspace, project, err := DecodeLifecycleStalePendingRequest(request)
+	if err != nil || scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if err := DecodeLifecycleStalePendingRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, err := DecodeLifecycleStalePendingRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}
@@ -4900,16 +4945,19 @@ func TestLifecycleStalePendingMatchesEverySharedCVector(t *testing.T) {
 func TestLifecycleNewlySupersededMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "lifecycle_newly_superseded")]
 
-	request, err := EncodeLifecycleNewlySupersededRequest(operation.Request.Since)
+	request, err := EncodeLifecycleNewlySupersededRequest(operation.Request.Since, operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	since, err := DecodeLifecycleNewlySupersededRequest(request)
-	if err != nil || since != operation.Request.Since {
+	since, scopeFlags, workspace, project, err := DecodeLifecycleNewlySupersededRequest(request)
+	if err != nil || since != operation.Request.Since ||
+		scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if _, err := DecodeLifecycleNewlySupersededRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, _, err := DecodeLifecycleNewlySupersededRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}

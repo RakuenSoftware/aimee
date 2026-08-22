@@ -85,6 +85,19 @@ type liveRequest struct {
 	seed []string
 }
 
+// The scope every scoped probe asks under: active, naming a workspace and a
+// project nothing holds.
+//
+// Active is the point. An inactive scope short-circuits the filter before it
+// reaches memory_scopes or memory_workspaces, so probing with one would prove
+// the statement parses and nothing about the twelve subqueries the rank is
+// built from -- which is most of what these statements are.
+const (
+	liveProbeScopeFlags   uint32 = 3
+	liveProbeWorkspace           = "live-probe-workspace"
+	liveProbeScopeProject        = "live-probe-project"
+)
+
 func liveReads() []liveRequest {
 	return []liveRequest{
 		{
@@ -523,6 +536,199 @@ func liveReads() []liveRequest {
 				}
 				if status != "" {
 					t.Fatalf("status = %q for a relation nobody proposed", status)
+				}
+			},
+		},
+		{
+			name:  "global_constraints",
+			stage: db2contract.StageGlobalConstraints,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeGlobalConstraintsRequest(liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeGlobalConstraintsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kv_section",
+			stage: db2contract.StageKvSection,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKvSectionRequest(kvSectionActiveTasks, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeKvSectionReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "recall_section",
+			stage: db2contract.StageRecallSection,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRecallSectionRequest(recallSectionIdentity, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRecallSectionReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_candidates",
+			stage: db2contract.StageMemoryCandidates,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryCandidatesRequest(memoryCandidatesPrimary, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryCandidatesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "briefing_active_entities",
+			stage: db2contract.StageBriefingActiveEntities,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBriefingActiveEntitiesRequest(8, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeBriefingActiveEntitiesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "briefing_key_facts",
+			stage: db2contract.StageBriefingKeyFacts,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBriefingKeyFactsRequest(liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeBriefingKeyFactsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "briefing_recent_activity",
+			stage: db2contract.StageBriefingRecentActivity,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBriefingRecentActivityRequest(liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeBriefingRecentActivityReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_key_facts_provenance",
+			stage: db2contract.StageMemoryKeyFactsProvenance,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryKeyFactsProvenanceRequest(liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryKeyFactsProvenanceReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "lifecycle_stale_pending",
+			stage: db2contract.StageLifecycleStalePending,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLifecycleStalePendingRequest(liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeLifecycleStalePendingReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "lifecycle_newly_superseded",
+			stage: db2contract.StageLifecycleNewlySuperseded,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLifecycleNewlySupersededRequest("", liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeLifecycleNewlySupersededReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_search_by_pattern",
+			stage: db2contract.StageMemorySearchByPattern,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySearchByPatternRequest("%live-probe%", liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemorySearchByPatternReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_episodes_search",
+			stage: db2contract.StageMemoryEpisodesSearch,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryEpisodesSearchRequest("live-probe", 8, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryEpisodesSearchReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "relations_for_entity",
+			stage: db2contract.StageRelationsForEntity,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRelationsForEntityRequest("live-probe", 8, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRelationsForEntityReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "relations_search",
+			stage: db2contract.StageRelationsSearch,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRelationsSearchRequest("live-probe", 8, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRelationsSearchReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "relations_search_as_of",
+			stage: db2contract.StageRelationsSearchAsOf,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRelationsSearchAsOfRequest("live-probe",
+					"2026-01-01 00:00:00", 8, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRelationsSearchAsOfReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "relations_supporting",
+			stage: db2contract.StageRelationsSupporting,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRelationsSupportingRequest("live-probe", 8, liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRelationsSupportingReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
 				}
 			},
 		},

@@ -227,15 +227,56 @@ func TestDispatchRefusesWithoutAStore(t *testing.T) {
 func TestDispatchRoutesOnTheFamilyAndTheOperation(t *testing.T) {
 	// An operation id is unique only within its family, so a request carrying
 	// the right id under the wrong stage must not reach the implementation.
+	//
+	// The wrong family is chosen rather than written down. This operation's id
+	// is free under some families and, as more of the catalogue is ported, not
+	// under others -- a hard-coded one would quietly stop testing routing and
+	// start testing a decode rejection instead.
+	var wrongFamily uint32
+	for _, family := range []uint32{
+		db2contract.FamilyLifecycle, db2contract.FamilyTenancy, db2contract.FamilyMemory,
+		db2contract.FamilyIndex, db2contract.FamilyLearning, db2contract.FamilyOrganization,
+		db2contract.FamilyCustody,
+	} {
+		if _, taken := lookup(family, db2contract.OperationCuratorInvalidationsSince); !taken {
+			wrongFamily = family
+			break
+		}
+	}
+	if wrongFamily == 0 {
+		t.Fatal("every family now implements this operation id; the test needs " +
+			"an operation whose id is still free somewhere")
+	}
+
 	store := &fakeStore{rows: &fakeRows{}}
 	handler := NewDispatchHandler(store)
 	request, err := db2contract.EncodeCuratorInvalidationsSinceRequest(0)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if _, status := handler(invocation(db2contract.FamilyMemory), request); status !=
+	if _, status := handler(invocation(wrongFamily), request); status !=
 		bus.ModuleStatusCapabilityAbsent {
-		t.Fatalf("wrong-family status = %v, want capability absent", status)
+		t.Fatalf("family %d: status = %v, want capability absent", wrongFamily, status)
+	}
+	if store.lastSQL != "" {
+		t.Fatal("a misrouted request reached the store")
+	}
+}
+
+func TestAMisroutedRequestNeverReachesTheStore(t *testing.T) {
+	// The half of the property above that holds whichever ids are occupied: a
+	// request whose operation id does exist under the wrong family must still
+	// not be executed as that family's operation. It is rejected at decode,
+	// because the body is the wrong shape, and nothing is queried.
+	store := &fakeStore{rows: &fakeRows{}}
+	handler := NewDispatchHandler(store)
+	request, err := db2contract.EncodeCuratorInvalidationsSinceRequest(0)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if _, status := handler(invocation(db2contract.FamilyMemory), request); status ==
+		bus.ModuleStatusOK {
+		t.Fatal("a misrouted request was answered as though it were routed")
 	}
 	if store.lastSQL != "" {
 		t.Fatal("a misrouted request reached the store")

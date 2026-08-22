@@ -2269,9 +2269,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       }
       {
          uint32_t limit = 0u;
-         if (aimee_db2_briefing_active_entities_request_decode(request_body, request_len, &limit) ==
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_PROJECT_MAX + 1];
+         if (aimee_db2_briefing_active_entities_request_decode(request_body, request_len, &limit, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) ==
              0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->briefing_active_entities)
@@ -2671,9 +2679,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       {
          char entity[AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MAX + 1] = "";
          uint32_t limit = 0u;
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_RELATIONS_FOR_ENTITY_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_RELATIONS_FOR_ENTITY_PROJECT_MAX + 1];
          if (aimee_db2_relations_for_entity_request_decode(request_body, request_len, entity,
-                                                           sizeof(entity), &limit) == 0)
+                                                           sizeof(entity), &limit, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_RELATIONS_FOR_ENTITY_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->relations_for_entity)
@@ -2738,9 +2754,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       {
          char relation_query[AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MAX + 1] = "";
          uint32_t limit = 0u;
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_RELATIONS_SEARCH_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_RELATIONS_SEARCH_PROJECT_MAX + 1];
          if (aimee_db2_relations_search_request_decode(request_body, request_len, relation_query,
-                                                       sizeof(relation_query), &limit) == 0)
+                                                       sizeof(relation_query), &limit, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_RELATIONS_SEARCH_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->relations_search)
@@ -2806,10 +2830,18 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          char relation_query[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MAX + 1] = "";
          char as_of[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MAX + 1] = "";
          uint32_t limit = 0u;
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_PROJECT_MAX + 1];
          if (aimee_db2_relations_search_as_of_request_decode(request_body, request_len,
                                                              relation_query, sizeof(relation_query),
-                                                             as_of, sizeof(as_of), &limit) == 0)
+                                                             as_of, sizeof(as_of), &limit, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->relations_search_as_of)
@@ -2874,9 +2906,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       {
          char entity_token[AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MAX + 1] = "";
          uint32_t limit = 0u;
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_RELATIONS_SUPPORTING_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_RELATIONS_SUPPORTING_PROJECT_MAX + 1];
          if (aimee_db2_relations_supporting_request_decode(request_body, request_len, entity_token,
-                                                           sizeof(entity_token), &limit) == 0)
+                                                           sizeof(entity_token), &limit, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_RELATIONS_SUPPORTING_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->relations_supporting)
@@ -3003,8 +3043,16 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         if (aimee_db2_global_constraints_request_decode(request_body, request_len) == 0)
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_GLOBAL_CONSTRAINTS_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_GLOBAL_CONSTRAINTS_PROJECT_MAX + 1];
+         if (aimee_db2_global_constraints_request_decode(request_body, request_len, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_GLOBAL_CONSTRAINTS_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->global_constraints)
@@ -3051,8 +3099,16 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       }
       {
          uint32_t kv_section = 0u;
-         if (aimee_db2_kv_section_request_decode(request_body, request_len, &kv_section) == 0)
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_KV_SECTION_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_KV_SECTION_PROJECT_MAX + 1];
+         if (aimee_db2_kv_section_request_decode(request_body, request_len, &kv_section, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_KV_SECTION_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->kv_section)
@@ -3198,9 +3254,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       }
       {
          uint32_t candidate_filter = 0u;
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_MEMORY_CANDIDATES_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_MEMORY_CANDIDATES_PROJECT_MAX + 1];
          if (aimee_db2_memory_candidates_request_decode(request_body, request_len,
-                                                        &candidate_filter) == 0)
+                                                        &candidate_filter, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_MEMORY_CANDIDATES_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->memory_candidates)
@@ -3256,9 +3320,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       }
       {
          uint32_t recall_section = 0u;
-         if (aimee_db2_recall_section_request_decode(request_body, request_len, &recall_section) ==
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_RECALL_SECTION_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_RECALL_SECTION_PROJECT_MAX + 1];
+         if (aimee_db2_recall_section_request_decode(request_body, request_len, &recall_section, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) ==
              0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_RECALL_SECTION_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->recall_section)
@@ -4725,8 +4797,16 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         if (aimee_db2_briefing_key_facts_request_decode(request_body, request_len) == 0)
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_BRIEFING_KEY_FACTS_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_BRIEFING_KEY_FACTS_PROJECT_MAX + 1];
+         if (aimee_db2_briefing_key_facts_request_decode(request_body, request_len, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_BRIEFING_KEY_FACTS_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->briefing_key_facts)
@@ -4788,8 +4868,16 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         if (aimee_db2_briefing_recent_activity_request_decode(request_body, request_len) == 0)
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_PROJECT_MAX + 1];
+         if (aimee_db2_briefing_recent_activity_request_decode(request_body, request_len, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->briefing_recent_activity)
@@ -4885,8 +4973,16 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         if (aimee_db2_memory_key_facts_provenance_request_decode(request_body, request_len) == 0)
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_PROJECT_MAX + 1];
+         if (aimee_db2_memory_key_facts_provenance_request_decode(request_body, request_len, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->memory_key_facts_provenance)
@@ -5262,9 +5358,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       {
          char search_query[AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MAX + 1] = "";
          uint32_t row_limit = 0u;
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_MEMORY_EPISODES_SEARCH_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_MEMORY_EPISODES_SEARCH_PROJECT_MAX + 1];
          if (aimee_db2_memory_episodes_search_request_decode(
-                 request_body, request_len, search_query, sizeof(search_query), &row_limit) == 0)
+                 request_body, request_len, search_query, sizeof(search_query), &row_limit, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_MEMORY_EPISODES_SEARCH_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->memory_episodes_search)
@@ -5413,9 +5517,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       }
       {
          char search_pattern[AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX + 1] = "";
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_PROJECT_MAX + 1];
          if (aimee_db2_memory_search_by_pattern_request_decode(
-                 request_body, request_len, search_pattern, sizeof(search_pattern)) == 0)
+                 request_body, request_len, search_pattern, sizeof(search_pattern), &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->memory_search_by_pattern)
@@ -5517,8 +5629,16 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         if (aimee_db2_lifecycle_stale_pending_request_decode(request_body, request_len) == 0)
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_LIFECYCLE_STALE_PENDING_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_LIFECYCLE_STALE_PENDING_PROJECT_MAX + 1];
+         if (aimee_db2_lifecycle_stale_pending_request_decode(request_body, request_len, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_LIFECYCLE_STALE_PENDING_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->lifecycle_stale_pending)
@@ -5572,9 +5692,17 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       }
       {
          char since[AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX + 1] = "";
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_PROJECT_MAX + 1];
          if (aimee_db2_lifecycle_newly_superseded_request_decode(request_body, request_len, since,
-                                                                 sizeof(since)) == 0)
+                                                                 sizeof(since), &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace,
+                                             scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->lifecycle_newly_superseded)

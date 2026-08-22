@@ -32,3 +32,13 @@ func number(value *int64) int64 {
 	}
 	return *value
 }
+
+// decimal is text() and number() for a nullable floating-point column. Absence
+// reads as zero, which for a confidence or a strength is the same thing a
+// caller would do with "unknown" anyway.
+func decimal(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}

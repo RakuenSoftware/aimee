@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "533ed69daf075fc381863d6ecf879ffffc1b5b636560007ce377d3c391d0ab8d"
+const ContractSHA256 = "877553890d12bfe43651afdccb292648179fb144fd3f7104430f0ed5944b3c77"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -1335,16 +1335,34 @@ const StageBriefingActiveEntities = FamilyMemory
 const OperationBriefingActiveEntities uint32 = 71
 const BriefingActiveEntitiesLimitMin uint32 = 1
 const BriefingActiveEntitiesLimitMax uint32 = 64
+const BriefingActiveEntitiesScopeFlagsMin uint32 = 0
+const BriefingActiveEntitiesScopeFlagsMax uint32 = 3
+const BriefingActiveEntitiesWorkspaceMin = 0
+const BriefingActiveEntitiesWorkspaceMax = 511
+const BriefingActiveEntitiesProjectMin = 0
+const BriefingActiveEntitiesProjectMax = 511
 
 // EncodeBriefingActiveEntitiesRequest writes the schema briefing_active_entities declares, in order.
-func EncodeBriefingActiveEntitiesRequest(limit uint32) ([]byte, error) {
-	if limit < BriefingActiveEntitiesLimitMin || limit > BriefingActiveEntitiesLimitMax {
+func EncodeBriefingActiveEntitiesRequest(limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if limit < BriefingActiveEntitiesLimitMin || limit > BriefingActiveEntitiesLimitMax ||
+		scopeFlags < BriefingActiveEntitiesScopeFlagsMin || scopeFlags > BriefingActiveEntitiesScopeFlagsMax ||
+		len(workspace) < BriefingActiveEntitiesWorkspaceMin || len(workspace) > BriefingActiveEntitiesWorkspaceMax || hasNUL(workspace) ||
+		len(project) < BriefingActiveEntitiesProjectMin || len(project) > BriefingActiveEntitiesProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
 	var limitBytes [4]byte
 	binary.LittleEndian.PutUint32(limitBytes[:], limit)
 	payload = append(payload, limitBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, BriefingActiveEntitiesWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, BriefingActiveEntitiesProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationBriefingActiveEntities, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -1353,28 +1371,47 @@ func EncodeBriefingActiveEntitiesRequest(limit uint32) ([]byte, error) {
 }
 
 // DecodeBriefingActiveEntitiesRequest reads it back, checking each field against its own bound.
-func DecodeBriefingActiveEntitiesRequest(request []byte) (uint32, error) {
+func DecodeBriefingActiveEntitiesRequest(request []byte) (uint32, uint32, string, string, error) {
 	var limit uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationBriefingActiveEntities || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if cursor+4 > len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	limit = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if limit < BriefingActiveEntitiesLimitMin || limit > BriefingActiveEntitiesLimitMax {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < BriefingActiveEntitiesScopeFlagsMin || scopeFlags > BriefingActiveEntitiesScopeFlagsMax {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, BriefingActiveEntitiesWorkspaceMax); err != nil ||
+		len(workspace) < BriefingActiveEntitiesWorkspaceMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, BriefingActiveEntitiesProjectMax); err != nil ||
+		len(project) < BriefingActiveEntitiesProjectMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return limit, nil
+	return limit, scopeFlags, workspace, project, nil
 }
 
 const BriefingActiveEntitiesEntityMin = 0
@@ -2966,11 +3003,20 @@ const RelationsForEntityEntityMin = 1
 const RelationsForEntityEntityMax = 127
 const RelationsForEntityLimitMin uint32 = 0
 const RelationsForEntityLimitMax uint32 = 256
+const RelationsForEntityScopeFlagsMin uint32 = 0
+const RelationsForEntityScopeFlagsMax uint32 = 3
+const RelationsForEntityWorkspaceMin = 0
+const RelationsForEntityWorkspaceMax = 511
+const RelationsForEntityProjectMin = 0
+const RelationsForEntityProjectMax = 511
 
 // EncodeRelationsForEntityRequest writes the schema relations_for_entity declares, in order.
-func EncodeRelationsForEntityRequest(entity string, limit uint32) ([]byte, error) {
+func EncodeRelationsForEntityRequest(entity string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
 	if len(entity) < RelationsForEntityEntityMin || len(entity) > RelationsForEntityEntityMax || hasNUL(entity) ||
-		limit < RelationsForEntityLimitMin || limit > RelationsForEntityLimitMax {
+		limit < RelationsForEntityLimitMin || limit > RelationsForEntityLimitMax ||
+		scopeFlags < RelationsForEntityScopeFlagsMin || scopeFlags > RelationsForEntityScopeFlagsMax ||
+		len(workspace) < RelationsForEntityWorkspaceMin || len(workspace) > RelationsForEntityWorkspaceMax || hasNUL(workspace) ||
+		len(project) < RelationsForEntityProjectMin || len(project) > RelationsForEntityProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
@@ -2980,6 +3026,15 @@ func EncodeRelationsForEntityRequest(entity string, limit uint32) ([]byte, error
 	var limitBytes [4]byte
 	binary.LittleEndian.PutUint32(limitBytes[:], limit)
 	payload = append(payload, limitBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, RelationsForEntityWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, RelationsForEntityProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationRelationsForEntity, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -2988,33 +3043,52 @@ func EncodeRelationsForEntityRequest(entity string, limit uint32) ([]byte, error
 }
 
 // DecodeRelationsForEntityRequest reads it back, checking each field against its own bound.
-func DecodeRelationsForEntityRequest(request []byte) (string, uint32, error) {
+func DecodeRelationsForEntityRequest(request []byte) (string, uint32, uint32, string, string, error) {
 	var entity string
 	var limit uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationRelationsForEntity || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if entity, err = takeRowText(payload, &cursor, RelationsForEntityEntityMax); err != nil ||
 		len(entity) < RelationsForEntityEntityMin {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor+4 > len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	limit = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if limit < RelationsForEntityLimitMin || limit > RelationsForEntityLimitMax {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < RelationsForEntityScopeFlagsMin || scopeFlags > RelationsForEntityScopeFlagsMax {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, RelationsForEntityWorkspaceMax); err != nil ||
+		len(workspace) < RelationsForEntityWorkspaceMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, RelationsForEntityProjectMax); err != nil ||
+		len(project) < RelationsForEntityProjectMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return entity, limit, nil
+	return entity, limit, scopeFlags, workspace, project, nil
 }
 
 const RelationsForEntityRelationIDMin uint64 = 0
@@ -3250,11 +3324,20 @@ const RelationsSearchRelationQueryMin = 1
 const RelationsSearchRelationQueryMax = 255
 const RelationsSearchLimitMin uint32 = 0
 const RelationsSearchLimitMax uint32 = 256
+const RelationsSearchScopeFlagsMin uint32 = 0
+const RelationsSearchScopeFlagsMax uint32 = 3
+const RelationsSearchWorkspaceMin = 0
+const RelationsSearchWorkspaceMax = 511
+const RelationsSearchProjectMin = 0
+const RelationsSearchProjectMax = 511
 
 // EncodeRelationsSearchRequest writes the schema relations_search declares, in order.
-func EncodeRelationsSearchRequest(relationQuery string, limit uint32) ([]byte, error) {
+func EncodeRelationsSearchRequest(relationQuery string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
 	if len(relationQuery) < RelationsSearchRelationQueryMin || len(relationQuery) > RelationsSearchRelationQueryMax || hasNUL(relationQuery) ||
-		limit < RelationsSearchLimitMin || limit > RelationsSearchLimitMax {
+		limit < RelationsSearchLimitMin || limit > RelationsSearchLimitMax ||
+		scopeFlags < RelationsSearchScopeFlagsMin || scopeFlags > RelationsSearchScopeFlagsMax ||
+		len(workspace) < RelationsSearchWorkspaceMin || len(workspace) > RelationsSearchWorkspaceMax || hasNUL(workspace) ||
+		len(project) < RelationsSearchProjectMin || len(project) > RelationsSearchProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
@@ -3264,6 +3347,15 @@ func EncodeRelationsSearchRequest(relationQuery string, limit uint32) ([]byte, e
 	var limitBytes [4]byte
 	binary.LittleEndian.PutUint32(limitBytes[:], limit)
 	payload = append(payload, limitBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, RelationsSearchWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, RelationsSearchProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationRelationsSearch, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -3272,33 +3364,52 @@ func EncodeRelationsSearchRequest(relationQuery string, limit uint32) ([]byte, e
 }
 
 // DecodeRelationsSearchRequest reads it back, checking each field against its own bound.
-func DecodeRelationsSearchRequest(request []byte) (string, uint32, error) {
+func DecodeRelationsSearchRequest(request []byte) (string, uint32, uint32, string, string, error) {
 	var relationQuery string
 	var limit uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationRelationsSearch || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if relationQuery, err = takeRowText(payload, &cursor, RelationsSearchRelationQueryMax); err != nil ||
 		len(relationQuery) < RelationsSearchRelationQueryMin {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor+4 > len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	limit = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if limit < RelationsSearchLimitMin || limit > RelationsSearchLimitMax {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < RelationsSearchScopeFlagsMin || scopeFlags > RelationsSearchScopeFlagsMax {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, RelationsSearchWorkspaceMax); err != nil ||
+		len(workspace) < RelationsSearchWorkspaceMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, RelationsSearchProjectMax); err != nil ||
+		len(project) < RelationsSearchProjectMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return relationQuery, limit, nil
+	return relationQuery, limit, scopeFlags, workspace, project, nil
 }
 
 const RelationsSearchRelationIDMin uint64 = 0
@@ -3536,12 +3647,21 @@ const RelationsSearchAsOfAsOfMin = 1
 const RelationsSearchAsOfAsOfMax = 31
 const RelationsSearchAsOfLimitMin uint32 = 0
 const RelationsSearchAsOfLimitMax uint32 = 256
+const RelationsSearchAsOfScopeFlagsMin uint32 = 0
+const RelationsSearchAsOfScopeFlagsMax uint32 = 3
+const RelationsSearchAsOfWorkspaceMin = 0
+const RelationsSearchAsOfWorkspaceMax = 511
+const RelationsSearchAsOfProjectMin = 0
+const RelationsSearchAsOfProjectMax = 511
 
 // EncodeRelationsSearchAsOfRequest writes the schema relations_search_as_of declares, in order.
-func EncodeRelationsSearchAsOfRequest(relationQuery string, asOf string, limit uint32) ([]byte, error) {
+func EncodeRelationsSearchAsOfRequest(relationQuery string, asOf string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
 	if len(relationQuery) < RelationsSearchAsOfRelationQueryMin || len(relationQuery) > RelationsSearchAsOfRelationQueryMax || hasNUL(relationQuery) ||
 		len(asOf) < RelationsSearchAsOfAsOfMin || len(asOf) > RelationsSearchAsOfAsOfMax || hasNUL(asOf) ||
-		limit < RelationsSearchAsOfLimitMin || limit > RelationsSearchAsOfLimitMax {
+		limit < RelationsSearchAsOfLimitMin || limit > RelationsSearchAsOfLimitMax ||
+		scopeFlags < RelationsSearchAsOfScopeFlagsMin || scopeFlags > RelationsSearchAsOfScopeFlagsMax ||
+		len(workspace) < RelationsSearchAsOfWorkspaceMin || len(workspace) > RelationsSearchAsOfWorkspaceMax || hasNUL(workspace) ||
+		len(project) < RelationsSearchAsOfProjectMin || len(project) > RelationsSearchAsOfProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
@@ -3554,6 +3674,15 @@ func EncodeRelationsSearchAsOfRequest(relationQuery string, asOf string, limit u
 	var limitBytes [4]byte
 	binary.LittleEndian.PutUint32(limitBytes[:], limit)
 	payload = append(payload, limitBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, RelationsSearchAsOfWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, RelationsSearchAsOfProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationRelationsSearchAsOf, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -3562,38 +3691,57 @@ func EncodeRelationsSearchAsOfRequest(relationQuery string, asOf string, limit u
 }
 
 // DecodeRelationsSearchAsOfRequest reads it back, checking each field against its own bound.
-func DecodeRelationsSearchAsOfRequest(request []byte) (string, string, uint32, error) {
+func DecodeRelationsSearchAsOfRequest(request []byte) (string, string, uint32, uint32, string, string, error) {
 	var relationQuery string
 	var asOf string
 	var limit uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationRelationsSearchAsOf || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", "", 0, ErrMalformedEnvelope
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if relationQuery, err = takeRowText(payload, &cursor, RelationsSearchAsOfRelationQueryMax); err != nil ||
 		len(relationQuery) < RelationsSearchAsOfRelationQueryMin {
-		return "", "", 0, ErrMalformedEnvelope
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if asOf, err = takeRowText(payload, &cursor, RelationsSearchAsOfAsOfMax); err != nil ||
 		len(asOf) < RelationsSearchAsOfAsOfMin {
-		return "", "", 0, ErrMalformedEnvelope
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor+4 > len(payload) {
-		return "", "", 0, ErrMalformedEnvelope
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	limit = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if limit < RelationsSearchAsOfLimitMin || limit > RelationsSearchAsOfLimitMax {
-		return "", "", 0, ErrMalformedEnvelope
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < RelationsSearchAsOfScopeFlagsMin || scopeFlags > RelationsSearchAsOfScopeFlagsMax {
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, RelationsSearchAsOfWorkspaceMax); err != nil ||
+		len(workspace) < RelationsSearchAsOfWorkspaceMin {
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, RelationsSearchAsOfProjectMax); err != nil ||
+		len(project) < RelationsSearchAsOfProjectMin {
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return "", "", 0, ErrMalformedEnvelope
+		return "", "", 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return relationQuery, asOf, limit, nil
+	return relationQuery, asOf, limit, scopeFlags, workspace, project, nil
 }
 
 const RelationsSearchAsOfRelationIDMin uint64 = 0
@@ -3829,11 +3977,20 @@ const RelationsSupportingEntityTokenMin = 1
 const RelationsSupportingEntityTokenMax = 127
 const RelationsSupportingLimitMin uint32 = 0
 const RelationsSupportingLimitMax uint32 = 256
+const RelationsSupportingScopeFlagsMin uint32 = 0
+const RelationsSupportingScopeFlagsMax uint32 = 3
+const RelationsSupportingWorkspaceMin = 0
+const RelationsSupportingWorkspaceMax = 511
+const RelationsSupportingProjectMin = 0
+const RelationsSupportingProjectMax = 511
 
 // EncodeRelationsSupportingRequest writes the schema relations_supporting declares, in order.
-func EncodeRelationsSupportingRequest(entityToken string, limit uint32) ([]byte, error) {
+func EncodeRelationsSupportingRequest(entityToken string, limit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
 	if len(entityToken) < RelationsSupportingEntityTokenMin || len(entityToken) > RelationsSupportingEntityTokenMax || hasNUL(entityToken) ||
-		limit < RelationsSupportingLimitMin || limit > RelationsSupportingLimitMax {
+		limit < RelationsSupportingLimitMin || limit > RelationsSupportingLimitMax ||
+		scopeFlags < RelationsSupportingScopeFlagsMin || scopeFlags > RelationsSupportingScopeFlagsMax ||
+		len(workspace) < RelationsSupportingWorkspaceMin || len(workspace) > RelationsSupportingWorkspaceMax || hasNUL(workspace) ||
+		len(project) < RelationsSupportingProjectMin || len(project) > RelationsSupportingProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
@@ -3843,6 +4000,15 @@ func EncodeRelationsSupportingRequest(entityToken string, limit uint32) ([]byte,
 	var limitBytes [4]byte
 	binary.LittleEndian.PutUint32(limitBytes[:], limit)
 	payload = append(payload, limitBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, RelationsSupportingWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, RelationsSupportingProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationRelationsSupporting, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -3851,33 +4017,52 @@ func EncodeRelationsSupportingRequest(entityToken string, limit uint32) ([]byte,
 }
 
 // DecodeRelationsSupportingRequest reads it back, checking each field against its own bound.
-func DecodeRelationsSupportingRequest(request []byte) (string, uint32, error) {
+func DecodeRelationsSupportingRequest(request []byte) (string, uint32, uint32, string, string, error) {
 	var entityToken string
 	var limit uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationRelationsSupporting || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if entityToken, err = takeRowText(payload, &cursor, RelationsSupportingEntityTokenMax); err != nil ||
 		len(entityToken) < RelationsSupportingEntityTokenMin {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor+4 > len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	limit = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if limit < RelationsSupportingLimitMin || limit > RelationsSupportingLimitMax {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < RelationsSupportingScopeFlagsMin || scopeFlags > RelationsSupportingScopeFlagsMax {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, RelationsSupportingWorkspaceMax); err != nil ||
+		len(workspace) < RelationsSupportingWorkspaceMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, RelationsSupportingProjectMax); err != nil ||
+		len(project) < RelationsSupportingProjectMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return entityToken, limit, nil
+	return entityToken, limit, scopeFlags, workspace, project, nil
 }
 
 const RelationsSupportingRelationIDMin uint64 = 0
@@ -4366,10 +4551,30 @@ func DecodeTypedFactRecallReply(reply []byte) ([]TypedFactRecallRow, error) {
 const EventGlobalConstraints = EventMemory
 const StageGlobalConstraints = FamilyMemory
 const OperationGlobalConstraints uint32 = 82
+const GlobalConstraintsScopeFlagsMin uint32 = 0
+const GlobalConstraintsScopeFlagsMax uint32 = 3
+const GlobalConstraintsWorkspaceMin = 0
+const GlobalConstraintsWorkspaceMax = 511
+const GlobalConstraintsProjectMin = 0
+const GlobalConstraintsProjectMax = 511
 
 // EncodeGlobalConstraintsRequest writes the schema global_constraints declares, in order.
-func EncodeGlobalConstraintsRequest() ([]byte, error) {
+func EncodeGlobalConstraintsRequest(scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if scopeFlags < GlobalConstraintsScopeFlagsMin || scopeFlags > GlobalConstraintsScopeFlagsMax ||
+		len(workspace) < GlobalConstraintsWorkspaceMin || len(workspace) > GlobalConstraintsWorkspaceMax || hasNUL(workspace) ||
+		len(project) < GlobalConstraintsProjectMin || len(project) > GlobalConstraintsProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
 	var payload []byte
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, GlobalConstraintsWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, GlobalConstraintsProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationGlobalConstraints, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -4378,19 +4583,38 @@ func EncodeGlobalConstraintsRequest() ([]byte, error) {
 }
 
 // DecodeGlobalConstraintsRequest reads it back, checking each field against its own bound.
-func DecodeGlobalConstraintsRequest(request []byte) error {
+func DecodeGlobalConstraintsRequest(request []byte) (uint32, string, string, error) {
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationGlobalConstraints || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return ErrMalformedEnvelope
+		return 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
-	if cursor != len(payload) {
-		return ErrMalformedEnvelope
+	if cursor+4 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
 	}
-	return nil
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < GlobalConstraintsScopeFlagsMin || scopeFlags > GlobalConstraintsScopeFlagsMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, GlobalConstraintsWorkspaceMax); err != nil ||
+		len(workspace) < GlobalConstraintsWorkspaceMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, GlobalConstraintsProjectMax); err != nil ||
+		len(project) < GlobalConstraintsProjectMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return scopeFlags, workspace, project, nil
 }
 
 const GlobalConstraintsMemoryKeyMin = 0
@@ -4480,16 +4704,34 @@ const StageKvSection = FamilyMemory
 const OperationKvSection uint32 = 83
 const KvSectionKvSectionMin uint32 = 1
 const KvSectionKvSectionMax uint32 = 5
+const KvSectionScopeFlagsMin uint32 = 0
+const KvSectionScopeFlagsMax uint32 = 3
+const KvSectionWorkspaceMin = 0
+const KvSectionWorkspaceMax = 511
+const KvSectionProjectMin = 0
+const KvSectionProjectMax = 511
 
 // EncodeKvSectionRequest writes the schema kv_section declares, in order.
-func EncodeKvSectionRequest(kvSection uint32) ([]byte, error) {
-	if kvSection < KvSectionKvSectionMin || kvSection > KvSectionKvSectionMax {
+func EncodeKvSectionRequest(kvSection uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if kvSection < KvSectionKvSectionMin || kvSection > KvSectionKvSectionMax ||
+		scopeFlags < KvSectionScopeFlagsMin || scopeFlags > KvSectionScopeFlagsMax ||
+		len(workspace) < KvSectionWorkspaceMin || len(workspace) > KvSectionWorkspaceMax || hasNUL(workspace) ||
+		len(project) < KvSectionProjectMin || len(project) > KvSectionProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
 	var kvSectionBytes [4]byte
 	binary.LittleEndian.PutUint32(kvSectionBytes[:], kvSection)
 	payload = append(payload, kvSectionBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, KvSectionWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, KvSectionProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationKvSection, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -4498,28 +4740,47 @@ func EncodeKvSectionRequest(kvSection uint32) ([]byte, error) {
 }
 
 // DecodeKvSectionRequest reads it back, checking each field against its own bound.
-func DecodeKvSectionRequest(request []byte) (uint32, error) {
+func DecodeKvSectionRequest(request []byte) (uint32, uint32, string, string, error) {
 	var kvSection uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationKvSection || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if cursor+4 > len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	kvSection = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if kvSection < KvSectionKvSectionMin || kvSection > KvSectionKvSectionMax {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < KvSectionScopeFlagsMin || scopeFlags > KvSectionScopeFlagsMax {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, KvSectionWorkspaceMax); err != nil ||
+		len(workspace) < KvSectionWorkspaceMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, KvSectionProjectMax); err != nil ||
+		len(project) < KvSectionProjectMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return kvSection, nil
+	return kvSection, scopeFlags, workspace, project, nil
 }
 
 const KvSectionMemoryKeyMin = 0
@@ -4882,16 +5143,34 @@ const StageMemoryCandidates = FamilyMemory
 const OperationMemoryCandidates uint32 = 86
 const MemoryCandidatesCandidateFilterMin uint32 = 1
 const MemoryCandidatesCandidateFilterMax uint32 = 2
+const MemoryCandidatesScopeFlagsMin uint32 = 0
+const MemoryCandidatesScopeFlagsMax uint32 = 3
+const MemoryCandidatesWorkspaceMin = 0
+const MemoryCandidatesWorkspaceMax = 511
+const MemoryCandidatesProjectMin = 0
+const MemoryCandidatesProjectMax = 511
 
 // EncodeMemoryCandidatesRequest writes the schema memory_candidates declares, in order.
-func EncodeMemoryCandidatesRequest(candidateFilter uint32) ([]byte, error) {
-	if candidateFilter < MemoryCandidatesCandidateFilterMin || candidateFilter > MemoryCandidatesCandidateFilterMax {
+func EncodeMemoryCandidatesRequest(candidateFilter uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if candidateFilter < MemoryCandidatesCandidateFilterMin || candidateFilter > MemoryCandidatesCandidateFilterMax ||
+		scopeFlags < MemoryCandidatesScopeFlagsMin || scopeFlags > MemoryCandidatesScopeFlagsMax ||
+		len(workspace) < MemoryCandidatesWorkspaceMin || len(workspace) > MemoryCandidatesWorkspaceMax || hasNUL(workspace) ||
+		len(project) < MemoryCandidatesProjectMin || len(project) > MemoryCandidatesProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
 	var candidateFilterBytes [4]byte
 	binary.LittleEndian.PutUint32(candidateFilterBytes[:], candidateFilter)
 	payload = append(payload, candidateFilterBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, MemoryCandidatesWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, MemoryCandidatesProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationMemoryCandidates, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -4900,28 +5179,47 @@ func EncodeMemoryCandidatesRequest(candidateFilter uint32) ([]byte, error) {
 }
 
 // DecodeMemoryCandidatesRequest reads it back, checking each field against its own bound.
-func DecodeMemoryCandidatesRequest(request []byte) (uint32, error) {
+func DecodeMemoryCandidatesRequest(request []byte) (uint32, uint32, string, string, error) {
 	var candidateFilter uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationMemoryCandidates || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if cursor+4 > len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	candidateFilter = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if candidateFilter < MemoryCandidatesCandidateFilterMin || candidateFilter > MemoryCandidatesCandidateFilterMax {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < MemoryCandidatesScopeFlagsMin || scopeFlags > MemoryCandidatesScopeFlagsMax {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, MemoryCandidatesWorkspaceMax); err != nil ||
+		len(workspace) < MemoryCandidatesWorkspaceMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, MemoryCandidatesProjectMax); err != nil ||
+		len(project) < MemoryCandidatesProjectMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return candidateFilter, nil
+	return candidateFilter, scopeFlags, workspace, project, nil
 }
 
 const MemoryCandidatesMemoryRowIDMin uint64 = 0
@@ -5095,16 +5393,34 @@ const StageRecallSection = FamilyMemory
 const OperationRecallSection uint32 = 87
 const RecallSectionRecallSectionMin uint32 = 1
 const RecallSectionRecallSectionMax uint32 = 4
+const RecallSectionScopeFlagsMin uint32 = 0
+const RecallSectionScopeFlagsMax uint32 = 3
+const RecallSectionWorkspaceMin = 0
+const RecallSectionWorkspaceMax = 511
+const RecallSectionProjectMin = 0
+const RecallSectionProjectMax = 511
 
 // EncodeRecallSectionRequest writes the schema recall_section declares, in order.
-func EncodeRecallSectionRequest(recallSection uint32) ([]byte, error) {
-	if recallSection < RecallSectionRecallSectionMin || recallSection > RecallSectionRecallSectionMax {
+func EncodeRecallSectionRequest(recallSection uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if recallSection < RecallSectionRecallSectionMin || recallSection > RecallSectionRecallSectionMax ||
+		scopeFlags < RecallSectionScopeFlagsMin || scopeFlags > RecallSectionScopeFlagsMax ||
+		len(workspace) < RecallSectionWorkspaceMin || len(workspace) > RecallSectionWorkspaceMax || hasNUL(workspace) ||
+		len(project) < RecallSectionProjectMin || len(project) > RecallSectionProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
 	var recallSectionBytes [4]byte
 	binary.LittleEndian.PutUint32(recallSectionBytes[:], recallSection)
 	payload = append(payload, recallSectionBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, RecallSectionWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, RecallSectionProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationRecallSection, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -5113,28 +5429,47 @@ func EncodeRecallSectionRequest(recallSection uint32) ([]byte, error) {
 }
 
 // DecodeRecallSectionRequest reads it back, checking each field against its own bound.
-func DecodeRecallSectionRequest(request []byte) (uint32, error) {
+func DecodeRecallSectionRequest(request []byte) (uint32, uint32, string, string, error) {
 	var recallSection uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationRecallSection || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if cursor+4 > len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	recallSection = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if recallSection < RecallSectionRecallSectionMin || recallSection > RecallSectionRecallSectionMax {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < RecallSectionScopeFlagsMin || scopeFlags > RecallSectionScopeFlagsMax {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, RecallSectionWorkspaceMax); err != nil ||
+		len(workspace) < RecallSectionWorkspaceMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, RecallSectionProjectMax); err != nil ||
+		len(project) < RecallSectionProjectMin {
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return 0, ErrMalformedEnvelope
+		return 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return recallSection, nil
+	return recallSection, scopeFlags, workspace, project, nil
 }
 
 const RecallSectionMemoryRowIDMin uint64 = 0
@@ -9953,10 +10288,30 @@ func DecodeDirectiveGetReply(reply []byte) (uint32, string, string, string, stri
 const EventBriefingKeyFacts = EventMemory
 const StageBriefingKeyFacts = FamilyMemory
 const OperationBriefingKeyFacts uint32 = 122
+const BriefingKeyFactsScopeFlagsMin uint32 = 0
+const BriefingKeyFactsScopeFlagsMax uint32 = 3
+const BriefingKeyFactsWorkspaceMin = 0
+const BriefingKeyFactsWorkspaceMax = 511
+const BriefingKeyFactsProjectMin = 0
+const BriefingKeyFactsProjectMax = 511
 
 // EncodeBriefingKeyFactsRequest writes the schema briefing_key_facts declares, in order.
-func EncodeBriefingKeyFactsRequest() ([]byte, error) {
+func EncodeBriefingKeyFactsRequest(scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if scopeFlags < BriefingKeyFactsScopeFlagsMin || scopeFlags > BriefingKeyFactsScopeFlagsMax ||
+		len(workspace) < BriefingKeyFactsWorkspaceMin || len(workspace) > BriefingKeyFactsWorkspaceMax || hasNUL(workspace) ||
+		len(project) < BriefingKeyFactsProjectMin || len(project) > BriefingKeyFactsProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
 	var payload []byte
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, BriefingKeyFactsWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, BriefingKeyFactsProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationBriefingKeyFacts, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -9965,19 +10320,38 @@ func EncodeBriefingKeyFactsRequest() ([]byte, error) {
 }
 
 // DecodeBriefingKeyFactsRequest reads it back, checking each field against its own bound.
-func DecodeBriefingKeyFactsRequest(request []byte) error {
+func DecodeBriefingKeyFactsRequest(request []byte) (uint32, string, string, error) {
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationBriefingKeyFacts || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return ErrMalformedEnvelope
+		return 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
-	if cursor != len(payload) {
-		return ErrMalformedEnvelope
+	if cursor+4 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
 	}
-	return nil
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < BriefingKeyFactsScopeFlagsMin || scopeFlags > BriefingKeyFactsScopeFlagsMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, BriefingKeyFactsWorkspaceMax); err != nil ||
+		len(workspace) < BriefingKeyFactsWorkspaceMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, BriefingKeyFactsProjectMax); err != nil ||
+		len(project) < BriefingKeyFactsProjectMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return scopeFlags, workspace, project, nil
 }
 
 const BriefingKeyFactsMemoryIDMin uint64 = 0
@@ -10201,10 +10575,30 @@ func DecodeBriefingKeyFactsReply(reply []byte) ([]BriefingKeyFactsRow, error) {
 const EventBriefingRecentActivity = EventMemory
 const StageBriefingRecentActivity = FamilyMemory
 const OperationBriefingRecentActivity uint32 = 123
+const BriefingRecentActivityScopeFlagsMin uint32 = 0
+const BriefingRecentActivityScopeFlagsMax uint32 = 3
+const BriefingRecentActivityWorkspaceMin = 0
+const BriefingRecentActivityWorkspaceMax = 511
+const BriefingRecentActivityProjectMin = 0
+const BriefingRecentActivityProjectMax = 511
 
 // EncodeBriefingRecentActivityRequest writes the schema briefing_recent_activity declares, in order.
-func EncodeBriefingRecentActivityRequest() ([]byte, error) {
+func EncodeBriefingRecentActivityRequest(scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if scopeFlags < BriefingRecentActivityScopeFlagsMin || scopeFlags > BriefingRecentActivityScopeFlagsMax ||
+		len(workspace) < BriefingRecentActivityWorkspaceMin || len(workspace) > BriefingRecentActivityWorkspaceMax || hasNUL(workspace) ||
+		len(project) < BriefingRecentActivityProjectMin || len(project) > BriefingRecentActivityProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
 	var payload []byte
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, BriefingRecentActivityWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, BriefingRecentActivityProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationBriefingRecentActivity, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -10213,19 +10607,38 @@ func EncodeBriefingRecentActivityRequest() ([]byte, error) {
 }
 
 // DecodeBriefingRecentActivityRequest reads it back, checking each field against its own bound.
-func DecodeBriefingRecentActivityRequest(request []byte) error {
+func DecodeBriefingRecentActivityRequest(request []byte) (uint32, string, string, error) {
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationBriefingRecentActivity || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return ErrMalformedEnvelope
+		return 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
-	if cursor != len(payload) {
-		return ErrMalformedEnvelope
+	if cursor+4 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
 	}
-	return nil
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < BriefingRecentActivityScopeFlagsMin || scopeFlags > BriefingRecentActivityScopeFlagsMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, BriefingRecentActivityWorkspaceMax); err != nil ||
+		len(workspace) < BriefingRecentActivityWorkspaceMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, BriefingRecentActivityProjectMax); err != nil ||
+		len(project) < BriefingRecentActivityProjectMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return scopeFlags, workspace, project, nil
 }
 
 const BriefingRecentActivitySessionIDMin = 0
@@ -10471,10 +10884,30 @@ func DecodeMemoryTierKindCountsReply(reply []byte) ([]MemoryTierKindCountsRow, e
 const EventMemoryKeyFactsProvenance = EventMemory
 const StageMemoryKeyFactsProvenance = FamilyMemory
 const OperationMemoryKeyFactsProvenance uint32 = 125
+const MemoryKeyFactsProvenanceScopeFlagsMin uint32 = 0
+const MemoryKeyFactsProvenanceScopeFlagsMax uint32 = 3
+const MemoryKeyFactsProvenanceWorkspaceMin = 0
+const MemoryKeyFactsProvenanceWorkspaceMax = 511
+const MemoryKeyFactsProvenanceProjectMin = 0
+const MemoryKeyFactsProvenanceProjectMax = 511
 
 // EncodeMemoryKeyFactsProvenanceRequest writes the schema memory_key_facts_provenance declares, in order.
-func EncodeMemoryKeyFactsProvenanceRequest() ([]byte, error) {
+func EncodeMemoryKeyFactsProvenanceRequest(scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if scopeFlags < MemoryKeyFactsProvenanceScopeFlagsMin || scopeFlags > MemoryKeyFactsProvenanceScopeFlagsMax ||
+		len(workspace) < MemoryKeyFactsProvenanceWorkspaceMin || len(workspace) > MemoryKeyFactsProvenanceWorkspaceMax || hasNUL(workspace) ||
+		len(project) < MemoryKeyFactsProvenanceProjectMin || len(project) > MemoryKeyFactsProvenanceProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
 	var payload []byte
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, MemoryKeyFactsProvenanceWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, MemoryKeyFactsProvenanceProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationMemoryKeyFactsProvenance, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -10483,19 +10916,38 @@ func EncodeMemoryKeyFactsProvenanceRequest() ([]byte, error) {
 }
 
 // DecodeMemoryKeyFactsProvenanceRequest reads it back, checking each field against its own bound.
-func DecodeMemoryKeyFactsProvenanceRequest(request []byte) error {
+func DecodeMemoryKeyFactsProvenanceRequest(request []byte) (uint32, string, string, error) {
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationMemoryKeyFactsProvenance || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return ErrMalformedEnvelope
+		return 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
-	if cursor != len(payload) {
-		return ErrMalformedEnvelope
+	if cursor+4 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
 	}
-	return nil
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < MemoryKeyFactsProvenanceScopeFlagsMin || scopeFlags > MemoryKeyFactsProvenanceScopeFlagsMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, MemoryKeyFactsProvenanceWorkspaceMax); err != nil ||
+		len(workspace) < MemoryKeyFactsProvenanceWorkspaceMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, MemoryKeyFactsProvenanceProjectMax); err != nil ||
+		len(project) < MemoryKeyFactsProvenanceProjectMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return scopeFlags, workspace, project, nil
 }
 
 const MemoryKeyFactsProvenanceMemoryIDMin uint64 = 0
@@ -11663,11 +12115,20 @@ const MemoryEpisodesSearchSearchQueryMin = 0
 const MemoryEpisodesSearchSearchQueryMax = 511
 const MemoryEpisodesSearchRowLimitMin uint32 = 0
 const MemoryEpisodesSearchRowLimitMax uint32 = 65535
+const MemoryEpisodesSearchScopeFlagsMin uint32 = 0
+const MemoryEpisodesSearchScopeFlagsMax uint32 = 3
+const MemoryEpisodesSearchWorkspaceMin = 0
+const MemoryEpisodesSearchWorkspaceMax = 511
+const MemoryEpisodesSearchProjectMin = 0
+const MemoryEpisodesSearchProjectMax = 511
 
 // EncodeMemoryEpisodesSearchRequest writes the schema memory_episodes_search declares, in order.
-func EncodeMemoryEpisodesSearchRequest(searchQuery string, rowLimit uint32) ([]byte, error) {
+func EncodeMemoryEpisodesSearchRequest(searchQuery string, rowLimit uint32, scopeFlags uint32, workspace string, project string) ([]byte, error) {
 	if len(searchQuery) < MemoryEpisodesSearchSearchQueryMin || len(searchQuery) > MemoryEpisodesSearchSearchQueryMax || hasNUL(searchQuery) ||
-		rowLimit < MemoryEpisodesSearchRowLimitMin || rowLimit > MemoryEpisodesSearchRowLimitMax {
+		rowLimit < MemoryEpisodesSearchRowLimitMin || rowLimit > MemoryEpisodesSearchRowLimitMax ||
+		scopeFlags < MemoryEpisodesSearchScopeFlagsMin || scopeFlags > MemoryEpisodesSearchScopeFlagsMax ||
+		len(workspace) < MemoryEpisodesSearchWorkspaceMin || len(workspace) > MemoryEpisodesSearchWorkspaceMax || hasNUL(workspace) ||
+		len(project) < MemoryEpisodesSearchProjectMin || len(project) > MemoryEpisodesSearchProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
@@ -11677,6 +12138,15 @@ func EncodeMemoryEpisodesSearchRequest(searchQuery string, rowLimit uint32) ([]b
 	var rowLimitBytes [4]byte
 	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
 	payload = append(payload, rowLimitBytes[:]...)
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, MemoryEpisodesSearchWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, MemoryEpisodesSearchProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationMemoryEpisodesSearch, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -11685,33 +12155,52 @@ func EncodeMemoryEpisodesSearchRequest(searchQuery string, rowLimit uint32) ([]b
 }
 
 // DecodeMemoryEpisodesSearchRequest reads it back, checking each field against its own bound.
-func DecodeMemoryEpisodesSearchRequest(request []byte) (string, uint32, error) {
+func DecodeMemoryEpisodesSearchRequest(request []byte) (string, uint32, uint32, string, string, error) {
 	var searchQuery string
 	var rowLimit uint32
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationMemoryEpisodesSearch || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if searchQuery, err = takeRowText(payload, &cursor, MemoryEpisodesSearchSearchQueryMax); err != nil ||
 		len(searchQuery) < MemoryEpisodesSearchSearchQueryMin {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor+4 > len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
 	cursor += 4
 	if rowLimit < MemoryEpisodesSearchRowLimitMin || rowLimit > MemoryEpisodesSearchRowLimitMax {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < MemoryEpisodesSearchScopeFlagsMin || scopeFlags > MemoryEpisodesSearchScopeFlagsMax {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, MemoryEpisodesSearchWorkspaceMax); err != nil ||
+		len(workspace) < MemoryEpisodesSearchWorkspaceMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, MemoryEpisodesSearchProjectMax); err != nil ||
+		len(project) < MemoryEpisodesSearchProjectMin {
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return "", 0, ErrMalformedEnvelope
+		return "", 0, 0, "", "", ErrMalformedEnvelope
 	}
-	return searchQuery, rowLimit, nil
+	return searchQuery, rowLimit, scopeFlags, workspace, project, nil
 }
 
 const MemoryEpisodesSearchEpisodeIDMin uint64 = 0
@@ -12101,14 +12590,32 @@ const StageMemorySearchByPattern = FamilyMemory
 const OperationMemorySearchByPattern uint32 = 135
 const MemorySearchByPatternSearchPatternMin = 1
 const MemorySearchByPatternSearchPatternMax = 511
+const MemorySearchByPatternScopeFlagsMin uint32 = 0
+const MemorySearchByPatternScopeFlagsMax uint32 = 3
+const MemorySearchByPatternWorkspaceMin = 0
+const MemorySearchByPatternWorkspaceMax = 511
+const MemorySearchByPatternProjectMin = 0
+const MemorySearchByPatternProjectMax = 511
 
 // EncodeMemorySearchByPatternRequest writes the schema memory_search_by_pattern declares, in order.
-func EncodeMemorySearchByPatternRequest(searchPattern string) ([]byte, error) {
-	if len(searchPattern) < MemorySearchByPatternSearchPatternMin || len(searchPattern) > MemorySearchByPatternSearchPatternMax || hasNUL(searchPattern) {
+func EncodeMemorySearchByPatternRequest(searchPattern string, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if len(searchPattern) < MemorySearchByPatternSearchPatternMin || len(searchPattern) > MemorySearchByPatternSearchPatternMax || hasNUL(searchPattern) ||
+		scopeFlags < MemorySearchByPatternScopeFlagsMin || scopeFlags > MemorySearchByPatternScopeFlagsMax ||
+		len(workspace) < MemorySearchByPatternWorkspaceMin || len(workspace) > MemorySearchByPatternWorkspaceMax || hasNUL(workspace) ||
+		len(project) < MemorySearchByPatternProjectMin || len(project) > MemorySearchByPatternProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
 	if err := putRowText(&payload, searchPattern, MemorySearchByPatternSearchPatternMax); err != nil {
+		return nil, err
+	}
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, MemorySearchByPatternWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, MemorySearchByPatternProjectMax); err != nil {
 		return nil, err
 	}
 	header, err := EncodeRequestHeader(OperationMemorySearchByPattern, 0, uint32(len(payload)))
@@ -12119,24 +12626,43 @@ func EncodeMemorySearchByPatternRequest(searchPattern string) ([]byte, error) {
 }
 
 // DecodeMemorySearchByPatternRequest reads it back, checking each field against its own bound.
-func DecodeMemorySearchByPatternRequest(request []byte) (string, error) {
+func DecodeMemorySearchByPatternRequest(request []byte) (string, uint32, string, string, error) {
 	var searchPattern string
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationMemorySearchByPattern || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
+		return "", 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if searchPattern, err = takeRowText(payload, &cursor, MemorySearchByPatternSearchPatternMax); err != nil ||
 		len(searchPattern) < MemorySearchByPatternSearchPatternMin {
-		return "", ErrMalformedEnvelope
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < MemorySearchByPatternScopeFlagsMin || scopeFlags > MemorySearchByPatternScopeFlagsMax {
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, MemorySearchByPatternWorkspaceMax); err != nil ||
+		len(workspace) < MemorySearchByPatternWorkspaceMin {
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, MemorySearchByPatternProjectMax); err != nil ||
+		len(project) < MemorySearchByPatternProjectMin {
+		return "", 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return "", ErrMalformedEnvelope
+		return "", 0, "", "", ErrMalformedEnvelope
 	}
-	return searchPattern, nil
+	return searchPattern, scopeFlags, workspace, project, nil
 }
 
 const MemorySearchByPatternMemoryIDMin uint64 = 0
@@ -12397,10 +12923,30 @@ func DecodeMemoryPriorInSessionReply(reply []byte) ([]MemoryPriorInSessionRow, e
 const EventLifecycleStalePending = EventMemory
 const StageLifecycleStalePending = FamilyMemory
 const OperationLifecycleStalePending uint32 = 137
+const LifecycleStalePendingScopeFlagsMin uint32 = 0
+const LifecycleStalePendingScopeFlagsMax uint32 = 3
+const LifecycleStalePendingWorkspaceMin = 0
+const LifecycleStalePendingWorkspaceMax = 511
+const LifecycleStalePendingProjectMin = 0
+const LifecycleStalePendingProjectMax = 511
 
 // EncodeLifecycleStalePendingRequest writes the schema lifecycle_stale_pending declares, in order.
-func EncodeLifecycleStalePendingRequest() ([]byte, error) {
+func EncodeLifecycleStalePendingRequest(scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if scopeFlags < LifecycleStalePendingScopeFlagsMin || scopeFlags > LifecycleStalePendingScopeFlagsMax ||
+		len(workspace) < LifecycleStalePendingWorkspaceMin || len(workspace) > LifecycleStalePendingWorkspaceMax || hasNUL(workspace) ||
+		len(project) < LifecycleStalePendingProjectMin || len(project) > LifecycleStalePendingProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
 	var payload []byte
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, LifecycleStalePendingWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, LifecycleStalePendingProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationLifecycleStalePending, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -12409,19 +12955,38 @@ func EncodeLifecycleStalePendingRequest() ([]byte, error) {
 }
 
 // DecodeLifecycleStalePendingRequest reads it back, checking each field against its own bound.
-func DecodeLifecycleStalePendingRequest(request []byte) error {
+func DecodeLifecycleStalePendingRequest(request []byte) (uint32, string, string, error) {
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationLifecycleStalePending || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return ErrMalformedEnvelope
+		return 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
-	if cursor != len(payload) {
-		return ErrMalformedEnvelope
+	if cursor+4 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
 	}
-	return nil
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < LifecycleStalePendingScopeFlagsMin || scopeFlags > LifecycleStalePendingScopeFlagsMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, LifecycleStalePendingWorkspaceMax); err != nil ||
+		len(workspace) < LifecycleStalePendingWorkspaceMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, LifecycleStalePendingProjectMax); err != nil ||
+		len(project) < LifecycleStalePendingProjectMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return scopeFlags, workspace, project, nil
 }
 
 const LifecycleStalePendingMemoryIDMin uint64 = 0
@@ -12583,14 +13148,32 @@ const StageLifecycleNewlySuperseded = FamilyMemory
 const OperationLifecycleNewlySuperseded uint32 = 138
 const LifecycleNewlySupersededSinceMin = 0
 const LifecycleNewlySupersededSinceMax = 31
+const LifecycleNewlySupersededScopeFlagsMin uint32 = 0
+const LifecycleNewlySupersededScopeFlagsMax uint32 = 3
+const LifecycleNewlySupersededWorkspaceMin = 0
+const LifecycleNewlySupersededWorkspaceMax = 511
+const LifecycleNewlySupersededProjectMin = 0
+const LifecycleNewlySupersededProjectMax = 511
 
 // EncodeLifecycleNewlySupersededRequest writes the schema lifecycle_newly_superseded declares, in order.
-func EncodeLifecycleNewlySupersededRequest(since string) ([]byte, error) {
-	if len(since) < LifecycleNewlySupersededSinceMin || len(since) > LifecycleNewlySupersededSinceMax || hasNUL(since) {
+func EncodeLifecycleNewlySupersededRequest(since string, scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if len(since) < LifecycleNewlySupersededSinceMin || len(since) > LifecycleNewlySupersededSinceMax || hasNUL(since) ||
+		scopeFlags < LifecycleNewlySupersededScopeFlagsMin || scopeFlags > LifecycleNewlySupersededScopeFlagsMax ||
+		len(workspace) < LifecycleNewlySupersededWorkspaceMin || len(workspace) > LifecycleNewlySupersededWorkspaceMax || hasNUL(workspace) ||
+		len(project) < LifecycleNewlySupersededProjectMin || len(project) > LifecycleNewlySupersededProjectMax || hasNUL(project) {
 		return nil, ErrMalformedEnvelope
 	}
 	var payload []byte
 	if err := putRowText(&payload, since, LifecycleNewlySupersededSinceMax); err != nil {
+		return nil, err
+	}
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, LifecycleNewlySupersededWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, LifecycleNewlySupersededProjectMax); err != nil {
 		return nil, err
 	}
 	header, err := EncodeRequestHeader(OperationLifecycleNewlySuperseded, 0, uint32(len(payload)))
@@ -12601,24 +13184,43 @@ func EncodeLifecycleNewlySupersededRequest(since string) ([]byte, error) {
 }
 
 // DecodeLifecycleNewlySupersededRequest reads it back, checking each field against its own bound.
-func DecodeLifecycleNewlySupersededRequest(request []byte) (string, error) {
+func DecodeLifecycleNewlySupersededRequest(request []byte) (string, uint32, string, string, error) {
 	var since string
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationLifecycleNewlySuperseded || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return "", ErrMalformedEnvelope
+		return "", 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
 	if since, err = takeRowText(payload, &cursor, LifecycleNewlySupersededSinceMax); err != nil ||
 		len(since) < LifecycleNewlySupersededSinceMin {
-		return "", ErrMalformedEnvelope
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < LifecycleNewlySupersededScopeFlagsMin || scopeFlags > LifecycleNewlySupersededScopeFlagsMax {
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, LifecycleNewlySupersededWorkspaceMax); err != nil ||
+		len(workspace) < LifecycleNewlySupersededWorkspaceMin {
+		return "", 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, LifecycleNewlySupersededProjectMax); err != nil ||
+		len(project) < LifecycleNewlySupersededProjectMin {
+		return "", 0, "", "", ErrMalformedEnvelope
 	}
 	if cursor != len(payload) {
-		return "", ErrMalformedEnvelope
+		return "", 0, "", "", ErrMalformedEnvelope
 	}
-	return since, nil
+	return since, scopeFlags, workspace, project, nil
 }
 
 const LifecycleNewlySupersededMemoryIDMin uint64 = 0

@@ -4118,7 +4118,7 @@
       "id": 71,
       "name": "briefing_active_entities",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -4139,6 +4139,24 @@
             "type": "u32",
             "minimum": 1,
             "maximum": 64
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -4765,7 +4783,7 @@
       "id": 77,
       "name": "relations_for_entity",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -4792,6 +4810,24 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 256
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -4874,7 +4910,7 @@
       "id": 78,
       "name": "relations_search",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -4901,6 +4937,24 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 256
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -4983,7 +5037,7 @@
       "id": 79,
       "name": "relations_search_as_of",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -5016,6 +5070,24 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 256
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -5098,7 +5170,7 @@
       "id": 80,
       "name": "relations_supporting",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -5125,6 +5197,24 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 256
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -5310,7 +5400,7 @@
       "id": 82,
       "name": "global_constraints",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -5325,7 +5415,26 @@
         "policy": {
           "reads": "preferences and policies above L0, newest first, so the constraint a caller sees first is the most recently written"
         },
-        "fields": []
+        "fields": [
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
       },
       "reply": {
         "row": {
@@ -5352,7 +5461,7 @@
       "id": 83,
       "name": "kv_section",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -5373,6 +5482,24 @@
             "type": "u32",
             "minimum": 1,
             "maximum": 5
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -5505,7 +5632,7 @@
       "id": 86,
       "name": "memory_candidates",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -5526,6 +5653,24 @@
             "type": "u32",
             "minimum": 1,
             "maximum": 2
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -5584,7 +5729,7 @@
       "id": 87,
       "name": "recall_section",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "none",
       "idempotency": "safe",
       "results": [
@@ -5605,6 +5750,24 @@
             "type": "u32",
             "minimum": 1,
             "maximum": 4
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -7578,7 +7741,7 @@
       "id": 122,
       "name": "briefing_key_facts",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -7593,7 +7756,26 @@
         "policy": {
           "reads": "only the durable tiers are listed, ranked by a scope expression written into the statement"
         },
-        "fields": []
+        "fields": [
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
       },
       "reply": {
         "row": {
@@ -7668,7 +7850,7 @@
       "id": 123,
       "name": "briefing_recent_activity",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -7683,7 +7865,26 @@
         "policy": {
           "reads": "one episode per session, chosen by a window function before the limit applies"
         },
-        "fields": []
+        "fields": [
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
       },
       "reply": {
         "row": {
@@ -7770,7 +7971,7 @@
       "id": 125,
       "name": "memory_key_facts_provenance",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -7785,7 +7986,26 @@
         "policy": {
           "reads": "two correlated subqueries a row, and only facts and preferences in the durable tiers"
         },
-        "fields": []
+        "fields": [
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
       },
       "reply": {
         "row": {
@@ -8208,7 +8428,7 @@
       "id": 132,
       "name": "memory_episodes_search",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -8235,6 +8455,24 @@
             "type": "u32",
             "minimum": 0,
             "maximum": 65535
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },
@@ -8379,7 +8617,7 @@
       "id": 135,
       "name": "memory_search_by_pattern",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -8399,6 +8637,24 @@
             "name": "search_pattern",
             "type": "utf8",
             "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
             "maximum_bytes": 511
           }
         ]
@@ -8495,7 +8751,7 @@
       "id": 137,
       "name": "lifecycle_stale_pending",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -8510,7 +8766,26 @@
         "policy": {
           "reads": "pending memories carrying a deadline, ranked by a scope expression before age"
         },
-        "fields": []
+        "fields": [
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
       },
       "reply": {
         "row": {
@@ -8561,7 +8836,7 @@
       "id": 138,
       "name": "lifecycle_newly_superseded",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -8582,6 +8857,24 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 31
+          },
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
           }
         ]
       },

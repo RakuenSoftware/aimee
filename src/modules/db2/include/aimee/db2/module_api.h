@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "533ed69daf075fc381863d6ecf879ffffc1b5b636560007ce377d3c391d0ab8d"
+#define AIMEE_DB2_CONTRACT_SHA256 "877553890d12bfe43651afdccb292648179fb144fd3f7104430f0ed5944b3c77"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -933,10 +933,16 @@
 #define AIMEE_DB2_EVENT_BRIEFING_ACTIVE_ENTITIES                                      AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_BRIEFING_ACTIVE_ENTITIES                                      AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_BRIEFING_ACTIVE_ENTITIES                                  71u
-#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_REQUEST_MIN_LEN                            28u
-#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_REQUEST_MAX_LEN                            28u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_REQUEST_MIN_LEN                            40u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_REQUEST_MAX_LEN                            1062u
 #define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MIN                                  1u
 #define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MAX                                  64u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_SCOPE_FLAGS_MIN                            0u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_SCOPE_FLAGS_MAX                            3u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_WORKSPACE_MIN                              0u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_WORKSPACE_MAX                              511u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_PROJECT_MIN                                0u
+#define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_PROJECT_MAX                                511u
 #define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_ENTITY_MIN                                 0u
 #define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_ENTITY_MAX                                 255u
 #define AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MENTIONS_MIN                               0u
@@ -1141,12 +1147,18 @@
 #define AIMEE_DB2_EVENT_RELATIONS_FOR_ENTITY                                          AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_RELATIONS_FOR_ENTITY                                          AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_RELATIONS_FOR_ENTITY                                      77u
-#define AIMEE_DB2_RELATIONS_FOR_ENTITY_REQUEST_MIN_LEN                                32u
-#define AIMEE_DB2_RELATIONS_FOR_ENTITY_REQUEST_MAX_LEN                                159u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_REQUEST_MIN_LEN                                44u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_REQUEST_MAX_LEN                                1193u
 #define AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MIN                                     1u
 #define AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MAX                                     127u
 #define AIMEE_DB2_RELATIONS_FOR_ENTITY_LIMIT_MIN                                      0u
 #define AIMEE_DB2_RELATIONS_FOR_ENTITY_LIMIT_MAX                                      256u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_SCOPE_FLAGS_MIN                                0u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_SCOPE_FLAGS_MAX                                3u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_WORKSPACE_MIN                                  0u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_WORKSPACE_MAX                                  511u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_PROJECT_MIN                                    0u
+#define AIMEE_DB2_RELATIONS_FOR_ENTITY_PROJECT_MAX                                    511u
 #define AIMEE_DB2_RELATIONS_FOR_ENTITY_RELATION_ID_MIN                                0ull
 #define AIMEE_DB2_RELATIONS_FOR_ENTITY_RELATION_ID_MAX                                9223372036854775807ull
 #define AIMEE_DB2_RELATIONS_FOR_ENTITY_RELATION_MEMORY_ID_MIN                         0ull
@@ -1175,12 +1187,18 @@
 #define AIMEE_DB2_EVENT_RELATIONS_SEARCH                                              AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_RELATIONS_SEARCH                                              AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_RELATIONS_SEARCH                                          78u
-#define AIMEE_DB2_RELATIONS_SEARCH_REQUEST_MIN_LEN                                    32u
-#define AIMEE_DB2_RELATIONS_SEARCH_REQUEST_MAX_LEN                                    287u
+#define AIMEE_DB2_RELATIONS_SEARCH_REQUEST_MIN_LEN                                    44u
+#define AIMEE_DB2_RELATIONS_SEARCH_REQUEST_MAX_LEN                                    1321u
 #define AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MIN                                 1u
 #define AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MAX                                 255u
 #define AIMEE_DB2_RELATIONS_SEARCH_LIMIT_MIN                                          0u
 #define AIMEE_DB2_RELATIONS_SEARCH_LIMIT_MAX                                          256u
+#define AIMEE_DB2_RELATIONS_SEARCH_SCOPE_FLAGS_MIN                                    0u
+#define AIMEE_DB2_RELATIONS_SEARCH_SCOPE_FLAGS_MAX                                    3u
+#define AIMEE_DB2_RELATIONS_SEARCH_WORKSPACE_MIN                                      0u
+#define AIMEE_DB2_RELATIONS_SEARCH_WORKSPACE_MAX                                      511u
+#define AIMEE_DB2_RELATIONS_SEARCH_PROJECT_MIN                                        0u
+#define AIMEE_DB2_RELATIONS_SEARCH_PROJECT_MAX                                        511u
 #define AIMEE_DB2_RELATIONS_SEARCH_RELATION_ID_MIN                                    0ull
 #define AIMEE_DB2_RELATIONS_SEARCH_RELATION_ID_MAX                                    9223372036854775807ull
 #define AIMEE_DB2_RELATIONS_SEARCH_RELATION_MEMORY_ID_MIN                             0ull
@@ -1209,14 +1227,20 @@
 #define AIMEE_DB2_EVENT_RELATIONS_SEARCH_AS_OF                                        AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_RELATIONS_SEARCH_AS_OF                                        AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_RELATIONS_SEARCH_AS_OF                                    79u
-#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_REQUEST_MIN_LEN                              36u
-#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_REQUEST_MAX_LEN                              322u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_REQUEST_MIN_LEN                              48u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_REQUEST_MAX_LEN                              1356u
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MIN                           1u
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MAX                           255u
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MIN                                    1u
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MAX                                    31u
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_LIMIT_MIN                                    0u
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_LIMIT_MAX                                    256u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_SCOPE_FLAGS_MIN                              0u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_SCOPE_FLAGS_MAX                              3u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_WORKSPACE_MIN                                0u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_WORKSPACE_MAX                                511u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_PROJECT_MIN                                  0u
+#define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_PROJECT_MAX                                  511u
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_ID_MIN                              0ull
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_ID_MAX                              9223372036854775807ull
 #define AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_MEMORY_ID_MIN                       0ull
@@ -1245,12 +1269,18 @@
 #define AIMEE_DB2_EVENT_RELATIONS_SUPPORTING                                          AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_RELATIONS_SUPPORTING                                          AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_RELATIONS_SUPPORTING                                      80u
-#define AIMEE_DB2_RELATIONS_SUPPORTING_REQUEST_MIN_LEN                                32u
-#define AIMEE_DB2_RELATIONS_SUPPORTING_REQUEST_MAX_LEN                                159u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_REQUEST_MIN_LEN                                44u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_REQUEST_MAX_LEN                                1193u
 #define AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MIN                               1u
 #define AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MAX                               127u
 #define AIMEE_DB2_RELATIONS_SUPPORTING_LIMIT_MIN                                      0u
 #define AIMEE_DB2_RELATIONS_SUPPORTING_LIMIT_MAX                                      256u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_SCOPE_FLAGS_MIN                                0u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_SCOPE_FLAGS_MAX                                3u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_WORKSPACE_MIN                                  0u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_WORKSPACE_MAX                                  511u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_PROJECT_MIN                                    0u
+#define AIMEE_DB2_RELATIONS_SUPPORTING_PROJECT_MAX                                    511u
 #define AIMEE_DB2_RELATIONS_SUPPORTING_RELATION_ID_MIN                                0ull
 #define AIMEE_DB2_RELATIONS_SUPPORTING_RELATION_ID_MAX                                9223372036854775807ull
 #define AIMEE_DB2_RELATIONS_SUPPORTING_RELATION_MEMORY_ID_MIN                         0ull
@@ -1312,8 +1342,14 @@
 #define AIMEE_DB2_EVENT_GLOBAL_CONSTRAINTS                                            AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_GLOBAL_CONSTRAINTS                                            AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_GLOBAL_CONSTRAINTS                                        82u
-#define AIMEE_DB2_GLOBAL_CONSTRAINTS_REQUEST_MIN_LEN                                  24u
-#define AIMEE_DB2_GLOBAL_CONSTRAINTS_REQUEST_MAX_LEN                                  24u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_REQUEST_MIN_LEN                                  36u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_REQUEST_MAX_LEN                                  1058u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_SCOPE_FLAGS_MIN                                  0u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_SCOPE_FLAGS_MAX                                  3u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_WORKSPACE_MIN                                    0u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_WORKSPACE_MAX                                    511u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_PROJECT_MIN                                      0u
+#define AIMEE_DB2_GLOBAL_CONSTRAINTS_PROJECT_MAX                                      511u
 #define AIMEE_DB2_GLOBAL_CONSTRAINTS_MEMORY_KEY_MIN                                   0u
 #define AIMEE_DB2_GLOBAL_CONSTRAINTS_MEMORY_KEY_MAX                                   511u
 #define AIMEE_DB2_GLOBAL_CONSTRAINTS_MEMORY_CONTENT_MIN                               0u
@@ -1325,10 +1361,16 @@
 #define AIMEE_DB2_EVENT_KV_SECTION                                                    AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_KV_SECTION                                                    AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_KV_SECTION                                                83u
-#define AIMEE_DB2_KV_SECTION_REQUEST_MIN_LEN                                          28u
-#define AIMEE_DB2_KV_SECTION_REQUEST_MAX_LEN                                          28u
+#define AIMEE_DB2_KV_SECTION_REQUEST_MIN_LEN                                          40u
+#define AIMEE_DB2_KV_SECTION_REQUEST_MAX_LEN                                          1062u
 #define AIMEE_DB2_KV_SECTION_KV_SECTION_MIN                                           1u
 #define AIMEE_DB2_KV_SECTION_KV_SECTION_MAX                                           5u
+#define AIMEE_DB2_KV_SECTION_SCOPE_FLAGS_MIN                                          0u
+#define AIMEE_DB2_KV_SECTION_SCOPE_FLAGS_MAX                                          3u
+#define AIMEE_DB2_KV_SECTION_WORKSPACE_MIN                                            0u
+#define AIMEE_DB2_KV_SECTION_WORKSPACE_MAX                                            511u
+#define AIMEE_DB2_KV_SECTION_PROJECT_MIN                                              0u
+#define AIMEE_DB2_KV_SECTION_PROJECT_MAX                                              511u
 #define AIMEE_DB2_KV_SECTION_MEMORY_KEY_MIN                                           0u
 #define AIMEE_DB2_KV_SECTION_MEMORY_KEY_MAX                                           511u
 #define AIMEE_DB2_KV_SECTION_MEMORY_CONTENT_MIN                                       0u
@@ -1372,10 +1414,16 @@
 #define AIMEE_DB2_EVENT_MEMORY_CANDIDATES                                             AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_MEMORY_CANDIDATES                                             AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_MEMORY_CANDIDATES                                         86u
-#define AIMEE_DB2_MEMORY_CANDIDATES_REQUEST_MIN_LEN                                   28u
-#define AIMEE_DB2_MEMORY_CANDIDATES_REQUEST_MAX_LEN                                   28u
+#define AIMEE_DB2_MEMORY_CANDIDATES_REQUEST_MIN_LEN                                   40u
+#define AIMEE_DB2_MEMORY_CANDIDATES_REQUEST_MAX_LEN                                   1062u
 #define AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MIN                              1u
 #define AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MAX                              2u
+#define AIMEE_DB2_MEMORY_CANDIDATES_SCOPE_FLAGS_MIN                                   0u
+#define AIMEE_DB2_MEMORY_CANDIDATES_SCOPE_FLAGS_MAX                                   3u
+#define AIMEE_DB2_MEMORY_CANDIDATES_WORKSPACE_MIN                                     0u
+#define AIMEE_DB2_MEMORY_CANDIDATES_WORKSPACE_MAX                                     511u
+#define AIMEE_DB2_MEMORY_CANDIDATES_PROJECT_MIN                                       0u
+#define AIMEE_DB2_MEMORY_CANDIDATES_PROJECT_MAX                                       511u
 #define AIMEE_DB2_MEMORY_CANDIDATES_MEMORY_ROW_ID_MIN                                 0ull
 #define AIMEE_DB2_MEMORY_CANDIDATES_MEMORY_ROW_ID_MAX                                 9223372036854775807ull
 #define AIMEE_DB2_MEMORY_CANDIDATES_USE_COUNT_MIN                                     0u
@@ -1396,10 +1444,16 @@
 #define AIMEE_DB2_EVENT_RECALL_SECTION                                                AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_RECALL_SECTION                                                AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_RECALL_SECTION                                            87u
-#define AIMEE_DB2_RECALL_SECTION_REQUEST_MIN_LEN                                      28u
-#define AIMEE_DB2_RECALL_SECTION_REQUEST_MAX_LEN                                      28u
+#define AIMEE_DB2_RECALL_SECTION_REQUEST_MIN_LEN                                      40u
+#define AIMEE_DB2_RECALL_SECTION_REQUEST_MAX_LEN                                      1062u
 #define AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MIN                                   1u
 #define AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MAX                                   4u
+#define AIMEE_DB2_RECALL_SECTION_SCOPE_FLAGS_MIN                                      0u
+#define AIMEE_DB2_RECALL_SECTION_SCOPE_FLAGS_MAX                                      3u
+#define AIMEE_DB2_RECALL_SECTION_WORKSPACE_MIN                                        0u
+#define AIMEE_DB2_RECALL_SECTION_WORKSPACE_MAX                                        511u
+#define AIMEE_DB2_RECALL_SECTION_PROJECT_MIN                                          0u
+#define AIMEE_DB2_RECALL_SECTION_PROJECT_MAX                                          511u
 #define AIMEE_DB2_RECALL_SECTION_MEMORY_ROW_ID_MIN                                    0ull
 #define AIMEE_DB2_RECALL_SECTION_MEMORY_ROW_ID_MAX                                    9223372036854775807ull
 #define AIMEE_DB2_RECALL_SECTION_MEMORY_TIER_MIN                                      0u
@@ -2003,8 +2057,14 @@
 #define AIMEE_DB2_EVENT_BRIEFING_KEY_FACTS                                            AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_BRIEFING_KEY_FACTS                                            AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_BRIEFING_KEY_FACTS                                        122u
-#define AIMEE_DB2_BRIEFING_KEY_FACTS_REQUEST_MIN_LEN                                  24u
-#define AIMEE_DB2_BRIEFING_KEY_FACTS_REQUEST_MAX_LEN                                  24u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_REQUEST_MIN_LEN                                  36u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_REQUEST_MAX_LEN                                  1058u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_SCOPE_FLAGS_MIN                                  0u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_SCOPE_FLAGS_MAX                                  3u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_WORKSPACE_MIN                                    0u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_WORKSPACE_MAX                                    511u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_PROJECT_MIN                                      0u
+#define AIMEE_DB2_BRIEFING_KEY_FACTS_PROJECT_MAX                                      511u
 #define AIMEE_DB2_BRIEFING_KEY_FACTS_MEMORY_ID_MIN                                    0ull
 #define AIMEE_DB2_BRIEFING_KEY_FACTS_MEMORY_ID_MAX                                    9223372036854775807ull
 #define AIMEE_DB2_BRIEFING_KEY_FACTS_MEMORY_TIER_MIN                                  0u
@@ -2030,8 +2090,14 @@
 #define AIMEE_DB2_EVENT_BRIEFING_RECENT_ACTIVITY                                      AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_BRIEFING_RECENT_ACTIVITY                                      AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_BRIEFING_RECENT_ACTIVITY                                  123u
-#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_REQUEST_MIN_LEN                            24u
-#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_REQUEST_MAX_LEN                            24u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_REQUEST_MIN_LEN                            36u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_REQUEST_MAX_LEN                            1058u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_SCOPE_FLAGS_MIN                            0u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_SCOPE_FLAGS_MAX                            3u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_WORKSPACE_MIN                              0u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_WORKSPACE_MAX                              511u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_PROJECT_MIN                                0u
+#define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_PROJECT_MAX                                511u
 #define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_SESSION_ID_MIN                             0u
 #define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_SESSION_ID_MAX                             63u
 #define AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_ACTIVITY_SUMMARY_MIN                       0u
@@ -2062,8 +2128,14 @@
 #define AIMEE_DB2_EVENT_MEMORY_KEY_FACTS_PROVENANCE                                   AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_MEMORY_KEY_FACTS_PROVENANCE                                   AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_MEMORY_KEY_FACTS_PROVENANCE                               125u
-#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_REQUEST_MIN_LEN                         24u
-#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_REQUEST_MAX_LEN                         24u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_REQUEST_MIN_LEN                         36u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_REQUEST_MAX_LEN                         1058u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_SCOPE_FLAGS_MIN                         0u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_SCOPE_FLAGS_MAX                         3u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_WORKSPACE_MIN                           0u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_WORKSPACE_MAX                           511u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_PROJECT_MIN                             0u
+#define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_PROJECT_MAX                             511u
 #define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MEMORY_ID_MIN                           0ull
 #define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MEMORY_ID_MAX                           9223372036854775807ull
 #define AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MEMORY_KEY_MIN                          0u
@@ -2193,12 +2265,18 @@
 #define AIMEE_DB2_EVENT_MEMORY_EPISODES_SEARCH                                        AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_MEMORY_EPISODES_SEARCH                                        AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_MEMORY_EPISODES_SEARCH                                    132u
-#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_REQUEST_MIN_LEN                              32u
-#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_REQUEST_MAX_LEN                              543u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_REQUEST_MIN_LEN                              44u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_REQUEST_MAX_LEN                              1577u
 #define AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MIN                             0u
 #define AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MAX                             511u
 #define AIMEE_DB2_MEMORY_EPISODES_SEARCH_ROW_LIMIT_MIN                                0u
 #define AIMEE_DB2_MEMORY_EPISODES_SEARCH_ROW_LIMIT_MAX                                65535u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_SCOPE_FLAGS_MIN                              0u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_SCOPE_FLAGS_MAX                              3u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_WORKSPACE_MIN                                0u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_WORKSPACE_MAX                                511u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_PROJECT_MIN                                  0u
+#define AIMEE_DB2_MEMORY_EPISODES_SEARCH_PROJECT_MAX                                  511u
 #define AIMEE_DB2_MEMORY_EPISODES_SEARCH_EPISODE_ID_MIN                               0ull
 #define AIMEE_DB2_MEMORY_EPISODES_SEARCH_EPISODE_ID_MAX                               9223372036854775807ull
 #define AIMEE_DB2_MEMORY_EPISODES_SEARCH_MEMORY_ID_MIN                                0ull
@@ -2246,10 +2324,16 @@
 #define AIMEE_DB2_EVENT_MEMORY_SEARCH_BY_PATTERN                                      AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_MEMORY_SEARCH_BY_PATTERN                                      AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_MEMORY_SEARCH_BY_PATTERN                                  135u
-#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_REQUEST_MIN_LEN                            28u
-#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_REQUEST_MAX_LEN                            539u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_REQUEST_MIN_LEN                            40u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_REQUEST_MAX_LEN                            1573u
 #define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MIN                         1u
 #define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX                         511u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SCOPE_FLAGS_MIN                            0u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SCOPE_FLAGS_MAX                            3u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_WORKSPACE_MIN                              0u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_WORKSPACE_MAX                              511u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_PROJECT_MIN                                0u
+#define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_PROJECT_MAX                                511u
 #define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MEMORY_ID_MIN                              0ull
 #define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MEMORY_ID_MAX                              9223372036854775807ull
 #define AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MEMORY_KEY_MIN                             0u
@@ -2282,8 +2366,14 @@
 #define AIMEE_DB2_EVENT_LIFECYCLE_STALE_PENDING                                       AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_LIFECYCLE_STALE_PENDING                                       AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_LIFECYCLE_STALE_PENDING                                   137u
-#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_REQUEST_MIN_LEN                             24u
-#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_REQUEST_MAX_LEN                             24u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_REQUEST_MIN_LEN                             36u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_REQUEST_MAX_LEN                             1058u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_SCOPE_FLAGS_MIN                             0u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_SCOPE_FLAGS_MAX                             3u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_WORKSPACE_MIN                               0u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_WORKSPACE_MAX                               511u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_PROJECT_MIN                                 0u
+#define AIMEE_DB2_LIFECYCLE_STALE_PENDING_PROJECT_MAX                                 511u
 #define AIMEE_DB2_LIFECYCLE_STALE_PENDING_MEMORY_ID_MIN                               0ull
 #define AIMEE_DB2_LIFECYCLE_STALE_PENDING_MEMORY_ID_MAX                               9223372036854775807ull
 #define AIMEE_DB2_LIFECYCLE_STALE_PENDING_MEMORY_TEXT_MIN                             0u
@@ -2301,10 +2391,16 @@
 #define AIMEE_DB2_EVENT_LIFECYCLE_NEWLY_SUPERSEDED                                    AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_LIFECYCLE_NEWLY_SUPERSEDED                                    AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_LIFECYCLE_NEWLY_SUPERSEDED                                138u
-#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_REQUEST_MIN_LEN                          28u
-#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_REQUEST_MAX_LEN                          59u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_REQUEST_MIN_LEN                          40u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_REQUEST_MAX_LEN                          1093u
 #define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MIN                                0u
 #define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX                                31u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SCOPE_FLAGS_MIN                          0u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SCOPE_FLAGS_MAX                          3u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_WORKSPACE_MIN                            0u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_WORKSPACE_MAX                            511u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_PROJECT_MIN                              0u
+#define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_PROJECT_MAX                              511u
 #define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MEMORY_ID_MIN                            0ull
 #define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MEMORY_ID_MAX                            9223372036854775807ull
 #define AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MEMORY_KEY_MIN                           0u
@@ -15280,22 +15376,38 @@ static inline int aimee_db2_unit_ids_for_memory_reply_decode(const uint8_t *inpu
    return 0;
 }
 
-static inline int aimee_db2_briefing_active_entities_request_encode(uint32_t limit,
+static inline int aimee_db2_briefing_active_entities_request_encode(uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
-   if (limit < AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MIN || limit > AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MAX)
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (limit < AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MIN || limit > AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
    uint32_t cursor = 0u;
    aimee_db2_put_u32(payload + cursor, limit);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_BRIEFING_ACTIVE_ENTITIES, 0u, cursor, output,
                                        capacity) != 0)
@@ -15306,11 +15418,17 @@ static inline int aimee_db2_briefing_active_entities_request_encode(uint32_t lim
 }
 
 static inline int aimee_db2_briefing_active_entities_request_decode(const uint8_t *input, size_t input_len,
-                                                   uint32_t *limit)
+                                                   uint32_t *limit, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (limit)
       *limit = 0u;
-   if (!limit)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!limit || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -15326,6 +15444,18 @@ static inline int aimee_db2_briefing_active_entities_request_decode(const uint8_
    *limit = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*limit < AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MIN || *limit > AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_LIMIT_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -16731,19 +16861,28 @@ static inline int aimee_db2_prospective_by_trigger_terms_reply_decode(const uint
    return 0;
 }
 
-static inline int aimee_db2_relations_for_entity_request_encode(const char *entity, uint32_t limit,
+static inline int aimee_db2_relations_for_entity_request_encode(const char *entity, uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!entity || !output || !output_len)
+   if (!entity || !workspace || !project || !output || !output_len)
       return -1;
    size_t entity_len = 0u;
    while (entity_len <= AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MAX && entity[entity_len])
       ++entity_len;
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_RELATIONS_FOR_ENTITY_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_RELATIONS_FOR_ENTITY_PROJECT_MAX && project[project_len])
+      ++project_len;
    if (entity_len < AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MIN || entity_len > AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MAX ||
-       limit > AIMEE_DB2_RELATIONS_FOR_ENTITY_LIMIT_MAX)
+       limit > AIMEE_DB2_RELATIONS_FOR_ENTITY_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_RELATIONS_FOR_ENTITY_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_RELATIONS_FOR_ENTITY_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_RELATIONS_FOR_ENTITY_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_RELATIONS_FOR_ENTITY_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
@@ -16753,6 +16892,14 @@ static inline int aimee_db2_relations_for_entity_request_encode(const char *enti
    cursor += 4u + (uint32_t)entity_len;
    aimee_db2_put_u32(payload + cursor, limit);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RELATIONS_FOR_ENTITY, 0u, cursor, output,
                                        capacity) != 0)
@@ -16763,13 +16910,19 @@ static inline int aimee_db2_relations_for_entity_request_encode(const char *enti
 }
 
 static inline int aimee_db2_relations_for_entity_request_decode(const uint8_t *input, size_t input_len,
-                                                   char *entity, size_t entity_capacity, uint32_t *limit)
+                                                   char *entity, size_t entity_capacity, uint32_t *limit, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (entity && entity_capacity)
       entity[0] = '\0';
    if (limit)
       *limit = 0u;
-   if (!entity || entity_capacity < (size_t)AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MAX + 1u || !limit)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!entity || entity_capacity < (size_t)AIMEE_DB2_RELATIONS_FOR_ENTITY_ENTITY_MAX + 1u || !limit || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_RELATIONS_FOR_ENTITY_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_RELATIONS_FOR_ENTITY_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -16795,6 +16948,18 @@ static inline int aimee_db2_relations_for_entity_request_decode(const uint8_t *i
    *limit = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*limit > AIMEE_DB2_RELATIONS_FOR_ENTITY_LIMIT_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_RELATIONS_FOR_ENTITY_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_RELATIONS_FOR_ENTITY_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_RELATIONS_FOR_ENTITY_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -16980,19 +17145,28 @@ static inline int aimee_db2_relations_for_entity_reply_decode(const uint8_t *inp
    return 0;
 }
 
-static inline int aimee_db2_relations_search_request_encode(const char *relation_query, uint32_t limit,
+static inline int aimee_db2_relations_search_request_encode(const char *relation_query, uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!relation_query || !output || !output_len)
+   if (!relation_query || !workspace || !project || !output || !output_len)
       return -1;
    size_t relation_query_len = 0u;
    while (relation_query_len <= AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MAX && relation_query[relation_query_len])
       ++relation_query_len;
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_RELATIONS_SEARCH_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_RELATIONS_SEARCH_PROJECT_MAX && project[project_len])
+      ++project_len;
    if (relation_query_len < AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MIN || relation_query_len > AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MAX ||
-       limit > AIMEE_DB2_RELATIONS_SEARCH_LIMIT_MAX)
+       limit > AIMEE_DB2_RELATIONS_SEARCH_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_RELATIONS_SEARCH_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_RELATIONS_SEARCH_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_RELATIONS_SEARCH_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_RELATIONS_SEARCH_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
@@ -17002,6 +17176,14 @@ static inline int aimee_db2_relations_search_request_encode(const char *relation
    cursor += 4u + (uint32_t)relation_query_len;
    aimee_db2_put_u32(payload + cursor, limit);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RELATIONS_SEARCH, 0u, cursor, output,
                                        capacity) != 0)
@@ -17012,13 +17194,19 @@ static inline int aimee_db2_relations_search_request_encode(const char *relation
 }
 
 static inline int aimee_db2_relations_search_request_decode(const uint8_t *input, size_t input_len,
-                                                   char *relation_query, size_t relation_query_capacity, uint32_t *limit)
+                                                   char *relation_query, size_t relation_query_capacity, uint32_t *limit, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (relation_query && relation_query_capacity)
       relation_query[0] = '\0';
    if (limit)
       *limit = 0u;
-   if (!relation_query || relation_query_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MAX + 1u || !limit)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!relation_query || relation_query_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_RELATION_QUERY_MAX + 1u || !limit || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -17044,6 +17232,18 @@ static inline int aimee_db2_relations_search_request_decode(const uint8_t *input
    *limit = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*limit > AIMEE_DB2_RELATIONS_SEARCH_LIMIT_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_RELATIONS_SEARCH_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_RELATIONS_SEARCH_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_RELATIONS_SEARCH_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -17229,13 +17429,13 @@ static inline int aimee_db2_relations_search_reply_decode(const uint8_t *input, 
    return 0;
 }
 
-static inline int aimee_db2_relations_search_as_of_request_encode(const char *relation_query, const char *as_of, uint32_t limit,
+static inline int aimee_db2_relations_search_as_of_request_encode(const char *relation_query, const char *as_of, uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!relation_query || !as_of || !output || !output_len)
+   if (!relation_query || !as_of || !workspace || !project || !output || !output_len)
       return -1;
    size_t relation_query_len = 0u;
    while (relation_query_len <= AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MAX && relation_query[relation_query_len])
@@ -17243,9 +17443,18 @@ static inline int aimee_db2_relations_search_as_of_request_encode(const char *re
    size_t as_of_len = 0u;
    while (as_of_len <= AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MAX && as_of[as_of_len])
       ++as_of_len;
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_RELATIONS_SEARCH_AS_OF_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_RELATIONS_SEARCH_AS_OF_PROJECT_MAX && project[project_len])
+      ++project_len;
    if (relation_query_len < AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MIN || relation_query_len > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MAX ||
        as_of_len < AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MIN || as_of_len > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MAX ||
-       limit > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_LIMIT_MAX)
+       limit > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_RELATIONS_SEARCH_AS_OF_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
@@ -17258,6 +17467,14 @@ static inline int aimee_db2_relations_search_as_of_request_encode(const char *re
    cursor += 4u + (uint32_t)as_of_len;
    aimee_db2_put_u32(payload + cursor, limit);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RELATIONS_SEARCH_AS_OF, 0u, cursor, output,
                                        capacity) != 0)
@@ -17268,7 +17485,7 @@ static inline int aimee_db2_relations_search_as_of_request_encode(const char *re
 }
 
 static inline int aimee_db2_relations_search_as_of_request_decode(const uint8_t *input, size_t input_len,
-                                                   char *relation_query, size_t relation_query_capacity, char *as_of, size_t as_of_capacity, uint32_t *limit)
+                                                   char *relation_query, size_t relation_query_capacity, char *as_of, size_t as_of_capacity, uint32_t *limit, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (relation_query && relation_query_capacity)
       relation_query[0] = '\0';
@@ -17276,7 +17493,13 @@ static inline int aimee_db2_relations_search_as_of_request_decode(const uint8_t 
       as_of[0] = '\0';
    if (limit)
       *limit = 0u;
-   if (!relation_query || relation_query_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MAX + 1u || !as_of || as_of_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MAX + 1u || !limit)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!relation_query || relation_query_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RELATION_QUERY_MAX + 1u || !as_of || as_of_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_AS_OF_AS_OF_MAX + 1u || !limit || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_AS_OF_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_RELATIONS_SEARCH_AS_OF_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -17312,6 +17535,18 @@ static inline int aimee_db2_relations_search_as_of_request_decode(const uint8_t 
    *limit = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*limit > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_LIMIT_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_RELATIONS_SEARCH_AS_OF_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_RELATIONS_SEARCH_AS_OF_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_RELATIONS_SEARCH_AS_OF_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -17497,19 +17732,28 @@ static inline int aimee_db2_relations_search_as_of_reply_decode(const uint8_t *i
    return 0;
 }
 
-static inline int aimee_db2_relations_supporting_request_encode(const char *entity_token, uint32_t limit,
+static inline int aimee_db2_relations_supporting_request_encode(const char *entity_token, uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!entity_token || !output || !output_len)
+   if (!entity_token || !workspace || !project || !output || !output_len)
       return -1;
    size_t entity_token_len = 0u;
    while (entity_token_len <= AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MAX && entity_token[entity_token_len])
       ++entity_token_len;
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_RELATIONS_SUPPORTING_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_RELATIONS_SUPPORTING_PROJECT_MAX && project[project_len])
+      ++project_len;
    if (entity_token_len < AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MIN || entity_token_len > AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MAX ||
-       limit > AIMEE_DB2_RELATIONS_SUPPORTING_LIMIT_MAX)
+       limit > AIMEE_DB2_RELATIONS_SUPPORTING_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_RELATIONS_SUPPORTING_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_RELATIONS_SUPPORTING_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_RELATIONS_SUPPORTING_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_RELATIONS_SUPPORTING_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
@@ -17519,6 +17763,14 @@ static inline int aimee_db2_relations_supporting_request_encode(const char *enti
    cursor += 4u + (uint32_t)entity_token_len;
    aimee_db2_put_u32(payload + cursor, limit);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RELATIONS_SUPPORTING, 0u, cursor, output,
                                        capacity) != 0)
@@ -17529,13 +17781,19 @@ static inline int aimee_db2_relations_supporting_request_encode(const char *enti
 }
 
 static inline int aimee_db2_relations_supporting_request_decode(const uint8_t *input, size_t input_len,
-                                                   char *entity_token, size_t entity_token_capacity, uint32_t *limit)
+                                                   char *entity_token, size_t entity_token_capacity, uint32_t *limit, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (entity_token && entity_token_capacity)
       entity_token[0] = '\0';
    if (limit)
       *limit = 0u;
-   if (!entity_token || entity_token_capacity < (size_t)AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MAX + 1u || !limit)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!entity_token || entity_token_capacity < (size_t)AIMEE_DB2_RELATIONS_SUPPORTING_ENTITY_TOKEN_MAX + 1u || !limit || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_RELATIONS_SUPPORTING_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_RELATIONS_SUPPORTING_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -17561,6 +17819,18 @@ static inline int aimee_db2_relations_supporting_request_decode(const uint8_t *i
    *limit = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*limit > AIMEE_DB2_RELATIONS_SUPPORTING_LIMIT_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_RELATIONS_SUPPORTING_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_RELATIONS_SUPPORTING_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_RELATIONS_SUPPORTING_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -17984,17 +18254,35 @@ static inline int aimee_db2_typed_fact_recall_reply_decode(const uint8_t *input,
    return 0;
 }
 
-static inline int aimee_db2_global_constraints_request_encode(uint8_t *output, size_t capacity,
+static inline int aimee_db2_global_constraints_request_encode(uint32_t scope_flags, const char *workspace, const char *project,
+                                                   uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_GLOBAL_CONSTRAINTS_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_GLOBAL_CONSTRAINTS_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (scope_flags > AIMEE_DB2_GLOBAL_CONSTRAINTS_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_GLOBAL_CONSTRAINTS_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_GLOBAL_CONSTRAINTS_PROJECT_MAX)
+      return -1;
    uint8_t scratch[AIMEE_DB2_GLOBAL_CONSTRAINTS_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
    uint32_t cursor = 0u;
-
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_GLOBAL_CONSTRAINTS, 0u, cursor, output,
                                        capacity) != 0)
@@ -18004,16 +18292,38 @@ static inline int aimee_db2_global_constraints_request_encode(uint8_t *output, s
    return 0;
 }
 
-static inline int aimee_db2_global_constraints_request_decode(const uint8_t *input, size_t input_len)
+static inline int aimee_db2_global_constraints_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_GLOBAL_CONSTRAINTS_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_GLOBAL_CONSTRAINTS_PROJECT_MAX + 1u)
+      return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
        header.operation != AIMEE_DB2_OPERATION_GLOBAL_CONSTRAINTS || header.flags != 0u ||
        input_len < AIMEE_DB2_GLOBAL_CONSTRAINTS_REQUEST_MIN_LEN ||
        input_len > AIMEE_DB2_GLOBAL_CONSTRAINTS_REQUEST_MAX_LEN)
       return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
    uint32_t payload_len = header.payload_len;
    uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_GLOBAL_CONSTRAINTS_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_GLOBAL_CONSTRAINTS_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_GLOBAL_CONSTRAINTS_PROJECT_MAX) != 0)
+      return -1;
    if (cursor != payload_len)
       return -1;
    return 0;
@@ -18100,22 +18410,38 @@ static inline int aimee_db2_global_constraints_reply_decode(const uint8_t *input
    return 0;
 }
 
-static inline int aimee_db2_kv_section_request_encode(uint32_t kv_section,
+static inline int aimee_db2_kv_section_request_encode(uint32_t kv_section, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
-   if (kv_section < AIMEE_DB2_KV_SECTION_KV_SECTION_MIN || kv_section > AIMEE_DB2_KV_SECTION_KV_SECTION_MAX)
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_KV_SECTION_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_KV_SECTION_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (kv_section < AIMEE_DB2_KV_SECTION_KV_SECTION_MIN || kv_section > AIMEE_DB2_KV_SECTION_KV_SECTION_MAX ||
+       scope_flags > AIMEE_DB2_KV_SECTION_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_KV_SECTION_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_KV_SECTION_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_KV_SECTION_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
    uint32_t cursor = 0u;
    aimee_db2_put_u32(payload + cursor, kv_section);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KV_SECTION, 0u, cursor, output,
                                        capacity) != 0)
@@ -18126,11 +18452,17 @@ static inline int aimee_db2_kv_section_request_encode(uint32_t kv_section,
 }
 
 static inline int aimee_db2_kv_section_request_decode(const uint8_t *input, size_t input_len,
-                                                   uint32_t *kv_section)
+                                                   uint32_t *kv_section, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (kv_section)
       *kv_section = 0u;
-   if (!kv_section)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!kv_section || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_KV_SECTION_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_KV_SECTION_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -18146,6 +18478,18 @@ static inline int aimee_db2_kv_section_request_decode(const uint8_t *input, size
    *kv_section = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*kv_section < AIMEE_DB2_KV_SECTION_KV_SECTION_MIN || *kv_section > AIMEE_DB2_KV_SECTION_KV_SECTION_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_KV_SECTION_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_KV_SECTION_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_KV_SECTION_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -18522,22 +18866,38 @@ static inline int aimee_db2_session_memories_reply_decode(const uint8_t *input, 
    return 0;
 }
 
-static inline int aimee_db2_memory_candidates_request_encode(uint32_t candidate_filter,
+static inline int aimee_db2_memory_candidates_request_encode(uint32_t candidate_filter, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
-   if (candidate_filter < AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MIN || candidate_filter > AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MAX)
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_MEMORY_CANDIDATES_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_MEMORY_CANDIDATES_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (candidate_filter < AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MIN || candidate_filter > AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MAX ||
+       scope_flags > AIMEE_DB2_MEMORY_CANDIDATES_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_MEMORY_CANDIDATES_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_MEMORY_CANDIDATES_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_MEMORY_CANDIDATES_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
    uint32_t cursor = 0u;
    aimee_db2_put_u32(payload + cursor, candidate_filter);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_MEMORY_CANDIDATES, 0u, cursor, output,
                                        capacity) != 0)
@@ -18548,11 +18908,17 @@ static inline int aimee_db2_memory_candidates_request_encode(uint32_t candidate_
 }
 
 static inline int aimee_db2_memory_candidates_request_decode(const uint8_t *input, size_t input_len,
-                                                   uint32_t *candidate_filter)
+                                                   uint32_t *candidate_filter, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (candidate_filter)
       *candidate_filter = 0u;
-   if (!candidate_filter)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!candidate_filter || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_MEMORY_CANDIDATES_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_MEMORY_CANDIDATES_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -18568,6 +18934,18 @@ static inline int aimee_db2_memory_candidates_request_decode(const uint8_t *inpu
    *candidate_filter = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*candidate_filter < AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MIN || *candidate_filter > AIMEE_DB2_MEMORY_CANDIDATES_CANDIDATE_FILTER_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_MEMORY_CANDIDATES_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_MEMORY_CANDIDATES_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_MEMORY_CANDIDATES_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -18710,22 +19088,38 @@ static inline int aimee_db2_memory_candidates_reply_decode(const uint8_t *input,
    return 0;
 }
 
-static inline int aimee_db2_recall_section_request_encode(uint32_t recall_section,
+static inline int aimee_db2_recall_section_request_encode(uint32_t recall_section, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
-   if (recall_section < AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MIN || recall_section > AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MAX)
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_RECALL_SECTION_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_RECALL_SECTION_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (recall_section < AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MIN || recall_section > AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MAX ||
+       scope_flags > AIMEE_DB2_RECALL_SECTION_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_RECALL_SECTION_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_RECALL_SECTION_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_RECALL_SECTION_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
    uint32_t cursor = 0u;
    aimee_db2_put_u32(payload + cursor, recall_section);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_RECALL_SECTION, 0u, cursor, output,
                                        capacity) != 0)
@@ -18736,11 +19130,17 @@ static inline int aimee_db2_recall_section_request_encode(uint32_t recall_sectio
 }
 
 static inline int aimee_db2_recall_section_request_decode(const uint8_t *input, size_t input_len,
-                                                   uint32_t *recall_section)
+                                                   uint32_t *recall_section, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (recall_section)
       *recall_section = 0u;
-   if (!recall_section)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!recall_section || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_RECALL_SECTION_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_RECALL_SECTION_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -18756,6 +19156,18 @@ static inline int aimee_db2_recall_section_request_decode(const uint8_t *input, 
    *recall_section = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*recall_section < AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MIN || *recall_section > AIMEE_DB2_RECALL_SECTION_RECALL_SECTION_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_RECALL_SECTION_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_RECALL_SECTION_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_RECALL_SECTION_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -23708,17 +24120,35 @@ static inline int aimee_db2_directive_get_reply_decode(const uint8_t *input, siz
    return 0;
 }
 
-static inline int aimee_db2_briefing_key_facts_request_encode(uint8_t *output, size_t capacity,
+static inline int aimee_db2_briefing_key_facts_request_encode(uint32_t scope_flags, const char *workspace, const char *project,
+                                                   uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_BRIEFING_KEY_FACTS_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_BRIEFING_KEY_FACTS_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (scope_flags > AIMEE_DB2_BRIEFING_KEY_FACTS_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_BRIEFING_KEY_FACTS_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_BRIEFING_KEY_FACTS_PROJECT_MAX)
+      return -1;
    uint8_t scratch[AIMEE_DB2_BRIEFING_KEY_FACTS_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
    uint32_t cursor = 0u;
-
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_BRIEFING_KEY_FACTS, 0u, cursor, output,
                                        capacity) != 0)
@@ -23728,16 +24158,38 @@ static inline int aimee_db2_briefing_key_facts_request_encode(uint8_t *output, s
    return 0;
 }
 
-static inline int aimee_db2_briefing_key_facts_request_decode(const uint8_t *input, size_t input_len)
+static inline int aimee_db2_briefing_key_facts_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_BRIEFING_KEY_FACTS_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_BRIEFING_KEY_FACTS_PROJECT_MAX + 1u)
+      return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
        header.operation != AIMEE_DB2_OPERATION_BRIEFING_KEY_FACTS || header.flags != 0u ||
        input_len < AIMEE_DB2_BRIEFING_KEY_FACTS_REQUEST_MIN_LEN ||
        input_len > AIMEE_DB2_BRIEFING_KEY_FACTS_REQUEST_MAX_LEN)
       return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
    uint32_t payload_len = header.payload_len;
    uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_BRIEFING_KEY_FACTS_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_BRIEFING_KEY_FACTS_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_BRIEFING_KEY_FACTS_PROJECT_MAX) != 0)
+      return -1;
    if (cursor != payload_len)
       return -1;
    return 0;
@@ -23913,17 +24365,35 @@ static inline int aimee_db2_briefing_key_facts_reply_decode(const uint8_t *input
    return 0;
 }
 
-static inline int aimee_db2_briefing_recent_activity_request_encode(uint8_t *output, size_t capacity,
+static inline int aimee_db2_briefing_recent_activity_request_encode(uint32_t scope_flags, const char *workspace, const char *project,
+                                                   uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (scope_flags > AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_PROJECT_MAX)
+      return -1;
    uint8_t scratch[AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
    uint32_t cursor = 0u;
-
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_BRIEFING_RECENT_ACTIVITY, 0u, cursor, output,
                                        capacity) != 0)
@@ -23933,16 +24403,38 @@ static inline int aimee_db2_briefing_recent_activity_request_encode(uint8_t *out
    return 0;
 }
 
-static inline int aimee_db2_briefing_recent_activity_request_decode(const uint8_t *input, size_t input_len)
+static inline int aimee_db2_briefing_recent_activity_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_PROJECT_MAX + 1u)
+      return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
        header.operation != AIMEE_DB2_OPERATION_BRIEFING_RECENT_ACTIVITY || header.flags != 0u ||
        input_len < AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_REQUEST_MIN_LEN ||
        input_len > AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_REQUEST_MAX_LEN)
       return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
    uint32_t payload_len = header.payload_len;
    uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_PROJECT_MAX) != 0)
+      return -1;
    if (cursor != payload_len)
       return -1;
    return 0;
@@ -24177,17 +24669,35 @@ static inline int aimee_db2_memory_tier_kind_counts_reply_decode(const uint8_t *
    return 0;
 }
 
-static inline int aimee_db2_memory_key_facts_provenance_request_encode(uint8_t *output, size_t capacity,
+static inline int aimee_db2_memory_key_facts_provenance_request_encode(uint32_t scope_flags, const char *workspace, const char *project,
+                                                   uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (scope_flags > AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_PROJECT_MAX)
+      return -1;
    uint8_t scratch[AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
    uint32_t cursor = 0u;
-
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_MEMORY_KEY_FACTS_PROVENANCE, 0u, cursor, output,
                                        capacity) != 0)
@@ -24197,16 +24707,38 @@ static inline int aimee_db2_memory_key_facts_provenance_request_encode(uint8_t *
    return 0;
 }
 
-static inline int aimee_db2_memory_key_facts_provenance_request_decode(const uint8_t *input, size_t input_len)
+static inline int aimee_db2_memory_key_facts_provenance_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_PROJECT_MAX + 1u)
+      return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
        header.operation != AIMEE_DB2_OPERATION_MEMORY_KEY_FACTS_PROVENANCE || header.flags != 0u ||
        input_len < AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_REQUEST_MIN_LEN ||
        input_len > AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_REQUEST_MAX_LEN)
       return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
    uint32_t payload_len = header.payload_len;
    uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_PROJECT_MAX) != 0)
+      return -1;
    if (cursor != payload_len)
       return -1;
    return 0;
@@ -25289,19 +25821,28 @@ static inline int aimee_db2_memory_dedupe_candidates_reply_decode(const uint8_t 
    return 0;
 }
 
-static inline int aimee_db2_memory_episodes_search_request_encode(const char *search_query, uint32_t row_limit,
+static inline int aimee_db2_memory_episodes_search_request_encode(const char *search_query, uint32_t row_limit, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!search_query || !output || !output_len)
+   if (!search_query || !workspace || !project || !output || !output_len)
       return -1;
    size_t search_query_len = 0u;
    while (search_query_len <= AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MAX && search_query[search_query_len])
       ++search_query_len;
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_MEMORY_EPISODES_SEARCH_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_MEMORY_EPISODES_SEARCH_PROJECT_MAX && project[project_len])
+      ++project_len;
    if (search_query_len > AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MAX ||
-       row_limit > AIMEE_DB2_MEMORY_EPISODES_SEARCH_ROW_LIMIT_MAX)
+       row_limit > AIMEE_DB2_MEMORY_EPISODES_SEARCH_ROW_LIMIT_MAX ||
+       scope_flags > AIMEE_DB2_MEMORY_EPISODES_SEARCH_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_MEMORY_EPISODES_SEARCH_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_MEMORY_EPISODES_SEARCH_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_MEMORY_EPISODES_SEARCH_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
@@ -25311,6 +25852,14 @@ static inline int aimee_db2_memory_episodes_search_request_encode(const char *se
    cursor += 4u + (uint32_t)search_query_len;
    aimee_db2_put_u32(payload + cursor, row_limit);
    cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_MEMORY_EPISODES_SEARCH, 0u, cursor, output,
                                        capacity) != 0)
@@ -25321,13 +25870,19 @@ static inline int aimee_db2_memory_episodes_search_request_encode(const char *se
 }
 
 static inline int aimee_db2_memory_episodes_search_request_decode(const uint8_t *input, size_t input_len,
-                                                   char *search_query, size_t search_query_capacity, uint32_t *row_limit)
+                                                   char *search_query, size_t search_query_capacity, uint32_t *row_limit, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (search_query && search_query_capacity)
       search_query[0] = '\0';
    if (row_limit)
       *row_limit = 0u;
-   if (!search_query || search_query_capacity < (size_t)AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MAX + 1u || !row_limit)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!search_query || search_query_capacity < (size_t)AIMEE_DB2_MEMORY_EPISODES_SEARCH_SEARCH_QUERY_MAX + 1u || !row_limit || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_MEMORY_EPISODES_SEARCH_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_MEMORY_EPISODES_SEARCH_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -25346,6 +25901,18 @@ static inline int aimee_db2_memory_episodes_search_request_decode(const uint8_t 
    *row_limit = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*row_limit > AIMEE_DB2_MEMORY_EPISODES_SEARCH_ROW_LIMIT_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_MEMORY_EPISODES_SEARCH_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_MEMORY_EPISODES_SEARCH_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_MEMORY_EPISODES_SEARCH_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;
@@ -25744,18 +26311,27 @@ static inline int aimee_db2_memory_session_created_at_reply_decode(const uint8_t
    return 0;
 }
 
-static inline int aimee_db2_memory_search_by_pattern_request_encode(const char *search_pattern,
+static inline int aimee_db2_memory_search_by_pattern_request_encode(const char *search_pattern, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!search_pattern || !output || !output_len)
+   if (!search_pattern || !workspace || !project || !output || !output_len)
       return -1;
    size_t search_pattern_len = 0u;
    while (search_pattern_len <= AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX && search_pattern[search_pattern_len])
       ++search_pattern_len;
-   if (search_pattern_len < AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MIN || search_pattern_len > AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX)
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (search_pattern_len < AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MIN || search_pattern_len > AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX ||
+       scope_flags > AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
@@ -25763,6 +26339,14 @@ static inline int aimee_db2_memory_search_by_pattern_request_encode(const char *
    aimee_db2_put_u32(payload + cursor, (uint32_t)search_pattern_len);
    memcpy(payload + cursor + 4u, search_pattern, search_pattern_len);
    cursor += 4u + (uint32_t)search_pattern_len;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_MEMORY_SEARCH_BY_PATTERN, 0u, cursor, output,
                                        capacity) != 0)
@@ -25773,11 +26357,17 @@ static inline int aimee_db2_memory_search_by_pattern_request_encode(const char *
 }
 
 static inline int aimee_db2_memory_search_by_pattern_request_decode(const uint8_t *input, size_t input_len,
-                                                   char *search_pattern, size_t search_pattern_capacity)
+                                                   char *search_pattern, size_t search_pattern_capacity, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (search_pattern && search_pattern_capacity)
       search_pattern[0] = '\0';
-   if (!search_pattern || search_pattern_capacity < (size_t)AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX + 1u)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!search_pattern || search_pattern_capacity < (size_t)AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MAX + 1u || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -25798,6 +26388,18 @@ static inline int aimee_db2_memory_search_by_pattern_request_decode(const uint8_
       if (taken < AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SEARCH_PATTERN_MIN)
          return -1;
    }
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_PROJECT_MAX) != 0)
+      return -1;
    if (cursor != payload_len)
       return -1;
    return 0;
@@ -26056,17 +26658,35 @@ static inline int aimee_db2_memory_prior_in_session_reply_decode(const uint8_t *
    return 0;
 }
 
-static inline int aimee_db2_lifecycle_stale_pending_request_encode(uint8_t *output, size_t capacity,
+static inline int aimee_db2_lifecycle_stale_pending_request_encode(uint32_t scope_flags, const char *workspace, const char *project,
+                                                   uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_LIFECYCLE_STALE_PENDING_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_LIFECYCLE_STALE_PENDING_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (scope_flags > AIMEE_DB2_LIFECYCLE_STALE_PENDING_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_LIFECYCLE_STALE_PENDING_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_LIFECYCLE_STALE_PENDING_PROJECT_MAX)
+      return -1;
    uint8_t scratch[AIMEE_DB2_LIFECYCLE_STALE_PENDING_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
    uint32_t cursor = 0u;
-
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LIFECYCLE_STALE_PENDING, 0u, cursor, output,
                                        capacity) != 0)
@@ -26076,16 +26696,38 @@ static inline int aimee_db2_lifecycle_stale_pending_request_encode(uint8_t *outp
    return 0;
 }
 
-static inline int aimee_db2_lifecycle_stale_pending_request_decode(const uint8_t *input, size_t input_len)
+static inline int aimee_db2_lifecycle_stale_pending_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_LIFECYCLE_STALE_PENDING_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_LIFECYCLE_STALE_PENDING_PROJECT_MAX + 1u)
+      return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
        header.operation != AIMEE_DB2_OPERATION_LIFECYCLE_STALE_PENDING || header.flags != 0u ||
        input_len < AIMEE_DB2_LIFECYCLE_STALE_PENDING_REQUEST_MIN_LEN ||
        input_len > AIMEE_DB2_LIFECYCLE_STALE_PENDING_REQUEST_MAX_LEN)
       return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
    uint32_t payload_len = header.payload_len;
    uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_LIFECYCLE_STALE_PENDING_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_LIFECYCLE_STALE_PENDING_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_LIFECYCLE_STALE_PENDING_PROJECT_MAX) != 0)
+      return -1;
    if (cursor != payload_len)
       return -1;
    return 0;
@@ -26219,18 +26861,27 @@ static inline int aimee_db2_lifecycle_stale_pending_reply_decode(const uint8_t *
    return 0;
 }
 
-static inline int aimee_db2_lifecycle_newly_superseded_request_encode(const char *since,
+static inline int aimee_db2_lifecycle_newly_superseded_request_encode(const char *since, uint32_t scope_flags, const char *workspace, const char *project,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!since || !output || !output_len)
+   if (!since || !workspace || !project || !output || !output_len)
       return -1;
    size_t since_len = 0u;
    while (since_len <= AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX && since[since_len])
       ++since_len;
-   if (since_len > AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX)
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (since_len > AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX ||
+       scope_flags > AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_PROJECT_MAX)
       return -1;
    uint8_t scratch[AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_REQUEST_MAX_LEN];
    uint8_t *payload = scratch;
@@ -26238,6 +26889,14 @@ static inline int aimee_db2_lifecycle_newly_superseded_request_encode(const char
    aimee_db2_put_u32(payload + cursor, (uint32_t)since_len);
    memcpy(payload + cursor + 4u, since, since_len);
    cursor += 4u + (uint32_t)since_len;
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LIFECYCLE_NEWLY_SUPERSEDED, 0u, cursor, output,
                                        capacity) != 0)
@@ -26248,11 +26907,17 @@ static inline int aimee_db2_lifecycle_newly_superseded_request_encode(const char
 }
 
 static inline int aimee_db2_lifecycle_newly_superseded_request_decode(const uint8_t *input, size_t input_len,
-                                                   char *since, size_t since_capacity)
+                                                   char *since, size_t since_capacity, uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
    if (since && since_capacity)
       since[0] = '\0';
-   if (!since || since_capacity < (size_t)AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX + 1u)
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!since || since_capacity < (size_t)AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX + 1u || !scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_PROJECT_MAX + 1u)
       return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
@@ -26265,6 +26930,18 @@ static inline int aimee_db2_lifecycle_newly_superseded_request_decode(const uint
    uint32_t cursor = 0u;
    if (aimee_db2_memory_row_take(payload, payload_len, &cursor, since,
                                  AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SINCE_MAX) != 0)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_PROJECT_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;

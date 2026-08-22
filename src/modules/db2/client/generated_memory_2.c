@@ -907,8 +907,9 @@ aimee_module_call_result_t aimee_db2_unit_ids_for_memory_call(
 
 aimee_module_call_result_t aimee_db2_briefing_active_entities_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    uint32_t limit, aimee_db2_briefing_active_entities_row_t *rows, uint32_t capacity,
-    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    uint32_t limit, uint32_t scope_flags, const char *workspace, const char *project,
+    aimee_db2_briefing_active_entities_row_t *rows, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -922,8 +923,8 @@ aimee_module_call_result_t aimee_db2_briefing_active_entities_call(
    const size_t response_capacity = AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_briefing_active_entities_request_encode(limit, request, sizeof(request),
-                                                         &request_len) != 0)
+   if (aimee_db2_briefing_active_entities_request_encode(
+           limit, scope_flags, workspace, project, request, sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -1163,8 +1164,9 @@ aimee_module_call_result_t aimee_db2_prospective_by_trigger_terms_call(
 
 aimee_module_call_result_t aimee_db2_relations_for_entity_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    const char *entity, uint32_t limit, aimee_db2_relations_for_entity_row_t *rows,
-    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    const char *entity, uint32_t limit, uint32_t scope_flags, const char *workspace,
+    const char *project, aimee_db2_relations_for_entity_row_t *rows, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -1178,8 +1180,8 @@ aimee_module_call_result_t aimee_db2_relations_for_entity_call(
    const size_t response_capacity = AIMEE_DB2_RELATIONS_FOR_ENTITY_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_relations_for_entity_request_encode(entity, limit, request, sizeof(request),
-                                                     &request_len) != 0)
+   if (aimee_db2_relations_for_entity_request_encode(entity, limit, scope_flags, workspace, project,
+                                                     request, sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -1206,8 +1208,9 @@ aimee_module_call_result_t aimee_db2_relations_for_entity_call(
 
 aimee_module_call_result_t aimee_db2_relations_search_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    const char *relation_query, uint32_t limit, aimee_db2_relations_search_row_t *rows,
-    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    const char *relation_query, uint32_t limit, uint32_t scope_flags, const char *workspace,
+    const char *project, aimee_db2_relations_search_row_t *rows, uint32_t capacity, uint32_t *count,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -1221,7 +1224,8 @@ aimee_module_call_result_t aimee_db2_relations_search_call(
    const size_t response_capacity = AIMEE_DB2_RELATIONS_SEARCH_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_relations_search_request_encode(relation_query, limit, request, sizeof(request),
+   if (aimee_db2_relations_search_request_encode(relation_query, limit, scope_flags, workspace,
+                                                 project, request, sizeof(request),
                                                  &request_len) != 0)
    {
       free(response);
@@ -1248,9 +1252,9 @@ aimee_module_call_result_t aimee_db2_relations_search_call(
 
 aimee_module_call_result_t aimee_db2_relations_search_as_of_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    const char *relation_query, const char *as_of, uint32_t limit,
-    aimee_db2_relations_search_as_of_row_t *rows, uint32_t capacity, uint32_t *count,
-    aimee_module_cancelled_fn cancelled, void *cancel_context)
+    const char *relation_query, const char *as_of, uint32_t limit, uint32_t scope_flags,
+    const char *workspace, const char *project, aimee_db2_relations_search_as_of_row_t *rows,
+    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -1264,8 +1268,9 @@ aimee_module_call_result_t aimee_db2_relations_search_as_of_call(
    const size_t response_capacity = AIMEE_DB2_RELATIONS_SEARCH_AS_OF_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_relations_search_as_of_request_encode(relation_query, as_of, limit, request,
-                                                       sizeof(request), &request_len) != 0)
+   if (aimee_db2_relations_search_as_of_request_encode(relation_query, as_of, limit, scope_flags,
+                                                       workspace, project, request, sizeof(request),
+                                                       &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
@@ -1292,8 +1297,9 @@ aimee_module_call_result_t aimee_db2_relations_search_as_of_call(
 
 aimee_module_call_result_t aimee_db2_relations_supporting_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-    const char *entity_token, uint32_t limit, aimee_db2_relations_supporting_row_t *rows,
-    uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
+    const char *entity_token, uint32_t limit, uint32_t scope_flags, const char *workspace,
+    const char *project, aimee_db2_relations_supporting_row_t *rows, uint32_t capacity,
+    uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (count)
       *count = 0u;
@@ -1307,7 +1313,8 @@ aimee_module_call_result_t aimee_db2_relations_supporting_call(
    const size_t response_capacity = AIMEE_DB2_RELATIONS_SUPPORTING_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_relations_supporting_request_encode(entity_token, limit, request, sizeof(request),
+   if (aimee_db2_relations_supporting_request_encode(entity_token, limit, scope_flags, workspace,
+                                                     project, request, sizeof(request),
                                                      &request_len) != 0)
    {
       free(response);
