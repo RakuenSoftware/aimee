@@ -9,16 +9,15 @@ import (
 	db2contract "github.com/JBailes/aimee/server-go/db2"
 )
 
-func TestCountEmbeddingsIgnoresTheVersionItIsGiven(t *testing.T) {
-	// Pinned as a defect, not as a design. The C validates the version and then
-	// runs a statement that never mentions it, so every version gets the same
-	// count -- and the caller uses that count to decide whether an embedder
-	// rollback is safe. It cannot be fixed here: nothing records which version
-	// an embedding was produced at. This test exists so the divergence is
-	// visible, and it should be deleted the day the schema can answer.
+func TestCountEmbeddingsCountsForTheVersionItIsGiven(t *testing.T) {
+	// The count gates an embedder rollback: zero refuses, anything else makes
+	// the requested version active. It used to ignore the version and count
+	// every indexed memory unit, so a rollback to a version nothing had been
+	// embedded at passed the gate and left vector search reading a version with
+	// no vectors.
 	store := &fakeStore{row: &fakeRow{values: []any{idPtr(12)}}}
 	handler := NewDispatchHandler(store)
-	request, err := db2contract.EncodeCountEmbeddingsForVersionRequest("v-does-not-exist")
+	request, err := db2contract.EncodeCountEmbeddingsForVersionRequest("embedder-v2")
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
@@ -30,12 +29,16 @@ func TestCountEmbeddingsIgnoresTheVersionItIsGiven(t *testing.T) {
 	if decodeErr != nil || count != 12 {
 		t.Fatalf("count = %d", count)
 	}
-	if len(store.lastArgs) != 0 {
-		t.Fatalf("args = %v -- the version reached the statement, which is a "+
-			"behaviour change rather than a port", store.lastArgs)
+	if len(store.lastArgs) != 1 || store.lastArgs[0] != "embedder-v2" {
+		t.Fatalf("args = %v -- the version never reached the statement", store.lastArgs)
 	}
-	if strings.Contains(store.lastSQL, "version") {
-		t.Errorf("the statement gained a version predicate: %q", store.lastSQL)
+	if !strings.Contains(store.lastSQL, "embedding_version = $1") {
+		t.Errorf("the statement does not filter by version: %q", store.lastSQL)
+	}
+	// Still restricted to vectors that were actually written. A failed attempt
+	// produced no vector, so counting it would be the same lie in a new place.
+	if !strings.Contains(store.lastSQL, "status = 'ok'") {
+		t.Errorf("the count admits rows that never produced a vector: %q", store.lastSQL)
 	}
 }
 

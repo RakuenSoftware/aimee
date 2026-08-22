@@ -44,46 +44,40 @@ func runtimeStateGet(ctx context.Context, store Store, request []byte) ([]byte, 
 	return reply, bus.ModuleStatusOK
 }
 
-// countEmbeddingsForVersion counts successfully indexed memory units.
+// countEmbeddingsForVersion counts memory units successfully indexed at one
+// embedder version.
 //
-// It does not count them for a version, despite its name and its one request
-// field. The C validates the version is non-empty and then runs a statement
-// that never mentions it, so every version gets the same answer -- and this
-// port does the same, because changing it here would change what its caller
-// decides.
+// It used to ignore the version entirely: the C validated it was non-empty and
+// then ran a statement that never mentioned it, so every version got the same
+// answer. That mattered because of who asks. The embedder rollback
+// (kb_handle_memory_reembed_rollback) takes this count, refuses when it is
+// zero, and otherwise makes the requested version active. The gate is meant to
+// say "embeddings exist at this version"; it said "some memory unit is indexed
+// at all". A rollback to a version nothing had ever been embedded at passed it
+// and left vector search reading a version with no vectors.
 //
-// That caller is the embedder rollback: kb_handle_memory_reembed_rollback asks
-// for the count, refuses the rollback when it is zero, and otherwise switches
-// the active embedder version to the requested one. The gate is meant to say
-// "embeddings exist at this version"; it actually says "some memory unit is
-// indexed at all". A rollback to a version nothing was ever embedded at passes
-// it, and vector search is then reading against a version with no vectors.
-//
-// It cannot be fixed from here. Nothing records which version an embedding was
-// produced at: vector_index_ops has no such column, and memory_active_embedder
-// holds one row naming only the version in force now. Answering the question
-// the name asks needs a schema that remembers it, which is a decision rather
-// than a port.
+// vector_index_ops.embedding_version now records which embedder produced each
+// vector, stamped on the success path from memory_active_embedder, so the
+// question the name asks is answerable and this asks it.
 const countEmbeddingsForVersionQuery = `SELECT COUNT(*) FROM vector_index_ops
  WHERE collection = 'memory_units'
    AND status = 'ok'
-   AND memory_id IS NOT NULL`
+   AND memory_id IS NOT NULL
+   AND embedding_version = $1`
 
 func countEmbeddingsForVersion(ctx context.Context, store Store, request []byte) (
 	[]byte, bus.ModuleStatus,
 ) {
-	// Decoded and then deliberately unused: the request carries the version and
-	// the statement has nowhere to put it. Dropping the field from the contract
-	// would be the honest shape, but the wire format is shared with the C.
-	if _, err := db2contract.DecodeCountEmbeddingsForVersionRequest(request); err != nil {
+	version, err := db2contract.DecodeCountEmbeddingsForVersionRequest(request)
+	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	count, status := readOptionalInt(ctx, store, countEmbeddingsForVersionQuery)
+	count, status := readOptionalInt(ctx, store, countEmbeddingsForVersionQuery, version)
 	if status != bus.ModuleStatusOK {
 		return nil, status
 	}
-	reply, err := db2contract.EncodeCountEmbeddingsForVersionReply(clampToU32(count))
-	if err != nil {
+	reply, encodeErr := db2contract.EncodeCountEmbeddingsForVersionReply(clampToU32(count))
+	if encodeErr != nil {
 		return nil, bus.ModuleStatusInternal
 	}
 	return reply, bus.ModuleStatusOK

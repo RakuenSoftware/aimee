@@ -68,21 +68,6 @@ static int count_total(void *conn)
    return count;
 }
 
-static int count_by_status(void *conn, const char *status)
-{
-   char err[CR_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM collab_rules WHERE status = ?1", err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_text(st, "?1", status);
-   int count = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      count = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return count;
-}
-
 static int increment_epoch(void *conn)
 {
    char err[CR_ERRBUF] = "";
@@ -209,31 +194,77 @@ int db2_collab_rules_propose(const char *text, const char *reason, const char *p
    return id;
 }
 
+/* Applies a status change that must match exactly one row and then advances the
+ * epoch, as one transaction.
+ *
+ * Both have to land together. db2_collab_rules_inject returns nothing at all
+ * when the agent's epoch equals the stored one, so a status change that commits
+ * without its bump leaves a rule active and enforced that no agent is ever told
+ * about -- and it does not resolve on its own, because only the next approve or
+ * retire moves the epoch. Unwrapped, a failure between the two produced exactly
+ * that.
+ *
+ * The row count is the outcome, not statement success: a transition that
+ * matches nothing means the rule is absent or was in another status, and
+ * bumping the epoch for that tells every agent to re-read a set that has not
+ * moved. */
+static int transition_and_bump(void *conn, const char *sql, int rule_id, int cap)
+{
+   char err[CR_ERRBUF] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   aimee_pg_bind_int(st, "?1", rule_id);
+   if (cap > 0)
+      aimee_pg_bind_int(st, "?2", cap);
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   int changed = (rc == AIMEE_PG_DONE) ? aimee_pg_stmt_changes(st) : 0;
+   aimee_pg_finalize(st);
+
+   if (changed != 1 || increment_epoch(conn) < 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   return 0;
+}
+
 int db2_collab_rules_approve(int rule_id)
 {
    void *conn = db2_conn();
    if (!conn || rule_id <= 0)
       return -1;
-   if (count_by_status(conn, "active") >= COLLAB_MAX_ACTIVE_RULES)
-      return -1;
-
-   char err[CR_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE collab_rules SET status = 'active', decided_at = pg_now_text()"
-                        " WHERE id = ?1 AND status = 'proposed'",
-                        err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_int(st, "?1", rule_id);
-   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
-   int changed = (rc == AIMEE_PG_DONE) ? aimee_pg_stmt_changes(st) : 0;
-   aimee_pg_finalize(st);
-   if (changed <= 0)
-      return -1;
-   return increment_epoch(conn) >= 0 ? 0 : -1;
+   /* The cap is inside the UPDATE rather than a count read before it. Reading
+    * the count, comparing, and then writing is a check that has stopped being
+    * true by the time it is acted on.
+    *
+    * It does not make concurrent approvals safe: at READ COMMITTED two
+    * statements can each see one short of the cap and each admit one. Closing
+    * that needs a lock or SERIALIZABLE, and this is strictly tighter than what
+    * it replaces rather than a claim to be airtight. The caller cannot tell the
+    * two refusals apart, and could not before either. */
+   return transition_and_bump(
+       conn,
+       "UPDATE collab_rules SET status = 'active', decided_at = pg_now_text()"
+       " WHERE id = ?1 AND status = 'proposed'"
+       "   AND (SELECT COUNT(*) FROM collab_rules WHERE status = 'active') < ?2",
+       rule_id, COLLAB_MAX_ACTIVE_RULES);
 }
 
+/* No epoch bump, and that is not an omission: a proposal was never in the
+ * active set, so rejecting it changes nothing an agent is holding and a bump
+ * would make every agent re-read a set that has not moved. */
 int db2_collab_rules_reject(int rule_id)
 {
    void *conn = db2_conn();
@@ -259,21 +290,11 @@ int db2_collab_rules_retire(int rule_id)
    void *conn = db2_conn();
    if (!conn || rule_id <= 0)
       return -1;
-   char err[CR_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE collab_rules SET status = 'retired', decided_at = pg_now_text()"
-                        " WHERE id = ?1 AND status = 'active'",
-                        err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_int(st, "?1", rule_id);
-   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
-   int changed = (rc == AIMEE_PG_DONE) ? aimee_pg_stmt_changes(st) : 0;
-   aimee_pg_finalize(st);
-   if (changed <= 0)
-      return -1;
-   return increment_epoch(conn) >= 0 ? 0 : -1;
+   return transition_and_bump(
+       conn,
+       "UPDATE collab_rules SET status = 'retired', decided_at = pg_now_text()"
+       " WHERE id = ?1 AND status = 'active'",
+       rule_id, 0);
 }
 
 char *db2_collab_rules_inject(int agent_last_epoch)

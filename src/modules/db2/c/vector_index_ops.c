@@ -8,6 +8,7 @@
 #include "aimee.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "kb_service_backend.h" /* db2_kb_service_get_active_embedder_version */
 
 #include <stddef.h>
 #include <stdio.h>
@@ -25,16 +26,30 @@ void db2_vector_index_op_record(int64_t point_id, const char *collection, int64_
    if (!conn)
       return;
 
+   /* embedding_version records which embedder produced this vector, read from
+    * memory_active_embedder rather than passed in: the vector was produced by
+    * whichever embedder was active when it was produced, and no caller of this
+    * function knows that better than the table does.
+    *
+    * It is stamped only on the success path. A failed attempt produced no
+    * vector, so claiming one exists at the current version would be the same
+    * lie this column was added to stop -- see the note on the column in
+    * schema.sql. On the conflict path a successful re-index restamps, because a
+    * point re-embedded at a new version is at the new version. */
    static const char *sql =
        "INSERT INTO vector_index_ops"
-       "  (point_id, collection, memory_id, status, attempts, last_error, indexed_at, updated_at)"
-       " VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, pg_now_text())"
+       "  (point_id, collection, memory_id, status, attempts, last_error, indexed_at,"
+       "   embedding_version, updated_at)"
+       " VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, pg_now_text())"
        " ON CONFLICT(point_id) DO UPDATE SET"
        "  collection = excluded.collection,"
        "  status     = excluded.status,"
        "  attempts   = vector_index_ops.attempts + 1,"
        "  last_error = excluded.last_error,"
        "  indexed_at = excluded.indexed_at,"
+       "  embedding_version = CASE WHEN excluded.status = 'ok'"
+       "                           THEN excluded.embedding_version"
+       "                           ELSE vector_index_ops.embedding_version END,"
        "  updated_at = pg_now_text()";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -51,10 +66,15 @@ void db2_vector_index_op_record(int64_t point_id, const char *collection, int64_
       aimee_pg_bind_null(st, "?3");
    aimee_pg_bind_text(st, "?4", ok ? "ok" : "failed");
    aimee_pg_bind_text(st, "?5", (error_msg && !ok) ? error_msg : "");
+   char active_version[128] = "";
    if (ok)
+   {
       aimee_pg_bind_text(st, "?6", ts);
+      (void)db2_kb_service_get_active_embedder_version(active_version, sizeof(active_version));
+   }
    else
       aimee_pg_bind_null(st, "?6");
+   aimee_pg_bind_text(st, "?7", active_version);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
 }

@@ -1125,15 +1125,24 @@ int db2_kb_service_count_embeddings_for_version(const char *version)
    if (!conn)
       return -1;
 
+   /* Counted for the version asked about, which is the whole point of the
+    * argument. This used to validate `version` and then ignore it, so every
+    * version got the same answer -- and the caller is the embedder rollback,
+    * which refuses when the count is zero and otherwise makes the requested
+    * version active. A rollback to a version nothing had been embedded at
+    * passed that gate and left vector search reading a version with no
+    * vectors. */
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *cs = aimee_pg_prepare(conn,
                                           "SELECT COUNT(*) FROM vector_index_ops"
                                           " WHERE collection = 'memory_units'"
                                           "   AND status = 'ok'"
-                                          "   AND memory_id IS NOT NULL",
+                                          "   AND memory_id IS NOT NULL"
+                                          "   AND embedding_version = ?1",
                                           err, sizeof(err));
    if (!cs)
       return -1;
+   aimee_pg_bind_text(cs, "?1", version);
 
    int count = -1;
    if (aimee_pg_step(cs, err, sizeof(err)) == AIMEE_PG_ROW)

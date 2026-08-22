@@ -1333,6 +1333,17 @@ int main(int argc, char **argv)
     * this run created, and a decision on an identifier no rule has is refused.
     * Rule identifiers start at one, so zero back from propose would mean the
     * insert did not happen. */
+   /* The scope every scoped read is asked under here.
+    *
+    * Active, because inactive is the state that admits every row: the filter
+    * short-circuits on it, so probing with an inactive scope would exercise
+    * none of the scope tables and prove nothing about them. The workspace and
+    * project name nothing this replay creates, so a scoped read that returns
+    * rows anyway would be returning rows it should not see. */
+   const uint32_t kReplayScopeFlags = 1u;
+   const char *const kReplayScopeWorkspace = "replay-workspace";
+   const char *const kReplayScopeProject = "replay-project";
+
    uint32_t proposed_rule = 0, decided_rule = 9;
    assert(aimee_db2_collab_rule_propose_call(call_client, &client, 9204, 0, "replay rule one",
                                              "replay reason", "replay", &proposed_rule, NULL,
@@ -1847,10 +1858,10 @@ int main(int argc, char **argv)
    static aimee_db2_briefing_active_entities_row_t
        briefing_rows[AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS];
    uint32_t briefing_count = 99;
-   assert(aimee_db2_briefing_active_entities_call(call_client, &client, 9282, 0, 8u, briefing_rows,
-                                                  AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS,
-                                                  &briefing_count, NULL,
-                                                  NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_briefing_active_entities_call(
+              call_client, &client, 9282, 0, 8u, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, briefing_rows, AIMEE_DB2_BRIEFING_ACTIVE_ENTITIES_MAX_ROWS,
+              &briefing_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(briefing_count == 0);
 
    static aimee_db2_entity_walk_step_typed_row_t
@@ -2011,7 +2022,8 @@ int main(int argc, char **argv)
        relations_for_entity_rows[AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS];
    uint32_t relations_for_entity_count = 99;
    assert(aimee_db2_relations_for_entity_call(
-              call_client, &client, 9301, 0, "replay-entity", 8u, relations_for_entity_rows,
+              call_client, &client, 9301, 0, "replay-entity", 8u, kReplayScopeFlags,
+              kReplayScopeWorkspace, kReplayScopeProject, relations_for_entity_rows,
               AIMEE_DB2_RELATIONS_FOR_ENTITY_MAX_ROWS, &relations_for_entity_count, NULL,
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(relations_for_entity_count == 0);
@@ -2020,9 +2032,9 @@ int main(int argc, char **argv)
        relations_search_rows[AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS];
    uint32_t relations_search_count = 99;
    assert(aimee_db2_relations_search_call(
-              call_client, &client, 9302, 0, "replay", 8u, relations_search_rows,
-              AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS, &relations_search_count, NULL,
-              NULL) == AIMEE_MODULE_CALL_OK);
+              call_client, &client, 9302, 0, "replay", 8u, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, relations_search_rows, AIMEE_DB2_RELATIONS_SEARCH_MAX_ROWS,
+              &relations_search_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(relations_search_count == 0);
 
    static aimee_db2_relations_search_as_of_row_t
@@ -2030,6 +2042,7 @@ int main(int argc, char **argv)
    uint32_t relations_search_as_of_count = 99;
    assert(aimee_db2_relations_search_as_of_call(
               call_client, &client, 9303, 0, "replay", "2026-01-01T00:00:00Z", 8u,
+              kReplayScopeFlags, kReplayScopeWorkspace, kReplayScopeProject,
               relations_search_as_of_rows, AIMEE_DB2_RELATIONS_SEARCH_AS_OF_MAX_ROWS,
               &relations_search_as_of_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(relations_search_as_of_count == 0);
@@ -2038,7 +2051,8 @@ int main(int argc, char **argv)
        relations_supporting_rows[AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS];
    uint32_t relations_supporting_count = 99;
    assert(aimee_db2_relations_supporting_call(
-              call_client, &client, 9304, 0, "replay-entity", 8u, relations_supporting_rows,
+              call_client, &client, 9304, 0, "replay-entity", 8u, kReplayScopeFlags,
+              kReplayScopeWorkspace, kReplayScopeProject, relations_supporting_rows,
               AIMEE_DB2_RELATIONS_SUPPORTING_MAX_ROWS, &relations_supporting_count, NULL,
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(relations_supporting_count == 0);
@@ -2267,15 +2281,16 @@ int main(int argc, char **argv)
    static aimee_db2_global_constraints_row_t
        global_constraints_rows[AIMEE_DB2_GLOBAL_CONSTRAINTS_MAX_ROWS];
    uint32_t global_constraints_count = 99;
-   assert(aimee_db2_global_constraints_call(call_client, &client, 9341, 0, global_constraints_rows,
-                                            AIMEE_DB2_GLOBAL_CONSTRAINTS_MAX_ROWS,
-                                            &global_constraints_count, NULL,
-                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_global_constraints_call(
+              call_client, &client, 9341, 0, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, global_constraints_rows, AIMEE_DB2_GLOBAL_CONSTRAINTS_MAX_ROWS,
+              &global_constraints_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(global_constraints_count == 0);
 
    static aimee_db2_kv_section_row_t kv_section_rows[AIMEE_DB2_KV_SECTION_MAX_ROWS];
    uint32_t kv_section_count = 99;
-   assert(aimee_db2_kv_section_call(call_client, &client, 9342, 0, 3u, kv_section_rows,
+   assert(aimee_db2_kv_section_call(call_client, &client, 9342, 0, 3u, kReplayScopeFlags,
+                                    kReplayScopeWorkspace, kReplayScopeProject, kv_section_rows,
                                     AIMEE_DB2_KV_SECTION_MAX_ROWS, &kv_section_count, NULL,
                                     NULL) == AIMEE_MODULE_CALL_OK);
    assert(kv_section_count == 0);
@@ -2301,16 +2316,17 @@ int main(int argc, char **argv)
        memory_candidates_rows[AIMEE_DB2_MEMORY_CANDIDATES_MAX_ROWS];
    uint32_t memory_candidates_count = 99;
    assert(aimee_db2_memory_candidates_call(
-              call_client, &client, 9345, 0, 1u, memory_candidates_rows,
-              AIMEE_DB2_MEMORY_CANDIDATES_MAX_ROWS, &memory_candidates_count, NULL,
-              NULL) == AIMEE_MODULE_CALL_OK);
+              call_client, &client, 9345, 0, 1u, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, memory_candidates_rows, AIMEE_DB2_MEMORY_CANDIDATES_MAX_ROWS,
+              &memory_candidates_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_candidates_count == 0);
 
    static aimee_db2_recall_section_row_t recall_section_rows[AIMEE_DB2_RECALL_SECTION_MAX_ROWS];
    uint32_t recall_section_count = 99;
-   assert(aimee_db2_recall_section_call(call_client, &client, 9346, 0, 1u, recall_section_rows,
-                                        AIMEE_DB2_RECALL_SECTION_MAX_ROWS, &recall_section_count,
-                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_recall_section_call(call_client, &client, 9346, 0, 1u, kReplayScopeFlags,
+                                        kReplayScopeWorkspace, kReplayScopeProject,
+                                        recall_section_rows, AIMEE_DB2_RECALL_SECTION_MAX_ROWS,
+                                        &recall_section_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(recall_section_count == 0);
 
    static aimee_db2_l2_cross_key_pairs_row_t
@@ -2331,7 +2347,8 @@ int main(int argc, char **argv)
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(l2_fact_decision_pairs_count == 0);
 
-   assert(aimee_db2_kv_section_call(call_client, &client, 9350, 0, 6u, kv_section_rows,
+   assert(aimee_db2_kv_section_call(call_client, &client, 9350, 0, 6u, kReplayScopeFlags,
+                                    kReplayScopeWorkspace, kReplayScopeProject, kv_section_rows,
                                     AIMEE_DB2_KV_SECTION_MAX_ROWS, &kv_section_count, NULL,
                                     NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
@@ -3093,10 +3110,17 @@ int main(int argc, char **argv)
    assert(aimee_db2_count_embeddings_for_version_call(call_client, &client, 9444, 0, "v1",
                                                       &count_embeddings_for_version_embedding_count,
                                                       NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   /* Asking again under a different version. The two answers agree because the
-    * backend never binds the version -- there is no version column on
-    * vector_index_ops to bind it to. On this schema both are zero, so the
-    * equality is what carries the point rather than the value. */
+   /* Asking again under a different version. Both are zero here because this
+    * replay embeds nothing, and zero is now the right answer to both questions
+    * rather than the same answer to one question asked twice: the backend binds
+    * the version against vector_index_ops.embedding_version.
+    *
+    * That the two discriminate cannot be shown from here. It needs a countable
+    * row -- collection 'memory_units', status 'ok', a memory_id that is not
+    * NULL -- and no operation on this wire creates a memories row for the
+    * foreign key to reach. TestLiveEmbeddingCountDiscriminatesByVersion in
+    * server-go/modules/db2 seeds one directly and proves it against the same
+    * PostgreSQL. */
    uint32_t count_embeddings_other_version = 99;
    assert(aimee_db2_count_embeddings_for_version_call(
               call_client, &client, 9446, 0, "a-version-nothing-was-embedded-under",
@@ -3820,17 +3844,18 @@ int main(int argc, char **argv)
    static aimee_db2_briefing_key_facts_row_t
        briefing_key_facts_rows[AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS];
    uint32_t briefing_key_facts_count = 99;
-   assert(aimee_db2_briefing_key_facts_call(call_client, &client, 9502, 0, briefing_key_facts_rows,
-                                            AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS,
-                                            &briefing_key_facts_count, NULL,
-                                            NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_db2_briefing_key_facts_call(
+              call_client, &client, 9502, 0, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, briefing_key_facts_rows, AIMEE_DB2_BRIEFING_KEY_FACTS_MAX_ROWS,
+              &briefing_key_facts_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(briefing_key_facts_count == 0);
 
    static aimee_db2_briefing_recent_activity_row_t
        briefing_recent_activity_rows[AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_MAX_ROWS];
    uint32_t briefing_recent_activity_count = 99;
    assert(aimee_db2_briefing_recent_activity_call(
-              call_client, &client, 9503, 0, briefing_recent_activity_rows,
+              call_client, &client, 9503, 0, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, briefing_recent_activity_rows,
               AIMEE_DB2_BRIEFING_RECENT_ACTIVITY_MAX_ROWS, &briefing_recent_activity_count, NULL,
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(briefing_recent_activity_count == 0);
@@ -3848,7 +3873,8 @@ int main(int argc, char **argv)
        memory_key_facts_provenance_rows[AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MAX_ROWS];
    uint32_t memory_key_facts_provenance_count = 99;
    assert(aimee_db2_memory_key_facts_provenance_call(
-              call_client, &client, 9505, 0, memory_key_facts_provenance_rows,
+              call_client, &client, 9505, 0, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, memory_key_facts_provenance_rows,
               AIMEE_DB2_MEMORY_KEY_FACTS_PROVENANCE_MAX_ROWS, &memory_key_facts_provenance_count,
               NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_key_facts_provenance_count == 0);
@@ -3913,9 +3939,10 @@ int main(int argc, char **argv)
        memory_episodes_search_rows[AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS];
    uint32_t memory_episodes_search_count = 99;
    assert(aimee_db2_memory_episodes_search_call(
-              call_client, &client, 9512, 0, "a-phrase-no-episode-holds", 16,
-              memory_episodes_search_rows, AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS,
-              &memory_episodes_search_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+              call_client, &client, 9512, 0, "a-phrase-no-episode-holds", 16, kReplayScopeFlags,
+              kReplayScopeWorkspace, kReplayScopeProject, memory_episodes_search_rows,
+              AIMEE_DB2_MEMORY_EPISODES_SEARCH_MAX_ROWS, &memory_episodes_search_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_episodes_search_count == 0);
 
    static aimee_db2_memory_session_content_row_t
@@ -3940,9 +3967,10 @@ int main(int argc, char **argv)
        memory_search_by_pattern_rows[AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS];
    uint32_t memory_search_by_pattern_count = 99;
    assert(aimee_db2_memory_search_by_pattern_call(
-              call_client, &client, 9515, 0, "a-pattern-no-memory-holds",
-              memory_search_by_pattern_rows, AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS,
-              &memory_search_by_pattern_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+              call_client, &client, 9515, 0, "a-pattern-no-memory-holds", kReplayScopeFlags,
+              kReplayScopeWorkspace, kReplayScopeProject, memory_search_by_pattern_rows,
+              AIMEE_DB2_MEMORY_SEARCH_BY_PATTERN_MAX_ROWS, &memory_search_by_pattern_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_search_by_pattern_count == 0);
 
    static aimee_db2_memory_prior_in_session_row_t
@@ -3959,7 +3987,8 @@ int main(int argc, char **argv)
        lifecycle_stale_pending_rows[AIMEE_DB2_LIFECYCLE_STALE_PENDING_MAX_ROWS];
    uint32_t lifecycle_stale_pending_count = 99;
    assert(aimee_db2_lifecycle_stale_pending_call(
-              call_client, &client, 9517, 0, lifecycle_stale_pending_rows,
+              call_client, &client, 9517, 0, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, lifecycle_stale_pending_rows,
               AIMEE_DB2_LIFECYCLE_STALE_PENDING_MAX_ROWS, &lifecycle_stale_pending_count, NULL,
               NULL) == AIMEE_MODULE_CALL_OK);
    assert(lifecycle_stale_pending_count == 0);
@@ -3968,9 +3997,10 @@ int main(int argc, char **argv)
        lifecycle_newly_superseded_rows[AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MAX_ROWS];
    uint32_t lifecycle_newly_superseded_count = 99;
    assert(aimee_db2_lifecycle_newly_superseded_call(
-              call_client, &client, 9518, 0, "2026-01-01T00:00:00Z",
-              lifecycle_newly_superseded_rows, AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MAX_ROWS,
-              &lifecycle_newly_superseded_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+              call_client, &client, 9518, 0, "2026-01-01T00:00:00Z", kReplayScopeFlags,
+              kReplayScopeWorkspace, kReplayScopeProject, lifecycle_newly_superseded_rows,
+              AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MAX_ROWS, &lifecycle_newly_superseded_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(lifecycle_newly_superseded_count == 0);
 
    static aimee_db2_lifecycle_unresolved_contradictions_row_t
@@ -4421,6 +4451,10 @@ int main(int argc, char **argv)
     * this is 1 whether or not the insert landed. Everything downstream that
     * retries a failed vector write reads a table this cannot report on. */
    assert(vector_index_op_record_recorded == 1);
+   /* The row this recorded is not countable by count_embeddings_for_version:
+    * its collection is not 'memory_units' and its memory_id is NULL. That is
+    * deliberate here -- this case is about the receipt, not the count -- and it
+    * is why the two counts above stay zero. */
 
    uint32_t vector_index_op_remove_recorded = 99;
    assert(aimee_db2_vector_index_op_remove_call(call_client, &client, 9555, 0, 4242,

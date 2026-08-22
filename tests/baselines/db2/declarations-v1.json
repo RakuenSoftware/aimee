@@ -20268,7 +20268,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 50
+          "line": 100
         }
       ],
       "signature": "void db2_memory_scope_bind_current ( aimee_pg_stmt_t * st )",
@@ -20285,7 +20285,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 47
+          "line": 66
         }
       ],
       "review": {
@@ -20310,7 +20310,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 48
+          "line": 67
         }
       ],
       "review": {
@@ -20333,7 +20333,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 49
+          "line": 99
         }
       ],
       "review": {
@@ -20356,7 +20356,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 46
+          "line": 65
         }
       ],
       "review": {
@@ -28603,7 +28603,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7e8c11982a3e3b9d9396d5171333d709810e0d787b6eb12d3250fcd7d2739e91",
+  "fingerprint": "67ed5aa5356802c2d68ed6171f0c5654d59e76a03140fea7051ecde2bf01b5e9",
   "module": "db2",
   "schema_version": 1,
   "summary": {

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "acd4b05d90d7a5457151b5e55b7f756810b7cc38",
+  "source_revision": "339979f46d5ae76fc6d58b28b2b8e83ed4045a14",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
@@ -10,8 +10,8 @@
     "production_consumers": 151,
     "test_consumers": 155,
     "include_directives": 1004,
-    "outbound_dependency_rows": 574,
-    "outbound_include_directives": 574
+    "outbound_dependency_rows": 575,
+    "outbound_include_directives": 575
   },
   "source_files": {
     "c": [
@@ -9148,6 +9148,13 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/memory_scope_query.h",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/memory_score_fields.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -10177,5 +10184,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "81ade17efd9b8ca3a32cea243a05ef0cc930571ecafeb8f0ad0901c6672b0596"
+  "fingerprint": "f150588b35c53139afb73580ca31bdee8ee8d9f199137a893b794dd98c9208f1"
 }

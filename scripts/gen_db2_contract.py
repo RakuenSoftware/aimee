@@ -50,17 +50,10 @@ SCOPE_FILTER_MACRO = "DB2_MEMORY_SCOPE_FILTER_SQL"
 BACKEND_DEFINITION = re.compile(r"^\w[\w \*]*?\b(db2_[a-z0-9_]+)\s*\([^;]*\)\s*$", re.M)
 
 
-def _scope_filtered_symbols(root: Path) -> frozenset[str]:
-    """Backend functions whose SQL is scope-filtered, read from the source.
-
-    Derived rather than listed. A list of names is a second statement of the
-    same fact, and the two drift silently: sixteen operations reached a
-    scope-filtered statement while declaring themselves unscoped, which the
-    catalog recorded and nothing checked. Reading the source makes the catalog
-    answerable to the code it describes.
-    """
+def _scan_scope_filtered(directory: Path) -> frozenset[str]:
+    """Backend functions in `directory` whose SQL is scope-filtered."""
     found: set[str] = set()
-    for path in sorted((root / BACKEND_SOURCE_DIR).glob("*.c")):
+    for path in sorted(directory.glob("*.c")):
         text = path.read_text(encoding="utf-8", errors="replace")
         definitions = [(match.start(), match.group(1))
                        for match in BACKEND_DEFINITION.finditer(text)]
@@ -73,6 +66,35 @@ def _scope_filtered_symbols(root: Path) -> frozenset[str]:
             if owner:
                 found.add(owner)
     return frozenset(found)
+
+
+def _scope_filtered_symbols(root: Path) -> frozenset[str]:
+    """Backend functions whose SQL is scope-filtered, read from the source.
+
+    Derived rather than listed. A list of names is a second statement of the
+    same fact, and the two drift silently: sixteen operations reached a
+    scope-filtered statement while declaring themselves unscoped, which the
+    catalog recorded and nothing checked. Reading the source makes the catalog
+    answerable to the code it describes.
+
+    Falls back to this checkout's own sources when `root` carries none. The unit
+    fixtures copy the catalog and its baselines into a temporary tree and vary
+    those; the C is not what they vary, and scanning an empty directory would
+    make every operation look unscoped -- which is the exact defect this check
+    exists to catch, arriving as a silent pass.
+
+    Empty from both is an error rather than an empty set, for the same reason: a
+    module with no scope-filtered statements at all is not a state this codebase
+    is in, so finding none means the scan is looking in the wrong place.
+    """
+    found = _scan_scope_filtered(root / BACKEND_SOURCE_DIR)
+    if not found:
+        found = _scan_scope_filtered(ROOT / BACKEND_SOURCE_DIR)
+    if not found:
+        fail("scope-scan",
+             f"no scope-filtered statements found under {BACKEND_SOURCE_DIR}; "
+             "every operation would look unscoped")
+    return found
 # What the bus wire carries in one payload (BUS_WIRE_MAX_PAYLOAD), less the
 # envelope: the ceiling on a reply that crosses whole.
 WIRE_REPLY_MAX = (1 << 20) - ENVELOPE_HEADER_LEN
