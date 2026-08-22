@@ -153,6 +153,33 @@ func liveReads() []liveRequest {
 			},
 		},
 		{
+			name:  "audit_event_list",
+			stage: db2contract.StageAuditEventList,
+			encode: func() ([]byte, error) {
+				// All three predicates, so the assembled statement is the widest
+				// shape rather than the simplest one.
+				return db2contract.EncodeAuditEventListRequest(
+					"2000-01-01T00:00:00Z", "2099-01-01T00:00:00Z", "user", 8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeAuditEventListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "demotion_candidates",
+			stage: db2contract.StageDemotionCandidates,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDemotionCandidatesRequest(1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDemotionCandidatesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
 			name:  "enrollment_list",
 			stage: db2contract.StageEnrollmentList,
 			encode: func() ([]byte, error) {
