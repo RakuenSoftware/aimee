@@ -77,14 +77,35 @@ int db2_enrollment_insert(const char *scope, const char *fingerprint, const char
    /* On a fingerprint conflict, refresh only metadata and ONLY for a non-revoked
     * row (the WHERE guard) — the redeem path must never resurrect a revoked cert.
     * Normal redeems present a fresh cert (new serial => new fingerprint), so the
-    * conflict path is just idempotent-retry / re-registration. */
+    * conflict path is just idempotent-retry / re-registration.
+    *
+    * The issuer and serial conditions admit an EMPTY stored value as well as an
+    * equal one. db2_enrollment_touch_last_seen backfills a legacy row for a cert
+    * issued before this table existed, and it knows neither — so requiring
+    * equality alone left that placeholder permanently un-upgradable: the first
+    * real enrolment of the same fingerprint matched the conflict, failed the
+    * guard, updated nothing and returned no row. A backfill whose whole purpose
+    * is to be superseded must not block its own supersession. An existing
+    * NON-empty issuer or serial still has to match, so a different cert cannot
+    * take over a fingerprint, and a revoked row is still untouchable.
+    *
+    * The SET writes both back, so upgrading a placeholder actually records the
+    * issuer and serial -- without that the row would stay empty and every later
+    * enrolment would take the placeholder path again. For an idempotent retry,
+    * where they already match, writing them is a no-op. authority_id is
+    * deliberately NOT reset: it is the anchor custody.enrollment_authority_resolve
+    * hands out, and changing it on re-enrolment would strand whoever holds it. */
    const char *sql =
        "INSERT INTO kb_enrollments (scope, fingerprint, serial, expires_at, legacy, authority_id, "
        "cert_issuer, cert_serial_norm) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
        "ON CONFLICT (fingerprint) DO UPDATE SET scope=EXCLUDED.scope, serial=EXCLUDED.serial, "
-       "expires_at=EXCLUDED.expires_at WHERE kb_enrollments.revoked_at='' AND "
-       "kb_enrollments.cert_issuer=EXCLUDED.cert_issuer AND "
-       "kb_enrollments.cert_serial_norm=EXCLUDED.cert_serial_norm RETURNING id";
+       "expires_at=EXCLUDED.expires_at, cert_issuer=EXCLUDED.cert_issuer, "
+       "cert_serial_norm=EXCLUDED.cert_serial_norm "
+       "WHERE kb_enrollments.revoked_at='' AND "
+       "(kb_enrollments.cert_issuer='' OR "
+       "kb_enrollments.cert_issuer=EXCLUDED.cert_issuer) AND "
+       "(kb_enrollments.cert_serial_norm='' OR "
+       "kb_enrollments.cert_serial_norm=EXCLUDED.cert_serial_norm) RETURNING id";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

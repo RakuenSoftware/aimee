@@ -4341,11 +4341,23 @@ int main(int argc, char **argv)
               call_client, &client, 9548, 0, "replay-scope", "replay-fingerprint", "CN=replay",
               "01", "2027-01-01T00:00:00Z", 0, &enrollment_insert_acknowledged,
               &enrollment_insert_enrollment_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   /* Refused, and not for the reason the guard exists. An earlier case touched
-    * this fingerprint, which auto-enrolled it with an empty serial; the upsert
-    * guard requires the stored serial to equal the one being sent, so the row
-    * that backfill created cannot afterwards be enrolled with its real serial. */
-   assert(enrollment_insert_acknowledged == 0);
+   /* An earlier case touched this fingerprint, which auto-enrolled it with an
+    * empty issuer and serial. Enrolling it properly now upgrades that
+    * placeholder -- which it could not do until the upsert guard was widened to
+    * admit an empty stored value, because the guard compared them for equality
+    * and a backfill that knows neither can never satisfy that. */
+   assert(enrollment_insert_acknowledged == 1);
+
+   /* And the upgrade recorded them, which is the observable half: the same
+    * fingerprint, issuer and serial now resolve to an authority, where the
+    * identical call at trace 9440 -- before this enrolment -- found nothing. */
+   uint32_t upgraded_authority_found = 99;
+   static char upgraded_authority_id[AIMEE_DB2_ENROLLMENT_AUTHORITY_RESOLVE_AUTHORITY_ID_MAX + 1];
+   assert(aimee_db2_enrollment_authority_resolve_call(
+              call_client, &client, 9550, 0, "replay-fingerprint", "CN=replay", "01",
+              &upgraded_authority_found, upgraded_authority_id, sizeof(upgraded_authority_id), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(upgraded_authority_found == 1 && upgraded_authority_id[0] != '\0');
 
    uint32_t enrollment_revoke_revoked = 99;
    static char
@@ -4391,6 +4403,7 @@ int main(int argc, char **argv)
           enrollment_revoke_revoked_at[0] == '\0' && enrollment_revoke_authority_id[0] == '\0' &&
           enrollment_revoke_legacy_row == 0);
 
+   /* A proposal refused for its signal, and an enrolment that upgrades its own backfill. */
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

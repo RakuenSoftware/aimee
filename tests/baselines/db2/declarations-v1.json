@@ -7959,7 +7959,7 @@
         "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "custody",
-        "reason": "The typed custody.enrollment_insert operation enrols a certificate. Its upsert guard stops a revoked certificate being resurrected by enrolling it again, which is what it exists for. The same guard also requires the stored serial to equal the one sent -- so a fingerprint custody.enrollment_touch_last_seen auto-enrolled, which leaves that column empty, can never afterwards be enrolled with its real serial. The backfill blocks its own upgrade."
+        "reason": "The typed custody.enrollment_insert operation enrols a certificate. Its upsert guard stops a revoked certificate being resurrected by enrolling it again, and requires an existing non-empty issuer and serial to match the ones sent -- so another certificate cannot take over a fingerprint. An empty stored value is admitted, because custody.enrollment_touch_last_seen backfills a placeholder knowing neither, and a backfill meant to be superseded must not block its own supersession."
       },
       "signature": "int db2_enrollment_insert ( const char * scope , const char * fingerprint , const char * cert_issuer , const char * cert_serial_norm , const char * expires_at , int legacy , int64_t * out_id )",
       "signature_sha256": "c4cb1438b38316ab04ede2d87cfa5a59f5b035cbb0b6ef786eafabbc36334d3f",
@@ -28393,7 +28393,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fe60094f35f419409b130929369341255bbb41286f877fa303ed22a7934098ac",
+  "fingerprint": "366d321aed9c0b0c5364e2ced8a6f76bff121f0f12725b3a23e40aeee0d87e98",
   "module": "db2",
   "schema_version": 1,
   "summary": {
