@@ -770,3 +770,111 @@ alone is a **PAM host account presented to aimee-server over TCP**: that path
 needs the management JWKS plane (signed envelope, manifest, and a hash-pinned
 trust bundle cached in DB1) to verify a kb-issued identity token, which is a
 provisioning exercise in its own right and is not what this charter changed.
+
+## The two remaining gaps, closed
+
+Two things were still stood in for. Both are now driven for real.
+
+### Enrollment is now the real flow, not a seeded row
+
+`enroll-client-cert.sh` wrote the `remote_client_grants` row by hand. That
+skipped the step that makes enrollment mean anything: possession of the
+client-generated private key, proved by a CSR. `enroll-first-user.sh` drives what
+the product actually defines:
+
+1. `POST /v1/deploy/apply` as a webchat user -> `server_http_first_user_bootstrap`
+   claims the first user and returns an **enrollment-only** bearer, with no tier
+   yet active
+2. a keypair and CSR generated client-side; the private key never leaves
+3. `POST /v1/cert/sign` presenting that bearer -> `pki_sign_csr` issues the
+   certificate **and** `server_http_first_user_bind_cert` binds its serial to the
+   grant, activating `full` only at that point
+
+Two things gate step 1 and neither is a default: `AIMEE_DEPLOY_ENABLED`, and a
+`webuser:` principal, which `vault_principal_resolve` grants only for an
+`X-Aimee-Webuser` header arriving over the root-owned UDS. The same header over
+TCP is a spoof and is refused a principal outright.
+
+The grant the flow produced:
+
+    principal      tier  cert_serial
+    webuser:alice  full  7F07650580CFD3402FA2D0AE859A65E3
+
+`webuser:alice` comes from the enrollment itself. Under the seeded version the
+principal was whatever name the script chose, which is exactly the difference
+between testing the mechanism and asserting it. `test-mtls-authority.sh` then
+passes unchanged using that certificate.
+
+The deploy half does go on to attempt `docker compose up -d`, which fails here.
+That is not a workaround: the enrollment is claimed **before** the deploy starts,
+deliberately, so a stack can never come up without a usable remote owner.
+
+### An account over TCP to aimee-server
+
+This needed the management trust chain, which the server does not accept in any
+simplified form: it reads a root-owned, single-link, non-writable trust bundle
+pinning an Ed25519 manifest key, then loads a **signed publication envelope**
+from DB1 and validates it against that bundle.
+
+The tree already has the rig for it. `write-tier-enforce-live provision` builds
+the chain with the production functions -- real Ed25519 manifest signing, the
+real envelope encoder, a real DB1 row -- so a change that breaks the real
+publication path breaks this too. `provision-mgmt-trust.sh` drives it and records
+the three variables the server then needs (`AIMEE_SERVER_ID` as the token
+audience, `AIMEE_SERVER_TEAM_ID`, and the bundle path).
+
+Building that rig first required a Makefile fix. The Makefile already documents
+this failure and lists the auxiliary drivers that need the core archive as an
+order-only prerequisite -- and `write-tier-enforce-live` and `identity-mint-live`
+were not on the list. So on a clean tree the one driver that can prove a minted
+token reaches a live server could not itself be built.
+
+`test-account-tcp-authority.sh`, every leg plain TCP:
+
+| leg | request | result |
+|---|---|---|
+| 1 | server bearer only, no identity token | 403, alice `A current` |
+| 3 | identity token minted for a **different** audience | 403, alice `A current` |
+| 2 | identity token for the account, correct audience | 200 `retracted:1`, alice `A gone` |
+| 4 | the same account, Class-B fact | 200 `retracted:1` |
+
+This is the case the transport table got exactly backwards: the same account,
+over TCP, was MODEL purely because of the socket. Leg 3 stops leg 2 being read as
+"any token is accepted"; leg 4 stops it being read as "it retracts for anyone".
+
+Two things about how a caller presents one, neither obvious:
+
+- The identity token goes in `Authorization` and the server bearer in
+  `x-api-key`. Over TCP the server runs two independent checks on the same
+  request: `server_http_authorize` wants a credential equal to the configured
+  bearer, and `server_http_resolve_write_tier` reads the identity token out of
+  `Authorization`. The token alone gets a 401 from the bearer check before the
+  account is ever resolved -- a refusal that proves nothing.
+- **`aimee.api.mtls` must be `off` for this probe**, and that is a real behaviour
+  worth recording rather than a test convenience. `server_http_effective_conn_caps`
+  gives a caller presenting no client certificate `CAPS_READ_ONLY` whenever mTLS
+  is in optional mode, whatever its token says -- "optional-mode bearer fallback
+  is deliberately weaker than a client cert". Only with mTLS off does the token's
+  per-user tier reach the route gate. The first run of this test was refused for
+  precisely that reason and looked like a broken account path.
+
+  So the two probes want opposite postures: `test-mtls-authority.sh` needs
+  `optional` because it is about the certificate; this one needs `off` because it
+  is about the identity token ALONE, and with a certificate present the
+  certificate would supply the account instead. `set-mtls-mode.sh` switches
+  between them, and each test refuses to run under the wrong one rather than
+  reporting a result that cannot mean what it appears to.
+
+### Coverage now
+
+Every account form the design names is exercised against running daemons:
+
+| account | proven by |
+|---|---|
+| PAM host account, local | `test-retract.sh`, `test-server-retract.sh` |
+| OIDC bearer | `test-oidc-authority.sh` |
+| enrolled mTLS client certificate | `test-mtls-authority.sh` |
+| KB-issued identity token over TCP | `test-account-tcp-authority.sh` |
+| no account (bare bearer) | the negative leg of all four |
+
+Nothing in the authority path is now covered by assertion alone.

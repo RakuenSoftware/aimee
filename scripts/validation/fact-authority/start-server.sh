@@ -50,6 +50,10 @@ ulimit -S -s 65536 || true
 # built and the memory module's RERANK confidence tier was never requested.
 bash /root/make-scope-repo.sh 2>/dev/null || true
 cd /root/proj 2>/dev/null || cd /root
+# The management trust chain, when it has been provisioned. Without these the
+# server denies every KB-issued identity token as no_team_configured/INVALID,
+# which looks like a bad token rather than an unconfigured server.
+[ -f /root/mgmt-trust-env.sh ] && . /root/mgmt-trust-env.sh
 nohup /usr/local/bin/aimee-server --socket=/root/aimee-server.sock >/root/server.log 2>&1 &
 # The daemon now refuses to run without the config module, and the module can
 # only attach once the daemon has created the bus socket -- so it is launched

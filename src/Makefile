@@ -1439,7 +1439,14 @@ token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN
 #
 # Order-only: the archive must EXIST first, but relinking it should not force
 # these to relink.
-$(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) ../oidc-login-live: | $(CORE_CONNECTION_LIB)
+#
+# identity-mint-live and write-tier-enforce-live were left off this list and hit
+# exactly the failure described above on a clean tree. write-tier-enforce-live is
+# the rig that provisions the management trust chain, so the one driver that can
+# prove a minted token reaches a live server could not itself be built without
+# first building something else that happened to create the archive.
+$(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) ../oidc-login-live \
+../identity-mint-live ../write-tier-enforce-live: | $(CORE_CONNECTION_LIB)
 
 $(KB_TOKEN_ROOTS_PROVISIONER): $(TOKEN_ROOTS_PROVISIONER_OBJS) \
                                $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS) \
