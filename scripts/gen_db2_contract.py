@@ -13955,6 +13955,48 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_record_retro_scan_marker",
         "policy": {"writes": 200},
     },
+    "memory_lineage_insert": {
+        "key": ("memory", 148),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lineage_insert",
+        "policy": {"writes": 200},
+    },
+    "memory_relation_insert": {
+        "key": ("memory", 149),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_relation_insert",
+        "policy": {"writes": 200},
+    },
+    "kb_documents_set_tsr_state": {
+        "key": ("maintenance", 66),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_documents_set_tsr_state",
+        "policy": {"writes": 200},
+    },
+    "kb_documents_delete_for_file": {
+        "key": ("maintenance", 67),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_documents_delete_for_file",
+        "policy": {"writes": 200},
+    },
+    "kb_documents_link_neighbours": {
+        "key": ("maintenance", 68),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_documents_link_neighbours",
+        "policy": {"writes": 200},
+    },
+    "evidence_store_vector": {
+        "key": ("learning", 83),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_evidence_store_vector",
+        "policy": {"writes": 200},
+    },
+    "memory_first_episode_card": {
+        "key": ("memory", 150),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_unit_first_episode_card_id",
+        "policy": {"reads": 200},
+    },
 }
 
 

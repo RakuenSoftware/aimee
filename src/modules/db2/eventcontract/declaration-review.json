@@ -1436,6 +1436,14 @@
       "reason": "The typed maintenance.evidence_reembed_all operation replaces the reset that requeues every evidence index row after an embedder version change. Its reach is total and deliberately so: it takes no predicate, resets the attempt count and discards the last error on every row. Recording that as fixed policy is the point of the entry -- the reach cannot be narrowed or widened by a caller, and the discarded failure history is stated rather than left to be discovered by someone wondering where the errors went."
     },
     {
+      "symbol": "db2_evidence_store_vector",
+      "signature_sha256": "4912b7a712c1a76028990e454f4e26501fbc4509fe9052819dd6be5f4a7f1380",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.evidence_store_vector operation stores an evidence embedding. The vector is text in pgvector's bracketed form, and the column it lands in declares its dimension -- 384 on this schema -- so a vector of any other length is refused by the database rather than stored. Nothing in the declaration says that number, so a caller learns the required dimension by being refused. The artifact is not checked to exist."
+    },
+    {
       "symbol": "db2_failed_query_bump",
       "signature_sha256": "9fa08d98aab55734434755cbc24c8580d93ac826bdce3babb7999b6192c47a9d",
       "disposition": "wire-operation",
@@ -1612,6 +1620,14 @@
       "reason": "The typed maintenance.kb_document_fetch operation reads one indexed document chunk. An empty project is not a missing argument: the identifier is unique across the corpus, so an empty project reads whichever project's document it names and returns that project rather than checking it. The backend's own comment says this is for whole-corpus search. Only the current generation of a project the index calls current is visible, so a project mid-reindex answers as though the document were gone."
     },
     {
+      "symbol": "db2_kb_documents_delete_for_file",
+      "signature_sha256": "9be516f028cfc39ca1abf7ed822f412884adb71b22037c8609a3a14eff7fd3aa",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_documents_delete_for_file operation deletes every chunk of a file. The backend returns void, so a delete that matched nothing and one that removed a thousand chunks are the same acknowledgement -- for a destructive operation, that is the reply saying least where it matters most. An empty file path is not refused here, so what it deletes depends entirely on what the backend's statement does with one."
+    },
+    {
       "symbol": "db2_kb_documents_get_stored_hash",
       "signature_sha256": "94810bc8c9cab32c68d6aa4537fc075de44e6511f7a1125b322a2f011faed598",
       "disposition": "wire-operation",
@@ -1628,12 +1644,28 @@
       "reason": "The typed organization.document_hash_exists operation asks whether a project's current generation already holds content with this hash. Two tables are searched and one path comes back, so the sample names one file with that content and never says how many there are, nor which of the two tables it came from. Both halves are scoped to the current generation, so identical content indexed under an older one does not count as present."
     },
     {
+      "symbol": "db2_kb_documents_link_neighbours",
+      "signature_sha256": "c570f46ab41c8e27598d0356888ea99b5a86e365a1cc382a1734b83abddf2bf6",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_documents_link_neighbours operation joins a chunk to the one before it. Neither identifier is checked to exist, so a chunk can be linked to a predecessor that is not there, and the backend returns void, so nothing says which happened. The link is written from both sides in separate statements outside a transaction, so a failure between them leaves the two chunks disagreeing about whether they are neighbours."
+    },
+    {
       "symbol": "db2_kb_documents_list_chunk_ids_for_file",
       "signature_sha256": "ff2c5761418e43ba5aaadbda19604c0c0a8f2357d22c9b3c245469f036b89e77",
       "disposition": "wire-operation",
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.document_chunk_ids operation lists the chunks a file was split into. Only the project's current generation is listed, so a file indexed under an older one has no chunks as far as this operation is concerned. The list stops at the row bound and says nothing about having stopped, which matters because its caller, the curator invalidation, uses the list to decide what to stale -- a file with more chunks than the bound leaves the rest valid."
+    },
+    {
+      "symbol": "db2_kb_documents_set_tsr_state",
+      "signature_sha256": "2ad93a6533c85679625b1dc98af047b8cb09933f17e7918c15301707f7f53fcb",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_documents_set_tsr_state operation sets the table-recognition state for every chunk of a file. It is a bulk write with no count: the backend returns void, so a caller learns neither how many chunks moved nor whether the file exists. The state is free text nothing checks, so a misspelling is stored and every reader filtering on the intended value silently skips those chunks."
     },
     {
       "symbol": "db2_kb_file_index_delete_current_project",
@@ -3892,6 +3924,14 @@
       "reason": "The typed memory.lifecycle_update_state operation moves a memory to a lifecycle state. The state is stored as sent and nothing checks it against a vocabulary, so a misspelling becomes a state that memory.lifecycle_counts counts nowhere and memory.lifecycle_get_state reports back unchanged. Entering superseded or archived closes the memory's event-time interval, but only when it is still open, so a caller who knew the real end date keeps it. The update names no current state."
     },
     {
+      "symbol": "db2_memory_lineage_insert",
+      "signature_sha256": "8ebfba5edb24b447eb4542ac22f20882f0fbc6ba68f14b83a3e6efa2ff900278",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lineage_insert operation records where an object came from. The object type is free text and the identifier is not checked against anything, so a lineage entry can name an object of a type nothing writes, or one that was deleted, and read back the same as a sound one. It answers with the new identifier, so unlike most writes here a caller can tell the row landed."
+    },
+    {
       "symbol": "db2_memory_link_create",
       "signature_sha256": "92caf6689844003ea3101627c7b0acfc65e87bda1c7dd8a7c0ff1779d757f419",
       "disposition": "wire-operation",
@@ -4260,6 +4300,14 @@
       "reason": "The typed memory.relation_dates operation lists the dates a memory's relations begin. Only relations whose start date is not empty are listed, so the count is not the memory's relation count and a caller cannot tell a memory with no relations from one whose relations are all undated. The date is a text column ordered as text, which is right for the one format DB2 writes and wrong for any other that reaches it."
     },
     {
+      "symbol": "db2_memory_relation_insert",
+      "signature_sha256": "af24c649363ba48f3e5f85a923c47cb92e7a7ac24eb94ccf84bc35be7e6d1076",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.relation_insert operation records a relation a memory asserts. The relation name is free text here -- unlike db2_fact_commit, which puts a relation through a gate before writing one -- so the same graph can hold a checked relation and an unchecked one under the same name. The backend returns void, so the acknowledgement cannot say the row landed."
+    },
+    {
       "symbol": "db2_memory_relations_delete_for_memory",
       "signature_sha256": "1e29122e659a695f72798bf2151c00eab049f54a56389fcc1e8b42f34c4698be",
       "disposition": "private-db2",
@@ -4594,6 +4642,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.episode_card_insert operation records an episode card for a memory. The backend returns void, so the acknowledgement says the call was made. Nothing deduplicates the key, so the same card written twice is two rows, and memory.unit_first_episode_card_id -- which takes the first -- then depends on which of the two the database returns first."
+    },
+    {
+      "symbol": "db2_memory_unit_first_episode_card_id",
+      "signature_sha256": "677d1cb81a0f5888dccbdf7c1c3e9a102f314e26dd1732191c649e0c4cee7a5a",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.first_episode_card operation finds a memory's first episode card. First means the lowest identifier, so it is the first written rather than the first by any property of the card -- and because memory.episode_card_insert deduplicates nothing, writing the same card twice makes the earlier duplicate the answer forever. Zero means no card, which is also what a failed read returns."
     },
     {
       "symbol": "db2_memory_unit_insert",

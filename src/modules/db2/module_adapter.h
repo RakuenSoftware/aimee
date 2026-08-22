@@ -640,6 +640,18 @@ typedef struct
    void (*memory_mark_merged_into)(int64_t merged_into, const char *session_id,
                                    double max_confidence);
    void (*memory_retro_scan_marker)(const char *ts);
+   int64_t (*memory_lineage_insert)(const char *object_type, int64_t object_id,
+                                    const char *source_kind, const char *source_ref,
+                                    double confidence);
+   void (*memory_relation_insert)(int64_t memory_id, const char *src_entity, const char *relation,
+                                  const char *dst_entity, const char *fact_text);
+   void (*kb_documents_set_tsr_state)(const char *project, const char *file_path,
+                                      const char *state);
+   void (*kb_documents_delete_for_file)(const char *project, const char *file_path);
+   void (*kb_documents_link_neighbours)(int64_t doc_id, int64_t prev_id);
+   int (*evidence_store_vector)(const char *artifact_id, const char *collection,
+                                const char *embedding_text);
+   int64_t (*memory_first_episode_card)(int64_t memory_id);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -3682,6 +3682,62 @@ void db2_memory_record_retro_scan_marker(const char *ts)
    (void)ts;
 }
 
+int64_t db2_memory_lineage_insert(const char *object_type, int64_t object_id,
+                                  const char *source_kind, const char *source_ref,
+                                  double confidence)
+{
+   (void)object_type;
+   (void)object_id;
+   (void)source_kind;
+   (void)source_ref;
+   (void)confidence;
+   return -1;
+}
+
+void db2_memory_relation_insert(int64_t memory_id, const char *src_entity, const char *relation,
+                                const char *dst_entity, const char *fact_text)
+{
+   (void)memory_id;
+   (void)src_entity;
+   (void)relation;
+   (void)dst_entity;
+   (void)fact_text;
+}
+
+void db2_kb_documents_set_tsr_state(const char *project, const char *file_path, const char *state)
+{
+   (void)project;
+   (void)file_path;
+   (void)state;
+}
+
+void db2_kb_documents_delete_for_file(const char *project, const char *file_path)
+{
+   (void)project;
+   (void)file_path;
+}
+
+void db2_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
+{
+   (void)doc_id;
+   (void)prev_id;
+}
+
+int db2_evidence_store_vector(const char *artifact_id, const char *collection,
+                              const char *embedding_text)
+{
+   (void)artifact_id;
+   (void)collection;
+   (void)embedding_text;
+   return -1;
+}
+
+int64_t db2_memory_unit_first_episode_card_id(int64_t memory_id)
+{
+   (void)memory_id;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

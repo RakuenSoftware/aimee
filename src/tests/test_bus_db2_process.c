@@ -4214,6 +4214,58 @@ int main(int argc, char **argv)
               &memory_retro_scan_marker_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_retro_scan_marker_acknowledged == 1);
 
+   /* Seven more writers and one read, most of which cannot report what they did. */
+   uint64_t memory_lineage_insert_lineage_id = 99;
+   assert(aimee_db2_memory_lineage_insert_call(
+              call_client, &client, 9538, 0, "memory", 4242, "replay", "replay-ref", 0.5,
+              &memory_lineage_insert_lineage_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Unlike the void writers around it, this one answers with the identifier it
+    * wrote -- so a caller can tell the row landed. The object it names does not
+    * exist, and nothing checks that. */
+   assert(memory_lineage_insert_lineage_id > 0);
+
+   uint32_t memory_relation_insert_acknowledged = 99;
+   assert(aimee_db2_memory_relation_insert_call(
+              call_client, &client, 9539, 0, 4242, "a", "relates_to", "b", "replayed",
+              &memory_relation_insert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_relation_insert_acknowledged == 1);
+
+   uint32_t kb_documents_set_tsr_state_acknowledged = 99;
+   assert(aimee_db2_kb_documents_set_tsr_state_call(
+              call_client, &client, 9540, 0, "replay-project", "replay/doc.md", "done",
+              &kb_documents_set_tsr_state_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_documents_set_tsr_state_acknowledged == 1);
+
+   uint32_t kb_documents_delete_for_file_acknowledged = 99;
+   assert(aimee_db2_kb_documents_delete_for_file_call(
+              call_client, &client, 9541, 0, "replay-project", "replay/gone.md",
+              &kb_documents_delete_for_file_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* A delete that matched nothing, acknowledged exactly as one that removed a
+    * thousand chunks would be. */
+   assert(kb_documents_delete_for_file_acknowledged == 1);
+
+   uint32_t kb_documents_link_neighbours_acknowledged = 99;
+   assert(aimee_db2_kb_documents_link_neighbours_call(call_client, &client, 9542, 0, 4242, 4241,
+                                                      &kb_documents_link_neighbours_acknowledged,
+                                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_documents_link_neighbours_acknowledged == 1);
+
+   uint32_t evidence_store_vector_acknowledged = 99;
+   assert(aimee_db2_evidence_store_vector_call(
+              call_client, &client, 9543, 0, "replay-artifact-w", "evidence", "[0.1,0.2]",
+              &evidence_store_vector_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Refused: the embedding column declares its dimension -- halfvec(384) on this
+    * schema -- so a two-element vector is rejected by the database rather than
+    * stored. Nothing in the declaration says that number, so a caller learns it
+    * by being refused. */
+   assert(evidence_store_vector_acknowledged == 0);
+
+   uint64_t memory_first_episode_card_episode_card_id = 99;
+   assert(aimee_db2_memory_first_episode_card_call(call_client, &client, 9544, 0, 4242,
+                                                   &memory_first_episode_card_episode_card_id, NULL,
+                                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_first_episode_card_episode_card_id == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

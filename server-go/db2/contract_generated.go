@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "d79be78819a8e06d332c2e219a7d01d2a7cf9ccf954dbf95beda73636df0d9e5"
+const ContractSHA256 = "7af38e6d5977b61ff50a64517c282fb419f57d509bcf99c4a4214580cfda49d2"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4915,6 +4915,241 @@ func DecodeMemoryRetroScanMarkerRequest(request []byte) (string, error) {
 		return "", ErrMalformedEnvelope
 	}
 	return scanTimestamp, nil
+}
+
+const EventMemoryLineageInsert = EventMemory
+const StageMemoryLineageInsert = FamilyMemory
+const OperationMemoryLineageInsert uint32 = 148
+const MemoryLineageInsertObjectTypeMin = 1
+const MemoryLineageInsertObjectTypeMax = 31
+const MemoryLineageInsertObjectIDMin uint64 = 1
+const MemoryLineageInsertObjectIDMax uint64 = 9223372036854775807
+const MemoryLineageInsertSourceKindMin = 1
+const MemoryLineageInsertSourceKindMax = 31
+const MemoryLineageInsertSourceRefMin = 0
+const MemoryLineageInsertSourceRefMax = 511
+const MemoryLineageInsertLineageConfidenceMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeMemoryLineageInsertRequest writes the schema memory_lineage_insert declares, in order.
+func EncodeMemoryLineageInsertRequest(objectType string, objectID uint64, sourceKind string, sourceRef string, lineageConfidence float64) ([]byte, error) {
+	if len(objectType) < MemoryLineageInsertObjectTypeMin || len(objectType) > MemoryLineageInsertObjectTypeMax || hasNUL(objectType) ||
+		objectID < MemoryLineageInsertObjectIDMin || objectID > MemoryLineageInsertObjectIDMax ||
+		len(sourceKind) < MemoryLineageInsertSourceKindMin || len(sourceKind) > MemoryLineageInsertSourceKindMax || hasNUL(sourceKind) ||
+		len(sourceRef) < MemoryLineageInsertSourceRefMin || len(sourceRef) > MemoryLineageInsertSourceRefMax || hasNUL(sourceRef) ||
+		math.Float64bits(lineageConfidence)&0x7fffffffffffffff > MemoryLineageInsertLineageConfidenceMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, objectType, MemoryLineageInsertObjectTypeMax); err != nil {
+		return nil, err
+	}
+	var objectIDBytes [8]byte
+	binary.LittleEndian.PutUint64(objectIDBytes[:], objectID)
+	payload = append(payload, objectIDBytes[:]...)
+	if err := putRowText(&payload, sourceKind, MemoryLineageInsertSourceKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, sourceRef, MemoryLineageInsertSourceRefMax); err != nil {
+		return nil, err
+	}
+	var lineageConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(lineageConfidenceBytes[:], math.Float64bits(lineageConfidence))
+	payload = append(payload, lineageConfidenceBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryLineageInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryLineageInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryLineageInsertRequest(request []byte) (string, uint64, string, string, float64, error) {
+	var objectType string
+	var objectID uint64
+	var sourceKind string
+	var sourceRef string
+	var lineageConfidence float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryLineageInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if objectType, err = takeRowText(payload, &cursor, MemoryLineageInsertObjectTypeMax); err != nil ||
+		len(objectType) < MemoryLineageInsertObjectTypeMin {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	objectID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if objectID < MemoryLineageInsertObjectIDMin || objectID > MemoryLineageInsertObjectIDMax {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if sourceKind, err = takeRowText(payload, &cursor, MemoryLineageInsertSourceKindMax); err != nil ||
+		len(sourceKind) < MemoryLineageInsertSourceKindMin {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if sourceRef, err = takeRowText(payload, &cursor, MemoryLineageInsertSourceRefMax); err != nil ||
+		len(sourceRef) < MemoryLineageInsertSourceRefMin {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemoryLineageInsertLineageConfidenceMaxMagnitudeBits {
+			return "", 0, "", "", 0, ErrMalformedEnvelope
+		}
+		lineageConfidence = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return "", 0, "", "", 0, ErrMalformedEnvelope
+	}
+	return objectType, objectID, sourceKind, sourceRef, lineageConfidence, nil
+}
+
+const EventMemoryRelationInsert = EventMemory
+const StageMemoryRelationInsert = FamilyMemory
+const OperationMemoryRelationInsert uint32 = 149
+const MemoryRelationInsertMemoryIDMin uint64 = 1
+const MemoryRelationInsertMemoryIDMax uint64 = 9223372036854775807
+const MemoryRelationInsertSrcEntityMin = 0
+const MemoryRelationInsertSrcEntityMax = 255
+const MemoryRelationInsertRelationNameMin = 0
+const MemoryRelationInsertRelationNameMax = 63
+const MemoryRelationInsertDstEntityMin = 0
+const MemoryRelationInsertDstEntityMax = 255
+const MemoryRelationInsertFactTextMin = 0
+const MemoryRelationInsertFactTextMax = 1023
+
+// EncodeMemoryRelationInsertRequest writes the schema memory_relation_insert declares, in order.
+func EncodeMemoryRelationInsertRequest(memoryID uint64, srcEntity string, relationName string, dstEntity string, factText string) ([]byte, error) {
+	if memoryID < MemoryRelationInsertMemoryIDMin || memoryID > MemoryRelationInsertMemoryIDMax ||
+		len(srcEntity) < MemoryRelationInsertSrcEntityMin || len(srcEntity) > MemoryRelationInsertSrcEntityMax || hasNUL(srcEntity) ||
+		len(relationName) < MemoryRelationInsertRelationNameMin || len(relationName) > MemoryRelationInsertRelationNameMax || hasNUL(relationName) ||
+		len(dstEntity) < MemoryRelationInsertDstEntityMin || len(dstEntity) > MemoryRelationInsertDstEntityMax || hasNUL(dstEntity) ||
+		len(factText) < MemoryRelationInsertFactTextMin || len(factText) > MemoryRelationInsertFactTextMax || hasNUL(factText) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, srcEntity, MemoryRelationInsertSrcEntityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, relationName, MemoryRelationInsertRelationNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, dstEntity, MemoryRelationInsertDstEntityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, factText, MemoryRelationInsertFactTextMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryRelationInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryRelationInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryRelationInsertRequest(request []byte) (uint64, string, string, string, string, error) {
+	var memoryID uint64
+	var srcEntity string
+	var relationName string
+	var dstEntity string
+	var factText string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryRelationInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryRelationInsertMemoryIDMin || memoryID > MemoryRelationInsertMemoryIDMax {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	if srcEntity, err = takeRowText(payload, &cursor, MemoryRelationInsertSrcEntityMax); err != nil ||
+		len(srcEntity) < MemoryRelationInsertSrcEntityMin {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	if relationName, err = takeRowText(payload, &cursor, MemoryRelationInsertRelationNameMax); err != nil ||
+		len(relationName) < MemoryRelationInsertRelationNameMin {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	if dstEntity, err = takeRowText(payload, &cursor, MemoryRelationInsertDstEntityMax); err != nil ||
+		len(dstEntity) < MemoryRelationInsertDstEntityMin {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	if factText, err = takeRowText(payload, &cursor, MemoryRelationInsertFactTextMax); err != nil ||
+		len(factText) < MemoryRelationInsertFactTextMin {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", "", "", ErrMalformedEnvelope
+	}
+	return memoryID, srcEntity, relationName, dstEntity, factText, nil
+}
+
+const EventMemoryFirstEpisodeCard = EventMemory
+const StageMemoryFirstEpisodeCard = FamilyMemory
+const OperationMemoryFirstEpisodeCard uint32 = 150
+const MemoryFirstEpisodeCardMemoryIDMin uint64 = 1
+const MemoryFirstEpisodeCardMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeMemoryFirstEpisodeCardRequest writes the schema memory_first_episode_card declares, in order.
+func EncodeMemoryFirstEpisodeCardRequest(memoryID uint64) ([]byte, error) {
+	if memoryID < MemoryFirstEpisodeCardMemoryIDMin || memoryID > MemoryFirstEpisodeCardMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryFirstEpisodeCard, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryFirstEpisodeCardRequest reads it back, checking each field against its own bound.
+func DecodeMemoryFirstEpisodeCardRequest(request []byte) (uint64, error) {
+	var memoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryFirstEpisodeCard || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryFirstEpisodeCardMemoryIDMin || memoryID > MemoryFirstEpisodeCardMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
 }
 
 const EventEntityObservationCount = EventIndex
@@ -12953,6 +13188,71 @@ func DecodeEvidencePendingListRequest(request []byte) (error) {
 	return nil
 }
 
+const EventEvidenceStoreVector = EventLearning
+const StageEvidenceStoreVector = FamilyLearning
+const OperationEvidenceStoreVector uint32 = 83
+const EvidenceStoreVectorArtifactIDMin = 1
+const EvidenceStoreVectorArtifactIDMax = 63
+const EvidenceStoreVectorCollectionMin = 0
+const EvidenceStoreVectorCollectionMax = 63
+const EvidenceStoreVectorEmbeddingTextMin = 0
+const EvidenceStoreVectorEmbeddingTextMax = 8191
+
+// EncodeEvidenceStoreVectorRequest writes the schema evidence_store_vector declares, in order.
+func EncodeEvidenceStoreVectorRequest(artifactID string, collection string, embeddingText string) ([]byte, error) {
+	if len(artifactID) < EvidenceStoreVectorArtifactIDMin || len(artifactID) > EvidenceStoreVectorArtifactIDMax || hasNUL(artifactID) ||
+		len(collection) < EvidenceStoreVectorCollectionMin || len(collection) > EvidenceStoreVectorCollectionMax || hasNUL(collection) ||
+		len(embeddingText) < EvidenceStoreVectorEmbeddingTextMin || len(embeddingText) > EvidenceStoreVectorEmbeddingTextMax || hasNUL(embeddingText) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, artifactID, EvidenceStoreVectorArtifactIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, collection, EvidenceStoreVectorCollectionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, embeddingText, EvidenceStoreVectorEmbeddingTextMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationEvidenceStoreVector, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEvidenceStoreVectorRequest reads it back, checking each field against its own bound.
+func DecodeEvidenceStoreVectorRequest(request []byte) (string, string, string, error) {
+	var artifactID string
+	var collection string
+	var embeddingText string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEvidenceStoreVector || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if artifactID, err = takeRowText(payload, &cursor, EvidenceStoreVectorArtifactIDMax); err != nil ||
+		len(artifactID) < EvidenceStoreVectorArtifactIDMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if collection, err = takeRowText(payload, &cursor, EvidenceStoreVectorCollectionMax); err != nil ||
+		len(collection) < EvidenceStoreVectorCollectionMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if embeddingText, err = takeRowText(payload, &cursor, EvidenceStoreVectorEmbeddingTextMax); err != nil ||
+		len(embeddingText) < EvidenceStoreVectorEmbeddingTextMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return artifactID, collection, embeddingText, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -18075,6 +18375,187 @@ func DecodeKBAsyncQueueStatusRequest(request []byte) (error) {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+const EventKBDocumentsSetTsrState = EventMaintenance
+const StageKBDocumentsSetTsrState = FamilyMaintenance
+const OperationKBDocumentsSetTsrState uint32 = 66
+const KBDocumentsSetTsrStateProjectNameMin = 1
+const KBDocumentsSetTsrStateProjectNameMax = 255
+const KBDocumentsSetTsrStateFilePathMin = 0
+const KBDocumentsSetTsrStateFilePathMax = 1023
+const KBDocumentsSetTsrStateTsrStateMin = 0
+const KBDocumentsSetTsrStateTsrStateMax = 31
+
+// EncodeKBDocumentsSetTsrStateRequest writes the schema kb_documents_set_tsr_state declares, in order.
+func EncodeKBDocumentsSetTsrStateRequest(projectName string, filePath string, tsrState string) ([]byte, error) {
+	if len(projectName) < KBDocumentsSetTsrStateProjectNameMin || len(projectName) > KBDocumentsSetTsrStateProjectNameMax || hasNUL(projectName) ||
+		len(filePath) < KBDocumentsSetTsrStateFilePathMin || len(filePath) > KBDocumentsSetTsrStateFilePathMax || hasNUL(filePath) ||
+		len(tsrState) < KBDocumentsSetTsrStateTsrStateMin || len(tsrState) > KBDocumentsSetTsrStateTsrStateMax || hasNUL(tsrState) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, KBDocumentsSetTsrStateProjectNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, KBDocumentsSetTsrStateFilePathMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, tsrState, KBDocumentsSetTsrStateTsrStateMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBDocumentsSetTsrState, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocumentsSetTsrStateRequest reads it back, checking each field against its own bound.
+func DecodeKBDocumentsSetTsrStateRequest(request []byte) (string, string, string, error) {
+	var projectName string
+	var filePath string
+	var tsrState string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocumentsSetTsrState || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, KBDocumentsSetTsrStateProjectNameMax); err != nil ||
+		len(projectName) < KBDocumentsSetTsrStateProjectNameMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, KBDocumentsSetTsrStateFilePathMax); err != nil ||
+		len(filePath) < KBDocumentsSetTsrStateFilePathMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if tsrState, err = takeRowText(payload, &cursor, KBDocumentsSetTsrStateTsrStateMax); err != nil ||
+		len(tsrState) < KBDocumentsSetTsrStateTsrStateMin {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", ErrMalformedEnvelope
+	}
+	return projectName, filePath, tsrState, nil
+}
+
+const EventKBDocumentsDeleteForFile = EventMaintenance
+const StageKBDocumentsDeleteForFile = FamilyMaintenance
+const OperationKBDocumentsDeleteForFile uint32 = 67
+const KBDocumentsDeleteForFileProjectNameMin = 1
+const KBDocumentsDeleteForFileProjectNameMax = 255
+const KBDocumentsDeleteForFileFilePathMin = 0
+const KBDocumentsDeleteForFileFilePathMax = 1023
+
+// EncodeKBDocumentsDeleteForFileRequest writes the schema kb_documents_delete_for_file declares, in order.
+func EncodeKBDocumentsDeleteForFileRequest(projectName string, filePath string) ([]byte, error) {
+	if len(projectName) < KBDocumentsDeleteForFileProjectNameMin || len(projectName) > KBDocumentsDeleteForFileProjectNameMax || hasNUL(projectName) ||
+		len(filePath) < KBDocumentsDeleteForFileFilePathMin || len(filePath) > KBDocumentsDeleteForFileFilePathMax || hasNUL(filePath) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, KBDocumentsDeleteForFileProjectNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, filePath, KBDocumentsDeleteForFileFilePathMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBDocumentsDeleteForFile, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocumentsDeleteForFileRequest reads it back, checking each field against its own bound.
+func DecodeKBDocumentsDeleteForFileRequest(request []byte) (string, string, error) {
+	var projectName string
+	var filePath string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocumentsDeleteForFile || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, KBDocumentsDeleteForFileProjectNameMax); err != nil ||
+		len(projectName) < KBDocumentsDeleteForFileProjectNameMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if filePath, err = takeRowText(payload, &cursor, KBDocumentsDeleteForFileFilePathMax); err != nil ||
+		len(filePath) < KBDocumentsDeleteForFileFilePathMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return projectName, filePath, nil
+}
+
+const EventKBDocumentsLinkNeighbours = EventMaintenance
+const StageKBDocumentsLinkNeighbours = FamilyMaintenance
+const OperationKBDocumentsLinkNeighbours uint32 = 68
+const KBDocumentsLinkNeighboursDocIDMin uint64 = 1
+const KBDocumentsLinkNeighboursDocIDMax uint64 = 9223372036854775807
+const KBDocumentsLinkNeighboursPrevDocIDMin uint64 = 0
+const KBDocumentsLinkNeighboursPrevDocIDMax uint64 = 9223372036854775807
+
+// EncodeKBDocumentsLinkNeighboursRequest writes the schema kb_documents_link_neighbours declares, in order.
+func EncodeKBDocumentsLinkNeighboursRequest(docID uint64, prevDocID uint64) ([]byte, error) {
+	if docID < KBDocumentsLinkNeighboursDocIDMin || docID > KBDocumentsLinkNeighboursDocIDMax ||
+		prevDocID < KBDocumentsLinkNeighboursPrevDocIDMin || prevDocID > KBDocumentsLinkNeighboursPrevDocIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var docIDBytes [8]byte
+	binary.LittleEndian.PutUint64(docIDBytes[:], docID)
+	payload = append(payload, docIDBytes[:]...)
+	var prevDocIDBytes [8]byte
+	binary.LittleEndian.PutUint64(prevDocIDBytes[:], prevDocID)
+	payload = append(payload, prevDocIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBDocumentsLinkNeighbours, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocumentsLinkNeighboursRequest reads it back, checking each field against its own bound.
+func DecodeKBDocumentsLinkNeighboursRequest(request []byte) (uint64, uint64, error) {
+	var docID uint64
+	var prevDocID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocumentsLinkNeighbours || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	docID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if docID < KBDocumentsLinkNeighboursDocIDMin || docID > KBDocumentsLinkNeighboursDocIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	prevDocID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if prevDocID < KBDocumentsLinkNeighboursPrevDocIDMin || prevDocID > KBDocumentsLinkNeighboursPrevDocIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return docID, prevDocID, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

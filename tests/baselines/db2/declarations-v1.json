@@ -9242,9 +9242,15 @@
           "line": 20
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.evidence_store_vector operation stores an evidence embedding. The vector is text in pgvector's bracketed form, and the column it lands in declares its dimension -- 384 on this schema -- so a vector of any other length is refused by the database rather than stored. Nothing in the declaration says that number, so a caller learns the required dimension by being refused. The artifact is not checked to exist."
+      },
       "signature": "int db2_evidence_store_vector ( const char * artifact_id , const char * collection , const char * embedding_text )",
       "signature_sha256": "4912b7a712c1a76028990e454f4e26501fbc4509fe9052819dd6be5f4a7f1380",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_evidence_store_vector"
     },
     {
@@ -10433,9 +10439,15 @@
           "line": 144
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_documents_delete_for_file operation deletes every chunk of a file. The backend returns void, so a delete that matched nothing and one that removed a thousand chunks are the same acknowledgement -- for a destructive operation, that is the reply saying least where it matters most. An empty file path is not refused here, so what it deletes depends entirely on what the backend's statement does with one."
+      },
       "signature": "void db2_kb_documents_delete_for_file ( const char * project , const char * file_path )",
       "signature_sha256": "9be516f028cfc39ca1abf7ed822f412884adb71b22037c8609a3a14eff7fd3aa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_documents_delete_for_file"
     },
     {
@@ -10571,9 +10583,15 @@
           "line": 158
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_documents_link_neighbours operation joins a chunk to the one before it. Neither identifier is checked to exist, so a chunk can be linked to a predecessor that is not there, and the backend returns void, so nothing says which happened. The link is written from both sides in separate statements outside a transaction, so a failure between them leaves the two chunks disagreeing about whether they are neighbours."
+      },
       "signature": "void db2_kb_documents_link_neighbours ( int64_t doc_id , int64_t prev_id )",
       "signature_sha256": "c570f46ab41c8e27598d0356888ea99b5a86e365a1cc382a1734b83abddf2bf6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_documents_link_neighbours"
     },
     {
@@ -10626,9 +10644,15 @@
           "line": 299
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_documents_set_tsr_state operation sets the table-recognition state for every chunk of a file. It is a bulk write with no count: the backend returns void, so a caller learns neither how many chunks moved nor whether the file exists. The state is free text nothing checks, so a misspelling is stored and every reader filtering on the intended value silently skips those chunks."
+      },
       "signature": "void db2_kb_documents_set_tsr_state ( const char * project , const char * file_path , const char * state )",
       "signature_sha256": "2ad93a6533c85679625b1dc98af047b8cb09933f17e7918c15301707f7f53fcb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_documents_set_tsr_state"
     },
     {
@@ -18654,9 +18678,15 @@
           "line": 611
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lineage_insert operation records where an object came from. The object type is free text and the identifier is not checked against anything, so a lineage entry can name an object of a type nothing writes, or one that was deleted, and read back the same as a sound one. It answers with the new identifier, so unlike most writes here a caller can tell the row landed."
+      },
       "signature": "int64_t db2_memory_lineage_insert ( const char * object_type , int64_t object_id , const char * source_kind , const char * source_ref , double confidence )",
       "signature_sha256": "8ebfba5edb24b447eb4542ac22f20882f0fbc6ba68f14b83a3e6efa2ff900278",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lineage_insert"
     },
     {
@@ -19839,9 +19869,15 @@
           "line": 43
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.relation_insert operation records a relation a memory asserts. The relation name is free text here -- unlike db2_fact_commit, which puts a relation through a gate before writing one -- so the same graph can hold a checked relation and an unchecked one under the same name. The backend returns void, so the acknowledgement cannot say the row landed."
+      },
       "signature": "void db2_memory_relation_insert ( int64_t memory_id , const char * src_entity , const char * relation , const char * dst_entity , const char * fact_text )",
       "signature_sha256": "af24c649363ba48f3e5f85a923c47cb92e7a7ac24eb94ccf84bc35be7e6d1076",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_relation_insert"
     },
     {
@@ -20838,9 +20874,15 @@
           "line": 202
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.first_episode_card operation finds a memory's first episode card. First means the lowest identifier, so it is the first written rather than the first by any property of the card -- and because memory.episode_card_insert deduplicates nothing, writing the same card twice makes the earlier duplicate the answer forever. Zero means no card, which is also what a failed read returns."
+      },
       "signature": "int64_t db2_memory_unit_first_episode_card_id ( int64_t memory_id )",
       "signature_sha256": "677d1cb81a0f5888dccbdf7c1c3e9a102f314e26dd1732191c649e0c4cee7a5a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_unit_first_episode_card_id"
     },
     {
@@ -28321,15 +28363,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3487d902625a90d0d2f3a3a75847fceb72c231bd83ddab8aac42ecd4617b7358",
+  "fingerprint": "a88f005ffa42323b4b159c7b976158606155cf8fd04f8839895a9cbc1232bf4d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 246,
+    "audit_pending": 239,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 713
+    "reviewed": 720
   }
 }

@@ -1031,3 +1031,93 @@ aimee_db2_memory_retro_scan_marker_call(aimee_db2_call_fn call, void *call_conte
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_memory_lineage_insert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *object_type, uint64_t object_id, const char *source_kind, const char *source_ref,
+    double lineage_confidence, uint64_t *lineage_id, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_LINEAGE_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_MEMORY_LINEAGE_INSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_lineage_insert_request_encode(object_type, object_id, source_kind,
+                                                      source_ref, lineage_confidence, request,
+                                                      sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_LINEAGE_INSERT,
+            AIMEE_DB2_STAGE_MEMORY_LINEAGE_INSERT, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_memory_lineage_insert_reply_decode(response, response_len, lineage_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_memory_relation_insert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t memory_id, const char *src_entity, const char *relation_name, const char *dst_entity,
+    const char *fact_text, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_RELATION_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_MEMORY_RELATION_INSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_relation_insert_request_encode(memory_id, src_entity, relation_name,
+                                                       dst_entity, fact_text, request,
+                                                       sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_RELATION_INSERT,
+            AIMEE_DB2_STAGE_MEMORY_RELATION_INSERT, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_memory_relation_insert_reply_decode(response, response_len, acknowledged) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_memory_first_episode_card_call(aimee_db2_call_fn call, void *call_context,
+                                         uint64_t trace_id, uint64_t deadline_ns,
+                                         uint64_t memory_id, uint64_t *episode_card_id,
+                                         aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_MEMORY_FIRST_EPISODE_CARD_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_MEMORY_FIRST_EPISODE_CARD_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_memory_first_episode_card_request_encode(memory_id, request, sizeof(request),
+                                                          &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_MEMORY_FIRST_EPISODE_CARD,
+            AIMEE_DB2_STAGE_MEMORY_FIRST_EPISODE_CARD, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_memory_first_episode_card_reply_decode(response, response_len, episode_card_id) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
