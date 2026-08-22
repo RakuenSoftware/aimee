@@ -343,6 +343,93 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "match_error_keys",
+			stage: db2contract.StageMatchErrorKeys,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMatchErrorKeysRequest("connection refused by peer")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMatchErrorKeysReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_ids_by_updated",
+			stage: db2contract.StageMemoryIdsByUpdated,
+			// Zero, which is the branch NULLIF covers. A plain LIMIT $1 would
+			// answer empty here and the reply would look identical to a schema
+			// with no memories in it, so this is the value worth probing.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryIdsByUpdatedRequest(0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryIdsByUpdatedReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "unit_ids_for_memory",
+			stage: db2contract.StageUnitIdsForMemory,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeUnitIdsForMemoryRequest(1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeUnitIdsForMemoryReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_relation_dates",
+			stage: db2contract.StageMemoryRelationDates,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryRelationDatesRequest(1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryRelationDatesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_depends_on_keys",
+			stage: db2contract.StageMemoryDependsOnKeys,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryDependsOnKeysRequest(1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryDependsOnKeysReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_session_content",
+			stage: db2contract.StageMemorySessionContent,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySessionContentRequest("live-probe-session")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemorySessionContentReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_session_created_at",
+			stage: db2contract.StageMemorySessionCreatedAt,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySessionCreatedAtRequest("live-probe-session")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemorySessionCreatedAtReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
