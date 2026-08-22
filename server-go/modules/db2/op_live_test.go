@@ -1156,6 +1156,66 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "entity_neighbors",
+			stage: db2contract.StageEntityNeighbors,
+			// The projection-visibility subquery joins two tables and the
+			// aggregating forms group over a union; neither is something a fake
+			// can execute.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityNeighborsRequest("live-probe-entity", 8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityNeighborsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_outbound_neighbors",
+			stage: db2contract.StageEntityOutboundNeighbors,
+			// The projection-visibility subquery joins two tables and the
+			// aggregating forms group over a union; neither is something a fake
+			// can execute.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityOutboundNeighborsRequest("live-probe-entity", 8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityOutboundNeighborsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_top_targets",
+			stage: db2contract.StageEntityTopTargets,
+			// The projection-visibility subquery joins two tables and the
+			// aggregating forms group over a union; neither is something a fake
+			// can execute.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityTopTargetsRequest("live-probe-entity", "depends_on")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityTopTargetsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_top_partners",
+			stage: db2contract.StageEntityTopPartners,
+			// The projection-visibility subquery joins two tables and the
+			// aggregating forms group over a union; neither is something a fake
+			// can execute.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityTopPartnersRequest("live-probe-entity", "depends_on")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityTopPartnersReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
