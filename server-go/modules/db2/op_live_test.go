@@ -2,6 +2,7 @@ package db2
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -194,6 +195,83 @@ func liveReads() []liveRequest {
 			decoded: func(t *testing.T, body []byte) {
 				if _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, err :=
 					db2contract.DecodeDirectiveFindByCauseTopicReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "memory_last_retro_scan",
+			stage:  db2contract.StageMemoryLastRetroScan,
+			encode: db2contract.EncodeMemoryLastRetroScanRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryLastRetroScanReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "project_last_scan",
+			stage:  db2contract.StageProjectLastScan,
+			encode: db2contract.EncodeProjectLastScanRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProjectLastScanReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "project_current_generation",
+			stage: db2contract.StageProjectCurrentGeneration,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectCurrentGenerationRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProjectCurrentGenerationReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "project_fingerprint",
+			stage: db2contract.StageProjectFingerprint,
+			encode: func() ([]byte, error) {
+				// md5, string_agg and the ordered aggregate all have to resolve.
+				return db2contract.EncodeProjectFingerprintRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				fingerprint, err := db2contract.DecodeProjectFingerprintReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				// The statement coalesces, so even a project with no files
+				// fingerprints as the md5 of the empty string -- 32 hex
+				// characters, never nothing.
+				if len(fingerprint) != 32 {
+					t.Fatalf("fingerprint = %q, want 32 hex characters", fingerprint)
+				}
+			},
+		},
+		{
+			name:   "bandit_decision_points",
+			stage:  db2contract.StageBanditDecisionPoints,
+			encode: db2contract.EncodeBanditDecisionPointsRequest,
+			decoded: func(t *testing.T, body []byte) {
+				encoded, err := db2contract.DecodeBanditDecisionPointsReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				var points []string
+				if err := json.Unmarshal([]byte(encoded), &points); err != nil {
+					t.Fatalf("the reply is not parseable JSON: %v (%q)", err, encoded)
+				}
+			},
+		},
+		{
+			name:   "active_embedder_version",
+			stage:  db2contract.StageActiveEmbedderVersion,
+			encode: db2contract.EncodeActiveEmbedderVersionRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeActiveEmbedderVersionReply(body); err != nil {
 					t.Fatalf("decode reply: %v", err)
 				}
 			},
