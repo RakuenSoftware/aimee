@@ -1105,6 +1105,38 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "retryable_index_failures",
+			stage: db2contract.StageRetryableIndexFailures,
+			// This is the probe that matters most in the batch. The previous
+			// statement was invalid SQL -- PostgreSQL refuses to order a
+			// DISTINCT by an unselected column -- so it never ran at all, and
+			// only a real database can tell the difference between that and an
+			// empty queue.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRetryableIndexFailuresRequest(3, 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRetryableIndexFailuresReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "witness_checkpoint_freshness",
+			stage:  db2contract.StageWitnessCheckpointFreshness,
+			encode: db2contract.EncodeWitnessCheckpointFreshnessRequest,
+			decoded: func(t *testing.T, body []byte) {
+				read, count, _, err := db2contract.DecodeWitnessCheckpointFreshnessReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if read != 1 {
+					t.Fatal("the read did not report itself as having happened")
+				}
+				_ = count
+			},
+		},
 	}
 }
 
@@ -2026,6 +2058,59 @@ func liveWrites() []liveRequest {
 				if acknowledged != 1 {
 					t.Fatal("a relation with an open evaluation and a real target " +
 						"was not mapped")
+				}
+			},
+		},
+		{
+			name:  "ingest_queue_fail",
+			stage: db2contract.StageIngestQueueFail,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeIngestQueueFailRequest(2147483000, "live probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeIngestQueueFailReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
+		{
+			name:  "kb_documents_delete_for_file",
+			stage: db2contract.StageKBDocumentsDeleteForFile,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocumentsDeleteForFileRequest(
+					"replay-project", "live-probe-no-such-file.md")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBDocumentsDeleteForFileReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the delete did not run")
+				}
+			},
+		},
+		{
+			name:  "kb_documents_link_neighbours",
+			stage: db2contract.StageKBDocumentsLinkNeighbours,
+			// Neither statement has to match a row -- a chunk since deleted
+			// links to nothing -- so an unseeded probe still exercises both
+			// updates and the transaction around them.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocumentsLinkNeighboursRequest(
+					2147483001, 2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBDocumentsLinkNeighboursReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("both updates did not run")
 				}
 			},
 		},

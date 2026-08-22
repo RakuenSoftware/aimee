@@ -49,11 +49,18 @@ int db2_agent_outcome_recent_failures(int window_days, db2_agent_outcome_failure
    snprintf(window, sizeof(window), "-%d days", window_days);
 
    char err[256] = "";
+   /* GROUP BY rather than SELECT DISTINCT, for the reason given in
+    * db2_vector_index_ops_list_retryable_memory_ids: PostgreSQL refuses to
+    * order a DISTINCT by an unselected column, so this never ran and the
+    * caller always saw no recent failures. MAX(created_at) orders each
+    * role-and-reason pair by its most recent occurrence, which is what "recent
+    * failures, newest first" means once the pair is the unit. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
-                                          "SELECT DISTINCT role, reason FROM agent_outcomes "
+                                          "SELECT role, reason FROM agent_outcomes "
                                           "WHERE outcome IN ('failure', 'error') "
                                           "AND created_at > pg_now_text(?1) "
-                                          "ORDER BY created_at DESC LIMIT ?2",
+                                          "GROUP BY role, reason "
+                                          "ORDER BY MAX(created_at) DESC LIMIT ?2",
                                           err, sizeof(err));
    if (!st)
       return 0;

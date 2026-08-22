@@ -198,12 +198,20 @@ int db2_vector_index_ops_list_retryable_memory_ids(int max_attempts, int limit, 
    if (!conn)
       return 0;
 
-   char sql[256];
+   /* GROUP BY rather than SELECT DISTINCT: PostgreSQL refuses to order a
+    * DISTINCT by a column that is not selected, so the previous form never ran
+    * and this retry queue always came back empty -- every failed embed stayed
+    * failed. Grouping gives the same one-row-per-memory result and lets the
+    * ordering be MIN(updated_at): the memory whose oldest failure is oldest
+    * goes first, which is what draining a queue oldest-first means when one
+    * memory can have several failed points. */
+   char sql[320];
    snprintf(sql, sizeof(sql),
-            "SELECT DISTINCT memory_id FROM vector_index_ops"
+            "SELECT memory_id FROM vector_index_ops"
             " WHERE status = 'failed' AND memory_id IS NOT NULL"
             "   AND attempts < ?1"
-            " ORDER BY updated_at ASC%s",
+            " GROUP BY memory_id"
+            " ORDER BY MIN(updated_at) ASC%s",
             (limit > 0) ? " LIMIT ?2" : "");
 
    char err[256] = "";
