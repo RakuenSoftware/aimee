@@ -15,7 +15,9 @@ import (
 // an operation's row handling can be tested without one.
 type fakeStore struct {
 	rows      *fakeRows
+	row       *fakeRow
 	queryErr  error
+	execErr   error
 	lastSQL   string
 	lastArgs  []any
 	execCalls int
@@ -31,12 +33,47 @@ func (s *fakeStore) Query(ctx context.Context, sql string, args ...any) (pgx.Row
 
 func (s *fakeStore) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	s.lastSQL, s.lastArgs = sql, args
-	return nil
+	if s.row == nil {
+		return &fakeRow{err: pgx.ErrNoRows}
+	}
+	return s.row
 }
 
 func (s *fakeStore) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	s.lastSQL, s.lastArgs = sql, args
 	s.execCalls++
-	return 0, nil
+	if s.execErr != nil {
+		return 0, s.execErr
+	}
+	return 1, nil
+}
+
+// fakeRow is one scripted row, or the absence of one.
+type fakeRow struct {
+	values []any
+	err    error
+}
+
+func (r *fakeRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if len(dest) != len(r.values) {
+		return errors.New("unexpected scan width")
+	}
+	for index, target := range dest {
+		switch typed := target.(type) {
+		case *int64:
+			*typed = r.values[index].(int64)
+		case *int32:
+			*typed = r.values[index].(int32)
+		case *string:
+			*typed = r.values[index].(string)
+		default:
+			return errors.New("unexpected scan type")
+		}
+	}
+	return nil
 }
 
 // fakeRows is the narrow slice of pgx.Rows an operation actually uses.
