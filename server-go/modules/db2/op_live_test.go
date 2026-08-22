@@ -732,6 +732,78 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "bandit_arms_list",
+			stage: db2contract.StageBanditArmsList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditArmsListRequest("live-probe-point")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeBanditArmsListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "bandit_promotion_get",
+			stage: db2contract.StageBanditPromotionGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditPromotionGetRequest("live-probe-point")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeBanditPromotionGetReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "calibration_surfaces_with_data",
+			stage: db2contract.StageCalibrationSurfacesWithData,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCalibrationSurfacesWithDataRequest(3)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCalibrationSurfacesWithDataReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "artifact_target_surface",
+			stage: db2contract.StageArtifactTargetSurface,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactTargetSurfaceRequest("live-probe-artifact")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeArtifactTargetSurfaceReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "audit_latest_before",
+			stage: db2contract.StageAuditLatestBefore,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeAuditLatestBeforeRequest("live-probe-artifact")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeAuditLatestBeforeReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "evidence_pending_list",
+			stage: db2contract.StageEvidencePendingList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEvidencePendingListRequest()
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEvidencePendingListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
