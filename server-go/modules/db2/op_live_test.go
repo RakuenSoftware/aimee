@@ -1062,6 +1062,49 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "document_stored_hash",
+			stage: db2contract.StageDocumentStoredHash,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDocumentStoredHashRequest(
+					"replay-project", "live-probe-no-such-file.md")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				hash, err := db2contract.DecodeDocumentStoredHashReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if hash != "" {
+					t.Fatalf("hash = %q for a file nothing has ingested", hash)
+				}
+			},
+		},
+		{
+			name:  "document_chunk_ids",
+			stage: db2contract.StageDocumentChunkIds,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDocumentChunkIdsRequest(
+					"replay-project", "live-probe-no-such-file.md")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDocumentChunkIdsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "pdf_tsr_state",
+			stage: db2contract.StagePdfTsrState,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodePdfTsrStateRequest(
+					"replay-project", "live-probe-no-such-file.pdf")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodePdfTsrStateReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -1914,6 +1957,78 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "doc_assets_delete_for_doc",
+			stage: db2contract.StageDocAssetsDeleteForDoc,
+			// The nested generation subqueries and the document check all have
+			// to resolve, which is the half a fake cannot run.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDocAssetsDeleteForDocRequest(
+					"replay-project", "live-probe-no-such-file.pdf")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				deleted, err := db2contract.DecodeDocAssetsDeleteForDocReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if deleted != 0 {
+					t.Fatalf("deleted = %d for a document nothing holds", deleted)
+				}
+			},
+		},
+		{
+			name:  "release_add_doc",
+			stage: db2contract.StageReleaseAddDoc,
+			// Seeded because release_docs carries foreign keys into both
+			// doc_releases and docs; an unseeded insert fails on them rather
+			// than on anything this operation decides.
+			//
+			// Twice, because being repeatable is the behaviour: the second call
+			// takes the ON CONFLICT path.
+			repeat: 2,
+			seed: []string{
+				liveProbeRelease,
+				liveProbeDoc,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeReleaseAddDocRequest(
+					liveProbeReleaseID, liveProbeDocID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeReleaseAddDocReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the insert did not run")
+				}
+			},
+		},
+		{
+			name:  "ontology_map",
+			stage: db2contract.StageOntologyMap,
+			// A target that exists and an open evaluation for the source, so
+			// all three checks pass and both tables move.
+			seed: []string{
+				liveProbeRelType,
+				liveProbeEvaluation,
+				liveProbeMapTarget,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeOntologyMapRequest(
+					liveProbeRelTypeName, liveProbeMapTargetName)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeOntologyMapReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("a relation with an open evaluation and a real target " +
+						"was not mapped")
+				}
+			},
+		},
 	}
 }
 
@@ -2026,6 +2141,17 @@ const (
  (id, question, cause, state, created_at, updated_at)
  VALUES (900008, 'live probe question?', 'retrieval_failure', 'open',
  '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+)
+
+// Seed rows for the document probes: a target relation for the map, and a doc
+// for the release to hold.
+const (
+	liveProbeMapTargetName = "live_probe_target_relation"
+	liveProbeMapTarget     = `INSERT INTO rel_types (rel_type, status)
+ VALUES ('live_probe_target_relation', 'active')`
+	liveProbeDocID = 900009
+	liveProbeDoc   = `INSERT INTO docs (id, content_hash, filename)
+ VALUES (900009, 'live-probe-content-hash', 'live-probe.md')`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
