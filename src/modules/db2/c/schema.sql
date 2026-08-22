@@ -16213,20 +16213,33 @@ RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
       AND x.current_version=p_policy_version))
 $$;
 
-CREATE OR REPLACE VIEW derived_memory_freshness AS
-WITH evaluated AS (
+CREATE OR REPLACE FUNCTION derived_memory_freshness_for(p_kind TEXT DEFAULT '',p_id TEXT DEFAULT '')
+RETURNS TABLE(derived_kind TEXT,derived_memory_id TEXT,status TEXT,cause_kind TEXT,cause_id TEXT)
+LANGUAGE sql STABLE AS $$
+WITH targets AS (
+ SELECT r.derived_kind,r.derived_memory_id
+ FROM derived_memory_registry r
+ WHERE p_kind='' OR EXISTS(SELECT 1 FROM derived_memory_dependencies x
+   WHERE x.input_kind=p_kind AND x.input_id=p_id
+     AND x.derived_kind=r.derived_kind AND x.derived_memory_id=r.derived_memory_id)),
+evaluated AS (
  SELECT d.*,knowledge_input_moved(d.input_kind,d.input_id,d.input_version,d.source_hash,
           d.derivation_policy_version,d.derived_kind) AS moved
- FROM derived_memory_dependencies d)
-SELECT r.derived_kind,r.derived_memory_id,
+ FROM derived_memory_dependencies d JOIN targets t
+   ON t.derived_kind=d.derived_kind AND t.derived_memory_id=d.derived_memory_id)
+SELECT t.derived_kind,t.derived_memory_id,
  CASE WHEN count(e.id)=0 THEN 'dependencies:not-recorded'
       WHEN bool_or(e.moved AND e.contribution='essential') THEN 'unsupported'
       WHEN bool_or(e.moved) THEN 'stale' ELSE 'fresh' END AS status,
  COALESCE((array_agg(e.input_kind ORDER BY e.id) FILTER(WHERE e.moved))[1],'') AS cause_kind,
  COALESCE((array_agg(e.input_id ORDER BY e.id) FILTER(WHERE e.moved))[1],'') AS cause_id
-FROM derived_memory_registry r LEFT JOIN evaluated e
- ON e.derived_kind=r.derived_kind AND e.derived_memory_id=r.derived_memory_id
-GROUP BY r.derived_kind,r.derived_memory_id;
+FROM targets t LEFT JOIN evaluated e
+ ON e.derived_kind=t.derived_kind AND e.derived_memory_id=t.derived_memory_id
+GROUP BY t.derived_kind,t.derived_memory_id
+$$;
+
+CREATE OR REPLACE VIEW derived_memory_freshness AS
+ SELECT * FROM derived_memory_freshness_for('', '');
 
 CREATE OR REPLACE FUNCTION derived_memory_apply_status(p_kind TEXT DEFAULT '',p_id TEXT DEFAULT '')
 RETURNS BIGINT LANGUAGE plpgsql AS $$
@@ -16235,11 +16248,9 @@ BEGIN
   WITH moved AS (UPDATE derived_memory_registry r SET current_status=f.status,
     stale_cause_kind=f.cause_kind,stale_cause_id=f.cause_id,
     updated_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
-   FROM derived_memory_freshness f WHERE f.derived_kind=r.derived_kind
+   FROM derived_memory_freshness_for(p_kind,p_id) f WHERE f.derived_kind=r.derived_kind
     AND f.derived_memory_id=r.derived_memory_id AND f.status<>r.current_status
-    AND (p_kind='' OR EXISTS(SELECT 1 FROM derived_memory_dependencies d
-      WHERE d.derived_kind=r.derived_kind AND d.derived_memory_id=r.derived_memory_id
-       AND d.input_kind=p_kind AND d.input_id=p_id)) RETURNING r.derived_kind,r.derived_memory_id),
+    RETURNING r.derived_kind,r.derived_memory_id),
   queued AS (INSERT INTO derived_rederivation_queue(derived_kind,derived_memory_id,cause)
     SELECT derived_kind,derived_memory_id,COALESCE(NULLIF(p_kind||':'||p_id,':'),'dependency moved')
     FROM moved ON CONFLICT(derived_kind,derived_memory_id) DO UPDATE
@@ -16252,12 +16263,9 @@ END $$;
 -- event-coverage defect; it must never conceal that defect by repairing rows.
 CREATE OR REPLACE FUNCTION derived_memory_reconcile(p_kind TEXT DEFAULT '',p_id TEXT DEFAULT '')
 RETURNS BIGINT LANGUAGE sql STABLE AS $$
- SELECT count(*) FROM derived_memory_registry r JOIN derived_memory_freshness f
+ SELECT count(*) FROM derived_memory_registry r JOIN derived_memory_freshness_for(p_kind,p_id) f
    USING(derived_kind,derived_memory_id)
-  WHERE r.current_status<>f.status AND (p_kind='' OR EXISTS(
-    SELECT 1 FROM derived_memory_dependencies d
-     WHERE d.derived_kind=r.derived_kind AND d.derived_memory_id=r.derived_memory_id
-       AND d.input_kind=p_kind AND d.input_id=p_id))
+  WHERE r.current_status<>f.status
 $$;
 
 CREATE OR REPLACE FUNCTION derived_memory_rederivation_claim(p_limit BIGINT DEFAULT 25)
@@ -17057,5 +17065,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '2')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '3')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
