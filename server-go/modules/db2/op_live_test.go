@@ -458,6 +458,50 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "lifecycle_get_state",
+			stage: db2contract.StageLifecycleGetState,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLifecycleGetStateRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				state, err := db2contract.DecodeLifecycleGetStateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if state != "" {
+					t.Fatalf("state = %q for a memory nothing holds", state)
+				}
+			},
+		},
+		{
+			name:  "memory_first_episode_card",
+			stage: db2contract.StageMemoryFirstEpisodeCard,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryFirstEpisodeCardRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryFirstEpisodeCardReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "dedupe_by_key",
+			stage: db2contract.StageDedupeByKey,
+			// A READ entry because a dry run writes nothing, and it is the half
+			// worth probing here: the CTE, the DISTINCT ON and the self-join all
+			// have to resolve against the real schema, and a fake proves none of
+			// that. The merging half is probed separately.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDedupeByKeyRequest(1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDedupeByKeyReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -949,6 +993,63 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_retro_scan_marker",
+			stage: db2contract.StageMemoryRetroScanMarker,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryRetroScanMarkerRequest("2026-01-01T00:00:00Z")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryRetroScanMarkerReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the marker was not written")
+				}
+			},
+		},
+		{
+			name:  "dedupe_by_key",
+			stage: db2contract.StageDedupeByKey,
+			// Two memories sharing a key, so the merge half actually matches
+			// something: the UPDATE ... FROM, the RETURNING and the provenance
+			// INSERT that reads from it all have to run. Against an empty
+			// schema the statement would parse and merge nothing, which is the
+			// same reply a broken join gives.
+			seed: []string{liveProbeDuplicateMemories},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDedupeByKeyRequest(0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				merged, err := db2contract.DecodeDedupeByKeyReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if merged < 1 {
+					t.Fatal("two memories sharing a key did not merge")
+				}
+			},
+		},
+		{
+			name:  "enrollment_touch_last_seen",
+			stage: db2contract.StageEnrollmentTouchLastSeen,
+			// The insert half: nothing holds this fingerprint, so the backfill
+			// path runs and the minted authority id has to satisfy the column.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEnrollmentTouchLastSeenRequest(
+					"live-probe-fingerprint", "kb")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				recorded, err := db2contract.DecodeEnrollmentTouchLastSeenReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if recorded != 1 {
+					t.Fatal("the sighting was not recorded")
+				}
+			},
+		},
 	}
 }
 
@@ -1008,6 +1109,17 @@ const (
  VALUES ('active_release_id', '900006')
  ON CONFLICT (state_key) DO UPDATE SET state_value = EXCLUDED.state_value`
 )
+
+// Two memories under one key, for the dedupe probe. Against an empty schema the
+// merge statement parses and merges nothing, which is the same reply a broken
+// join would give -- so the probe needs something to actually merge.
+const liveProbeDuplicateMemories = `INSERT INTO memories
+ (id, tier, kind, key, content, confidence, merged_into, created_at, updated_at)
+ VALUES
+ (900007, 'L2', 'fact', 'live-probe-duplicate-key', 'canonical', 0.9, 0,
+  '2026-01-01 00:00:00', '2026-01-01 00:00:00'),
+ (900008, 'L2', 'fact', 'live-probe-duplicate-key', 'duplicate', 0.5, 0,
+  '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
@@ -1086,9 +1198,28 @@ var liveExcluded = map[string]string{}
 // get out of, and the reason that harness's own docstring calls it "the only
 // test that proves a DB2 statement parses and runs".
 func TestLiveCoversEveryPortedOperation(t *testing.T) {
-	covered := len(liveReads()) + len(liveWrites()) + len(liveExcluded)
+	// Keyed on the entry name, not on the stage. A stage is a family and is
+	// shared by every operation in it -- the dispatch key is the (stage,
+	// operation) pair, and only the encoded request carries the second half --
+	// so counting stages would collapse fifty-odd operations into eight.
+	//
+	// Names rather than entries, because an operation can earn more than one
+	// probe: dedupe_by_key has a read for its dry run and a write for its
+	// merge, since the two take different paths. Both entries carry the same
+	// name and count once; they sit under different parent tests, so the
+	// subtest names do not collide.
+	probed := map[string]bool{}
+	for _, entry := range liveReads() {
+		probed[entry.name] = true
+	}
+	for _, entry := range liveWrites() {
+		probed[entry.name] = true
+	}
+	covered := len(probed) + len(liveExcluded)
 	if covered != Implemented() {
-		t.Fatalf("%d operation(s) ported; %d read-probed, %d write-probed, %d excluded",
-			Implemented(), len(liveReads()), len(liveWrites()), len(liveExcluded))
+		t.Fatalf("%d operation(s) ported; %d distinct operation(s) probed, %d excluded "+
+			"(%d read entries, %d write entries)",
+			Implemented(), len(probed), len(liveExcluded),
+			len(liveReads()), len(liveWrites()))
 	}
 }
