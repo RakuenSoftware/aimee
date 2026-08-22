@@ -2867,13 +2867,18 @@ int main(void)
       assert(lc.demote_days == 60);
       assert(fabs(lc.demotion_resistance - 1.0) < 0.01);
 
-      /* policy: easy promote, aggressive demotion resistance */
+      /* policy: legacy promotion remains easy, while P6 keys expiry on the
+       * epistemic policy meaning (effectively non-expiring). Migrated legacy
+       * rows retain their former 180-day value in their row-local override. */
       db2_kind_lifecycle_load(KIND_POLICY, &lc);
       assert(lc.promote_use_count == 1);
       assert(fabs(lc.promote_confidence - 0.7) < 0.01);
       assert(lc.demote_days == 365);
       assert(fabs(lc.demotion_resistance - 5.0) < 0.01);
-      assert(lc.expire_days == 180);
+      assert(lc.expire_days == 36500);
+
+      db2_kind_lifecycle_load("world_fact", &lc);
+      assert(lc.expire_days == 30);
 
       /* procedure: 2 uses to promote, 3x demotion resistance */
       db2_kind_lifecycle_load(KIND_PROCEDURE, &lc);

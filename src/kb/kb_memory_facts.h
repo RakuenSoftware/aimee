@@ -11,8 +11,6 @@
 #ifndef DEC_KB_MEMORY_FACTS_H
 #define DEC_KB_MEMORY_FACTS_H 1
 
-#include "config.h"
-
 /* Drain up to `batch` pending "memory_facts" jobs. Returns the number processed
  * (0 when none, when typed_facts_enabled is off, or when DB2 is unavailable). */
 int kb_memory_facts_drain(int batch);

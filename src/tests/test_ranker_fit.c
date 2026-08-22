@@ -74,6 +74,27 @@ static void insert_feat(long long doc, double dense, double lex, double rec)
    assert(rc == 0);
 }
 
+static void insert_work_outcome(const char *outcome_id, const char *event_id,
+                                const char *subject_kind, const char *subject_id,
+                                const char *outcome)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO work_outcomes(outcome_id,retrieval_event_id,subject_kind,subject_id,"
+       " authenticated_evaluator,outcome,occurred_at)"
+       " VALUES(?1,?2,?3,?4,'test',?5,'2026-01-01 00:00:00')",
+       err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", outcome_id);
+   aimee_pg_bind_text(st, "?2", event_id);
+   aimee_pg_bind_text(st, "?3", subject_kind);
+   aimee_pg_bind_text(st, "?4", subject_id);
+   aimee_pg_bind_text(st, "?5", outcome);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+}
+
 static void write_exec(const char *path, const char *content)
 {
    FILE *fp = fopen(path, "wb");
@@ -200,6 +221,28 @@ static void test_closed_loop_capture(void)
    cJSON_Delete(rows);
    close_db();
    printf("  closed_loop_capture: ok\n");
+}
+
+/* ---- 2c. canonical P5 work outcomes feed the ranker training view ---- */
+static void test_work_outcome_capture(void)
+{
+   open_db();
+   insert_feat(100, 0.9, 0.8, 0.9);
+   insert_feat(101, 0.2, 0.1, 0.3);
+   insert_work_outcome("wo-1", "work-e1", "document", "100", "useful");
+   insert_work_outcome("wo-2", "work-e1", "document", "101", "dead_end");
+   /* Same id, different subject space: must not contaminate document fitting. */
+   insert_work_outcome("wo-3", "work-e1", "assertion", "100", "useful");
+
+   cJSON *rows = NULL;
+   int ng = 0, nr = 0, np = 0;
+   assert(kb_ranker_training_view("kb_document", "v1", &rows, &ng, &nr, &np) == 0);
+   assert(nr == 2);
+   assert(np == 1);
+   assert(ng == 1);
+   cJSON_Delete(rows);
+   close_db();
+   printf("  work_outcome_capture: ok\n");
 }
 
 /* ---- 3. fit disabled ---- */
@@ -628,6 +671,7 @@ int main(void)
    test_empty_view_diagnostic();
    test_training_view_join();
    test_closed_loop_capture();
+   test_work_outcome_capture();
    test_fit_disabled();
    test_fit_below_floor();
    test_gate_commit_on_lift();

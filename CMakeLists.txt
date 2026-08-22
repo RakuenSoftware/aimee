@@ -491,6 +491,8 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/admin_grant.c
     ${AIMEE_SRC_DIR}/modules/db2/c/oidc_jwks.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/evidence_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_profiles.c
     ${AIMEE_SRC_DIR}/modules/db2/c/epistemic_directives.c
     ${AIMEE_SRC_DIR}/modules/db2/c/failed_queries.c

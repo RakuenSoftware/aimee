@@ -9,6 +9,7 @@
 #define DEC_DB2_FACT_INGEST_H 1
 
 #include "fact_lifecycle.h" /* fact_authority_t */
+#include "fact_mutation.h"  /* fact_evidence_input_t */
 
 #ifdef __cplusplus
 extern "C"
@@ -52,6 +53,14 @@ extern "C"
     * Retraction is NOT handled here; the full ingress path obtains the memory
     * module's scan verdict before routing a correction through db2_fact_retract. */
    int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabled);
+   int db2_fact_ingest_text_with_evidence(const char *text, fact_authority_t authority, int enabled,
+                                          const fact_evidence_input_t *evidence,
+                                          const char *assertion_kind, const char *valid_from,
+                                          const char *valid_until);
+   int db2_fact_ingest_text_as_actor(const char *text, const fact_actor_t *actor, int enabled,
+                                     const fact_evidence_input_t *evidence,
+                                     const char *assertion_kind, const char *valid_from,
+                                     const char *valid_until);
 
    /* The full per-turn typed-fact ingress orchestration (the KB context_block
     * seam): when config.typed_facts_enabled, run §6 ingest — or §4 retraction on a

@@ -56,6 +56,9 @@ static cJSON *kbs_memory_row_to_json(const memory_t *m)
    cJSON_AddStringToObject(obj, "created_at", m->created_at);
    cJSON_AddStringToObject(obj, "updated_at", m->updated_at);
    cJSON_AddStringToObject(obj, "source_session", m->source_session);
+   cJSON_AddStringToObject(obj, "provenance_category", m->provenance_category);
+   cJSON_AddNumberToObject(obj, "retrieval_score", m->retrieval_score);
+   cJSON_AddNumberToObject(obj, "hybrid_rank", m->hybrid_rank);
    return obj;
 }
 
@@ -260,6 +263,12 @@ static cJSON *kbs_memory_diagnostic_to_json(const memory_diagnostic_t *d)
    cJSON_AddNumberToObject(parts, "pagerank", d->parts.pagerank);
    cJSON_AddNumberToObject(parts, "hybrid_total", d->parts.hybrid_total);
    cJSON_AddNumberToObject(parts, "blended_total", d->parts.blended_total);
+   cJSON_AddNumberToObject(parts, "graph_score", d->parts.graph_score);
+   cJSON_AddNumberToObject(parts, "graph_weight", d->parts.graph_weight);
+   cJSON_AddNumberToObject(parts, "code_proximity", d->parts.code_proximity);
+   cJSON_AddNumberToObject(parts, "utility", d->parts.utility);
+   cJSON_AddNumberToObject(parts, "outcome", d->parts.outcome);
+   cJSON_AddNumberToObject(parts, "source_fusion", d->parts.source_fusion);
    cJSON_AddNumberToObject(parts, "total", d->parts.total);
    return j;
 }
@@ -1207,14 +1216,25 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
                                             double confidence, const char *session_id,
                                             int authority)
 {
+   return db2_kb_service_memory_insert_epistemic_ex_json(
+       tier, kind, "world_fact", key, content, use_cases, confidence, session_id, authority);
+}
+
+cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
+                                                      const char *epistemic_kind, const char *key,
+                                                      const char *content, const char *use_cases,
+                                                      double confidence, const char *session_id,
+                                                      int authority)
+{
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
 
    memory_t out;
-   int rc = memory_insert_ex(tier ? tier : "", kind ? kind : "", key ? key : "",
-                             content ? content : "", use_cases ? use_cases : "", confidence,
-                             session_id ? session_id : "", (memory_authority_t)authority, &out);
+   int rc = memory_insert_epistemic_ex(
+       tier ? tier : "", kind ? kind : "", epistemic_kind ? epistemic_kind : "", key ? key : "",
+       content ? content : "", use_cases ? use_cases : "", confidence, session_id ? session_id : "",
+       (memory_authority_t)authority, &out);
    if (rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
@@ -1228,7 +1248,7 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
     * synchronous fact work on the store hot path; the drain's pattern pass now
     * captures the high-precision triples the old inline call did. */
    {
-      if (config_typed_facts_enabled() && out.id > 0)
+      if (config_typed_facts_enabled() && out.id > 0 && db2_fact_actor_capture_memory(out.id) == 0)
          (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
    }
    cJSON *obj = kbs_memory_row_to_json(&out);
