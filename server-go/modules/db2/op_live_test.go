@@ -1385,6 +1385,55 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_temporal_refs_list",
+			stage: db2contract.StageMemoryTemporalRefsList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryTemporalRefsListRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryTemporalRefsListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_superseded_keys",
+			stage: db2contract.StageMemorySupersededKeys,
+			// SUBSTR over STRPOS, grouped by the same expression, with the
+			// count repeated in HAVING because PostgreSQL refuses the alias
+			// there. None of that is something a fake evaluates.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySupersededKeysRequest(2, 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemorySupersededKeysReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "session_memories",
+			stage: db2contract.StageSessionMemories,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeSessionMemoriesRequest("live-probe-session", 8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeSessionMemoriesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "prospective_counts",
+			stage:  db2contract.StageProspectiveCounts,
+			encode: db2contract.EncodeProspectiveCountsRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, err := db2contract.DecodeProspectiveCountsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -2690,6 +2739,66 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_link_create",
+			stage: db2contract.StageMemoryLinkCreate,
+			// memory_links carries foreign keys into memories on both ends, so
+			// two memories are seeded. Twice, for the conflict path.
+			repeat: 2,
+			seed:   []string{liveProbeAliasMemory, liveProbeLinkTarget},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryLinkCreateRequest(
+					liveProbeAliasMemoryID, liveProbeLinkTargetID, "depends_on")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryLinkCreateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the link was not recorded")
+				}
+			},
+		},
+		{
+			name:   "memory_scope_tag_insert",
+			stage:  db2contract.StageMemoryScopeTagInsert,
+			repeat: 2,
+			seed:   []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryScopeTagInsertRequest(
+					liveProbeAliasMemoryID, "project", "live-probe-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryScopeTagInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the scope tag was not recorded")
+				}
+			},
+		},
+		{
+			name:  "memory_mark_merged_into",
+			stage: db2contract.StageMemoryMarkMergedInto,
+			// Five predicates have to plan together; nothing needs to match for
+			// that.
+			seed: []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryMarkMergedIntoRequest(
+					liveProbeAliasMemoryID, "live-probe-session", 0.3)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryMarkMergedIntoReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
 	}
 }
 
@@ -2852,6 +2961,15 @@ const (
 	liveProbeContradiction  = `INSERT INTO epistemic_directives
  (id, question, cause, state, memory_a_id, memory_b_id, created_at, updated_at)
  VALUES (900015, 'which is true?', 'contradiction', 'open', 900013, 900014,
+ '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+)
+
+// A second memory, for the link probe's far end.
+const (
+	liveProbeLinkTargetID = 900016
+	liveProbeLinkTarget   = `INSERT INTO memories
+ (id, tier, kind, key, content, created_at, updated_at)
+ VALUES (900016, 'L2', 'fact', 'live-probe-link-target', 'live probe',
  '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
 )
 
