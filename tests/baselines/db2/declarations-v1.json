@@ -18565,7 +18565,9 @@
       "symbol": "db2_memory_row_insert_epistemic_ex"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_memory_advanced.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -26476,7 +26478,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "87c07eabc041f23ca4053aa5a53f5083693f317aa38577de73e122d05896229f",
+  "fingerprint": "8f336c00c6953d10b18f2d48a8677b06d91897f0e585652ccb106ac30166f8df",
   "module": "db2",
   "schema_version": 1,
   "summary": {

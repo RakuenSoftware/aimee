@@ -638,6 +638,13 @@ int memory_embed_text_runtime(const char *text, const char *command, float *out,
    const char *effective_cmd = memory_effective_embedding_cmd(command);
    s_qembed_requests++;
 
+   /* No configured embedder is an unavailable vector lane, not a request to
+    * execute a magic `builtin` command. The lexical fallback was removed from
+    * memory_embed_text; resurrecting its old name here only starts a failing
+    * subprocess and trips the dependency breaker. */
+   if (!effective_cmd || !effective_cmd[0])
+      return 0;
+
    /* Cacheable only when both keys fit their buffers (so a stored key is exact,
     * never a truncated prefix that could false-match a different query). */
    int cacheable = text && command && strlen(text) < MEMORY_QEMBED_TEXT_MAX &&
@@ -659,12 +666,6 @@ int memory_embed_text_runtime(const char *text, const char *command, float *out,
    s_qembed_misses++;
    long long _emb_t0 = util_now_ms();
    int dim = memory_embed_text(text, effective_cmd, EMBED_INPUT_QUERY, out, max_dim);
-   if (dim <= 0 && strcmp(effective_cmd, "builtin") != 0)
-   {
-      aimee_log(LOG_WARN, "memory",
-                "query embedding failed for configured command; retrying with builtin embeddings");
-      dim = memory_embed_text(text, "builtin", EMBED_INPUT_QUERY, out, max_dim);
-   }
    s_qembed_ms += util_now_ms() - _emb_t0;
    s_qembed_spawns++;
 
@@ -961,12 +962,10 @@ static void memory_embed_unit_row(int64_t unit_id, const char *unit_type, const 
                unit_key ? unit_key : "", unit_text, weight);
 
    float vec[EMBED_MAX_DIM];
-   const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, command, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return;
 
-   (void)model;
    memory_sync_unit_vec_row(unit_id, vec, dim);
 }
 

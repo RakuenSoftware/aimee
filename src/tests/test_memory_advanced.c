@@ -15,6 +15,7 @@
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
 #include "modules/memory/memory_ontology.h"
+#include "modules/memory/memory_platform.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -52,6 +53,13 @@ int main(void)
 
    /* DB1 is required by the maintenance cycle (maintenance_state table). */
    assert(db1_init(":memory:") == 0);
+
+   /* This suite exercises memory state transitions, not the asynchronous
+    * embedder. Leaving background embedding enabled makes every insert fork a
+    * detached KB RPC worker even though no service exists in this fixture. On
+    * the real-Postgres shard those children can outlive their test cases and
+    * obscure the suite's runtime. Embedding has dedicated coverage elsewhere. */
+   int background_embed_was_suppressed = platform_memory_background_embed_set_suppressed(1);
 
    /* DB2 backed by an in-memory sqlite shim. Test seeds use aimee_pg_*
     * against db2_conn() — same surface production code uses. */
@@ -1490,26 +1498,29 @@ int main(void)
 
          /* Seed 500 rows evenly spaced across the last 90 days. Each has a
           * 10-day TTL — anything whose created_at is older than ~10 days
-          * ago is already expired and must be archived by the sweep. */
+          * ago is already expired and must be archived by the sweep. This is a
+          * store-level sweep fixture, so seed the authoritative rows directly:
+          * memory_insert would run derived-metadata and opportunistic-maintenance
+          * work after every row, neither of which is part of this assertion. */
          char err[256] = "";
          aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err));
          for (int i = 0; i < 500; i++)
          {
             char key[64];
             snprintf(key, sizeof(key), "stress:%d", i);
-            memory_t m;
-            memory_insert(TIER_L2, KIND_FACT, key, "I'll ship this next week", 0.9, "s1", &m);
-
             char ageq[512];
             int age_days = 90 - (i % 90); /* 1..90 */
             char created_ts[TEST_TS_MAX], ttl_ts[TEST_TS_MAX];
             test_ts_days(created_ts, sizeof(created_ts), -age_days);
             test_ts_days(ttl_ts, sizeof(ttl_ts), -age_days + 10);
+            int64_t memory_id = db2_memory_row_insert_ex(
+                TIER_L2, KIND_FACT, key, "I'll ship this next week", "", 0.9, "s1", created_ts,
+                "normal", 0.9, 0.5, 0.0, "agent_message");
+            assert(memory_id > 0);
             snprintf(ageq, sizeof(ageq),
                      "UPDATE memories SET lifecycle_state = 'pending',"
-                     " created_at = '%s', ttl_at = '%s'"
-                     " WHERE key = '%s'",
-                     created_ts, ttl_ts, key);
+                     " ttl_at = '%s' WHERE id = %lld",
+                     ttl_ts, (long long)memory_id);
             err[0] = '\0';
             int urc = aimee_pg_exec(db2_conn(), ageq, err, sizeof(err));
             if (urc != 0)
@@ -2198,6 +2209,7 @@ int main(void)
    }
 
    db2_test_shim_close();
+   platform_memory_background_embed_set_suppressed(background_embed_was_suppressed);
    db1_shutdown();
 
    printf("all tests passed\n");
