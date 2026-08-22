@@ -89,6 +89,19 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
       detail = detail_capped;
    }
 
+#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+   /* Serialize production appenders for the lifetime of the surrounding
+    * transaction.  Without this lock, two KB connections can read the same
+    * chain head and race on seq/prev_hash.  SQLite tests are single-store and
+    * intentionally skip this PostgreSQL primitive. */
+   {
+      char lock_err[256] = "";
+      if (aimee_pg_exec(conn, "SELECT pg_advisory_xact_lock(hashtext('kb_audit_event'))", lock_err,
+                        sizeof(lock_err)) != 0)
+         return -1;
+   }
+#endif
+
    char err[256];
    long long seq = 1;
    char prev[65];

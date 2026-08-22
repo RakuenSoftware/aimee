@@ -115,7 +115,7 @@ int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t 
    out[1].parts.total = 0.44;
    return 2;
 }
-/* Drives the compression lever in the build test below (config_load stub). */
+/* Drives the compression lever in the build test below (legacy_config_read stub). */
 static int g_test_compress = 0;
 
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
@@ -143,23 +143,7 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    }
    return 1;
 }
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->ingress_preinject_enabled = 1;
-      cfg->ingress_preinject_assembly_budget = 1200;
-      cfg->ingress_compress_enabled = g_test_compress;
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the memory module. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values mirror exactly what the stub above writes into the struct —
+/* Accessor stubs mirror the desired fixture values —
  * preinject on, budget 1200, compress tracking g_test_compress, and the two
  * fields the stub leaves zeroed — so no assertion changes meaning. */
 int config_ingress_preinject_enabled(void)
@@ -823,13 +807,4 @@ int main(void)
    test_compress_code_fold();
    printf("all tests passed\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

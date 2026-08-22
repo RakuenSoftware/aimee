@@ -53,7 +53,7 @@ static const char *g_stream_payload;
  * buffered P2c test. NULL = empty "{}" (regression-canary default). */
 static const char *g_response_body;
 static int g_response_status;
-/* P2c policy gate. The real config_load is stubbed to honor this global;
+/* P2c policy gate. The real legacy_config_read is stubbed to honor this global;
  * flip g_prevent to 1 to enable the streaming-side tool policing. */
 static int g_prevent;
 /* Tool-use fixtures for parsed_with_tool_uses (the driver parse_response
@@ -382,23 +382,7 @@ static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response
    cJSON_Delete(arr);
 }
 
-/* Minimal config_load stub (the real one depends on the YAML loader,
- * out of scope for this minimal-link test). Mirrors test_anthropic_http_p2c.c. */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->gateway_prevent_subagents = g_prevent;
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. These mirror what the stub above produced — prevent_subagents
+/* Accessor stubs mirror this fixture's policy — prevent_subagents
  * tracks g_prevent, pin_model was left zeroed — so assertions are unchanged. */
 int config_gateway_prevent_subagents(void)
 {
@@ -410,7 +394,7 @@ int config_gateway_pin_model(void)
    return 0;
 }
 
-/* Same migration for the economizer seam: the config_load stub above leaves the
+/* The economizer fixture leaves the
  * economizer zeroed, so the live-config form must report OFF. */
 int econ_mode_current(void)
 {
@@ -881,8 +865,7 @@ int main(void)
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. This policing integration fixture explicitly enables
+/* This policing integration fixture explicitly enables
  * the governance module; the module's unspecified production default is
  * covered by test_response_governance_stage.c. */
 int config_present(void)

@@ -107,8 +107,8 @@ int gw_stage_memory_enabled(void)
 }
 
 /* aimee_ir_serve.c now asks config_present() + config_module_memory() instead of
- * loading a config_t and reading the field. Reporting "not present" reproduces
- * what the old config_load -> -1 stub produced: an unresolved tristate, so
+ * loading a legacy_config_record and reading the field. Reporting "not present" reproduces
+ * what the old legacy_config_read -> -1 stub produced: an unresolved tristate, so
  * enablement falls to the env default above. */
 int config_present(void)
 {

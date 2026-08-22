@@ -4,10 +4,44 @@
 #include "../modules/db2/c/ontology_evolution.h"
 #include "../modules/db2/c/rel_types_store.h"
 #include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "kb_identity.h"
 #include "modules/memory/memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+static kb_principal_t reviewer = {.kind = KB_PRIN_OIDC,
+                                  .authenticated = 1,
+                                  .issuer = "https://operator.test",
+                                  .subject = "ontology-reviewer"};
+
+const kb_principal_t *kb_reqctx_actor(void)
+{
+   return &reviewer;
+}
+
+int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
+{
+   if (!p || !p->authenticated || !out || cap < 14)
+      return -1;
+   snprintf(out, cap, "test:operator");
+   return 0;
+}
+
+static void operation_commit(const char *operation, char out[FACT_COMMIT_ID_MAX])
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT commit_id FROM fact_graph_commits WHERE operation=?1 LIMIT 1", err,
+       sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", operation);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   snprintf(out, FACT_COMMIT_ID_MAX, "%s", aimee_pg_column_text(st, 0));
+   aimee_pg_finalize(st);
+}
 
 int main(void)
 {
@@ -59,6 +93,19 @@ int main(void)
    assert(db2_ontology_approve("frobnicates") == 0);
    assert(db2_ontology_eval_status("frobnicates", st, sizeof(st)) == 1);
    assert(strcmp(st, ONTO_EVAL_APPROVED) == 0);
+   char approve_commit[FACT_COMMIT_ID_MAX], rollback_commit[FACT_COMMIT_ID_MAX];
+   operation_commit("ontology.approve", approve_commit);
+   fact_commit_change_t diff[2];
+   assert(db2_fact_commit_preview(approve_commit, diff, 2) == 1);
+   assert(strcmp(diff[0].object_kind, "relation") == 0 &&
+          strcmp(diff[0].object_key, "frobnicates") == 0);
+   fact_actor_t operator_actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
+   snprintf(operator_actor.principal, sizeof(operator_actor.principal), "test:operator");
+   snprintf(operator_actor.role, sizeof(operator_actor.role), "operator");
+   assert(db2_fact_commit_rollback(&operator_actor, approve_commit, rollback_commit) == 1);
+   assert(db2_ontology_eval_status("frobnicates", st, sizeof(st)) == 1);
+   assert(strcmp(st, ONTO_EVAL_PENDING) == 0);
+   assert(db2_ontology_approve("frobnicates") == 0); /* decision can be applied again */
    /* once approved it is no longer a pending candidate. */
    n = db2_ontology_eval_candidates(3, cand, 8);
    assert(n == 1 && strcmp(cand[0], "wobbles") == 0);

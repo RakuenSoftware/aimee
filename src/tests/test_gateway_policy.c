@@ -1,5 +1,5 @@
 /* test_gateway_policy.c: pure tests for gateway request-side tool policing.
- * config_load and guardrails_is_subagent_tool are stubbed so the link is minimal
+ * Accessors and guardrails_is_subagent_tool are stubbed so the link is minimal
  * (the real ones are covered by their own modules' tests). */
 #include <assert.h>
 #include <stdio.h>
@@ -13,20 +13,7 @@
 
 static int g_prevent = 0;
 static int g_pin = 0;
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->gateway_prevent_subagents = g_prevent;
-      cfg->gateway_pin_model = g_pin;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values match what this file's config_load stub produced, so the
- * assertions below are unchanged. */
+/* Accessor stubs expose the policy values under test. */
 int config_gateway_pin_model(void)
 {
    return g_pin;

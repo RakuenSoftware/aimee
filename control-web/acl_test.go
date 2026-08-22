@@ -5,6 +5,14 @@ import "testing"
 func TestConsoleAdminAllows_Allowed(t *testing.T) {
 	ok := [][2]string{
 		{"GET", "/v1/console/overview"},
+		{"GET", "/v1/console/typed_facts"},
+		{"POST", "/v1/console/typed_facts/config"},
+		{"POST", "/v1/console/typed_facts/relation"},
+		{"POST", "/v1/console/typed_facts/assertion"},
+		{"POST", "/v1/console/typed_facts/entity"},
+		{"POST", "/v1/console/typed_facts/commit"},
+		{"POST", "/v1/console/typed_facts/erasure"},
+		{"POST", "/v1/console/evidence"},
 		{"GET", "/v1/enrollments"},
 		{"POST", "/v1/enrollments/abc123/revoke"},
 		{"GET", "/v1/config/oidc"},
@@ -43,9 +51,14 @@ func TestConsoleAdminAllows_Denied(t *testing.T) {
 	deny := [][2]string{
 		{"DELETE", "/v1/enrollments/abc/revoke"}, // wrong method
 		{"POST", "/v1/console/overview"},         // wrong method
-		{"get", "/v1/enrollments"},               // case-sensitive method
-		{"GET", "/v1/enroll"},                    // only POST /v1/enroll is allowed
-		{"GET", "/v1/review"},                    // curator scope, not console-admin
+		{"GET", "/v1/console/typed_facts/config"},
+		{"POST", "/v1/console/typed_facts"},
+		{"GET", "/v1/console/typed_facts/entity"},
+		{"DELETE", "/v1/console/typed_facts/erasure"},
+		{"GET", "/v1/console/evidence"},
+		{"get", "/v1/enrollments"}, // case-sensitive method
+		{"GET", "/v1/enroll"},      // only POST /v1/enroll is allowed
+		{"GET", "/v1/review"},      // curator scope, not console-admin
 		{"POST", "/v1/review/7/accept"},
 		{"GET", "/v1/ingest/status"},
 		{"POST", "/v1/enrollments/abc/revoke/extra"}, // extra segment

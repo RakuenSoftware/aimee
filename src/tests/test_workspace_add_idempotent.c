@@ -20,7 +20,6 @@
  *     slots (see test_workspace_prune_dead.c for what that costs).
  */
 #include "config.h"
-#include "modules/config/config_accessors.h"
 
 #include <assert.h>
 #include <stdio.h>

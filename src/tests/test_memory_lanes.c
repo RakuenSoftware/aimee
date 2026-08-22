@@ -1,10 +1,7 @@
-/* test_memory_lanes.c — unit tests for two-lane retrieval (config and floor logic).
+/* test_memory_lanes.c — unit tests for two-lane retrieval floor logic.
  *
  * What is tested:
- *   1. Config defaults: memory_recall_lanes_* fields default correctly (disabled,
- *      floor_summary=4, floor_fact=4, all others zeroed/empty).
- *   2. Config loading: YAML overrides are parsed into the right fields.
- *   3. Floor algorithm invariant: after apply_floor, at least floor_n items from
+ *   Floor algorithm invariant: after apply_floor, at least floor_n items from
  *      the lane are present in the top-`total` window.  Verified with a local
  *      reimplementation that mirrors the production logic.
  */
@@ -14,111 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include "aimee.h"
-#include "config.h"
-#include "platform_path.h"
-#include "platform_test_util.h"
-
-static char g_tmpdir[512];
-
-static void setup_tmpdir(void)
-{
-   snprintf(g_tmpdir, sizeof(g_tmpdir), "%s/aimee-test-lanes-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(g_tmpdir) != NULL);
-   assert(platform_setenv("HOME", g_tmpdir) == 0);
-   assert(platform_unsetenv("AIMEE_HOME") == 0);
-   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
-}
-
-static void write_config_yaml(const char *yaml)
-{
-   char cfgdir[600];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", g_tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cpath[700];
-   snprintf(cpath, sizeof(cpath), "%s/aimee.yaml", cfgdir);
-   FILE *f = fopen(cpath, "w");
-   assert(f);
-   fputs(yaml, f);
-   fclose(f);
-}
-
-/* ---- 1. Config defaults ---- */
-
-static void test_config_defaults(void)
-{
-   /* No config file — all lanes fields should be at their defaults. */
-   char cfgpath[700];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/.config/aimee/aimee.yaml", g_tmpdir);
-   unlink(cfgpath);
-   config_t cfg;
-   int rc = config_load(&cfg);
-   assert(rc == 0);
-   assert(cfg.memory_recall_lanes_enabled == 0);
-   assert(cfg.memory_recall_lanes_summary_kinds[0] == '\0');
-   assert(cfg.memory_recall_lanes_fact_kinds[0] == '\0');
-   assert(cfg.memory_recall_lanes_k_summary == 0);
-   assert(cfg.memory_recall_lanes_k_fact == 0);
-   assert(cfg.memory_recall_lanes_floor_summary == 4);
-   assert(cfg.memory_recall_lanes_floor_fact == 4);
-   printf("  config_defaults: ok\n");
-}
-
-/* ---- 2. Config loading from YAML ---- */
-
-static void test_config_load_lanes(void)
-{
-   write_config_yaml("memory_recall_lanes:\n"
-                     "  enabled: true\n"
-                     "  summary_kinds: episode\n"
-                     "  fact_kinds: \"fact,preference\"\n"
-                     "  k_summary: 30\n"
-                     "  k_fact: 25\n"
-                     "  floor_summary: 6\n"
-                     "  floor_fact: 3\n");
-   config_t cfg;
-   int rc = config_load(&cfg);
-   assert(rc == 0);
-   assert(cfg.memory_recall_lanes_enabled == 1);
-   assert(strcmp(cfg.memory_recall_lanes_summary_kinds, "episode") == 0);
-   assert(strcmp(cfg.memory_recall_lanes_fact_kinds, "fact,preference") == 0);
-   assert(cfg.memory_recall_lanes_k_summary == 30);
-   assert(cfg.memory_recall_lanes_k_fact == 25);
-   assert(cfg.memory_recall_lanes_floor_summary == 6);
-   assert(cfg.memory_recall_lanes_floor_fact == 3);
-   printf("  config_load_lanes: ok\n");
-}
-
-static void test_config_load_lanes_partial(void)
-{
-   write_config_yaml("memory_recall_lanes:\n"
-                     "  enabled: false\n");
-   config_t cfg;
-   int rc = config_load(&cfg);
-   assert(rc == 0);
-   assert(cfg.memory_recall_lanes_enabled == 0);
-   assert(cfg.memory_recall_lanes_floor_summary == 4);
-   assert(cfg.memory_recall_lanes_floor_fact == 4);
-   printf("  config_load_lanes_partial: ok\n");
-}
-
-static void test_config_load_lanes_zero_floor(void)
-{
-   write_config_yaml("memory_recall_lanes:\n"
-                     "  enabled: true\n"
-                     "  floor_summary: 0\n"
-                     "  floor_fact: 0\n");
-   config_t cfg;
-   int rc = config_load(&cfg);
-   assert(rc == 0);
-   assert(cfg.memory_recall_lanes_floor_summary == 0);
-   assert(cfg.memory_recall_lanes_floor_fact == 0);
-   printf("  config_load_lanes_zero_floor: ok\n");
-}
-
-/* ---- 3. Floor algorithm invariant ---- */
+/* Floor algorithm invariant. */
 
 /* Local mirror of memory_apply_lane_floor to test the contract independently. */
 typedef struct
@@ -267,17 +160,6 @@ int main(void)
 {
    printf("memory_lanes:\n");
 
-   char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-   char *old_aimee_home = getenv("AIMEE_HOME") ? strdup(getenv("AIMEE_HOME")) : NULL;
-   char *old_no_cache = getenv("AIMEE_NO_CACHE") ? strdup(getenv("AIMEE_NO_CACHE")) : NULL;
-
-   setup_tmpdir();
-
-   test_config_defaults();
-   test_config_load_lanes();
-   test_config_load_lanes_partial();
-   test_config_load_lanes_zero_floor();
-
    printf("  floor_invariants:\n");
    test_floor_already_met();
    test_floor_promotes_from_tail();
@@ -289,33 +171,5 @@ int main(void)
 
    printf("All memory_lanes tests passed.\n");
 
-   if (old_home)
-   {
-      assert(platform_setenv("HOME", old_home) == 0);
-      free(old_home);
-   }
-   else
-   {
-      assert(platform_unsetenv("HOME") == 0);
-   }
-   if (old_aimee_home)
-   {
-      assert(platform_setenv("AIMEE_HOME", old_aimee_home) == 0);
-      free(old_aimee_home);
-   }
-   else
-   {
-      assert(platform_unsetenv("AIMEE_HOME") == 0);
-   }
-   if (old_no_cache)
-   {
-      assert(platform_setenv("AIMEE_NO_CACHE", old_no_cache) == 0);
-      free(old_no_cache);
-   }
-   else
-   {
-      assert(platform_unsetenv("AIMEE_NO_CACHE") == 0);
-   }
-   platform_test_rmrf(g_tmpdir);
    return 0;
 }

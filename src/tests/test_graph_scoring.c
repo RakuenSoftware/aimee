@@ -10,8 +10,11 @@
 #include "db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 #include "platform_test_util.h"
 #include "../modules/db2/c/entity_edges.h"
+#include "../modules/db2/c/fact_mutation.h"
 #include "../headers/memory.h"
 
 static char g_db_path[512];
@@ -177,6 +180,93 @@ static void test_backfill_idempotent(void)
    teardown();
 }
 
+static void insert_test_edge(const char *source, const char *target, const char *edge_class,
+                             const char *lifecycle, const char *commit_id)
+{
+   if (strcmp(edge_class, "semantic") == 0)
+   {
+      fact_actor_t actor;
+      fact_actor_rank_t rank =
+          strcmp(lifecycle, FACT_LIFECYCLE_PERSISTENT) == 0 ? FACT_ACTOR_SYSTEM : FACT_ACTOR_MODEL;
+      assert(db2_fact_actor_internal(rank, &actor) == 0);
+      fact_evidence_input_t evidence = {.source_kind = "test",
+                                        .source_id = target,
+                                        .evidence_hash = target,
+                                        .observed_at = "2026-01-01 00:00:00"};
+      fact_assertion_input_t input = {.source = source,
+                                      .relation = "related_to",
+                                      .target = target,
+                                      .confidence_class = "B",
+                                      .confidence = 0.8,
+                                      .assertion_kind = FACT_KIND_WORLD_FACT,
+                                      .evidence = &evidence};
+      fact_mutation_result_t result;
+      assert(db2_fact_mutation_assert(&actor, &input, &result) == 0);
+      if (strcmp(lifecycle, FACT_LIFECYCLE_PROMOTED) == 0)
+      {
+         fact_actor_t operator_actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
+         snprintf(operator_actor.principal, sizeof(operator_actor.principal), "test:operator");
+         snprintf(operator_actor.role, sizeof(operator_actor.role), "operator");
+         assert(db2_fact_mutation_review(&operator_actor, result.assertion_id, FACT_REVIEW_APPROVE,
+                                         &result) == 0);
+      }
+      assert(strcmp(result.lifecycle, lifecycle) == 0);
+      return;
+   }
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO entity_edges(source,relation,target,weight,edge_class,lifecycle_state,"
+       "commit_id) VALUES(?1,'related_to',?2,1,?3,?4,?5)",
+       err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", source);
+   aimee_pg_bind_text(st, "?2", target);
+   aimee_pg_bind_text(st, "?3", edge_class);
+   aimee_pg_bind_text(st, "?4", lifecycle);
+   aimee_pg_bind_text(st, "?5", commit_id);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+}
+
+static int weighted_contains(const db2_entity_edge_weighted_neighbor_t *rows, int n,
+                             const char *node)
+{
+   for (int i = 0; i < n; i++)
+      if (strcmp(rows[i].node, node) == 0)
+         return 1;
+   return 0;
+}
+
+static void test_candidate_semantic_edges_are_quarantined_from_graph_recall(void)
+{
+   setup();
+   const char *commit_id = "test-graph-recall-lifecycle";
+   insert_test_edge("recall-root", "candidate-direct", "semantic", "candidate", commit_id);
+   insert_test_edge("recall-root", "persistent-direct", "semantic", "persistent", commit_id);
+   insert_test_edge("recall-root", "promoted-direct", "semantic", "promoted", commit_id);
+   insert_test_edge("recall-root", "cooccurrence-direct", "cooccurrence", "candidate", "");
+   insert_test_edge("persistent-direct", "candidate-hop-two", "semantic", "candidate", commit_id);
+   insert_test_edge("persistent-direct", "promoted-hop-two", "semantic", "promoted", commit_id);
+
+   db2_entity_edge_weighted_neighbor_t weighted[16];
+   memset(weighted, 0, sizeof(weighted));
+   int nw = db2_entity_edge_neighbors_weighted("recall-root", weighted, 16, 16, 0);
+   assert(!weighted_contains(weighted, nw, "candidate-direct"));
+   assert(weighted_contains(weighted, nw, "persistent-direct"));
+   assert(weighted_contains(weighted, nw, "promoted-direct"));
+   assert(weighted_contains(weighted, nw, "cooccurrence-direct"));
+
+   memset(weighted, 0, sizeof(weighted));
+   nw = db2_entity_edge_neighbors_weighted("persistent-direct", weighted, 16, 16, 0);
+   assert(!weighted_contains(weighted, nw, "candidate-hop-two"));
+   assert(weighted_contains(weighted, nw, "recall-root"));
+   assert(weighted_contains(weighted, nw, "promoted-hop-two"));
+
+   teardown();
+}
+
 int main(void)
 {
    printf("test_decay_zero_score... ");
@@ -226,6 +316,9 @@ int main(void)
    printf("ok\n");
    printf("test_backfill_idempotent... ");
    test_backfill_idempotent();
+   printf("ok\n");
+   printf("test_candidate_semantic_edges_are_quarantined_from_graph_recall... ");
+   test_candidate_semantic_edges_are_quarantined_from_graph_recall();
    printf("ok\n");
    printf("graph_scoring: all tests passed\n");
    return 0;

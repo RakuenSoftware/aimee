@@ -209,6 +209,37 @@ func TestConcurrentModuleCallerRejectsCallsAfterShutdownWithoutRetainingThem(t *
 	}
 }
 
+func TestConcurrentModuleCallerDrainsBeforeClientDetach(t *testing.T) {
+	fake := &fakeCallerBus{budget: 128}
+	caller := newConcurrentModuleCaller(t.Context(), fake)
+	done := make(chan error, 1)
+	go func() {
+		_, err := caller.Call(context.Background(), 6657, 1, 1, time.Minute, []byte("ask"))
+		done <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		fake.mu.Lock()
+		sent := len(fake.sent)
+		fake.mu.Unlock()
+		if sent > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("call was not sent")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	caller.CloseAndWait()
+	if err := <-done; !errors.Is(err, ErrModuleRuntime) {
+		t.Fatalf("drained call error = %v", err)
+	}
+	if _, err := caller.Call(context.Background(), 6657, 1, 1, time.Second,
+		[]byte("late")); !errors.Is(err, ErrModuleRuntime) {
+		t.Fatalf("late call error = %v", err)
+	}
+}
+
 func TestConcurrentModuleCallerDiscardsPartialAssemblyOnDeadline(t *testing.T) {
 	fake := &fakeCallerBus{budget: 128,
 		replyTo: func(f *fakeCallerBus, kind uint32, correlation uint64, _ []byte) {

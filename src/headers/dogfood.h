@@ -40,7 +40,7 @@ typedef struct dogfood_label
    int prospective_surfaced; /* 1 when record captures a prospective reminder firing */
 } dogfood_label_t;
 
-/* Copy the dogfood-related fields from a full config_t into a small
+/* Copy the dogfood-related fields from a full legacy_config_record into a small
  * struct that the logger can consume without pulling in the whole config
  * definition. Safe to call with cfg==NULL (fills defaults). */
 void dogfood_config_current(dogfood_config_t *out);

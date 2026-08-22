@@ -503,10 +503,10 @@ ORPHAN_SRCS = $(filter-out $(DB1_CLIENT_SRCS),$(wildcard db1_client/*.c))
 ORPHAN_OBJS = $(ORPHAN_SRCS:%.c=$(OBJDIR)/%.o)
 
 # CMD_SRCS is linked into NO shipping binary and no test target, so nothing ever
-# compiled it. Five files had rotted on the mainline -- an uninitialised config_t,
+# compiled it. Five files had rotted on the mainline -- an uninitialised legacy config object,
 # a stale db1_coord_job_add_task arity, a `/*` inside a block comment, a `scope`
-# declared in a block that does not reach its use, and a config_t field read with
-# no config_t in scope. This target compiles them so that cannot recur silently.
+# declared in a block that does not reach its use, and a legacy config field read with
+# no legacy config object in scope. This target compiles them so that cannot recur silently.
 cmd-srcs-compile-check: $(CMD_OBJS) $(ORPHAN_OBJS)
 	@echo "cmd-srcs-compile-check: ok ($(words $(CMD_SRCS)) cmd + $(words $(ORPHAN_SRCS)) orphan file(s))"
 
@@ -2122,10 +2122,10 @@ schema-sync-check:
 config-schema-drift-check:
 	@python3 ../scripts/check-config-schema-drift.py
 
-# A config_t read before anything filled it. The compiler does not catch this --
+# A legacy config object read before anything filled it. The compiler does not catch this --
 # the struct is too big for -Wmaybe-uninitialized to reason about -- and the way
-# it gets introduced (deleting an `if (config_load(&cfg) != 0)` guard, which
-# deletes the config_load inside the condition) leaves no other trace.
+# it gets introduced (deleting the old reader guard, which
+# deletes the legacy reader inside the condition) leaves no other trace.
 config-uninitialized-check:
 	@python3 ../scripts/check-config-uninitialized.py
 

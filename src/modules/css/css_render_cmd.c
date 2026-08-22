@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* Adapter: feed {"html","css"} to css_render_command on stdin, return its stdout
  * (the computed-style snapshot JSON). Returns 0 on success (*out_json set), non-0

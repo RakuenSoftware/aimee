@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | Proposal | #1056 | This doc — 2 roundtable rounds, no blocking. |
 | **P1a** | #1057 | Reload core: config-snapshot **double-buffer + seqlock**, `config_reload()` with **validate-or-keep** + a content-hash no-op guard (torn-read stress-tested). Also fixed a pre-existing bug: `economizer.*` was ignored when a config had no `reduce:` block. |
-| **P1b** | #1059 | **Wired + live-verified:** `config set` → the same running server reflects it **immediately**; **SIGHUP reloads** instead of shutting down; `config_load` transparently returns the live snapshot in the server (disk-fresh read-modify-save for `config.set`), which also closed the pre-existing `g_config_cache` reader race. |
+| **P1b** | #1059 | **Wired + live-verified:** `config set` → the same running server reflects it **immediately**; **SIGHUP reloads** instead of shutting down; `legacy_config_read` transparently returns the live snapshot in the server (disk-fresh read-modify-save for `config.set`), which also closed the pre-existing `g_config_cache` reader race. |
 | **P2** | #1062 | **Honesty layer:** `reload_class` (`hot`/`reappliable`/`restart`) per field + a **Live / Restart** verdict on `config set`/Settings. Table audited (endpoints/models/flags are per-request = HOT; the startup-bound minority `db2_url`/`kb_api_*`/`autonomy.*` = RESTART). |
 | **P3** | #1063 | **Re-applier registry** — a `hook(old, new)` invoked after a changed reload, the foundation for making bound state live. |
 | **P5** | (this) | Close-out. |
@@ -48,7 +48,7 @@ carried efforts above.
   "on the next server start." Where a setting genuinely cannot be re-applied live, the server
   says so **explicitly** at change time instead of silently deferring to a restart.
 - **Thesis:** aimee's effective config behaviour today is **mixed and unsurfaced**.
-  `config_load` is mtime-cached, so consumers that read it **per request** (the economizer
+  `legacy_config_read` is mtime-cached, so consumers that read it **per request** (the economizer
   `reduce.*` levers, and similar) *do* pick up a change on their next request — that path is
   already live. But a large, important class of settings is **bound once at server startup**
   and needs a restart: the inbound `/v1` listener (`aimee.api.http_port` / `tls_port` /
@@ -62,7 +62,7 @@ carried efforts above.
 
 | Path | How it reads config | Effect of a change |
 | --- | --- | --- |
-| Economizer `reduce.*`, per-request `config_load` callers | mtime-cached `config_load` each request | **Live** on the next request once the mtime changes |
+| Economizer `reduce.*`, per-request `legacy_config_read` callers | mtime-cached `legacy_config_read` each request | **Live** on the next request once the mtime changes |
 | `aimee.api.*` listener (port/TLS/bearer) | `server_http_start(cfg…)` once at startup | **Restart** — the socket/cert/token are bound at listen time |
 | `autonomy.*` | `autonomy_config_to_env(&cfg)` once at startup (setenv, no-overwrite) | **Restart** — the wfe library reads env at process start |
 | Plugin extensions | `config_load_plugin_extensions(&cfg)` once | **Restart** |
@@ -83,16 +83,16 @@ restart with no signal to the user.
 
 ## §2 Design
 
-0. **Precondition (verified): `config_t` is a flat POD.** It holds only ints and fixed
-   `char[]` arrays — no heap pointers — which is why `config_load` already `memcpy`s the whole
-   struct into/out of `g_config_cache` and callers pass their *own* `config_t` buffer and get
+0. **Precondition (verified): `legacy_config_record` is a flat POD.** It holds only ints and fixed
+   `char[]` arrays — no heap pointers — which is why `legacy_config_read` already `memcpy`s the whole
+   struct into/out of `g_config_cache` and callers pass their *own* `legacy_config_record` buffer and get
    a **value copy**. So the reader contract is *already* copy-out (no caller holds a pointer
    into the cache across a call), and the struct is trivially double-bufferable. P1
-   carries an audit confirming no consumer stashes a `config_t*` (or a `char*` into one) past
-   the `config_load` call.
+   carries an audit confirming no consumer stashes a `legacy_config_record*` (or a `char*` into one) past
+   the `legacy_config_read` call.
 1. **One reload entrypoint — `config_reload()`.** Re-reads the file, validates it (the same
    `config_reduce_validate`-style gate, so a bad config is *rejected* and the live config
-   kept), and publishes a new snapshot into a **double buffer** (two fixed `config_t` slots —
+   kept), and publishes a new snapshot into a **double buffer** (two fixed `legacy_config_record` slots —
    no malloc, no free, no grace period) guarded by a **seqlock**: the writer fills the
    inactive slot, bumps a version counter odd, points the active index at it, bumps even;
    readers load the counter (acquire), copy the active slot, re-load the counter, and **retry
@@ -129,7 +129,7 @@ restart with no signal to the user.
    expensive re-applier (plugin re-parse). `st_size`+`st_mtim` may be kept only as a fast-path
    hint before hashing.
 6. **Two-stage commit + per-section failure semantics.** Reload is a *prepare-then-publish*:
-   (a) build a **candidate** `config_t` from the validated file; (b) run each changed
+   (a) build a **candidate** `legacy_config_record` from the validated file; (b) run each changed
    section's re-applier against the candidate — a re-applier that **fails writes the section's
    PRIOR values back into the candidate** (revert-in-place) and records a per-section error;
    (c) only the *resolved* candidate is published via the seqlock swap. So readers only ever
@@ -161,7 +161,7 @@ restart with no signal to the user.
   token + self-reload guard + validate-or-keep + the `/v1` `config.reload` op (+ best-effort
   `SIGHUP`); `config set` triggers it. Fixes the *hot* path's push + same-second staleness for
   all reader threads. No behaviour change for startup-bound keys yet.
-  *Tests:* (a) N concurrent `config_set` + `config_load` under load → no reader sees a torn
+  *Tests:* (a) N concurrent `config_set` + `legacy_config_read` under load → no reader sees a torn
   snapshot (seqlock retry exercised); (b) `kill -9` between `config_save` and the reload
   signal → next reader/reload recovers a coherent config; (c) an **invalid** written config →
   reload rejected, the running config unchanged; (d) a normalizing re-save → token unchanged →
@@ -185,11 +185,11 @@ restart with no signal to the user.
   restart-required, documented as deliberate.
 
 ## §5 Open items (for roundtable)
-1. The P1 pointer audit (§0): enumerate `config_load` call sites and confirm none retains a
-   `config_t*`/`char*` into the cache past the call (the signature forces copy-out, so this is
+1. The P1 pointer audit (§0): enumerate `legacy_config_read` call sites and confirm none retains a
+   `legacy_config_record*`/`char*` into the cache past the call (the signature forces copy-out, so this is
    expected to be clean — but confirm, and consider an opaque-handle guard to keep it clean).
 2. The wfe env-caching question (§P3a/P3b) needs a concrete probe before P3b commits — does the
    wfe library read env per call or cache it at init?
-3. Seqlock reader cost: `config_load` is called per-request on hot paths; confirm the
+3. Seqlock reader cost: `legacy_config_read` is called per-request on hot paths; confirm the
    copy-the-struct-under-seqlock cost is negligible vs today's mtime-cached memcpy (it should
    be — same memcpy, plus two relaxed counter loads).

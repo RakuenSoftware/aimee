@@ -20,7 +20,7 @@
 const char *db1_default_path(void)
 {
    /* Thread-local: returned-pointer scratch. This is the db1_default_path hook
-    * config_default_db1_path() delegates to, reached from config_load() on
+    * config_default_db1_path() delegates to, reached from legacy_config_read() on
     * several concurrent threads — a process-global static buffer is a data race
     * (see the matching fix in config.c / aimee_home.c). */
    static __thread char path[MAX_PATH_LEN];

@@ -194,8 +194,8 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
 
       /* Read the seats off the PANEL, and apply the two overrides to the PANEL —
        * it is what delegate_roundtable_run consumes. Both used to be written to a
-       * local config_t that was passed on; once the engine took an
-       * ensemble_panel_t built earlier in this loop, writing them to the config_t
+       * local legacy_config_record that was passed on; once the engine took an
+       * ensemble_panel_t built earlier in this loop, writing them to the legacy_config_record
        * became a pair of dead stores that silently dropped the min-successful and
        * replay-verify overrides. */
       const int panel_count = panel.reference_count;

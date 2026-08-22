@@ -48,6 +48,7 @@ extern "C"
                             const char *review_reason);
 
    /* Delete doc by id. Returns 0 on success, -1 on error / not found. */
+   /* Deprecated compatibility symbol; always refuses. Use P3 lifecycle apply. */
    int db2_kb_doc_delete(int64_t id);
 
    /* List docs in review queue (state='staged', review_needed=true),

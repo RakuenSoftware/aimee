@@ -69,7 +69,7 @@ fail closed; generic kind resolution must not silently defeat an explicit isolat
 ### Config touchpoint
 
 The module consumes `workspaces[]`, provider, VCS remote/head, sandbox image, and workspace-root
-fields declared at `src/modules/config/config.h:270` and parsed at `src/modules/config/config.c:1572`;
+fields declared by the external config-module contract and consumed through native accessors;
 `config` owns parsing and persistence. Workspace interprets registrations into bounded
 handles. Fields for detached, mirror, or container behavior are truthful only when that live provider
 path is registered and usable.

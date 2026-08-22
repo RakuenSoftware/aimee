@@ -120,7 +120,8 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
     * reasoning stages and kb_curator_provider_* for the mechanical ones. */
    snprintf(out->base_url, sizeof(out->base_url), "%s", config_kb_curator_provider_base_url());
    snprintf(out->model, sizeof(out->model), "%s", config_kb_curator_provider_model());
-   snprintf(out->api_key, sizeof(out->api_key), "%s", config_kb_curator_provider_api_key());
+   (void)runtime_secret_get("AIMEE_KB_CURATOR_PROVIDER_API_KEY", out->api_key,
+                            sizeof(out->api_key));
 
    /* Fallback when no config provider is set: the configured SYNTHESIS endpoint,
     * resolved by config — one field (llm_synth_endpoint) with the

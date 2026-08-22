@@ -23,7 +23,7 @@ typedef struct
    int allowed_domain_count;
 } computer_use_policy_t;
 
-/* Reads the live config through the config accessors; callers never hold a config_t. */
+/* Reads the live config through the config accessors; callers never hold a legacy_config_record. */
 void computer_use_policy_from_config(computer_use_policy_t *out);
 int computer_use_is_tool_name(const char *qualified_tool_name);
 int computer_use_classify(const computer_use_policy_t *policy, const char *qualified_tool_name,

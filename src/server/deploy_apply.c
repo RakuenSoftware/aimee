@@ -5,7 +5,7 @@
 
 #include "aimee_home.h"      /* one-shot legacy credential migration path */
 #include "cJSON.h"           /* scope `docker compose ps` to the managed services */
-#include "config.h"          /* config_t, config_load */
+#include "config.h"          /* legacy_config_record, legacy_config_read */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
 #include "runtime_secret.h"

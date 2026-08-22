@@ -7,11 +7,11 @@
 - **State:** terminal done; implemented and validated.
 - **Parent:** `tiered-llm-p5d2b-safe-config-projection.plan.md`.
 - **Purpose:** remove a pre-existing C data race before a management endpoint begins copying the
-  full active `config_t` on demand.
+  full active `legacy_config_record` on demand.
 
 ## Defect and boundary
 
-`config_snapshot_get` reads an ordinary `config_t` from a two-slot double buffer and retries when
+`config_snapshot_get` reads an ordinary `legacy_config_record` from a two-slot double buffer and retries when
 the sequence changes. A reader can still be copying old slot 0 while two consecutive publishers
 switch to slot 1 and then begin rewriting slot 0. The final retry detects change but cannot undo
 the overlapping non-atomic read/write and its undefined behavior.
@@ -37,7 +37,7 @@ writer makes the sequence odd.
    state word unchanged; if reserved, restart at step 1;
 3. acquire-load sequence and active slot again;
 4. if either changed or the sequence is odd, unpin and retry without touching the slot payload;
-5. copy the pinned ordinary `config_t` to the caller;
+5. copy the pinned ordinary `legacy_config_record` to the caller;
 6. release-decrement the slot state and return success.
 
 The publisher, already serialized by `g_snap_wlock`, chooses the inactive slot and acquire-CASes
@@ -72,7 +72,7 @@ publication/validation remains release/acquire.
   reader cannot pin/touch payload, and (b) reader pin first, proving writer cannot reserve/write
   until unpin. A second seam pauses after validated pin, performs one publication, and proves a
   consecutive publisher cannot rewrite the pinned old slot until release.
-- Stress multiple readers copying the full `config_t` while one writer performs thousands of
+- Stress multiple readers copying the full `legacy_config_record` while one writer performs thousands of
   alternating, distinct publications. Every accepted record equals one complete published image;
   no mixed tuple is accepted.
 - Run the stress under ThreadSanitizer or the repository's equivalent data-race detector. A plain

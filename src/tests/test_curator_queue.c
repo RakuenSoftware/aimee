@@ -255,9 +255,6 @@ static void test_reclaim_stale_running_memory_facts(sqlite3 *db)
 {
    assert(strcmp(job_status(db, 9003), "running") == 0); /* still stale from above */
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.typed_facts_enabled = 1;
    (void)kb_memory_facts_drain(8);
 
    assert(strcmp(job_status(db, 9003), "failed") == 0);  /* orphan reclaimed */
@@ -384,7 +381,7 @@ int main(void)
    if (db2_test_shim_skip_on_postgres("curator_queue"))
       return 0;
 
-   /* Deterministic config: HOME with no aimee.yaml -> config_load (called inside
+   /* Deterministic config: HOME with no aimee.yaml -> legacy_config_read (called inside
     * the queue) returns built-in defaults (extract_docs default-ON). */
    platform_setenv("HOME", "/tmp");
    platform_unsetenv("AIMEE_HOME");

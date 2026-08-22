@@ -246,7 +246,6 @@ step "OIDC and PAM are mutually exclusive"
 # With a usable OIDC profile the PAM route must refuse with 409 and never consult a
 # password -- otherwise an IdP's MFA and lockout policy is bypassable by anyone with
 # a local account.
-kill "$LIVE_KB_PID" 2>/dev/null; sleep 1; kill -9 "$LIVE_KB_PID" 2>/dev/null; wait "$LIVE_KB_PID" 2>/dev/null
 # The full profile kb_oidc_login_config_from_env requires. A PARTIAL profile is
 # KB_OIDC_LOGIN_INVALID, which deliberately falls back to PAM -- so a rig that set
 # only some of these would test the fallback and report mutual exclusion as proven.
@@ -258,15 +257,10 @@ export AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL="https://idp.aimee.test/authorize"
 export AIMEE_KB_OIDC_LOGIN_TOKEN_URL="https://idp.aimee.test/token"
 export AIMEE_KB_OIDC_LOGIN_REDIRECT_URI="https://kb.aimee.test/v1/identity/login/callback"
 export AIMEE_KB_OIDC_LOGIN_SCOPE="openid profile"
-# Started by hand, NOT via live_env_start_kb: that helper strips every
-# AIMEE_KB_OIDC_* variable (a stray one makes PAM answer 409 and every PAM
-# assertion pass vacuously), and this is the one place that wants them set.
-./aimee-kb --http-port="$KB_PORT" >"$work/kb-oidc.log" 2>&1 &
-LIVE_KB_PID=$!
-for i in $(seq 1 60); do
-  curl -sf -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 && break
-  sleep 1
-done
+# live_env_restart_kb deliberately preserves the caller's environment while it
+# restarts both the daemon and its event-bus modules. Starting only the daemon
+# would strand config/postgres on the old bus epoch and test a dead process.
+live_env_restart_kb
 mode=$(curl -s -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/identity/auth-mode")
 code=$(login "$U1" "$P1")
 if [ "$code" = "409" ]; then

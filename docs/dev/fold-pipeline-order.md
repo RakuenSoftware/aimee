@@ -87,10 +87,10 @@ payload_rewrite` CI step from day one.
 **Explicitly NOT in P1.5** (intentionally deferred to P2, so a follow-up author does
 not "helpfully" wire inert config that nothing reads):
 
-- `config_t` fields + a `fold` config section for the five knobs: window fallback,
+- `legacy_config_record` fields + a `fold` config section for the five knobs: window fallback,
   retained-band %, tail-cap %, pressure-ceiling %, prefix-saturation %, and the
   closet budget;
-- a `fold_budget_config_t`-from-`config_t` populator at the step-3 call site.
+- a `fold_budget_config_t`-from-`legacy_config_record` populator at the step-3 call site.
 
 These land in P2 in the same change that consumes the resolver. **P2 acceptance
 requires** that wiring plus determinism tests for the B-S8 rule: any per-tool

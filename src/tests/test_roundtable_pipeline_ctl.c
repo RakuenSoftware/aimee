@@ -249,6 +249,7 @@ static void test_gate_ttl_via_gate(void)
    assert(cf != NULL);
    fputs("roundtable:\n  pipeline_gate_ttl_h: 1\n", cf);
    fclose(cf);
+   setenv("AIMEE_NO_CACHE", "1", 1);
 
    /* resolve the gate with pass: TTL must abandon it FIRST, never merge. */
    server_conn_t conn;

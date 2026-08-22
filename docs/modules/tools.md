@@ -58,8 +58,8 @@ advertised-but-unbound tools are an error, not a capability.
 
 ### Config touchpoint
 
-The module consumes toolsets, role visibility, output caps (`src/modules/config/config_fields.c:107`),
-compaction thresholds (`src/modules/config/config_sections.c:655`), sandbox/tool policy,
+The module consumes toolsets, role visibility, output caps, compaction thresholds, sandbox/tool policy,
+all obtained through the external config-module contract,
 and provider registration settings. `config` parses and projects values; tools interprets catalog and
 dispatch behavior. A GUI field is valid only when its named tool/provider has a live consumer path.
 

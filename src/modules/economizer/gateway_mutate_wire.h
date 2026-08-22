@@ -40,7 +40,7 @@ extern "C"
    void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx);
    void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx);
 
-   /* Cheap (mtime-cached config_load) check of econ_gateway_mutate_on, so a caller can
+   /* Cheap (mtime-cached legacy_config_read) check of econ_gateway_mutate_on, so a caller can
     * skip the system-prompt flattening + the mutate attempt entirely on the default-
     * OFF hot path. gw_buffered_mutate re-checks internally (defense in depth). */
    int gw_mutate_is_enabled(void);

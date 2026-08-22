@@ -146,7 +146,7 @@ tags + community membership):
   concrete refactor signal the current hub/centrality list does not produce.
 - **Bridge symbols.** High edge-betweenness nodes that are *not* file hubs —
   the cross-cutting concerns that connect otherwise-separate modules. *"Why does
-  `config_load` connect the auth module to the curator?"* **Exact Brandes below
+  `legacy_config_read` connect the auth module to the curator?"* **Exact Brandes below
   a node/edge threshold; deterministic-seed sampling above it**, marked
   `approximate:true`, so the audit stays cheap on large graphs.
 - **Low-cohesion modules.** Communities scored by **conductance / modularity

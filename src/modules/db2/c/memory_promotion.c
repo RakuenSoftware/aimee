@@ -10,16 +10,17 @@
 
 #define MP_ERRBUF 256
 
-int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promotion_kind_t *out,
-                                            int max)
+static int list_distinct_kinds_in_tier(const char *column, const char *tier,
+                                       db2_memory_promotion_kind_t *out, int max)
 {
-   if (!tier || !*tier || !out || max <= 0)
+   if (!column || !tier || !*tier || !out || max <= 0)
       return 0;
    void *conn = db2_conn();
    if (!conn)
       return 0;
 
-   static const char *sql = "SELECT DISTINCT kind FROM memories WHERE tier = ?1";
+   char sql[96];
+   snprintf(sql, sizeof(sql), "SELECT DISTINCT %s FROM memories WHERE tier = ?1", column);
    char err[MP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -37,6 +38,18 @@ int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promoti
    }
    aimee_pg_finalize(st);
    return n;
+}
+
+int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promotion_kind_t *out,
+                                            int max)
+{
+   return list_distinct_kinds_in_tier("kind", tier, out, max);
+}
+
+int db2_memory_promotion_list_epistemic_kinds_in_tier(const char *tier,
+                                                      db2_memory_promotion_kind_t *out, int max)
+{
+   return list_distinct_kinds_in_tier("epistemic_kind", tier, out, max);
 }
 
 int db2_memory_promotion_promote_kind(const char *ts, const char *kind, int promote_use_count,
@@ -191,9 +204,13 @@ int db2_memory_promotion_delete_stale_l1_provenance(const char *kind, const char
    if (!conn)
       return 0;
 
-   static const char *sql = "DELETE FROM memory_provenance WHERE memory_id IN"
-                            " (SELECT id FROM memories WHERE tier = 'L1' AND kind = ?1"
-                            "   AND last_used_at < pg_now_text(?2 || ' days'))";
+   static const char *sql =
+       "DELETE FROM memory_provenance WHERE memory_id IN"
+       " (SELECT id FROM memories WHERE tier = 'L1'"
+       "   AND epistemic_kind = ?1"
+       "   AND last_used_at < pg_now_text('-' || COALESCE("
+       "     expiry_days_migration_override,CAST(replace(?2,'-','') AS bigint))"
+       "     || ' days'))";
    char err[MP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -214,8 +231,10 @@ int db2_memory_promotion_delete_stale_l1(const char *kind, const char *days_neg_
    if (!conn)
       return 0;
 
-   static const char *sql = "DELETE FROM memories WHERE tier = 'L1' AND kind = ?1"
-                            "  AND last_used_at < pg_now_text(?2 || ' days')";
+   static const char *sql = "DELETE FROM memories WHERE tier = 'L1' AND epistemic_kind = ?1"
+                            "  AND last_used_at < pg_now_text('-' || COALESCE("
+                            "    expiry_days_migration_override,CAST(replace(?2,'-','') AS bigint))"
+                            "    || ' days')";
    char err[MP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -338,7 +357,8 @@ int db2_memory_promotion_reclassify_directives(int require_approval)
       sql = "UPDATE memories SET tier = 'L4'"
             " WHERE tier = 'L3'"
             "   AND (kind = 'workflow'"
-            "        OR (kind = 'policy' AND id IN"
+            "        OR (kind = 'policy' AND (epistemic_kind<>'policy' OR"
+            " governance_promoted<>0) AND id IN"
             "            (SELECT memory_id FROM memory_promotion_approvals"
             "             WHERE target_tier = 'L4')))";
    }
@@ -346,7 +366,8 @@ int db2_memory_promotion_reclassify_directives(int require_approval)
    {
       sql = "UPDATE memories SET tier = 'L4'"
             " WHERE tier = 'L3'"
-            "   AND kind IN ('policy', 'workflow')";
+            "   AND (kind='workflow' OR (kind='policy' AND"
+            " (epistemic_kind<>'policy' OR governance_promoted<>0)))";
    }
 
    char err[MP_ERRBUF] = "";

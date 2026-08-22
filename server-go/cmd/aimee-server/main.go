@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	appconfig "github.com/JBailes/aimee/server-go/config"
 	db1contract "github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
@@ -63,7 +63,6 @@ func main() {
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
 	moduleBusSocket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"),
 		"daemon module bus socket; reviews are requested over it")
-	configPath := flag.String("config", "", "aimee.yaml path")
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
 	flag.Parse()
@@ -72,9 +71,6 @@ func main() {
 	}
 	if *workflowDir == "" {
 		*workflowDir = filepath.Join(*home, "workflows")
-	}
-	if *configPath == "" {
-		*configPath = filepath.Join(*home, "aimee.yaml")
 	}
 	if err := os.MkdirAll(*home, 0o700); err != nil {
 		log.Fatalf("create aimee home: %v", err)
@@ -99,11 +95,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("attach to the module bus: %v", err)
 	}
-	defer attached.Detach()
 	caller, err := bus.NewConcurrentModuleCaller(rootCtx, attached)
 	if err != nil {
 		log.Fatalf("module bus caller: %v", err)
 	}
+	// Shutdown must cancel and drain callers before unmapping their shared bus
+	// region. Detaching first races scheduler/config calls already inside emit
+	// and can turn an ordinary SIGTERM into a use-after-unmap SIGSEGV.
+	defer func() {
+		rootCancel()
+		caller.CloseAndWait()
+		attached.Detach()
+	}()
 	storeClient, err := db1contract.NewClient(caller, 0)
 	if err != nil {
 		log.Fatalf("db1 bus client: %v", err)
@@ -119,6 +122,13 @@ func main() {
 	if err := waitForStore(rootCtx, store, 60*time.Second); err != nil {
 		log.Fatalf("DB1 module did not answer: %v", err)
 	}
+	configClient, err := appconfig.NewClient(caller, 0)
+	if err != nil {
+		log.Fatalf("config bus client: %v", err)
+	}
+	if err := waitForConfig(rootCtx, configClient, 60*time.Second); err != nil {
+		log.Fatalf("config module did not answer: %v", err)
+	}
 	artifacts, err := wfe.NewArtifactStore(filepath.Join(*home, "wfe-artifacts"))
 	if err != nil {
 		log.Fatal(err)
@@ -127,11 +137,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	configStore, err := appconfig.NewStore(*configPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	handler.SetConfigStore(configStore)
+	handler.SetConfigStore(configClient)
 	// The WFE control plane is deliberately Unix-socket-only. Credentials must
 	// never be carried in this long-lived process's argv or environment; the
 	// socket's ownership and 0600 mode are the authentication boundary.
@@ -216,7 +222,7 @@ func main() {
 		lastConcurrency := *concurrency
 		lastPolicy := engine.RunPolicy{MaxTurns: 300, MaxWall: 1800 * time.Second, AutoResumeWall: true, MaxResumes: 50}
 		readInt := func(key string, fallback int) int {
-			value, ok, err := configStore.IntValue(key)
+			value, ok, err := configClient.IntValue(key)
 			if err != nil {
 				log.Printf("invalid live config %s: %v", key, err)
 				return fallback
@@ -246,7 +252,7 @@ func main() {
 			lastPolicy.MaxWall = time.Duration(readInt("autonomy.max_wall_secs", int(lastPolicy.MaxWall/time.Second))) * time.Second
 			lastPolicy.MaxResumes = readInt("autonomy.max_resumes", lastPolicy.MaxResumes)
 			lastPolicy.StaleAbandon = time.Duration(readInt("autonomy.stale_abandon_secs", int(lastPolicy.StaleAbandon/time.Second))) * time.Second
-			if value, ok, err := configStore.BoolValue("autonomy.auto_resume_cap_parks"); err != nil {
+			if value, ok, err := configClient.BoolValue("autonomy.auto_resume_cap_parks"); err != nil {
 				log.Printf("invalid live config autonomy.auto_resume_cap_parks: %v", err)
 			} else if ok {
 				lastPolicy.AutoResumeWall = value
@@ -264,7 +270,7 @@ func main() {
 		go func() {
 			for {
 				handler.ScanTriggers(rootCtx)
-				interval := configStore.Int("trigger.scan_interval_secs", 5)
+				interval := configClient.Int("trigger.scan_interval_secs", 5)
 				if interval < 1 {
 					interval = 1
 				}
@@ -394,6 +400,30 @@ func waitForStore(ctx context.Context, store *db1.Store, within time.Duration) e
 			return nil
 		} else if !announced {
 			log.Printf("waiting for the DB1 module to serve the store: %v", err)
+			announced = true
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no answer within %s", within)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func waitForConfig(ctx context.Context, client *appconfig.Client, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	announced := false
+	for {
+		if _, err := client.Values(); err == nil {
+			if announced {
+				log.Printf("config module is serving; workflow engine starting")
+			}
+			return nil
+		} else if !announced {
+			log.Printf("waiting for the config module to serve configuration: %v", err)
 			announced = true
 		}
 		if time.Now().After(deadline) {

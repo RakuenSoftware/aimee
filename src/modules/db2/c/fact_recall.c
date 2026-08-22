@@ -44,7 +44,8 @@ int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char 
     * budget. Source-only (the entity is the subject of "my X is Y"-style facts). */
    static const char *sql = "SELECT relation, target, confidence FROM entity_edges"
                             " WHERE source = ?1 AND edge_class = 'semantic'"
-                            "   AND superseded_at = '' AND suppressed = 0"
+                            "   AND lifecycle_state IN ('persistent','promoted')"
+                            "   AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0"
                             " ORDER BY confidence DESC, id ASC LIMIT ?2";
    char err[FR_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -164,6 +165,37 @@ int db2_fact_recall_in_query(const char *query, int turn_requests_sensitive, cha
          snprintf(names[nnames++], 128, "%s", pref);
    }
    aimee_pg_finalize(st);
+
+   /* LLM extraction cannot always infer a canonical entity kind. Those subjects
+    * are intentionally stored as NODE_OTHER and are therefore not inserted into
+    * entity_registry, but a promoted assertion about one must still be reachable
+    * when the query names it. Add directly mentioned current semantic subjects as
+    * a fallback, retaining the same candidate/invalidated/suppressed quarantine as
+    * the recall query itself. Registry names above win and duplicates are folded. */
+   static const char *direct_sql =
+       "SELECT DISTINCT source FROM entity_edges"
+       " WHERE edge_class='semantic' AND source <> 'user' AND length(source) >= 3"
+       "   AND lifecycle_state IN ('persistent','promoted')"
+       "   AND superseded_at='' AND invalidated_at='' AND suppressed=0"
+       "   AND lower(?1) LIKE '%' || lower(source) || '%'"
+       " ORDER BY source LIMIT ?2";
+   st = aimee_pg_prepare(conn, direct_sql, err, sizeof(err));
+   if (st)
+   {
+      aimee_pg_bind_text(st, "?1", query);
+      aimee_pg_bind_int(st, "?2", FR_MAX_ENTITIES);
+      while (nnames < FR_MAX_ENTITIES && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *name = aimee_pg_column_text(st, 0);
+         int duplicate = 0;
+         for (int i = 0; name && i < nnames; i++)
+            if (strcmp(names[i], name) == 0)
+               duplicate = 1;
+         if (name && name[0] && !duplicate)
+            snprintf(names[nnames++], 128, "%s", name);
+      }
+      aimee_pg_finalize(st);
+   }
 
    /* Recall each mentioned entity's facts into the remaining buffer. */
    for (int i = 0; i < nnames && used + 1 < cap; i++)
