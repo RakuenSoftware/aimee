@@ -151,7 +151,7 @@ arm_module() { # executable socket policy log pid-variable [environment...]
     local deadline=$((SECONDS + WAIT_SECONDS))
     while (( SECONDS < deadline )); do
       if [[ -S "$socket" ]]; then
-        env AIMEE_HOME="$AIMEE_HOME" AIMEE_MODULE_POLICY_DIR="$policy" \
+        exec env AIMEE_HOME="$AIMEE_HOME" AIMEE_MODULE_POLICY_DIR="$policy" \
           "$@" "$executable" "$socket"
       fi
       sleep 0.1
