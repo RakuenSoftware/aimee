@@ -502,6 +502,22 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "ontology_eval_status",
+			stage: db2contract.StageOntologyEvalStatus,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeOntologyEvalStatusRequest("live-probe-never-proposed")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				status, err := db2contract.DecodeOntologyEvalStatusReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if status != "" {
+					t.Fatalf("status = %q for a relation nobody proposed", status)
+				}
+			},
+		},
 	}
 }
 
@@ -1050,6 +1066,60 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "ontology_approve",
+			stage: db2contract.StageOntologyApprove,
+			// An open evaluation and the rel_type it decides, so both halves
+			// match something. Against an empty schema the evaluation update
+			// matches nothing and the operation refuses, which would probe the
+			// refusal rather than the decision.
+			seed: []string{liveProbeRelType, liveProbeEvaluation},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeOntologyApproveRequest(liveProbeRelTypeName)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeOntologyApproveReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("an open evaluation was not approved")
+				}
+			},
+		},
+		{
+			name:  "ontology_reject",
+			stage: db2contract.StageOntologyReject,
+			seed:  []string{liveProbeRelType, liveProbeEvaluation},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeOntologyRejectRequest(liveProbeRelTypeName)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeOntologyRejectReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("an open evaluation was not rejected")
+				}
+			},
+		},
+		{
+			name:  "release_create",
+			stage: db2contract.StageReleaseCreate,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeReleaseCreateRequest("live-probe-new-release")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				id, err := db2contract.DecodeReleaseCreateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if id == 0 {
+					t.Fatal("no release was created")
+				}
+			},
+		},
 	}
 }
 
@@ -1120,6 +1190,17 @@ const liveProbeDuplicateMemories = `INSERT INTO memories
   '2026-01-01 00:00:00', '2026-01-01 00:00:00'),
  (900008, 'L2', 'fact', 'live-probe-duplicate-key', 'duplicate', 0.5, 0,
   '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+
+// An open evaluation and its relation type, for the ontology decision probes.
+// The name is already normalized, because that is the form the tables hold and
+// the probe is not testing the normalizer here.
+const (
+	liveProbeRelTypeName = "live_probe_relation"
+	liveProbeRelType     = `INSERT INTO rel_types (rel_type, status)
+ VALUES ('live_probe_relation', 'provisional')`
+	liveProbeEvaluation = `INSERT INTO ontology_evaluations (rel_type, status)
+ VALUES ('live_probe_relation', 'pending')`
+)
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
