@@ -1413,6 +1413,18 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *artifact_id, const char *collection, const char *embedding_text, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_learning_proposal_get_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t proposal_id, uint32_t *proposal_found, uint32_t *signal_id, char *proposal_sink, size_t proposal_sink_capacity, char *proposal_state, size_t proposal_state_capacity, char *target_key, size_t target_key_capacity, uint64_t *target_memory_id, char *action_json, size_t action_json_capacity, char *evidence_refs, size_t evidence_refs_capacity, uint32_t *corroboration_count, char *expires_at, size_t expires_at_capacity, char *committed_at, size_t committed_at_capacity, char *archive_reason, size_t archive_reason_capacity, char *proposal_created_at, size_t proposal_created_at_capacity, char *proposal_updated_at, size_t proposal_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_learning_proposal_find_pending_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *proposal_sink, const char *target_key, uint64_t target_memory_id, uint32_t *proposal_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_learning_proposal_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t signal_id, const char *proposal_sink, const char *target_key, uint64_t target_memory_id, const char *action_json, const char *evidence_refs, const char *expires_at, uint32_t *proposal_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
@@ -1559,6 +1571,14 @@ extern "C"
    aimee_module_call_result_t aimee_db2_enrollment_authority_resolve_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *cert_fingerprint, const char *cert_issuer, const char *cert_serial_norm, uint32_t *authority_found, char *authority_id, size_t authority_id_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_enrollment_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *enrollment_scope, const char *cert_fingerprint, const char *cert_issuer, const char *cert_serial_norm, const char *expires_at, uint32_t legacy_row, uint32_t *acknowledged, uint64_t *enrollment_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_enrollment_revoke_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t enrollment_id, uint32_t *revoked, char *enrollment_scope, size_t enrollment_scope_capacity, char *cert_fingerprint, size_t cert_fingerprint_capacity, char *cert_serial_norm, size_t cert_serial_norm_capacity, char *enrollment_state, size_t enrollment_state_capacity, char *issued_at, size_t issued_at_capacity, char *last_seen_at, size_t last_seen_at_capacity, char *expires_at, size_t expires_at_capacity, char *revoked_at, size_t revoked_at_capacity, char *authority_id, size_t authority_id_capacity, uint32_t *legacy_row, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_async_pending_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,

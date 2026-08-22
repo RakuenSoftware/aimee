@@ -17229,6 +17229,252 @@
       }
     },
     {
+      "family": "learning",
+      "id": 84,
+      "name": "learning_proposal_get",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposals are relational DB2 rows.",
+      "c_symbols": [
+        "db2_learning_proposal_get"
+      ],
+      "request": {
+        "policy": {
+          "reads": "one proposal by identifier, which carries no scope"
+        },
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "proposal_found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "signal_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "proposal_sink",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "proposal_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "target_key",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "target_memory_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "action_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 2047
+          },
+          {
+            "name": "evidence_refs",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "corroboration_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "expires_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "committed_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "archive_reason",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "proposal_created_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "proposal_updated_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 85,
+      "name": "learning_proposal_find_pending",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposals are relational DB2 rows.",
+      "c_symbols": [
+        "db2_learning_proposal_find_pending"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the newest pending proposal for one sink and target, or none"
+        },
+        "fields": [
+          {
+            "name": "proposal_sink",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "target_key",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "target_memory_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 86,
+      "name": "learning_proposal_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Learning proposals are relational DB2 rows.",
+      "c_symbols": [
+        "db2_learning_proposal_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the signal carries a foreign key and the target memory does not"
+        },
+        "fields": [
+          {
+            "name": "signal_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "proposal_sink",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "target_key",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "target_memory_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "action_json",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 2047
+          },
+          {
+            "name": "evidence_refs",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 1023
+          },
+          {
+            "name": "expires_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",
@@ -19396,6 +19642,182 @@
             "type": "utf8",
             "minimum_bytes": 0,
             "maximum_bytes": 32
+          }
+        ]
+      }
+    },
+    {
+      "family": "custody",
+      "id": 10,
+      "name": "enrollment_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Certificate enrolments are relational DB2 rows.",
+      "c_symbols": [
+        "db2_enrollment_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the upsert applies only while the row is unrevoked AND its stored serial already equals the one being sent"
+        },
+        "fields": [
+          {
+            "name": "enrollment_scope",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "cert_fingerprint",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 79
+          },
+          {
+            "name": "cert_issuer",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "cert_serial_norm",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 79
+          },
+          {
+            "name": "expires_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "legacy_row",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "enrollment_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "custody",
+      "id": 11,
+      "name": "enrollment_revoke",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Certificate enrolments are relational DB2 rows.",
+      "c_symbols": [
+        "db2_enrollment_revoke"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the row is revoked and returned in one statement"
+        },
+        "fields": [
+          {
+            "name": "enrollment_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "revoked",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "enrollment_scope",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "cert_fingerprint",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 79
+          },
+          {
+            "name": "cert_serial_norm",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 79
+          },
+          {
+            "name": "enrollment_state",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "issued_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "last_seen_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "expires_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "revoked_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "authority_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 32
+          },
+          {
+            "name": "legacy_row",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
           }
         ]
       }

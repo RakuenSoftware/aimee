@@ -257,3 +257,73 @@ aimee_module_call_result_t aimee_db2_enrollment_authority_resolve_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_enrollment_insert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *enrollment_scope, const char *cert_fingerprint, const char *cert_issuer,
+    const char *cert_serial_norm, const char *expires_at, uint32_t legacy_row,
+    uint32_t *acknowledged, uint64_t *enrollment_id, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ENROLLMENT_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ENROLLMENT_INSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_enrollment_insert_request_encode(enrollment_scope, cert_fingerprint, cert_issuer,
+                                                  cert_serial_norm, expires_at, legacy_row, request,
+                                                  sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENROLLMENT_INSERT, AIMEE_DB2_STAGE_ENROLLMENT_INSERT,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_enrollment_insert_reply_decode(response, response_len, acknowledged,
+                                                enrollment_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_enrollment_revoke_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t enrollment_id, uint32_t *revoked, char *enrollment_scope,
+    size_t enrollment_scope_capacity, char *cert_fingerprint, size_t cert_fingerprint_capacity,
+    char *cert_serial_norm, size_t cert_serial_norm_capacity, char *enrollment_state,
+    size_t enrollment_state_capacity, char *issued_at, size_t issued_at_capacity,
+    char *last_seen_at, size_t last_seen_at_capacity, char *expires_at, size_t expires_at_capacity,
+    char *revoked_at, size_t revoked_at_capacity, char *authority_id, size_t authority_id_capacity,
+    uint32_t *legacy_row, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_ENROLLMENT_REVOKE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_ENROLLMENT_REVOKE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_enrollment_revoke_request_encode(enrollment_id, request, sizeof(request),
+                                                  &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_ENROLLMENT_REVOKE, AIMEE_DB2_STAGE_ENROLLMENT_REVOKE,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_enrollment_revoke_reply_decode(
+           response, response_len, revoked, enrollment_scope, enrollment_scope_capacity,
+           cert_fingerprint, cert_fingerprint_capacity, cert_serial_norm, cert_serial_norm_capacity,
+           enrollment_state, enrollment_state_capacity, issued_at, issued_at_capacity, last_seen_at,
+           last_seen_at_capacity, expires_at, expires_at_capacity, revoked_at, revoked_at_capacity,
+           authority_id, authority_id_capacity, legacy_row) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

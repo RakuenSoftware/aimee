@@ -1196,12 +1196,28 @@
       "reason": "The typed custody.enrollment_authority_resolve operation finds the authority a certificate is enrolled under. The fingerprint, issuer and normalised serial must all match, so a certificate re-issued with a new serial resolves to nothing rather than to its old authority. An enrolment counts only while its state is active and its revocation stamp is empty, separate columns either of which alone would hide a row. An authority not exactly thirty-two characters is an error rather than an absence."
     },
     {
+      "symbol": "db2_enrollment_insert",
+      "signature_sha256": "c4cb1438b38316ab04ede2d87cfa5a59f5b035cbb0b6ef786eafabbc36334d3f",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.enrollment_insert operation enrols a certificate. Its upsert guard stops a revoked certificate being resurrected by enrolling it again, which is what it exists for. The same guard also requires the stored serial to equal the one sent -- so a fingerprint custody.enrollment_touch_last_seen auto-enrolled, which leaves that column empty, can never afterwards be enrolled with its real serial. The backfill blocks its own upgrade."
+    },
+    {
       "symbol": "db2_enrollment_is_active_by_key",
       "signature_sha256": "313dfb279e65f3be168e4d333d47441c8dccb1c9daa8146dfbd61126229f3397",
       "disposition": "wire-operation",
       "family": "custody",
       "db3_placement": "retained-db2",
       "reason": "The typed custody.enrollment_active operation replaces the enrollment probe. A revoked enrollment reads as inactive, exactly like one that was never enrolled, so a caller cannot tell the two apart through this operation -- which matters because they mean different things to whoever is deciding what to do next."
+    },
+    {
+      "symbol": "db2_enrollment_revoke",
+      "signature_sha256": "dae6bf3f5a9888d074d90f63afcb535d86733c4e5562d1e2226fb447e65c7c8a",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.enrollment_revoke operation revokes an enrolment and returns the row it revoked, in one statement -- so a caller sees exactly what it revoked rather than reading it back and hoping nothing changed between. Revoking an identifier that names nothing answers with the flag clear. The revocation stamp it writes is what custody.enrollment_insert's guard later reads, so this write is what makes that one refuse."
     },
     {
       "symbol": "db2_enrollment_touch_last_seen",
@@ -3122,6 +3138,30 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.proposal_bump_corroboration operation replaces the corroboration bump. The count is incremented by the statement rather than supplied, so a caller records that a proposal was corroborated again without being able to set or read the total. Only a pending proposal is bumped, but the acknowledgement reports that the statement ran and not that a row matched, so corroborating a committed proposal -- or one that does not exist -- does nothing and says it succeeded."
+    },
+    {
+      "symbol": "db2_learning_proposal_find_pending",
+      "signature_sha256": "191eb85afda078d2ed7548646d1fefa5929e3614b6a420d4cfcb73de1b026e85",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposal_find_pending operation finds whether a target already has a proposal waiting, so a caller can avoid raising a second. It takes the newest of them, which means duplicates can exist and this only ever reveals one -- it prevents a third rather than the second. All three of sink, key and memory must match exactly, so a proposal about the same thing recorded under a different key is invisible to the check."
+    },
+    {
+      "symbol": "db2_learning_proposal_get",
+      "signature_sha256": "868fd36691301244758584e22a953eabedaad8a7f82df49e23f27a22c52d2127",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposal_get operation reads one learning proposal. The action it proposes is JSON the writer assembled, so what a proposal would do is text this boundary carries without understanding -- a caller deciding whether to commit one is parsing the writer's words. The expiry is a stamp with no enforcement here, so an expired proposal reads exactly like a live one and only the caller comparing it to a clock can tell."
+    },
+    {
+      "symbol": "db2_learning_proposal_insert",
+      "signature_sha256": "809cac88d7f2f62ce5f7046aaf43802e901dfc37055d9e7ffd1db4ca4ae45efe",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.proposal_insert operation raises a proposal. Its two references are not treated alike: the signal it cites carries a foreign key, so citing one that does not exist is refused by the database, while the memory it targets carries none and may name anything. Nothing prevents a duplicate -- learning.proposal_find_pending exists so a caller can check first, which makes that the caller's discipline rather than the table's."
     },
     {
       "symbol": "db2_learning_proposal_mark_committed",

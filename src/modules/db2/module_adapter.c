@@ -1096,6 +1096,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kb_documents_link_neighbours = db2_kb_documents_link_neighbours,
        .evidence_store_vector = db2_evidence_store_vector,
        .memory_first_episode_card = db2_memory_unit_first_episode_card_id,
+       .learning_proposal_get = db2_learning_proposal_get,
+       .learning_proposal_find_pending = db2_learning_proposal_find_pending,
+       .learning_proposal_insert = db2_learning_proposal_insert,
+       .enrollment_insert = db2_enrollment_insert,
+       .enrollment_revoke = db2_enrollment_revoke,
    };
    return &backend;
 }
@@ -8822,6 +8827,98 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    if (invocation->stage_id == AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE)
    {
       {
+         char enrollment_scope[AIMEE_DB2_ENROLLMENT_INSERT_ENROLLMENT_SCOPE_MAX + 1] = "";
+         char cert_fingerprint[AIMEE_DB2_ENROLLMENT_INSERT_CERT_FINGERPRINT_MAX + 1] = "";
+         char cert_issuer[AIMEE_DB2_ENROLLMENT_INSERT_CERT_ISSUER_MAX + 1] = "";
+         char cert_serial_norm[AIMEE_DB2_ENROLLMENT_INSERT_CERT_SERIAL_NORM_MAX + 1] = "";
+         char expires_at[AIMEE_DB2_ENROLLMENT_INSERT_EXPIRES_AT_MAX + 1] = "";
+         uint32_t legacy_row = 0u;
+         if (aimee_db2_enrollment_insert_request_decode(
+                 request_body, request_len, enrollment_scope, sizeof(enrollment_scope),
+                 cert_fingerprint, sizeof(cert_fingerprint), cert_issuer, sizeof(cert_issuer),
+                 cert_serial_norm, sizeof(cert_serial_norm), expires_at, sizeof(expires_at),
+                 &legacy_row) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENROLLMENT_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->enrollment_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            uint64_t enrollment_id = 0u;
+            {
+               int64_t written = 0;
+               acknowledged = backend->enrollment_insert(enrollment_scope, cert_fingerprint,
+                                                         cert_issuer, cert_serial_norm, expires_at,
+                                                         (int)legacy_row, &written) == 0
+                                  ? 1u
+                                  : 0u;
+               enrollment_id = written > 0 ? (uint64_t)written : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_enrollment_insert_reply_encode(acknowledged, enrollment_id, response_body,
+                                                         response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t enrollment_id = 0u;
+         if (aimee_db2_enrollment_revoke_request_decode(request_body, request_len,
+                                                        &enrollment_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENROLLMENT_REVOKE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->enrollment_revoke)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t revoked = 0u;
+            char enrollment_scope[AIMEE_DB2_ENROLLMENT_REVOKE_ENROLLMENT_SCOPE_MAX + 1] = "";
+            char cert_fingerprint[AIMEE_DB2_ENROLLMENT_REVOKE_CERT_FINGERPRINT_MAX + 1] = "";
+            char cert_serial_norm[AIMEE_DB2_ENROLLMENT_REVOKE_CERT_SERIAL_NORM_MAX + 1] = "";
+            char enrollment_state[AIMEE_DB2_ENROLLMENT_REVOKE_ENROLLMENT_STATE_MAX + 1] = "";
+            char issued_at[AIMEE_DB2_ENROLLMENT_REVOKE_ISSUED_AT_MAX + 1] = "";
+            char last_seen_at[AIMEE_DB2_ENROLLMENT_REVOKE_LAST_SEEN_AT_MAX + 1] = "";
+            char expires_at[AIMEE_DB2_ENROLLMENT_REVOKE_EXPIRES_AT_MAX + 1] = "";
+            char revoked_at[AIMEE_DB2_ENROLLMENT_REVOKE_REVOKED_AT_MAX + 1] = "";
+            char authority_id[AIMEE_DB2_ENROLLMENT_REVOKE_AUTHORITY_ID_MAX + 1] = "";
+            uint32_t legacy_row = 0u;
+            {
+               db2_enrollment_row_t row;
+               memset(&row, 0, sizeof(row));
+               if (backend->enrollment_revoke((int64_t)enrollment_id, &row) == 0)
+               {
+                  revoked = 1u;
+                  snprintf(enrollment_scope, sizeof(enrollment_scope), "%s", row.scope);
+                  snprintf(cert_fingerprint, sizeof(cert_fingerprint), "%s", row.fingerprint);
+                  snprintf(cert_serial_norm, sizeof(cert_serial_norm), "%s", row.serial);
+                  snprintf(enrollment_state, sizeof(enrollment_state), "%s", row.state);
+                  snprintf(issued_at, sizeof(issued_at), "%s", row.issued_at);
+                  snprintf(last_seen_at, sizeof(last_seen_at), "%s", row.last_seen_at);
+                  snprintf(expires_at, sizeof(expires_at), "%s", row.expires_at);
+                  snprintf(revoked_at, sizeof(revoked_at), "%s", row.revoked_at);
+                  snprintf(authority_id, sizeof(authority_id), "%s", row.authority_id);
+                  legacy_row = row.legacy ? 1u : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_enrollment_revoke_reply_encode(
+                    revoked, enrollment_scope, cert_fingerprint, cert_serial_norm, enrollment_state,
+                    issued_at, last_seen_at, expires_at, revoked_at, authority_id, legacy_row,
+                    response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
          char cert_fingerprint[AIMEE_DB2_ENROLLMENT_AUTHORITY_RESOLVE_CERT_FINGERPRINT_MAX + 1] =
              "";
          char cert_issuer[AIMEE_DB2_ENROLLMENT_AUTHORITY_RESOLVE_CERT_ISSUER_MAX + 1] = "";
@@ -12168,6 +12265,139 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_evidence_store_vector_reply_encode(acknowledged, response_body,
                                                              response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t proposal_id = 0u;
+         if (aimee_db2_learning_proposal_get_request_decode(request_body, request_len,
+                                                            &proposal_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_LEARNING_PROPOSAL_GET_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->learning_proposal_get)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t proposal_found = 0u;
+            uint32_t signal_id = 0u;
+            char proposal_sink[AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_SINK_MAX + 1] = "";
+            char proposal_state[AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_STATE_MAX + 1] = "";
+            char target_key[AIMEE_DB2_LEARNING_PROPOSAL_GET_TARGET_KEY_MAX + 1] = "";
+            uint64_t target_memory_id = 0u;
+            char action_json[AIMEE_DB2_LEARNING_PROPOSAL_GET_ACTION_JSON_MAX + 1] = "";
+            char evidence_refs[AIMEE_DB2_LEARNING_PROPOSAL_GET_EVIDENCE_REFS_MAX + 1] = "";
+            uint32_t corroboration_count = 0u;
+            char expires_at[AIMEE_DB2_LEARNING_PROPOSAL_GET_EXPIRES_AT_MAX + 1] = "";
+            char committed_at[AIMEE_DB2_LEARNING_PROPOSAL_GET_COMMITTED_AT_MAX + 1] = "";
+            char archive_reason[AIMEE_DB2_LEARNING_PROPOSAL_GET_ARCHIVE_REASON_MAX + 1] = "";
+            char proposal_created_at[AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_CREATED_AT_MAX + 1] =
+                "";
+            char proposal_updated_at[AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_UPDATED_AT_MAX + 1] =
+                "";
+            {
+               learning_proposal_t proposal;
+               memset(&proposal, 0, sizeof(proposal));
+               if (backend->learning_proposal_get((int)proposal_id, &proposal) == 0)
+               {
+                  proposal_found = 1u;
+                  signal_id = proposal.signal_id > 0 ? (uint32_t)proposal.signal_id : 0u;
+                  snprintf(proposal_sink, sizeof(proposal_sink), "%s", proposal.sink);
+                  snprintf(proposal_state, sizeof(proposal_state), "%s", proposal.state);
+                  snprintf(target_key, sizeof(target_key), "%s", proposal.target_key);
+                  target_memory_id =
+                      proposal.target_memory_id > 0 ? (uint64_t)proposal.target_memory_id : 0u;
+                  snprintf(action_json, sizeof(action_json), "%s", proposal.action_json);
+                  snprintf(evidence_refs, sizeof(evidence_refs), "%s", proposal.evidence_refs);
+                  corroboration_count = proposal.corroboration_count > 0
+                                            ? (uint32_t)proposal.corroboration_count
+                                            : 0u;
+                  snprintf(expires_at, sizeof(expires_at), "%s", proposal.expires_at);
+                  snprintf(committed_at, sizeof(committed_at), "%s", proposal.committed_at);
+                  snprintf(archive_reason, sizeof(archive_reason), "%s", proposal.archive_reason);
+                  snprintf(proposal_created_at, sizeof(proposal_created_at), "%s",
+                           proposal.created_at);
+                  snprintf(proposal_updated_at, sizeof(proposal_updated_at), "%s",
+                           proposal.updated_at);
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_learning_proposal_get_reply_encode(
+                    proposal_found, signal_id, proposal_sink, proposal_state, target_key,
+                    target_memory_id, action_json, evidence_refs, corroboration_count, expires_at,
+                    committed_at, archive_reason, proposal_created_at, proposal_updated_at,
+                    response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char proposal_sink[AIMEE_DB2_LEARNING_PROPOSAL_FIND_PENDING_PROPOSAL_SINK_MAX + 1] = "";
+         char target_key[AIMEE_DB2_LEARNING_PROPOSAL_FIND_PENDING_TARGET_KEY_MAX + 1] = "";
+         uint64_t target_memory_id = 0u;
+         if (aimee_db2_learning_proposal_find_pending_request_decode(
+                 request_body, request_len, proposal_sink, sizeof(proposal_sink), target_key,
+                 sizeof(target_key), &target_memory_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_LEARNING_PROPOSAL_FIND_PENDING_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->learning_proposal_find_pending)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t proposal_id = 0u;
+            {
+               int found = backend->learning_proposal_find_pending(proposal_sink, target_key,
+                                                                   (int64_t)target_memory_id);
+               proposal_id = found > 0 ? (uint32_t)found : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_learning_proposal_find_pending_reply_encode(
+                    proposal_id, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t signal_id = 0u;
+         char proposal_sink[AIMEE_DB2_LEARNING_PROPOSAL_INSERT_PROPOSAL_SINK_MAX + 1] = "";
+         char target_key[AIMEE_DB2_LEARNING_PROPOSAL_INSERT_TARGET_KEY_MAX + 1] = "";
+         uint64_t target_memory_id = 0u;
+         char action_json[AIMEE_DB2_LEARNING_PROPOSAL_INSERT_ACTION_JSON_MAX + 1] = "";
+         char evidence_refs[AIMEE_DB2_LEARNING_PROPOSAL_INSERT_EVIDENCE_REFS_MAX + 1] = "";
+         char expires_at[AIMEE_DB2_LEARNING_PROPOSAL_INSERT_EXPIRES_AT_MAX + 1] = "";
+         if (aimee_db2_learning_proposal_insert_request_decode(
+                 request_body, request_len, &signal_id, proposal_sink, sizeof(proposal_sink),
+                 target_key, sizeof(target_key), &target_memory_id, action_json,
+                 sizeof(action_json), evidence_refs, sizeof(evidence_refs), expires_at,
+                 sizeof(expires_at)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_LEARNING_PROPOSAL_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->learning_proposal_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t proposal_id = 0u;
+            {
+               int written = backend->learning_proposal_insert(
+                   (int)signal_id, proposal_sink, target_key, (int64_t)target_memory_id,
+                   action_json, evidence_refs, expires_at);
+               proposal_id = written > 0 ? (uint32_t)written : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_learning_proposal_insert_reply_encode(
+                    proposal_id, response_body, response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

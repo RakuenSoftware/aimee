@@ -13997,6 +13997,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_unit_first_episode_card_id",
         "policy": {"reads": 200},
     },
+    "learning_proposal_get": {
+        "key": ("learning", 84),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_learning_proposal_get",
+        "policy": {"reads": 200},
+    },
+    "learning_proposal_find_pending": {
+        "key": ("learning", 85),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_learning_proposal_find_pending",
+        "policy": {"reads": 200},
+    },
+    "learning_proposal_insert": {
+        "key": ("learning", 86),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_learning_proposal_insert",
+        "policy": {"writes": 200},
+    },
+    "enrollment_insert": {
+        "key": ("custody", 10),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_enrollment_insert",
+        "policy": {"writes": 200},
+    },
+    "enrollment_revoke": {
+        "key": ("custody", 11),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_enrollment_revoke",
+        "policy": {"writes": 200},
+    },
 }
 
 

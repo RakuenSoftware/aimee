@@ -7955,9 +7955,15 @@
           "line": 27
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.enrollment_insert operation enrols a certificate. Its upsert guard stops a revoked certificate being resurrected by enrolling it again, which is what it exists for. The same guard also requires the stored serial to equal the one sent -- so a fingerprint custody.enrollment_touch_last_seen auto-enrolled, which leaves that column empty, can never afterwards be enrolled with its real serial. The backfill blocks its own upgrade."
+      },
       "signature": "int db2_enrollment_insert ( const char * scope , const char * fingerprint , const char * cert_issuer , const char * cert_serial_norm , const char * expires_at , int legacy , int64_t * out_id )",
       "signature_sha256": "c4cb1438b38316ab04ede2d87cfa5a59f5b035cbb0b6ef786eafabbc36334d3f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_enrollment_insert"
     },
     {
@@ -8053,9 +8059,15 @@
           "line": 44
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.enrollment_revoke operation revokes an enrolment and returns the row it revoked, in one statement -- so a caller sees exactly what it revoked rather than reading it back and hoping nothing changed between. Revoking an identifier that names nothing answers with the flag clear. The revocation stamp it writes is what custody.enrollment_insert's guard later reads, so this write is what makes that one refuse."
+      },
       "signature": "int db2_enrollment_revoke ( int64_t id , db2_enrollment_row_t * out )",
       "signature_sha256": "dae6bf3f5a9888d074d90f63afcb535d86733c4e5562d1e2226fb447e65c7c8a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_enrollment_revoke"
     },
     {
@@ -15097,9 +15109,15 @@
           "line": 50
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposal_find_pending operation finds whether a target already has a proposal waiting, so a caller can avoid raising a second. It takes the newest of them, which means duplicates can exist and this only ever reveals one -- it prevents a third rather than the second. All three of sink, key and memory must match exactly, so a proposal about the same thing recorded under a different key is invisible to the check."
+      },
       "signature": "int db2_learning_proposal_find_pending ( const char * sink , const char * target_key , int64_t target_memory_id )",
       "signature_sha256": "191eb85afda078d2ed7548646d1fefa5929e3614b6a420d4cfcb73de1b026e85",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposal_find_pending"
     },
     {
@@ -15112,9 +15130,15 @@
           "line": 69
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposal_get operation reads one learning proposal. The action it proposes is JSON the writer assembled, so what a proposal would do is text this boundary carries without understanding -- a caller deciding whether to commit one is parsing the writer's words. The expiry is a stamp with no enforcement here, so an expired proposal reads exactly like a live one and only the caller comparing it to a clock can tell."
+      },
       "signature": "int db2_learning_proposal_get ( int id , learning_proposal_t * out )",
       "signature_sha256": "868fd36691301244758584e22a953eabedaad8a7f82df49e23f27a22c52d2127",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposal_get"
     },
     {
@@ -15128,9 +15152,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.proposal_insert operation raises a proposal. Its two references are not treated alike: the signal it cites carries a foreign key, so citing one that does not exist is refused by the database, while the memory it targets carries none and may name anything. Nothing prevents a duplicate -- learning.proposal_find_pending exists so a caller can check first, which makes that the caller's discipline rather than the table's."
+      },
       "signature": "int db2_learning_proposal_insert ( int signal_id , const char * sink , const char * target_key , int64_t target_memory_id , const char * action_json , const char * evidence_refs , const char * expires_at )",
       "signature_sha256": "809cac88d7f2f62ce5f7046aaf43802e901dfc37055d9e7ffd1db4ca4ae45efe",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_learning_proposal_insert"
     },
     {
@@ -28363,15 +28393,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a88f005ffa42323b4b159c7b976158606155cf8fd04f8839895a9cbc1232bf4d",
+  "fingerprint": "fe60094f35f419409b130929369341255bbb41286f877fa303ed22a7934098ac",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 239,
+    "audit_pending": 234,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 720
+    "reviewed": 725
   }
 }

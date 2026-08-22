@@ -72,3 +72,105 @@ aimee_module_call_result_t aimee_db2_evidence_store_vector_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_learning_proposal_get_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t proposal_id, uint32_t *proposal_found, uint32_t *signal_id, char *proposal_sink,
+    size_t proposal_sink_capacity, char *proposal_state, size_t proposal_state_capacity,
+    char *target_key, size_t target_key_capacity, uint64_t *target_memory_id, char *action_json,
+    size_t action_json_capacity, char *evidence_refs, size_t evidence_refs_capacity,
+    uint32_t *corroboration_count, char *expires_at, size_t expires_at_capacity, char *committed_at,
+    size_t committed_at_capacity, char *archive_reason, size_t archive_reason_capacity,
+    char *proposal_created_at, size_t proposal_created_at_capacity, char *proposal_updated_at,
+    size_t proposal_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LEARNING_PROPOSAL_GET_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LEARNING_PROPOSAL_GET_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_learning_proposal_get_request_encode(proposal_id, request, sizeof(request),
+                                                      &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LEARNING_PROPOSAL_GET,
+            AIMEE_DB2_STAGE_LEARNING_PROPOSAL_GET, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_learning_proposal_get_reply_decode(
+           response, response_len, proposal_found, signal_id, proposal_sink, proposal_sink_capacity,
+           proposal_state, proposal_state_capacity, target_key, target_key_capacity,
+           target_memory_id, action_json, action_json_capacity, evidence_refs,
+           evidence_refs_capacity, corroboration_count, expires_at, expires_at_capacity,
+           committed_at, committed_at_capacity, archive_reason, archive_reason_capacity,
+           proposal_created_at, proposal_created_at_capacity, proposal_updated_at,
+           proposal_updated_at_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_learning_proposal_find_pending_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *proposal_sink, const char *target_key, uint64_t target_memory_id,
+    uint32_t *proposal_id, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LEARNING_PROPOSAL_FIND_PENDING_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LEARNING_PROPOSAL_FIND_PENDING_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_learning_proposal_find_pending_request_encode(proposal_sink, target_key,
+                                                               target_memory_id, request,
+                                                               sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LEARNING_PROPOSAL_FIND_PENDING,
+            AIMEE_DB2_STAGE_LEARNING_PROPOSAL_FIND_PENDING, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_learning_proposal_find_pending_reply_decode(response, response_len, proposal_id) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_learning_proposal_insert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t signal_id, const char *proposal_sink, const char *target_key,
+    uint64_t target_memory_id, const char *action_json, const char *evidence_refs,
+    const char *expires_at, uint32_t *proposal_id, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_LEARNING_PROPOSAL_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_LEARNING_PROPOSAL_INSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_learning_proposal_insert_request_encode(
+           signal_id, proposal_sink, target_key, target_memory_id, action_json, evidence_refs,
+           expires_at, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_LEARNING_PROPOSAL_INSERT,
+            AIMEE_DB2_STAGE_LEARNING_PROPOSAL_INSERT, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_learning_proposal_insert_reply_decode(response, response_len, proposal_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

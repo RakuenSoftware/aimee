@@ -652,6 +652,16 @@ typedef struct
    int (*evidence_store_vector)(const char *artifact_id, const char *collection,
                                 const char *embedding_text);
    int64_t (*memory_first_episode_card)(int64_t memory_id);
+   int (*learning_proposal_get)(int id, learning_proposal_t *out);
+   int (*learning_proposal_find_pending)(const char *sink, const char *target_key,
+                                         int64_t target_memory_id);
+   int (*learning_proposal_insert)(int signal_id, const char *sink, const char *target_key,
+                                   int64_t target_memory_id, const char *action_json,
+                                   const char *evidence_refs, const char *expires_at);
+   int (*enrollment_insert)(const char *scope, const char *fingerprint, const char *cert_issuer,
+                            const char *cert_serial_norm, const char *expires_at, int legacy,
+                            int64_t *out_id);
+   int (*enrollment_revoke)(int64_t id, db2_enrollment_row_t *out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

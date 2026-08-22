@@ -4053,6 +4053,59 @@ int64_t db2_memory_unit_first_episode_card_id(int64_t memory_id)
    return 0;
 }
 
+int db2_learning_proposal_get(int id, learning_proposal_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_learning_proposal_find_pending(const char *sink, const char *target_key,
+                                       int64_t target_memory_id)
+{
+   (void)sink;
+   (void)target_key;
+   (void)target_memory_id;
+   return 0;
+}
+
+int db2_learning_proposal_insert(int signal_id, const char *sink, const char *target_key,
+                                 int64_t target_memory_id, const char *action_json,
+                                 const char *evidence_refs, const char *expires_at)
+{
+   (void)signal_id;
+   (void)sink;
+   (void)target_key;
+   (void)target_memory_id;
+   (void)action_json;
+   (void)evidence_refs;
+   (void)expires_at;
+   return -1;
+}
+
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id)
+{
+   (void)scope;
+   (void)fingerprint;
+   (void)cert_issuer;
+   (void)cert_serial_norm;
+   (void)expires_at;
+   (void)legacy;
+   (void)out_id;
+   return -1;
+}
+
+int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
+{
+   (void)id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "7af38e6d5977b61ff50a64517c282fb419f57d509bcf99c4a4214580cfda49d2"
+const ContractSHA256 = "74b174b7ff1f507a69eb1bbe58399641779928d64ef1ac09ad62065b2835ab99"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -13253,6 +13253,239 @@ func DecodeEvidenceStoreVectorRequest(request []byte) (string, string, string, e
 	return artifactID, collection, embeddingText, nil
 }
 
+const EventLearningProposalGet = EventLearning
+const StageLearningProposalGet = FamilyLearning
+const OperationLearningProposalGet uint32 = 84
+const LearningProposalGetProposalIDMin uint32 = 1
+const LearningProposalGetProposalIDMax uint32 = 2147483647
+
+// EncodeLearningProposalGetRequest writes the schema learning_proposal_get declares, in order.
+func EncodeLearningProposalGetRequest(proposalID uint32) ([]byte, error) {
+	if proposalID < LearningProposalGetProposalIDMin || proposalID > LearningProposalGetProposalIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var proposalIDBytes [4]byte
+	binary.LittleEndian.PutUint32(proposalIDBytes[:], proposalID)
+	payload = append(payload, proposalIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationLearningProposalGet, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLearningProposalGetRequest reads it back, checking each field against its own bound.
+func DecodeLearningProposalGetRequest(request []byte) (uint32, error) {
+	var proposalID uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLearningProposalGet || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	proposalID = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if proposalID < LearningProposalGetProposalIDMin || proposalID > LearningProposalGetProposalIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return proposalID, nil
+}
+
+const EventLearningProposalFindPending = EventLearning
+const StageLearningProposalFindPending = FamilyLearning
+const OperationLearningProposalFindPending uint32 = 85
+const LearningProposalFindPendingProposalSinkMin = 1
+const LearningProposalFindPendingProposalSinkMax = 31
+const LearningProposalFindPendingTargetKeyMin = 0
+const LearningProposalFindPendingTargetKeyMax = 255
+const LearningProposalFindPendingTargetMemoryIDMin uint64 = 0
+const LearningProposalFindPendingTargetMemoryIDMax uint64 = 9223372036854775807
+
+// EncodeLearningProposalFindPendingRequest writes the schema learning_proposal_find_pending declares, in order.
+func EncodeLearningProposalFindPendingRequest(proposalSink string, targetKey string, targetMemoryID uint64) ([]byte, error) {
+	if len(proposalSink) < LearningProposalFindPendingProposalSinkMin || len(proposalSink) > LearningProposalFindPendingProposalSinkMax || hasNUL(proposalSink) ||
+		len(targetKey) < LearningProposalFindPendingTargetKeyMin || len(targetKey) > LearningProposalFindPendingTargetKeyMax || hasNUL(targetKey) ||
+		targetMemoryID < LearningProposalFindPendingTargetMemoryIDMin || targetMemoryID > LearningProposalFindPendingTargetMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, proposalSink, LearningProposalFindPendingProposalSinkMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, targetKey, LearningProposalFindPendingTargetKeyMax); err != nil {
+		return nil, err
+	}
+	var targetMemoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(targetMemoryIDBytes[:], targetMemoryID)
+	payload = append(payload, targetMemoryIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationLearningProposalFindPending, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLearningProposalFindPendingRequest reads it back, checking each field against its own bound.
+func DecodeLearningProposalFindPendingRequest(request []byte) (string, string, uint64, error) {
+	var proposalSink string
+	var targetKey string
+	var targetMemoryID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLearningProposalFindPending || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if proposalSink, err = takeRowText(payload, &cursor, LearningProposalFindPendingProposalSinkMax); err != nil ||
+		len(proposalSink) < LearningProposalFindPendingProposalSinkMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if targetKey, err = takeRowText(payload, &cursor, LearningProposalFindPendingTargetKeyMax); err != nil ||
+		len(targetKey) < LearningProposalFindPendingTargetKeyMin {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	targetMemoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if targetMemoryID < LearningProposalFindPendingTargetMemoryIDMin || targetMemoryID > LearningProposalFindPendingTargetMemoryIDMax {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", 0, ErrMalformedEnvelope
+	}
+	return proposalSink, targetKey, targetMemoryID, nil
+}
+
+const EventLearningProposalInsert = EventLearning
+const StageLearningProposalInsert = FamilyLearning
+const OperationLearningProposalInsert uint32 = 86
+const LearningProposalInsertSignalIDMin uint32 = 0
+const LearningProposalInsertSignalIDMax uint32 = 2147483647
+const LearningProposalInsertProposalSinkMin = 1
+const LearningProposalInsertProposalSinkMax = 31
+const LearningProposalInsertTargetKeyMin = 0
+const LearningProposalInsertTargetKeyMax = 255
+const LearningProposalInsertTargetMemoryIDMin uint64 = 0
+const LearningProposalInsertTargetMemoryIDMax uint64 = 9223372036854775807
+const LearningProposalInsertActionJsonMin = 0
+const LearningProposalInsertActionJsonMax = 2047
+const LearningProposalInsertEvidenceRefsMin = 0
+const LearningProposalInsertEvidenceRefsMax = 1023
+const LearningProposalInsertExpiresAtMin = 0
+const LearningProposalInsertExpiresAtMax = 31
+
+// EncodeLearningProposalInsertRequest writes the schema learning_proposal_insert declares, in order.
+func EncodeLearningProposalInsertRequest(signalID uint32, proposalSink string, targetKey string, targetMemoryID uint64, actionJson string, evidenceRefs string, expiresAt string) ([]byte, error) {
+	if signalID < LearningProposalInsertSignalIDMin || signalID > LearningProposalInsertSignalIDMax ||
+		len(proposalSink) < LearningProposalInsertProposalSinkMin || len(proposalSink) > LearningProposalInsertProposalSinkMax || hasNUL(proposalSink) ||
+		len(targetKey) < LearningProposalInsertTargetKeyMin || len(targetKey) > LearningProposalInsertTargetKeyMax || hasNUL(targetKey) ||
+		targetMemoryID < LearningProposalInsertTargetMemoryIDMin || targetMemoryID > LearningProposalInsertTargetMemoryIDMax ||
+		len(actionJson) < LearningProposalInsertActionJsonMin || len(actionJson) > LearningProposalInsertActionJsonMax || hasNUL(actionJson) ||
+		len(evidenceRefs) < LearningProposalInsertEvidenceRefsMin || len(evidenceRefs) > LearningProposalInsertEvidenceRefsMax || hasNUL(evidenceRefs) ||
+		len(expiresAt) < LearningProposalInsertExpiresAtMin || len(expiresAt) > LearningProposalInsertExpiresAtMax || hasNUL(expiresAt) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var signalIDBytes [4]byte
+	binary.LittleEndian.PutUint32(signalIDBytes[:], signalID)
+	payload = append(payload, signalIDBytes[:]...)
+	if err := putRowText(&payload, proposalSink, LearningProposalInsertProposalSinkMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, targetKey, LearningProposalInsertTargetKeyMax); err != nil {
+		return nil, err
+	}
+	var targetMemoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(targetMemoryIDBytes[:], targetMemoryID)
+	payload = append(payload, targetMemoryIDBytes[:]...)
+	if err := putRowText(&payload, actionJson, LearningProposalInsertActionJsonMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, evidenceRefs, LearningProposalInsertEvidenceRefsMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, expiresAt, LearningProposalInsertExpiresAtMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationLearningProposalInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLearningProposalInsertRequest reads it back, checking each field against its own bound.
+func DecodeLearningProposalInsertRequest(request []byte) (uint32, string, string, uint64, string, string, string, error) {
+	var signalID uint32
+	var proposalSink string
+	var targetKey string
+	var targetMemoryID uint64
+	var actionJson string
+	var evidenceRefs string
+	var expiresAt string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLearningProposalInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	signalID = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if signalID < LearningProposalInsertSignalIDMin || signalID > LearningProposalInsertSignalIDMax {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	if proposalSink, err = takeRowText(payload, &cursor, LearningProposalInsertProposalSinkMax); err != nil ||
+		len(proposalSink) < LearningProposalInsertProposalSinkMin {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	if targetKey, err = takeRowText(payload, &cursor, LearningProposalInsertTargetKeyMax); err != nil ||
+		len(targetKey) < LearningProposalInsertTargetKeyMin {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	targetMemoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if targetMemoryID < LearningProposalInsertTargetMemoryIDMin || targetMemoryID > LearningProposalInsertTargetMemoryIDMax {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	if actionJson, err = takeRowText(payload, &cursor, LearningProposalInsertActionJsonMax); err != nil ||
+		len(actionJson) < LearningProposalInsertActionJsonMin {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	if evidenceRefs, err = takeRowText(payload, &cursor, LearningProposalInsertEvidenceRefsMax); err != nil ||
+		len(evidenceRefs) < LearningProposalInsertEvidenceRefsMin {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	if expiresAt, err = takeRowText(payload, &cursor, LearningProposalInsertExpiresAtMax); err != nil ||
+		len(expiresAt) < LearningProposalInsertExpiresAtMin {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", 0, "", "", "", ErrMalformedEnvelope
+	}
+	return signalID, proposalSink, targetKey, targetMemoryID, actionJson, evidenceRefs, expiresAt, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -15419,6 +15652,155 @@ func DecodeEnrollmentAuthorityResolveRequest(request []byte) (string, string, st
 		return "", "", "", ErrMalformedEnvelope
 	}
 	return certFingerprint, certIssuer, certSerialNorm, nil
+}
+
+const EventEnrollmentInsert = EventCustody
+const StageEnrollmentInsert = FamilyCustody
+const OperationEnrollmentInsert uint32 = 10
+const EnrollmentInsertEnrollmentScopeMin = 1
+const EnrollmentInsertEnrollmentScopeMax = 127
+const EnrollmentInsertCertFingerprintMin = 1
+const EnrollmentInsertCertFingerprintMax = 79
+const EnrollmentInsertCertIssuerMin = 0
+const EnrollmentInsertCertIssuerMax = 255
+const EnrollmentInsertCertSerialNormMin = 0
+const EnrollmentInsertCertSerialNormMax = 79
+const EnrollmentInsertExpiresAtMin = 0
+const EnrollmentInsertExpiresAtMax = 31
+const EnrollmentInsertLegacyRowMin uint32 = 0
+const EnrollmentInsertLegacyRowMax uint32 = 1
+
+// EncodeEnrollmentInsertRequest writes the schema enrollment_insert declares, in order.
+func EncodeEnrollmentInsertRequest(enrollmentScope string, certFingerprint string, certIssuer string, certSerialNorm string, expiresAt string, legacyRow uint32) ([]byte, error) {
+	if len(enrollmentScope) < EnrollmentInsertEnrollmentScopeMin || len(enrollmentScope) > EnrollmentInsertEnrollmentScopeMax || hasNUL(enrollmentScope) ||
+		len(certFingerprint) < EnrollmentInsertCertFingerprintMin || len(certFingerprint) > EnrollmentInsertCertFingerprintMax || hasNUL(certFingerprint) ||
+		len(certIssuer) < EnrollmentInsertCertIssuerMin || len(certIssuer) > EnrollmentInsertCertIssuerMax || hasNUL(certIssuer) ||
+		len(certSerialNorm) < EnrollmentInsertCertSerialNormMin || len(certSerialNorm) > EnrollmentInsertCertSerialNormMax || hasNUL(certSerialNorm) ||
+		len(expiresAt) < EnrollmentInsertExpiresAtMin || len(expiresAt) > EnrollmentInsertExpiresAtMax || hasNUL(expiresAt) ||
+		legacyRow < EnrollmentInsertLegacyRowMin || legacyRow > EnrollmentInsertLegacyRowMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, enrollmentScope, EnrollmentInsertEnrollmentScopeMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, certFingerprint, EnrollmentInsertCertFingerprintMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, certIssuer, EnrollmentInsertCertIssuerMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, certSerialNorm, EnrollmentInsertCertSerialNormMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, expiresAt, EnrollmentInsertExpiresAtMax); err != nil {
+		return nil, err
+	}
+	var legacyRowBytes [4]byte
+	binary.LittleEndian.PutUint32(legacyRowBytes[:], legacyRow)
+	payload = append(payload, legacyRowBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEnrollmentInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEnrollmentInsertRequest reads it back, checking each field against its own bound.
+func DecodeEnrollmentInsertRequest(request []byte) (string, string, string, string, string, uint32, error) {
+	var enrollmentScope string
+	var certFingerprint string
+	var certIssuer string
+	var certSerialNorm string
+	var expiresAt string
+	var legacyRow uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEnrollmentInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if enrollmentScope, err = takeRowText(payload, &cursor, EnrollmentInsertEnrollmentScopeMax); err != nil ||
+		len(enrollmentScope) < EnrollmentInsertEnrollmentScopeMin {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if certFingerprint, err = takeRowText(payload, &cursor, EnrollmentInsertCertFingerprintMax); err != nil ||
+		len(certFingerprint) < EnrollmentInsertCertFingerprintMin {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if certIssuer, err = takeRowText(payload, &cursor, EnrollmentInsertCertIssuerMax); err != nil ||
+		len(certIssuer) < EnrollmentInsertCertIssuerMin {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if certSerialNorm, err = takeRowText(payload, &cursor, EnrollmentInsertCertSerialNormMax); err != nil ||
+		len(certSerialNorm) < EnrollmentInsertCertSerialNormMin {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if expiresAt, err = takeRowText(payload, &cursor, EnrollmentInsertExpiresAtMax); err != nil ||
+		len(expiresAt) < EnrollmentInsertExpiresAtMin {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	legacyRow = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if legacyRow < EnrollmentInsertLegacyRowMin || legacyRow > EnrollmentInsertLegacyRowMax {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	return enrollmentScope, certFingerprint, certIssuer, certSerialNorm, expiresAt, legacyRow, nil
+}
+
+const EventEnrollmentRevoke = EventCustody
+const StageEnrollmentRevoke = FamilyCustody
+const OperationEnrollmentRevoke uint32 = 11
+const EnrollmentRevokeEnrollmentIDMin uint64 = 1
+const EnrollmentRevokeEnrollmentIDMax uint64 = 9223372036854775807
+
+// EncodeEnrollmentRevokeRequest writes the schema enrollment_revoke declares, in order.
+func EncodeEnrollmentRevokeRequest(enrollmentID uint64) ([]byte, error) {
+	if enrollmentID < EnrollmentRevokeEnrollmentIDMin || enrollmentID > EnrollmentRevokeEnrollmentIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var enrollmentIDBytes [8]byte
+	binary.LittleEndian.PutUint64(enrollmentIDBytes[:], enrollmentID)
+	payload = append(payload, enrollmentIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationEnrollmentRevoke, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeEnrollmentRevokeRequest reads it back, checking each field against its own bound.
+func DecodeEnrollmentRevokeRequest(request []byte) (uint64, error) {
+	var enrollmentID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEnrollmentRevoke || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	enrollmentID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if enrollmentID < EnrollmentRevokeEnrollmentIDMin || enrollmentID > EnrollmentRevokeEnrollmentIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return enrollmentID, nil
 }
 
 const EventAsyncPendingCount = EventMaintenance

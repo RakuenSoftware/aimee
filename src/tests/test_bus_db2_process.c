@@ -4266,6 +4266,131 @@ int main(int argc, char **argv)
                                                    NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_first_episode_card_episode_card_id == 0);
 
+   /* A proposal refused for its signal, and an enrolment refused by its own backfill. */
+   uint32_t learning_proposal_insert_proposal_id = 99;
+   assert(aimee_db2_learning_proposal_insert_call(
+              call_client, &client, 9545, 0, 1, "memory", "replay-target", 4242,
+              "{\"do\":\"nothing\"}", "", "2027-01-01T00:00:00Z",
+              &learning_proposal_insert_proposal_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Refused: signal_id carries a foreign key, so citing a signal that does not
+    * exist is rejected by the database. target_memory_id carries none, so the
+    * memory this names need not exist -- the two references are not alike. */
+   assert(learning_proposal_insert_proposal_id == 0);
+
+   uint32_t learning_proposal_find_pending_proposal_id = 99;
+   assert(aimee_db2_learning_proposal_find_pending_call(
+              call_client, &client, 9546, 0, "memory", "replay-target", 4242,
+              &learning_proposal_find_pending_proposal_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Nothing was raised, so nothing is pending. */
+   assert(learning_proposal_find_pending_proposal_id == 0);
+
+   uint32_t learning_proposal_get_proposal_found = 99;
+   uint32_t learning_proposal_get_signal_id = 99;
+   static char
+       learning_proposal_get_proposal_sink[AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_SINK_MAX + 1];
+   learning_proposal_get_proposal_sink[0] = 'x';
+   static char
+       learning_proposal_get_proposal_state[AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_STATE_MAX + 1];
+   learning_proposal_get_proposal_state[0] = 'x';
+   static char learning_proposal_get_target_key[AIMEE_DB2_LEARNING_PROPOSAL_GET_TARGET_KEY_MAX + 1];
+   learning_proposal_get_target_key[0] = 'x';
+   uint64_t learning_proposal_get_target_memory_id = 99;
+   static char
+       learning_proposal_get_action_json[AIMEE_DB2_LEARNING_PROPOSAL_GET_ACTION_JSON_MAX + 1];
+   learning_proposal_get_action_json[0] = 'x';
+   static char
+       learning_proposal_get_evidence_refs[AIMEE_DB2_LEARNING_PROPOSAL_GET_EVIDENCE_REFS_MAX + 1];
+   learning_proposal_get_evidence_refs[0] = 'x';
+   uint32_t learning_proposal_get_corroboration_count = 99;
+   static char learning_proposal_get_expires_at[AIMEE_DB2_LEARNING_PROPOSAL_GET_EXPIRES_AT_MAX + 1];
+   learning_proposal_get_expires_at[0] = 'x';
+   static char
+       learning_proposal_get_committed_at[AIMEE_DB2_LEARNING_PROPOSAL_GET_COMMITTED_AT_MAX + 1];
+   learning_proposal_get_committed_at[0] = 'x';
+   static char
+       learning_proposal_get_archive_reason[AIMEE_DB2_LEARNING_PROPOSAL_GET_ARCHIVE_REASON_MAX + 1];
+   learning_proposal_get_archive_reason[0] = 'x';
+   static char learning_proposal_get_proposal_created_at
+       [AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_CREATED_AT_MAX + 1];
+   learning_proposal_get_proposal_created_at[0] = 'x';
+   static char learning_proposal_get_proposal_updated_at
+       [AIMEE_DB2_LEARNING_PROPOSAL_GET_PROPOSAL_UPDATED_AT_MAX + 1];
+   learning_proposal_get_proposal_updated_at[0] = 'x';
+   assert(
+       aimee_db2_learning_proposal_get_call(
+           call_client, &client, 9547, 0, 1, &learning_proposal_get_proposal_found,
+           &learning_proposal_get_signal_id, learning_proposal_get_proposal_sink,
+           sizeof(learning_proposal_get_proposal_sink), learning_proposal_get_proposal_state,
+           sizeof(learning_proposal_get_proposal_state), learning_proposal_get_target_key,
+           sizeof(learning_proposal_get_target_key), &learning_proposal_get_target_memory_id,
+           learning_proposal_get_action_json, sizeof(learning_proposal_get_action_json),
+           learning_proposal_get_evidence_refs, sizeof(learning_proposal_get_evidence_refs),
+           &learning_proposal_get_corroboration_count, learning_proposal_get_expires_at,
+           sizeof(learning_proposal_get_expires_at), learning_proposal_get_committed_at,
+           sizeof(learning_proposal_get_committed_at), learning_proposal_get_archive_reason,
+           sizeof(learning_proposal_get_archive_reason), learning_proposal_get_proposal_created_at,
+           sizeof(learning_proposal_get_proposal_created_at),
+           learning_proposal_get_proposal_updated_at,
+           sizeof(learning_proposal_get_proposal_updated_at), NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* And so there is nothing to read. */
+   assert(learning_proposal_get_proposal_found == 0);
+
+   uint32_t enrollment_insert_acknowledged = 99;
+   uint64_t enrollment_insert_enrollment_id = 99;
+   assert(aimee_db2_enrollment_insert_call(
+              call_client, &client, 9548, 0, "replay-scope", "replay-fingerprint", "CN=replay",
+              "01", "2027-01-01T00:00:00Z", 0, &enrollment_insert_acknowledged,
+              &enrollment_insert_enrollment_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Refused, and not for the reason the guard exists. An earlier case touched
+    * this fingerprint, which auto-enrolled it with an empty serial; the upsert
+    * guard requires the stored serial to equal the one being sent, so the row
+    * that backfill created cannot afterwards be enrolled with its real serial. */
+   assert(enrollment_insert_acknowledged == 0);
+
+   uint32_t enrollment_revoke_revoked = 99;
+   static char
+       enrollment_revoke_enrollment_scope[AIMEE_DB2_ENROLLMENT_REVOKE_ENROLLMENT_SCOPE_MAX + 1];
+   enrollment_revoke_enrollment_scope[0] = 'x';
+   static char
+       enrollment_revoke_cert_fingerprint[AIMEE_DB2_ENROLLMENT_REVOKE_CERT_FINGERPRINT_MAX + 1];
+   enrollment_revoke_cert_fingerprint[0] = 'x';
+   static char
+       enrollment_revoke_cert_serial_norm[AIMEE_DB2_ENROLLMENT_REVOKE_CERT_SERIAL_NORM_MAX + 1];
+   enrollment_revoke_cert_serial_norm[0] = 'x';
+   static char
+       enrollment_revoke_enrollment_state[AIMEE_DB2_ENROLLMENT_REVOKE_ENROLLMENT_STATE_MAX + 1];
+   enrollment_revoke_enrollment_state[0] = 'x';
+   static char enrollment_revoke_issued_at[AIMEE_DB2_ENROLLMENT_REVOKE_ISSUED_AT_MAX + 1];
+   enrollment_revoke_issued_at[0] = 'x';
+   static char enrollment_revoke_last_seen_at[AIMEE_DB2_ENROLLMENT_REVOKE_LAST_SEEN_AT_MAX + 1];
+   enrollment_revoke_last_seen_at[0] = 'x';
+   static char enrollment_revoke_expires_at[AIMEE_DB2_ENROLLMENT_REVOKE_EXPIRES_AT_MAX + 1];
+   enrollment_revoke_expires_at[0] = 'x';
+   static char enrollment_revoke_revoked_at[AIMEE_DB2_ENROLLMENT_REVOKE_REVOKED_AT_MAX + 1];
+   enrollment_revoke_revoked_at[0] = 'x';
+   static char enrollment_revoke_authority_id[AIMEE_DB2_ENROLLMENT_REVOKE_AUTHORITY_ID_MAX + 1];
+   enrollment_revoke_authority_id[0] = 'x';
+   uint32_t enrollment_revoke_legacy_row = 99;
+   assert(aimee_db2_enrollment_revoke_call(
+              call_client, &client, 9549, 0, 4242, &enrollment_revoke_revoked,
+              enrollment_revoke_enrollment_scope, sizeof(enrollment_revoke_enrollment_scope),
+              enrollment_revoke_cert_fingerprint, sizeof(enrollment_revoke_cert_fingerprint),
+              enrollment_revoke_cert_serial_norm, sizeof(enrollment_revoke_cert_serial_norm),
+              enrollment_revoke_enrollment_state, sizeof(enrollment_revoke_enrollment_state),
+              enrollment_revoke_issued_at, sizeof(enrollment_revoke_issued_at),
+              enrollment_revoke_last_seen_at, sizeof(enrollment_revoke_last_seen_at),
+              enrollment_revoke_expires_at, sizeof(enrollment_revoke_expires_at),
+              enrollment_revoke_revoked_at, sizeof(enrollment_revoke_revoked_at),
+              enrollment_revoke_authority_id, sizeof(enrollment_revoke_authority_id),
+              &enrollment_revoke_legacy_row, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(enrollment_revoke_revoked == 0 && enrollment_revoke_enrollment_scope[0] == '\0' &&
+          enrollment_revoke_cert_fingerprint[0] == '\0' &&
+          enrollment_revoke_cert_serial_norm[0] == '\0' &&
+          enrollment_revoke_enrollment_state[0] == '\0' && enrollment_revoke_issued_at[0] == '\0' &&
+          enrollment_revoke_last_seen_at[0] == '\0' && enrollment_revoke_expires_at[0] == '\0' &&
+          enrollment_revoke_revoked_at[0] == '\0' && enrollment_revoke_authority_id[0] == '\0' &&
+          enrollment_revoke_legacy_row == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
