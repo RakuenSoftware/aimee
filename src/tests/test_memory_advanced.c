@@ -15,6 +15,7 @@
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
 #include "modules/memory/memory_ontology.h"
+#include "modules/memory/memory_platform.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -52,6 +53,13 @@ int main(void)
 
    /* DB1 is required by the maintenance cycle (maintenance_state table). */
    assert(db1_init(":memory:") == 0);
+
+   /* This suite exercises memory state transitions, not the asynchronous
+    * embedder. Leaving background embedding enabled makes every insert fork a
+    * detached KB RPC worker even though no service exists in this fixture. On
+    * the real-Postgres shard those children can outlive their test cases and
+    * obscure the suite's runtime. Embedding has dedicated coverage elsewhere. */
+   int background_embed_was_suppressed = platform_memory_background_embed_set_suppressed(1);
 
    /* DB2 backed by an in-memory sqlite shim. Test seeds use aimee_pg_*
     * against db2_conn() — same surface production code uses. */
@@ -1490,7 +1498,10 @@ int main(void)
 
          /* Seed 500 rows evenly spaced across the last 90 days. Each has a
           * 10-day TTL — anything whose created_at is older than ~10 days
-          * ago is already expired and must be archived by the sweep. */
+          * ago is already expired and must be archived by the sweep. This is a
+          * store-level sweep fixture, so seed the authoritative rows directly:
+          * memory_insert would run derived-metadata and opportunistic-maintenance
+          * work after every row, neither of which is part of this assertion. */
          char err[256] = "";
          aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err));
          for (int i = 0; i < 500; i++)
@@ -2195,6 +2206,7 @@ int main(void)
    }
 
    db2_test_shim_close();
+   platform_memory_background_embed_set_suppressed(background_embed_was_suppressed);
    db1_shutdown();
 
    printf("all tests passed\n");

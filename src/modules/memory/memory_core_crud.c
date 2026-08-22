@@ -391,11 +391,7 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
          add_provenance(existing_id, session_id, "merge",
                         same_semantic_value ? "semantic profile dedupe" : "exact key match");
 
-         {
-            platform_memory_background_embed(existing_id, config_embedder_command_field()[0]
-                                                              ? config_embedder_command_field()
-                                                              : "builtin");
-         }
+         platform_memory_background_embed(existing_id, config_embedder_command_current(NULL));
 
          if (out)
             memory_get(existing_id, out);
