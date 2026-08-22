@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "83b20d7f23eb5ca488ee086fcac1a388f336bb7fe84c2c212ac3146706d1b433"
+const ContractSHA256 = "d96ccfee0edc21119b9e6ce602fc6c9434cac91d23116687a366360893bc4b95"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -8468,6 +8468,95 @@ func DecodeEntityEdgeCoTargetsRequest(request []byte) (string, string, uint32, e
 	return edgeNode, edgeRelation, minWeight, nil
 }
 
+const EventCodeIndexProjectList = EventIndex
+const StageCodeIndexProjectList = FamilyIndex
+const OperationCodeIndexProjectList uint32 = 69
+
+
+// EncodeCodeIndexProjectListRequest writes the schema code_index_project_list declares, in order.
+func EncodeCodeIndexProjectListRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationCodeIndexProjectList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCodeIndexProjectListRequest reads it back, checking each field against its own bound.
+func DecodeCodeIndexProjectListRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCodeIndexProjectList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventCssTokenCandidates = EventIndex
+const StageCssTokenCandidates = FamilyIndex
+const OperationCssTokenCandidates uint32 = 70
+const CssTokenCandidatesProjectFilterMin = 0
+const CssTokenCandidatesProjectFilterMax = 127
+const CssTokenCandidatesMinCountMin uint32 = 0
+const CssTokenCandidatesMinCountMax uint32 = 65535
+
+// EncodeCssTokenCandidatesRequest writes the schema css_token_candidates declares, in order.
+func EncodeCssTokenCandidatesRequest(projectFilter string, minCount uint32) ([]byte, error) {
+	if len(projectFilter) < CssTokenCandidatesProjectFilterMin || len(projectFilter) > CssTokenCandidatesProjectFilterMax || hasNUL(projectFilter) ||
+		minCount < CssTokenCandidatesMinCountMin || minCount > CssTokenCandidatesMinCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectFilter, CssTokenCandidatesProjectFilterMax); err != nil {
+		return nil, err
+	}
+	var minCountBytes [4]byte
+	binary.LittleEndian.PutUint32(minCountBytes[:], minCount)
+	payload = append(payload, minCountBytes[:]...)
+	header, err := EncodeRequestHeader(OperationCssTokenCandidates, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCssTokenCandidatesRequest reads it back, checking each field against its own bound.
+func DecodeCssTokenCandidatesRequest(request []byte) (string, uint32, error) {
+	var projectFilter string
+	var minCount uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCssTokenCandidates || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectFilter, err = takeRowText(payload, &cursor, CssTokenCandidatesProjectFilterMax); err != nil ||
+		len(projectFilter) < CssTokenCandidatesProjectFilterMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	minCount = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if minCount < CssTokenCandidatesMinCountMin || minCount > CssTokenCandidatesMinCountMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return projectFilter, minCount, nil
+}
+
 const EventTraceMiningRecord = EventLearning
 const StageTraceMiningRecord = FamilyLearning
 const OperationTraceMiningRecord uint32 = 8
@@ -13830,6 +13919,64 @@ func DecodeDecisionLogRecordRequest(request []byte) (string, string, string, str
 		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
 	}
 	return decisionSubject, decisionOptions, decisionChosen, decisionRationale, decisionAuthor, linkedPolicyID, revisitWhen, supersedesID, nil
+}
+
+const EventArtifactListProposed = EventLearning
+const StageArtifactListProposed = FamilyLearning
+const OperationArtifactListProposed uint32 = 89
+const ArtifactListProposedTargetSurfaceMin = 0
+const ArtifactListProposedTargetSurfaceMax = 63
+const ArtifactListProposedListLimitMin uint32 = 1
+const ArtifactListProposedListLimitMax uint32 = 64
+
+// EncodeArtifactListProposedRequest writes the schema artifact_list_proposed declares, in order.
+func EncodeArtifactListProposedRequest(targetSurface string, listLimit uint32) ([]byte, error) {
+	if len(targetSurface) < ArtifactListProposedTargetSurfaceMin || len(targetSurface) > ArtifactListProposedTargetSurfaceMax || hasNUL(targetSurface) ||
+		listLimit < ArtifactListProposedListLimitMin || listLimit > ArtifactListProposedListLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, targetSurface, ArtifactListProposedTargetSurfaceMax); err != nil {
+		return nil, err
+	}
+	var listLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(listLimitBytes[:], listLimit)
+	payload = append(payload, listLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationArtifactListProposed, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeArtifactListProposedRequest reads it back, checking each field against its own bound.
+func DecodeArtifactListProposedRequest(request []byte) (string, uint32, error) {
+	var targetSurface string
+	var listLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationArtifactListProposed || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if targetSurface, err = takeRowText(payload, &cursor, ArtifactListProposedTargetSurfaceMax); err != nil ||
+		len(targetSurface) < ArtifactListProposedTargetSurfaceMin {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	listLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if listLimit < ArtifactListProposedListLimitMin || listLimit > ArtifactListProposedListLimitMax {
+		return "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", 0, ErrMalformedEnvelope
+	}
+	return targetSurface, listLimit, nil
 }
 
 const EventDocumentExists = EventOrganization
@@ -19817,6 +19964,49 @@ func DecodeCuratorInvalidationsSinceRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return sinceID, nil
+}
+
+const EventKBPurgeFenceRead = EventMaintenance
+const StageKBPurgeFenceRead = FamilyMaintenance
+const OperationKBPurgeFenceRead uint32 = 78
+const KBPurgeFenceReadPurgeProjectMin = 1
+const KBPurgeFenceReadPurgeProjectMax = 127
+
+// EncodeKBPurgeFenceReadRequest writes the schema kb_purge_fence_read declares, in order.
+func EncodeKBPurgeFenceReadRequest(purgeProject string) ([]byte, error) {
+	if len(purgeProject) < KBPurgeFenceReadPurgeProjectMin || len(purgeProject) > KBPurgeFenceReadPurgeProjectMax || hasNUL(purgeProject) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, purgeProject, KBPurgeFenceReadPurgeProjectMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBPurgeFenceRead, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBPurgeFenceReadRequest reads it back, checking each field against its own bound.
+func DecodeKBPurgeFenceReadRequest(request []byte) (string, error) {
+	var purgeProject string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBPurgeFenceRead || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if purgeProject, err = takeRowText(payload, &cursor, KBPurgeFenceReadPurgeProjectMax); err != nil ||
+		len(purgeProject) < KBPurgeFenceReadPurgeProjectMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return purgeProject, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

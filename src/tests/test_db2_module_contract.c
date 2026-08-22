@@ -4244,6 +4244,46 @@ int db2_curator_invalidations_since(int64_t since_id, db2_curator_invalidation_t
    return 0;
 }
 
+int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
+                            size_t pid_cap, int *live_out)
+{
+   (void)project;
+   if (gen_out && gen_cap)
+      gen_out[0] = '\0';
+   if (pid_out && pid_cap)
+      pid_out[0] = '\0';
+   if (live_out)
+      *live_out = 0;
+   return 0;
+}
+
+int db2_code_index_project_list(project_info_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_css_token_candidates(const char *project_filter, int min_count, css_token_cand_t *out,
+                             int max)
+{
+   (void)project_filter;
+   (void)min_count;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifact_proposed_t *out,
+                               int max_out)
+{
+   (void)target_surface;
+   (void)limit;
+   (void)out;
+   (void)max_out;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -16,6 +16,8 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "css_insights.h"
+#include "kb_runtime_state.h"
 #include "db2_witness_checkpoint.h"
 #include "org_telemetry.h"
 #include "vector_index_ops.h"
@@ -692,6 +694,13 @@ typedef struct
    int (*entity_edge_co_targets)(const char *node, const char *relation, int min_weight,
                                  char (*out)[128], int max);
    int (*curator_invalidations_since)(int64_t since_id, db2_curator_invalidation_t *out, int max);
+   int (*kb_purge_fence_read)(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
+                              size_t pid_cap, int *live_out);
+   int (*code_index_project_list)(project_info_t *out, int max);
+   int (*css_token_candidates)(const char *project_filter, int min_count, css_token_cand_t *out,
+                               int max);
+   int (*artifact_list_proposed)(const char *target_surface, int limit,
+                                 db2_artifact_proposed_t *out, int max_out);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

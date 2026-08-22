@@ -1111,6 +1111,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *edge_node, const char *edge_relation, uint32_t min_weight, aimee_db2_entity_edge_co_targets_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_code_index_project_list_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_code_index_project_list_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_css_token_candidates_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project_filter, uint32_t min_count, aimee_db2_css_token_candidates_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_trace_mining_record_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t last_trace_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
@@ -1440,6 +1448,10 @@ extern "C"
    aimee_module_call_result_t aimee_db2_decision_log_record_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *decision_subject, const char *decision_options, const char *decision_chosen, const char *decision_rationale, const char *decision_author, uint64_t linked_policy_id, const char *revisit_when, uint64_t supersedes_id, uint32_t *acknowledged, uint64_t *logged_decision_id, uint64_t *logged_task_id, char *logged_decision_options, size_t logged_decision_options_capacity, char *logged_decision_chosen, size_t logged_decision_chosen_capacity, char *logged_decision_rationale, size_t logged_decision_rationale_capacity, char *logged_decision_assumptions, size_t logged_decision_assumptions_capacity, char *logged_decision_outcome, size_t logged_decision_outcome_capacity, char *logged_decision_created_at, size_t logged_decision_created_at_capacity, char *logged_decision_status, size_t logged_decision_status_capacity, char *logged_revisit_when, size_t logged_revisit_when_capacity, uint64_t *logged_supersedes_id, char *logged_decision_subject, size_t logged_decision_subject_capacity, char *logged_decision_author, size_t logged_decision_author_capacity, uint64_t *logged_linked_policy_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_artifact_list_proposed_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *target_surface, uint32_t list_limit, aimee_db2_artifact_list_proposed_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
@@ -1860,5 +1872,9 @@ extern "C"
    aimee_module_call_result_t aimee_db2_curator_invalidations_since_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t since_id, aimee_db2_curator_invalidations_since_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_purge_fence_read_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *purge_project, uint32_t *fence_present, char *fence_generation, size_t fence_generation_capacity, char *fence_purge_id, size_t fence_purge_id_capacity, uint32_t *fence_live, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

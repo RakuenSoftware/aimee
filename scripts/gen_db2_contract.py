@@ -14099,6 +14099,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_curator_invalidations_since",
         "policy": {"reads": 200},
     },
+    "kb_purge_fence_read": {
+        "key": ("maintenance", 78),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_purge_fence_read",
+        "policy": {"reads": 200},
+    },
+    "code_index_project_list": {
+        "key": ("index", 69),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_code_index_project_list",
+        "policy": {"reads": 200},
+    },
+    "css_token_candidates": {
+        "key": ("index", 70),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_css_token_candidates",
+        "policy": {"reads": 200},
+    },
+    "artifact_list_proposed": {
+        "key": ("learning", 89),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_artifact_list_proposed",
+        "policy": {"reads": 200},
+    },
 }
 
 

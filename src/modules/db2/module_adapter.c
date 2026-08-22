@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/css_insights.h"
 #include "c/db2_witness_checkpoint.h"
 #include "c/org_telemetry.h"
 #include "c/vector_index_ops.h"
@@ -1117,6 +1118,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .entity_list_active = db2_entity_list_active,
        .entity_edge_co_targets = db2_entity_edge_co_targets,
        .curator_invalidations_since = db2_curator_invalidations_since,
+       .kb_purge_fence_read = db2_kb_purge_fence_read,
+       .code_index_project_list = db2_code_index_project_list,
+       .css_token_candidates = db2_css_token_candidates,
+       .artifact_list_proposed = db2_artifact_list_proposed,
    };
    return &backend;
 }
@@ -8725,6 +8730,111 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         if (aimee_db2_code_index_project_list_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CODE_INDEX_PROJECT_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->code_index_project_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_code_index_project_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CODE_INDEX_PROJECT_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               project_info_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_CODE_INDEX_PROJECT_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->code_index_project_list(
+                      listed, (int)AIMEE_DB2_CODE_INDEX_PROJECT_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].project_name, sizeof(rows[index].project_name), "%s",
+                           listed[index].name);
+                  snprintf(rows[index].project_root, sizeof(rows[index].project_root), "%s",
+                           listed[index].root);
+                  snprintf(rows[index].scanned_at, sizeof(rows[index].scanned_at), "%s",
+                           listed[index].scanned_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_code_index_project_list_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project_filter[AIMEE_DB2_CSS_TOKEN_CANDIDATES_PROJECT_FILTER_MAX + 1] = "";
+         uint32_t min_count = 0u;
+         if (aimee_db2_css_token_candidates_request_decode(request_body, request_len,
+                                                           project_filter, sizeof(project_filter),
+                                                           &min_count) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CSS_TOKEN_CANDIDATES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->css_token_candidates)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_css_token_candidates_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CSS_TOKEN_CANDIDATES_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               css_token_cand_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_CSS_TOKEN_CANDIDATES_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->css_token_candidates(
+                      project_filter[0] ? project_filter : NULL, (int)min_count, listed,
+                      (int)AIMEE_DB2_CSS_TOKEN_CANDIDATES_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].token_value, sizeof(rows[index].token_value), "%s",
+                           listed[index].value);
+                  snprintf(rows[index].token_kind, sizeof(rows[index].token_kind), "%s",
+                           listed[index].kind);
+                  rows[index].token_count =
+                      listed[index].count > 0 ? (uint32_t)listed[index].count : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_css_token_candidates_reply_encode(rows, count, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -12759,6 +12869,68 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char target_surface[AIMEE_DB2_ARTIFACT_LIST_PROPOSED_TARGET_SURFACE_MAX + 1] = "";
+         uint32_t list_limit = 0u;
+         if (aimee_db2_artifact_list_proposed_request_decode(request_body, request_len,
+                                                             target_surface, sizeof(target_surface),
+                                                             &list_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ARTIFACT_LIST_PROPOSED_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->artifact_list_proposed)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_artifact_list_proposed_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ARTIFACT_LIST_PROPOSED_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_artifact_proposed_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_ARTIFACT_LIST_PROPOSED_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->artifact_list_proposed(
+                      target_surface, (int)list_limit, listed,
+                      (int)AIMEE_DB2_ARTIFACT_LIST_PROPOSED_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].artifact_id, sizeof(rows[index].artifact_id), "%s",
+                           listed[index].id);
+                  snprintf(rows[index].artifact_kind, sizeof(rows[index].artifact_kind), "%s",
+                           listed[index].kind);
+                  snprintf(rows[index].artifact_surface, sizeof(rows[index].artifact_surface), "%s",
+                           listed[index].target_surface);
+                  rows[index].confidence = listed[index].confidence;
+                  snprintf(rows[index].artifact_created_at, sizeof(rows[index].artifact_created_at),
+                           "%s", listed[index].created_at);
+                  snprintf(rows[index].payload_json, sizeof(rows[index].payload_json), "%s",
+                           listed[index].payload_json);
+                  snprintf(rows[index].citation_ids, sizeof(rows[index].citation_ids), "%s",
+                           listed[index].citation_ids);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_artifact_list_proposed_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_proposals_archive_expired_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_PROPOSALS_ARCHIVE_EXPIRED_RESPONSE_LEN)
@@ -15210,6 +15382,49 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
             free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char purge_project[AIMEE_DB2_KB_PURGE_FENCE_READ_PURGE_PROJECT_MAX + 1] = "";
+         if (aimee_db2_kb_purge_fence_read_request_decode(request_body, request_len, purge_project,
+                                                          sizeof(purge_project)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_PURGE_FENCE_READ_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_purge_fence_read)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t fence_present = 0u;
+            char fence_generation[AIMEE_DB2_KB_PURGE_FENCE_READ_FENCE_GENERATION_MAX + 1] = "";
+            char fence_purge_id[AIMEE_DB2_KB_PURGE_FENCE_READ_FENCE_PURGE_ID_MAX + 1] = "";
+            uint32_t fence_live = 0u;
+            {
+               int live = 0;
+               /* 1 present, 0 absent, -1 failed -- and the last two answer the
+                * same on the wire, because a field list with rows in it has no
+                * third state to put a failure in. */
+               fence_present = backend->kb_purge_fence_read(
+                                   purge_project, fence_generation, sizeof(fence_generation),
+                                   fence_purge_id, sizeof(fence_purge_id), &live) == 1
+                                   ? 1u
+                                   : 0u;
+               fence_live = (fence_present && live) ? 1u : 0u;
+               if (!fence_present)
+               {
+                  fence_generation[0] = '\0';
+                  fence_purge_id[0] = '\0';
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_purge_fence_read_reply_encode(
+                    fence_present, fence_generation, fence_purge_id, fence_live, response_body,
+                    response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
             return AIMEE_MODULE_STATUS_OK;
          }
       }

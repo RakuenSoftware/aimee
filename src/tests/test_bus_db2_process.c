@@ -4789,6 +4789,72 @@ int main(int argc, char **argv)
     * here from a cursor read that could not run. */
    assert(curator_invalidations_since_count == 0);
 
+   /* Batch 63: the purge fence, the project roster, and two bounded lists. */
+   uint32_t kb_purge_fence_read_fence_present = 99;
+   static char
+       kb_purge_fence_read_fence_generation[AIMEE_DB2_KB_PURGE_FENCE_READ_FENCE_GENERATION_MAX + 1];
+   kb_purge_fence_read_fence_generation[0] = 'x';
+   static char
+       kb_purge_fence_read_fence_purge_id[AIMEE_DB2_KB_PURGE_FENCE_READ_FENCE_PURGE_ID_MAX + 1];
+   kb_purge_fence_read_fence_purge_id[0] = 'x';
+   uint32_t kb_purge_fence_read_fence_live = 99;
+   assert(aimee_db2_kb_purge_fence_read_call(
+              call_client, &client, 9566, 0, "replay-project", &kb_purge_fence_read_fence_present,
+              kb_purge_fence_read_fence_generation, sizeof(kb_purge_fence_read_fence_generation),
+              kb_purge_fence_read_fence_purge_id, sizeof(kb_purge_fence_read_fence_purge_id),
+              &kb_purge_fence_read_fence_live, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* No purge has ever fenced this project, so the fence is absent -- which
+    * this cannot tell apart from a read that failed, and live is meaningless
+    * without a fence to be live. */
+   assert(kb_purge_fence_read_fence_present == 0 &&
+          kb_purge_fence_read_fence_generation[0] == '\0' &&
+          kb_purge_fence_read_fence_purge_id[0] == '\0' && kb_purge_fence_read_fence_live == 0);
+
+   static aimee_db2_code_index_project_list_row_t
+       code_index_project_list_rows[AIMEE_DB2_CODE_INDEX_PROJECT_LIST_MAX_ROWS];
+   uint32_t code_index_project_list_count = 99;
+   assert(aimee_db2_code_index_project_list_call(
+              call_client, &client, 9567, 0, code_index_project_list_rows,
+              AIMEE_DB2_CODE_INDEX_PROJECT_LIST_MAX_ROWS, &code_index_project_list_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* The one project earlier cases created. Its root is `replay/root`, which
+    * has no dotted directory in it -- a project rooted under one would be
+    * absent here with no way to ask for it, which is the filter this list
+    * applies and does not report. */
+   assert(code_index_project_list_count == 1 &&
+          !strcmp(code_index_project_list_rows[0].project_name, "replay-project") &&
+          !strcmp(code_index_project_list_rows[0].project_root, "replay/root") &&
+          code_index_project_list_rows[0].scanned_at[0] != '\0');
+
+   static aimee_db2_css_token_candidates_row_t
+       css_token_candidates_rows[AIMEE_DB2_CSS_TOKEN_CANDIDATES_MAX_ROWS];
+   uint32_t css_token_candidates_count = 99;
+   assert(aimee_db2_css_token_candidates_call(
+              call_client, &client, 9568, 0, "", 2, css_token_candidates_rows,
+              AIMEE_DB2_CSS_TOKEN_CANDIDATES_MAX_ROWS, &css_token_candidates_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* No declarations, so no repeated value. The floor of 2 sent here is the
+    * lowest the backend will honour; a 0 or 1 would have been raised to it
+    * silently. */
+   assert(css_token_candidates_count == 0);
+
+   static aimee_db2_artifact_list_proposed_row_t
+       artifact_list_proposed_rows[AIMEE_DB2_ARTIFACT_LIST_PROPOSED_MAX_ROWS];
+   uint32_t artifact_list_proposed_count = 99;
+   assert(aimee_db2_artifact_list_proposed_call(
+              call_client, &client, 9569, 0, "", 8, artifact_list_proposed_rows,
+              AIMEE_DB2_ARTIFACT_LIST_PROPOSED_MAX_ROWS, &artifact_list_proposed_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* Five artifacts earlier cases proposed, ordered by confidence descending.
+    * Only the last position is deterministic: four of the five share a
+    * confidence of 1 and the ordering among equals is the database's, so this
+    * pins the one that is uniquely least confident and asserts nothing about
+    * the four above it. Every surface is empty, and the empty request surface
+    * matched all of them rather than matching those. */
+   assert(artifact_list_proposed_count == 5 && artifact_list_proposed_rows[0].confidence == 1.0 &&
+          artifact_list_proposed_rows[4].confidence == 0.5 &&
+          artifact_list_proposed_rows[4].artifact_id[0] != '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

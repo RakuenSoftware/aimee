@@ -794,6 +794,63 @@ where ingested content lives, which is not this migration's to make.
 `db2_kb_doc_read` is published and does not carry the text, so a document's row
 crosses the boundary today; only the write does not.
 
+## Nine declarations answer with an owned string of no stated size
+
+Every field in `db2-envelope-generic-v1` carries a maximum byte count, and the
+generator needs one before it will emit a codec. For nearly every declaration
+that bound comes from the C buffer the value ends up in. A function returning
+`char *` has no such buffer: it mallocs whatever the row held and hands the
+caller the pointer, so its size is whatever someone wrote.
+
+This is the reply-side twin of `db2_kb_doc_write`, which takes a whole document
+as an argument. It is listed apart from the twelve oversized row lists, because
+those have a bound that is merely too large and these have none at all.
+
+Six of the nine are genuinely unbounded, and each is unbounded for its own
+reason:
+
+    db2_kb_build_document_payload      a document's assembled payload
+    db2_memory_build_memory_payload    a memory's, likewise
+    db2_memory_build_unit_payload      a memory unit's, plus an id by out-param
+    db2_kb_file_index_get_content      the indexed content of one source file
+    db2_rules_generate                 every active rule, rendered as one block
+    db2_agent_hint_find_and_consume    the hint text, matched against a prompt
+
+`db2_kb_file_index_get_content` is the sharpest of them, because its writing
+half is in the same position: `db2_kb_file_index_upsert(project, path, hash,
+content)` takes the file's whole content as an argument, sized by the file. A
+number invented at the boundary would refuse real files in one direction and
+truncate them in the other, and the fix is the same shape the ingest write
+needs -- the content goes somewhere the module can read, and the request
+carries the reference.
+
+`db2_agent_hint_find_and_consume` is worth separating out. Its reply is short in
+practice, but its *request* carries the agent's whole prompt, because the match
+is `prompt LIKE pattern` evaluated in the database. Bounding that field refuses
+a long prompt outright, which is a behaviour change: today a long prompt simply
+matches or does not. And the call is not idempotent -- it marks the hint
+consumed in the same breath as returning it -- so a refused request and a lost
+reply are not the same thing to the caller.
+
+The remaining three are different, and their reviews already say so. The
+`db2_kb_service_collab_rules_*_json` facades are dispositioned `private-db2`
+with reasons naming what should replace them: "a bounded typed list operation
+returns rule records for caller-owned presentation". The data behind
+`db2_collab_rules_json_all`, `_json_active` and `_inject` is bounded -- fifty
+rules at most, each with fixed-width text, reason, proposer and two timestamps
+-- so the size is derivable even though no C buffer states it. What blocks them
+is not the bound but the shape: they are cJSON producers, and turning them into
+typed row lists means publishing `db2_collab_rules_list` and
+`db2_collab_rules_list_active` instead, which are marked private-test-only
+today precisely because these facades are their only callers.
+
+`_json_active` and `_inject` also carry an epoch beside their rules, which is
+the list-and-a-summary problem two sections down: the epoch is per-query and
+the rules are per-row, and a row reply has nowhere to put the first. `_inject`
+adds a conditional on top -- it answers with nothing at all when the caller's
+epoch already matches -- which a count of zero cannot distinguish from an empty
+rule set.
+
 ## Two declarations list projects, and one of them should go
 
     int db2_canonical_index_list_projects(project_info_t *out, int max);

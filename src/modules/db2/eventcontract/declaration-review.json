@@ -300,6 +300,14 @@
       "reason": "The typed learning.artifact_links_read operation lists an artifact's outgoing links. The statement has no ordering and no limit of its own -- the caller's array is the only bound -- so an artifact with more links than the array holds answers with whichever ones the database returned first, and nothing says any were left. Its one caller in the knowledge base asks for eight."
     },
     {
+      "symbol": "db2_artifact_list_proposed",
+      "signature_sha256": "c3403fe3a64b56d5659370a3a276f856258dcdd275c95e453f532203fb47925a",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.artifact_list_proposed operation lists artifacts awaiting review, most confident first. The payload is JSON this boundary carries without understanding, so what an artifact proposes is the writer's words and a reviewer is reading them rather than a checked structure. An empty surface widens to every surface rather than matching none, which makes the unfiltered read the one a caller gets by omission -- easy to reach by accident when a surface name fails to be assembled."
+    },
+    {
       "symbol": "db2_artifact_register_exemplar",
       "signature_sha256": "f2f0c6014383b7a62830e3c6abba57a3bceaccca6a0c4b29aa2657849aafe9d1",
       "disposition": "wire-operation",
@@ -612,6 +620,14 @@
       "reason": "The typed index.project_last_scan operation reads the newest scan stamp across every project in the current lifecycle state. The answer belongs to no project in particular -- one freshly scanned project makes the whole index look fresh. An empty stamp means no current project has ever been scanned, and is also what a failed read gives, since the buffer is cleared before the statement runs. The request carries nothing, because nothing the caller could say would narrow it."
     },
     {
+      "symbol": "db2_code_index_project_list",
+      "signature_sha256": "d57bc4d7454d9c8c4383c54822d148e2bb4337d3c13c6fcae78493e9746f5fcd",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.code_index_project_list operation names the projects the code index holds. It shows only current generations, so a project mid-rescan is listed by what is published rather than by what is being built, and it excludes any root under a dotted directory -- which quietly hides a project someone rooted inside .cache or a worktree, with no way to ask for it. The root is bounded here at a kilobyte against a four-kilobyte C buffer, so a pathological path is refused rather than truncated."
+    },
+    {
       "symbol": "db2_code_index_project_upsert",
       "signature_sha256": "4c8fb855dfe018aa74c7012aae9deede87096a0760eb59a9b20534f0d7806fd9",
       "disposition": "wire-operation",
@@ -906,6 +922,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.css_render_snapshot_store operation replaces one CSS render snapshot. The delete runs before the insert with no transaction around them, so a failure between the two leaves the phase with no snapshot at all rather than the one it had -- worse than not writing. Both statements are scoped to the project's current generation, so a project mid-scan writes nothing and is refused."
+    },
+    {
+      "symbol": "db2_css_token_candidates",
+      "signature_sha256": "d9e40b75f27ba98bdbe5243b08019bc3152d1e70f179ec1042ffe43ab7993fe5",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.css_token_candidates operation finds declaration values repeated often enough to be worth naming as a token. A minimum below two is silently raised to two rather than refused, which is a small dishonesty the wire carries forward: a caller asking for every value gets only the repeated ones and is not told. An empty filter means every project, so all-projects and a project that does not exist differ only by an empty string."
     },
     {
       "symbol": "db2_curator_invalidate_doc",
@@ -1890,6 +1914,14 @@
       "family": "organization",
       "db3_placement": "retained-db2",
       "reason": "The typed organization.purge_fence_heartbeat operation refreshes a purge fence's timestamp. Unlike the bare advisory guard it uses, this operation opens the transaction, takes the lock, checks the fence still names this generation and purge, writes and commits -- all inside the module -- so it is one of the few purge-route pieces that crosses the boundary intact. A fence naming a different purge is refused, and so is one that has been cleared; the reply cannot tell those from a database error."
+    },
+    {
+      "symbol": "db2_kb_purge_fence_read",
+      "signature_sha256": "0caa422d9ea098ee27f8b88a318412c9c0fbd4c95cde5837816a7ef35c17d43e",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.kb_purge_fence_read operation reports who is purging a project. A fence that exists is not the same as one that is live: the owner heartbeats, and a fence whose heartbeat has aged past a third of its lifetime is stale rather than absent -- so a caller can tell an abandoned purge from no purge and take it over deliberately. The backend's -1 arrives as not-present, which is the one collapse here: a read that failed says the field is clear."
     },
     {
       "symbol": "db2_kb_release_add_doc",

@@ -12897,6 +12897,115 @@
       }
     },
     {
+      "family": "index",
+      "id": 69,
+      "name": "code_index_project_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Projects are relational DB2 rows.",
+      "c_symbols": [
+        "db2_code_index_project_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "current generations only, and no project rooted under a dotted directory"
+        },
+        "fields": []
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "project_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "project_root",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "scanned_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
+      "family": "index",
+      "id": 70,
+      "name": "css_token_candidates",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "CSS declarations are relational DB2 rows.",
+      "c_symbols": [
+        "db2_css_token_candidates"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a floor below two is raised to two, because a value used once is not repetition"
+        },
+        "fields": [
+          {
+            "name": "project_filter",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "min_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "token_value",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "token_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "token_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 512
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -17896,6 +18005,91 @@
             "maximum": 9223372036854775807
           }
         ]
+      }
+    },
+    {
+      "family": "learning",
+      "id": 89,
+      "name": "artifact_list_proposed",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Artifacts are relational DB2 rows.",
+      "c_symbols": [
+        "db2_artifact_list_proposed"
+      ],
+      "request": {
+        "policy": {
+          "reads": "most confident first, and an empty surface asks across all of them"
+        },
+        "fields": [
+          {
+            "name": "target_surface",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "list_limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 64
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "artifact_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 36
+            },
+            {
+              "name": "artifact_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "artifact_surface",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "artifact_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "payload_json",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            },
+            {
+              "name": "citation_ids",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 4095
+            }
+          ]
+        },
+        "maximum_rows": 64
       }
     },
     {
@@ -24995,6 +25189,64 @@
           ]
         },
         "maximum_rows": 128
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 78,
+      "name": "kb_purge_fence_read",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The purge fence is a relational DB2 runtime-state row.",
+      "c_symbols": [
+        "db2_kb_purge_fence_read"
+      ],
+      "request": {
+        "policy": {
+          "reads": "present and live are separate answers, and a read that failed is neither"
+        },
+        "fields": [
+          {
+            "name": "purge_project",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "fence_present",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "fence_generation",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "fence_purge_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "fence_live",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
       }
     }
   ]
