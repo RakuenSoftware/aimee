@@ -190,18 +190,26 @@ int db2_bandit_arm_stats_update(const char *decision_point, const char *arm_id, 
    char ts[32];
    now_utc(ts, sizeof(ts));
 
+   /* The casts are what make this statement runnable. Parameters are sent with
+    * no declared types (PQexecParams, paramTypes NULL), so the server infers
+    * them -- and it cannot infer the type of ?3*?3, a product of two unknowns:
+    * "operator is not unique: unknown * unknown". Without the casts this
+    * statement failed every time it was issued, so no arm ever accumulated a
+    * decision, a reward or a posterior. */
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "INSERT INTO bandit_arm_stats"
        "  (decision_point, arm_id, n_decisions, n_rewards, sum_reward, sum_reward_sq,"
        "   posterior_alpha, posterior_beta, updated_at)"
-       "  VALUES (?1, ?2, 1, 1, ?3, ?3*?3, ?4, ?5, ?6)"
+       "  VALUES (?1, ?2, 1, 1, ?3::double precision,"
+       "          ?3::double precision * ?3::double precision, ?4, ?5, ?6)"
        "  ON CONFLICT (decision_point, arm_id) DO UPDATE"
        "    SET n_decisions = bandit_arm_stats.n_decisions + 1,"
        "        n_rewards   = bandit_arm_stats.n_rewards + 1,"
-       "        sum_reward  = bandit_arm_stats.sum_reward + ?3,"
-       "        sum_reward_sq = bandit_arm_stats.sum_reward_sq + ?3*?3,"
+       "        sum_reward  = bandit_arm_stats.sum_reward + ?3::double precision,"
+       "        sum_reward_sq = bandit_arm_stats.sum_reward_sq"
+       "                        + ?3::double precision * ?3::double precision,"
        "        posterior_alpha = ?4,"
        "        posterior_beta  = ?5,"
        "        updated_at      = ?6",
@@ -215,9 +223,12 @@ int db2_bandit_arm_stats_update(const char *decision_point, const char *arm_id, 
    aimee_pg_bind_double(st, "?4", posterior_alpha);
    aimee_pg_bind_double(st, "?5", posterior_beta);
    aimee_pg_bind_text(st, "?6", ts);
-   aimee_pg_step(st, err, sizeof(err));
+   /* Reported rather than discarded. Ignoring it is how the broken statement
+    * above stayed invisible: the caller was told the write succeeded every
+    * time, including the times it could not have. */
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
-   return 0;
+   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
 /* Emit the single TEXT column of a prepared statement as a JSON array of

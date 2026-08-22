@@ -1137,6 +1137,25 @@ func liveReads() []liveRequest {
 				_ = count
 			},
 		},
+		{
+			name:  "bandit_explore_stats",
+			stage: db2contract.StageBanditExploreStats,
+			// A real window, so make_interval and the ISO-8601 cutoff both have
+			// to execute rather than being skipped by the zero branch.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditExploreStatsRequest("live-probe-point", 3600)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				explore, total, err := db2contract.DecodeBanditExploreStatsReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if explore > total {
+					t.Fatalf("explore = %d exceeds total = %d; the columns are crossed",
+						explore, total)
+				}
+			},
+		},
 	}
 }
 
@@ -2111,6 +2130,48 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("both updates did not run")
+				}
+			},
+		},
+		{
+			name:  "bandit_arm_stats_update",
+			stage: db2contract.StageBanditArmStatsUpdate,
+			// The probe that matters here. The C form of this statement was
+			// rejected by PostgreSQL every time it ran -- an untyped product --
+			// and only a real server can tell that apart from a write that
+			// landed. Run twice so the ON CONFLICT branch executes too, which
+			// carries the same product.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditArmStatsUpdateRequest(
+					"live-probe-point", "live-probe-arm", 0.5, 2.0, 3.0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeBanditArmStatsUpdateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the arm statistics were not written")
+				}
+			},
+		},
+		{
+			name:  "bandit_promotion_set",
+			stage: db2contract.StageBanditPromotionSet,
+			// Twice, so the conflict path replaces rather than inserts.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditPromotionSetRequest(
+					"live-probe-point", "live-probe-arm", "live-probe-rollback")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeBanditPromotionSetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the promotion was not written")
 				}
 			},
 		},
