@@ -2356,13 +2356,17 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    if (tls_port > 0)
    {
       server_tls_wait_for_store(db1_store_probe);
-      if (server_tls_init_default() == 0)
+      int tls_rc = server_tls_init_default();
+      if (tls_rc == SERVER_TLS_INIT_OK)
          g_tls_fd = tcp_listen(tls_port, bearer_token, 1 /* TLS: may bind 0.0.0.0 */);
       else
-         /* This is the vault's attested write path — make a misconfigured cert/key
-          * loud (the UDS listener still comes up; the operator must fix the cert). */
-         LOG_ERROR("server.http", "tls_port=%d set but TLS cert/key not loadable; TLS DISABLED",
-                   tls_port);
+         /* This is the vault's attested write path, so the failure is loud (the UDS
+          * listener still comes up). It now names WHICH failure: this line said
+          * "cert/key not loadable" for all three, including a ramp self-test that
+          * could not reach DB1, sending the operator to inspect a certificate that
+          * was never the problem. */
+         LOG_ERROR("server.http", "tls_port=%d set but TLS could not start: %s; TLS DISABLED",
+                   tls_port, server_tls_init_result_str(tls_rc));
    }
 
    if (management.enabled)

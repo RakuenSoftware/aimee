@@ -1041,3 +1041,57 @@ database. Each code now has its own answer, and a membership refusal says so.
 The unit test agreed with the collapse because it asserted on `stub_rc = -42`, a
 value the tenancy layer cannot return. It uses the real codes now, and covers
 the DENIED case that was wrong.
+
+## The diagnostic pattern, and its last instance
+
+Five separate times this branch was slowed by a message that named the wrong
+cause. They are one shape, not five incidents:
+
+| reported | actually |
+|---|---|
+| `unauthorized` | an Authorization header truncated at 512 bytes |
+| "retraction scan gave no answer" | a module call that never reached the module |
+| "requires the postgres backend" | the caller is not a member of that team |
+| "failed to store memory" | aimee-kb never finished starting |
+| "TLS cert/key not loadable" | the mTLS ramp could not reach DB1 |
+
+The first four are fixed above. The last one is `server_tls_init_default()`,
+which has three unrelated failure paths and returned `-1` for all of them:
+
+- the mTLS ramp self-test, which IS DB1 stage 19 (db1-pki)
+- aimee's client CA
+- the server certificate and its Vault-held key
+
+Only the third has anything to do with a certificate, and the message named a
+certificate for all three. During this branch's own validation that sent me to
+inspect a certificate that was fine, while the real fault was a module that was
+not running. Each cause now has its own code and its own sentence, and the ramp
+failure points at db1 rather than at the cert.
+
+### What is and is not proven for this one
+
+`unit-test-server-tls-init-cause` pins the mapping: the three causes are
+mutually distinct, the ramp cause does not mention a certificate and does name
+db1, the identity cause still says "certificate", and an out-of-range code
+reports "unknown" rather than inventing a specific fault.
+
+`test_server_management_tls` already exercised one of these paths and asserted a
+bare `-1`; its own comment said it "fail[s] at the stubbed client-CA step", so it
+now asserts exactly that. A test that could not tell the three apart was part of
+how they stayed collapsed.
+
+The LIVE reproduction is not available on this container. `test-tls-failure-cause.sh`
+stages it, and its second leg (db1 present, TLS must come up) passes, but the
+first leg SKIPS: with db1's state already established here the ramp completes
+even with no db1 module attached and the binary moved aside, so the failure
+branch cannot be provoked. That is reported as a skip rather than a pass, which
+would claim coverage that does not exist, or a failure, which would blame the
+fix. Two earlier attempts at that leg were themselves wrong and are worth
+recording:
+
+- launching aimee-server by hand instead of through `start-server.sh` left it
+  without the environment it needs, so it exited immediately and the ABSENCE of
+  a "TLS DISABLED" line read as success while nothing had run at all
+- moving the db1 binary aside did not remove db1: `install-db1-module.sh`
+  refuses on a missing binary BEFORE it reaches its own `pkill`, so a module
+  started by an earlier run stayed attached and answered the ramp perfectly well
