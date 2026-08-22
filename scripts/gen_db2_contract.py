@@ -13907,6 +13907,54 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_kb_service_async_queue_status",
         "policy": {"reads": 200},
     },
+    "memory_alias_insert": {
+        "key": ("memory", 140),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_alias_insert",
+        "policy": {"writes": 200},
+    },
+    "memory_entity_insert": {
+        "key": ("memory", 141),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_entity_insert",
+        "policy": {"writes": 200},
+    },
+    "memory_coref_audit_insert": {
+        "key": ("memory", 142),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_coref_audit_insert",
+        "policy": {"writes": 200},
+    },
+    "memory_scope_tag_insert": {
+        "key": ("memory", 143),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_scope_tag_insert",
+        "policy": {"writes": 200},
+    },
+    "memory_temporal_insert": {
+        "key": ("memory", 144),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_temporal_insert",
+        "policy": {"writes": 200},
+    },
+    "memory_episode_card_insert": {
+        "key": ("memory", 145),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_unit_episode_card_insert",
+        "policy": {"writes": 200},
+    },
+    "memory_mark_merged_into": {
+        "key": ("memory", 146),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_mark_merged_into",
+        "policy": {"writes": 200},
+    },
+    "memory_retro_scan_marker": {
+        "key": ("memory", 147),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_record_retro_scan_marker",
+        "policy": {"writes": 200},
+    },
 }
 
 

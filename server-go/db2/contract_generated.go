@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "7eaaafedec44c49261de7c63e16db9cf982659e29c1897a4767ec5a32345581c"
+const ContractSHA256 = "d79be78819a8e06d332c2e219a7d01d2a7cf9ccf954dbf95beda73636df0d9e5"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4304,6 +4304,617 @@ func DecodeLifecycleUnresolvedContradictionsRequest(request []byte) (error) {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+const EventMemoryAliasInsert = EventMemory
+const StageMemoryAliasInsert = FamilyMemory
+const OperationMemoryAliasInsert uint32 = 140
+const MemoryAliasInsertMemoryIDMin uint64 = 1
+const MemoryAliasInsertMemoryIDMax uint64 = 9223372036854775807
+const MemoryAliasInsertAliasTextMin = 1
+const MemoryAliasInsertAliasTextMax = 511
+const MemoryAliasInsertAliasWeightMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeMemoryAliasInsertRequest writes the schema memory_alias_insert declares, in order.
+func EncodeMemoryAliasInsertRequest(memoryID uint64, aliasText string, aliasWeight float64) ([]byte, error) {
+	if memoryID < MemoryAliasInsertMemoryIDMin || memoryID > MemoryAliasInsertMemoryIDMax ||
+		len(aliasText) < MemoryAliasInsertAliasTextMin || len(aliasText) > MemoryAliasInsertAliasTextMax || hasNUL(aliasText) ||
+		math.Float64bits(aliasWeight)&0x7fffffffffffffff > MemoryAliasInsertAliasWeightMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, aliasText, MemoryAliasInsertAliasTextMax); err != nil {
+		return nil, err
+	}
+	var aliasWeightBytes [8]byte
+	binary.LittleEndian.PutUint64(aliasWeightBytes[:], math.Float64bits(aliasWeight))
+	payload = append(payload, aliasWeightBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryAliasInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryAliasInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryAliasInsertRequest(request []byte) (uint64, string, float64, error) {
+	var memoryID uint64
+	var aliasText string
+	var aliasWeight float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryAliasInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryAliasInsertMemoryIDMin || memoryID > MemoryAliasInsertMemoryIDMax {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	if aliasText, err = takeRowText(payload, &cursor, MemoryAliasInsertAliasTextMax); err != nil ||
+		len(aliasText) < MemoryAliasInsertAliasTextMin {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemoryAliasInsertAliasWeightMaxMagnitudeBits {
+			return 0, "", 0, ErrMalformedEnvelope
+		}
+		aliasWeight = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	return memoryID, aliasText, aliasWeight, nil
+}
+
+const EventMemoryEntityInsert = EventMemory
+const StageMemoryEntityInsert = FamilyMemory
+const OperationMemoryEntityInsert uint32 = 141
+const MemoryEntityInsertMemoryIDMin uint64 = 1
+const MemoryEntityInsertMemoryIDMax uint64 = 9223372036854775807
+const MemoryEntityInsertEntityNameMin = 1
+const MemoryEntityInsertEntityNameMax = 255
+const MemoryEntityInsertEntityRoleMin = 0
+const MemoryEntityInsertEntityRoleMax = 31
+const MemoryEntityInsertEntityWeightMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeMemoryEntityInsertRequest writes the schema memory_entity_insert declares, in order.
+func EncodeMemoryEntityInsertRequest(memoryID uint64, entityName string, entityRole string, entityWeight float64) ([]byte, error) {
+	if memoryID < MemoryEntityInsertMemoryIDMin || memoryID > MemoryEntityInsertMemoryIDMax ||
+		len(entityName) < MemoryEntityInsertEntityNameMin || len(entityName) > MemoryEntityInsertEntityNameMax || hasNUL(entityName) ||
+		len(entityRole) < MemoryEntityInsertEntityRoleMin || len(entityRole) > MemoryEntityInsertEntityRoleMax || hasNUL(entityRole) ||
+		math.Float64bits(entityWeight)&0x7fffffffffffffff > MemoryEntityInsertEntityWeightMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, entityName, MemoryEntityInsertEntityNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, entityRole, MemoryEntityInsertEntityRoleMax); err != nil {
+		return nil, err
+	}
+	var entityWeightBytes [8]byte
+	binary.LittleEndian.PutUint64(entityWeightBytes[:], math.Float64bits(entityWeight))
+	payload = append(payload, entityWeightBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryEntityInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryEntityInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryEntityInsertRequest(request []byte) (uint64, string, string, float64, error) {
+	var memoryID uint64
+	var entityName string
+	var entityRole string
+	var entityWeight float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryEntityInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryEntityInsertMemoryIDMin || memoryID > MemoryEntityInsertMemoryIDMax {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if entityName, err = takeRowText(payload, &cursor, MemoryEntityInsertEntityNameMax); err != nil ||
+		len(entityName) < MemoryEntityInsertEntityNameMin {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if entityRole, err = takeRowText(payload, &cursor, MemoryEntityInsertEntityRoleMax); err != nil ||
+		len(entityRole) < MemoryEntityInsertEntityRoleMin {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemoryEntityInsertEntityWeightMaxMagnitudeBits {
+			return 0, "", "", 0, ErrMalformedEnvelope
+		}
+		entityWeight = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	return memoryID, entityName, entityRole, entityWeight, nil
+}
+
+const EventMemoryCorefAuditInsert = EventMemory
+const StageMemoryCorefAuditInsert = FamilyMemory
+const OperationMemoryCorefAuditInsert uint32 = 142
+const MemoryCorefAuditInsertMemoryIDMin uint64 = 1
+const MemoryCorefAuditInsertMemoryIDMax uint64 = 9223372036854775807
+const MemoryCorefAuditInsertSessionIDMin = 0
+const MemoryCorefAuditInsertSessionIDMax = 127
+const MemoryCorefAuditInsertCorefOutcomeMin = 0
+const MemoryCorefAuditInsertCorefOutcomeMax = 31
+const MemoryCorefAuditInsertEntityNameMin = 0
+const MemoryCorefAuditInsertEntityNameMax = 255
+const MemoryCorefAuditInsertCorefModeMin = 0
+const MemoryCorefAuditInsertCorefModeMax = 31
+const MemoryCorefAuditInsertCorefConfidenceMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeMemoryCorefAuditInsertRequest writes the schema memory_coref_audit_insert declares, in order.
+func EncodeMemoryCorefAuditInsertRequest(memoryID uint64, sessionID string, corefOutcome string, entityName string, corefMode string, corefConfidence float64) ([]byte, error) {
+	if memoryID < MemoryCorefAuditInsertMemoryIDMin || memoryID > MemoryCorefAuditInsertMemoryIDMax ||
+		len(sessionID) < MemoryCorefAuditInsertSessionIDMin || len(sessionID) > MemoryCorefAuditInsertSessionIDMax || hasNUL(sessionID) ||
+		len(corefOutcome) < MemoryCorefAuditInsertCorefOutcomeMin || len(corefOutcome) > MemoryCorefAuditInsertCorefOutcomeMax || hasNUL(corefOutcome) ||
+		len(entityName) < MemoryCorefAuditInsertEntityNameMin || len(entityName) > MemoryCorefAuditInsertEntityNameMax || hasNUL(entityName) ||
+		len(corefMode) < MemoryCorefAuditInsertCorefModeMin || len(corefMode) > MemoryCorefAuditInsertCorefModeMax || hasNUL(corefMode) ||
+		math.Float64bits(corefConfidence)&0x7fffffffffffffff > MemoryCorefAuditInsertCorefConfidenceMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, sessionID, MemoryCorefAuditInsertSessionIDMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, corefOutcome, MemoryCorefAuditInsertCorefOutcomeMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, entityName, MemoryCorefAuditInsertEntityNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, corefMode, MemoryCorefAuditInsertCorefModeMax); err != nil {
+		return nil, err
+	}
+	var corefConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(corefConfidenceBytes[:], math.Float64bits(corefConfidence))
+	payload = append(payload, corefConfidenceBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryCorefAuditInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryCorefAuditInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryCorefAuditInsertRequest(request []byte) (uint64, string, string, string, string, float64, error) {
+	var memoryID uint64
+	var sessionID string
+	var corefOutcome string
+	var entityName string
+	var corefMode string
+	var corefConfidence float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryCorefAuditInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryCorefAuditInsertMemoryIDMin || memoryID > MemoryCorefAuditInsertMemoryIDMax {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if sessionID, err = takeRowText(payload, &cursor, MemoryCorefAuditInsertSessionIDMax); err != nil ||
+		len(sessionID) < MemoryCorefAuditInsertSessionIDMin {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if corefOutcome, err = takeRowText(payload, &cursor, MemoryCorefAuditInsertCorefOutcomeMax); err != nil ||
+		len(corefOutcome) < MemoryCorefAuditInsertCorefOutcomeMin {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if entityName, err = takeRowText(payload, &cursor, MemoryCorefAuditInsertEntityNameMax); err != nil ||
+		len(entityName) < MemoryCorefAuditInsertEntityNameMin {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if corefMode, err = takeRowText(payload, &cursor, MemoryCorefAuditInsertCorefModeMax); err != nil ||
+		len(corefMode) < MemoryCorefAuditInsertCorefModeMin {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemoryCorefAuditInsertCorefConfidenceMaxMagnitudeBits {
+			return 0, "", "", "", "", 0, ErrMalformedEnvelope
+		}
+		corefConfidence = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return 0, "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	return memoryID, sessionID, corefOutcome, entityName, corefMode, corefConfidence, nil
+}
+
+const EventMemoryScopeTagInsert = EventMemory
+const StageMemoryScopeTagInsert = FamilyMemory
+const OperationMemoryScopeTagInsert uint32 = 143
+const MemoryScopeTagInsertMemoryIDMin uint64 = 1
+const MemoryScopeTagInsertMemoryIDMax uint64 = 9223372036854775807
+const MemoryScopeTagInsertScopeTypeMin = 1
+const MemoryScopeTagInsertScopeTypeMax = 15
+const MemoryScopeTagInsertScopeValueMin = 0
+const MemoryScopeTagInsertScopeValueMax = 127
+
+// EncodeMemoryScopeTagInsertRequest writes the schema memory_scope_tag_insert declares, in order.
+func EncodeMemoryScopeTagInsertRequest(memoryID uint64, scopeType string, scopeValue string) ([]byte, error) {
+	if memoryID < MemoryScopeTagInsertMemoryIDMin || memoryID > MemoryScopeTagInsertMemoryIDMax ||
+		len(scopeType) < MemoryScopeTagInsertScopeTypeMin || len(scopeType) > MemoryScopeTagInsertScopeTypeMax || hasNUL(scopeType) ||
+		len(scopeValue) < MemoryScopeTagInsertScopeValueMin || len(scopeValue) > MemoryScopeTagInsertScopeValueMax || hasNUL(scopeValue) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, scopeType, MemoryScopeTagInsertScopeTypeMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeValue, MemoryScopeTagInsertScopeValueMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryScopeTagInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryScopeTagInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryScopeTagInsertRequest(request []byte) (uint64, string, string, error) {
+	var memoryID uint64
+	var scopeType string
+	var scopeValue string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryScopeTagInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryScopeTagInsertMemoryIDMin || memoryID > MemoryScopeTagInsertMemoryIDMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if scopeType, err = takeRowText(payload, &cursor, MemoryScopeTagInsertScopeTypeMax); err != nil ||
+		len(scopeType) < MemoryScopeTagInsertScopeTypeMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if scopeValue, err = takeRowText(payload, &cursor, MemoryScopeTagInsertScopeValueMax); err != nil ||
+		len(scopeValue) < MemoryScopeTagInsertScopeValueMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return memoryID, scopeType, scopeValue, nil
+}
+
+const EventMemoryTemporalInsert = EventMemory
+const StageMemoryTemporalInsert = FamilyMemory
+const OperationMemoryTemporalInsert uint32 = 144
+const MemoryTemporalInsertMemoryIDMin uint64 = 1
+const MemoryTemporalInsertMemoryIDMax uint64 = 9223372036854775807
+const MemoryTemporalInsertRefKeyMin = 1
+const MemoryTemporalInsertRefKeyMax = 127
+const MemoryTemporalInsertGranularityMin = 0
+const MemoryTemporalInsertGranularityMax = 31
+const MemoryTemporalInsertRefWeightMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeMemoryTemporalInsertRequest writes the schema memory_temporal_insert declares, in order.
+func EncodeMemoryTemporalInsertRequest(memoryID uint64, refKey string, granularity string, refWeight float64) ([]byte, error) {
+	if memoryID < MemoryTemporalInsertMemoryIDMin || memoryID > MemoryTemporalInsertMemoryIDMax ||
+		len(refKey) < MemoryTemporalInsertRefKeyMin || len(refKey) > MemoryTemporalInsertRefKeyMax || hasNUL(refKey) ||
+		len(granularity) < MemoryTemporalInsertGranularityMin || len(granularity) > MemoryTemporalInsertGranularityMax || hasNUL(granularity) ||
+		math.Float64bits(refWeight)&0x7fffffffffffffff > MemoryTemporalInsertRefWeightMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, refKey, MemoryTemporalInsertRefKeyMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, granularity, MemoryTemporalInsertGranularityMax); err != nil {
+		return nil, err
+	}
+	var refWeightBytes [8]byte
+	binary.LittleEndian.PutUint64(refWeightBytes[:], math.Float64bits(refWeight))
+	payload = append(payload, refWeightBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryTemporalInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryTemporalInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryTemporalInsertRequest(request []byte) (uint64, string, string, float64, error) {
+	var memoryID uint64
+	var refKey string
+	var granularity string
+	var refWeight float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryTemporalInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryTemporalInsertMemoryIDMin || memoryID > MemoryTemporalInsertMemoryIDMax {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if refKey, err = takeRowText(payload, &cursor, MemoryTemporalInsertRefKeyMax); err != nil ||
+		len(refKey) < MemoryTemporalInsertRefKeyMin {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if granularity, err = takeRowText(payload, &cursor, MemoryTemporalInsertGranularityMax); err != nil ||
+		len(granularity) < MemoryTemporalInsertGranularityMin {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemoryTemporalInsertRefWeightMaxMagnitudeBits {
+			return 0, "", "", 0, ErrMalformedEnvelope
+		}
+		refWeight = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return 0, "", "", 0, ErrMalformedEnvelope
+	}
+	return memoryID, refKey, granularity, refWeight, nil
+}
+
+const EventMemoryEpisodeCardInsert = EventMemory
+const StageMemoryEpisodeCardInsert = FamilyMemory
+const OperationMemoryEpisodeCardInsert uint32 = 145
+const MemoryEpisodeCardInsertMemoryIDMin uint64 = 1
+const MemoryEpisodeCardInsertMemoryIDMax uint64 = 9223372036854775807
+const MemoryEpisodeCardInsertUnitKeyMin = 0
+const MemoryEpisodeCardInsertUnitKeyMax = 255
+const MemoryEpisodeCardInsertUnitTextMin = 0
+const MemoryEpisodeCardInsertUnitTextMax = 2047
+
+// EncodeMemoryEpisodeCardInsertRequest writes the schema memory_episode_card_insert declares, in order.
+func EncodeMemoryEpisodeCardInsertRequest(memoryID uint64, unitKey string, unitText string) ([]byte, error) {
+	if memoryID < MemoryEpisodeCardInsertMemoryIDMin || memoryID > MemoryEpisodeCardInsertMemoryIDMax ||
+		len(unitKey) < MemoryEpisodeCardInsertUnitKeyMin || len(unitKey) > MemoryEpisodeCardInsertUnitKeyMax || hasNUL(unitKey) ||
+		len(unitText) < MemoryEpisodeCardInsertUnitTextMin || len(unitText) > MemoryEpisodeCardInsertUnitTextMax || hasNUL(unitText) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var memoryIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryIDBytes[:], memoryID)
+	payload = append(payload, memoryIDBytes[:]...)
+	if err := putRowText(&payload, unitKey, MemoryEpisodeCardInsertUnitKeyMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, unitText, MemoryEpisodeCardInsertUnitTextMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryEpisodeCardInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryEpisodeCardInsertRequest reads it back, checking each field against its own bound.
+func DecodeMemoryEpisodeCardInsertRequest(request []byte) (uint64, string, string, error) {
+	var memoryID uint64
+	var unitKey string
+	var unitText string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryEpisodeCardInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	memoryID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryID < MemoryEpisodeCardInsertMemoryIDMin || memoryID > MemoryEpisodeCardInsertMemoryIDMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if unitKey, err = takeRowText(payload, &cursor, MemoryEpisodeCardInsertUnitKeyMax); err != nil ||
+		len(unitKey) < MemoryEpisodeCardInsertUnitKeyMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if unitText, err = takeRowText(payload, &cursor, MemoryEpisodeCardInsertUnitTextMax); err != nil ||
+		len(unitText) < MemoryEpisodeCardInsertUnitTextMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return memoryID, unitKey, unitText, nil
+}
+
+const EventMemoryMarkMergedInto = EventMemory
+const StageMemoryMarkMergedInto = FamilyMemory
+const OperationMemoryMarkMergedInto uint32 = 146
+const MemoryMarkMergedIntoMergedIntoIDMin uint64 = 1
+const MemoryMarkMergedIntoMergedIntoIDMax uint64 = 9223372036854775807
+const MemoryMarkMergedIntoSessionIDMin = 0
+const MemoryMarkMergedIntoSessionIDMax = 127
+const MemoryMarkMergedIntoMaxConfidenceMaxMagnitudeBits uint64 = 4741671816366391296
+
+// EncodeMemoryMarkMergedIntoRequest writes the schema memory_mark_merged_into declares, in order.
+func EncodeMemoryMarkMergedIntoRequest(mergedIntoID uint64, sessionID string, maxConfidence float64) ([]byte, error) {
+	if mergedIntoID < MemoryMarkMergedIntoMergedIntoIDMin || mergedIntoID > MemoryMarkMergedIntoMergedIntoIDMax ||
+		len(sessionID) < MemoryMarkMergedIntoSessionIDMin || len(sessionID) > MemoryMarkMergedIntoSessionIDMax || hasNUL(sessionID) ||
+		math.Float64bits(maxConfidence)&0x7fffffffffffffff > MemoryMarkMergedIntoMaxConfidenceMaxMagnitudeBits {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var mergedIntoIDBytes [8]byte
+	binary.LittleEndian.PutUint64(mergedIntoIDBytes[:], mergedIntoID)
+	payload = append(payload, mergedIntoIDBytes[:]...)
+	if err := putRowText(&payload, sessionID, MemoryMarkMergedIntoSessionIDMax); err != nil {
+		return nil, err
+	}
+	var maxConfidenceBytes [8]byte
+	binary.LittleEndian.PutUint64(maxConfidenceBytes[:], math.Float64bits(maxConfidence))
+	payload = append(payload, maxConfidenceBytes[:]...)
+	header, err := EncodeRequestHeader(OperationMemoryMarkMergedInto, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryMarkMergedIntoRequest reads it back, checking each field against its own bound.
+func DecodeMemoryMarkMergedIntoRequest(request []byte) (uint64, string, float64, error) {
+	var mergedIntoID uint64
+	var sessionID string
+	var maxConfidence float64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryMarkMergedInto || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	mergedIntoID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if mergedIntoID < MemoryMarkMergedIntoMergedIntoIDMin || mergedIntoID > MemoryMarkMergedIntoMergedIntoIDMax {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	if sessionID, err = takeRowText(payload, &cursor, MemoryMarkMergedIntoSessionIDMax); err != nil ||
+		len(sessionID) < MemoryMarkMergedIntoSessionIDMin {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	{
+		bits := binary.LittleEndian.Uint64(payload[cursor:])
+		cursor += 8
+		if bits&0x7fffffffffffffff > MemoryMarkMergedIntoMaxConfidenceMaxMagnitudeBits {
+			return 0, "", 0, ErrMalformedEnvelope
+		}
+		maxConfidence = math.Float64frombits(bits)
+	}
+	if cursor != len(payload) {
+		return 0, "", 0, ErrMalformedEnvelope
+	}
+	return mergedIntoID, sessionID, maxConfidence, nil
+}
+
+const EventMemoryRetroScanMarker = EventMemory
+const StageMemoryRetroScanMarker = FamilyMemory
+const OperationMemoryRetroScanMarker uint32 = 147
+const MemoryRetroScanMarkerScanTimestampMin = 0
+const MemoryRetroScanMarkerScanTimestampMax = 31
+
+// EncodeMemoryRetroScanMarkerRequest writes the schema memory_retro_scan_marker declares, in order.
+func EncodeMemoryRetroScanMarkerRequest(scanTimestamp string) ([]byte, error) {
+	if len(scanTimestamp) < MemoryRetroScanMarkerScanTimestampMin || len(scanTimestamp) > MemoryRetroScanMarkerScanTimestampMax || hasNUL(scanTimestamp) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, scanTimestamp, MemoryRetroScanMarkerScanTimestampMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationMemoryRetroScanMarker, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeMemoryRetroScanMarkerRequest reads it back, checking each field against its own bound.
+func DecodeMemoryRetroScanMarkerRequest(request []byte) (string, error) {
+	var scanTimestamp string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationMemoryRetroScanMarker || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if scanTimestamp, err = takeRowText(payload, &cursor, MemoryRetroScanMarkerScanTimestampMax); err != nil ||
+		len(scanTimestamp) < MemoryRetroScanMarkerScanTimestampMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return scanTimestamp, nil
 }
 
 const EventEntityObservationCount = EventIndex

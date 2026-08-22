@@ -8690,6 +8690,440 @@
       }
     },
     {
+      "family": "memory",
+      "id": 140,
+      "name": "memory_alias_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory attributes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_alias_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates the alias, and the backend reports nothing either way"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "alias_text",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "alias_weight",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 141,
+      "name": "memory_entity_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory attributes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_entity_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates the entity, and the backend reports nothing either way"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "entity_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "entity_role",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "entity_weight",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 142,
+      "name": "memory_coref_audit_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory attributes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_coref_audit_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "an audit row that reports nothing about whether it was written"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "session_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "coref_outcome",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "entity_name",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "coref_mode",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "coref_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 143,
+      "name": "memory_scope_tag_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory attributes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_scope_tag_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "the statement takes no action on conflict, so a repeat is a no-op it cannot report"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "scope_type",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "scope_value",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 144,
+      "name": "memory_temporal_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory attributes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_temporal_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates the reference, and the backend reports nothing either way"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "ref_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "granularity",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "ref_weight",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 145,
+      "name": "memory_episode_card_insert",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory attributes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_unit_episode_card_insert"
+      ],
+      "request": {
+        "policy": {
+          "writes": "nothing deduplicates the card, and the backend reports nothing either way"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "unit_key",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "unit_text",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 2047
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 146,
+      "name": "memory_mark_merged_into",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory attributes are relational DB2 rows.",
+      "c_symbols": [
+        "db2_memory_mark_merged_into"
+      ],
+      "request": {
+        "policy": {
+          "writes": "every session-tier memory below a confidence is pointed at one survivor at once"
+        },
+        "fields": [
+          {
+            "name": "merged_into_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "session_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "max_confidence",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "maximum_magnitude_binary64_bits": 4741671816366391296
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 147,
+      "name": "memory_retro_scan_marker",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The contradiction log is a relational DB2 table.",
+      "c_symbols": [
+        "db2_memory_record_retro_scan_marker"
+      ],
+      "request": {
+        "policy": {
+          "writes": "writes the marker memory.last_retro_scan reads back"
+        },
+        "fields": [
+          {
+            "name": "scan_timestamp",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "acknowledged",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      }
+    },
+    {
       "family": "index",
       "id": 1,
       "name": "entity_edge_prune_orphans",

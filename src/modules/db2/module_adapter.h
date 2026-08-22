@@ -626,6 +626,20 @@ typedef struct
    int (*kb_project_status)(const char *project, db2_kb_service_project_status_t *out);
    int (*kb_reembed_status)(db2_kb_service_reembed_status_t *out);
    int (*kb_async_queue_status)(db2_kb_service_async_queue_stats_t *out);
+   void (*memory_alias_insert)(int64_t memory_id, const char *alias, double weight);
+   void (*memory_entity_insert)(int64_t memory_id, const char *entity, const char *role,
+                                double weight);
+   void (*memory_coref_audit_insert)(int64_t memory_id, const char *session_id, const char *outcome,
+                                     const char *entity, const char *mode, double confidence);
+   void (*memory_scope_tag_insert)(int64_t memory_id, const char *scope_type,
+                                   const char *scope_value);
+   void (*memory_temporal_insert)(int64_t memory_id, const char *ref_key, const char *granularity,
+                                  double weight);
+   void (*memory_episode_card_insert)(int64_t memory_id, const char *unit_key,
+                                      const char *unit_text);
+   void (*memory_mark_merged_into)(int64_t merged_into, const char *session_id,
+                                   double max_confidence);
+   void (*memory_retro_scan_marker)(const char *ts);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -4161,6 +4161,59 @@ int main(int argc, char **argv)
    assert(kb_async_queue_status_queue_running == 0 && kb_async_queue_status_queue_done == 0 &&
           kb_async_queue_status_queue_failed == 0);
 
+   /* Eight writers that return void. Every one of these acknowledgements is a 1
+    * whatever the database did -- the memory identifier below exists in none of
+    * these tables, and each write is still acknowledged. That is the shape
+    * db2-boundary-blockers records: an acknowledged field that is a constant. */
+   uint32_t memory_alias_insert_acknowledged = 99;
+   assert(aimee_db2_memory_alias_insert_call(call_client, &client, 9530, 0, 4242, "replay alias",
+                                             0.5, &memory_alias_insert_acknowledged, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_alias_insert_acknowledged == 1);
+
+   uint32_t memory_entity_insert_acknowledged = 99;
+   assert(aimee_db2_memory_entity_insert_call(call_client, &client, 9531, 0, 4242, "replay-entity",
+                                              "subject", 0.5, &memory_entity_insert_acknowledged,
+                                              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_entity_insert_acknowledged == 1);
+
+   uint32_t memory_coref_audit_insert_acknowledged = 99;
+   assert(aimee_db2_memory_coref_audit_insert_call(
+              call_client, &client, 9532, 0, 4242, "replay-session", "resolved", "replay-entity",
+              "exact", 0.9, &memory_coref_audit_insert_acknowledged, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_coref_audit_insert_acknowledged == 1);
+
+   uint32_t memory_scope_tag_insert_acknowledged = 99;
+   assert(aimee_db2_memory_scope_tag_insert_call(call_client, &client, 9533, 0, 4242, "project",
+                                                 "replay", &memory_scope_tag_insert_acknowledged,
+                                                 NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_scope_tag_insert_acknowledged == 1);
+
+   uint32_t memory_temporal_insert_acknowledged = 99;
+   assert(aimee_db2_memory_temporal_insert_call(
+              call_client, &client, 9534, 0, 4242, "2026-01-01", "absolute_day", 0.5,
+              &memory_temporal_insert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_temporal_insert_acknowledged == 1);
+
+   uint32_t memory_episode_card_insert_acknowledged = 99;
+   assert(aimee_db2_memory_episode_card_insert_call(
+              call_client, &client, 9535, 0, 4242, "replay-card", "replayed",
+              &memory_episode_card_insert_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_episode_card_insert_acknowledged == 1);
+
+   uint32_t memory_mark_merged_into_acknowledged = 99;
+   assert(aimee_db2_memory_mark_merged_into_call(
+              call_client, &client, 9536, 0, 4242, "replay-session", 0.5,
+              &memory_mark_merged_into_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_mark_merged_into_acknowledged == 1);
+
+   uint32_t memory_retro_scan_marker_acknowledged = 99;
+   assert(aimee_db2_memory_retro_scan_marker_call(
+              call_client, &client, 9537, 0, "2026-01-01T00:00:00Z",
+              &memory_retro_scan_marker_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memory_retro_scan_marker_acknowledged == 1);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

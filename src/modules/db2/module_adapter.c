@@ -1081,6 +1081,14 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kb_project_status = db2_kb_service_collect_project_status,
        .kb_reembed_status = db2_kb_service_collect_reembed_status,
        .kb_async_queue_status = db2_kb_service_async_queue_status,
+       .memory_alias_insert = db2_memory_alias_insert,
+       .memory_entity_insert = db2_memory_entity_insert,
+       .memory_coref_audit_insert = db2_memory_coref_audit_insert,
+       .memory_scope_tag_insert = db2_memory_scope_tag_insert,
+       .memory_temporal_insert = db2_memory_temporal_insert,
+       .memory_episode_card_insert = db2_memory_unit_episode_card_insert,
+       .memory_mark_merged_into = db2_memory_mark_merged_into,
+       .memory_retro_scan_marker = db2_memory_record_retro_scan_marker,
    };
    return &backend;
 }
@@ -5630,6 +5638,235 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
             free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         char alias_text[AIMEE_DB2_MEMORY_ALIAS_INSERT_ALIAS_TEXT_MAX + 1] = "";
+         double alias_weight = 0.0;
+         if (aimee_db2_memory_alias_insert_request_decode(request_body, request_len, &memory_id,
+                                                          alias_text, sizeof(alias_text),
+                                                          &alias_weight) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_ALIAS_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_alias_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_alias_insert((int64_t)memory_id, alias_text, alias_weight);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_alias_insert_reply_encode(acknowledged, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         char entity_name[AIMEE_DB2_MEMORY_ENTITY_INSERT_ENTITY_NAME_MAX + 1] = "";
+         char entity_role[AIMEE_DB2_MEMORY_ENTITY_INSERT_ENTITY_ROLE_MAX + 1] = "";
+         double entity_weight = 0.0;
+         if (aimee_db2_memory_entity_insert_request_decode(
+                 request_body, request_len, &memory_id, entity_name, sizeof(entity_name),
+                 entity_role, sizeof(entity_role), &entity_weight) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_ENTITY_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_entity_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_entity_insert((int64_t)memory_id, entity_name, entity_role,
+                                          entity_weight);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_entity_insert_reply_encode(acknowledged, response_body,
+                                                            response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         char session_id[AIMEE_DB2_MEMORY_COREF_AUDIT_INSERT_SESSION_ID_MAX + 1] = "";
+         char coref_outcome[AIMEE_DB2_MEMORY_COREF_AUDIT_INSERT_COREF_OUTCOME_MAX + 1] = "";
+         char entity_name[AIMEE_DB2_MEMORY_COREF_AUDIT_INSERT_ENTITY_NAME_MAX + 1] = "";
+         char coref_mode[AIMEE_DB2_MEMORY_COREF_AUDIT_INSERT_COREF_MODE_MAX + 1] = "";
+         double coref_confidence = 0.0;
+         if (aimee_db2_memory_coref_audit_insert_request_decode(
+                 request_body, request_len, &memory_id, session_id, sizeof(session_id),
+                 coref_outcome, sizeof(coref_outcome), entity_name, sizeof(entity_name), coref_mode,
+                 sizeof(coref_mode), &coref_confidence) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_COREF_AUDIT_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_coref_audit_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_coref_audit_insert((int64_t)memory_id, session_id, coref_outcome,
+                                               entity_name, coref_mode, coref_confidence);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_coref_audit_insert_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         char scope_type[AIMEE_DB2_MEMORY_SCOPE_TAG_INSERT_SCOPE_TYPE_MAX + 1] = "";
+         char scope_value[AIMEE_DB2_MEMORY_SCOPE_TAG_INSERT_SCOPE_VALUE_MAX + 1] = "";
+         if (aimee_db2_memory_scope_tag_insert_request_decode(
+                 request_body, request_len, &memory_id, scope_type, sizeof(scope_type), scope_value,
+                 sizeof(scope_value)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_SCOPE_TAG_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_scope_tag_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_scope_tag_insert((int64_t)memory_id, scope_type, scope_value);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_scope_tag_insert_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         char ref_key[AIMEE_DB2_MEMORY_TEMPORAL_INSERT_REF_KEY_MAX + 1] = "";
+         char granularity[AIMEE_DB2_MEMORY_TEMPORAL_INSERT_GRANULARITY_MAX + 1] = "";
+         double ref_weight = 0.0;
+         if (aimee_db2_memory_temporal_insert_request_decode(request_body, request_len, &memory_id,
+                                                             ref_key, sizeof(ref_key), granularity,
+                                                             sizeof(granularity), &ref_weight) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_TEMPORAL_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_temporal_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_temporal_insert((int64_t)memory_id, ref_key, granularity, ref_weight);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_temporal_insert_reply_encode(acknowledged, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t memory_id = 0u;
+         char unit_key[AIMEE_DB2_MEMORY_EPISODE_CARD_INSERT_UNIT_KEY_MAX + 1] = "";
+         char unit_text[AIMEE_DB2_MEMORY_EPISODE_CARD_INSERT_UNIT_TEXT_MAX + 1] = "";
+         if (aimee_db2_memory_episode_card_insert_request_decode(
+                 request_body, request_len, &memory_id, unit_key, sizeof(unit_key), unit_text,
+                 sizeof(unit_text)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_EPISODE_CARD_INSERT_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_episode_card_insert)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_episode_card_insert((int64_t)memory_id, unit_key, unit_text);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_episode_card_insert_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t merged_into_id = 0u;
+         char session_id[AIMEE_DB2_MEMORY_MARK_MERGED_INTO_SESSION_ID_MAX + 1] = "";
+         double max_confidence = 0.0;
+         if (aimee_db2_memory_mark_merged_into_request_decode(
+                 request_body, request_len, &merged_into_id, session_id, sizeof(session_id),
+                 &max_confidence) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_MARK_MERGED_INTO_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_mark_merged_into)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_mark_merged_into((int64_t)merged_into_id, session_id, max_confidence);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_mark_merged_into_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char scan_timestamp[AIMEE_DB2_MEMORY_RETRO_SCAN_MARKER_SCAN_TIMESTAMP_MAX + 1] = "";
+         if (aimee_db2_memory_retro_scan_marker_request_decode(
+                 request_body, request_len, scan_timestamp, sizeof(scan_timestamp)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_MEMORY_RETRO_SCAN_MARKER_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->memory_retro_scan_marker)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            backend->memory_retro_scan_marker(scan_timestamp);
+            /* The backend returns void, so this says the call was made. */
+            acknowledged = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_memory_retro_scan_marker_reply_encode(
+                    acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
             return AIMEE_MODULE_STATUS_OK;
          }
       }

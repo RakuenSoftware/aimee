@@ -841,6 +841,38 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        aimee_db2_lifecycle_unresolved_contradictions_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_memory_alias_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *alias_text, double alias_weight, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_entity_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *entity_name, const char *entity_role, double entity_weight, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_coref_audit_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *session_id, const char *coref_outcome, const char *entity_name, const char *coref_mode, double coref_confidence, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_scope_tag_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *scope_type, const char *scope_value, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_temporal_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *ref_key, const char *granularity, double ref_weight, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_episode_card_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *unit_key, const char *unit_text, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_mark_merged_into_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t merged_into_id, const char *session_id, double max_confidence, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_memory_retro_scan_marker_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *scan_timestamp, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_entity_observation_count_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *entity_id, uint32_t *count, aimee_module_cancelled_fn cancelled,

@@ -3934,6 +3934,69 @@ int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
    return -1;
 }
 
+void db2_memory_alias_insert(int64_t memory_id, const char *alias, double weight)
+{
+   (void)memory_id;
+   (void)alias;
+   (void)weight;
+}
+
+void db2_memory_entity_insert(int64_t memory_id, const char *entity, const char *role,
+                              double weight)
+{
+   (void)memory_id;
+   (void)entity;
+   (void)role;
+   (void)weight;
+}
+
+void db2_memory_coref_audit_insert(int64_t memory_id, const char *session_id, const char *outcome,
+                                   const char *entity, const char *mode, double confidence)
+{
+   (void)memory_id;
+   (void)session_id;
+   (void)outcome;
+   (void)entity;
+   (void)mode;
+   (void)confidence;
+}
+
+void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, const char *scope_value)
+{
+   (void)memory_id;
+   (void)scope_type;
+   (void)scope_value;
+}
+
+void db2_memory_temporal_insert(int64_t memory_id, const char *ref_key, const char *granularity,
+                                double weight)
+{
+   (void)memory_id;
+   (void)ref_key;
+   (void)granularity;
+   (void)weight;
+}
+
+void db2_memory_unit_episode_card_insert(int64_t memory_id, const char *unit_key,
+                                         const char *unit_text)
+{
+   (void)memory_id;
+   (void)unit_key;
+   (void)unit_text;
+}
+
+void db2_memory_mark_merged_into(int64_t merged_into, const char *session_id, double max_confidence)
+{
+   (void)merged_into;
+   (void)session_id;
+   (void)max_confidence;
+}
+
+void db2_memory_record_retro_scan_marker(const char *ts)
+{
+   (void)ts;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

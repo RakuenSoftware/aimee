@@ -3196,6 +3196,14 @@
       "reason": "The typed memory.aggregate operation replaces the aggregation read. Three statements hide behind it, chosen by which argument is set: an entity seed wins outright, the keyword is consulted only when the seed is empty, and neither selects every kind but scratch. That precedence is invisible to a caller sending both. It over-fetches by one row to learn whether it truncated and reports that separately, because a full list and a truncated one look the same. Identifiers cross; it is unscoped."
     },
     {
+      "symbol": "db2_memory_alias_insert",
+      "signature_sha256": "6b6f4347992a122fa250d71a7c1917641dc70768812749801480683db002682a",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.alias_insert operation records another name for a memory. The backend returns void, so the acknowledgement says the call was made and can never say the row landed. Nothing deduplicates the alias, so the same name recorded twice is two rows and a reader counting aliases counts calls. The weight is stored as sent and nothing bounds it."
+    },
+    {
       "symbol": "db2_memory_aliases_delete_for_memory",
       "signature_sha256": "227c42b68e1cc57ee503bd21761cc6c7f434c2827e20214557c4a6bf33cbbdd4",
       "disposition": "private-db2",
@@ -3340,6 +3348,14 @@
       "reason": "Contradiction audit insertion is private evidence written by complete conflict record and resolve operations; a standalone best-effort wire mutation could diverge from the conflict row it documents."
     },
     {
+      "symbol": "db2_memory_coref_audit_insert",
+      "signature_sha256": "761257e3f8c89e1cf9ddbc11af087603e9fe923e9ce8eb095b5030050d305697",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.coref_audit_insert operation records how a coreference was resolved. It is an audit row whose write cannot be confirmed: the backend returns void, so the acknowledgement says the call was made. An audit trail that cannot report its own failure is the one place that matters most, and this one shares the shape with every other void writer here rather than being singled out."
+    },
+    {
       "symbol": "db2_memory_count",
       "signature_sha256": "9ba16dc645d42d96744285c4ebf5a81ba93d16af8c77d60c1f03d9109d358b19",
       "disposition": "wire-operation",
@@ -3442,6 +3458,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.entities_list operation lists the entities a memory mentions, heaviest first. The weight is returned, so a caller can see where it was cut off -- unlike most lists here, truncation is legible. Its callers ask for sixteen, which the reply carries many times over, so the cut is the caller's array rather than the wire."
+    },
+    {
+      "symbol": "db2_memory_entity_insert",
+      "signature_sha256": "2255e7c2cc997aefd1b495955510e589dfe4010f857e9afa213727b3a6967dc5",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.entity_insert operation records that a memory mentions an entity in a role. The backend returns void, so the acknowledgement cannot say the row landed. The same entity in the same role recorded twice is two rows, which memory.entities_list then returns as two -- so a caller ranking by weight sees the same entity twice at the same weight rather than once."
     },
     {
       "symbol": "db2_memory_episode_insert",
@@ -4044,6 +4068,14 @@
       "reason": "Private lookup inside the episode-relation rebuild: the value is read only to feed the rows that same rebuild is about to write, and is never returned to a caller. Exposing it would publish an intermediate of a composite operation as though it were an answer in its own right."
     },
     {
+      "symbol": "db2_memory_mark_merged_into",
+      "signature_sha256": "6159089d164c5611c4768b8252fe40190302e0bdd24c577ed96d714959b23344",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.mark_merged_into operation points a session's low-confidence memories at the one that replaced them. It is a bulk write with no list of what it touched: the rows are chosen by session and confidence inside the statement, and the backend returns void, so a caller learns neither how many were merged nor that any were. A confidence ceiling that matches nothing and one that matches everything are the same acknowledgement."
+    },
+    {
       "symbol": "db2_memory_negation_fts_search",
       "signature_sha256": "2801882c88b2d3a42e9ebb09bc7c198e4d60b032260e9a7e89e1c855354164f0",
       "disposition": "wire-operation",
@@ -4204,6 +4236,14 @@
       "reason": "The typed memory.prune_orphaned_l0 operation replaces the doctor-invoked retention delete for expired unlinked short-term rows; the tier and age window stay fixed policy behind the handler so no caller can widen the delete."
     },
     {
+      "symbol": "db2_memory_record_retro_scan_marker",
+      "signature_sha256": "5147e3b3b913d2382c2e6eb3ebf20badb744e6622a90870c20f6f1d498d5324c",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.retro_scan_marker operation records that the retroactive contradiction scan ran. It writes the row memory.last_retro_scan finds by matching a free-text column against one particular word, so the two are joined by a convention rather than a column -- and this is the writer that has to keep it. The stamp is the caller's, not DB2's, so a caller with a wrong clock records a scan that appears to have run at the wrong time."
+    },
+    {
       "symbol": "db2_memory_reject",
       "signature_sha256": "4212a62121c6fb6a2e5f552e73565b21d2e5534bade93821ce4c4a5e09d208b9",
       "disposition": "wire-operation",
@@ -4322,6 +4362,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
+    },
+    {
+      "symbol": "db2_memory_scope_tag_insert",
+      "signature_sha256": "5fbb55ca3c39d6df9fa92c67aea664bf45f2850b26a7a729d68e55056e36b071",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.scope_tag_insert operation tags a memory with a scope. Its statement does nothing on conflict, so tagging twice is a no-op rather than a duplicate -- which is right, and also invisible: the backend returns void, so a repeat and a first write are the same acknowledgement. The scope type is free text, and memory.scopes_list orders by a fixed preference over those types, so a type outside that list sorts last."
     },
     {
       "symbol": "db2_memory_scopes_list",
@@ -4468,6 +4516,14 @@
       "reason": "Private second half of memory_refresh_summaries: the derived rows cleared by the matching *_delete_for_memory call are recomputed and reinserted here. The delete and the reinserts are one rebuild, so exposing either half would let a caller run half of it and would split the rebuild across the process boundary. The composite refresh is the operation that migrates."
     },
     {
+      "symbol": "db2_memory_temporal_insert",
+      "signature_sha256": "1581a0553af150dc1c380bec8d90dde3e3e6e0ccce7dce272ff832e1dfcb2500",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.temporal_insert operation records a time reference a memory carries. The granularity is free text that nothing checks, and memory.temporal_refs_list returns it as stored -- so what a reference means is the writer's word at both ends. The backend returns void, so the acknowledgement cannot say the row landed, and nothing deduplicates, so the same reference twice is two rows."
+    },
+    {
       "symbol": "db2_memory_temporal_refs_delete_for_memory",
       "signature_sha256": "b10603b3b6e7ce0d2139627d5d7ae50a317f3650ac0fa5863479f19ef3d7c329",
       "disposition": "private-db2",
@@ -4530,6 +4586,14 @@
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "Private first half of memory_refresh_units_graph: the derived rows are cleared and then immediately recomputed and reinserted. Exposing the delete on its own would offer a capability no caller wants and would split the rebuild across the process boundary, so a failure between the delete and the reinserts would leave the memory stripped of its derived rows. The composite refresh is the operation that migrates; this half never runs alone."
+    },
+    {
+      "symbol": "db2_memory_unit_episode_card_insert",
+      "signature_sha256": "bd41cd8de1440abadd373dc99ba1fe48954904b925acecf6ab297ac746d53398",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.episode_card_insert operation records an episode card for a memory. The backend returns void, so the acknowledgement says the call was made. Nothing deduplicates the key, so the same card written twice is two rows, and memory.unit_first_episode_card_id -- which takes the first -- then depends on which of the two the database returns first."
     },
     {
       "symbol": "db2_memory_unit_insert",
