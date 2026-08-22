@@ -275,13 +275,32 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
  * re-deriving anything: only the constructors in kb_identity.h set
  * authenticated = 1, and a zero-initialized principal is unauthenticated.
  *
- * Every authenticated kind counts, and the list is deliberately not filtered by
- * how the caller reached us:
+ * An account NAMES SOMEONE, and that is what separates the four kinds:
  *
  *   OIDC   an issuer-scoped subject -- the same account whatever carried it
  *   HOST   a local host account PAM accepted
  *   CERT   a verified mTLS peer, which names one enrolled machine
- *   OWNER  the single-org owner, for a deployment running without an IdP
+ *   OWNER  a SHARED install credential, which names nobody in particular
+ *
+ * The first three identify a principal, so no transport qualifier applies to
+ * them: an OIDC subject is the same person over any socket, and a client cert
+ * names one enrolled machine.
+ *
+ * OWNER is different in kind, not merely weaker. It is one bearer for the whole
+ * install, so it cannot say WHICH person is acting; loopback is what makes it
+ * stand for "the operator at this machine" rather than "whoever holds the
+ * token". Dropping that qualifier was measured, from a genuinely non-loopback
+ * peer, and it let a remote holder of the bearer destroy a user-stated Class-A
+ * fact:
+ *
+ *     alice before: A current
+ *     remote peer, authority=user -> {"status":"ok","retracted":1}
+ *     alice after:  A gone
+ *
+ * That is a real widening of what a leaked bearer can do, and it is not what
+ * the account model argues for -- the model says the ACCOUNT decides, and a
+ * shared credential is precisely the case where there is no account to decide
+ * with. The qualifier is kept for OWNER alone.
  *
  * CERT was previously excluded, mirroring a matching exclusion of
  * ATTEST_MTLS_CLIENT on the server, and the two together were the bug: a client
@@ -294,6 +313,10 @@ static fact_authority_t kb_memory_request_authority(void)
    const kb_principal_t *actor = kb_reqctx_actor(); /* NULL unless authenticated */
    if (!actor || !actor->authenticated || actor->kind == KB_PRIN_NONE)
       return FACT_AUTHORITY_MODEL;
+   /* A shared install bearer only stands for a person at the machine it is
+    * installed on. Every other kind names one. */
+   if (actor->kind == KB_PRIN_OWNER)
+      return kb_login_throttle_peer_is_loopback() ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
    return FACT_AUTHORITY_USER;
 }
 

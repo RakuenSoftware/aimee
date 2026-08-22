@@ -1204,3 +1204,70 @@ attached:
 
 The skip is the TLS ramp-failure branch, which cannot be staged on this box.
 Everything else is exercised against running daemons.
+
+## The widening, measured and then closed
+
+The account correction removed the loopback qualifier from the kb's owner case,
+and that was recorded at the time as "one behavioural widening, stated plainly".
+Stating it was not enough. Measured from a peer that is genuinely not the
+container:
+
+    alice before: A current
+    remote peer, owner bearer, authority=user -> {"status":"ok","retracted":1}
+    alice after:  A gone
+
+A remote holder of the install bearer could destroy a user-stated Class-A fact.
+An earlier run of the same probe answered `retracted: 0` and looked reassuring;
+it was vacuous, because alice was not there. The probe now seeds first and
+carries a loopback control, so neither outcome can be read off an empty table.
+
+The qualifier is back for `KB_PRIN_OWNER` alone, and the reason is a distinction
+the account model makes rather than an exception to it. An account NAMES someone:
+
+    OIDC   an issuer-scoped subject -- the same person over any socket
+    HOST   a local host account PAM accepted
+    CERT   a verified peer, naming one enrolled machine
+    OWNER  a SHARED install credential, naming nobody in particular
+
+The first three identify a principal, so no transport qualifier applies. OWNER
+is one bearer for the whole install and cannot say WHICH person is acting;
+loopback is what makes it stand for "the operator at this machine" rather than
+"whoever holds the token". A shared credential is precisely the case where there
+is no account to decide with.
+
+    remote peer  -> retracted 0, alice A current
+    loopback     -> retracted 1, alice A gone
+
+This also honours the decision recorded earlier in the work, which was
+specifically "owner bearer ON LOOPBACK counts".
+
+## Four probes that existed and were not being run
+
+`run-suite.sh` reported 13 pass while four probes in the same directory were not
+in it at all:
+
+    test-retrieve-live       RETRIEVE, by cycling the kb-side module
+    test-rerank-live         RERANK, by cycling the envelope
+    test-chat-memory-stages  a real chat turn carrying the envelope
+    test-retract-remote      the non-loopback owner bearer
+
+A green summary that silently omits probes is the same failure as a probe that
+passes without running its stage, one level up. The first three are now in the
+runner, and SKIP rather than fail when the capture proxy is not up, since a
+missing provider is a staging fact rather than a defect.
+
+`test-retract-remote` is deliberately NOT in the runner: it must run from a peer
+that is not the container, and running it from inside would make every call
+loopback and prove the opposite of what it asks. The host invokes it.
+
+With the provider and proxy up:
+
+    pass 16   fail 0   skip 1
+
+RERANK is worth one note. Without the capture proxy it reports NO-CAPTURE for all
+three legs while still showing the warning delta, so the stage is exercised but
+the envelope cannot be observed. With the proxy:
+
+    module RUNNING    envelope PRESENT
+    module STOPPED    envelope ABSENT + 1 "rerank confidence unavailable"
+    module RESTARTED  envelope PRESENT

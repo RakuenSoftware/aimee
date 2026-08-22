@@ -115,6 +115,27 @@ bash /root/set-mtls-mode.sh off >/dev/null 2>&1
 bring_up_server
 seed; run "account over TCP"           bash /root/test-account-tcp-authority.sh "$BEARER"
 
+hdr "live model stages (needs the chat provider and capture proxy)"
+# These were NOT in this runner for its first several passes, and their absence
+# is exactly the kind of thing a "13 pass" summary hides: four probes existed and
+# none of them ran. They need the server's chat provider pointed at the capture
+# proxy, so they SKIP rather than fail when that is not up -- a missing provider
+# is a staging fact, not a defect in the code under test.
+if curl -s -m 8 -o /dev/null http://127.0.0.1:8798/v1/models 2>/dev/null; then
+  run "RETRIEVE via module cycling" bash /root/test-retrieve-live.sh
+  run "RERANK via envelope cycling" bash /root/test-rerank-live.sh
+  run "chat turn carries the envelope" bash /root/test-chat-memory-stages.sh
+else
+  skip=$((skip + 3))
+  echo "  live model stages                  SKIP"
+  echo "      SKIP: the capture proxy is not answering on :8798. Run slp.sh"
+  echo "            (which also repoints the provider) to exercise these."
+fi
+
+# test-retract-remote.sh is deliberately NOT here: it must run from a peer that
+# is not this container, so the host invokes it. Running it from inside would
+# make every call loopback and prove the opposite of what it asks.
+
 hdr "read surfaces"
 run "entity profile / schema list" bash /root/test-graph-surfaces.sh
 run "grant administration path"    bash /root/test-grant-admin.sh
