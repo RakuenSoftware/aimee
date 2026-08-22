@@ -30,6 +30,15 @@ type Store interface {
 	// affected -- which is the difference between a write that changed
 	// something and one that matched nothing.
 	Exec(ctx context.Context, sql string, args ...any) (int64, error)
+	// InTx runs fn inside a transaction, committing when it returns nil and
+	// rolling back otherwise.
+	//
+	// fn receives a Store bound to the transaction, so an operation issues the
+	// same three calls whether or not it is in one. An operation that needs a
+	// transaction is one whose halves must not be separately visible -- a
+	// supersede and the insert that replaces it, say -- and this is the only way
+	// to get one: nothing hands out a connection to manage by hand.
+	InTx(ctx context.Context, fn func(Store) error) error
 }
 
 // PoolStore is the production Store: one pgx pool over AIMEE_DB2_URL.
@@ -51,6 +60,55 @@ func (s *PoolStore) Exec(ctx context.Context, sql string, args ...any) (int64, e
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// InTx opens a transaction and runs fn against it.
+//
+// A rollback failure is deliberately not reported over fn's own error: fn
+// already said what went wrong, and replacing that with "the rollback also
+// failed" would lose the reason. The connection is returned to the pool either
+// way, which is what a failed rollback would otherwise leak.
+func (s *PoolStore) InTx(ctx context.Context, fn func(Store) error) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	if err := fn(&txStore{tx: tx}); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// txStore is a Store bound to one transaction.
+type txStore struct {
+	tx pgx.Tx
+}
+
+func (s *txStore) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return s.tx.Query(ctx, sql, args...)
+}
+
+func (s *txStore) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.tx.QueryRow(ctx, sql, args...)
+}
+
+func (s *txStore) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	tag, err := s.tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// InTx inside a transaction is a programming error rather than a nested one.
+//
+// pgx would give a savepoint, which has different semantics: an inner rollback
+// would leave the outer transaction alive and the operation half-applied. An
+// operation that thinks it opened a transaction and got a savepoint is the kind
+// of thing that works in testing and loses a write in production.
+func (s *txStore) InTx(ctx context.Context, fn func(Store) error) error {
+	return errors.New("db2: InTx inside a transaction")
 }
 
 // Close releases the pool. Safe on a nil store so a caller need not branch.

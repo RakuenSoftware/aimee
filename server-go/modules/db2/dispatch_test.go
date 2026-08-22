@@ -14,17 +14,31 @@ import (
 // fakeStore answers from a script rather than a database, so the dispatcher and
 // an operation's row handling can be tested without one.
 type fakeStore struct {
-	rows      *fakeRows
-	row       *fakeRow
-	queryErr  error
-	execErr   error
-	lastSQL   string
-	lastArgs  []any
-	execCalls int
+	rows     *fakeRows
+	row      *fakeRow
+	rowQueue []*fakeRow
+	queryErr error
+	execErr  error
+	lastSQL  string
+	lastArgs []any
+	// Every statement in order. An operation that issues more than one -- a
+	// write and the read-back of what it wrote -- needs the first inspected,
+	// and lastSQL by then holds the last.
+	sqlLog     []string
+	argsLog    [][]any
+	execCalls  int
+	execRows   int64
+	execRowsAt bool
+	txCalls    int
+	txBeginErr error
+	committed  bool
+	rolledBack bool
 }
 
 func (s *fakeStore) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	s.lastSQL, s.lastArgs = sql, args
+	s.sqlLog = append(s.sqlLog, sql)
+	s.argsLog = append(s.argsLog, args)
 	if s.queryErr != nil {
 		return nil, s.queryErr
 	}
@@ -33,6 +47,16 @@ func (s *fakeStore) Query(ctx context.Context, sql string, args ...any) (pgx.Row
 
 func (s *fakeStore) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	s.lastSQL, s.lastArgs = sql, args
+	s.sqlLog = append(s.sqlLog, sql)
+	s.argsLog = append(s.argsLog, args)
+	// A queue when an operation issues several single-row statements in order --
+	// an insert and then the read-back of what it wrote, which scan different
+	// widths and cannot share one scripted row.
+	if len(s.rowQueue) > 0 {
+		next := s.rowQueue[0]
+		s.rowQueue = s.rowQueue[1:]
+		return next
+	}
 	if s.row == nil {
 		return &fakeRow{err: pgx.ErrNoRows}
 	}
@@ -41,11 +65,36 @@ func (s *fakeStore) QueryRow(ctx context.Context, sql string, args ...any) pgx.R
 
 func (s *fakeStore) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
 	s.lastSQL, s.lastArgs = sql, args
+	s.sqlLog = append(s.sqlLog, sql)
+	s.argsLog = append(s.argsLog, args)
 	s.execCalls++
 	if s.execErr != nil {
 		return 0, s.execErr
 	}
+	// One row affected unless a test says otherwise. execRowsAt distinguishes
+	// "the test wants zero" from "the test said nothing", which matters because
+	// zero is the interesting answer for a statement that matched nothing.
+	if s.execRowsAt {
+		return s.execRows, nil
+	}
 	return 1, nil
+}
+
+// InTx runs fn against this same fake, so a transactional operation is
+// exercised without one. The commit is recorded rather than performed: what a
+// test can check is that the operation asked for a transaction and whether it
+// returned an error inside it, which is what decides commit from rollback.
+func (s *fakeStore) InTx(ctx context.Context, fn func(Store) error) error {
+	s.txCalls++
+	if s.txBeginErr != nil {
+		return s.txBeginErr
+	}
+	if err := fn(s); err != nil {
+		s.rolledBack = true
+		return err
+	}
+	s.committed = true
+	return nil
 }
 
 // fakeRow is one scripted row, or the absence of one.
@@ -73,6 +122,10 @@ func (r *fakeRow) Scan(dest ...any) error {
 			*typed = r.values[index].(float64)
 		case *bool:
 			*typed = r.values[index].(bool)
+		case **int64:
+			*typed, _ = r.values[index].(*int64)
+		case **string:
+			*typed, _ = r.values[index].(*string)
 		default:
 			return errors.New("unexpected scan type")
 		}
@@ -113,6 +166,10 @@ func (r *fakeRows) Scan(dest ...any) error {
 			*typed = row[index].(float64)
 		case *bool:
 			*typed = row[index].(bool)
+		case **int64:
+			*typed, _ = row[index].(*int64)
+		case **string:
+			*typed, _ = row[index].(*string)
 		default:
 			return errors.New("unexpected scan type")
 		}
