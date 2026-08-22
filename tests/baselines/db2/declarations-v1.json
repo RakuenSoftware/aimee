@@ -6694,9 +6694,15 @@
           "line": 130
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.curator_invalidations_since operation reads what has invalidated curated artifacts since a caller last looked. It is a cursor read -- strictly greater than the identifier given, oldest first -- so a caller stores the last identifier it saw and never sees a row twice. That also means a caller that loses its cursor cannot recover the ones it missed except by starting from zero, and a backend failure arrives as an empty page, which looks exactly like being caught up."
+      },
       "signature": "int db2_curator_invalidations_since ( int64_t since_id , db2_curator_invalidation_t * out , int max )",
       "signature_sha256": "9a1f1655b580365379dce9aedae7b54d27522bfebddb02c0a06f4d8a41d713c4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_curator_invalidations_since"
     },
     {
@@ -8051,9 +8057,15 @@
           "line": 40
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "custody",
+        "reason": "The typed custody.enrollment_list operation lists enrolled certificates, newest first. Revoked rows are listed alongside live ones with their revocation stamp, because the question an operator asks is which certificates this install has seen and an answer omitting the revoked ones invites re-enrolling something deliberately withdrawn. The backend's -1 arrives as a count of zero, so a failed read is indistinguishable from a fresh install."
+      },
       "signature": "int db2_enrollment_list ( int limit , db2_enrollment_row_t * out , int max )",
       "signature_sha256": "9e6f94db2d89dc1a460976a5185f402b0760af39dd057e3998fee2bdeb5c4bfa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_enrollment_list"
     },
     {
@@ -8288,9 +8300,15 @@
           "line": 113
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_edge_co_targets operation names what a node shares a relation with, following the edge in both directions -- so a node that is the source of one edge and the target of another appears once in a single answer. Semantic edges are excluded: they are inferred rather than observed, and mixing them in would let a guess look like a recorded fact. The weight is a floor and not a rank, so which sixteen come back when more qualify is unstated."
+      },
       "signature": "int db2_entity_edge_co_targets ( const char * node , const char * relation , int min_weight , char ( * out ) [ 128 ] , int max )",
       "signature_sha256": "a9ffbeb453a797d8bf3d3555f50e1f6cf41f6af7e54f9ba2029afc02b870a08c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_edge_co_targets"
     },
     {
@@ -8758,9 +8776,15 @@
           "line": 36
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "index",
+        "reason": "The typed index.entity_list_active operation lists entities observed in at least so many distinct memories. Distinct is the point: an entity named ten times in one memory has been observed once, so the threshold measures spread rather than repetition. The names are lowercased by the grouping, so what comes back is the key the group was formed on and not any spelling that was written -- a caller displaying these is showing the index's word, not the author's."
+      },
       "signature": "int db2_entity_list_active ( int min_obs , char ( * names_out ) [ 128 ] , int * obs_out , int max )",
       "signature_sha256": "61af738c3c8c4a09768d35465f4f25bb9c4b237e8a92e2ea9666ed313855fa32",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_entity_list_active"
     },
     {
@@ -24133,15 +24157,9 @@
           "line": 67
         }
       ],
-      "review": {
-        "db3_placement": "retained-db2",
-        "disposition": "wire-operation",
-        "family": "organization",
-        "reason": "The typed organization.telemetry_allow operation sets which metrics of a schema may be ingested. Postgres enforces the admin gate inside the definer, which raises, so this boundary learns it was refused by reading the message text -- and the wire keeps that apart from any other failure, because one is an answer and the other is an outage. The metric names cross as the Postgres array literal, so their syntax is checked by the database and not here."
-      },
       "signature": "int db2_telemetry_allow ( const char * event_schema , const char * metric_names_array , int enabled )",
       "signature_sha256": "86b6ac3be19aa0234cfe851ad10b921d1b692151c65cec79bbf65a8b8cd74eab",
-      "status": "reviewed",
+      "status": "audit-pending",
       "symbol": "db2_telemetry_allow"
     },
     {
@@ -26452,15 +26470,9 @@
           "line": 82
         }
       ],
-      "review": {
-        "db3_placement": "retained-db2",
-        "disposition": "wire-operation",
-        "family": "organization",
-        "reason": "The typed organization.write_tier_grant_lookup operation resolves what a subject may write. It is the fail-closed gate, so its three outcomes must stay apart on the wire: granted, not granted, and could-not-tell. Folding a failure into not-granted would record an outage as a policy decision, and folding it into tier zero would make it read as granted-off, which is a real permission. The tier crosses as its ordinal, so both ends now depend on kb_identity_tier_t keeping its order."
-      },
       "signature": "int db2_write_tier_grant_lookup ( const char * server_id , int64_t team_id , const char * subject , kb_identity_tier_t * out )",
       "signature_sha256": "6a6c7c86814b03107c2df5cbb2e9d5c91c3eb95759487a710ada64cf656860f3",
-      "status": "reviewed",
+      "status": "audit-pending",
       "symbol": "db2_write_tier_grant_lookup"
     },
     {
@@ -26509,15 +26521,9 @@
           "line": 99
         }
       ],
-      "review": {
-        "db3_placement": "retained-db2",
-        "disposition": "wire-operation",
-        "family": "organization",
-        "reason": "The typed organization.write_tier_grant_set_reporting operation grants a write tier and reports what it replaced, both under one lock -- a separate read then write would let two commands interleave and report a tier that was already gone. had_previous is carried apart from previous_tier because tier zero is a real tier, so absence cannot be a sentinel. The subject not being a team member is reported and not refused: grants and memberships are provisioned in either order."
-      },
       "signature": "int db2_write_tier_grant_set_reporting ( const char * server_id , int64_t team_id , const char * subject , kb_identity_tier_t tier , const char * granted_by , db2_write_tier_grant_report_t * out )",
       "signature_sha256": "1c08d87cc35f96eeb3eb2111d4f90437d3ae369a6474024a46b30ca4bfe8936d",
-      "status": "reviewed",
+      "status": "audit-pending",
       "symbol": "db2_write_tier_grant_set_reporting"
     },
     {
@@ -28525,15 +28531,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "82f7e548a0950c44ca7649d2a86ec37d7af66ff1ebabdd7999f65fc8a838864f",
+  "fingerprint": "733eae2f8323aa3f69d5036105addc7ad591d1aca0fc53c88ff8e0af126eab37",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 212,
+    "audit_pending": 211,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 747
+    "reviewed": 748
   }
 }

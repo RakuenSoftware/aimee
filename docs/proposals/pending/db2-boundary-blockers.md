@@ -115,11 +115,11 @@ or a confined export that takes a name rather than a path and decides the
 directory itself, which changes the service API. Both are decisions for whoever
 owns the KB service.
 
-## Sixty-six declarations read and write under a tenant scope the request has no way to carry
+## Seventy declarations read and write under a tenant scope the request has no way to carry
 
 This is the largest single item here, and it is a shape rather than a symbol.
-Seventy DB2 functions sit behind `db2_tenant_require_pg()` or the tenant scope;
-four are already `private-db2` and the other sixty-six are unreviewed.
+70 pending DB2 functions depend on a session principal that nothing in a
+request carries.
 
 The tables they touch are protected by row-level security keyed on a session
 setting. `kb_team_membership` is the clearest case -- RLS enabled and FORCEd,
@@ -151,6 +151,55 @@ and looks correct; a production role would return nothing. A test environment
 that is more permissive than production is the one arrangement that cannot
 catch this.
 
+### Three were published anyway, and the replay agreed with them
+
+That paragraph was written before it happened and did not prevent it.
+`organization.write_tier_grant_lookup`, `write_tier_grant_set_reporting` and
+`telemetry_allow` were published, gated, and withdrawn one batch later.
+
+The scan that was supposed to keep them out matched `int __g = db2_tenant` as
+the literal first statement of a function body. Two shapes walked past it:
+`db2_telemetry_allow` opens `int g = db2_tenant_require_pg();` under a different
+variable name, and `db2_write_tier_grant_lookup` checks its out-pointer before
+reaching its guard. Neither is unusual. A pattern that has to be told the
+variable name and the statement number is not a scan, and treating its silence
+as evidence is what published them.
+
+The replay agreed. `write_tier_grant_lookup` answered "no live grant", which is
+what the assertion expected of an empty database and also exactly what a
+missing principal produces; the two are the same three zeroes.
+`set_reporting` acknowledged nothing and that read as "there was nothing to
+report". `telemetry_allow` succeeded outright, because the definer's admin gate
+consults `kb_principal_is_admin()` and the replay connects as the database
+owner. A superuser cannot fail an authorization check, so a replay run by one
+cannot test that the check works.
+
+The first of the three is the one that matters. It is the fail-closed gate for
+per-user remote writes, and its published form would have answered "not
+granted" for every subject in the module process while looking healthy -- an
+outage recorded as a policy decision, which is the exact failure its own reason
+said the wire had to prevent.
+
+### What the corrected scan looks for
+
+Three shapes, followed to a fixed point across the module rather than matched
+in one body:
+
+* the C guard, `db2_tenant_require_pg()` or `db2_tenant_scope_begin()`, under
+  any variable name and at any position;
+* a SECURITY DEFINER function in `schema.sql` that reads
+  `current_setting('aimee.principal')` -- the C calling it looks like an
+  ordinary prepared statement, and the refusal exists only in the database;
+* a plain statement against a table whose row policy reads the principal, which
+  is the shape that caught `write_tier_grant_lookup` and names nothing unusual
+  at all.
+
+80 definers and policy-guarded tables name the principal between them.
+One published operation still matches: `db2_dim_change_reset` reaches
+`db2_maintenance_scope_begin`, and that is a false positive worth stating --
+it opens a maintenance context from a worker and a project it supplies itself,
+not from a caller's identity, so it needs no principal from the request.
+
 Two ways out, and neither belongs to a migration working one symbol at a time.
 The envelope could carry an authenticated principal and team, which the module
 sets on its connection for the life of the request -- a wire-format change, and
@@ -160,8 +209,9 @@ becomes one composite operation that opens the scope, does the work and
 commits, which means enumerating those units rather than the functions they
 call.
 
-Until one of those exists the sixty-six stay unreviewed, and the count is worth
-watching: it is roughly one in seven of what is left.
+Until one of those exists the 70 stay unreviewed, and the count is worth
+watching: it is roughly one in three of what is left, not one in seven as the
+undercounting scan suggested.
 
 ## Thirty-three declarations run whatever the host process installed into them
 
@@ -679,11 +729,14 @@ checked against, which is what the per-field cap had been standing in for.
 
 ## Three list reads have an outcome no row list can carry
 
-`db2_write_tier_grant_lookup` crossed the boundary in this batch carrying three
-outcomes apart: granted, not granted, and could-not-tell. It could, because its
-reply is a field list, and a field list can say anything the schema declares.
+`db2_write_tier_grant_lookup` was published carrying three outcomes apart:
+granted, not granted, and could-not-tell. It could, because its reply is a
+field list, and a field list can say anything the schema declares. It was then
+withdrawn for the tenancy reason above -- but the shape it demonstrated is the
+one this section is about, and it will need it again whenever tenancy is
+solved.
 
-Its sibling `db2_write_tier_grant_list_ex` cannot. A row reply carries rows and
+Its sibling `db2_write_tier_grant_list_ex` cannot have it. A row reply carries rows and
 a count, and nothing else -- the schema check that reads one refuses any other
 key beside it. The backend returns 0, or a negative tenancy refusal, or -1 for
 an outage or a row whose tier string the mapping does not recognize; every one

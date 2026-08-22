@@ -4106,39 +4106,6 @@ int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
    return -1;
 }
 
-int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
-                                kb_identity_tier_t *out)
-{
-   (void)server_id;
-   (void)team_id;
-   (void)subject;
-   if (out)
-      *out = KB_IDENTITY_TIER_OFF;
-   return -1;
-}
-
-int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, const char *subject,
-                                       kb_identity_tier_t tier, const char *granted_by,
-                                       db2_write_tier_grant_report_t *out)
-{
-   (void)server_id;
-   (void)team_id;
-   (void)subject;
-   (void)tier;
-   (void)granted_by;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-int db2_telemetry_allow(const char *event_schema, const char *metric_names_array, int enabled)
-{
-   (void)event_schema;
-   (void)metric_names_array;
-   (void)enabled;
-   return -1;
-}
-
 void db2_vector_index_op_record(int64_t point_id, const char *collection, int64_t memory_id, int ok,
                                 const char *error_msg)
 {
@@ -4239,6 +4206,42 @@ int db2_directive_insert_ignore(const char *question, const char *topic, const c
    if (out_existed)
       *out_existed = 0;
    return -1;
+}
+
+int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max)
+{
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_list_active(int min_obs, char (*names_out)[128], int *obs_out, int max)
+{
+   (void)min_obs;
+   (void)names_out;
+   (void)obs_out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_edge_co_targets(const char *node, const char *relation, int min_weight,
+                               char (*out)[128], int max)
+{
+   (void)node;
+   (void)relation;
+   (void)min_weight;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_curator_invalidations_since(int64_t since_id, db2_curator_invalidation_t *out, int max)
+{
+   (void)since_id;
+   (void)out;
+   (void)max;
+   return 0;
 }
 
 int db2_anti_pattern_exists_exact(const char *pattern)

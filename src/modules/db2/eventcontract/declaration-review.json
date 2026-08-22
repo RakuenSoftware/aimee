@@ -916,6 +916,14 @@
       "reason": "The typed learning.curator_invalidate_doc operation stales the artifacts citing a document. It reads at most 1024 of the document's chunks and stops, so a larger document leaves the artifacts citing its later chunks valid and reports a count that looks complete. The invalidations run one chunk at a time with no transaction, so a partial run is reported as its partial count, and the invalidation event is written only when the count is above zero."
     },
     {
+      "symbol": "db2_curator_invalidations_since",
+      "signature_sha256": "9a1f1655b580365379dce9aedae7b54d27522bfebddb02c0a06f4d8a41d713c4",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.curator_invalidations_since operation reads what has invalidated curated artifacts since a caller last looked. It is a cursor read -- strictly greater than the identifier given, oldest first -- so a caller stores the last identifier it saw and never sees a row twice. That also means a caller that loses its cursor cannot recover the ones it missed except by starting from zero, and a backend failure arrives as an empty page, which looks exactly like being caught up."
+    },
+    {
       "symbol": "db2_curator_reembed_all",
       "signature_sha256": "c76883d0c1d8edb11e85298b827e8802ae045ec73150b7ca99598ca130123adb",
       "disposition": "wire-operation",
@@ -1244,6 +1252,14 @@
       "reason": "The typed custody.enrollment_active operation replaces the enrollment probe. A revoked enrollment reads as inactive, exactly like one that was never enrolled, so a caller cannot tell the two apart through this operation -- which matters because they mean different things to whoever is deciding what to do next."
     },
     {
+      "symbol": "db2_enrollment_list",
+      "signature_sha256": "9e6f94db2d89dc1a460976a5185f402b0760af39dd057e3998fee2bdeb5c4bfa",
+      "disposition": "wire-operation",
+      "family": "custody",
+      "db3_placement": "retained-db2",
+      "reason": "The typed custody.enrollment_list operation lists enrolled certificates, newest first. Revoked rows are listed alongside live ones with their revocation stamp, because the question an operator asks is which certificates this install has seen and an answer omitting the revoked ones invites re-enrolling something deliberately withdrawn. The backend's -1 arrives as a count of zero, so a failed read is indistinguishable from a fresh install."
+    },
+    {
       "symbol": "db2_enrollment_revoke",
       "signature_sha256": "dae6bf3f5a9888d074d90f63afcb535d86733c4e5562d1e2226fb447e65c7c8a",
       "disposition": "wire-operation",
@@ -1274,6 +1290,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_edge_bump_utility operation adjusts the utility of every edge touching an entity -- at either end, by the same amount, in one statement, with no bound on how many rows that is. Each result is clamped into the range the column keeps, so a delta past it moves an edge to the limit rather than being refused, and repeating the call stops changing anything once every edge is pinned. The reply says the statement ran and never how many edges moved."
+    },
+    {
+      "symbol": "db2_entity_edge_co_targets",
+      "signature_sha256": "a9ffbeb453a797d8bf3d3555f50e1f6cf41f6af7e54f9ba2029afc02b870a08c",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_edge_co_targets operation names what a node shares a relation with, following the edge in both directions -- so a node that is the source of one edge and the target of another appears once in a single answer. Semantic edges are excluded: they are inferred rather than observed, and mixing them in would let a guess look like a recorded fact. The weight is a floor and not a rank, so which sixteen come back when more qualify is unstated."
     },
     {
       "symbol": "db2_entity_edge_explain_by_entity",
@@ -1386,6 +1410,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "The typed index.entity_walk_step_typed operation returns the edges touching a node, heaviest first, at most fifty. The node may be either end, so the reply's source and target say which way each edge points rather than repeating the argument. An edge with no recorded relation identifier or endpoint kind reads back as the co-discussed relation and the other kind, so a default and a real value are indistinguishable in the reply."
+    },
+    {
+      "symbol": "db2_entity_list_active",
+      "signature_sha256": "61af738c3c8c4a09768d35465f4f25bb9c4b237e8a92e2ea9666ed313855fa32",
+      "disposition": "wire-operation",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The typed index.entity_list_active operation lists entities observed in at least so many distinct memories. Distinct is the point: an entity named ten times in one memory has been observed once, so the threshold measures spread rather than repetition. The names are lowercased by the grouping, so what comes back is the key the group was formed on and not any spelling that was written -- a caller displaying these is showing the index's word, not the author's."
     },
     {
       "symbol": "db2_entity_node_alias_upsert",
@@ -5268,14 +5300,6 @@
       "reason": "The typed organization.task_update_state operation replaces the task state write. Unlike the other state writes in this batch its backend distinguishes an update that matched no row from one that did, so the reply carries that rather than a bare acknowledgement -- a caller can tell that the task it named does not exist, which the others cannot."
     },
     {
-      "symbol": "db2_telemetry_allow",
-      "signature_sha256": "86b6ac3be19aa0234cfe851ad10b921d1b692151c65cec79bbf65a8b8cd74eab",
-      "disposition": "wire-operation",
-      "family": "organization",
-      "db3_placement": "retained-db2",
-      "reason": "The typed organization.telemetry_allow operation sets which metrics of a schema may be ingested. Postgres enforces the admin gate inside the definer, which raises, so this boundary learns it was refused by reading the message text -- and the wire keeps that apart from any other failure, because one is an answer and the other is an outage. The metric names cross as the Postgres array literal, so their syntax is checked by the database and not here."
-    },
-    {
       "symbol": "db2_tenant_scope_begin",
       "signature_sha256": "c1aed4cab1fc4d2813d1102f3cc7e77716752c5599de05af5592530a70775ef5",
       "disposition": "private-db2",
@@ -5418,22 +5442,6 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.workflow_pattern_insert operation records a workflow pattern. Nothing deduplicates the pattern text, so the same pattern learned twice becomes two rows. The confidence is stored as sent and nothing bounds it to a probability. The backend fills its output struct from the arguments rather than reading the row back, so a caller that trusted that struct was told what it sent -- which is why this operation answers with the identifier alone."
-    },
-    {
-      "symbol": "db2_write_tier_grant_lookup",
-      "signature_sha256": "6a6c7c86814b03107c2df5cbb2e9d5c91c3eb95759487a710ada64cf656860f3",
-      "disposition": "wire-operation",
-      "family": "organization",
-      "db3_placement": "retained-db2",
-      "reason": "The typed organization.write_tier_grant_lookup operation resolves what a subject may write. It is the fail-closed gate, so its three outcomes must stay apart on the wire: granted, not granted, and could-not-tell. Folding a failure into not-granted would record an outage as a policy decision, and folding it into tier zero would make it read as granted-off, which is a real permission. The tier crosses as its ordinal, so both ends now depend on kb_identity_tier_t keeping its order."
-    },
-    {
-      "symbol": "db2_write_tier_grant_set_reporting",
-      "signature_sha256": "1c08d87cc35f96eeb3eb2111d4f90437d3ae369a6474024a46b30ca4bfe8936d",
-      "disposition": "wire-operation",
-      "family": "organization",
-      "db3_placement": "retained-db2",
-      "reason": "The typed organization.write_tier_grant_set_reporting operation grants a write tier and reports what it replaced, both under one lock -- a separate read then write would let two commands interleave and report a tier that was already gone. had_previous is carried apart from previous_tier because tier zero is a real tier, so absence cannot be a sentinel. The subject not being a team member is reported and not refused: grants and memberships are provisioned in either order."
     },
     {
       "symbol": "kb_maintenance_config_defaults",

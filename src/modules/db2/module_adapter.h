@@ -666,13 +666,6 @@ typedef struct
                             const char *cert_serial_norm, const char *expires_at, int legacy,
                             int64_t *out_id);
    int (*enrollment_revoke)(int64_t id, db2_enrollment_row_t *out);
-   int (*write_tier_grant_lookup)(const char *server_id, int64_t team_id, const char *subject,
-                                  kb_identity_tier_t *out);
-   int (*write_tier_grant_set_reporting)(const char *server_id, int64_t team_id,
-                                         const char *subject, kb_identity_tier_t tier,
-                                         const char *granted_by,
-                                         db2_write_tier_grant_report_t *out);
-   int (*telemetry_allow)(const char *event_schema, const char *metric_names_array, int enabled);
    void (*vector_index_op_record)(int64_t point_id, const char *collection, int64_t memory_id,
                                   int ok, const char *error_msg);
    void (*vector_index_op_remove)(int64_t point_id);
@@ -694,6 +687,11 @@ typedef struct
                                   int64_t memory_b_id, const char *evidence,
                                   const char *source_session, const char *valid_until,
                                   int64_t *out_id, int *out_existed);
+   int (*enrollment_list)(int limit, db2_enrollment_row_t *out, int max);
+   int (*entity_list_active)(int min_obs, char (*names_out)[128], int *obs_out, int max);
+   int (*entity_edge_co_targets)(const char *node, const char *relation, int min_weight,
+                                 char (*out)[128], int max);
+   int (*curator_invalidations_since)(int64_t since_id, db2_curator_invalidation_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

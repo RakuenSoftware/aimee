@@ -4406,46 +4406,12 @@ int main(int argc, char **argv)
    /* A proposal refused for its signal, and an enrolment that upgrades its own backfill. */
    /* Batch 59: the write-tier grant gate, the telemetry allowlist, and the vector-index
     * bookkeeping. */
-   uint32_t write_tier_grant_set_reporting_acknowledged = 99;
-   uint32_t write_tier_grant_set_reporting_grant_changed = 99;
-   uint32_t write_tier_grant_set_reporting_was_revoked = 99;
-   uint32_t write_tier_grant_set_reporting_had_previous = 99;
-   uint32_t write_tier_grant_set_reporting_previous_tier = 99;
-   uint32_t write_tier_grant_set_reporting_subject_is_member = 99;
-   assert(aimee_db2_write_tier_grant_set_reporting_call(
-              call_client, &client, 9551, 0, "replay-server", 1, "replay-subject", 2,
-              "replay-admin", &write_tier_grant_set_reporting_acknowledged,
-              &write_tier_grant_set_reporting_grant_changed,
-              &write_tier_grant_set_reporting_was_revoked,
-              &write_tier_grant_set_reporting_had_previous,
-              &write_tier_grant_set_reporting_previous_tier,
-              &write_tier_grant_set_reporting_subject_is_member, NULL,
-              NULL) == AIMEE_MODULE_CALL_OK);
-   assert(write_tier_grant_set_reporting_acknowledged == 0 &&
-          write_tier_grant_set_reporting_grant_changed == 0 &&
-          write_tier_grant_set_reporting_was_revoked == 0 &&
-          write_tier_grant_set_reporting_had_previous == 0 &&
-          write_tier_grant_set_reporting_previous_tier == 0 &&
-          write_tier_grant_set_reporting_subject_is_member == 0);
-
-   uint32_t write_tier_grant_lookup_lookup_outcome = 99;
-   uint32_t write_tier_grant_lookup_grant_tier = 99;
-   assert(aimee_db2_write_tier_grant_lookup_call(
-              call_client, &client, 9552, 0, "replay-server", 1, "replay-subject",
-              &write_tier_grant_lookup_lookup_outcome, &write_tier_grant_lookup_grant_tier, NULL,
-              NULL) == AIMEE_MODULE_CALL_OK);
-   assert(write_tier_grant_lookup_lookup_outcome == 0 && write_tier_grant_lookup_grant_tier == 0);
-
-   uint32_t telemetry_allow_allow_outcome = 99;
-   assert(aimee_db2_telemetry_allow_call(call_client, &client, 9553, 0, "replay.schema",
-                                         "{alpha,beta}", 1, &telemetry_allow_allow_outcome, NULL,
-                                         NULL) == AIMEE_MODULE_CALL_OK);
-   /* Applied. The definer's admin gate did not fire, so this proves the
-    * applied path and not the refused one -- the replay connects as the
-    * database owner, and there is no non-admin role here to be refused as.
-    * The enabled flag crosses as an integer and the definer takes a
-    * boolean; it is the unknown-type parameter that coerces it. */
-   assert(telemetry_allow_allow_outcome == 1);
+   /* Batch 59's other three cases stood here. The two grant operations and the
+    * telemetry allowlist write were withdrawn: each depends on a session
+    * principal the envelope cannot carry, and each passed here only because
+    * this replay connects as a superuser, for whom row-level security and the
+    * definers' admin gate do not apply. See the tenancy section of
+    * docs/proposals/pending/db2-boundary-blockers.md. */
 
    uint32_t vector_index_op_record_recorded = 99;
    assert(aimee_db2_vector_index_op_record_call(
@@ -4776,6 +4742,52 @@ int main(int argc, char **argv)
           directive_find_by_cause_topic_valid_until[0] == '\0' &&
           directive_find_by_cause_topic_directive_created_at[0] != '\0' &&
           directive_find_by_cause_topic_directive_updated_at[0] != '\0');
+
+   /* Batch 62: the enrolment roster and three bounded reads. */
+   static aimee_db2_enrollment_list_row_t enrollment_list_rows[AIMEE_DB2_ENROLLMENT_LIST_MAX_ROWS];
+   uint32_t enrollment_list_count = 99;
+   assert(aimee_db2_enrollment_list_call(call_client, &client, 9562, 0, 8, enrollment_list_rows,
+                                         AIMEE_DB2_ENROLLMENT_LIST_MAX_ROWS, &enrollment_list_count,
+                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* One row: the fingerprint an earlier case touched, which auto-enrolled it,
+    * and a later case then enrolled properly. It is listed live rather than
+    * revoked, and the roster carries both -- an answer omitting the revoked ones
+    * would invite re-enrolling something deliberately withdrawn. */
+   assert(enrollment_list_count == 1);
+
+   static aimee_db2_entity_list_active_row_t
+       entity_list_active_rows[AIMEE_DB2_ENTITY_LIST_ACTIVE_MAX_ROWS];
+   uint32_t entity_list_active_count = 99;
+   assert(aimee_db2_entity_list_active_call(
+              call_client, &client, 9563, 0, 0, entity_list_active_rows,
+              AIMEE_DB2_ENTITY_LIST_ACTIVE_MAX_ROWS, &entity_list_active_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* Empty, and the backend answers 0 for a failure too -- so this asserts that
+    * nothing was found, not that the read worked. */
+   assert(entity_list_active_count == 0);
+
+   static aimee_db2_entity_edge_co_targets_row_t
+       entity_edge_co_targets_rows[AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_MAX_ROWS];
+   uint32_t entity_edge_co_targets_count = 99;
+   assert(aimee_db2_entity_edge_co_targets_call(
+              call_client, &client, 9564, 0, "replay-src", "mentions", 0,
+              entity_edge_co_targets_rows, AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_MAX_ROWS,
+              &entity_edge_co_targets_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The edge an earlier case created, found from its source. The read follows
+    * the relation in both directions, so asking from either end of that edge
+    * returns the other, and a node that is both would still appear once. */
+   assert(entity_edge_co_targets_count == 1);
+
+   static aimee_db2_curator_invalidations_since_row_t
+       curator_invalidations_since_rows[AIMEE_DB2_CURATOR_INVALIDATIONS_SINCE_MAX_ROWS];
+   uint32_t curator_invalidations_since_count = 99;
+   assert(aimee_db2_curator_invalidations_since_call(
+              call_client, &client, 9565, 0, 0, curator_invalidations_since_rows,
+              AIMEE_DB2_CURATOR_INVALIDATIONS_SINCE_MAX_ROWS, &curator_invalidations_since_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Empty because nothing has invalidated anything, which is indistinguishable
+    * here from a cursor read that could not run. */
+   assert(curator_invalidations_since_count == 0);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,

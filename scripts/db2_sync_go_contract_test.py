@@ -68,6 +68,22 @@ def main() -> int:
     # --- a request round trip for every described operation ------------------
     described = [operation for operation in operations
                  if operation["wire_format"] == "db2-envelope-generic-v1"]
+
+    # A generated case for an operation the catalog no longer has is a compile
+    # error rather than a stale test: it calls an encoder the generator has
+    # stopped emitting. Withdrawing an operation is a real event -- three were
+    # taken back the batch after they were published -- so dropping those cases
+    # belongs here, beside the tool that wrote them.
+    wanted = {f"func Test{go_name(str(operation['name']))}MatchesEverySharedCVector("
+              for operation in described}
+    dropped = 0
+    for match in list(re.finditer(r"^func (Test\w+MatchesEverySharedCVector)\(", text, re.M)):
+        marker = f"func {match.group(1)}("
+        if marker in wanted or GENERATED_MARK not in _case_at(text, marker):
+            continue
+        text = _drop_case(text, marker)
+        dropped += 1
+
     cases = []
     for operation in described:
         name = str(operation["name"])
@@ -167,7 +183,7 @@ func Test{go_name(name)}MatchesEverySharedCVector(t *testing.T) {{
 
     TEST.write_text(text, encoding="utf-8")
     print(f"db2_sync_go_contract_test: guard pins {len(operations)} operations; "
-          f"{len(cases)} case(s) added")
+          f"{len(cases)} case(s) added, {dropped} dropped")
     return 0
 
 

@@ -14027,24 +14027,6 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_enrollment_revoke",
         "policy": {"writes": 200},
     },
-    "write_tier_grant_lookup": {
-        "key": ("organization", 35),
-        "format": "db2-envelope-generic-v1",
-        "symbol": "db2_write_tier_grant_lookup",
-        "policy": {"reads": 200},
-    },
-    "write_tier_grant_set_reporting": {
-        "key": ("organization", 36),
-        "format": "db2-envelope-generic-v1",
-        "symbol": "db2_write_tier_grant_set_reporting",
-        "policy": {"writes": 200},
-    },
-    "telemetry_allow": {
-        "key": ("organization", 37),
-        "format": "db2-envelope-generic-v1",
-        "symbol": "db2_telemetry_allow",
-        "policy": {"writes": 200},
-    },
     "vector_index_op_record": {
         "key": ("maintenance", 69),
         "format": "db2-envelope-generic-v1",
@@ -14092,6 +14074,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "format": "db2-envelope-generic-v1",
         "symbol": "db2_directive_insert_ignore",
         "policy": {"writes": 200},
+    },
+    "enrollment_list": {
+        "key": ("custody", 12),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_enrollment_list",
+        "policy": {"reads": 200},
+    },
+    "entity_list_active": {
+        "key": ("index", 67),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_list_active",
+        "policy": {"reads": 200},
+    },
+    "entity_edge_co_targets": {
+        "key": ("index", 68),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_entity_edge_co_targets",
+        "policy": {"reads": 200},
+    },
+    "curator_invalidations_since": {
+        "key": ("maintenance", 77),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_curator_invalidations_since",
+        "policy": {"reads": 200},
     },
 }
 

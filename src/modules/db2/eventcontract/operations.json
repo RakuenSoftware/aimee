@@ -12793,6 +12793,110 @@
       }
     },
     {
+      "family": "index",
+      "id": 67,
+      "name": "entity_list_active",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity observations are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_list_active"
+      ],
+      "request": {
+        "policy": {
+          "reads": "entities are counted by distinct memory, and the name comes back lowercased"
+        },
+        "fields": [
+          {
+            "name": "min_observations",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "entity_name",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "observation_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 64
+      }
+    },
+    {
+      "family": "index",
+      "id": 68,
+      "name": "entity_edge_co_targets",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Entity edges are relational DB2 rows.",
+      "c_symbols": [
+        "db2_entity_edge_co_targets"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the edge is followed in both directions and semantic edges are excluded"
+        },
+        "fields": [
+          {
+            "name": "edge_node",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "edge_relation",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "min_weight",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "edge_target",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            }
+          ]
+        },
+        "maximum_rows": 16
+      }
+    },
+    {
       "family": "learning",
       "id": 1,
       "name": "rules_decay",
@@ -19505,210 +19609,6 @@
       }
     },
     {
-      "family": "organization",
-      "id": 35,
-      "name": "write_tier_grant_lookup",
-      "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
-      "transaction": "single-statement",
-      "idempotency": "safe",
-      "results": [
-        "ok"
-      ],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Write-tier grants are relational DB2 rows behind row-level security.",
-      "c_symbols": [
-        "db2_write_tier_grant_lookup"
-      ],
-      "request": {
-        "policy": {
-          "reads": "three outcomes are carried apart: granted, not granted, and could not tell"
-        },
-        "fields": [
-          {
-            "name": "server_id",
-            "type": "utf8",
-            "minimum_bytes": 1,
-            "maximum_bytes": 127
-          },
-          {
-            "name": "team_id",
-            "type": "u64",
-            "minimum": 1,
-            "maximum": 9223372036854775807
-          },
-          {
-            "name": "grant_subject",
-            "type": "utf8",
-            "minimum_bytes": 1,
-            "maximum_bytes": 576
-          }
-        ]
-      },
-      "reply": {
-        "fields": [
-          {
-            "name": "lookup_outcome",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 2
-          },
-          {
-            "name": "grant_tier",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 2
-          }
-        ]
-      }
-    },
-    {
-      "family": "organization",
-      "id": 36,
-      "name": "write_tier_grant_set_reporting",
-      "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
-      "transaction": "single-statement",
-      "idempotency": "safe",
-      "results": [
-        "ok"
-      ],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Write-tier grants are relational DB2 rows behind row-level security.",
-      "c_symbols": [
-        "db2_write_tier_grant_set_reporting"
-      ],
-      "request": {
-        "policy": {
-          "writes": "the pre-image is observed under the same lock as the write, in one transaction"
-        },
-        "fields": [
-          {
-            "name": "server_id",
-            "type": "utf8",
-            "minimum_bytes": 1,
-            "maximum_bytes": 127
-          },
-          {
-            "name": "team_id",
-            "type": "u64",
-            "minimum": 1,
-            "maximum": 9223372036854775807
-          },
-          {
-            "name": "grant_subject",
-            "type": "utf8",
-            "minimum_bytes": 1,
-            "maximum_bytes": 576
-          },
-          {
-            "name": "grant_tier",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 2
-          },
-          {
-            "name": "granted_by",
-            "type": "utf8",
-            "minimum_bytes": 1,
-            "maximum_bytes": 576
-          }
-        ]
-      },
-      "reply": {
-        "fields": [
-          {
-            "name": "acknowledged",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 1
-          },
-          {
-            "name": "grant_changed",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 1
-          },
-          {
-            "name": "was_revoked",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 1
-          },
-          {
-            "name": "had_previous",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 1
-          },
-          {
-            "name": "previous_tier",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 2
-          },
-          {
-            "name": "subject_is_member",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 1
-          }
-        ]
-      }
-    },
-    {
-      "family": "organization",
-      "id": 37,
-      "name": "telemetry_allow",
-      "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
-      "transaction": "single-statement",
-      "idempotency": "safe",
-      "results": [
-        "ok"
-      ],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The telemetry allowlist is a relational DB2 table behind a definer function.",
-      "c_symbols": [
-        "db2_telemetry_allow"
-      ],
-      "request": {
-        "policy": {
-          "writes": "refused-because-not-admin is carried apart from refused-because-it-failed"
-        },
-        "fields": [
-          {
-            "name": "event_schema",
-            "type": "utf8",
-            "minimum_bytes": 1,
-            "maximum_bytes": 159
-          },
-          {
-            "name": "metric_names_array",
-            "type": "utf8",
-            "minimum_bytes": 0,
-            "maximum_bytes": 1023
-          },
-          {
-            "name": "allow_enabled",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 1
-          }
-        ]
-      },
-      "reply": {
-        "fields": [
-          {
-            "name": "allow_outcome",
-            "type": "u32",
-            "minimum": 0,
-            "maximum": 2
-          }
-        ]
-      }
-    },
-    {
       "family": "custody",
       "id": 1,
       "name": "vector_rebuild_lock_try_acquire",
@@ -20344,6 +20244,109 @@
             "maximum": 1
           }
         ]
+      }
+    },
+    {
+      "family": "custody",
+      "id": 12,
+      "name": "enrollment_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Certificate enrolments are relational DB2 rows.",
+      "c_symbols": [
+        "db2_enrollment_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "newest first, and a read that could not run arrives as an empty list"
+        },
+        "fields": [
+          {
+            "name": "list_limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 200
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "enrollment_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "enrollment_scope",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "cert_fingerprint",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 79
+            },
+            {
+              "name": "cert_serial_norm",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 79
+            },
+            {
+              "name": "enrollment_state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            },
+            {
+              "name": "issued_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "last_seen_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "expires_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "revoked_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "authority_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 32
+            },
+            {
+              "name": "legacy_row",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 1
+            }
+          ]
+        },
+        "maximum_rows": 200
       }
     },
     {
@@ -24925,6 +24928,73 @@
             "maximum": 1
           }
         ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 77,
+      "name": "curator_invalidations_since",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Curator invalidation events are relational DB2 rows.",
+      "c_symbols": [
+        "db2_curator_invalidations_since"
+      ],
+      "request": {
+        "policy": {
+          "reads": "strictly after the supplied identifier, oldest first, so a cursor advances"
+        },
+        "fields": [
+          {
+            "name": "since_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "invalidation_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "source_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "source_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "artifacts_stale",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "invalidated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 128
       }
     }
   ]

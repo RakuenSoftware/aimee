@@ -1105,9 +1105,6 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .learning_proposal_insert = db2_learning_proposal_insert,
        .enrollment_insert = db2_enrollment_insert,
        .enrollment_revoke = db2_enrollment_revoke,
-       .write_tier_grant_lookup = db2_write_tier_grant_lookup,
-       .write_tier_grant_set_reporting = db2_write_tier_grant_set_reporting,
-       .telemetry_allow = db2_telemetry_allow,
        .vector_index_op_record = db2_vector_index_op_record,
        .vector_index_op_remove = db2_vector_index_op_remove,
        .witness_checkpoint_freshness = db2_witness_checkpoint_freshness,
@@ -1116,6 +1113,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .decision_log_record = db2_decision_log_record,
        .directive_find_by_cause_topic = db2_directive_find_by_cause_topic,
        .directive_insert_ignore = db2_directive_insert_ignore,
+       .enrollment_list = db2_enrollment_list,
+       .entity_list_active = db2_entity_list_active,
+       .entity_edge_co_targets = db2_entity_edge_co_targets,
+       .curator_invalidations_since = db2_curator_invalidations_since,
    };
    return &backend;
 }
@@ -8648,6 +8649,82 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         uint32_t min_observations = 0u;
+         if (aimee_db2_entity_list_active_request_decode(request_body, request_len,
+                                                         &min_observations) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_LIST_ACTIVE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_list_active)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_list_active_row_t rows[AIMEE_DB2_ENTITY_LIST_ACTIVE_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               static char names[AIMEE_DB2_ENTITY_LIST_ACTIVE_MAX_ROWS][128];
+               static int observations[AIMEE_DB2_ENTITY_LIST_ACTIVE_MAX_ROWS];
+               memset(names, 0, sizeof(names));
+               memset(observations, 0, sizeof(observations));
+               int found = backend->entity_list_active((int)min_observations, names, observations,
+                                                       (int)AIMEE_DB2_ENTITY_LIST_ACTIVE_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].entity_name, sizeof(rows[index].entity_name), "%s",
+                           names[index]);
+                  rows[index].observation_count =
+                      observations[index] > 0 ? (uint32_t)observations[index] : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_list_active_reply_encode(rows, count, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char edge_node[AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_EDGE_NODE_MAX + 1] = "";
+         char edge_relation[AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_EDGE_RELATION_MAX + 1] = "";
+         uint32_t min_weight = 0u;
+         if (aimee_db2_entity_edge_co_targets_request_decode(
+                 request_body, request_len, edge_node, sizeof(edge_node), edge_relation,
+                 sizeof(edge_relation), &min_weight) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->entity_edge_co_targets)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_entity_edge_co_targets_row_t rows[AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               static char targets[AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_MAX_ROWS][128];
+               memset(targets, 0, sizeof(targets));
+               int found = backend->entity_edge_co_targets(
+                   edge_node, edge_relation, (int)min_weight, targets,
+                   (int)AIMEE_DB2_ENTITY_EDGE_CO_TARGETS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+                  snprintf(rows[index].edge_target, sizeof(rows[index].edge_target), "%s",
+                           targets[index]);
+               count = found < 0 ? 0u : (uint32_t)found;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_entity_edge_co_targets_reply_encode(rows, count, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       if (aimee_db2_entity_edge_normalize_weights_request_decode(request_body, request_len) == 0)
       {
          if (response_capacity < AIMEE_DB2_ENTITY_EDGE_NORMALIZE_WEIGHTS_RESPONSE_LEN)
@@ -8841,6 +8918,73 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_VECTOR_REBUILD_LOCK_TRY_ACQUIRE)
    {
+      {
+         uint32_t list_limit = 0u;
+         if (aimee_db2_enrollment_list_request_decode(request_body, request_len, &list_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_ENROLLMENT_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->enrollment_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_enrollment_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_ENROLLMENT_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_enrollment_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_ENROLLMENT_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->enrollment_list((int)list_limit, listed,
+                                                   (int)AIMEE_DB2_ENROLLMENT_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].enrollment_id =
+                      listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].enrollment_scope, sizeof(rows[index].enrollment_scope), "%s",
+                           listed[index].scope);
+                  snprintf(rows[index].cert_fingerprint, sizeof(rows[index].cert_fingerprint), "%s",
+                           listed[index].fingerprint);
+                  snprintf(rows[index].cert_serial_norm, sizeof(rows[index].cert_serial_norm), "%s",
+                           listed[index].serial);
+                  snprintf(rows[index].enrollment_state, sizeof(rows[index].enrollment_state), "%s",
+                           listed[index].state);
+                  snprintf(rows[index].issued_at, sizeof(rows[index].issued_at), "%s",
+                           listed[index].issued_at);
+                  snprintf(rows[index].last_seen_at, sizeof(rows[index].last_seen_at), "%s",
+                           listed[index].last_seen_at);
+                  snprintf(rows[index].expires_at, sizeof(rows[index].expires_at), "%s",
+                           listed[index].expires_at);
+                  snprintf(rows[index].revoked_at, sizeof(rows[index].revoked_at), "%s",
+                           listed[index].revoked_at);
+                  snprintf(rows[index].authority_id, sizeof(rows[index].authority_id), "%s",
+                           listed[index].authority_id);
+                  rows[index].legacy_row =
+                      listed[index].legacy > 0 ? (uint32_t)listed[index].legacy : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_enrollment_list_reply_encode(rows, count, response_body,
+                                                       response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       {
          char enrollment_scope[AIMEE_DB2_ENROLLMENT_INSERT_ENROLLMENT_SCOPE_MAX + 1] = "";
          char cert_fingerprint[AIMEE_DB2_ENROLLMENT_INSERT_CERT_FINGERPRINT_MAX + 1] = "";
@@ -9966,132 +10110,6 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             if (aimee_db2_tool_registry_lookup_reply_encode(tool_found, input_schema, side_effect,
                                                             tool_enabled, response_body,
                                                             response_capacity, response_len) != 0)
-            {
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            }
-            return AIMEE_MODULE_STATUS_OK;
-         }
-      }
-      {
-         char server_id[AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MAX + 1] = "";
-         uint64_t team_id = 0u;
-         char grant_subject[AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MAX + 1] = "";
-         if (aimee_db2_write_tier_grant_lookup_request_decode(
-                 request_body, request_len, server_id, sizeof(server_id), &team_id, grant_subject,
-                 sizeof(grant_subject)) == 0)
-         {
-            if (response_capacity < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_RESPONSE_MAX_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!backend || !backend->write_tier_grant_lookup)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            uint32_t lookup_outcome = 0u;
-            uint32_t grant_tier = 0u;
-            {
-               kb_identity_tier_t tier = KB_IDENTITY_TIER_OFF;
-               int outcome = backend->write_tier_grant_lookup(server_id, (int64_t)team_id,
-                                                              grant_subject, &tier);
-               /* Granted, not granted, and could-not-tell, in that order. A
-                * negative code is any failure -- an outage, a refused tenancy,
-                * or a row whose tier string the mapping does not recognize --
-                * and the caller must deny without recording a decision. */
-               if (outcome == DB2_WRITE_TIER_GRANT_FOUND)
-               {
-                  lookup_outcome = 1u;
-                  grant_tier = (uint32_t)tier;
-               }
-               else if (outcome == DB2_WRITE_TIER_GRANT_NONE)
-                  lookup_outcome = 0u;
-               else
-                  lookup_outcome = 2u;
-            }
-            if (aimee_module_invocation_cancelled(invocation))
-            {
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            }
-            if (aimee_db2_write_tier_grant_lookup_reply_encode(lookup_outcome, grant_tier,
-                                                               response_body, response_capacity,
-                                                               response_len) != 0)
-            {
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            }
-            return AIMEE_MODULE_STATUS_OK;
-         }
-      }
-      {
-         char server_id[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MAX + 1] = "";
-         uint64_t team_id = 0u;
-         char grant_subject[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MAX + 1] = "";
-         uint32_t grant_tier = 0u;
-         char granted_by[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MAX + 1] = "";
-         if (aimee_db2_write_tier_grant_set_reporting_request_decode(
-                 request_body, request_len, server_id, sizeof(server_id), &team_id, grant_subject,
-                 sizeof(grant_subject), &grant_tier, granted_by, sizeof(granted_by)) == 0)
-         {
-            if (response_capacity < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_RESPONSE_MAX_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!backend || !backend->write_tier_grant_set_reporting)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            uint32_t acknowledged = 0u;
-            uint32_t grant_changed = 0u;
-            uint32_t was_revoked = 0u;
-            uint32_t had_previous = 0u;
-            uint32_t previous_tier = 0u;
-            uint32_t subject_is_member = 0u;
-            {
-               db2_write_tier_grant_report_t report;
-               memset(&report, 0, sizeof(report));
-               if (backend->write_tier_grant_set_reporting(
-                       server_id, (int64_t)team_id, grant_subject, (kb_identity_tier_t)grant_tier,
-                       granted_by, &report) == 0)
-               {
-                  acknowledged = 1u;
-                  grant_changed = report.changed ? 1u : 0u;
-                  was_revoked = report.was_revoked ? 1u : 0u;
-                  had_previous = report.had_previous ? 1u : 0u;
-                  previous_tier = report.had_previous ? (uint32_t)report.previous_tier : 0u;
-                  subject_is_member = report.is_member ? 1u : 0u;
-               }
-            }
-            if (aimee_module_invocation_cancelled(invocation))
-            {
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            }
-            if (aimee_db2_write_tier_grant_set_reporting_reply_encode(
-                    acknowledged, grant_changed, was_revoked, had_previous, previous_tier,
-                    subject_is_member, response_body, response_capacity, response_len) != 0)
-            {
-               return AIMEE_MODULE_STATUS_INTERNAL;
-            }
-            return AIMEE_MODULE_STATUS_OK;
-         }
-      }
-      {
-         char event_schema[AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MAX + 1] = "";
-         char metric_names_array[AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MAX + 1] = "";
-         uint32_t allow_enabled = 0u;
-         if (aimee_db2_telemetry_allow_request_decode(
-                 request_body, request_len, event_schema, sizeof(event_schema), metric_names_array,
-                 sizeof(metric_names_array), &allow_enabled) == 0)
-         {
-            if (response_capacity < AIMEE_DB2_TELEMETRY_ALLOW_RESPONSE_MAX_LEN)
-               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-            if (!backend || !backend->telemetry_allow)
-               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-            uint32_t allow_outcome = 0u;
-            {
-               int outcome =
-                   backend->telemetry_allow(event_schema, metric_names_array, (int)allow_enabled);
-               /* Applied, refused because the caller is not an admin, or failed.
-                * The middle one is a decision the operator can act on; the last
-                * one is not, and reading them as one would hide an outage. */
-               allow_outcome = outcome == 0 ? 1u : outcome == DB2_TELEMETRY_ERR_DENIED ? 2u : 0u;
-            }
-            if (aimee_module_invocation_cancelled(invocation))
-            {
-               return AIMEE_MODULE_STATUS_CANCELLED;
-            }
-            if (aimee_db2_telemetry_allow_reply_encode(allow_outcome, response_body,
-                                                       response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
@@ -15134,6 +15152,64 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t since_id = 0u;
+         if (aimee_db2_curator_invalidations_since_request_decode(request_body, request_len,
+                                                                  &since_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CURATOR_INVALIDATIONS_SINCE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->curator_invalidations_since)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_curator_invalidations_since_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CURATOR_INVALIDATIONS_SINCE_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_curator_invalidation_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_CURATOR_INVALIDATIONS_SINCE_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->curator_invalidations_since(
+                      (int64_t)since_id, listed,
+                      (int)AIMEE_DB2_CURATOR_INVALIDATIONS_SINCE_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].invalidation_id =
+                      listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].source_kind, sizeof(rows[index].source_kind), "%s",
+                           listed[index].source_kind);
+                  snprintf(rows[index].source_id, sizeof(rows[index].source_id), "%s",
+                           listed[index].source_id);
+                  rows[index].artifacts_stale = listed[index].artifacts_stale > 0
+                                                    ? (uint32_t)listed[index].artifacts_stale
+                                                    : 0u;
+                  snprintf(rows[index].invalidated_at, sizeof(rows[index].invalidated_at), "%s",
+                           listed[index].created_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_curator_invalidations_since_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }
