@@ -3860,6 +3860,72 @@ int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_
    return -1;
 }
 
+int db2_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
+                            const char *rationale, const char *assumptions, const char *created_at,
+                            db2_decision_log_row_t *out)
+{
+   (void)task_id;
+   (void)options;
+   (void)chosen;
+   (void)rationale;
+   (void)assumptions;
+   (void)created_at;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_decision_log_record(const char *subject, const char *options, const char *chosen,
+                            const char *rationale, const char *author, int64_t linked_policy_id,
+                            const char *revisit_when, int64_t supersedes_id,
+                            db2_decision_log_row_t *out)
+{
+   (void)subject;
+   (void)options;
+   (void)chosen;
+   (void)rationale;
+   (void)author;
+   (void)linked_policy_id;
+   (void)revisit_when;
+   (void)supersedes_id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_directive_find_by_cause_topic(const char *cause, const char *topic, memory_directive_t *out)
+{
+   (void)cause;
+   (void)topic;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_directive_insert_ignore(const char *question, const char *topic, const char *anchor_entity,
+                                const char *anchor_file, const char *cause, int priority,
+                                int64_t memory_a_id, int64_t memory_b_id, const char *evidence,
+                                const char *source_session, const char *valid_until,
+                                int64_t *out_id, int *out_existed)
+{
+   (void)question;
+   (void)topic;
+   (void)anchor_entity;
+   (void)anchor_file;
+   (void)cause;
+   (void)priority;
+   (void)memory_a_id;
+   (void)memory_b_id;
+   (void)evidence;
+   (void)source_session;
+   (void)valid_until;
+   if (out_id)
+      *out_id = 0;
+   if (out_existed)
+      *out_existed = 0;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

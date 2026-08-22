@@ -14069,6 +14069,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_witness_checkpoint_anchor_coverage",
         "policy": {"reads": 200},
     },
+    "decision_log_insert": {
+        "key": ("learning", 87),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_insert",
+        "policy": {"writes": 200},
+    },
+    "decision_log_record": {
+        "key": ("learning", 88),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_decision_log_record",
+        "policy": {"writes": 200},
+    },
+    "directive_find_by_cause_topic": {
+        "key": ("maintenance", 75),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_find_by_cause_topic",
+        "policy": {"reads": 200},
+    },
+    "directive_insert_ignore": {
+        "key": ("maintenance", 76),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_directive_insert_ignore",
+        "policy": {"writes": 200},
+    },
 }
 
 

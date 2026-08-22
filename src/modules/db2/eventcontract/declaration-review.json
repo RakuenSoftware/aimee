@@ -972,6 +972,14 @@
       "reason": "The typed learning.decision_log_get operation reads one decision record. The identifier carries no scope, so a caller holding a number reads whatever decision it names. The supersedes and linked-policy identifiers come back as numbers with no way to tell an absent link from a link to row zero, because the column's default for both is zero. The columns are wider than the struct that receives them, so a longer rationale or option set is cut at the C buffer before the wire ever sees it."
     },
     {
+      "symbol": "db2_decision_log_insert",
+      "signature_sha256": "9e8984173cbcb55472bb057262ed6bffaeb7d51384abaed3e06102b3f17e204f",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.decision_log_insert operation records a decision against a task and returns the row it wrote, so a caller sees what landed rather than what it sent. The timestamp is optional and an empty one is not a blank field: it selects a different statement, one that lets the database stamp the row, so a caller wanting the real time of the decision sends nothing rather than its own clock. This write records no subject and no status, which is what separates it from the scoped write beside it."
+    },
+    {
       "symbol": "db2_decision_log_list",
       "signature_sha256": "6e52cdcaf44c1fda26b984af3145ac502ff5cf788e0eb309847004636ad5961f",
       "disposition": "wire-operation",
@@ -994,6 +1002,14 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.mark_revisit_due operation replaces the sweep that flags active decisions whose review date has arrived. The two states, the requirement that a decision carry a review date at all, and the database clock are fixed policy, as they are for the two sweeps beside it. Unlike those, this backend separates a failed statement from an empty sweep, so the boundary can report the failure instead of an untouched log."
+    },
+    {
+      "symbol": "db2_decision_log_record",
+      "signature_sha256": "d90cab2fe92a5963ef9c05ed8ca350dc7d3d328ab740c07c50f533a71163aad9",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.decision_log_record operation records a scoped decision and, when it supersedes one, retires that one in the same transaction -- so a subject never has two active decisions and never loses the old one without gaining the new. The supersede is constrained to an active row in the SAME subject, so a decision cannot retire one from another scope, and an identifier matching nothing active fails the call rather than inserting beside it. An empty subject is refused: it would be one global slot."
     },
     {
       "symbol": "db2_decision_log_set_outcome",
@@ -1076,12 +1092,28 @@
       "reason": "The typed memory.directive_counts_by_state operation counts epistemic directives by state. It names four states and drops every other group on the floor, so the four counts need not add up to the table and a state the writer adds later is counted nowhere. There is no scope and no filter: this is every directive the installation holds, which is the only thing the backend can answer."
     },
     {
+      "symbol": "db2_directive_find_by_cause_topic",
+      "signature_sha256": "4e860a2c1fbd4df68e9ab254b8656b9daafaae9a18cb79a0888992cafdc90bfc",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.directive_find_by_cause_topic operation finds a directive by what caused it and what it is about. The pair is not unique and the query takes one row with no ordering, so which directive answers when several share a cause and topic is the database's choice rather than a stated one. It exists so the insert beside it can tell an existing directive from a new one, which is the use that makes the ambiguity tolerable: any of them proves the pair is taken."
+    },
+    {
       "symbol": "db2_directive_get",
       "signature_sha256": "3fcde884044ee6a24903c612a2fe09780d591c25418bfd9a0b20637551fa51f1",
       "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
       "reason": "The typed memory.directive_get operation reads one epistemic directive. It carries three memory identifiers -- the two it was raised about and the one that resolved it -- and each is zero when absent, which is also what a caller would read if the memory it named were deleted. The state is the same free column memory.directive_counts_by_state groups by, so a directive in a state that grouping does not name is readable here and counted nowhere."
+    },
+    {
+      "symbol": "db2_directive_insert_ignore",
+      "signature_sha256": "ac218be7e159cebeb0437f5850e74e12ce24910afdbe0111376c456e0dcad328",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.directive_insert_ignore operation raises a directive unless an equivalent one is already open, and says which happened. Uniqueness is not one rule: partial indexes make a contradiction unique by its two memories and a retrieval failure unique by its topic, so what counts as the same directive depends on its cause. On a conflict it looks the existing row up by cause, topic and question -- not the index that refused the insert, so the identifier can come back zero on a real conflict."
     },
     {
       "symbol": "db2_directive_list",

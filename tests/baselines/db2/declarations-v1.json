@@ -6983,9 +6983,15 @@
           "line": 41
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.decision_log_insert operation records a decision against a task and returns the row it wrote, so a caller sees what landed rather than what it sent. The timestamp is optional and an empty one is not a blank field: it selects a different statement, one that lets the database stamp the row, so a caller wanting the real time of the decision sends nothing rather than its own clock. This write records no subject and no status, which is what separates it from the scoped write beside it."
+      },
       "signature": "int db2_decision_log_insert ( int64_t task_id , const char * options , const char * chosen , const char * rationale , const char * assumptions , const char * created_at , db2_decision_log_row_t * out )",
       "signature_sha256": "9e8984173cbcb55472bb057262ed6bffaeb7d51384abaed3e06102b3f17e204f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_insert"
     },
     {
@@ -7068,9 +7074,15 @@
           "line": 53
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.decision_log_record operation records a scoped decision and, when it supersedes one, retires that one in the same transaction -- so a subject never has two active decisions and never loses the old one without gaining the new. The supersede is constrained to an active row in the SAME subject, so a decision cannot retire one from another scope, and an identifier matching nothing active fails the call rather than inserting beside it. An empty subject is refused: it would be one global slot."
+      },
       "signature": "int db2_decision_log_record ( const char * subject , const char * options , const char * chosen , const char * rationale , const char * author , int64_t linked_policy_id , const char * revisit_when , int64_t supersedes_id , db2_decision_log_row_t * out )",
       "signature_sha256": "d90cab2fe92a5963ef9c05ed8ca350dc7d3d328ab740c07c50f533a71163aad9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_decision_log_record"
     },
     {
@@ -7421,9 +7433,15 @@
           "line": 40
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_find_by_cause_topic operation finds a directive by what caused it and what it is about. The pair is not unique and the query takes one row with no ordering, so which directive answers when several share a cause and topic is the database's choice rather than a stated one. It exists so the insert beside it can tell an existing directive from a new one, which is the use that makes the ambiguity tolerable: any of them proves the pair is taken."
+      },
       "signature": "int db2_directive_find_by_cause_topic ( const char * cause , const char * topic , memory_directive_t * out )",
       "signature_sha256": "4e860a2c1fbd4df68e9ab254b8656b9daafaae9a18cb79a0888992cafdc90bfc",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_find_by_cause_topic"
     },
     {
@@ -7458,9 +7476,15 @@
           "line": 28
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.directive_insert_ignore operation raises a directive unless an equivalent one is already open, and says which happened. Uniqueness is not one rule: partial indexes make a contradiction unique by its two memories and a retrieval failure unique by its topic, so what counts as the same directive depends on its cause. On a conflict it looks the existing row up by cause, topic and question -- not the index that refused the insert, so the identifier can come back zero on a real conflict."
+      },
       "signature": "int db2_directive_insert_ignore ( const char * question , const char * topic , const char * anchor_entity , const char * anchor_file , const char * cause , int priority , int64_t memory_a_id , int64_t memory_b_id , const char * evidence , const char * source_session , const char * valid_until , int64_t * out_id , int * out_existed )",
       "signature_sha256": "ac218be7e159cebeb0437f5850e74e12ce24910afdbe0111376c456e0dcad328",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_directive_insert_ignore"
     },
     {
@@ -28501,15 +28525,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "911f393141e32ecaac41ed313935c6dc2b8afa7b0eaff60e1e97593e5aaf7e95",
+  "fingerprint": "82f7e548a0950c44ca7649d2a86ec37d7af66ff1ebabdd7999f65fc8a838864f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 216,
+    "audit_pending": 212,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 743
+    "reviewed": 747
   }
 }

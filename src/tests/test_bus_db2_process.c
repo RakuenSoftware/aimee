@@ -4504,6 +4504,279 @@ int main(int argc, char **argv)
           witness_checkpoint_anchor_coverage_unknown_checkpoints == 0 &&
           witness_checkpoint_anchor_coverage_unknown_key_id_hex[0] == '\0');
 
+   /* Batch 61: the decision log's two writes, and a directive raised then found. */
+   uint32_t decision_log_insert_acknowledged = 99;
+   uint64_t decision_log_insert_logged_decision_id = 99;
+   uint64_t decision_log_insert_logged_task_id = 99;
+   static char decision_log_insert_logged_decision_options
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_OPTIONS_MAX + 1];
+   decision_log_insert_logged_decision_options[0] = 'x';
+   static char decision_log_insert_logged_decision_chosen
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_CHOSEN_MAX + 1];
+   decision_log_insert_logged_decision_chosen[0] = 'x';
+   static char decision_log_insert_logged_decision_rationale
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_RATIONALE_MAX + 1];
+   decision_log_insert_logged_decision_rationale[0] = 'x';
+   static char decision_log_insert_logged_decision_assumptions
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_ASSUMPTIONS_MAX + 1];
+   decision_log_insert_logged_decision_assumptions[0] = 'x';
+   static char decision_log_insert_logged_decision_outcome
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_OUTCOME_MAX + 1];
+   decision_log_insert_logged_decision_outcome[0] = 'x';
+   static char decision_log_insert_logged_decision_created_at
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_CREATED_AT_MAX + 1];
+   decision_log_insert_logged_decision_created_at[0] = 'x';
+   static char decision_log_insert_logged_decision_status
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_STATUS_MAX + 1];
+   decision_log_insert_logged_decision_status[0] = 'x';
+   static char decision_log_insert_logged_revisit_when
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_REVISIT_WHEN_MAX + 1];
+   decision_log_insert_logged_revisit_when[0] = 'x';
+   uint64_t decision_log_insert_logged_supersedes_id = 99;
+   static char decision_log_insert_logged_decision_subject
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_SUBJECT_MAX + 1];
+   decision_log_insert_logged_decision_subject[0] = 'x';
+   static char decision_log_insert_logged_decision_author
+       [AIMEE_DB2_DECISION_LOG_INSERT_LOGGED_DECISION_AUTHOR_MAX + 1];
+   decision_log_insert_logged_decision_author[0] = 'x';
+   uint64_t decision_log_insert_logged_linked_policy_id = 99;
+   assert(
+       aimee_db2_decision_log_insert_call(
+           call_client, &client, 9558, 0, 4242, "replay-options", "replay-chosen",
+           "replay-rationale", "replay-assumptions", "", &decision_log_insert_acknowledged,
+           &decision_log_insert_logged_decision_id, &decision_log_insert_logged_task_id,
+           decision_log_insert_logged_decision_options,
+           sizeof(decision_log_insert_logged_decision_options),
+           decision_log_insert_logged_decision_chosen,
+           sizeof(decision_log_insert_logged_decision_chosen),
+           decision_log_insert_logged_decision_rationale,
+           sizeof(decision_log_insert_logged_decision_rationale),
+           decision_log_insert_logged_decision_assumptions,
+           sizeof(decision_log_insert_logged_decision_assumptions),
+           decision_log_insert_logged_decision_outcome,
+           sizeof(decision_log_insert_logged_decision_outcome),
+           decision_log_insert_logged_decision_created_at,
+           sizeof(decision_log_insert_logged_decision_created_at),
+           decision_log_insert_logged_decision_status,
+           sizeof(decision_log_insert_logged_decision_status),
+           decision_log_insert_logged_revisit_when, sizeof(decision_log_insert_logged_revisit_when),
+           &decision_log_insert_logged_supersedes_id, decision_log_insert_logged_decision_subject,
+           sizeof(decision_log_insert_logged_decision_subject),
+           decision_log_insert_logged_decision_author,
+           sizeof(decision_log_insert_logged_decision_author),
+           &decision_log_insert_logged_linked_policy_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The row came back, not the arguments that went in -- which is the point of
+    * returning it. Four fields the caller never sent are filled: the identifier,
+    * the timestamp the database stamped because an empty one was sent, and the
+    * status, which defaults to active. The subject and author stay empty: this
+    * write has no scope, which is the whole difference from the one after it. */
+   assert(decision_log_insert_acknowledged == 1 && decision_log_insert_logged_decision_id > 0 &&
+          decision_log_insert_logged_task_id == 4242 &&
+          decision_log_insert_logged_decision_options[0] != '\0' &&
+          decision_log_insert_logged_decision_chosen[0] != '\0' &&
+          decision_log_insert_logged_decision_rationale[0] != '\0' &&
+          decision_log_insert_logged_decision_assumptions[0] != '\0' &&
+          decision_log_insert_logged_decision_outcome[0] == '\0' &&
+          decision_log_insert_logged_decision_created_at[0] != '\0' &&
+          !strcmp(decision_log_insert_logged_decision_status, "active") &&
+          decision_log_insert_logged_revisit_when[0] == '\0' &&
+          decision_log_insert_logged_supersedes_id == 0 &&
+          decision_log_insert_logged_decision_subject[0] == '\0' &&
+          decision_log_insert_logged_decision_author[0] == '\0' &&
+          decision_log_insert_logged_linked_policy_id == 0);
+
+   uint32_t decision_log_record_acknowledged = 99;
+   uint64_t decision_log_record_logged_decision_id = 99;
+   uint64_t decision_log_record_logged_task_id = 99;
+   static char decision_log_record_logged_decision_options
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_OPTIONS_MAX + 1];
+   decision_log_record_logged_decision_options[0] = 'x';
+   static char decision_log_record_logged_decision_chosen
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_CHOSEN_MAX + 1];
+   decision_log_record_logged_decision_chosen[0] = 'x';
+   static char decision_log_record_logged_decision_rationale
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_RATIONALE_MAX + 1];
+   decision_log_record_logged_decision_rationale[0] = 'x';
+   static char decision_log_record_logged_decision_assumptions
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_ASSUMPTIONS_MAX + 1];
+   decision_log_record_logged_decision_assumptions[0] = 'x';
+   static char decision_log_record_logged_decision_outcome
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_OUTCOME_MAX + 1];
+   decision_log_record_logged_decision_outcome[0] = 'x';
+   static char decision_log_record_logged_decision_created_at
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_CREATED_AT_MAX + 1];
+   decision_log_record_logged_decision_created_at[0] = 'x';
+   static char decision_log_record_logged_decision_status
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_STATUS_MAX + 1];
+   decision_log_record_logged_decision_status[0] = 'x';
+   static char decision_log_record_logged_revisit_when
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_REVISIT_WHEN_MAX + 1];
+   decision_log_record_logged_revisit_when[0] = 'x';
+   uint64_t decision_log_record_logged_supersedes_id = 99;
+   static char decision_log_record_logged_decision_subject
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_SUBJECT_MAX + 1];
+   decision_log_record_logged_decision_subject[0] = 'x';
+   static char decision_log_record_logged_decision_author
+       [AIMEE_DB2_DECISION_LOG_RECORD_LOGGED_DECISION_AUTHOR_MAX + 1];
+   decision_log_record_logged_decision_author[0] = 'x';
+   uint64_t decision_log_record_logged_linked_policy_id = 99;
+   assert(
+       aimee_db2_decision_log_record_call(
+           call_client, &client, 9559, 0, "replay-subject", "replay-options", "replay-chosen",
+           "replay-rationale", "replay-author", 0, "", 0, &decision_log_record_acknowledged,
+           &decision_log_record_logged_decision_id, &decision_log_record_logged_task_id,
+           decision_log_record_logged_decision_options,
+           sizeof(decision_log_record_logged_decision_options),
+           decision_log_record_logged_decision_chosen,
+           sizeof(decision_log_record_logged_decision_chosen),
+           decision_log_record_logged_decision_rationale,
+           sizeof(decision_log_record_logged_decision_rationale),
+           decision_log_record_logged_decision_assumptions,
+           sizeof(decision_log_record_logged_decision_assumptions),
+           decision_log_record_logged_decision_outcome,
+           sizeof(decision_log_record_logged_decision_outcome),
+           decision_log_record_logged_decision_created_at,
+           sizeof(decision_log_record_logged_decision_created_at),
+           decision_log_record_logged_decision_status,
+           sizeof(decision_log_record_logged_decision_status),
+           decision_log_record_logged_revisit_when, sizeof(decision_log_record_logged_revisit_when),
+           &decision_log_record_logged_supersedes_id, decision_log_record_logged_decision_subject,
+           sizeof(decision_log_record_logged_decision_subject),
+           decision_log_record_logged_decision_author,
+           sizeof(decision_log_record_logged_decision_author),
+           &decision_log_record_logged_linked_policy_id, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The scoped write, and the mirror image: a subject and an author, no task,
+    * and no assumptions -- the two writes share a table and fill different
+    * halves of it. Nothing was superseded, because nothing active existed to
+    * supersede; sending an identifier that matched nothing would have failed the
+    * whole call rather than inserting beside it. */
+   assert(decision_log_record_acknowledged == 1 && decision_log_record_logged_decision_id > 0 &&
+          decision_log_record_logged_task_id == 0 &&
+          decision_log_record_logged_decision_options[0] != '\0' &&
+          decision_log_record_logged_decision_chosen[0] != '\0' &&
+          decision_log_record_logged_decision_rationale[0] != '\0' &&
+          decision_log_record_logged_decision_assumptions[0] == '\0' &&
+          decision_log_record_logged_decision_outcome[0] == '\0' &&
+          decision_log_record_logged_decision_created_at[0] != '\0' &&
+          !strcmp(decision_log_record_logged_decision_status, "active") &&
+          decision_log_record_logged_revisit_when[0] == '\0' &&
+          decision_log_record_logged_supersedes_id == 0 &&
+          !strcmp(decision_log_record_logged_decision_subject, "replay-subject") &&
+          !strcmp(decision_log_record_logged_decision_author, "replay-author") &&
+          decision_log_record_logged_linked_policy_id == 0);
+
+   uint32_t directive_insert_ignore_acknowledged = 99;
+   uint64_t directive_insert_ignore_directive_id = 99;
+   uint32_t directive_insert_ignore_directive_existed = 99;
+   assert(aimee_db2_directive_insert_ignore_call(
+              call_client, &client, 9560, 0, "replay question?", "replay-topic", "replay-entity",
+              "replay/file.c", "retrieval_failure", 5, 0, 0, "replay-evidence", "replay-session",
+              "", &directive_insert_ignore_acknowledged, &directive_insert_ignore_directive_id,
+              &directive_insert_ignore_directive_existed, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Inserted, so the identifier is real and nothing was there before. The
+    * conflict path is the interesting one and this run does not reach it: on a
+    * dedup the row is looked up by cause, topic and question, which is not the
+    * index that refused the insert, so a contradiction deduped by its two
+    * memories can come back existed=1 with an identifier of zero. */
+   assert(directive_insert_ignore_acknowledged == 1 && directive_insert_ignore_directive_id > 0 &&
+          directive_insert_ignore_directive_existed == 0);
+
+   uint32_t directive_find_by_cause_topic_directive_found = 99;
+   uint64_t directive_find_by_cause_topic_directive_id = 99;
+   static char directive_find_by_cause_topic_directive_question
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_DIRECTIVE_QUESTION_MAX + 1];
+   directive_find_by_cause_topic_directive_question[0] = 'x';
+   static char directive_find_by_cause_topic_anchor_entity
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_ANCHOR_ENTITY_MAX + 1];
+   directive_find_by_cause_topic_anchor_entity[0] = 'x';
+   static char directive_find_by_cause_topic_anchor_file
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_ANCHOR_FILE_MAX + 1];
+   directive_find_by_cause_topic_anchor_file[0] = 'x';
+   uint32_t directive_find_by_cause_topic_directive_priority = 99;
+   static char directive_find_by_cause_topic_directive_state
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_DIRECTIVE_STATE_MAX + 1];
+   directive_find_by_cause_topic_directive_state[0] = 'x';
+   uint64_t directive_find_by_cause_topic_memory_a_id = 99;
+   uint64_t directive_find_by_cause_topic_memory_b_id = 99;
+   uint64_t directive_find_by_cause_topic_resolution_memory_id = 99;
+   static char directive_find_by_cause_topic_directive_evidence
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_DIRECTIVE_EVIDENCE_MAX + 1];
+   directive_find_by_cause_topic_directive_evidence[0] = 'x';
+   static char directive_find_by_cause_topic_source_session
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_SOURCE_SESSION_MAX + 1];
+   directive_find_by_cause_topic_source_session[0] = 'x';
+   uint32_t directive_find_by_cause_topic_surfaced_count = 99;
+   static char directive_find_by_cause_topic_last_surfaced_at
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_LAST_SURFACED_AT_MAX + 1];
+   directive_find_by_cause_topic_last_surfaced_at[0] = 'x';
+   static char directive_find_by_cause_topic_resolved_at
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_RESOLVED_AT_MAX + 1];
+   directive_find_by_cause_topic_resolved_at[0] = 'x';
+   static char directive_find_by_cause_topic_valid_until
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_VALID_UNTIL_MAX + 1];
+   directive_find_by_cause_topic_valid_until[0] = 'x';
+   static char directive_find_by_cause_topic_directive_created_at
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_DIRECTIVE_CREATED_AT_MAX + 1];
+   directive_find_by_cause_topic_directive_created_at[0] = 'x';
+   static char directive_find_by_cause_topic_directive_updated_at
+       [AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_DIRECTIVE_UPDATED_AT_MAX + 1];
+   directive_find_by_cause_topic_directive_updated_at[0] = 'x';
+   assert(aimee_db2_directive_find_by_cause_topic_call(
+              call_client, &client, 9561, 0, "retrieval_failure", "replay-topic",
+              &directive_find_by_cause_topic_directive_found,
+              &directive_find_by_cause_topic_directive_id,
+              directive_find_by_cause_topic_directive_question,
+              sizeof(directive_find_by_cause_topic_directive_question),
+              directive_find_by_cause_topic_anchor_entity,
+              sizeof(directive_find_by_cause_topic_anchor_entity),
+              directive_find_by_cause_topic_anchor_file,
+              sizeof(directive_find_by_cause_topic_anchor_file),
+              &directive_find_by_cause_topic_directive_priority,
+              directive_find_by_cause_topic_directive_state,
+              sizeof(directive_find_by_cause_topic_directive_state),
+              &directive_find_by_cause_topic_memory_a_id,
+              &directive_find_by_cause_topic_memory_b_id,
+              &directive_find_by_cause_topic_resolution_memory_id,
+              directive_find_by_cause_topic_directive_evidence,
+              sizeof(directive_find_by_cause_topic_directive_evidence),
+              directive_find_by_cause_topic_source_session,
+              sizeof(directive_find_by_cause_topic_source_session),
+              &directive_find_by_cause_topic_surfaced_count,
+              directive_find_by_cause_topic_last_surfaced_at,
+              sizeof(directive_find_by_cause_topic_last_surfaced_at),
+              directive_find_by_cause_topic_resolved_at,
+              sizeof(directive_find_by_cause_topic_resolved_at),
+              directive_find_by_cause_topic_valid_until,
+              sizeof(directive_find_by_cause_topic_valid_until),
+              directive_find_by_cause_topic_directive_created_at,
+              sizeof(directive_find_by_cause_topic_directive_created_at),
+              directive_find_by_cause_topic_directive_updated_at,
+              sizeof(directive_find_by_cause_topic_directive_updated_at), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* And the directive the previous case raised is what this finds, by the cause
+    * and topic alone. Every field it carries is the one that was inserted, and
+    * the three the insert never set -- resolution, resolved_at, last_surfaced_at
+    * -- are empty rather than absent. The timestamp is stamped with a space
+    * where the decision log stamps a T and a Z: two conventions, one database. */
+   assert(directive_find_by_cause_topic_directive_found == 1 &&
+          directive_find_by_cause_topic_directive_id == directive_insert_ignore_directive_id &&
+          !strcmp(directive_find_by_cause_topic_directive_question, "replay question?") &&
+          !strcmp(directive_find_by_cause_topic_anchor_entity, "replay-entity") &&
+          !strcmp(directive_find_by_cause_topic_anchor_file, "replay/file.c") &&
+          directive_find_by_cause_topic_directive_priority == 5 &&
+          !strcmp(directive_find_by_cause_topic_directive_state, "open") &&
+          directive_find_by_cause_topic_memory_a_id == 0 &&
+          directive_find_by_cause_topic_memory_b_id == 0 &&
+          directive_find_by_cause_topic_resolution_memory_id == 0 &&
+          !strcmp(directive_find_by_cause_topic_directive_evidence, "replay-evidence") &&
+          !strcmp(directive_find_by_cause_topic_source_session, "replay-session") &&
+          directive_find_by_cause_topic_surfaced_count == 0 &&
+          directive_find_by_cause_topic_last_surfaced_at[0] == '\0' &&
+          directive_find_by_cause_topic_resolved_at[0] == '\0' &&
+          directive_find_by_cause_topic_valid_until[0] == '\0' &&
+          directive_find_by_cause_topic_directive_created_at[0] != '\0' &&
+          directive_find_by_cause_topic_directive_updated_at[0] != '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -679,6 +679,21 @@ typedef struct
    int (*witness_checkpoint_freshness)(int64_t *out_count, int64_t *out_age_seconds);
    int (*witness_checkpoint_anchor_coverage)(const uint8_t *key_id, size_t key_id_len,
                                              int64_t *out_unknown, char *sample, size_t sample_cap);
+   int (*decision_log_insert)(int64_t task_id, const char *options, const char *chosen,
+                              const char *rationale, const char *assumptions,
+                              const char *created_at, db2_decision_log_row_t *out);
+   int (*decision_log_record)(const char *subject, const char *options, const char *chosen,
+                              const char *rationale, const char *author, int64_t linked_policy_id,
+                              const char *revisit_when, int64_t supersedes_id,
+                              db2_decision_log_row_t *out);
+   int (*directive_find_by_cause_topic)(const char *cause, const char *topic,
+                                        memory_directive_t *out);
+   int (*directive_insert_ignore)(const char *question, const char *topic,
+                                  const char *anchor_entity, const char *anchor_file,
+                                  const char *cause, int priority, int64_t memory_a_id,
+                                  int64_t memory_b_id, const char *evidence,
+                                  const char *source_session, const char *valid_until,
+                                  int64_t *out_id, int *out_existed);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

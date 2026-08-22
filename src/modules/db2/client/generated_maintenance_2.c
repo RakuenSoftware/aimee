@@ -1006,3 +1006,83 @@ aimee_module_call_result_t aimee_db2_witness_checkpoint_anchor_coverage_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_directive_find_by_cause_topic_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *directive_cause, const char *directive_topic, uint32_t *directive_found,
+    uint64_t *directive_id, char *directive_question, size_t directive_question_capacity,
+    char *anchor_entity, size_t anchor_entity_capacity, char *anchor_file,
+    size_t anchor_file_capacity, uint32_t *directive_priority, char *directive_state,
+    size_t directive_state_capacity, uint64_t *memory_a_id, uint64_t *memory_b_id,
+    uint64_t *resolution_memory_id, char *directive_evidence, size_t directive_evidence_capacity,
+    char *source_session, size_t source_session_capacity, uint32_t *surfaced_count,
+    char *last_surfaced_at, size_t last_surfaced_at_capacity, char *resolved_at,
+    size_t resolved_at_capacity, char *valid_until, size_t valid_until_capacity,
+    char *directive_created_at, size_t directive_created_at_capacity, char *directive_updated_at,
+    size_t directive_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_FIND_BY_CAUSE_TOPIC_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_directive_find_by_cause_topic_request_encode(
+           directive_cause, directive_topic, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DIRECTIVE_FIND_BY_CAUSE_TOPIC,
+            AIMEE_DB2_STAGE_DIRECTIVE_FIND_BY_CAUSE_TOPIC, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_directive_find_by_cause_topic_reply_decode(
+           response, response_len, directive_found, directive_id, directive_question,
+           directive_question_capacity, anchor_entity, anchor_entity_capacity, anchor_file,
+           anchor_file_capacity, directive_priority, directive_state, directive_state_capacity,
+           memory_a_id, memory_b_id, resolution_memory_id, directive_evidence,
+           directive_evidence_capacity, source_session, source_session_capacity, surfaced_count,
+           last_surfaced_at, last_surfaced_at_capacity, resolved_at, resolved_at_capacity,
+           valid_until, valid_until_capacity, directive_created_at, directive_created_at_capacity,
+           directive_updated_at, directive_updated_at_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_directive_insert_ignore_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *directive_question, const char *directive_topic, const char *anchor_entity,
+    const char *anchor_file, const char *directive_cause, uint32_t directive_priority,
+    uint64_t memory_a_id, uint64_t memory_b_id, const char *directive_evidence,
+    const char *source_session, const char *valid_until, uint32_t *acknowledged,
+    uint64_t *directive_id, uint32_t *directive_existed, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DIRECTIVE_INSERT_IGNORE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DIRECTIVE_INSERT_IGNORE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_directive_insert_ignore_request_encode(
+           directive_question, directive_topic, anchor_entity, anchor_file, directive_cause,
+           directive_priority, memory_a_id, memory_b_id, directive_evidence, source_session,
+           valid_until, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DIRECTIVE_INSERT_IGNORE,
+            AIMEE_DB2_STAGE_DIRECTIVE_INSERT_IGNORE, trace_id, deadline_ns, request, request_len,
+            response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_directive_insert_ignore_reply_decode(response, response_len, acknowledged,
+                                                      directive_id, directive_existed) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

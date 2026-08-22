@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "e8b03d636dbc80e88f3ff0da1aefdf1a42852a03763d4ce805c2acbb2a623524"
+const ContractSHA256 = "4ef6ce4a22a1b1ce526c755463d64cb727d8d456810b2ededa7fd9e2fc5f9d0f"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -13486,6 +13486,236 @@ func DecodeLearningProposalInsertRequest(request []byte) (uint32, string, string
 	return signalID, proposalSink, targetKey, targetMemoryID, actionJson, evidenceRefs, expiresAt, nil
 }
 
+const EventDecisionLogInsert = EventLearning
+const StageDecisionLogInsert = FamilyLearning
+const OperationDecisionLogInsert uint32 = 87
+const DecisionLogInsertTaskIDMin uint64 = 0
+const DecisionLogInsertTaskIDMax uint64 = 9223372036854775807
+const DecisionLogInsertDecisionOptionsMin = 1
+const DecisionLogInsertDecisionOptionsMax = 1023
+const DecisionLogInsertDecisionChosenMin = 1
+const DecisionLogInsertDecisionChosenMax = 255
+const DecisionLogInsertDecisionRationaleMin = 0
+const DecisionLogInsertDecisionRationaleMax = 1023
+const DecisionLogInsertDecisionAssumptionsMin = 0
+const DecisionLogInsertDecisionAssumptionsMax = 511
+const DecisionLogInsertDecisionCreatedAtMin = 0
+const DecisionLogInsertDecisionCreatedAtMax = 31
+
+// EncodeDecisionLogInsertRequest writes the schema decision_log_insert declares, in order.
+func EncodeDecisionLogInsertRequest(taskID uint64, decisionOptions string, decisionChosen string, decisionRationale string, decisionAssumptions string, decisionCreatedAt string) ([]byte, error) {
+	if taskID < DecisionLogInsertTaskIDMin || taskID > DecisionLogInsertTaskIDMax ||
+		len(decisionOptions) < DecisionLogInsertDecisionOptionsMin || len(decisionOptions) > DecisionLogInsertDecisionOptionsMax || hasNUL(decisionOptions) ||
+		len(decisionChosen) < DecisionLogInsertDecisionChosenMin || len(decisionChosen) > DecisionLogInsertDecisionChosenMax || hasNUL(decisionChosen) ||
+		len(decisionRationale) < DecisionLogInsertDecisionRationaleMin || len(decisionRationale) > DecisionLogInsertDecisionRationaleMax || hasNUL(decisionRationale) ||
+		len(decisionAssumptions) < DecisionLogInsertDecisionAssumptionsMin || len(decisionAssumptions) > DecisionLogInsertDecisionAssumptionsMax || hasNUL(decisionAssumptions) ||
+		len(decisionCreatedAt) < DecisionLogInsertDecisionCreatedAtMin || len(decisionCreatedAt) > DecisionLogInsertDecisionCreatedAtMax || hasNUL(decisionCreatedAt) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var taskIDBytes [8]byte
+	binary.LittleEndian.PutUint64(taskIDBytes[:], taskID)
+	payload = append(payload, taskIDBytes[:]...)
+	if err := putRowText(&payload, decisionOptions, DecisionLogInsertDecisionOptionsMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionChosen, DecisionLogInsertDecisionChosenMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionRationale, DecisionLogInsertDecisionRationaleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionAssumptions, DecisionLogInsertDecisionAssumptionsMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionCreatedAt, DecisionLogInsertDecisionCreatedAtMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDecisionLogInsert, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogInsertRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogInsertRequest(request []byte) (uint64, string, string, string, string, string, error) {
+	var taskID uint64
+	var decisionOptions string
+	var decisionChosen string
+	var decisionRationale string
+	var decisionAssumptions string
+	var decisionCreatedAt string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogInsert || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	taskID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if taskID < DecisionLogInsertTaskIDMin || taskID > DecisionLogInsertTaskIDMax {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if decisionOptions, err = takeRowText(payload, &cursor, DecisionLogInsertDecisionOptionsMax); err != nil ||
+		len(decisionOptions) < DecisionLogInsertDecisionOptionsMin {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if decisionChosen, err = takeRowText(payload, &cursor, DecisionLogInsertDecisionChosenMax); err != nil ||
+		len(decisionChosen) < DecisionLogInsertDecisionChosenMin {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if decisionRationale, err = takeRowText(payload, &cursor, DecisionLogInsertDecisionRationaleMax); err != nil ||
+		len(decisionRationale) < DecisionLogInsertDecisionRationaleMin {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if decisionAssumptions, err = takeRowText(payload, &cursor, DecisionLogInsertDecisionAssumptionsMax); err != nil ||
+		len(decisionAssumptions) < DecisionLogInsertDecisionAssumptionsMin {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if decisionCreatedAt, err = takeRowText(payload, &cursor, DecisionLogInsertDecisionCreatedAtMax); err != nil ||
+		len(decisionCreatedAt) < DecisionLogInsertDecisionCreatedAtMin {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", "", "", "", ErrMalformedEnvelope
+	}
+	return taskID, decisionOptions, decisionChosen, decisionRationale, decisionAssumptions, decisionCreatedAt, nil
+}
+
+const EventDecisionLogRecord = EventLearning
+const StageDecisionLogRecord = FamilyLearning
+const OperationDecisionLogRecord uint32 = 88
+const DecisionLogRecordDecisionSubjectMin = 1
+const DecisionLogRecordDecisionSubjectMax = 255
+const DecisionLogRecordDecisionOptionsMin = 1
+const DecisionLogRecordDecisionOptionsMax = 1023
+const DecisionLogRecordDecisionChosenMin = 1
+const DecisionLogRecordDecisionChosenMax = 255
+const DecisionLogRecordDecisionRationaleMin = 0
+const DecisionLogRecordDecisionRationaleMax = 1023
+const DecisionLogRecordDecisionAuthorMin = 0
+const DecisionLogRecordDecisionAuthorMax = 127
+const DecisionLogRecordLinkedPolicyIDMin uint64 = 0
+const DecisionLogRecordLinkedPolicyIDMax uint64 = 9223372036854775807
+const DecisionLogRecordRevisitWhenMin = 0
+const DecisionLogRecordRevisitWhenMax = 31
+const DecisionLogRecordSupersedesIDMin uint64 = 0
+const DecisionLogRecordSupersedesIDMax uint64 = 9223372036854775807
+
+// EncodeDecisionLogRecordRequest writes the schema decision_log_record declares, in order.
+func EncodeDecisionLogRecordRequest(decisionSubject string, decisionOptions string, decisionChosen string, decisionRationale string, decisionAuthor string, linkedPolicyID uint64, revisitWhen string, supersedesID uint64) ([]byte, error) {
+	if len(decisionSubject) < DecisionLogRecordDecisionSubjectMin || len(decisionSubject) > DecisionLogRecordDecisionSubjectMax || hasNUL(decisionSubject) ||
+		len(decisionOptions) < DecisionLogRecordDecisionOptionsMin || len(decisionOptions) > DecisionLogRecordDecisionOptionsMax || hasNUL(decisionOptions) ||
+		len(decisionChosen) < DecisionLogRecordDecisionChosenMin || len(decisionChosen) > DecisionLogRecordDecisionChosenMax || hasNUL(decisionChosen) ||
+		len(decisionRationale) < DecisionLogRecordDecisionRationaleMin || len(decisionRationale) > DecisionLogRecordDecisionRationaleMax || hasNUL(decisionRationale) ||
+		len(decisionAuthor) < DecisionLogRecordDecisionAuthorMin || len(decisionAuthor) > DecisionLogRecordDecisionAuthorMax || hasNUL(decisionAuthor) ||
+		linkedPolicyID < DecisionLogRecordLinkedPolicyIDMin || linkedPolicyID > DecisionLogRecordLinkedPolicyIDMax ||
+		len(revisitWhen) < DecisionLogRecordRevisitWhenMin || len(revisitWhen) > DecisionLogRecordRevisitWhenMax || hasNUL(revisitWhen) ||
+		supersedesID < DecisionLogRecordSupersedesIDMin || supersedesID > DecisionLogRecordSupersedesIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, decisionSubject, DecisionLogRecordDecisionSubjectMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionOptions, DecisionLogRecordDecisionOptionsMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionChosen, DecisionLogRecordDecisionChosenMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionRationale, DecisionLogRecordDecisionRationaleMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, decisionAuthor, DecisionLogRecordDecisionAuthorMax); err != nil {
+		return nil, err
+	}
+	var linkedPolicyIDBytes [8]byte
+	binary.LittleEndian.PutUint64(linkedPolicyIDBytes[:], linkedPolicyID)
+	payload = append(payload, linkedPolicyIDBytes[:]...)
+	if err := putRowText(&payload, revisitWhen, DecisionLogRecordRevisitWhenMax); err != nil {
+		return nil, err
+	}
+	var supersedesIDBytes [8]byte
+	binary.LittleEndian.PutUint64(supersedesIDBytes[:], supersedesID)
+	payload = append(payload, supersedesIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDecisionLogRecord, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDecisionLogRecordRequest reads it back, checking each field against its own bound.
+func DecodeDecisionLogRecordRequest(request []byte) (string, string, string, string, string, uint64, string, uint64, error) {
+	var decisionSubject string
+	var decisionOptions string
+	var decisionChosen string
+	var decisionRationale string
+	var decisionAuthor string
+	var linkedPolicyID uint64
+	var revisitWhen string
+	var supersedesID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDecisionLogRecord || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if decisionSubject, err = takeRowText(payload, &cursor, DecisionLogRecordDecisionSubjectMax); err != nil ||
+		len(decisionSubject) < DecisionLogRecordDecisionSubjectMin {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if decisionOptions, err = takeRowText(payload, &cursor, DecisionLogRecordDecisionOptionsMax); err != nil ||
+		len(decisionOptions) < DecisionLogRecordDecisionOptionsMin {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if decisionChosen, err = takeRowText(payload, &cursor, DecisionLogRecordDecisionChosenMax); err != nil ||
+		len(decisionChosen) < DecisionLogRecordDecisionChosenMin {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if decisionRationale, err = takeRowText(payload, &cursor, DecisionLogRecordDecisionRationaleMax); err != nil ||
+		len(decisionRationale) < DecisionLogRecordDecisionRationaleMin {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if decisionAuthor, err = takeRowText(payload, &cursor, DecisionLogRecordDecisionAuthorMax); err != nil ||
+		len(decisionAuthor) < DecisionLogRecordDecisionAuthorMin {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	linkedPolicyID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if linkedPolicyID < DecisionLogRecordLinkedPolicyIDMin || linkedPolicyID > DecisionLogRecordLinkedPolicyIDMax {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if revisitWhen, err = takeRowText(payload, &cursor, DecisionLogRecordRevisitWhenMax); err != nil ||
+		len(revisitWhen) < DecisionLogRecordRevisitWhenMin {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	supersedesID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if supersedesID < DecisionLogRecordSupersedesIDMin || supersedesID > DecisionLogRecordSupersedesIDMax {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", 0, "", 0, ErrMalformedEnvelope
+	}
+	return decisionSubject, decisionOptions, decisionChosen, decisionRationale, decisionAuthor, linkedPolicyID, revisitWhen, supersedesID, nil
+}
+
 const EventDocumentExists = EventOrganization
 const StageDocumentExists = FamilyOrganization
 const OperationDocumentExists uint32 = 6
@@ -19391,6 +19621,225 @@ func DecodeWitnessCheckpointAnchorCoverageRequest(request []byte) (string, error
 		return "", ErrMalformedEnvelope
 	}
 	return signerKeyIDHex, nil
+}
+
+const EventDirectiveFindByCauseTopic = EventMaintenance
+const StageDirectiveFindByCauseTopic = FamilyMaintenance
+const OperationDirectiveFindByCauseTopic uint32 = 75
+const DirectiveFindByCauseTopicDirectiveCauseMin = 1
+const DirectiveFindByCauseTopicDirectiveCauseMax = 31
+const DirectiveFindByCauseTopicDirectiveTopicMin = 0
+const DirectiveFindByCauseTopicDirectiveTopicMax = 127
+
+// EncodeDirectiveFindByCauseTopicRequest writes the schema directive_find_by_cause_topic declares, in order.
+func EncodeDirectiveFindByCauseTopicRequest(directiveCause string, directiveTopic string) ([]byte, error) {
+	if len(directiveCause) < DirectiveFindByCauseTopicDirectiveCauseMin || len(directiveCause) > DirectiveFindByCauseTopicDirectiveCauseMax || hasNUL(directiveCause) ||
+		len(directiveTopic) < DirectiveFindByCauseTopicDirectiveTopicMin || len(directiveTopic) > DirectiveFindByCauseTopicDirectiveTopicMax || hasNUL(directiveTopic) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, directiveCause, DirectiveFindByCauseTopicDirectiveCauseMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, directiveTopic, DirectiveFindByCauseTopicDirectiveTopicMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDirectiveFindByCauseTopic, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveFindByCauseTopicRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveFindByCauseTopicRequest(request []byte) (string, string, error) {
+	var directiveCause string
+	var directiveTopic string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveFindByCauseTopic || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if directiveCause, err = takeRowText(payload, &cursor, DirectiveFindByCauseTopicDirectiveCauseMax); err != nil ||
+		len(directiveCause) < DirectiveFindByCauseTopicDirectiveCauseMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if directiveTopic, err = takeRowText(payload, &cursor, DirectiveFindByCauseTopicDirectiveTopicMax); err != nil ||
+		len(directiveTopic) < DirectiveFindByCauseTopicDirectiveTopicMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return directiveCause, directiveTopic, nil
+}
+
+const EventDirectiveInsertIgnore = EventMaintenance
+const StageDirectiveInsertIgnore = FamilyMaintenance
+const OperationDirectiveInsertIgnore uint32 = 76
+const DirectiveInsertIgnoreDirectiveQuestionMin = 1
+const DirectiveInsertIgnoreDirectiveQuestionMax = 511
+const DirectiveInsertIgnoreDirectiveTopicMin = 0
+const DirectiveInsertIgnoreDirectiveTopicMax = 127
+const DirectiveInsertIgnoreAnchorEntityMin = 0
+const DirectiveInsertIgnoreAnchorEntityMax = 127
+const DirectiveInsertIgnoreAnchorFileMin = 0
+const DirectiveInsertIgnoreAnchorFileMax = 127
+const DirectiveInsertIgnoreDirectiveCauseMin = 1
+const DirectiveInsertIgnoreDirectiveCauseMax = 31
+const DirectiveInsertIgnoreDirectivePriorityMin uint32 = 0
+const DirectiveInsertIgnoreDirectivePriorityMax uint32 = 2147483647
+const DirectiveInsertIgnoreMemoryAIDMin uint64 = 0
+const DirectiveInsertIgnoreMemoryAIDMax uint64 = 9223372036854775807
+const DirectiveInsertIgnoreMemoryBIDMin uint64 = 0
+const DirectiveInsertIgnoreMemoryBIDMax uint64 = 9223372036854775807
+const DirectiveInsertIgnoreDirectiveEvidenceMin = 0
+const DirectiveInsertIgnoreDirectiveEvidenceMax = 511
+const DirectiveInsertIgnoreSourceSessionMin = 0
+const DirectiveInsertIgnoreSourceSessionMax = 127
+const DirectiveInsertIgnoreValidUntilMin = 0
+const DirectiveInsertIgnoreValidUntilMax = 31
+
+// EncodeDirectiveInsertIgnoreRequest writes the schema directive_insert_ignore declares, in order.
+func EncodeDirectiveInsertIgnoreRequest(directiveQuestion string, directiveTopic string, anchorEntity string, anchorFile string, directiveCause string, directivePriority uint32, memoryAID uint64, memoryBID uint64, directiveEvidence string, sourceSession string, validUntil string) ([]byte, error) {
+	if len(directiveQuestion) < DirectiveInsertIgnoreDirectiveQuestionMin || len(directiveQuestion) > DirectiveInsertIgnoreDirectiveQuestionMax || hasNUL(directiveQuestion) ||
+		len(directiveTopic) < DirectiveInsertIgnoreDirectiveTopicMin || len(directiveTopic) > DirectiveInsertIgnoreDirectiveTopicMax || hasNUL(directiveTopic) ||
+		len(anchorEntity) < DirectiveInsertIgnoreAnchorEntityMin || len(anchorEntity) > DirectiveInsertIgnoreAnchorEntityMax || hasNUL(anchorEntity) ||
+		len(anchorFile) < DirectiveInsertIgnoreAnchorFileMin || len(anchorFile) > DirectiveInsertIgnoreAnchorFileMax || hasNUL(anchorFile) ||
+		len(directiveCause) < DirectiveInsertIgnoreDirectiveCauseMin || len(directiveCause) > DirectiveInsertIgnoreDirectiveCauseMax || hasNUL(directiveCause) ||
+		directivePriority < DirectiveInsertIgnoreDirectivePriorityMin || directivePriority > DirectiveInsertIgnoreDirectivePriorityMax ||
+		memoryAID < DirectiveInsertIgnoreMemoryAIDMin || memoryAID > DirectiveInsertIgnoreMemoryAIDMax ||
+		memoryBID < DirectiveInsertIgnoreMemoryBIDMin || memoryBID > DirectiveInsertIgnoreMemoryBIDMax ||
+		len(directiveEvidence) < DirectiveInsertIgnoreDirectiveEvidenceMin || len(directiveEvidence) > DirectiveInsertIgnoreDirectiveEvidenceMax || hasNUL(directiveEvidence) ||
+		len(sourceSession) < DirectiveInsertIgnoreSourceSessionMin || len(sourceSession) > DirectiveInsertIgnoreSourceSessionMax || hasNUL(sourceSession) ||
+		len(validUntil) < DirectiveInsertIgnoreValidUntilMin || len(validUntil) > DirectiveInsertIgnoreValidUntilMax || hasNUL(validUntil) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, directiveQuestion, DirectiveInsertIgnoreDirectiveQuestionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, directiveTopic, DirectiveInsertIgnoreDirectiveTopicMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, anchorEntity, DirectiveInsertIgnoreAnchorEntityMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, anchorFile, DirectiveInsertIgnoreAnchorFileMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, directiveCause, DirectiveInsertIgnoreDirectiveCauseMax); err != nil {
+		return nil, err
+	}
+	var directivePriorityBytes [4]byte
+	binary.LittleEndian.PutUint32(directivePriorityBytes[:], directivePriority)
+	payload = append(payload, directivePriorityBytes[:]...)
+	var memoryAIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryAIDBytes[:], memoryAID)
+	payload = append(payload, memoryAIDBytes[:]...)
+	var memoryBIDBytes [8]byte
+	binary.LittleEndian.PutUint64(memoryBIDBytes[:], memoryBID)
+	payload = append(payload, memoryBIDBytes[:]...)
+	if err := putRowText(&payload, directiveEvidence, DirectiveInsertIgnoreDirectiveEvidenceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, sourceSession, DirectiveInsertIgnoreSourceSessionMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, validUntil, DirectiveInsertIgnoreValidUntilMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationDirectiveInsertIgnore, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDirectiveInsertIgnoreRequest reads it back, checking each field against its own bound.
+func DecodeDirectiveInsertIgnoreRequest(request []byte) (string, string, string, string, string, uint32, uint64, uint64, string, string, string, error) {
+	var directiveQuestion string
+	var directiveTopic string
+	var anchorEntity string
+	var anchorFile string
+	var directiveCause string
+	var directivePriority uint32
+	var memoryAID uint64
+	var memoryBID uint64
+	var directiveEvidence string
+	var sourceSession string
+	var validUntil string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDirectiveInsertIgnore || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if directiveQuestion, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreDirectiveQuestionMax); err != nil ||
+		len(directiveQuestion) < DirectiveInsertIgnoreDirectiveQuestionMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if directiveTopic, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreDirectiveTopicMax); err != nil ||
+		len(directiveTopic) < DirectiveInsertIgnoreDirectiveTopicMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if anchorEntity, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreAnchorEntityMax); err != nil ||
+		len(anchorEntity) < DirectiveInsertIgnoreAnchorEntityMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if anchorFile, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreAnchorFileMax); err != nil ||
+		len(anchorFile) < DirectiveInsertIgnoreAnchorFileMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if directiveCause, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreDirectiveCauseMax); err != nil ||
+		len(directiveCause) < DirectiveInsertIgnoreDirectiveCauseMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	directivePriority = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if directivePriority < DirectiveInsertIgnoreDirectivePriorityMin || directivePriority > DirectiveInsertIgnoreDirectivePriorityMax {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	memoryAID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryAID < DirectiveInsertIgnoreMemoryAIDMin || memoryAID > DirectiveInsertIgnoreMemoryAIDMax {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	memoryBID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if memoryBID < DirectiveInsertIgnoreMemoryBIDMin || memoryBID > DirectiveInsertIgnoreMemoryBIDMax {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if directiveEvidence, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreDirectiveEvidenceMax); err != nil ||
+		len(directiveEvidence) < DirectiveInsertIgnoreDirectiveEvidenceMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if sourceSession, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreSourceSessionMax); err != nil ||
+		len(sourceSession) < DirectiveInsertIgnoreSourceSessionMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if validUntil, err = takeRowText(payload, &cursor, DirectiveInsertIgnoreValidUntilMax); err != nil ||
+		len(validUntil) < DirectiveInsertIgnoreValidUntilMin {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", "", 0, 0, 0, "", "", "", ErrMalformedEnvelope
+	}
+	return directiveQuestion, directiveTopic, anchorEntity, anchorFile, directiveCause, directivePriority, memoryAID, memoryBID, directiveEvidence, sourceSession, validUntil, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

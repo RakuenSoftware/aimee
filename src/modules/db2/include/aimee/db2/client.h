@@ -1425,6 +1425,14 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t signal_id, const char *proposal_sink, const char *target_key, uint64_t target_memory_id, const char *action_json, const char *evidence_refs, const char *expires_at, uint32_t *proposal_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_decision_log_insert_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t task_id, const char *decision_options, const char *decision_chosen, const char *decision_rationale, const char *decision_assumptions, const char *decision_created_at, uint32_t *acknowledged, uint64_t *logged_decision_id, uint64_t *logged_task_id, char *logged_decision_options, size_t logged_decision_options_capacity, char *logged_decision_chosen, size_t logged_decision_chosen_capacity, char *logged_decision_rationale, size_t logged_decision_rationale_capacity, char *logged_decision_assumptions, size_t logged_decision_assumptions_capacity, char *logged_decision_outcome, size_t logged_decision_outcome_capacity, char *logged_decision_created_at, size_t logged_decision_created_at_capacity, char *logged_decision_status, size_t logged_decision_status_capacity, char *logged_revisit_when, size_t logged_revisit_when_capacity, uint64_t *logged_supersedes_id, char *logged_decision_subject, size_t logged_decision_subject_capacity, char *logged_decision_author, size_t logged_decision_author_capacity, uint64_t *logged_linked_policy_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_decision_log_record_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *decision_subject, const char *decision_options, const char *decision_chosen, const char *decision_rationale, const char *decision_author, uint64_t linked_policy_id, const char *revisit_when, uint64_t supersedes_id, uint32_t *acknowledged, uint64_t *logged_decision_id, uint64_t *logged_task_id, char *logged_decision_options, size_t logged_decision_options_capacity, char *logged_decision_chosen, size_t logged_decision_chosen_capacity, char *logged_decision_rationale, size_t logged_decision_rationale_capacity, char *logged_decision_assumptions, size_t logged_decision_assumptions_capacity, char *logged_decision_outcome, size_t logged_decision_outcome_capacity, char *logged_decision_created_at, size_t logged_decision_created_at_capacity, char *logged_decision_status, size_t logged_decision_status_capacity, char *logged_revisit_when, size_t logged_revisit_when_capacity, uint64_t *logged_supersedes_id, char *logged_decision_subject, size_t logged_decision_subject_capacity, char *logged_decision_author, size_t logged_decision_author_capacity, uint64_t *logged_linked_policy_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_document_exists_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t document_id, uint32_t *exists, aimee_module_cancelled_fn cancelled,
@@ -1840,5 +1848,13 @@ extern "C"
    aimee_module_call_result_t aimee_db2_witness_checkpoint_anchor_coverage_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *signer_key_id_hex, uint32_t *coverage_read, uint64_t *unknown_checkpoints, char *unknown_key_id_hex, size_t unknown_key_id_hex_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_directive_find_by_cause_topic_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *directive_cause, const char *directive_topic, uint32_t *directive_found, uint64_t *directive_id, char *directive_question, size_t directive_question_capacity, char *anchor_entity, size_t anchor_entity_capacity, char *anchor_file, size_t anchor_file_capacity, uint32_t *directive_priority, char *directive_state, size_t directive_state_capacity, uint64_t *memory_a_id, uint64_t *memory_b_id, uint64_t *resolution_memory_id, char *directive_evidence, size_t directive_evidence_capacity, char *source_session, size_t source_session_capacity, uint32_t *surfaced_count, char *last_surfaced_at, size_t last_surfaced_at_capacity, char *resolved_at, size_t resolved_at_capacity, char *valid_until, size_t valid_until_capacity, char *directive_created_at, size_t directive_created_at_capacity, char *directive_updated_at, size_t directive_updated_at_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_directive_insert_ignore_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *directive_question, const char *directive_topic, const char *anchor_entity, const char *anchor_file, const char *directive_cause, uint32_t directive_priority, uint64_t memory_a_id, uint64_t memory_b_id, const char *directive_evidence, const char *source_session, const char *valid_until, uint32_t *acknowledged, uint64_t *directive_id, uint32_t *directive_existed, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

@@ -174,3 +174,108 @@ aimee_module_call_result_t aimee_db2_learning_proposal_insert_call(
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_decision_log_insert_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint64_t task_id, const char *decision_options, const char *decision_chosen,
+    const char *decision_rationale, const char *decision_assumptions,
+    const char *decision_created_at, uint32_t *acknowledged, uint64_t *logged_decision_id,
+    uint64_t *logged_task_id, char *logged_decision_options,
+    size_t logged_decision_options_capacity, char *logged_decision_chosen,
+    size_t logged_decision_chosen_capacity, char *logged_decision_rationale,
+    size_t logged_decision_rationale_capacity, char *logged_decision_assumptions,
+    size_t logged_decision_assumptions_capacity, char *logged_decision_outcome,
+    size_t logged_decision_outcome_capacity, char *logged_decision_created_at,
+    size_t logged_decision_created_at_capacity, char *logged_decision_status,
+    size_t logged_decision_status_capacity, char *logged_revisit_when,
+    size_t logged_revisit_when_capacity, uint64_t *logged_supersedes_id,
+    char *logged_decision_subject, size_t logged_decision_subject_capacity,
+    char *logged_decision_author, size_t logged_decision_author_capacity,
+    uint64_t *logged_linked_policy_id, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DECISION_LOG_INSERT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DECISION_LOG_INSERT_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_decision_log_insert_request_encode(
+           task_id, decision_options, decision_chosen, decision_rationale, decision_assumptions,
+           decision_created_at, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DECISION_LOG_INSERT, AIMEE_DB2_STAGE_DECISION_LOG_INSERT,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_decision_log_insert_reply_decode(
+           response, response_len, acknowledged, logged_decision_id, logged_task_id,
+           logged_decision_options, logged_decision_options_capacity, logged_decision_chosen,
+           logged_decision_chosen_capacity, logged_decision_rationale,
+           logged_decision_rationale_capacity, logged_decision_assumptions,
+           logged_decision_assumptions_capacity, logged_decision_outcome,
+           logged_decision_outcome_capacity, logged_decision_created_at,
+           logged_decision_created_at_capacity, logged_decision_status,
+           logged_decision_status_capacity, logged_revisit_when, logged_revisit_when_capacity,
+           logged_supersedes_id, logged_decision_subject, logged_decision_subject_capacity,
+           logged_decision_author, logged_decision_author_capacity, logged_linked_policy_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_decision_log_record_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *decision_subject, const char *decision_options, const char *decision_chosen,
+    const char *decision_rationale, const char *decision_author, uint64_t linked_policy_id,
+    const char *revisit_when, uint64_t supersedes_id, uint32_t *acknowledged,
+    uint64_t *logged_decision_id, uint64_t *logged_task_id, char *logged_decision_options,
+    size_t logged_decision_options_capacity, char *logged_decision_chosen,
+    size_t logged_decision_chosen_capacity, char *logged_decision_rationale,
+    size_t logged_decision_rationale_capacity, char *logged_decision_assumptions,
+    size_t logged_decision_assumptions_capacity, char *logged_decision_outcome,
+    size_t logged_decision_outcome_capacity, char *logged_decision_created_at,
+    size_t logged_decision_created_at_capacity, char *logged_decision_status,
+    size_t logged_decision_status_capacity, char *logged_revisit_when,
+    size_t logged_revisit_when_capacity, uint64_t *logged_supersedes_id,
+    char *logged_decision_subject, size_t logged_decision_subject_capacity,
+    char *logged_decision_author, size_t logged_decision_author_capacity,
+    uint64_t *logged_linked_policy_id, aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DECISION_LOG_RECORD_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_DECISION_LOG_RECORD_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_decision_log_record_request_encode(
+           decision_subject, decision_options, decision_chosen, decision_rationale, decision_author,
+           linked_policy_id, revisit_when, supersedes_id, request, sizeof(request),
+           &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_DECISION_LOG_RECORD, AIMEE_DB2_STAGE_DECISION_LOG_RECORD,
+            trace_id, deadline_ns, request, request_len, response, response_capacity, &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_decision_log_record_reply_decode(
+           response, response_len, acknowledged, logged_decision_id, logged_task_id,
+           logged_decision_options, logged_decision_options_capacity, logged_decision_chosen,
+           logged_decision_chosen_capacity, logged_decision_rationale,
+           logged_decision_rationale_capacity, logged_decision_assumptions,
+           logged_decision_assumptions_capacity, logged_decision_outcome,
+           logged_decision_outcome_capacity, logged_decision_created_at,
+           logged_decision_created_at_capacity, logged_decision_status,
+           logged_decision_status_capacity, logged_revisit_when, logged_revisit_when_capacity,
+           logged_supersedes_id, logged_decision_subject, logged_decision_subject_capacity,
+           logged_decision_author, logged_decision_author_capacity, logged_linked_policy_id) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
