@@ -273,14 +273,24 @@ Grants are keyed by server, team, and exact authenticated subject:
 | mTLS identity | `cert:<issuer>:<serial>` |
 | local single-org operator | `owner` |
 
-Grant through the local Unix socket. These routes are never exposed to a remote bearer:
+Grants are administered **against aimee-kb**, not through aimee-server. The
+server used to proxy this over its local Unix socket; that proxy was removed,
+because proxying it meant aimee-server holding an administrative identity on
+aimee-kb, which a single-tenant data-plane service should not have. The
+`aimee kb grant …` commands went with it and no longer dispatch.
 
 ```bash
-aimee kb grant set --server <server-id> --team <team-id> --subject <subject> --tier data
-aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
-aimee kb grant list --server <server-id> --team <team-id> --include-revoked
-aimee kb grant revoke --server <server-id> --team <team-id> --subject <subject>
+# on aimee-kb, as a principal with admin or team-lead authority IN the target team
+POST /v1/write-tier-grants/set     {"server_id": "...", "team_id": N,
+                                    "subject": "...", "tier": "data"}
+POST /v1/write-tier-grants/revoke  {"server_id": "...", "team_id": N, "subject": "..."}
+GET  /v1/write-tier-grants?server_id=...&team_id=N[&include_revoked=1][&subject=...]
 ```
+
+The acting identity comes from authentication, never from the request body, and
+the DB layer's `SECURITY DEFINER` check is the authority. A caller that is not a
+member of the named team is refused with exactly that reason; the `(server,
+team)` pair must also be registered.
 
 `data` permits memory, document, and index writes. `full` also permits agent, delegate, runner, and
 workspace control. The first grant uses the local `owner` operator context with team `0`; the

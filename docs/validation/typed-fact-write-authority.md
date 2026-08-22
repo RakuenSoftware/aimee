@@ -981,3 +981,63 @@ Asserting absence would fail on correct behaviour.
   = 4096 or 4105; `kb_tls_serve.c`: `KB_TLS_AUTH_MAX` = 8192), and the Go
   listeners use `Header.Get` with no fixed buffer at all. `kb_http_conn.c` was
   the only production instance.
+
+## `aimee kb grant set`: not a missing feature, a removed one
+
+The earlier entry recorded that this command does not dispatch and left it as
+feature completion. That was the wrong conclusion, and building it would have
+been worse than leaving it.
+
+`v1_route_requires_uds` keeps the reason:
+
+> "The family this guarded, /v1/grants/write-tier, is gone: aimee-server no
+> longer proxies write-tier grant administration. That is an operator action
+> against aimee-kb, where the DB layer's admin-or-team-lead RLS check is the
+> authority. Proxying it meant aimee-server needed an administrative identity on
+> aimee-kb, which is precisely what a single-tenant data-plane service should
+> not hold."
+
+So the CLI marshaller, renderers and print table are leftovers of a deliberately
+removed path, and re-wiring them would reintroduce the anti-pattern the removal
+existed to fix. What survived the removal instead was every artifact that tells
+an operator to use it:
+
+- the server's 403 body (`server_http.c`)
+- the route comment in `server_http_routes.c`, which described a UDS-only family
+  and was followed by unrelated GET routes, reading as if they were below it
+- `docs/UPGRADING.md`'s operator procedure
+- `docs/QUICKSTART.md`'s "grant administration is local-socket only"
+
+All four now say where grants are actually administered: aimee-kb's own
+`/v1/write-tier-grants` routes, by a principal with admin or team-lead authority
+in the target team.
+
+### And the refusal was blaming the database
+
+Running it (`test-grant-admin.sh`) rather than reading it produced:
+
+    {"error":"grant administration requires the postgres backend"}
+
+on a kb running Postgres. The log named the real code:
+
+    WARN kb.grants: tenant scope refused for team 7 (rc=-104)
+
+`DB2_ERR_TENANT_DENIED` -- "team not in principal memberships". An ordinary
+authorization refusal, reported as a deployment fault.
+
+`map_db_failure` mapped `rc < -1` to "requires the postgres backend", which
+sweeps up EVERY tenancy code. Only `DB2_ERR_TENANT_REQUIRES_PG` (-100) means the
+backend is wrong; -101..-104 are unauthenticated, no connection, scope-open
+failure, and not-a-member. The function's own comment set out to keep these
+apart:
+
+> "Reporting them alike would have an operator debugging their credentials when
+> the backend is simply wrong."
+
+which is exactly the confusion it produced, in the other direction: an operator
+whose credential is simply not a member of the team goes looking at the
+database. Each code now has its own answer, and a membership refusal says so.
+
+The unit test agreed with the collapse because it asserted on `stub_rc = -42`, a
+value the tenancy layer cannot return. It uses the real codes now, and covers
+the DENIED case that was wrong.

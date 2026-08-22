@@ -1677,12 +1677,22 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * caller with nowhere to go: following QUICKSTART end to end now lands here
        * on the first kb write, and nothing on screen says a write-tier grant is
        * what is missing or who issues it. The mechanism is already public
-       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
+       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing.
+       *
+       * It named `aimee kb grant set`, which does not dispatch: the server-side
+       * proxy for grant administration was removed deliberately (see
+       * v1_route_requires_uds -- proxying it meant aimee-server holding an
+       * administrative identity on aimee-kb), but this message was left pointing
+       * at it. An operator who hit this 403 followed it to a command that does
+       * not exist. Grants are administered against aimee-kb itself, by a
+       * principal with admin or team-lead authority in the target team. */
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
                     "presented token's scope. Over the network a bearer is read/query only "
-                    "until your subject holds a write-tier grant on this server; an operator "
-                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
+                    "until your subject holds a write-tier grant on this server. Grants are "
+                    "administered on aimee-kb (POST /v1/write-tier-grants/set) by a principal "
+                    "with admin or team-lead authority in that team; aimee-server does not "
+                    "issue them. See docs/UPGRADING.md.\","
                     "\"type\":\"permission_error\"}}",
                     request_id);
       /* Count the requests the retired global would formerly have allowed, so an
