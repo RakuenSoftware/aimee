@@ -16295,7 +16295,9 @@ LANGUAGE plpgsql AS $$
 DECLARE oid TEXT;
 BEGIN
  oid:=CASE WHEN NEW.object_key<>'' THEN NEW.object_key ELSE NEW.assertion_id::TEXT END;
- IF NEW.object_kind IN ('assertion','memory','document','document_version','entity') THEN
+ IF NEW.object_kind IN ('assertion','memory','document','document_version','entity') AND
+    EXISTS(SELECT 1 FROM derived_memory_dependencies d
+      WHERE d.input_kind=NEW.object_kind AND d.input_id=oid) THEN
    PERFORM derived_memory_apply_status(NEW.object_kind,oid);
  END IF;
  RETURN NEW;
@@ -16307,7 +16309,9 @@ CREATE TRIGGER zz_derived_change_reconcile AFTER INSERT ON fact_graph_changes
 CREATE OR REPLACE FUNCTION derived_memory_file_reconcile() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
- IF NEW.hash IS DISTINCT FROM OLD.hash OR NEW.generation IS DISTINCT FROM OLD.generation THEN
+ IF (NEW.hash IS DISTINCT FROM OLD.hash OR NEW.generation IS DISTINCT FROM OLD.generation) AND
+    EXISTS(SELECT 1 FROM derived_memory_dependencies d
+      WHERE d.input_kind='code_unit' AND d.input_id=NEW.id::TEXT) THEN
    PERFORM derived_memory_apply_status('code_unit',NEW.id::TEXT);
  END IF;
  RETURN NEW;
