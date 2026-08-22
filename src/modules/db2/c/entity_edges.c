@@ -30,15 +30,16 @@
  * populations in *results* (a typed-recall walk must not return co_discussed and
  * vice-versa) — that is a filter on what gets rendered, not on what may serve as
  * traversal evidence. Co-occurrence rows carry no temporal state; semantic rows
- * do, so admitting them requires constraining them to current facts or the walk
- * would traverse retracted ones. Always pair with EE_VISIBLE_PROJECTION. */
+ * do, so admitting them requires the same persistent/promoted lifecycle gate as
+ * direct typed recall. In particular, candidates remain quarantined until an
+ * operator promotes them. Always pair with EE_VISIBLE_PROJECTION. */
 #define EE_ADMIT_CURRENT_SEMANTIC                                                                  \
    " AND (edge_class <> 'semantic'"                                                                \
-   " OR (lifecycle_state NOT IN ('superseded','invalidated')"                                      \
+   " OR (lifecycle_state IN ('persistent','promoted')"                                             \
    " AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0))"
 #define EE_ADMIT_CURRENT_SEMANTIC_E                                                                \
    " AND (e.edge_class <> 'semantic'"                                                              \
-   " OR (e.lifecycle_state NOT IN ('superseded','invalidated')"                                    \
+   " OR (e.lifecycle_state IN ('persistent','promoted')"                                           \
    " AND e.superseded_at = '' AND e.invalidated_at = '' AND e.suppressed = 0))"
 
 #define EE_VISIBLE_PROJECTION_E                                                                    \

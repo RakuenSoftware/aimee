@@ -10,6 +10,8 @@
 #include "db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 #include "platform_test_util.h"
 #include "../modules/db2/c/entity_edges.h"
 #include "../headers/memory.h"
@@ -177,6 +179,74 @@ static void test_backfill_idempotent(void)
    teardown();
 }
 
+static void insert_test_edge(const char *source, const char *target, const char *edge_class,
+                             const char *lifecycle, const char *commit_id)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO entity_edges(source,relation,target,weight,edge_class,lifecycle_state,"
+       "commit_id) VALUES(?1,'related_to',?2,1,?3,?4,?5)",
+       err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", source);
+   aimee_pg_bind_text(st, "?2", target);
+   aimee_pg_bind_text(st, "?3", edge_class);
+   aimee_pg_bind_text(st, "?4", lifecycle);
+   aimee_pg_bind_text(st, "?5", commit_id);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+}
+
+static int weighted_contains(const db2_entity_edge_weighted_neighbor_t *rows, int n,
+                             const char *node)
+{
+   for (int i = 0; i < n; i++)
+      if (strcmp(rows[i].node, node) == 0)
+         return 1;
+   return 0;
+}
+
+static void test_candidate_semantic_edges_are_quarantined_from_graph_recall(void)
+{
+   setup();
+   char err[256] = "";
+   const char *commit_id = "test-graph-recall-lifecycle";
+   aimee_pg_stmt_t *commit = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,"
+       "authority_rank,status,reversible)"
+       " VALUES(?1,'test.seed','test','system',20,'open',1)",
+       err, sizeof(err));
+   assert(commit);
+   aimee_pg_bind_text(commit, "?1", commit_id);
+   assert(aimee_pg_step(commit, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(commit);
+
+   insert_test_edge("recall-root", "candidate-direct", "semantic", "candidate", commit_id);
+   insert_test_edge("recall-root", "persistent-direct", "semantic", "persistent", commit_id);
+   insert_test_edge("recall-root", "promoted-direct", "semantic", "promoted", commit_id);
+   insert_test_edge("recall-root", "cooccurrence-direct", "cooccurrence", "candidate", "");
+   insert_test_edge("persistent-direct", "candidate-hop-two", "semantic", "candidate", commit_id);
+   insert_test_edge("persistent-direct", "promoted-hop-two", "semantic", "promoted", commit_id);
+
+   db2_entity_edge_weighted_neighbor_t weighted[16];
+   memset(weighted, 0, sizeof(weighted));
+   int nw = db2_entity_edge_neighbors_weighted("recall-root", weighted, 16, 16, 0);
+   assert(!weighted_contains(weighted, nw, "candidate-direct"));
+   assert(weighted_contains(weighted, nw, "persistent-direct"));
+   assert(weighted_contains(weighted, nw, "promoted-direct"));
+   assert(weighted_contains(weighted, nw, "cooccurrence-direct"));
+
+   memset(weighted, 0, sizeof(weighted));
+   nw = db2_entity_edge_neighbors_weighted("persistent-direct", weighted, 16, 16, 0);
+   assert(!weighted_contains(weighted, nw, "candidate-hop-two"));
+   assert(weighted_contains(weighted, nw, "recall-root"));
+   assert(weighted_contains(weighted, nw, "promoted-hop-two"));
+
+   teardown();
+}
+
 int main(void)
 {
    printf("test_decay_zero_score... ");
@@ -226,6 +296,9 @@ int main(void)
    printf("ok\n");
    printf("test_backfill_idempotent... ");
    test_backfill_idempotent();
+   printf("ok\n");
+   printf("test_candidate_semantic_edges_are_quarantined_from_graph_recall... ");
+   test_candidate_semantic_edges_are_quarantined_from_graph_recall();
    printf("ok\n");
    printf("graph_scoring: all tests passed\n");
    return 0;
