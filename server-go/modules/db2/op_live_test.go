@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,13 @@ const (
 	liveProbeWorkspace           = "live-probe-workspace"
 	liveProbeScopeProject        = "live-probe-project"
 )
+
+// liveProbeEmbedding builds a vector of the width evidence_vectors.embedding
+// declares. The dimension is part of the column type, so a literal of any other
+// width is rejected -- which is exactly what a fake cannot tell you.
+func liveProbeEmbedding() string {
+	return "[" + strings.TrimSuffix(strings.Repeat("0,", 384), ",") + "]"
+}
 
 func liveReads() []liveRequest {
 	return []liveRequest{
@@ -1347,6 +1355,36 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "feature_row_read",
+			stage: db2contract.StageFeatureRowRead,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeFeatureRowReadRequest(
+					"live-probe-subject", "memory", "v1")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeFeatureRowReadReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_conflicting_l2",
+			stage: db2contract.StageMemoryConflictingL2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryConflictingL2Request(
+					"live-probe-no-such-key", "live probe content")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, err := db2contract.DecodeMemoryConflictingL2Reply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a key nothing holds reported a conflict")
+				}
+			},
+		},
 	}
 }
 
@@ -2567,6 +2605,91 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "evidence_store_vector",
+			stage: db2contract.StageEvidenceStoreVector,
+			// evidence_vectors carries a foreign key into artifacts, and
+			// embedding is halfvec(384) -- so the literal has to parse AND
+			// carry the right number of dimensions, neither of which a fake
+			// checks. The first draft of this probe sent "[]" and failed here,
+			// which is how the dimension requirement got written down.
+			//
+			// Run twice so the delete half has something to remove.
+			repeat: 2,
+			seed:   []string{liveProbeArtifact},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEvidenceStoreVectorRequest(
+					liveProbeArtifactID, "evidence", liveProbeEmbedding())
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeEvidenceStoreVectorReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the vector was not stored")
+				}
+			},
+		},
+		{
+			name:  "mining_job_complete",
+			stage: db2contract.StageMiningJobComplete,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMiningJobCompleteRequest(
+					"live-probe-job", 400, "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMiningJobCompleteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
+		{
+			name:  "kb_directive_resolve",
+			stage: db2contract.StageKBDirectiveResolve,
+			// Seeded open, because the predicate is now in the WHERE: unseeded
+			// this would probe the refusal rather than the resolve.
+			seed: []string{liveProbeDirective},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDirectiveResolveRequest(
+					liveProbeDirectiveID, 1, "live probe note")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBDirectiveResolveReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("an open directive was not resolved")
+				}
+			},
+		},
+		{
+			name:  "resolve_contradiction",
+			stage: db2contract.StageResolveContradiction,
+			// A contradiction directive naming the pair, so the symmetric
+			// match has something to find.
+			seed: []string{liveProbeContradiction},
+			encode: func() ([]byte, error) {
+				// Deliberately the reverse ordering of the seeded pair, which
+				// is what exercises the symmetric half of the predicate.
+				return db2contract.EncodeResolveContradictionRequest(
+					liveProbeContradictionB, liveProbeContradictionA, 1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeResolveContradictionReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the pair did not resolve in the reverse ordering")
+				}
+			},
+		},
 	}
 }
 
@@ -2718,6 +2841,17 @@ const (
 	liveProbeAliasMemory   = `INSERT INTO memories
  (id, tier, kind, key, content, created_at, updated_at)
  VALUES (900012, 'L2', 'fact', 'live-probe-alias-memory', 'live probe',
+ '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+)
+
+// An open contradiction directive naming a pair of memories, seeded so the
+// resolve probe can ask for it in the reverse order.
+const (
+	liveProbeContradictionA = 900013
+	liveProbeContradictionB = 900014
+	liveProbeContradiction  = `INSERT INTO epistemic_directives
+ (id, question, cause, state, memory_a_id, memory_b_id, created_at, updated_at)
+ VALUES (900015, 'which is true?', 'contradiction', 'open', 900013, 900014,
  '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
 )
 
