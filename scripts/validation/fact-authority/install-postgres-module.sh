@@ -29,6 +29,14 @@ serve=11265
 EOF
 echo "postgres grant installed"
 
+# `grants` mode exists for the same reason config's and db1's do, and postgres
+# needed it just as much: a daemon reads modules.d ONCE, at startup. Writing this
+# grant after aimee-kb is already up means the kb never sees it, and the health
+# call comes back AIMEE_MODULE_CALL_CAPABILITY_ABSENT -- with the module process
+# running and looking healthy, which is what made `aimee status` report
+# "store: unavailable" while the store worked.
+[ "${1:-both}" = "grants" ] && exit 0
+
 [ -x /usr/local/libexec/aimee-modules/aimee-module-postgres ] || \
   cp /usr/local/libexec/aimee-modules/aimee-module-memory \
      /usr/local/libexec/aimee-modules/aimee-module-postgres

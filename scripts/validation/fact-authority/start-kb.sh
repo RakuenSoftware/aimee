@@ -7,6 +7,10 @@ set -u
 # Scoped to OUR binary path. CT 9078 is shared with other sessions running
 # their own stacks from /opt/... -- a bare `pkill -f aimee-kb` matches theirs
 # too and takes down work that has nothing to do with this branch.
+# Module grants BEFORE the daemon starts: modules.d is read once, at startup, so
+# a grant written afterwards is invisible and the stage answers
+# capability_absent while its module process sits there looking healthy.
+[ -f /root/install-postgres-module.sh ] && bash /root/install-postgres-module.sh grants >/dev/null 2>&1
 pkill -f '/usr/local/bin/aimee-kb' 2>/dev/null
 sleep 2
 export AIMEE_HOME=/root/.config/aimee
