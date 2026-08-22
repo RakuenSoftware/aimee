@@ -434,11 +434,9 @@ live_env_write_config() {
 embedding_dim: 1024
 kb:
   api:
-    bearer_token: $LIVE_KB_BEARER
 aimee:
   api:
     http_port: $LIVE_SRV_PORT
-    bearer_token: $LIVE_SRV_BEARER
     remote_writes: ${LIVE_REMOTE_WRITES:-off}
 YAML
 }
@@ -629,6 +627,12 @@ live_env_start_server() {
    live_env_start_module
    step "Starting aimee-server with a TCP listener"
    export AIMEE_KB_API_URL="http://127.0.0.1:$LIVE_KB_PORT"
+   # API credentials are Vault/runtime-secret capabilities, not configuration
+   # values.  The extracted config module deliberately quarantines legacy
+   # bearer_token YAML fields, so give the daemon its first-boot bearer through
+   # the supported runtime-secret ingress.  The daemon seals and removes this
+   # variable in its own process; the harness retains its copy for probes.
+   export AIMEE_API_BEARER_TOKEN="$LIVE_SRV_BEARER"
    export AIMEE_SERVER_ID="$LIVE_SERVER_ID"
    export AIMEE_SERVER_TEAM_ID="$LIVE_TEAM"
    ./aimee-server >"$LIVE_SRV_STDIO" 2>&1 &
