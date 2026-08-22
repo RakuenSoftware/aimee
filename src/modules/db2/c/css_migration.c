@@ -307,15 +307,19 @@ int db2_css_migration_assert_conventions(const char *project, const char *now_is
     * heuristic (model/derivation sourced), never user-authority. */
    int asserted = 0;
    int r;
+   /* Named outcomes rather than AIMEE_SUCCEEDED(r): a rejection is a success
+    * under the result convention -- the gate ran and answered -- but the fact
+    * is not in place, and this counts facts in place. Testing the sign here
+    * would count a refused assertion as an asserted one. */
    r = db2_typed_fact_assert(project, "project", "naming_convention",
                              bem > 0 ? "BEM" : "flat-utility", "scalar", 75, "exemplar-scan",
                              now_iso);
-   if (r == TYPED_FACT_OK || r == TYPED_FACT_UNCHANGED)
+   if (r == TYPED_FACT_ASSERTED || r == TYPED_FACT_UNCHANGED)
       asserted++;
    r = db2_typed_fact_assert(project, "project", "token_strategy",
                              tokens > 0 ? "css-custom-properties" : "literal-values", "scalar", 75,
                              "exemplar-scan", now_iso);
-   if (r == TYPED_FACT_OK || r == TYPED_FACT_UNCHANGED)
+   if (r == TYPED_FACT_ASSERTED || r == TYPED_FACT_UNCHANGED)
       asserted++;
    return asserted;
 }

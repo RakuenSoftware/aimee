@@ -35,7 +35,7 @@ int main(void)
 
    /* assert a convention fact */
    assert(db2_typed_fact_assert("fizzy", "project", "naming_convention", "BEM", "scalar", 90,
-                                "exemplar-scan", T) == TYPED_FACT_OK);
+                                "exemplar-scan", T) == TYPED_FACT_ASSERTED);
 
    typed_fact_t f[16];
    int n = db2_typed_fact_recall("fizzy", "naming_convention", f, 16);
@@ -50,7 +50,7 @@ int main(void)
 
    /* contradiction supersedes the prior value (history retained, only 1 active) */
    assert(db2_typed_fact_assert("fizzy", "project", "naming_convention", "utility", "scalar", 80,
-                                "human-correction", T) == TYPED_FACT_OK);
+                                "human-correction", T) == TYPED_FACT_ASSERTED);
    n = db2_typed_fact_recall("fizzy", "naming_convention", f, 16);
    assert(n == 1 && strcmp(f[0].object, "utility") == 0); /* new value wins; old superseded */
 
@@ -62,17 +62,41 @@ int main(void)
    assert(db2_typed_fact_assert("fizzy", "project", "should_match", "conv", "convention", 50, "x",
                                 T) == TYPED_FACT_REJECTED_KIND);
 
+   /* A rejection is a SUCCESS in the project result convention: the gate was
+    * asked whether this proposition may be stored and it answered. Only a
+    * failure to run is negative. Pinned by sign rather than by value so this
+    * keeps meaning what it says if the band codes are ever renumbered. */
+   assert(AIMEE_SUCCEEDED(TYPED_FACT_REJECTED_REL));
+   assert(AIMEE_SUCCEEDED(TYPED_FACT_REJECTED_KIND));
+   assert(AIMEE_SUCCEEDED(TYPED_FACT_ASSERTED));
+   assert(AIMEE_SUCCEEDED(TYPED_FACT_UNCHANGED));
+   assert(AIMEE_FAILED_P(TYPED_FACT_INVALID));
+   assert(AIMEE_FAILED_P(TYPED_FACT_UNAVAILABLE));
+   assert(AIMEE_FAILED_P(TYPED_FACT_ERROR));
+
+   /* And nothing the gate answers is zero, because the gate always finishes. */
+   assert(!AIMEE_PENDING_P(TYPED_FACT_ASSERTED) && !AIMEE_PENDING_P(TYPED_FACT_UNCHANGED) &&
+          !AIMEE_PENDING_P(TYPED_FACT_REJECTED_REL) && !AIMEE_PENDING_P(TYPED_FACT_REJECTED_KIND) &&
+          !AIMEE_PENDING_P(TYPED_FACT_INVALID) && !AIMEE_PENDING_P(TYPED_FACT_UNAVAILABLE) &&
+          !AIMEE_PENDING_P(TYPED_FACT_ERROR));
+
+   /* An incoherent request is not a rejection: one is an answer about the
+    * proposition, the other is that there was never a question. */
+   assert(db2_typed_fact_assert(NULL, "project", "naming_convention", "BEM", "scalar", 50, "x",
+                                T) == TYPED_FACT_INVALID);
+   assert(TYPED_FACT_INVALID != TYPED_FACT_ERROR);
+
    /* per-component should_match facts + by_relation lookup */
    assert(db2_typed_fact_assert("Button.tsx", "component", "should_match", "btn_convention",
-                                "convention", 70, "driver", T) == TYPED_FACT_OK);
+                                "convention", 70, "driver", T) == TYPED_FACT_ASSERTED);
    assert(db2_typed_fact_assert("Card.tsx", "component", "should_match", "card_convention",
-                                "convention", 70, "driver", T) == TYPED_FACT_OK);
+                                "convention", 70, "driver", T) == TYPED_FACT_ASSERTED);
    n = db2_typed_fact_by_relation("should_match", f, 16);
    assert(n == 2);
 
    /* recall all relations for a subject */
    assert(db2_typed_fact_assert("fizzy", "project", "token_strategy", "css-vars", "scalar", 85, "x",
-                                T) == TYPED_FACT_OK);
+                                T) == TYPED_FACT_ASSERTED);
    n = db2_typed_fact_recall("fizzy", NULL, f, 16);
    assert(n == 2); /* naming_convention(utility) + token_strategy */
 

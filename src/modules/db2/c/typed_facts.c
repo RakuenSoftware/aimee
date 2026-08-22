@@ -72,7 +72,7 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
                           const char *source, const char *now_iso)
 {
    if (!subject || !subject[0] || !relation || !object)
-      return TYPED_FACT_ERROR;
+      return TYPED_FACT_INVALID;
    const tf_rel_t *rel = tf_lookup(relation);
    if (!rel)
       return TYPED_FACT_REJECTED_REL;
@@ -85,12 +85,12 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
 
    void *conn = db2_conn();
    if (!conn)
-      return TYPED_FACT_ERROR;
+      return TYPED_FACT_UNAVAILABLE;
 
    char err[TF_ERRBUF] = "";
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
       return TYPED_FACT_ERROR;
-   int rc = TYPED_FACT_OK;
+   int rc = TYPED_FACT_ASSERTED;
 
    /* Examine the current active fact for (subject, relation). */
    static const char *sel = "SELECT id, object FROM typed_facts"
@@ -114,7 +114,7 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
    else
       rc = TYPED_FACT_ERROR;
 
-   if (rc == TYPED_FACT_OK && identical)
+   if (rc == TYPED_FACT_ASSERTED && identical)
    {
       aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
       return TYPED_FACT_UNCHANGED;
@@ -122,7 +122,7 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
 
    /* Insert the new fact. */
    int64_t new_id = -1;
-   if (rc == TYPED_FACT_OK)
+   if (rc == TYPED_FACT_ASSERTED)
    {
       static const char *ins =
           "INSERT INTO typed_facts"
@@ -150,7 +150,7 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
    }
 
    /* Supersede the prior contradicting fact (retain it, mark inactive). */
-   if (rc == TYPED_FACT_OK && prior_id >= 0 && new_id >= 0)
+   if (rc == TYPED_FACT_ASSERTED && prior_id >= 0 && new_id >= 0)
    {
       static const char *sup =
           "UPDATE typed_facts SET active = 0, superseded_by = ?2 WHERE id = ?1";
@@ -167,7 +167,7 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
          rc = TYPED_FACT_ERROR;
    }
 
-   if (rc == TYPED_FACT_OK)
+   if (rc == TYPED_FACT_ASSERTED)
       aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
    else
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
