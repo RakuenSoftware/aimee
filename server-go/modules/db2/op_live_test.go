@@ -842,6 +842,73 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "project_stats",
+			stage: db2contract.StageProjectStats,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectStatsRequest("replay-project")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, err := db2contract.DecodeProjectStatsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "proposals_settled_counts",
+			stage: db2contract.StageProposalsSettledCounts,
+			// The window fallback and pg_now_text both have to execute, and SUM
+			// over an empty set answers NULL here -- which is exactly the shape
+			// a plain integer scan would fail on.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProposalsSettledCountsRequest(30)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				committed, terminal, err := db2contract.DecodeProposalsSettledCountsReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if terminal < committed {
+					t.Fatalf("terminal = %d is below committed = %d; terminal is "+
+						"committed plus archived and cannot be smaller",
+						terminal, committed)
+				}
+			},
+		},
+		{
+			name:  "retrieval_event_by_turn",
+			stage: db2contract.StageRetrievalEventByTurn,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRetrievalEventByTurnRequest("live-probe-turn")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, err := db2contract.DecodeRetrievalEventByTurnReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "artifact_links_read",
+			stage: db2contract.StageArtifactLinksRead,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactLinksReadRequest("live-probe-artifact")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeArtifactLinksReadReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "corpus_pipeline_stage_counts",
+			stage:  db2contract.StageCorpusPipelineStageCounts,
+			encode: db2contract.EncodeCorpusPipelineStageCountsRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCorpusPipelineStageCountsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -1615,6 +1682,26 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("an artifact that exists was not flagged")
+				}
+			},
+		},
+		{
+			name:  "purge_files_matching",
+			stage: db2contract.StagePurgeFilesMatching,
+			// A pattern nothing matches, against a project id nothing holds.
+			// The generation subquery still has to resolve, which is the half a
+			// fake cannot run.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodePurgeFilesMatchingRequest(
+					2147483000, "live-probe-no-such-path/%")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				deleted, err := db2contract.DecodePurgeFilesMatchingReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if deleted != 0 {
+					t.Fatalf("deleted = %d for a project nothing holds", deleted)
 				}
 			},
 		},
