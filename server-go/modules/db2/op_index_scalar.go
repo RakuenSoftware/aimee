@@ -160,18 +160,9 @@ func fileIndexDeleteCurrentGeneration(ctx context.Context, store Store, request 
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if _, execErr := store.Exec(ctx, fileIndexDeleteCurrentGenerationQuery, project); execErr != nil {
-		reply, encodeErr := db2contract.EncodeFileIndexDeleteCurrentGenerationReply(0)
-		if encodeErr != nil {
-			return nil, bus.ModuleStatusInternal
-		}
-		return reply, bus.ModuleStatusOK
-	}
-	reply, err := db2contract.EncodeFileIndexDeleteCurrentGenerationReply(1)
-	if err != nil {
-		return nil, bus.ModuleStatusInternal
-	}
-	return reply, bus.ModuleStatusOK
+	_, execErr := store.Exec(ctx, fileIndexDeleteCurrentGenerationQuery, project)
+	return acknowledgement(execErr == nil,
+		db2contract.EncodeFileIndexDeleteCurrentGenerationReply)
 }
 
 // minhashDeleteCurrentGeneration clears a project's minhash signatures and the
@@ -196,15 +187,8 @@ func minhashDeleteCurrentGeneration(ctx context.Context, store Store, request []
 		_, err := tx.Exec(ctx, minhashDeleteBucketsQuery, project)
 		return err
 	})
-	acknowledged := uint32(1)
-	if txErr != nil {
-		acknowledged = 0
-	}
-	reply, err := db2contract.EncodeMinhashDeleteCurrentGenerationReply(acknowledged)
-	if err != nil {
-		return nil, bus.ModuleStatusInternal
-	}
-	return reply, bus.ModuleStatusOK
+	return acknowledgement(txErr == nil,
+		db2contract.EncodeMinhashDeleteCurrentGenerationReply)
 }
 
 // readOptionalText reads one text column, answering empty when no row matched.

@@ -68,6 +68,13 @@ type liveRequest struct {
 	// repeat runs a write probe more than once inside its transaction, for an
 	// operation whose second call is the one that used to fail.
 	repeat int
+	// seed runs inside the probe's transaction before the operation, for a
+	// write whose interesting path needs rows to act on. A probe against an
+	// empty schema proves the statement parses and binds; it does not prove the
+	// statement matches anything, and for an operation like generation_publish
+	// -- whose whole behaviour is a changed-row count -- that is most of what
+	// there is to prove. Seeded rows roll back with the probe.
+	seed []string
 }
 
 func liveReads() []liveRequest {
@@ -506,8 +513,131 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "projection_generation_create",
+			stage: db2contract.StageProjectionGenerationCreate,
+			seed:  []string{liveProbeProject},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectionGenerationCreateRequest(liveProbeProjectName)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				generation, err := db2contract.DecodeProjectionGenerationCreateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				// Non-zero is the whole point: the INSERT ... SELECT only
+				// inserts when the project is current, and a seeded current
+				// project must therefore get an identifier back.
+				if generation == 0 {
+					t.Fatal("no generation was opened for a current project")
+				}
+			},
+		},
+		{
+			name:  "generation_publish",
+			stage: db2contract.StageGenerationPublish,
+			// A visible generation as well as the pending one, so the supersede
+			// has something to retire. Publishing into an empty table would run
+			// all three statements and prove nothing about the ordering that
+			// protects the last visible graph.
+			seed: []string{
+				liveProbeProject,
+				liveProbeVisibleGeneration,
+				liveProbePendingGeneration,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeGenerationPublishRequest(
+					liveProbePendingGenerationID, liveProbeProjectName)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeGenerationPublishReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("a pending generation on a current project did not publish")
+				}
+			},
+		},
+		{
+			name:  "generation_abort",
+			stage: db2contract.StageGenerationAbort,
+			seed:  []string{liveProbeProject, liveProbePendingGeneration},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeGenerationAbortRequest(
+					liveProbePendingGenerationID, "live probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeGenerationAbortReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the abort did not run")
+				}
+			},
+		},
+		{
+			name:  "generation_set_source_hash",
+			stage: db2contract.StageGenerationSetSourceHash,
+			seed:  []string{liveProbeProject, liveProbePendingGeneration},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeGenerationSetSourceHashRequest(
+					liveProbePendingGenerationID, "live-probe-source-hash")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeGenerationSetSourceHashReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
+		{
+			name:  "project_delete",
+			stage: db2contract.StageProjectDelete,
+			// Seeded with the generation rows too, so the delete runs against a
+			// project something references. If a cascade rule were missing the
+			// statement would fail here rather than in production.
+			seed: []string{
+				liveProbeProject,
+				liveProbeVisibleGeneration,
+				liveProbePendingGeneration,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectDeleteRequest(liveProbeProjectName)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				deleted, err := db2contract.DecodeProjectDeleteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if deleted != 1 {
+					t.Fatal("the delete did not run")
+				}
+			},
+		},
 	}
 }
+
+// Seed rows for the projection-lifecycle probes. The identifiers are fixed
+// rather than generated because a probe has to name the generation it publishes
+// and a seed statement cannot hand one back; they are high enough not to meet a
+// real row, and the transaction rolls back regardless.
+const (
+	liveProbeProjectName         = "live-probe-project"
+	liveProbePendingGenerationID = 900001
+	liveProbeProject             = `INSERT INTO projects (name, root, scanned_at, lifecycle_state)
+ VALUES ('live-probe-project', '/live-probe', '2026-01-01 00:00:00', 'current')`
+	liveProbeVisibleGeneration = `INSERT INTO code_projection_generations
+ (id, project, state, started_at) VALUES
+ (900000, 'live-probe-project', 'visible', '2026-01-01 00:00:00')`
+	liveProbePendingGeneration = `INSERT INTO code_projection_generations
+ (id, project, state, started_at) VALUES
+ (900001, 'live-probe-project', 'pending', '2026-01-01 00:00:00')`
+)
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
@@ -525,6 +655,12 @@ func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 			// Always. The probe proves the statements run; it must not decide
 			// what the database holds afterwards.
 			defer func() { _ = tx.Rollback(ctx) }()
+
+			for _, statement := range testCase.seed {
+				if _, err := tx.Exec(ctx, statement); err != nil {
+					t.Fatalf("seed: %v\n%s", err, statement)
+				}
+			}
 
 			handler := NewDispatchHandler(&rollbackStore{tx: tx})
 			request, err := testCase.encode()
