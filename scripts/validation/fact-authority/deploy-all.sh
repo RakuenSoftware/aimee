@@ -15,7 +15,14 @@ x 'mkdir -p /root/.config/aimee /usr/local/libexec/aimee-modules /root/pgtests'
 p /tmp/bins.tgz /tmp/bins.tgz
 p /tmp/mm.tgz   /tmp/mm.tgz
 x 'cd /usr/local/bin && tar xzf /tmp/bins.tgz && chmod +x aimee aimee-server aimee-kb'
-x 'cd /usr/local/libexec/aimee-modules && tar xzf /tmp/mm.tgz && chmod +x aimee-module-memory aimee-module-config 2>/dev/null; true'
+# aimee-module-postgres is created here, at unpack time, because its GRANT names
+# it and a grant whose executable does not resolve is invalid -- which fails the
+# whole module endpoint and stops aimee-kb starting. Creating it lazily inside
+# install-postgres-module.sh was enough on a container that had run before and
+# not enough on a fresh one.
+x 'cd /usr/local/libexec/aimee-modules && tar xzf /tmp/mm.tgz && chmod +x aimee-module-memory aimee-module-config aimee-module-db1 2>/dev/null; \
+   [ -x aimee-module-postgres ] || cp -f aimee-module-memory aimee-module-postgres; \
+   chmod +x aimee-module-postgres 2>/dev/null; true'
 
 # The Postgres-backed test binaries, when they have been staged. Without these a
 # rebuilt container silently loses run-pg-tests.sh -- the one thing that
@@ -26,22 +33,44 @@ if [ -f /tmp/pgt.tgz ]; then
   x 'cd /root/pgtests && tar xzf /tmp/pgt.tgz && { [ -f /tmp/pgsql.tgz ] && tar xzf /tmp/pgsql.tgz; }; chmod +x unit-test-* db2-test-template 2>/dev/null'
 fi
 
+# The trust-chain rig, when staged. test-account-tcp-authority.sh needs it to
+# provision the management JWKS chain and mint identity tokens; without it that
+# probe fails with "not installed", which on a fresh box is a deployment gap
+# rather than anything about the code.
+[ -f /tmp/write-tier-enforce-live ] && {
+  p /tmp/write-tier-enforce-live /usr/local/bin/write-tier-enforce-live
+  x 'chmod +x /usr/local/bin/write-tier-enforce-live'
+}
+
 # The memory module binary and the capture proxy, when staged.
 [ -f /tmp/logging-proxy.py ] && p /tmp/logging-proxy.py /root/logging-proxy.py
 
 p /tmp/kb-aimee.yaml     /root/.config/aimee/aimee.yaml
 p /tmp/server-aimee.yaml /root/aimee.yaml
 
-for s in psql provision start-kb start-server reset-kb seed-facts \
-         install-memory-module install-memory-module-server start-memory-module \
-         restore-stack install-chat-provider make-scope-repo \
-         start-logging-proxy show-upstream-prompt probe-query-pollution \
-         test-rerank-live test-retrieve-live test-chat-memory-stages \
-         test-retract test-server-retract test-context-block test-provenance \
-         test-memory-delete test-drain-supersede run-pg-tests \
-         install-postgres-module install-config-module explore explore-cli; do
-  [ -f "/tmp/${s}.sh" ] && p "/tmp/${s}.sh" "/root/${s}.sh"
+# EVERY staged script and helper, not a hand-maintained list.
+#
+# This was an explicit allowlist of names, and it drifted: make-mtls-certs,
+# enroll-first-user, provision-mgmt-trust, make-oidc-idp, set-mtls-mode,
+# test-embed-stage, stub-embedder.py, run-suite and others were all added to the
+# directory and never added here. On the container that had been running all
+# session it did not matter, because they had been copied by hand. On a fresh one
+# the suite could not be prepared at all -- half the steps reported "No such file
+# or directory".
+#
+# A list that has to be updated by hand is a list that will be wrong, and its
+# being wrong is invisible until someone starts from nothing. Copying whatever is
+# staged cannot drift.
+for f in /tmp/*.sh /tmp/*.py; do
+  [ -e "$f" ] || continue
+  b="$(basename "$f")"
+  case "$b" in
+    provision-host.sh|deploy-all.sh|bootstrap-fresh.sh|keepalive-loop.sh) continue ;;  # host-side
+    test-retract-remote.sh) continue ;;                                               # host-side by design
+  esac
+  p "$f" "/root/${b}"
 done
+
 x 'chmod +x /root/*.sh'
 
 # Short aliases the earlier runs used, kept so the scripts call each other.

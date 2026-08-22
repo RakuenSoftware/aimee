@@ -14,7 +14,31 @@
 set -u
 CONF=/root/.config/aimee
 SOCK="$CONF/kb-module-bus.sock"
+BIN=/usr/local/libexec/aimee-modules/aimee-module-postgres
 mkdir -p "$CONF/modules.d/kb"
+
+# The BINARY must exist BEFORE the grant names it, and that includes `grants`
+# mode. bus_runtime's parse_grant_file resolves `executable` with realpath(); a
+# path that does not resolve makes the grant INVALID, and ONE invalid grant fails
+# the whole module endpoint -- so aimee-kb refuses to start outright:
+#
+#   ERROR obs_bus: module grant policy is invalid: .../modules.d/kb
+#   aimee-kb: module bus failed to start
+#
+# This was invisible on a container that had run before, because the binary was
+# already there from an earlier pass. On a genuinely FRESH box the grant was
+# written first and the copy sat after the grants-mode exit below, so the very
+# first clean install could not bring the kb up at all. Found by provisioning a
+# new container instead of reusing the one that had been running all session.
+#
+# aimee-module-postgres IS the memory binary: cmd/aimee-module picks its module
+# from filepath.Base(argv[0]) minus the "aimee-module-" prefix.
+[ -x "$BIN" ] || cp -f /usr/local/libexec/aimee-modules/aimee-module-memory "$BIN" 2>/dev/null
+[ -x "$BIN" ] || {
+  echo "postgres: no module binary at $BIN, and no memory binary to copy." >&2
+  echo "          Refusing to write a grant that would stop the kb starting." >&2
+  exit 1
+}
 
 cat > "$CONF/modules.d/kb/postgres.grant" <<'EOF'
 version=1
@@ -36,10 +60,6 @@ echo "postgres grant installed"
 # running and looking healthy, which is what made `aimee status` report
 # "store: unavailable" while the store worked.
 [ "${1:-both}" = "grants" ] && exit 0
-
-[ -x /usr/local/libexec/aimee-modules/aimee-module-postgres ] || \
-  cp /usr/local/libexec/aimee-modules/aimee-module-memory \
-     /usr/local/libexec/aimee-modules/aimee-module-postgres
 
 for _ in $(seq 1 30); do [ -S "$SOCK" ] && break; sleep 1; done
 [ -S "$SOCK" ] || { echo "kb module bus socket missing" >&2; exit 1; }

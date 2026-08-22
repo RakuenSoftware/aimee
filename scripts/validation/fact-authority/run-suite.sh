@@ -50,13 +50,45 @@ seed() { bash /root/seed-facts.sh >/dev/null 2>&1; }
 # rest of the run executes with stages missing while each module process is
 # either gone or, worse, still alive against a dead socket. "state: RUNNING" is
 # not "attached": the check that matters is whether a stage answers.
+# The count is re-baselined after every bring-up, because the readiness poll
+# below IS a module stage call: `aimee status` asks event 11265, so its first
+# attempt before the module attaches is itself a capability_absent. Counting the
+# probe own warm-up as evidence of a broken run is a false positive of my own
+# making, and it fired on the first fresh-container run.
+#
+# What the detector is for is stages missing WHILE PROBES RUN. Re-baselining
+# after bring-up measures exactly that and nothing else.
+rebaseline_caps() {
+  capstart="$(grep -ac 'result=capability_absent' /root/kb.log 2>/dev/null | head -1)"
+  capstart="${capstart:-0}"
+}
+
 bring_up_kb() {
   bash /root/install-config-module.sh grants   >/dev/null 2>&1
   bash /root/install-postgres-module.sh grants >/dev/null 2>&1
   bash /root/start-kb.sh >/dev/null 2>&1
   bash /root/smm.sh >/dev/null 2>&1
   bash /root/install-postgres-module.sh >/dev/null 2>&1
-  sleep 2
+  # WAIT for a stage to answer, rather than sleeping a guessed interval. A module
+  # process reports "state: RUNNING" as soon as it is spawned, but attaching to
+  # the bus lags the daemon accepting calls -- so the first probe after a restart
+  # could be served with stages missing, and it still prints PASS because every
+  # consumer of an absent stage reports "no answer" and carries on. On a fresh
+  # container that race is wider (nothing is warm) and it fired.
+  #
+  # `aimee status` reporting `store: ok` means event 11265 answered, which is a
+  # module stage round trip: the cheapest honest readiness signal available.
+  local i
+  for i in $(seq 1 30); do
+    if AIMEE_HOME=/root AIMEE_API_ENDPOINT=unix:/root/aimee-http.sock \
+         /usr/local/bin/aimee status 2>/dev/null | grep -q "store: *ok"; then
+      rebaseline_caps
+      return 0
+    fi
+    sleep 2
+  done
+  echo "  WARNING: no module stage answered within 60s of bringing the kb up;" >&2
+  echo "           probes below may run with stages missing." >&2
 }
 
 bring_up_server() {
@@ -65,6 +97,7 @@ bring_up_server() {
   bash /root/start-server.sh >/dev/null 2>&1
   bash /root/imms.sh >/dev/null 2>&1
   sleep 2
+  rebaseline_caps
 }
 
 hdr "bringing the stack up"
@@ -74,7 +107,10 @@ echo "  daemons: kb=$(pgrep -cf /usr/local/bin/aimee-kb) server=$(pgrep -cf /usr
 echo "  kb-bus modules:     $(pgrep -cf 'aimee-modules/aimee-module-.* /root/.config/aimee/kb-module-bus.sock')"
 echo "  server-bus modules: $(pgrep -cf 'aimee-modules/aimee-module-.* /root/server-module-bus.sock')"
 # Mark the log so the detector at the end only counts THIS run.
-capstart="$(grep -ac 'result=capability_absent' /root/kb.log 2>/dev/null || echo 0)"
+# grep -c PRINTS 0 and EXITS 1 when there are no matches, so `|| echo 0` appends
+# a second line and the arithmetic below sees "0\n0". head -1 keeps one number.
+capstart="$(grep -ac 'result=capability_absent' /root/kb.log 2>/dev/null | head -1)"
+capstart="${capstart:-0}"
 
 hdr "schema and migration"
 run "p6 migration on a populated db" bash /root/test-p6-migration.sh
@@ -150,7 +186,8 @@ hdr "summary"
 # A stage that could not be reached makes a probe green for the wrong reason:
 # every consumer reports "no answer" and carries on. Counted across the run so a
 # detached module cannot hide behind a clean pass list.
-capend="$(grep -ac 'result=capability_absent' /root/kb.log 2>/dev/null || echo 0)"
+capend="$(grep -ac 'result=capability_absent' /root/kb.log 2>/dev/null | head -1)"
+capend="${capend:-0}"
 capnew=$(( capend - capstart ))
 if [ "$capnew" -gt 0 ]; then
   echo "  WARNING: $capnew module stage call(s) were refused as capability_absent"

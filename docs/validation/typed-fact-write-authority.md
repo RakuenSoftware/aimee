@@ -1350,3 +1350,85 @@ than from my inference.
 What IS established: the call path (15 requests, 15 × 200, none once the
 embedder is stopped) and the write path plus vector space (rows exist, produced
 by this stub, at the recorded dimension).
+
+## The clean-install path, which had never been run
+
+Every result above came from one container that accumulated state across a long
+session: schema applied, certificates issued, grants written, an enrollment
+claimed, modules attached, facts seeded. That makes "it works" a claim about a
+hand-built deployment. Given how many ordering traps this record already
+documents, assuming a fresh bring-up would be smooth was exactly the kind of
+inference that keeps having to be retracted here.
+
+So a second container was created from nothing (`pct create`), three times, and
+the whole path run against it. Three defects fell out, all in the tooling, all
+invisible on a box that had run before.
+
+### aimee-kb would not start at all
+
+    ERROR obs_bus: module grant policy is invalid: .../modules.d/kb
+    aimee-kb: module bus failed to start
+
+`install-postgres-module.sh` wrote a grant naming
+`/usr/local/libexec/aimee-modules/aimee-module-postgres`, and created that binary
+**after** the `grants`-mode exit. On a fresh box the file therefore did not
+exist; `parse_grant_file` resolves `executable` with `realpath()`, an
+unresolvable path makes the grant invalid, and ONE invalid grant fails the whole
+module endpoint. The kb refused to start.
+
+This is the failure mode documented much earlier in this record -- "one bad file
+in modules.d takes the daemon with it" -- reached for real, from the one
+direction that had never been tried. The binary is now ensured before the grant
+names it, in both the install script and at deploy-time unpack.
+
+### Half the suite could not be prepared
+
+`deploy-all.sh` copied scripts from a hand-maintained allowlist of names, and the
+list had drifted: `make-mtls-certs`, `enroll-first-user`, `provision-mgmt-trust`,
+`make-oidc-idp`, `set-mtls-mode`, `test-embed-stage`, `stub-embedder.py`,
+`run-suite` and others were never added. On the old container it did not matter,
+because they had been copied by hand. On a fresh one the preparation steps
+reported "No such file or directory".
+
+A list maintained by hand is a list that will be wrong, and its being wrong is
+invisible until someone starts from nothing. It now copies whatever is staged.
+
+`write-tier-enforce-live` was likewise never shipped, so the account-over-TCP
+probe failed with "not installed" -- a deployment gap reporting as a test
+failure.
+
+### The detector counted its own warm-up
+
+With those fixed the suite ran, and the `capability_absent` detector fired. It
+was right to look and wrong about the cause, twice over:
+
+- `grep -c` PRINTS `0` and EXITS non-zero when nothing matches, so `|| echo 0`
+  appended a second line and the arithmetic saw `"0\n0"`.
+- The readiness poll IS a module stage call: `aimee status` asks event 11265, so
+  its first attempt before the module attaches is itself a `capability_absent`.
+  The detector was counting the suite's own warm-up as evidence of a broken run.
+
+Both fixed: bring-up now WAITS for a stage to answer rather than sleeping a
+guessed interval, and re-baselines the count afterwards, so what is measured is
+stages missing *while probes run*.
+
+### Result on a container built from nothing
+
+    suite                      pass 17   fail 0   skip 1
+    capability_absent during probes: 0
+    non-loopback probe (host)  PASS
+    explore.sh                 flagged 0
+    explore-cli.sh             flagged 0
+
+`prepare-suite.sh` now collects the steps a bare deployment does not provide --
+API bearer, management trust chain, mTLS identity, first-user enrollment, OIDC
+issuer, chat provider, capture proxy, seeded facts -- and makes their ORDER
+explicit, since several depend on each other and on a restart in between.
+
+### One hypothesis disproved
+
+I expected the TLS ramp-failure branch to become stageable on a fresh box, on
+the theory that db1 state was what let the ramp succeed without the module. It
+skips there too. So the ramp genuinely does not require the db1 module in this
+configuration, and the earlier explanation was wrong. The branch remains
+unstaged, now for a reason that has been tested rather than assumed.
