@@ -999,6 +999,69 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_salience",
+			stage: db2contract.StageMemorySalience,
+			// A memory nothing holds, so the reply must be the default that was
+			// sent -- which is what proves the default covers absence rather
+			// than being discarded.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySalienceRequest(2147483000, 0.25)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				score, err := db2contract.DecodeMemorySalienceReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if score != 0.25 {
+					t.Fatalf("salience = %v for an absent memory, want the default", score)
+				}
+			},
+		},
+		{
+			name:  "memory_surprise",
+			stage: db2contract.StageMemorySurprise,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySurpriseRequest(2147483000, 0.25)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				score, err := db2contract.DecodeMemorySurpriseReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if score != 0.25 {
+					t.Fatalf("surprise = %v for an absent memory, want the default", score)
+				}
+			},
+		},
+		{
+			name:  "ontology_eval_count",
+			stage: db2contract.StageOntologyEvalCount,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeOntologyEvalCountRequest("live-probe-never-proposed")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, err := db2contract.DecodeOntologyEvalCountReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a relation nobody proposed reported as found")
+				}
+			},
+		},
+		{
+			name:  "decision_log_active_id",
+			stage: db2contract.StageDecisionLogActiveID,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDecisionLogActiveIDRequest("live-probe-subject", 0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDecisionLogActiveIDReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -1795,6 +1858,62 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "prospective_set_state",
+			stage: db2contract.StageProspectiveSetState,
+			// Acknowledges whether or not a row matched, so an unseeded probe
+			// still proves the statement runs -- which is the half a fake
+			// cannot show.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProspectiveSetStateRequest(2147483000, "cancelled")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeProspectiveSetStateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
+		{
+			name:  "lifecycle_mark_pending",
+			stage: db2contract.StageLifecycleMarkPending,
+			// pg_now_text has to accept the bound interval, which is the whole
+			// reason the day count moved out of the statement text.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLifecycleMarkPendingRequest(2147483000, 14)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeLifecycleMarkPendingReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run; the bound interval may not parse")
+				}
+			},
+		},
+		{
+			name:  "directive_resolve",
+			stage: db2contract.StageDirectiveResolve,
+			// Seeded because this one refuses when nothing changed: unseeded it
+			// would probe the refusal rather than the resolve.
+			seed: []string{liveProbeDirective},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveResolveRequest(liveProbeDirectiveID, 1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeDirectiveResolveReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("an open directive was not resolved")
+				}
+			},
+		},
 	}
 }
 
@@ -1898,6 +2017,15 @@ const (
 	liveProbeArtifact   = `INSERT INTO artifacts (id, kind, state, payload)
  VALUES ('live-probe-artifact', 'live-probe', 'committed',
  '{"kept": "value"}'::jsonb)`
+)
+
+// An open directive for the resolve probe.
+const (
+	liveProbeDirectiveID = 900008
+	liveProbeDirective   = `INSERT INTO epistemic_directives
+ (id, question, cause, state, created_at, updated_at)
+ VALUES (900008, 'live probe question?', 'retrieval_failure', 'open',
+ '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
