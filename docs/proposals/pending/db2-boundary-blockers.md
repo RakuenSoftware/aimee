@@ -11,7 +11,25 @@ leaving them where they are contradicts the callers they already have.
 
 They are recorded here rather than given a disposition, so the review file keeps
 meaning what it says: a symbol marked `private-db2` is one nothing outside DB2
-calls, and none of these qualify.
+calls, and none of these qualify. There is now a third disposition,
+`linked-library`, for declarations that reach no store at all -- those are
+settled rather than blocked, and the section on them says why.
+
+Where the remaining work stands, from the scans each section describes:
+
+    tenancy-blocked                       70
+    provider-blocked                      23
+    oversized row lists                   12
+    unbounded owned-string replies         9  (6 genuinely, 3 shape rather than size)
+    binary sketch structures               6
+    workable by ordinary batching         96
+
+Those overlap in places and the sum is not the pending total. The shape is what
+matters: rather more than half of what is left is blocked on one of a few
+decisions, not on the effort of writing operations. The tenancy figure in
+particular was 66 by a scan that could not see two of the three ways a
+declaration depends on the session principal, and correcting it is what turned
+this from a long tail into the largest item on the list.
 
 ## `db2_kb_purge_txn_guard` holds a lock that the bus would release
 
@@ -793,6 +811,47 @@ where ingested content lives, which is not this migration's to make.
 
 `db2_kb_doc_read` is published and does not carry the text, so a document's row
 crosses the boundary today; only the write does not.
+
+## The envelope has no bytes, and six sketch operations are all bytes
+
+`db2-envelope-generic-v1` has four field types: `utf8`, `u32`, `u64` and `f64`.
+There is no opaque byte string. Everything that has needed one so far has been
+small enough to spell as hex --
+`maintenance.witness_checkpoint_anchor_coverage` carries a sixteen-byte signer
+key id as thirty-two characters, and decodes it in the handler.
+
+The six sketch load and save declarations are the point where that stops
+working:
+
+    db2_sketch_bloom_load / _save          131072 bytes  (2^20 bits)
+    db2_sketch_hll_load / _save              4096 bytes  (2^12 registers)
+    db2_sketch_count_min_load / _save     1048576 bytes  (4 x 65536 x uint32)
+
+Each is a fixed-size binary structure persisted whole and read back whole. Hex
+doubles them, so the bloom filter becomes a 256KB field against a per-field cap
+of 8192, and the count-min sketch is a megabyte before encoding -- past the
+whole-reply limit on its own, with the envelope header still to pay for.
+
+Raising the field cap does not fix it, and neither would base64. These are not
+values that happen to be large; they are memory images, and putting a memory
+image through a text field is the wrong shape whatever the number is. Three
+answers exist and all three are decisions rather than migrations:
+
+* the envelope grows a `bytes` field with its own bound, which is a wire-format
+  change and would also retire the hex round trip the witness key id does today;
+* the sketches stay inside DB2 and what crosses is the question asked of them --
+  "does this scope contain this item", "how many distinct" -- which is a smaller
+  and better boundary but means enumerating every query rather than moving the
+  structure;
+* the structures are persisted by reference, and the request carries the
+  reference, which is the same answer `db2_kb_doc_write` and
+  `db2_kb_file_index_upsert` need.
+
+The second is probably right for the sketches specifically: a bloom filter
+crossing a process boundary so the caller can ask it one question is a megabyte
+of traffic for a boolean. It is recorded here rather than acted on because
+choosing it means designing the query set, which is a different piece of work
+from moving a symbol.
 
 ## Nine declarations answer with an owned string of no stated size
 
