@@ -910,38 +910,6 @@ adds a conditional on top -- it answers with nothing at all when the caller's
 epoch already matches -- which a count of zero cannot distinguish from an empty
 rule set.
 
-## `db2_decision_log_insert` can hold one active row in the whole table
-
-    int db2_decision_log_insert(int64_t task_id, const char *options, ...);
-
-It takes no subject, so every row it writes leaves `subject` at its default of
-the empty string and `linked_policy_id` at zero. And `decision_log` carries:
-
-    CREATE UNIQUE INDEX idx_dl_active_scope ON decision_log
-      USING btree (subject, linked_policy_id) WHERE (status = 'active')
-
-So the `('', 0)` slot admits exactly one active row, and the second unscoped
-decision ever recorded is refused for as long as the first is active. Nothing
-supersedes it: `db2_decision_log_record` is the operation that retires a prior
-decision, and it only ever retires one in its own subject, which an unscoped row
-is not in.
-
-The C implementation half-knows. Its comment reads "Most likely
-idx_dl_active_scope rejected a second active decision for this (subject,
-linked_policy_id)" -- a guess about an error it did not inspect, on a path that
-is not most-likely but certain for this operation.
-
-Found by porting it. The Go implementation returns the same refusal, its unit
-tests passed against a fake that had no index, and the live probe against the
-replay schema failed on the second insert -- where the first had been written by
-an earlier replay case. A fake cannot have this defect; only a real schema can.
-
-What to do about it is a decision about what an unscoped decision is for. Either
-the operation is genuinely single-slot and should say so -- in which case its
-callers want to know a decision was refused rather than a write failed -- or it
-should take a subject like its sibling does, which changes its signature and
-every caller. The migration should not pick.
-
 ## Two declarations list projects, and one of them should go
 
     int db2_canonical_index_list_projects(project_info_t *out, int max);

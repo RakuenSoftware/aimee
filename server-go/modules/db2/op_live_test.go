@@ -64,9 +64,9 @@ type liveRequest struct {
 	stage   uint32
 	encode  func() ([]byte, error)
 	decoded func(t *testing.T, body []byte)
-	// setup prepares the transaction a write probe runs in. It exists for one
-	// operation and the reason is worth stating rather than generalising away.
-	setup func(t *testing.T, ctx context.Context, store Store)
+	// repeat runs a write probe more than once inside its transaction, for an
+	// operation whose second call is the one that used to fail.
+	repeat int
 }
 
 func liveReads() []liveRequest {
@@ -255,28 +255,22 @@ func liveWrites() []liveRequest {
 		{
 			name:  "decision_log_insert",
 			stage: db2contract.StageDecisionLogInsert,
-			// decision_log_insert never sets a subject, so every row it writes
-			// lands in the ('', 0) slot -- and idx_dl_active_scope is UNIQUE on
-			// (subject, linked_policy_id) WHERE status = 'active'. There can be
-			// exactly one active unscoped decision in the table, so the second
-			// one ever recorded is refused while the first is active.
-			//
-			// The replay database already holds one, which is how this was
-			// found: the probe failed against a real schema where every fake
-			// said yes. Retiring it inside the rolled-back transaction is what
-			// lets the insert be proven at all.
-			setup: func(t *testing.T, ctx context.Context, store Store) {
-				if _, err := store.Exec(ctx,
-					`UPDATE decision_log SET status = 'superseded'
-					 WHERE status = 'active' AND subject = '' AND linked_policy_id = 0`,
-				); err != nil {
-					t.Fatalf("clearing the unscoped slot: %v", err)
-				}
-			},
+			// This probe used to have to retire the occupied ('', 0) slot
+			// before it could insert, because idx_dl_active_scope covered
+			// unscoped rows and admitted exactly one. That was a defect in the
+			// index rather than in the probe -- the invariant belongs to the
+			// governance write, which cannot produce an unscoped row -- and the
+			// predicate now says `subject <> ''`. Two plain decisions logged
+			// against the same database is the case that was broken; the second
+			// insert below is that case.
 			encode: func() ([]byte, error) {
 				return db2contract.EncodeDecisionLogInsertRequest(
 					0, "live options", "live chosen", "", "", "")
 			},
+			// Run twice, because once proves nothing here: the defect this
+			// covers let the first unscoped insert through and refused every
+			// one after it.
+			repeat: 2,
 			decoded: func(t *testing.T, body []byte) {
 				acknowledged, id, _, _, _, _, _, _, createdAt, status, _, _, _, _, _, err :=
 					db2contract.DecodeDecisionLogInsertReply(body)
@@ -337,20 +331,23 @@ func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 			// what the database holds afterwards.
 			defer func() { _ = tx.Rollback(ctx) }()
 
-			store := &rollbackStore{tx: tx}
-			if testCase.setup != nil {
-				testCase.setup(t, ctx, store)
-			}
-			handler := NewDispatchHandler(store)
+			handler := NewDispatchHandler(&rollbackStore{tx: tx})
 			request, err := testCase.encode()
 			if err != nil {
 				t.Fatalf("encode request: %v", err)
 			}
-			body, status := handler(invocation(testCase.stage), request)
-			if status != bus.ModuleStatusOK {
-				t.Fatalf("status = %v -- the statement did not run", status)
+			attempts := testCase.repeat
+			if attempts < 1 {
+				attempts = 1
 			}
-			testCase.decoded(t, body)
+			for attempt := range attempts {
+				body, status := handler(invocation(testCase.stage), request)
+				if status != bus.ModuleStatusOK {
+					t.Fatalf("attempt %d: status = %v -- the statement did not run",
+						attempt, status)
+				}
+				testCase.decoded(t, body)
+			}
 		})
 	}
 }

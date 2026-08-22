@@ -232,3 +232,33 @@ func TestDecisionLogReadBackFailureIsUnacknowledged(t *testing.T) {
 		t.Fatalf("acknowledged = %d, err = %v", acknowledged, err)
 	}
 }
+
+func TestDecisionLogInsertIsNotSingleSlot(t *testing.T) {
+	// Two plain decisions logged against one database. This failed before
+	// idx_dl_active_scope was narrowed to scoped rows: every unscoped insert
+	// landed in the same ('', 0) slot, so `aimee mem decision` worked once per
+	// database and then reported "failed to log decision" forever.
+	//
+	// The fake has no index, so this cannot fail here -- it is the live write
+	// probe that proves it, and this exists so the intent is written beside the
+	// operation rather than only in a schema comment.
+	store := &fakeStore{rowQueue: append(
+		decisionWriteThenRead(1, ""), decisionWriteThenRead(2, "")...)}
+	handler := NewDispatchHandler(store)
+	for attempt := range 2 {
+		request, err := db2contract.EncodeDecisionLogInsertRequest(
+			0, "options", "chosen", "", "", "")
+		if err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		body, status := handler(invocation(db2contract.StageDecisionLogInsert), request)
+		if status != bus.ModuleStatusOK {
+			t.Fatalf("attempt %d: status = %v", attempt, status)
+		}
+		acknowledged, _, _, _, _, _, _, _, _, _, _, _, _, _, _, decodeErr :=
+			db2contract.DecodeDecisionLogInsertReply(body)
+		if decodeErr != nil || acknowledged != 1 {
+			t.Fatalf("attempt %d: acknowledged = %d", attempt, acknowledged)
+		}
+	}
+}

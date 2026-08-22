@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "26a4c99b357303ba0db3f2d0d8eac04a496951a7",
+  "source_revision": "1e19fbedc4f7709a45279e7159895f7cb8c8b61f",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,

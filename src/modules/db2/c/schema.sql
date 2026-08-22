@@ -270,7 +270,33 @@ ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS linked_policy_id BIGINT NOT NU
 -- One-active-per-scope invariant: at most one active decision per (subject,
 -- linked_policy_id). linked_policy_id is NOT NULL DEFAULT 0 so no COALESCE is
 -- needed. Enforced at the DB layer (not just a check-then-insert race).
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dl_active_scope ON decision_log(subject, linked_policy_id) WHERE status = 'active';
+--
+-- `subject <> ''` is part of the predicate because an empty subject is not a
+-- scope. Two writes reach this table. db2_decision_log_record is the governance
+-- one: it refuses an empty subject outright, so every row it writes is scoped
+-- and every one is covered here. db2_decision_log_insert is the older plain
+-- decision log, which takes no subject at all -- so its rows inherit the column
+-- default of '' and the status default of 'active', and without this predicate
+-- every one of them lands in the same ('', 0) slot. That made the second
+-- decision ever logged fail, and the third, and every one after: `aimee mem
+-- decision` worked once per database.
+--
+-- Adding the predicate takes nothing away from the invariant. The path it
+-- protects cannot produce an unscoped row, so no scoped decision loses
+-- enforcement; only the unscoped log stops being held to a rule written for a
+-- different write.
+-- Dropped and rebuilt only when it is still the old two-column predicate. An
+-- unconditional DROP would leave every restart with a window in which the
+-- invariant is not enforced, on a schema that is applied at every init.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_indexes
+              WHERE indexname = 'idx_dl_active_scope'
+                AND indexdef NOT LIKE '%subject <> %') THEN
+    DROP INDEX idx_dl_active_scope;
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dl_active_scope ON decision_log(subject, linked_policy_id) WHERE status = 'active' AND subject <> '';
 CREATE INDEX IF NOT EXISTS idx_dl_revisit ON decision_log(revisit_when) WHERE status = 'active' AND revisit_when != '';
 CREATE INDEX IF NOT EXISTS idx_agent_hints_lookup ON agent_hints(role, consumed);
 CREATE INDEX IF NOT EXISTS idx_memory_workspaces_workspace ON memory_workspaces(workspace);
