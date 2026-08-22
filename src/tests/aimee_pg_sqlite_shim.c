@@ -132,6 +132,17 @@ static void shim_noop_int_func(sqlite3_context *ctx, int argc, sqlite3_value **a
    sqlite3_result_int(ctx, 0);
 }
 
+/* Transaction-local request context has no SQLite analogue. Unit tests only
+ * need set_config() to preserve the value-returning SELECT shape used by the
+ * production writer; PostgreSQL integration tests cover its isolation. */
+static void shim_set_config_func(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+   if (argc != 3 || sqlite3_value_type(argv[1]) == SQLITE_NULL)
+      sqlite3_result_null(ctx);
+   else
+      sqlite3_result_value(ctx, argv[1]);
+}
+
 static void pgvec_register_functions(sqlite3 *db)
 {
    if (!db)
@@ -143,6 +154,8 @@ static void pgvec_register_functions(sqlite3 *db)
                            NULL, shim_noop_int_func, NULL, NULL);
    sqlite3_create_function(db, "pg_advisory_xact_lock", 1, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
                            shim_noop_int_func, NULL, NULL);
+   sqlite3_create_function(db, "set_config", 3, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
+                           shim_set_config_func, NULL, NULL);
    /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables. */
    sqlite3_exec(
        db,
@@ -682,15 +695,19 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
       return -1;
    char *errmsg = NULL;
    int rc = sqlite3_exec(db, sql_t, NULL, NULL, &errmsg);
-   free(sql_t);
    if (rc != SQLITE_OK)
    {
+      if (getenv("AIMEE_PG_SHIM_TRACE"))
+         fprintf(stderr, "pg-shim exec: %s (sql=%s)\n", errmsg ? errmsg : sqlite3_errmsg(db),
+                 sql_t);
       if (errbuf && errlen)
          snprintf(errbuf, errlen, "%s", errmsg ? errmsg : sqlite3_errmsg(db));
       sqlite3_free(errmsg);
+      free(sql_t);
       return -1;
    }
    sqlite3_free(errmsg);
+   free(sql_t);
    return 0;
 }
 
@@ -740,6 +757,8 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_pr
    int rc = sqlite3_prepare_v2(db, sql_t, -1, &st, NULL);
    if (rc != SQLITE_OK)
    {
+      if (getenv("AIMEE_PG_SHIM_TRACE"))
+         fprintf(stderr, "pg-shim prepare: %s (sql=%s)\n", sqlite3_errmsg(db), sql_t);
       if (kind && rc == SQLITE_NOMEM)
          *kind = AIMEE_PG_PREPARE_RESOURCE;
       if (errbuf && errlen)
@@ -785,6 +804,9 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *errbuf, size_t errlen
    }
    if (errbuf && errlen)
       snprintf(errbuf, errlen, "step: %s", sqlite3_errmsg(stmt->db));
+   if (getenv("AIMEE_PG_SHIM_TRACE"))
+      fprintf(stderr, "pg-shim step: %s (sql=%s)\n", sqlite3_errmsg(stmt->db),
+              sqlite3_sql(stmt->st));
    return AIMEE_PG_ERR;
 }
 

@@ -9,6 +9,7 @@
 #include "modules/memory/memory_ontology.h"
 #include "modules/memory/memory_fact_gate.h"
 #include "fact_lifecycle.h" /* fact_authority_t, FACT_CLASS_* (§4/§5) */
+#include "fact_mutation.h"  /* fact_evidence_input_t */
 
 #ifdef __cplusplus
 extern "C"
@@ -61,6 +62,25 @@ extern "C"
                                        const char *rel_type, const char *target,
                                        memory_node_kind_t tail_kind, fact_authority_t authority,
                                        int enabled);
+
+   /* Evidence-complete ingestion surface.  The authority enum still identifies
+    * the trusted internal source path; evidence contains provenance only and can
+    * never nominate authority. */
+   fact_gate_verdict_t db2_fact_commit_with_evidence(
+       const char *source, memory_node_kind_t head_kind, const char *rel_type, const char *target,
+       memory_node_kind_t tail_kind, fact_authority_t authority, int enabled,
+       const fact_evidence_input_t *evidence, const char *assertion_kind, const char *valid_from,
+       const char *valid_until);
+
+   /* Principal-preserving form used after an authenticated actor was captured
+    * at the ingestion boundary. */
+   fact_gate_verdict_t db2_fact_commit_with_actor(const char *source, memory_node_kind_t head_kind,
+                                                  const char *rel_type, const char *target,
+                                                  memory_node_kind_t tail_kind,
+                                                  const fact_actor_t *actor, int enabled,
+                                                  const fact_evidence_input_t *evidence,
+                                                  const char *assertion_kind,
+                                                  const char *valid_from, const char *valid_until);
 
 #ifdef __cplusplus
 }

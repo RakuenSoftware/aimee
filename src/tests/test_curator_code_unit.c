@@ -26,21 +26,15 @@
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
- * with the extract gates disabled so the real config_load() the queue functions
+ * with the extract gates disabled so the queue functions
  * call reports the gate off deterministically (and the run never touches the
  * developer's real ~/.config/aimee). */
-/* The single place this test binary names config_t. Every case that needs a
- * different extract-code gate goes through here rather than loading its own copy:
- * config_t is a secret of the config module, and one reader is the budget. */
 static void ccu_set_extract_code_gate(int on)
 {
-   config_t cfg;
-   config_load(&cfg);
-   cfg.kb_curator_extract_code_enabled = on;
-   cfg.kb_curator_extract_docs_enabled = 0;
+   assert(config_set_kb_curator_extract_code_enabled(on) == 0);
+   assert(config_set_kb_curator_extract_docs_enabled(0) == 0);
    if (!on)
-      cfg.synthesis_endpoint[0] = '\0';
-   config_save(&cfg);
+      assert(config_set_synthesis_endpoint("") == 0);
 }
 
 static void test_force_curator_gate_off(void)

@@ -2,7 +2,7 @@
  * the fail-closed gate (fidelity_check_enabled AND its hard dependencies).
  *
  * fidelity_check_eligible() reads config through accessors rather than taking a
- * config_t, so this suite (which links no config module) supplies them. The
+ * legacy_config_record, so this suite (which links no config module) supplies them. The
  * three flags are the same three the cases always set, by the same names. The
  * old "NULL cfg" case becomes config_present() reporting 0 -- the same question,
  * can the gate see config at all, asked without a struct. */

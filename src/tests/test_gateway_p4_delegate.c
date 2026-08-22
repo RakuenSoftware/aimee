@@ -1,6 +1,6 @@
 /* test_gateway_p4_delegate.c: universal-gateway P4 — the delegate/primary model-call
  * loop run through the gateway pipeline. Pure tests of gateway_delegate_* plus the
- * response-side police as the loop invokes it. config_load, guardrails_canonical_tool_name
+ * response-side police as the loop invokes it. Accessors, guardrails_canonical_tool_name
  * and aimee_log are stubbed so the link stays minimal (their real impls have their own
  * tests). */
 #include <assert.h>
@@ -17,19 +17,7 @@
 #define PASS(name) printf("  PASS: %s\n", (name))
 
 static int g_prevent = 0;
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->gateway_prevent_subagents = g_prevent;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values match what this file's config_load stub produced, so the
- * assertions below are unchanged. */
+/* Accessor stub exposes the policy value under test. */
 int config_gateway_prevent_subagents(void)
 {
    return g_prevent;

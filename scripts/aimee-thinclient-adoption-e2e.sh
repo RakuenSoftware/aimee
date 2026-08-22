@@ -61,9 +61,10 @@ fi
 # this harness times out waiting for a listener that was never coming.
 # `make all` does not build the module, so build it here.
 DB1_MODULE_BUILT="$REPO/src/build/obj/aimee-module-db1"
-if [[ ! -x "$DB1_MODULE_BUILT" ]]; then
-  bold "==> Building the DB1 module"
-  make -C src build/obj/aimee-module-db1 >/dev/null
+CONFIG_MODULE_BUILT="$REPO/src/build/obj/aimee-module-config"
+if [[ ! -x "$DB1_MODULE_BUILT" || ! -x "$CONFIG_MODULE_BUILT" ]]; then
+  bold "==> Building the DB1 and config modules"
+  make -C src build/obj/aimee-module-db1 build/obj/aimee-module-config >/dev/null
 fi
 
 # --- server: scratch home, TLS listener, first-boot Vault bearer ------------
@@ -77,9 +78,12 @@ sed "s/8740/${HTTP_PORT}/; s/8743/${TLS_PORT}/" \
 # The grant the supervisor would write, taken from the generated bundle so the
 # served kinds cannot drift from what the module actually serves.
 DB1_MODULE="$SERVER_HOME/aimee-module-db1"
+CONFIG_MODULE="$SERVER_HOME/aimee-module-config"
 MODULE_BUS_SOCK="$SERVER_HOME/server-module-bus.sock"
 module_pid=""
+config_module_pid=""
 install -m0755 "$DB1_MODULE_BUILT" "$DB1_MODULE"
+install -m0755 "$CONFIG_MODULE_BUILT" "$CONFIG_MODULE"
 mkdir -p "$SERVER_HOME/modules.d/server"
 DB1_GRANT="$REPO/src/build/obj/module-bundle/grants/server/db1.grant"
 if [[ ! -r "$DB1_GRANT" ]]; then
@@ -92,6 +96,13 @@ if [[ ! -r "$DB1_GRANT" ]]; then
 fi
 sed "s|^executable=.*|executable=$DB1_MODULE|" "$DB1_GRANT" \
   >"$SERVER_HOME/modules.d/server/db1.grant"
+CONFIG_GRANT="$REPO/src/build/obj/module-bundle/grants/server/config.grant"
+if [[ ! -r "$CONFIG_GRANT" ]]; then
+  red "no generated config grant at $CONFIG_GRANT"
+  exit 1
+fi
+sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$CONFIG_GRANT" \
+  >"$SERVER_HOME/modules.d/server/config.grant"
 
 # Armed BEFORE the daemon, waiting for the socket the daemon is about to create.
 # The daemon runs its mTLS ramp self-test once, at startup, and that needs the
@@ -109,12 +120,28 @@ start_module() {
     echo "module: the bus socket never appeared" >&2
   ) >>"$SERVER_HOME/module.log" 2>&1 &
   module_pid=$!
+  (
+    deadline=$((SECONDS + WAIT_SECONDS))
+    while (( SECONDS < deadline )); do
+      if [[ -S "$MODULE_BUS_SOCK" ]]; then
+        AIMEE_HOME="$SERVER_HOME" exec "$CONFIG_MODULE" "$MODULE_BUS_SOCK"
+      fi
+      sleep 0.1
+    done
+    echo "config module: the bus socket never appeared" >&2
+  ) >>"$SERVER_HOME/config-module.log" 2>&1 &
+  config_module_pid=$!
 }
 stop_module() {
   if [[ -n "$module_pid" ]]; then
     kill "$module_pid" 2>/dev/null || true
     wait "$module_pid" 2>/dev/null || true
     module_pid=""
+  fi
+  if [[ -n "$config_module_pid" ]]; then
+    kill "$config_module_pid" 2>/dev/null || true
+    wait "$config_module_pid" 2>/dev/null || true
+    config_module_pid=""
   fi
 }
 
@@ -123,7 +150,11 @@ first_start=1
 cleanup() {
   stop_module
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
-  rm -rf "$SERVER_HOME" "$CLIENT_HOME"
+  if [[ "${AIMEE_E2E_KEEP:-0}" == 1 ]]; then
+    printf 'kept server home: %s\nkept client home: %s\n' "$SERVER_HOME" "$CLIENT_HOME"
+  else
+    rm -rf "$SERVER_HOME" "$CLIENT_HOME"
+  fi
 }
 trap cleanup EXIT
 
@@ -238,5 +269,13 @@ st="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"
-[[ "$FAIL" == 0 ]] || exit 1
+if [[ "$FAIL" != 0 ]]; then
+  printf '%s\n' '--- server log ---'
+  tail -40 "$SERVER_HOME/server.log" 2>/dev/null || true
+  printf '%s\n' '--- DB1 module log ---'
+  tail -20 "$SERVER_HOME/module.log" 2>/dev/null || true
+  printf '%s\n' '--- config module log ---'
+  tail -20 "$SERVER_HOME/config-module.log" 2>/dev/null || true
+  exit 1
+fi
 green "thin-client Vault enrollment works end to end."

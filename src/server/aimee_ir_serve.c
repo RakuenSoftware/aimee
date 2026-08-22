@@ -9,7 +9,7 @@
 #include <aimee/translation/aimee_backend.h>
 #include <aimee/translation/aimee_frontend.h>
 #include "modules/memory/gw_stage_memory.h" /* ir_stage_memory + gw_stage_memory_enabled */
-#include "config.h" /* config_load + config_module_enabled (modules.memory) */
+#include "config.h" /* legacy_config_read + config_module_enabled (modules.memory) */
 #include "persona.h"
 #include "server_http.h"          /* session_persona_get */
 #include "server_http_identity.h" /* inbound session identity */
@@ -51,7 +51,7 @@ int aimee_ir_stream_relay_enabled(void)
 }
 
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
- * default (gw_stage_memory_enabled). Cached config_load, so an operator toggle applies
+ * default (gw_stage_memory_enabled). Cached legacy_config_read, so an operator toggle applies
  * without a restart; keeps ir_stage_memory itself config-free. Resolved at the seam
  * call site, mirroring the legacy gw_stage_slot_t catalogs. */
 static int ir_memory_enabled(void)

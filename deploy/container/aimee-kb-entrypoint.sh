@@ -48,12 +48,11 @@
 # later was a space change the guard refused, and the kb never started again. A kb with
 # no embedder cannot do the one thing it exists for, and saying so at startup is cheaper
 # than discovering it from bad answers.
-# Ask the binary, never the file. This used to parse aimee.yaml with a sed regex, which
-# hardcoded the config paths and assumed a top-level `embedding_model:` key — a second
-# reader of a setting config owns. It worked only because config_save happens to write
-# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected".
+# Ask the pure-Go config process binary, never the file and never a native
+# configuration implementation. Before the KB daemon bus exists, its narrow
+# public-string bootstrap mode is the sole authoritative reader.
 read_cfg_embedding_model() {
-    aimee-kb --print-embedding-model 2>/dev/null || true
+    /usr/local/libexec/aimee-modules/aimee-module-config --get embedder_model 2>/dev/null || true
 }
 
 # Is this container starting the KB SERVICE, or running a one-shot that exits?

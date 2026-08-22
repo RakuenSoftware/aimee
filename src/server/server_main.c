@@ -4,7 +4,6 @@
 #include "cli_client.h"
 #include "commands.h"
 #include "config.h"
-#include "config_database.h" /* config_emit_deploy_env_current (--emit-deploy-env) */
 #include "config_sections.h"
 #include "forge_app_token.h"
 #include "modules/git/forge_credentials.h"
@@ -186,6 +185,15 @@ static int run_server(const char *socket_path, log_level_t log_level)
       audit_log_close();
       return 1;
    }
+   /* The config store is a required supervised process. Start the daemon bus
+    * explicitly before any startup consumer asks for config, then give the
+    * supervisor a bounded window to attach after it observes the socket. */
+   if (obs_bus_start() != 0)
+   {
+      startup_notify(notify_fd, "error: module bus failed to start\n");
+      audit_log_close();
+      return 1;
+   }
    audit_ensure_key();             /* provision the per-action audit key (best-effort) */
    vault_audit_bridge_install();   /* route vault credential-access events onto the audit bus */
    sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */
@@ -241,7 +249,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       }
    }
 
-   if (!config_present())
+   if (!config_wait_ready(10000))
    {
       startup_notify(notify_fd, "error: invalid configuration\n");
       aimee_log(LOG_ERROR, "config", "server startup rejected invalid configuration");
@@ -255,7 +263,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * individual enrollment bearer; `aimee api enable` can reveal the primary to
     * a local operator when a headless deployment explicitly needs it. */
    if ((config_server_api_http_port() > 0 || config_server_api_tls_port() > 0) &&
-       !config_server_api_bearer_token()[0])
+       !runtime_secret_has("AIMEE_API_BEARER_TOKEN"))
    {
       char primary[65] = "";
       if (platform_random_hex(primary, 64) != 0 ||
@@ -267,7 +275,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
          return 1;
       }
       runtime_secret_wipe(primary, sizeof(primary));
-      /* No need to write it back here: the seed below reloads, and config_load
+      /* No need to write it back here: the seed below reloads, and legacy_config_read
        * applies AIMEE_API_BEARER_TOKEN out of Vault, so the snapshot every reader
        * below sees carries the freshly minted primary. */
       aimee_log(LOG_INFO, "vault.env", "minted Vault-only API primary for configured listener");
@@ -410,10 +418,13 @@ static int run_server(const char *socket_path, log_level_t log_level)
       server_http_set_bearer_extra(extra, extra_count);
    }
    cli_session_pty_set_forwarding(config_server_api_cli_session_forwarding());
-   int http_start =
-       server_http_start(NULL, config_server_api_http_port(), config_server_api_tls_port(),
-                         config_server_api_bearer_token(), config_server_api_rate_limit_per_min(),
-                         config_server_api_remote_writes());
+   char api_primary_bearer[256] = "";
+   (void)runtime_secret_get("AIMEE_API_BEARER_TOKEN", api_primary_bearer,
+                            sizeof(api_primary_bearer));
+   int http_start = server_http_start(
+       NULL, config_server_api_http_port(), config_server_api_tls_port(), api_primary_bearer,
+       config_server_api_rate_limit_per_min(), config_server_api_remote_writes());
+   runtime_secret_wipe(api_primary_bearer, sizeof(api_primary_bearer));
    if (http_start == SERVER_HTTP_START_MGMT_FATAL)
    {
       char management_error[256];
@@ -464,48 +475,6 @@ int main(int argc, char **argv)
     * safely unset. */
    if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
-
-   /* Emit the compose env for this backend record, for the container entrypoint
-    * to write beside the managed compose file as its `.env`.
-    *
-    * A ONE-SHOT FLAG RATHER THAN THE /v1 ROUTE, because this runs BEFORE the
-    * server is listening: the entrypoint has to produce the file at start, and
-    * anything that needed a running server could not. It loads config directly,
-    * which is the same source config.deploy_env serves later.
-    *
-    * WHY THE FILE HAS TO BE DERIVED AT EVERY START. The managed deployment's
-    * identity -- which kb image variant, which embedder -- lived ONLY in the
-    * running container's Config.Env, put there by whichever shell first ran
-    * compose. Rebooting is safe (restart=unless-stopped restarts the same
-    * container object, env intact), but RECREATING is not, and recreating is
-    * what every image upgrade does. `docker compose up -d` with a different
-    * caller environment silently reinterpolates:
-    *
-    *   EMBEDDER_MODEL   unset -> the kb refuses to serve. Loud, recoverable.
-    *   AIMEE_KB_VARIANT unset -> ${AIMEE_KB_VARIANT:+-...} resolves to the
-    *                             EMBEDDERLESS aimee-kb image. Silent, and the
-    *                             deployment quietly loses its embedder.
-    *
-    * Compose reads `.env` from the project directory automatically, so writing
-    * it at start makes EVERY later `docker compose up -d` correct -- the
-    * server's own deploy, an operator's, or a script's -- with nobody having to
-    * remember to re-supply anything. Swapping an image becomes what it should
-    * have been all along: a restart, not a reconfiguration.
-    *
-    * /opt/aimee/deploy is image content, not a mount, so the file is rebuilt on
-    * every start and can never go stale against a config the operator changed
-    * while the container was down. Being ephemeral is the point, not a flaw.
-    *
-    * No secret is written: config_emit_deploy_env deliberately omits
-    * embedder_api_key and synthesis_api_key, and the managed-inference bearer is
-    * added to the deploy child's envp only (deploy_apply.c), never to a file. */
-   if (argc == 2 && strcmp(argv[1], "--emit-deploy-env") == 0)
-   {
-      char env[4096];
-      config_emit_deploy_env_current(env, sizeof(env));
-      fputs(env, stdout);
-      return 0;
-   }
 
    /* The co-located root-UDS-attested web service consumes these labelled base64
     * records through a pipe for authentication, signed sessions, and in-memory

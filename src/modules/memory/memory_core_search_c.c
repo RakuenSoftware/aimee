@@ -527,6 +527,7 @@ int memory_expand_to_session_window(memory_t *out, int count, int max, int windo
 int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
                              int limit, memory_t *out, int max)
 {
+   memory_recall_trace_capture_reset();
    if (!query || !query[0])
       return 0;
 
@@ -830,6 +831,8 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
                   }
                if (!is_archived)
                   candidates[write++] = candidates[i];
+               else
+                  memory_recall_trace_reject(candidates[i].id, "candidate", "lifecycle_archived");
             }
             count = write;
          }
@@ -971,6 +974,7 @@ static void memory_sort_scope_buckets(memory_t *matches, int count, int *scope_r
 int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
                                  int include_all, int limit, memory_t *out, int max)
 {
+   memory_recall_trace_capture_reset();
    if (!query || !query[0])
       return 0;
    db2_memory_scope_context_t previous_scope;
@@ -1065,7 +1069,10 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
    {
       int rank = db2_memory_scope_context_rank(candidates[i].id);
       if (rank <= 0 && !include_all)
+      {
+         memory_recall_trace_reject(candidates[i].id, "candidate", "scope_boundary");
          continue;
+      }
       if (kept != i)
          candidates[kept] = candidates[i];
       scope_rank[kept] = rank;

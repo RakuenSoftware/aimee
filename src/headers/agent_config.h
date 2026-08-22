@@ -32,7 +32,7 @@ const char *agent_config_path(void);
 agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
 /* The two system settings routing actually consults. This used to be a whole
- * config_t threaded through for exactly these two booleans -- callers had to hold
+ * legacy_config_record threaded through for exactly these two booleans -- callers had to hold
  * the 750 KB struct, and a reader could not tell which of its ~600 fields
  * mattered. Populate with agent_route_policy_current(). */
 typedef struct

@@ -14,7 +14,7 @@
 - **Author:** JBailes (drafted by Claude, 2026-07-30).
 - **Scope:** every `getenv("AIMEE_*")` call site in `src/` (tests excluded), checked against the
   live config surface (`config_fields.c`, `config_sections.c`, `config_memory.c`,
-  `config_kb_curator.c`, and the `config_load` parse blocks).
+  `config_kb_curator.c`, and the `legacy_config_read` parse blocks).
 
 ## Method and its limits
 
@@ -142,7 +142,7 @@ Two notes on this table:
   the eleven `config_autonomy_lookup` knobs; `transport.*`; `memory.citations.*`,
   `memory.cognify.async.*`, `memory.pagerank.*`; `memory_weight_profile`; `vault.tpm2.*`.
 - **Env-only by design:** real secrets (`AIMEE_*_TOKEN`, `*_PIN`, `*_SECRET`, `vault_kms_*`);
-  bootstrap values read before `config_load` (`AIMEE_HOME`, `AIMEE_RUNTIME_DIR`,
+  bootstrap values read before `legacy_config_read` (`AIMEE_HOME`, `AIMEE_RUNTIME_DIR`,
   `AIMEE_SERVER_STARTUP_FD`); per-process propagation between parent and delegate
   (`AIMEE_DELEGATE_DEPTH`, `AIMEE_PARENT_DELEGATION_ID`, `AIMEE_DELEGATE_SOURCE_*` — these are
   `setenv`'d by aimee itself, not operator input); `AIMEE_TEST_*` hooks; and

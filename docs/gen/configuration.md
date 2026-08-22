@@ -1,6 +1,6 @@
 # Configuration Reference
 
-> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
+> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config module, env vars scanned from `getenv()` in `src/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 This reference covers every configurable surface:
 
@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (93)
+## CLI-settable keys (87)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -45,7 +45,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cross_verify` | bool | Enable cross-model verification of outputs. |
 | `css_render_command` | string | Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar). |
 | `css_style_graph_enabled` | bool | Enable the CSS migration assistant's style-graph write path during indexing. |
-| `db2_url` | string | Vault-backed DB2 connection URL; reads are redacted and writes bypass YAML. |
 | `dedup_enabled` | bool | Deduplicate near-identical responses. |
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
 | `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
@@ -53,7 +52,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build. It augments a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
 | `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host through aimee for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. |
 | `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory. A delegate always runs in its own container -- there is no in-process host path to fall back to -- and this additionally refuses on a breach or an unverifiable probe. |
-| `embedder_api_key` | string | Bearer token for an external embedder endpoint (blank if it needs none). |
 | `embedder_command` | string | Command that produces embeddings (overrides the endpoint). |
 | `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and refuses to start on drift. |
 | `embedder_model` | string | Embedder identity. Written for a bundled model too, not just an external one: it is the registry key pooling and prefixes resolve from, and the value recorded against the corpus. |
@@ -71,12 +69,9 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `ingress_max_raw_scans` | int | Max raw-content scans per ingress request. |
 | `ingress_preinject_assembly_budget` | int | Token budget for ingress context pre-injection. |
 | `ingress_preinject_enabled` | bool | Enable `<aimee-context>` pre-injection on ingress (memory/code preview envelope on primary ingress turns; default on). |
-| `ingress_trusted_proxy_secret` | string | Vault-backed shared secret for a trusted ingress proxy; reads are redacted. |
 | `integrity_dry_run` | bool | Run integrity checks without enforcing. |
 | `integrity_enabled` | bool | Enable the integrity gate. |
-| `kb_api_bearer_token` | string | Vault-backed bearer for the aimee-kb API; reads expose configured state only. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
-| `kb_client_bearer_token` | string | Vault-backed server-to-KB bearer; reads are redacted; restart required. |
 | `kb_client_url` | string | Remote aimee-kb API base URL used by aimee-server; restart required. |
 | `kb_curator_extract_code_workers` | int | Parallel curator code-extraction workers, bounded to the synthesis service slot count. |
 | `kb_curator_extract_docs_workers` | int | Parallel curator document-extraction workers, bounded to the synthesis service slot count. |
@@ -106,7 +101,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
 | `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
-| `synthesis_api_key` | string | Bearer token for the synthesis endpoint (blank for a keyless or loopback endpoint). |
 | `synthesis_endpoint` | string | The ONE synthesis endpoint, remote or loopback. Empty means synthesis is off, which is supported - embedding, search, recall and indexing never call it. On a *-llm image the container entrypoint sets this to loopback itself after starting the bundled model. |
 | `synthesis_model` | string | Synthesis model. On a *-llm image this selects the bundled model to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model label sent to the configured endpoint. |
 | `synthesis_thinking` | bool | Let the synthesis model think before answering (default on). It measured positive-to-neutral everywhere it was tried. Global rather than per-stage, and the operator's call: turn it off only for a model that reasons past its output budget without answering. |
@@ -232,7 +226,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 
 ## Config-file sections (54)
 
-Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
+Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the external config module metadata; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
 - **`aimee`**: _Core API/runtime settings._ Keys: `api`
 - **`autonomy`**: `auto_resume_cap_parks`, `ci_retry_max`, `concurrency`, `fanout`, `max_resumes`, `max_turns`, `max_wall_secs`, `skeptics`, `stale_abandon_secs`, `unit_max`, `unit_retry`
@@ -289,15 +283,15 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`workspaces`**: _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
 - **`worktree_gc`**: `enabled`, `max_age_days`
 
-## Other top-level config-file keys (5)
+## Other top-level config-file keys (4)
 
 Scalar keys read directly from the config root (not via the CLI allowlist above):
 
-`db2_pool_size`, `economizer`, `modules`, `proxy_token`, `toolsets`
+`db2_pool_size`, `economizer`, `modules`, `toolsets`
 
 ## Environment variables
 
-The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 228 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -313,7 +307,6 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
 | `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_RUNTIME_DIR` | Private runtime directory for sockets, temporary credentials, and process state. |
-| `AIMEE_TOOLSETS_CONFIG` | Path to a toolsets config file (overrides the default tool allowlists). |
 | `AIMEE_WORKSPACES_DIR` | Root directory for mirrored/registered workspaces. |
 
 ### Client & session
@@ -343,8 +336,6 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_API_MTLS` | Client-certificate mode: `off`, `optional`, or `required`. The managed server image defaults to `optional` so enrollment works before the durable roster promotes the listener to required. |
-| `AIMEE_API_REMOTE_WRITES` | Legacy value: `off`, `data`, or `full`. Still parsed, but no longer authorizes user writes; non-off values warn and feed `remote_writes.global_ignored`. |
 | `AIMEE_BACKGROUND_THREADS` | Background worker thread count. |
 | `AIMEE_COMPUTE_THREADS` | Compute-pool thread count. |
 | `AIMEE_DEPLOY_COMPOSE_FILE` | Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml). |
@@ -441,11 +432,9 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_VAULT_OPERATOR_ENABLED` | Enable the dedicated KB vault-operator runtime. |
 | `AIMEE_KB_VAULT_ORCHESTRATOR_URL` | Operator-configured vault orchestrator endpoint. |
 | `AIMEE_LLM_HOST` | DNS name of the synthesis sidecar container. Setting it makes aimee-kb issue the mTLS identities for the kb -> aimee-llm hop into $AIMEE_HOME/synthesis-tls at startup, from the kb's own CA. Unset for an external or absent synthesis provider, which needs none of them. The sidecar refuses to start without this material. |
-| `AIMEE_OCR_URL` | Structured-PDF OCR sidecar endpoint. |
 | `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
 | `AIMEE_SERVER_TEAM_ID` | The team this server serves, from the same registry row as AIMEE_SERVER_ID. Required for per-user /v1 write authorization: unset, the server still starts and serves reads but denies every write with no_team_configured. |
 | `AIMEE_TRANSPORT_KB_POOL_ENABLED` | Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections. |
-| `AIMEE_TSR_URL` | Structured-PDF table-recognition sidecar endpoint. |
 | `AIMEE_VECTOR_KB_BATCH_SIZE` | Embedding batch size for KB vector ingest. |
 
 ### Database & vectors
@@ -486,7 +475,6 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_DELEGATE_DEPTH` | Current delegation depth (recursion guard). |
 | `AIMEE_DELEGATE_HEARTBEAT_MONITOR` | Enable the delegate heartbeat monitor. |
 | `AIMEE_DELEGATE_MAX_INFLIGHT` | Process-wide maximum number of admitted delegate attempts. |
-| `AIMEE_DELEGATE_SANDBOX` | Enable the configured delegate sandbox backend. |
 | `AIMEE_DELEGATE_SOURCE_AUTHORITY` | Enable source-authority gating for delegate edits. |
 | `AIMEE_DELEGATE_SOURCE_PATHS` | Allowed source paths for delegate edits. |
 | `AIMEE_DELEGATE_WORKTREE_ROOT` | Root directory for delegate worktrees. |

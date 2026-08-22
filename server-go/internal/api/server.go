@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
+	appconfig "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
@@ -22,7 +22,7 @@ type Server struct {
 	artifacts       *wfe.ArtifactStore
 	workflowDir     string
 	workflows       *wfe.Registry
-	config          *appconfig.Store
+	config          appconfig.Service
 	mux             *http.ServeMux
 	notify          func()
 	cancel          func(string)
@@ -79,7 +79,7 @@ func (s *Server) SetSchedulerCancel(cancel func(string)) { s.cancel = cancel }
 func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, db1.WorkItem) error) {
 	s.cleanupWorktree = cleanup
 }
-func (s *Server) SetConfigStore(store *appconfig.Store) { s.config = store }
+func (s *Server) SetConfigStore(store appconfig.Service) { s.config = store }
 func (s *Server) workflowRegistry() (*wfe.Registry, error) {
 	if s.workflows != nil {
 		return s.workflows, nil

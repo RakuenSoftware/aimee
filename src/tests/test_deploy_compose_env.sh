@@ -25,7 +25,15 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 entrypoint="$root/deploy/container/server-entrypoint.sh"
 tmp=$(mktemp -d)
-cleanup() { rm -rf "$tmp"; }
+server_pid=""
+config_pid=""
+cleanup() {
+    [ -z "$config_pid" ] || kill "$config_pid" 2>/dev/null || true
+    [ -z "$server_pid" ] || kill "$server_pid" 2>/dev/null || true
+    [ -z "$config_pid" ] || wait "$config_pid" 2>/dev/null || true
+    [ -z "$server_pid" ] || wait "$server_pid" 2>/dev/null || true
+    rm -rf "$tmp"
+}
 trap 'cleanup' EXIT HUP INT TERM
 
 fails=0
@@ -41,7 +49,7 @@ check() {
 [ -r "$entrypoint" ] || { echo "deploy-compose-env: missing $entrypoint" >&2; exit 1; }
 
 # 1. The entrypoint must derive the file rather than assume an inherited env.
-grep -q -- '--emit-deploy-env' "$entrypoint" \
+grep -q -- 'aimee config deploy-env' "$entrypoint" \
     && r=yes || r=no
 check "entrypoint derives the env from config" "yes" "$r"
 
@@ -59,7 +67,7 @@ check "written via a temp file and renamed into place" "yes" "$r"
 #    later compose callers; the server's own deploy path builds its child
 #    environment directly and works without it. Refusing to boot over it would
 #    trade a silent recreate bug for a loud outage.
-awk '/--emit-deploy-env/,/^fi$/' "$entrypoint" | grep -q 'WARNING' && r=yes || r=no
+awk '/aimee config deploy-env/,/^fi$/' "$entrypoint" | grep -q 'WARNING' && r=yes || r=no
 check "a write failure warns rather than aborting the start" "yes" "$r"
 
 # 4. No secret may reach the file. config_emit_deploy_env omits the API keys by
@@ -76,11 +84,35 @@ check "no credential is written to the compose env file" "clean" "$r"
 # 5. The emitted env itself must carry the variable whose absence is silent.
 #    Run the real emitter against a config that selects the bundled model.
 server_bin="$root/aimee-server"
-if [ -x "$server_bin" ]; then
+client_bin="$root/aimee"
+config_bin="$root/src/build/obj/aimee-module-config"
+if [ -x "$server_bin" ] && [ -x "$client_bin" ] && [ -x "$config_bin" ]; then
     home="$tmp/home"
-    mkdir -p "$home"
+    mkdir -p "$home/modules.d/server"
     printf 'embedder_model: bekko-a25m\n' > "$home/aimee.yaml"
-    env_out=$(AIMEE_HOME="$home" "$server_bin" --emit-deploy-env 2>/dev/null || true)
+    grant="$root/src/build/obj/module-bundle/grants/server/config.grant"
+    [ -r "$grant" ] || python3 "$root/scripts/export_c_repositories.py" \
+        --runtime-bundle "$root/src/build/obj/module-bundle" >/dev/null
+    sed "s|^executable=.*|executable=$config_bin|" "$grant" \
+        >"$home/modules.d/server/config.grant"
+    AIMEE_HOME="$home" "$server_bin" --foreground >"$tmp/server.log" 2>&1 &
+    server_pid=$!
+    bus="$home/server-module-bus.sock"
+    n=0
+    while [ ! -S "$bus" ] && [ "$n" -lt 300 ]; do
+        sleep 0.1
+        n=$((n + 1))
+    done
+    AIMEE_HOME="$home" "$config_bin" "$bus" >"$tmp/config.log" 2>&1 &
+    config_pid=$!
+    http="$home/aimee-http.sock"
+    n=0
+    while [ ! -S "$http" ] && [ "$n" -lt 300 ]; do
+        sleep 0.1
+        n=$((n + 1))
+    done
+    env_out=$(AIMEE_HOME="$home" AIMEE_API_ENDPOINT="unix:$http" \
+        "$client_bin" config deploy-env 2>/dev/null || true)
 
     case "$env_out" in
     *AIMEE_KB_VARIANT=a25m*) r=a25m ;;
@@ -103,7 +135,7 @@ if [ -x "$server_bin" ]; then
     esac
     check "the variant is never emitted blank for a bundled model" "nonblank" "$r"
 else
-    printf '  skip  emitter cases (no built aimee-server at %s)\n' "$server_bin"
+    printf '  skip  emitter cases (server, client, or config module is not built)\n'
 fi
 
 if [ "$fails" -ne 0 ]; then

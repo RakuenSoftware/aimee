@@ -4,10 +4,10 @@
  * <config_default_dir()>/roundtables/<name>.json. This mirrors the persona
  * registry (persona.c) for path/list/validate idioms, but stores structured JSON
  * (a preset is pure config, not prose). Selecting a preset "active" overlays it
- * onto the live config_t via config_save/config_reload; the roundtable runtime
- * (delegate_ensemble.c) is untouched and keeps reading config_t. */
+ * onto the live legacy_config_record via config_save/config_reload; the roundtable runtime
+ * (delegate_ensemble.c) is untouched and keeps reading legacy_config_record. */
 #include "roundtable_preset.h"
-#include "config.h" /* config_default_dir, config_t, config_load_file, config_save, config_reload */
+#include "config.h" /* config_default_dir, legacy_config_record, config_load_file, config_save, config_reload */
 #include "log.h"
 #include "platform_path.h" /* platform_mkdir_p */
 #include <ctype.h>
@@ -403,7 +403,7 @@ void roundtable_preset_from_current_config(const char *name, roundtable_preset_t
 }
 
 /* Translate a preset into the config module's plain apply-struct. config never
- * learns the preset file format; this module never touches a config_t. */
+ * learns the preset file format; this module never touches a legacy_config_record. */
 static void preset_to_config_apply(const roundtable_preset_t *p, config_roundtable_preset_t *out)
 {
    memset(out, 0, sizeof(*out));

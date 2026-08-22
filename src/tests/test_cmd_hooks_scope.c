@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "config.h"
 #include "headers/cmd_hooks_scope.h"
 #include "cJSON.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -90,62 +91,31 @@ static void test_hook_scope_project_is_not_configured_workspace(void)
    snprintf(root, sizeof root, "%s/aimee-hook-scope-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
 
-   char config_dir[512];
-   char aimee_dir[512];
-   char config_path[512];
    char workspace_root[512];
    char project_root[512];
    char manifest_path[512];
-   snprintf(config_dir, sizeof(config_dir), "%s/.config", root);
-   snprintf(aimee_dir, sizeof(aimee_dir), "%s/aimee", config_dir);
-   snprintf(config_path, sizeof(config_path), "%s/aimee.yaml", aimee_dir);
    snprintf(workspace_root, sizeof(workspace_root), "%s/configured-workspace", root);
    snprintf(project_root, sizeof(project_root), "%s/nested-project", workspace_root);
    snprintf(manifest_path, sizeof(manifest_path), "%s/aimee.workspace.yaml", project_root);
-   assert(mkdir(config_dir, 0700) == 0);
-   assert(mkdir(aimee_dir, 0700) == 0);
    assert(mkdir(workspace_root, 0700) == 0);
    assert(mkdir(project_root, 0700) == 0);
 
-   FILE *fp = fopen(config_path, "w");
-   assert(fp != NULL);
-   fprintf(fp, "workspaces:\n  - %s\n", workspace_root);
-   fclose(fp);
-   fp = fopen(manifest_path, "w");
+   FILE *fp = fopen(manifest_path, "w");
    assert(fp != NULL);
    fputs("id: stable-hook-project\n", fp);
    fclose(fp);
-
-   const char *old_home_env = getenv("HOME");
-   char *old_home = old_home_env ? strdup(old_home_env) : NULL;
-   const char *old_no_cache_env = getenv("AIMEE_NO_CACHE");
-   char *old_no_cache = old_no_cache_env ? strdup(old_no_cache_env) : NULL;
-   assert(setenv("HOME", root, 1) == 0);
-   assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
+   assert(config_workspace_add(workspace_root, NULL, NULL, NULL) == 0);
 
    char workspace[512];
    char project[512];
    hook_scope_labels_for_cwd(project_root, workspace, sizeof(workspace), project, sizeof(project));
    assert(strcmp(workspace, "configured-workspace") == 0);
    assert(strcmp(project, "stable-hook-project") == 0);
-
-   if (old_home)
-      assert(setenv("HOME", old_home, 1) == 0);
-   else
-      assert(unsetenv("HOME") == 0);
-   if (old_no_cache)
-      assert(setenv("AIMEE_NO_CACHE", old_no_cache, 1) == 0);
-   else
-      assert(unsetenv("AIMEE_NO_CACHE") == 0);
-   free(old_home);
-   free(old_no_cache);
+   assert(config_workspace_remove(workspace_root) == 0);
 
    assert(unlink(manifest_path) == 0);
-   assert(unlink(config_path) == 0);
    assert(rmdir(project_root) == 0);
    assert(rmdir(workspace_root) == 0);
-   assert(rmdir(aimee_dir) == 0);
-   assert(rmdir(config_dir) == 0);
    assert(rmdir(root) == 0);
 }
 

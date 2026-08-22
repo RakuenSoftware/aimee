@@ -290,7 +290,7 @@ fi
 # paths below are skipped (the systemd path already no-ops because the unit is
 # left disabled in remote installs).
 KB_REMOTE=false
-# config_load reads aimee.yaml (YAML), not config.json; match a non-empty
+# The config module reads aimee.yaml (YAML), not config.json; match a non-empty
 # top-level kb_client_url scalar (column-0 anchored).
 KB_CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/aimee/aimee.yaml"
 if [ -f "$KB_CONFIG_FILE" ] && \

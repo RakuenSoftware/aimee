@@ -5,6 +5,7 @@
 #include "rel_types_store.h"      /* db2_rel_types_resolve */
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "fact_mutation.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -189,6 +190,15 @@ int db2_ontology_approve(const char *rel_type)
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0 ||
+       db2_fact_graph_record_external_in_txn(&actor, "ontology.approve", "relation", norm,
+                                             "promote", "provisional/pending", "active/approved", 1,
+                                             NULL) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -229,6 +239,14 @@ int db2_ontology_map(const char *novel, const char *target)
    }
    (void)oe_update(conn, "UPDATE rel_types SET status = 'mapped' WHERE rel_type = ?1", nn, NULL,
                    NULL);
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0 ||
+       db2_fact_graph_record_external_in_txn(&actor, "ontology.map", "relation", nn, "map",
+                                             "provisional/pending", "mapped", 1, NULL) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -264,6 +282,14 @@ int db2_ontology_reject(const char *rel_type)
    }
    (void)oe_update(conn, "UPDATE rel_types SET status = 'rejected' WHERE rel_type = ?1", norm, NULL,
                    NULL);
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0 ||
+       db2_fact_graph_record_external_in_txn(&actor, "ontology.reject", "relation", norm, "reject",
+                                             "provisional/pending", "rejected", 1, NULL) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));

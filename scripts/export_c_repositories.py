@@ -617,6 +617,15 @@ def go_module_main(module_id: str, principal_ref: int,
 \t}
 """ if module_id == "delegates" else ""
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
+    setup = ""
+    if module_id == "config":
+        handler = "moduleHandler"
+        setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
+\tif err != nil {
+\t\tfmt.Fprintf(os.Stderr, "aimee-module-config: %v\\n", err)
+\t\tos.Exit(1)
+\t}
+"""
     return f"""package main
 
 import (
@@ -633,6 +642,7 @@ import (
 func main() {{
 {watchdog}\
 {cleanup}\
+{setup}\
 \tif len(os.Args) != 2 {{
 \t\tfmt.Fprintf(os.Stderr, "usage: %s DAEMON_MODULE_BUS_SOCKET\\n", os.Args[0])
 \t\tos.Exit(2)
@@ -672,6 +682,7 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
+    "server-go/config": {"config"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/db1": {"economizer"},
 }
@@ -686,7 +697,8 @@ def go_process_shared_sources(module_id: str) -> list[str]:
         sources.extend(
             path.relative_to(ROOT).as_posix()
             for path in (ROOT / directory).glob("*.go")
-            if not path.name.endswith("_test.go")
+            if not path.name.endswith("_test.go") or
+            (module_id == "config" and directory == "server-go/config")
         )
     return sorted(sources)
 
@@ -706,6 +718,8 @@ def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     """Return direct and indirect requirements for an isolated Go export."""
     direct = ["golang.org/x/sys"]
     indirect: list[str] = []
+    if module_id == "config":
+        direct.append("go.yaml.in/yaml/v3")
     if module_id == "postgres":
         direct.append("github.com/jackc/pgx/v5")
         indirect.extend([
@@ -737,6 +751,31 @@ def export_module(
     descriptor = load_json(descriptor_path)
     if descriptor.get("id") != module_id:
         raise ExportError(f"{descriptor_path}: descriptor id mismatch")
+    external = descriptor.get("external_source")
+    if isinstance(external, dict):
+        module_path = external.get("module")
+        repository_url = external.get("repository")
+        if not isinstance(module_path, str) or not isinstance(repository_url, str):
+            raise ExportError(f"{module_id}: malformed external_source")
+        dependency_version = go_dependency_version(module_path)
+        source_paths = [ROOT / item for item in module_owned_files(module_id, descriptor)]
+        pin = {
+            "id": module_id,
+            "classification": classification,
+            "repository": repository_url + ".git",
+            "ref": dependency_version,
+            "version": dependency_version,
+            "commit": dependency_version.rsplit("-", 1)[-1],
+            "execution": contract["execution"],
+            "placements": contract["placements"],
+            "source_sha256": digest_files(source_paths),
+        }
+        if contract["execution"] == "process":
+            pin["runtime"] = contract["runtime"]
+            pin["principal_class"] = PRINCIPAL_CLASS
+            pin["principal_ref"] = contract["principal_ref"]
+            pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+        return pin
     owned = module_owned_files(module_id, descriptor)
     repository_files = module_repository_files(module_id, descriptor)
     declared_sources = descriptor.get("sources", [])
@@ -816,7 +855,8 @@ jobs:
 """
         elif runtime == "go":
             go_sources = descriptor.get("go_sources", [])
-            if not isinstance(go_sources, list) or not go_sources:
+            if (not isinstance(go_sources, list) or not go_sources) and \
+                    "external_source" not in descriptor:
                 raise ExportError(f"{module_id}: Go process has no go_sources")
             bus_sources = go_bus_sources(module_id)
             if not bus_sources:
@@ -840,9 +880,7 @@ go 1.25.0
 
 require (
 {require_text}
-)
-{indirect_text}
-""",
+){indirect_text}""",
             )
             write_text(
                 repository / "runtime/main.go",
@@ -876,7 +914,14 @@ install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
         DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
 """,
             )
-            runtime_text = f"""It builds `{binary}` as a separate Go process for the
+            if module_id == "config":
+                runtime_text = f"""It builds `{binary}` as a pure-Go process for the
+{', '.join(contract['placements'])} bus. The exported repository includes the
+exact canonical Go bus client/runtime snapshot, caller contract, handler,
+validation, and persistent store. It contains no C implementation or bridge.
+"""
+            else:
+                runtime_text = f"""It builds `{binary}` as a separate Go process for the
 {', '.join(contract['placements'])} bus. The exported repository includes the
 exact canonical Go bus client/runtime snapshot and its repository-owned handler;
 the retained C adapter is a wire-parity fixture, not the production executable.
@@ -893,7 +938,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
-      - run: go test ./server-go/bus ./server-go/modules/{module_id}
+      - run: go test ./server-go/bus{" ./server-go/config" if module_id == "config" else ""} ./server-go/modules/{module_id}
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --parallel 2
       - run: test -x build/{binary}
@@ -933,6 +978,14 @@ jobs:
       - run: cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/_prefix"
       - run: cmake --install build
 """
+    repository_note = """The descriptor-owned production sources, tests, contracts,
+and documentation are preserved at their canonical paths so their migration
+history remains auditable.
+"""
+    if runtime != "go":
+        repository_note += """Any non-owned compatibility headers required by the standalone C build are
+declared separately, copied at canonical paths, and bound into the source digest.
+"""
     write_text(repository / ".github/workflows/ci.yml", workflow)
     write_text(
         repository / "README.md",
@@ -940,12 +993,9 @@ jobs:
 
 This is the independent `{module_id}` source-ownership repository.
 
-{runtime_text}
+{runtime_text.rstrip()}
 
-The descriptor-owned production sources, headers, tests, and documentation are
-preserved at their canonical paths so their migration history remains auditable.
-Any non-owned compatibility headers required by the standalone C build are
-declared separately, copied at canonical paths, and bound into the source digest.
+{repository_note.rstrip()}
 """,
     )
     source_paths = [ROOT / item for item in repository_files]
@@ -1045,7 +1095,8 @@ def export_runtime_bundle(output_root: Path) -> int:
             c_builds.append(build_row)
         else:
             go_sources = descriptor.get("go_sources", [])
-            if not isinstance(go_sources, list) or not go_sources:
+            if (not isinstance(go_sources, list) or not go_sources) and \
+                    "external_source" not in descriptor:
                 raise ExportError(f"{module_id}: Go process has no go_sources")
             if hosted_by is None:
                 go_modules.append(module_id)

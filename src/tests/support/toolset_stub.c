@@ -18,13 +18,6 @@ int toolset_registry_load_effective(toolset_registry_t *registry, char *err, siz
    return 0;
 }
 
-int toolset_registry_load_file(toolset_registry_t *registry, const char *path, char *err,
-                               size_t err_len)
-{
-   (void)path;
-   return toolset_registry_load_effective(registry, err, err_len);
-}
-
 const toolset_def_t *toolset_registry_find(const toolset_registry_t *registry, const char *name)
 {
    (void)name;

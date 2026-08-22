@@ -156,7 +156,7 @@ static void test_job_interval_is_respected(void)
  * pending proposal rather than producing a second one. */
 static void test_recurrence_routes_to_learning_when_enabled(void)
 {
-   /* Enable the flag via an AIMEE_HOME-scoped config the real config_load reads. */
+   /* Enable the flag via an AIMEE_HOME-scoped config the real legacy_config_read reads. */
    char home[256];
    snprintf(home, sizeof home, "%s/kbmining_fl_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home));
@@ -167,6 +167,7 @@ static void test_recurrence_routes_to_learning_when_enabled(void)
    fputs("kb:\n  mining:\n    failure_learning_enabled: true\n", f);
    fclose(f);
    setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
 
    open_db();
    for (int i = 1; i <= 5; i++)
@@ -194,6 +195,7 @@ static void test_recurrence_routes_to_learning_when_enabled(void)
 
    close_db();
    unsetenv("AIMEE_HOME");
+   unsetenv("AIMEE_NO_CACHE");
    printf("  recurrence_routes_to_learning_when_enabled: ok\n");
 }
 

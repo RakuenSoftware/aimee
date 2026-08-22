@@ -16,6 +16,7 @@
  */
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
+#include "client_config.h"
 #include "aimee_home.h"
 #include "agent_code_capabilities.h"
 #include "platform_path.h"
@@ -387,75 +388,6 @@ static int attn_raw_scan_count(cJSON *arr, long now_ts)
    return count;
 }
 
-static int attn_parse_nonnegative_int(const char *s, int *out)
-{
-   if (!s || !out)
-      return 0;
-
-   while (isspace((unsigned char)*s))
-      s++;
-   if (*s == '+')
-      s++;
-   if (!isdigit((unsigned char)*s))
-      return 0;
-
-   errno = 0;
-   char *end = NULL;
-   long value = strtol(s, &end, 10);
-   if (errno || end == s || value < 0 || value > INT_MAX)
-      return 0;
-   *out = (int)value;
-   return 1;
-}
-
-static int attn_parse_ingress_max_raw_scans(const char *buf, int *out)
-{
-   if (!buf || !out)
-      return 0;
-
-   const char *line = buf;
-   while (*line)
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-
-      if (*p && *p != '#')
-      {
-         char quote = 0;
-         if (*p == '"' || *p == '\'')
-            quote = *p++;
-
-         size_t key_len = strlen("ingress_max_raw_scans");
-         if (strncmp(p, "ingress_max_raw_scans", key_len) == 0)
-         {
-            p += key_len;
-            if (quote)
-            {
-               if (*p != quote)
-                  goto next_line;
-               p++;
-            }
-            while (*p && isspace((unsigned char)*p))
-               p++;
-            if (*p == ':' || *p == '=')
-            {
-               p++;
-               return attn_parse_nonnegative_int(p, out);
-            }
-         }
-      }
-
-   next_line:
-      while (*line && *line != '\n')
-         line++;
-      if (*line == '\n')
-         line++;
-   }
-
-   return 0;
-}
-
 static int attn_read_file(const char *path, char **out)
 {
    if (!path || !out)
@@ -497,78 +429,7 @@ static int attn_read_file(const char *path, char **out)
 
 static int attn_config_ingress_max_raw_scans(void)
 {
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 0;
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 0;
-
-   int value = 0;
-   if (!attn_parse_ingress_max_raw_scans(buf, &value))
-      value = 0;
-   free(buf);
-   return value;
-}
-
-/* Parse a boolean `<key>:` line from an aimee.yaml buffer. Accepts
- * true/1/yes/on (case-insensitive) as true; anything else (incl. a missing
- * key) leaves *out untouched. Mirrors attn_parse_ingress_max_raw_scans' lean,
- * link-free YAML-line scan so the guard need not pull in the full config. */
-static int attn_parse_bool_key(const char *buf, const char *key, int *out)
-{
-   if (!buf || !key || !out)
-      return 0;
-
-   const char *line = buf;
-   while (*line)
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-
-      if (*p && *p != '#')
-      {
-         char quote = 0;
-         if (*p == '"' || *p == '\'')
-            quote = *p++;
-
-         size_t key_len = strlen(key);
-         if (strncmp(p, key, key_len) == 0)
-         {
-            p += key_len;
-            if (quote)
-            {
-               if (*p != quote)
-                  goto next_line;
-               p++;
-            }
-            while (*p && isspace((unsigned char)*p))
-               p++;
-            if (*p == ':' || *p == '=')
-            {
-               p++;
-               while (*p && (isspace((unsigned char)*p) || *p == '"' || *p == '\''))
-                  p++;
-               *out = (strncasecmp(p, "true", 4) == 0 || strncasecmp(p, "yes", 3) == 0 ||
-                       strncasecmp(p, "on", 2) == 0 || *p == '1');
-               return 1;
-            }
-         }
-      }
-
-   next_line:
-      while (*line && *line != '\n')
-         line++;
-      if (*line == '\n')
-         line++;
-   }
-
-   return 0;
+   return client_config_int("ingress_max_raw_scans", 0);
 }
 
 static int attn_config_require_session_worktree(void)
@@ -579,21 +440,7 @@ static int attn_config_require_session_worktree(void)
     * `git checkout <branch>` moves the branch the other is mutating, cross-
     * contaminating commits. Failing closed to isolation (each session in its own
     * `.aimee/worktrees/...` worktree+branch) is the only safe default. */
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 1; /* no resolvable home -> fail closed to isolation */
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 1; /* no config file -> default ON */
-
-   int value = 1; /* default ON; only an explicit key overrides */
-   (void)attn_parse_bool_key(buf, "require_session_worktree", &value);
-   free(buf);
-   return value;
+   return client_config_bool("require_session_worktree", 1);
 }
 
 static int attn_config_require_aimee_memory(void)
@@ -602,21 +449,7 @@ static int attn_config_require_aimee_memory(void)
     * system (`aimee memory store`), where they are indexed, recalled, and
     * audited — not in per-harness markdown files aimee never sees. Only an
     * explicit `require_aimee_memory: false` opts out. */
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 1; /* no resolvable home -> fail closed to enforcement */
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 1; /* no config file -> default ON */
-
-   int value = 1; /* default ON; only an explicit key overrides */
-   (void)attn_parse_bool_key(buf, "require_aimee_memory", &value);
-   free(buf);
-   return value;
+   return client_config_bool("require_aimee_memory", 1);
 }
 
 /* Public wrapper so other client TUs (e.g. the remote/thin session-start path)

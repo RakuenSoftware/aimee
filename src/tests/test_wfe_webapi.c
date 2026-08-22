@@ -78,6 +78,7 @@ int main(void)
    snprintf(pdir, sizeof pdir, "%s/workflows/proposals", home);
    mkdir(pdir, 0755);
    setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
    assert(db1_init(":memory:") == 0);
 
    char *buf = malloc(CAP);

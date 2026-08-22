@@ -6,6 +6,7 @@
 
 #include "cJSON.h"
 #include "config.h"
+#include "config_client.h"
 #include "mcp_osv_cache.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
@@ -157,18 +158,56 @@ static void remove_package_manager_link(const char *dir, const char *path)
       rmdir(dir);
 }
 
-/* mcp_client_registry_boot reads config through accessors now instead of taking a
- * config_t. This suite links the real config module, so each case publishes the
- * config it built as the live snapshot -- the accessors then read exactly that, with
- * no file I/O and no dependence on the machine's aimee.yaml. Same fields, same
- * values, same assertions as when the struct was passed by hand. */
-static config_t cfg;
+typedef struct
+{
+   int mcp_client_count;
+   config_mcp_client_t mcp_clients[CONFIG_MCP_MAX_CLIENTS];
+   int mcp_osv_enabled;
+   int mcp_osv_enforce;
+   int mcp_osv_offline;
+   int mcp_osv_cache_ttl_hours;
+   char mcp_osv_endpoint[512];
+   int mcp_osv_allow_count;
+   char mcp_osv_allow[CONFIG_MCP_OSV_MAX_ALLOW][256];
+} mcp_registry_fixture_t;
+
+static mcp_registry_fixture_t cfg;
 
 /* Publish what this case just filled in. Call after the last cfg.* write and
  * before booting the registry. */
 static void publish_cfg(void)
 {
-   config_snapshot_init(&cfg);
+   cJSON *clients = cJSON_CreateArray();
+   for (int i = 0; i < cfg.mcp_client_count; i++)
+   {
+      cJSON *client = cJSON_CreateObject();
+      cJSON_AddStringToObject(client, "name", cfg.mcp_clients[i].name);
+      cJSON_AddStringToObject(client, "transport",
+                              cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_STDIO ? "stdio"
+                              : cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_SSE ? "sse"
+                                                                                         : "");
+      cJSON_AddStringToObject(
+          client, "install", cfg.mcp_clients[i].install == CONFIG_MCP_INSTALL_KB ? "kb" : "server");
+      cJSON *command = cJSON_AddArrayToObject(client, "command");
+      for (int j = 0; j < cfg.mcp_clients[i].command_count; j++)
+         cJSON_AddItemToArray(command, cJSON_CreateString(cfg.mcp_clients[i].command[j]));
+      cJSON_AddStringToObject(client, "cwd", cfg.mcp_clients[i].cwd);
+      cJSON_AddStringToObject(client, "url", cfg.mcp_clients[i].url);
+      cJSON_AddStringToObject(client, "bearer_token_env", cfg.mcp_clients[i].bearer_token_env);
+      cJSON_AddItemToArray(clients, client);
+   }
+   assert(config_client_set_value("mcp_clients", clients) == 0);
+   assert(config_client_set_number("mcp_client_count", cfg.mcp_client_count) == 0);
+   assert(config_client_set_number("mcp_osv_enabled", cfg.mcp_osv_enabled) == 0);
+   assert(config_client_set_number("mcp_osv_enforce", cfg.mcp_osv_enforce) == 0);
+   assert(config_client_set_number("mcp_osv_offline", cfg.mcp_osv_offline) == 0);
+   assert(config_client_set_number("mcp_osv_cache_ttl_hours", cfg.mcp_osv_cache_ttl_hours) == 0);
+   assert(config_client_set_string("mcp_osv_endpoint", cfg.mcp_osv_endpoint) == 0);
+   cJSON *allow = cJSON_CreateArray();
+   for (int i = 0; i < cfg.mcp_osv_allow_count; i++)
+      cJSON_AddItemToArray(allow, cJSON_CreateString(cfg.mcp_osv_allow[i]));
+   assert(config_client_set_value("mcp_osv_allow", allow) == 0);
+   assert(config_client_set_number("mcp_osv_allow_count", cfg.mcp_osv_allow_count) == 0);
 }
 
 static void test_boot_and_lazy_tools(void)

@@ -48,8 +48,8 @@ Classifier output is advisory and cannot independently produce an allow or overr
 
 ### Config touchpoint
 
-The module consumes `guardrail_mode` (`src/modules/config/config_fields.c:33`), the `guardrails`
-section (`src/modules/config/config_sections.c:1216`), delegate/tool restrictions, approval
+The module consumes `guardrail_mode`, the `guardrails` section from the external config-module
+contract, delegate/tool restrictions, approval
 rules, and related effective settings. `config` owns parsing and truthful projection; policy owns
 interpretation at decision time. Ambiguous duplicated parsing is deferred to the config slice.
 
