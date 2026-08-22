@@ -21,7 +21,6 @@
 #include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "config.h"
-#include "config_learning.h"
 
 static void open_db(void)
 {
@@ -392,16 +391,12 @@ static void test_demotion_candidates(void)
 /* ---- 8. config defaults ---- */
 static void test_config_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_demotion_settings(&cfg, NULL);
-
    /* Default flipped to 1 (shadow): scores/profiles are computed but no row is
-    * demoted until 2 (live). See config_apply_demotion_settings rationale. */
-   assert(cfg.demotion_enabled == 1);
-   assert(cfg.demotion_window == 64);
-   assert(fabs(cfg.demotion_half_life_days - 30.0) < 1e-9);
-   assert(cfg.demotion_n_min == 5);
+    * demoted until 2 (live). */
+   assert(config_demotion_enabled() == 1);
+   assert(config_demotion_window() == 64);
+   assert(fabs(config_demotion_half_life_days() - 30.0) < 1e-9);
+   assert(config_demotion_n_min() == 5);
 
    printf("  config_defaults: ok\n");
 }

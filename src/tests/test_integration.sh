@@ -82,6 +82,50 @@ MODULE_POLICY_DIR="$AIMEE_HOME/modules.d/server"
 MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB1_MODULE_PID=""
 
+# Configuration is served by its own pure-Go process. The daemon validates its
+# startup snapshot before opening HTTP, so this module must attach as soon as
+# the bus socket exists; waiting for HTTP first is a circular dependency.
+CONFIG_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module-config"
+CONFIG_MODULE="$AIMEE_HOME/aimee-module-config"
+CONFIG_MODULE_PID=""
+
+install_config_module() {
+    if [ ! -x "$CONFIG_MODULE_BUILT" ]; then
+        echo "ABORT: the config module is not built at $CONFIG_MODULE_BUILT."
+        echo "       Run this harness through 'make integration-tests'."
+        exit 1
+    fi
+    cp "$CONFIG_MODULE_BUILT" "$CONFIG_MODULE"
+    chmod 0755 "$CONFIG_MODULE"
+    mkdir -p "$MODULE_POLICY_DIR"
+    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/config.grant"
+    if [ ! -r "$generated" ]; then
+        python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+            --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+    fi
+    if [ ! -r "$generated" ]; then
+        echo "ABORT: no generated config module grant at $generated."
+        exit 1
+    fi
+    sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$generated" \
+        >"$MODULE_POLICY_DIR/config.grant"
+}
+
+start_config_module() {
+    [ -x "$CONFIG_MODULE" ] || return 1
+    stop_config_module
+    "$CONFIG_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-config.log" 2>&1 &
+    CONFIG_MODULE_PID=$!
+}
+
+stop_config_module() {
+    if [ -n "$CONFIG_MODULE_PID" ]; then
+        kill "$CONFIG_MODULE_PID" 2>/dev/null || true
+        wait "$CONFIG_MODULE_PID" 2>/dev/null || true
+        CONFIG_MODULE_PID=""
+    fi
+}
+
 install_db1_module() {
     # Missing module: stop, do not degrade. This used to return 0 and let the
     # run continue, from a time when the daemon still had an in-process store to
@@ -236,6 +280,7 @@ stop_workflow_module() {
 }
 
 install_db1_module
+install_config_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -555,10 +600,13 @@ start_server() {
     local log="$SERVER_LOG"
     "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
+    local config_started=0
     local i
     for i in $(seq 1 300); do
-        # The daemon owns the module bus socket, so the module attaches only
-        # once the daemon is listening -- which is what this loop waits for.
+        if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
+            start_config_module
+            config_started=1
+        fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
         # A dead process will never bind; fail fast rather than waiting out the
         # full window for a server that has already exited.
@@ -585,6 +633,7 @@ trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 cleanup() {
     stop_workflow_module
     stop_db1_module
+    stop_config_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -753,14 +802,27 @@ fi
 # TCP listener (gated by aimee.api.{http_port,bearer_token}). Use an isolated
 # second server so the main harness server (UDS-only) is undisturbed.
 TCP_HOME=$(mktemp -d /tmp/aimee-tcp-XXXXXX) || true
-mkdir -p "$TCP_HOME/.config/aimee"
+mkdir -p "$TCP_HOME/.config/aimee/modules.d/server"
 TCP_PORT=18897
 TCP_BEARER="integ-tcp-bearer"
-printf 'aimee:\n  api:\n    http_port: %s\n    bearer_token: %s\n' \
-    "$TCP_PORT" "$TCP_BEARER" >"$TCP_HOME/.config/aimee/aimee.yaml"
+printf 'aimee:\n  api:\n    http_port: %s\n' \
+    "$TCP_PORT" >"$TCP_HOME/.config/aimee/aimee.yaml"
+sed "s|^executable=.*|executable=$CONFIG_MODULE_BUILT|" \
+    "$REPO_ROOT/src/build/obj/module-bundle/grants/server/config.grant" \
+    >"$TCP_HOME/.config/aimee/modules.d/server/config.grant"
 env -u AIMEE_PROFILE HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
+    AIMEE_API_BEARER_TOKEN="$TCP_BEARER" \
     "$AIMEE_SERVER" --foreground >"$TCP_HOME/server.log" 2>&1 &
 TCP_SRV_PID=$!
+TCP_BUS_SOCK="$TCP_HOME/.config/aimee/server-module-bus.sock"
+for _ in $(seq 1 300); do
+    [ -S "$TCP_BUS_SOCK" ] && break
+    kill -0 "$TCP_SRV_PID" 2>/dev/null || break
+    sleep 0.1
+done
+env HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
+    "$CONFIG_MODULE_BUILT" "$TCP_BUS_SOCK" >"$TCP_HOME/config.log" 2>&1 &
+TCP_CONFIG_PID=$!
 # Wait for the bind rather than guessing at it, for the same reason as
 # start_server above: on a loaded runner two seconds is not reliably enough, and
 # a probe that fires early fails the assertions of a server that was about to
@@ -811,11 +873,13 @@ fi
 # point, on every CI run of this harness. That line was in the log from the
 # first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
+kill "$TCP_CONFIG_PID" 2>/dev/null || true
 # Reap before removing its HOME. kill only requests exit, so without this the
 # server can still be writing under $TCP_HOME while rm -rf walks it, and rm
 # fails with ENOTEMPTY when a directory gains entries between unlinking its
 # children and removing it. Under 'set -e' that aborts the whole harness.
 wait "$TCP_SRV_PID" 2>/dev/null || true
+wait "$TCP_CONFIG_PID" 2>/dev/null || true
 # `|| true` regardless: teardown of a temporary directory must never decide
 # whether the suite continues. Even with the wait, anything else holding a file
 # open here would abort a run that has nothing left to do but report.

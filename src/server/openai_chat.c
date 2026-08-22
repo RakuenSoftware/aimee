@@ -31,7 +31,7 @@
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
 #include "log.h"   /* LOG_WARN: name the provider's error instead of discarding it */
 #include "aimee_errors.h"
-#include "config.h" /* config_t, config_load */
+#include "config.h" /* legacy_config_record, legacy_config_read */
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
@@ -1386,7 +1386,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
  * parser requires output_item.added before any delta, so every turn is framed
  * created -> item.added -> delta(s) -> item.done -> completed. Compute-then-chunk. */
 /* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
- * deprecated env default. Cached config_load; keeps gw_stage_governance config-free. */
+ * deprecated env default. Cached legacy_config_read; keeps gw_stage_governance config-free. */
 static int openai_governance_enabled(void)
 {
    int tri = config_present() ? config_module_governance() : -1;

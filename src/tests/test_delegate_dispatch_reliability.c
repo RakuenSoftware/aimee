@@ -78,8 +78,8 @@ static void set_blast_radius(const char *const *deps, int ndeps, const char *con
    g_br_rc = 0;
 }
 
-/* Drive the real config_load via a temp AIMEE_HOME/aimee.yaml (config.o is linked,
- * so config_load can't be stubbed). AIMEE_NO_CACHE defeats the config cache. */
+/* Drive the real legacy_config_read via a temp AIMEE_HOME/aimee.yaml (config.o is linked,
+ * so legacy_config_read can't be stubbed). AIMEE_NO_CACHE defeats the config cache. */
 static char g_graph_home[256];
 /* The graph-context tests below feed a prompt that names a file and assert on
  * the block built AROUND it. Finding that file is the delegates module's rule

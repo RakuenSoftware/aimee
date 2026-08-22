@@ -13,8 +13,13 @@
   },
   "ownership_complete": true,
   "sources": [
-    "src/modules/routing/routing.c",
-    "src/modules/routing/module_adapter.c"
+    "src/modules/routing/agent_config.c",
+    "src/modules/routing/agent_registry.c",
+    "src/modules/routing/module_adapter.c",
+    "src/modules/routing/routing.c"
+  ],
+  "private_headers": [
+    "src/modules/routing/agent_registry.h"
   ],
   "go_sources": [
     "server-go/modules/routing/routing.go"

@@ -391,10 +391,28 @@ int main(void)
    int64_t candidate_id = mr.assertion_id;
    assert(db2_fact_mutation_review(&operator_actor, candidate_id, FACT_REVIEW_APPROVE, &mr) == 0);
    assert(strcmp(mr.lifecycle, FACT_LIFECYCLE_PROMOTED) == 0);
+   char approve_commit[FACT_COMMIT_ID_MAX];
+   snprintf(approve_commit, sizeof(approve_commit), "%s", mr.commit_id);
    assert(db2_fact_current_count("jane") == 1); /* approved value superseded incumbent */
    assert(db2_fact_mutation_review(&operator_actor, candidate_id, FACT_REVIEW_UNDO, &mr) == 0);
    assert(strcmp(mr.lifecycle, FACT_LIFECYCLE_CANDIDATE) == 0);
+   char undo_commit[FACT_COMMIT_ID_MAX];
+   snprintf(undo_commit, sizeof(undo_commit), "%s", mr.commit_id);
    assert(db2_fact_current_count("jane") == 1); /* undo restored incumbent */
+
+   /* Rolling the latest transition creates a revert commit.  That neutralizing
+    * commit must not itself become a descendant that makes walking the prior
+    * decision backward impossible. */
+   char stacked_rollback[FACT_COMMIT_ID_MAX];
+   int stacked_rc = db2_fact_commit_rollback(&operator_actor, undo_commit, stacked_rollback);
+   assert(stacked_rc > 0);
+   assert(scalar_int("SELECT COUNT(*) FROM entity_edges WHERE id="
+                     " (SELECT MAX(id) FROM entity_edges WHERE source='jane'"
+                     " AND target='globex') AND lifecycle_state='promoted'") == 1);
+   assert(db2_fact_commit_rollback(&operator_actor, approve_commit, stacked_rollback) > 0);
+   assert(scalar_int("SELECT COUNT(*) FROM entity_edges WHERE id="
+                     " (SELECT MAX(id) FROM entity_edges WHERE source='jane'"
+                     " AND target='globex') AND lifecycle_state='candidate'") == 1);
 
    ai.source = "rollback-subject";
    ai.target = "acme";

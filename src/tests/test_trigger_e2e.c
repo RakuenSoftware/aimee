@@ -25,16 +25,7 @@
 
 /* ---- stubs for trigger_scheduler.c symbols outside the proposals path ---- */
 
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   /* -1 = unspecified (see test_trigger.c): a memset-0 would read as user-DISABLED and gate the
-    * trigger's workflow dispatch, breaking the proposal -> run e2e. */
-   cfg->module_memory = cfg->module_governance = cfg->module_delegates = cfg->module_workflows = -1;
-   return 0;
-}
-
-/* Accessor stub: same contract as the struct stub above — module_workflows is
+/* Accessor stub: module_workflows is
  * -1 (unspecified), not 0, because 0 reads as user-DISABLED and would gate the
  * trigger's workflow dispatch, breaking the proposal -> run e2e this file
  * exists to prove. */

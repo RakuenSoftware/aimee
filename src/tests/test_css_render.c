@@ -21,7 +21,7 @@
 #include <string.h>
 #include <sqlite3.h>
 
-/* Point config_load at an isolated HOME holding an aimee.yaml with the given
+/* Point legacy_config_read at an isolated HOME holding an aimee.yaml with the given
  * css_style_graph_enabled value (AIMEE_NO_CACHE bypasses the mtime cache). */
 static void set_config(int css_enabled)
 {

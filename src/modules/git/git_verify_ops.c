@@ -20,7 +20,7 @@ int verify_enabled_global(void)
 
 /* See git_verify.h for the contract. Compares the canonical main-repo root of
  * the target against the session's registered worktree git_roots; cross-project
- * repos are out of scope unless config opts in. config_load /
+ * repos are out of scope unless config opts in. legacy_config_read /
  * session_state_load are both cheap relative to a push/PR. */
 int verify_project_in_scope(const char *target_repo_root)
 {

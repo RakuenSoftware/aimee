@@ -8,18 +8,9 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "commands.h"
-#include "config_fields.h"
+#include "config_client.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
-
-static void restore_env(const char *name, char *old_value)
-{
-   if (old_value)
-      assert(platform_setenv(name, old_value) == 0);
-   else
-      assert(platform_unsetenv(name) == 0);
-   free(old_value);
-}
 
 static char *capture_stdout(void (*fn)(void *), void *arg)
 {
@@ -58,43 +49,21 @@ static void run_cmd_config(void *arg)
    cmd_config(NULL, call->argc, call->argv);
 }
 
-static void write_text(const char *path, const char *content)
-{
-   FILE *fp = fopen(path, "w");
-   assert(fp);
-   fputs(content, fp);
-   fclose(fp);
-}
-
 static void test_dispositions_text_and_json(void)
 {
-   char tmpdir[512];
-   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-cmd-config-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(tmpdir) != NULL);
-
-   char config_dir[640];
-   snprintf(config_dir, sizeof(config_dir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(config_dir, 0700) == 0);
-
-   char config_path[768];
-   snprintf(config_path, sizeof(config_path), "%s/aimee.yaml", config_dir);
-   write_text(config_path, "memory:\n"
-                           "  dispositions:\n"
-                           "    global:\n"
-                           "      skepticism: 0.8\n"
-                           "    workspace:\n"
-                           "      empathy: 0.6\n"
-                           "    project:\n"
-                           "      skepticism: 0.2\n");
-
-   char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-   char *old_aimee_home = getenv("AIMEE_HOME") ? strdup(getenv("AIMEE_HOME")) : NULL;
-   char *old_aimee_profile = getenv("AIMEE_PROFILE") ? strdup(getenv("AIMEE_PROFILE")) : NULL;
-   char *old_no_cache = getenv("AIMEE_NO_CACHE") ? strdup(getenv("AIMEE_NO_CACHE")) : NULL;
-   assert(platform_setenv("HOME", tmpdir) == 0);
-   assert(platform_unsetenv("AIMEE_HOME") == 0);
-   assert(platform_unsetenv("AIMEE_PROFILE") == 0);
-   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
+   cJSON *rows = cJSON_CreateArray();
+   cJSON *skepticism = cJSON_CreateObject();
+   cJSON_AddStringToObject(skepticism, "name", "skepticism");
+   cJSON_AddNumberToObject(skepticism, "value", 0.2);
+   cJSON_AddNumberToObject(skepticism, "source", CONFIG_DISPOSITION_SOURCE_PROJECT);
+   cJSON_AddItemToArray(rows, skepticism);
+   cJSON *empathy = cJSON_CreateObject();
+   cJSON_AddStringToObject(empathy, "name", "empathy");
+   cJSON_AddNumberToObject(empathy, "value", 0.6);
+   cJSON_AddNumberToObject(empathy, "source", CONFIG_DISPOSITION_SOURCE_WORKSPACE);
+   cJSON_AddItemToArray(rows, empathy);
+   assert(config_client_set_value("dispositions", rows) == 0);
+   assert(config_client_set_number("disposition_count", 2) == 0);
 
    char *argv_text[] = {"dispositions"};
    cmd_call_t text_call = {.argc = 1, .argv = argv_text};
@@ -112,98 +81,16 @@ static void test_dispositions_text_and_json(void)
    assert(strstr(json, "\"source\":\"project\"") != NULL);
    assert(strstr(json, "\"source\":\"workspace\"") != NULL);
    free(json);
-
-   restore_env("HOME", old_home);
-   restore_env("AIMEE_HOME", old_aimee_home);
-   restore_env("AIMEE_PROFILE", old_aimee_profile);
-   restore_env("AIMEE_NO_CACHE", old_no_cache);
-   platform_test_rmrf(tmpdir);
-}
-
-/* The config.show/get/set server handlers and the `aimee config` command both
- * resolve fields through this shared table; exercise the pure helpers here. */
-static void test_config_fields_helpers(void)
-{
-   assert(config_field_lookup("provider") != NULL);
-   assert(config_field_lookup("autonomous") != NULL);
-   assert(config_field_lookup("no_such_key") == NULL);
-
-   /* Regression guard: the kb_curator_* / kb_evidence_embed_enabled gates are the LAST
-    * entries in config_fields[]. They were once stranded behind a stray {NULL} terminator
-    * placed mid-array, which made config_field_lookup (and config.show/get/set) stop before
-    * reaching them. Assert the tail of the table is reachable so that bug cannot return. */
-   assert(config_field_lookup("kb_curator_synthesize_enabled") != NULL);
-   assert(config_field_lookup("kb_evidence_embed_enabled") != NULL);
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-
-   /* string */
-   const config_field_t *provider = config_field_lookup("provider");
-   assert(config_field_set_value(&cfg, provider, "claude") == 0);
-   cJSON *v = config_field_value_json(&cfg, provider);
-   assert(cJSON_IsString(v) && strcmp(v->valuestring, "claude") == 0);
-   cJSON_Delete(v);
-
-   /* Credential compatibility fields carry their canonical Vault name and
-    * their public representation is configured state, never the value. */
-   const config_field_t *kb_secret = config_field_lookup("kb_api_bearer_token");
-   assert(kb_secret);
-   assert(strcmp(config_field_secret_name(kb_secret), "AIMEE_KB_API_BEARER_TOKEN") == 0);
-   snprintf(cfg.kb_api_bearer_token, sizeof(cfg.kb_api_bearer_token), "%s", "never-return-this");
-   v = config_field_public_value_json(&cfg, kb_secret);
-   assert(cJSON_IsBool(v) && cJSON_IsTrue(v));
-   cJSON_Delete(v);
-   assert(strcmp(config_field_secret_name(config_field_lookup("db2_url")), "AIMEE_DB2_URL") == 0);
-   /* aimee-server's OUTBOUND kb credential has its own key, so it can carry a
-    * scoped service token while aimee-kb keeps its own inbound one. */
-   assert(strcmp(config_field_secret_name(config_field_lookup("kb_client_bearer_token")),
-                 "AIMEE_KB_CLIENT_BEARER_TOKEN") == 0);
-   assert(strcmp(config_field_secret_name(config_field_lookup("ingress_trusted_proxy_secret")),
-                 "AIMEE_INGRESS_PROXY_SECRET") == 0);
-   assert(strcmp(config_field_secret_name(config_field_lookup("telemetry.metrics_token")),
-                 "AIMEE_TELEMETRY_METRICS_TOKEN") == 0);
-   assert(config_field_secret_name(provider) == NULL);
-
-   /* bool: accepts true/1/false/0, rejects anything else */
-   const config_field_t *auton = config_field_lookup("autonomous");
-   assert(config_field_set_value(&cfg, auton, "true") == 0);
-   v = config_field_value_json(&cfg, auton);
-   assert(cJSON_IsBool(v) && cJSON_IsTrue(v));
-   cJSON_Delete(v);
-   assert(config_field_set_value(&cfg, auton, "0") == 0);
-   v = config_field_value_json(&cfg, auton);
-   assert(cJSON_IsBool(v) && !cJSON_IsTrue(v));
-   cJSON_Delete(v);
-   assert(config_field_set_value(&cfg, auton, "maybe") == -1);
-
-   /* int */
-   const config_field_t *iters = config_field_lookup("max_iterations");
-   assert(iters && config_field_set_value(&cfg, iters, "42") == 0);
-   v = config_field_value_json(&cfg, iters);
-   assert(cJSON_IsNumber(v) && v->valueint == 42);
-   cJSON_Delete(v);
-
-   /* nested trigger admission policy is GUI/config.set writable */
-   const config_field_t *trigger_cap = config_field_lookup("trigger.max_concurrent");
-   assert(trigger_cap && config_field_set_value(&cfg, trigger_cap, "7") == 0);
-   v = config_field_value_json(&cfg, trigger_cap);
-   assert(cJSON_IsNumber(v) && v->valueint == 7);
-   cJSON_Delete(v);
-
-   /* float — including a threshold field that used to be mistyped CFG_STRING */
-   const config_field_t *thr = config_field_lookup("guardrails_semantic_warn_threshold");
-   assert(thr && config_field_set_value(&cfg, thr, "0.25") == 0);
-   v = config_field_value_json(&cfg, thr);
-   assert(cJSON_IsNumber(v) && v->valuedouble > 0.24 && v->valuedouble < 0.26);
-   cJSON_Delete(v);
 }
 
 int main(void)
 {
    printf("cmd_config: ");
    test_dispositions_text_and_json();
-   test_config_fields_helpers();
+   assert(config_client_key_is_secret("kb_api_bearer_token"));
+   assert(strcmp(config_client_secret_name("kb_api_bearer_token"), "AIMEE_KB_API_BEARER_TOKEN") ==
+          0);
+   assert(!config_client_key_is_secret("provider"));
    printf("OK\n");
    return 0;
 }

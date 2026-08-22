@@ -3,6 +3,7 @@ module github.com/JBailes/aimee/server-go
 go 1.25.0
 
 require (
+	github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260822003140-4d9b33e4a791
 	github.com/jackc/pgx/v5 v5.10.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/sys v0.46.0

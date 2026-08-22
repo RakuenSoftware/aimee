@@ -61,13 +61,15 @@ def main() -> int:
             version = exporter.CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
             timestamp = exporter.source_timestamp()
             for module_id in expected_go:
+                descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
+                if "external_source" in descriptor:
+                    continue
                 exporter.export_module(repositories, module_id, "required",
                                        contracts[module_id], timestamp, version)
                 repository = repositories / f"aimee-module-{module_id}"
                 if not (repository / "runtime/main.go").is_file() or \
                         (repository / "runtime/main.c").exists():
                     return fail(f"{module_id}: isolated repository is not Go-only at runtime")
-                descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
                 canonical_bus = exporter.go_bus_sources(module_id)
                 shared_sources = exporter.go_process_shared_sources(module_id)
                 for relative in [*canonical_bus, *shared_sources, *descriptor.get("go_sources", [])]:

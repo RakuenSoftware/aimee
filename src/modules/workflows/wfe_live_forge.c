@@ -141,7 +141,7 @@ static int forge_push_branch(const char *dir, const char *branch, const char *wh
 }
 
 /* The master switch: the live forge does nothing unless the operator enabled it.
- * A config_load failure reads as DISABLED (fail closed). */
+ * A legacy_config_read failure reads as DISABLED (fail closed). */
 static int forge_on(void)
 {
    return config_wfe_live_forge_enabled();

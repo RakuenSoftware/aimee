@@ -610,8 +610,8 @@ void agent_set_durable_job(int job_id)
    (void)job_id;
 }
 /* server_compute resolves the two routing settings through this now instead of
- * loading a config_t. Both off, matching the zeroed config_t the compute path
- * used to build here. */
+ * loading a legacy_config_record. Both off, matching the zeroed legacy_config_record the compute
+ * path used to build here. */
 void agent_route_policy_current(agent_route_policy_t *out)
 {
    if (out)

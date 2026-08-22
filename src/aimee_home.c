@@ -31,7 +31,7 @@ static const char *user_home(void)
 const char *aimee_home(void)
 {
    /* Thread-local: this is a per-call scratch buffer whose pointer is returned
-    * to the caller. aimee-kb calls config_load() (which routes here) from
+    * to the caller. aimee-kb calls legacy_config_read() (which routes here) from
     * several worker threads concurrently (ingest watch/timer, reflection), so a
     * process-global static buffer is a data race (TSan-confirmed) and risks a
     * torn read of the path. Per-thread storage makes each call race-free while

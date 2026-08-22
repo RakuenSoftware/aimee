@@ -26,11 +26,11 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
-/* The file-static config_t this suite used to share is gone. It existed because
+/* The file-static legacy_config_record this suite used to share is gone. It existed because
  * ten block-scoped ~750 KiB copies in this one long main() pushed GCC past the
  * default 8 MiB stack and the optimized binary segfaulted before reaching the
  * later cases. Every case now states its precondition through write_test_config()
- * and the code under test reads it back via accessors, so no config_t is needed
+ * and the code under test reads it back via accessors, so no legacy_config_record is needed
  * here at all — which is the outcome the encapsulation proposal is chasing. */
 
 static void write_test_config(const char *yaml)
@@ -659,7 +659,7 @@ int main(void)
 
    /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 ---
     *
-    * These two cases used to zero a local config_t to express "disabled". Now that
+    * These two cases used to zero a local legacy_config_record to express "disabled". Now that
     * the function reads live config, the precondition has to be written to the
     * config file the test owns — otherwise the case silently reads whatever the
     * developer's real aimee.yaml says and stops testing the disabled path. */
@@ -1508,24 +1508,21 @@ int main(void)
          {
             char key[64];
             snprintf(key, sizeof(key), "stress:%d", i);
-            char ageq[512];
+            char ageq[1024];
             int age_days = 90 - (i % 90); /* 1..90 */
             char created_ts[TEST_TS_MAX], ttl_ts[TEST_TS_MAX];
             test_ts_days(created_ts, sizeof(created_ts), -age_days);
             test_ts_days(ttl_ts, sizeof(ttl_ts), -age_days + 10);
-            int64_t memory_id = db2_memory_row_insert_ex(
-                TIER_L2, KIND_FACT, key, "I'll ship this next week", "", 0.9, "s1", created_ts,
-                "normal", 0.9, 0.5, 0.0, "agent_message");
-            assert(memory_id > 0);
             snprintf(ageq, sizeof(ageq),
-                     "UPDATE memories SET lifecycle_state = 'pending',"
-                     " ttl_at = '%s' WHERE id = %lld",
-                     ttl_ts, (long long)memory_id);
+                     "INSERT INTO memories(tier,kind,key,content,confidence,source_session,"
+                     " lifecycle_state,created_at,ttl_at) VALUES('L2','fact','%s',"
+                     " 'I''ll ship this next week',0.9,'s1','pending','%s','%s')",
+                     key, created_ts, ttl_ts);
             err[0] = '\0';
             int urc = aimee_pg_exec(db2_conn(), ageq, err, sizeof(err));
             if (urc != 0)
             {
-               fprintf(stderr, "stress update failed at i=%d: %s\nSQL: %s\n", i, err, ageq);
+               fprintf(stderr, "stress seed failed at i=%d: %s\nSQL: %s\n", i, err, ageq);
                assert(0);
             }
          }

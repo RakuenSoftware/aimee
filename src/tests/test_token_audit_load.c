@@ -289,12 +289,8 @@ static void enable_async_config(void)
    const char *home = "/tmp/aimee_audit_load_home";
    mkdir(home, 0700);
    setenv("AIMEE_HOME", home, 1);
-   setenv("AIMEE_NO_CACHE", "1", 1); /* always re-read config */
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return;
-   cfg.ingress_audit_async = 1;
-   (void)config_save(&cfg);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   (void)config_set("ingress_audit_async", "true");
 }
 
 int main(void)

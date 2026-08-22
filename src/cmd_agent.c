@@ -1184,7 +1184,7 @@ static void ag_local(app_ctx_t *ctx, int argc, char **argv)
    if (agent_save_config(cfg) != 0)
       fatal("could not save %s", agent_config_path());
    if (ag_set_model_concurrency(ag->model, ag->max_parallel) != 0)
-      fatal("could not update delegate concurrency in %s", config_default_path());
+      fatal("could not update delegate concurrency through the config module");
    if (old_model[0] && strcmp(old_model, ag->model) != 0)
       (void)ag_clear_model_concurrency_if_unused(cfg, old_model);
 

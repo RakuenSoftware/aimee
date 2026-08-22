@@ -1,6 +1,5 @@
 #include "../kb_mdl.h"
 #include "config.h"
-#include "config_learning.h"
 
 #include <assert.h>
 #include <math.h>
@@ -141,12 +140,8 @@ static void test_mdl_select_rejects_ambiguous_clusters(void)
 
 static void test_mdl_config_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_mdl_settings(&cfg, NULL);
-
-   assert(cfg.kb_mdl_tiebreak_enabled == 1);
-   assert(fabs(cfg.kb_mdl_bump_drift_alert - 0.30) < 1e-9);
+   assert(config_kb_mdl_tiebreak_enabled() == 1);
+   assert(fabs(config_kb_mdl_bump_drift_alert() - 0.30) < 1e-9);
    printf("  PASS  test_mdl_config_defaults\n");
 }
 

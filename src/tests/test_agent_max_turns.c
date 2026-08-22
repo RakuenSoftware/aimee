@@ -18,17 +18,7 @@ int agent_routing_primary_turn(void)
    return g_primary_turn;
 }
 
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->max_iterations = g_max_iterations;
-   cfg->max_iterations_delegate = g_max_iterations_delegate;
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values match what this file's config_load stub produced, so the
- * assertions below are unchanged. */
+/* Accessor stubs expose the iteration limits under test. */
 int config_max_iterations(void)
 {
    return g_max_iterations;
@@ -174,13 +164,4 @@ int main(void)
 
    printf("test_agent_max_turns: all tests passed\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

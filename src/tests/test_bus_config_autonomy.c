@@ -1,183 +1,177 @@
-/* test_bus_config_autonomy.c: a SECOND, distinct module over the bus.
- *
- * The memory slices proved the bus carries a real db1 module's read and write.
- * One module proves the wiring; it does not prove the pattern generalises. This
- * puts a different subsystem — config — on the bus: the real config_autonomy_lookup,
- * served as a request/reply, and required to agree with a direct call.
- *
- * config_autonomy_lookup is a good generalisation test because it is not a pure
- * function of its argument: it reads the live config snapshot and honours an
- * operator env override. So the test also flips an env override and requires the
- * bus answer to change with it — proving the real function ran on the far side of
- * the bus against live state, not a value captured when the request was framed.
- *
- * A test/integration harness. The bus is linked into no shipping binary by it (D7).
- */
-#include <pthread.h>
+/* Native caller contract for the independently deployed pure-Go config module.
+ * The transport seam captures the exact event/stage/JSON request and returns a
+ * representative module response. No native config parser or store is linked. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
-#include <aimee/core/event_bus/bus_client.h>
-#include <aimee/core/event_bus/bus_host.h>
-#include <aimee/core/event_bus/bus_ring.h>
-#include <aimee/core/event_bus/bus_wire.h>
 #include "config.h"
+#include "config_client.h"
+#include "config_database.h"
+#include "module_json_call.h"
 
-static void must(int cond, const char *what)
+static cJSON *last_request;
+static cJSON *last_mutation;
+static uint32_t last_event_kind;
+static uint32_t last_stage_id;
+static size_t last_max_body;
+static int last_timeout_ms;
+static int changed_version;
+static int snapshot_calls;
+
+static void must(int condition, const char *message)
 {
-   if (!cond)
+   if (!condition)
    {
-      fprintf(stderr, "FAIL: %s\n", what);
+      fprintf(stderr, "FAIL: %s\n", message);
       abort();
    }
 }
 
-#define KIND_CFG_LOOKUP 2002
-
-/* ---- reply wire form: found flag + the looked-up value ---- */
-struct lookup_reply
+static cJSON *success(void)
 {
-   int32_t found;
-   int64_t value;
-};
-
-/* ---- attach helper (serve on a thread so the one-shot handshake completes) ---- */
-
-struct serve_arg
-{
-   bus_host_t *h;
-   int fd;
-};
-static void *serve_thread(void *p)
-{
-   struct serve_arg *a = p;
-   bus_host_serve_attach(a->h, a->fd);
-   return NULL;
-}
-static void attach_client(bus_host_t *h, bus_client_t *c)
-{
-   int sv[2];
-   must(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) == 0, "socketpair");
-   struct serve_arg a = {.h = h, .fd = sv[1]};
-   pthread_t t;
-   must(pthread_create(&t, NULL, serve_thread, &a) == 0, "spawn serve");
-   must(bus_client_attach(sv[0], c) == BUS_CLIENT_OK, "attach");
-   pthread_join(t, NULL);
-   close(sv[0]);
-   close(sv[1]);
+   cJSON *response = cJSON_CreateObject();
+   must(response && cJSON_AddTrueToObject(response, "ok"), "allocate success response");
+   return response;
 }
 
-/* The config server: on a lookup request (payload = env name), run the REAL
- * config_autonomy_lookup and reply {found, value}. */
-static void config_server_step(bus_client_t *server)
+cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSON *request,
+                                    size_t max_body, int timeout_ms,
+                                    aimee_module_call_result_t *result)
 {
-   bus_event_t ev;
-   while (bus_client_poll(server, &ev) == BUS_CLIENT_OK)
+   cJSON_Delete(last_request);
+   last_request = cJSON_Duplicate(request, 1);
+   cJSON_Delete(request);
+   last_event_kind = event_kind;
+   last_stage_id = stage_id;
+   last_max_body = max_body;
+   last_timeout_ms = timeout_ms;
+   *result = AIMEE_MODULE_CALL_OK;
+
+   cJSON *operation = cJSON_GetObjectItemCaseSensitive(last_request, "operation");
+   must(cJSON_IsString(operation), "request has operation");
+   if (strcmp(operation->valuestring, "snapshot") && strcmp(operation->valuestring, "version"))
    {
-      if (ev.frame.event_kind != KIND_CFG_LOOKUP || !(ev.frame.hdr_flags & BUS_F_REQUEST))
-         continue;
-      char name[128] = {0};
-      uint32_t n = ev.payload_len < sizeof name - 1 ? ev.payload_len : sizeof name - 1;
-      memcpy(name, ev.payload, n);
-
-      long v = 0;
-      struct lookup_reply rep = {0, 0};
-      rep.found = config_autonomy_lookup(name, &v);
-      rep.value = (int64_t)v;
-      must(bus_client_reply(server, KIND_CFG_LOOKUP, ev.frame.correlation_id, &rep, sizeof rep) ==
-               BUS_CLIENT_OK,
-           "server reply");
+      cJSON_Delete(last_mutation);
+      last_mutation = cJSON_Duplicate(last_request, 1);
    }
+   if (!strcmp(operation->valuestring, "snapshot"))
+   {
+      snapshot_calls++;
+      cJSON *response = success();
+      cJSON *values = cJSON_AddObjectToObject(response, "values");
+      must(values && cJSON_AddNumberToObject(values, "max_iterations", 37), "snapshot values");
+      must(cJSON_AddStringToObject(values, "kb_mode", "local") != NULL, "kb mode");
+      must(cJSON_AddStringToObject(values, "kb_client_url", "") != NULL, "kb URL");
+      must(cJSON_AddStringToObject(values, "embedder_model", "bekko-a25m") != NULL,
+           "embedder model");
+      must(cJSON_AddStringToObject(values, "embedder_url", "") != NULL, "embedder URL");
+      must(cJSON_AddStringToObject(values, "synthesis_model", "") != NULL, "synthesis model");
+      must(cJSON_AddStringToObject(values, "synthesis_endpoint", "") != NULL, "synthesis endpoint");
+      must(cJSON_AddStringToObject(
+               response, "version",
+               changed_version
+                   ? "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                   : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") != NULL,
+           "snapshot version");
+      return response;
+   }
+   if (!strcmp(operation->valuestring, "version"))
+   {
+      cJSON *response = success();
+      must(cJSON_AddStringToObject(
+               response, "version",
+               changed_version
+                   ? "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                   : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") != NULL,
+           "version response");
+      return response;
+   }
+   return success();
 }
 
-/* One lookup over the bus: request(name) -> route -> real lookup -> route -> reply. */
-static struct lookup_reply bus_lookup(bus_host_t *h, bus_client_t *req, bus_client_t *server,
-                                      uint64_t corr, const char *name)
+static cJSON *request_value(void)
 {
-   must(bus_client_request(req, KIND_CFG_LOOKUP, corr, name, (uint32_t)strlen(name)) ==
-            BUS_CLIENT_OK,
-        "request");
-   bus_host_pump(h);
-   config_server_step(server);
-   bus_host_pump(h);
-
-   bus_event_t ev;
-   must(bus_client_poll(req, &ev) == BUS_CLIENT_OK, "reply arrived");
-   must(ev.frame.event_kind == KIND_CFG_LOOKUP && ev.frame.correlation_id == corr,
-        "reply is the lookup");
-   struct lookup_reply rep = {0, 0};
-   must(ev.payload_len == sizeof rep, "reply is a lookup reply");
-   memcpy(&rep, ev.payload, sizeof rep);
-   return rep;
+   cJSON *value = cJSON_GetObjectItemCaseSensitive(last_mutation, "value");
+   must(cJSON_IsObject(value), "request has object value");
+   return value;
 }
 
-/* Assert the bus answer equals a fresh direct call, for a given name. */
-static void check_agrees(bus_host_t *h, bus_client_t *req, bus_client_t *server, uint64_t corr,
-                         const char *name)
+static void expect_operation(const char *name)
 {
-   long dv = 0;
-   int dfound = config_autonomy_lookup(name, &dv);
-   struct lookup_reply b = bus_lookup(h, req, server, corr, name);
-   must(b.found == dfound, "bus and direct agree on found");
-   must(!dfound || b.value == (int64_t)dv, "bus and direct agree on value");
-   printf("  %-34s direct{found=%d,val=%ld} == bus{found=%d,val=%lld}\n", name, dfound, dv, b.found,
-          (long long)b.value);
+   cJSON *request =
+       (!strcmp(name, "snapshot") || !strcmp(name, "version")) ? last_request : last_mutation;
+   cJSON *operation = cJSON_GetObjectItemCaseSensitive(request, "operation");
+   must(cJSON_IsString(operation) && !strcmp(operation->valuestring, name), name);
+   must(last_event_kind == AIMEE_CONFIG_EVENT_KIND, "config event kind");
+   must(last_stage_id == AIMEE_CONFIG_STAGE_ID, "config stage");
+   must(last_max_body == 16u * 1024u * 1024u, "config response bound");
+   must(last_timeout_ms == 5000, "config deadline");
 }
 
 int main(void)
 {
-   printf("test_bus_config_autonomy:\n");
+   must(config_snapshot_seed() == 0, "seed snapshot through module");
+   expect_operation("snapshot");
+   double number = 0;
+   must(config_client_read_number("max_iterations", &number) == 0 && number == 37,
+        "snapshot is cached for accessors");
+   char deploy_env[2048];
+   config_emit_deploy_env_current(deploy_env, sizeof(deploy_env));
+   must(strstr(deploy_env, "COMPOSE_PROFILES=kb\n") != NULL, "local KB compose profile");
+   must(strstr(deploy_env, "AIMEE_KB_VARIANT=a25m\n") != NULL, "bundled KB variant");
+   must(strstr(deploy_env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL, "bundled embedder selection");
+   must(strstr(deploy_env, "TOKEN=") == NULL && strstr(deploy_env, "API_KEY=") == NULL,
+        "deploy environment excludes credentials");
 
-   /* Seed the live config snapshot the real lookup reads, with distinctive
-    * autonomy values so a match cannot be a coincidence of zeros. */
-   config_t c;
-   memset(&c, 0, sizeof c);
-   c.autonomy_max_turns = 42;
-   c.autonomy_skeptics = 3;
-   c.autonomy_concurrency = 7;
-   config_snapshot_init(&c);
-   unsetenv("AIMEE_AUTONOMY_MAX_TURNS"); /* no stray operator override for the first checks */
+   must(config_reload_if_changed() == 0, "equal version avoids reload");
+   expect_operation("version");
+   must(snapshot_calls == 1, "unchanged version does not refetch");
+   changed_version = 1;
+   must(config_reload_if_changed() == 1, "changed version reloads");
+   expect_operation("snapshot");
+   must(snapshot_calls == 2, "changed version refetches once");
 
-   bus_host_config_t cfg;
-   memset(&cfg, 0, sizeof cfg);
-   cfg.max_slots = 4;
-   cfg.slot_size = 256;
-   cfg.inline_budget = 192;
-   cfg.queue_capacity = 16;
-   cfg.arena_size = 256 * 1024;
+   int rc = config_set_typed_facts(1, 0, 4);
+   if (rc != 0)
+      fprintf(stderr, "typed-facts rc=%d error=%s\n", rc, config_client_last_error());
+   must(rc == 0, "typed-facts mutation");
+   expect_operation("set-typed-facts");
+   cJSON *value = request_value();
+   must(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value, "enabled")), "typed enabled");
+   must(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(value, "auto_promote")),
+        "typed auto-promote");
+   must(cJSON_GetObjectItemCaseSensitive(value, "promote_threshold")->valueint == 4,
+        "typed threshold");
 
-   bus_host_t h;
-   must(bus_host_create(&h, &cfg, NULL, NULL) == BUS_HOST_OK, "host");
-   bus_client_t req, server;
-   attach_client(&h, &req);
-   attach_client(&h, &server);
-   must(bus_host_serve_kind(&h, server.reply.handle_id, KIND_CFG_LOOKUP) == BUS_HOST_OK,
-        "server serves lookup");
+   must(config_set_api_http_listener(8088, 90) == 0, "API listener mutation");
+   expect_operation("set-api-http-listener");
+   value = request_value();
+   must(cJSON_GetObjectItemCaseSensitive(value, "http_port")->valueint == 8088, "API port");
+   must(cJSON_GetObjectItemCaseSensitive(value, "rate_limit_per_min")->valueint == 90,
+        "API rate limit");
 
-   /* Real config-backed autonomy vars: the bus answer must equal a direct call. */
-   check_agrees(&h, &req, &server, 1, "AIMEE_AUTONOMY_MAX_TURNS");
-   check_agrees(&h, &req, &server, 2, "AIMEE_AUTONOMY_SKEPTICS");
-   check_agrees(&h, &req, &server, 3, "AIMEE_AUTONOMY_CONCURRENCY");
-   /* A name the function does not own: both must report not-found (found=0). */
-   check_agrees(&h, &req, &server, 4, "AIMEE_USD_PER_SEC");
+   must(config_set_model_concurrency("provider/model", 3) == 0, "model mutation");
+   expect_operation("set-model-concurrency");
+   value = request_value();
+   must(!strcmp(cJSON_GetObjectItemCaseSensitive(value, "model")->valuestring, "provider/model"),
+        "model name");
+   must(cJSON_GetObjectItemCaseSensitive(value, "limit")->valueint == 3, "model limit");
 
-   /* Live state: flip an operator override and require the BUS answer to move
-    * with it. If the far side were echoing a value captured at request-framing
-    * time rather than really running config_autonomy_lookup, this would fail. */
-   setenv("AIMEE_AUTONOMY_MAX_TURNS", "99", 1);
-   struct lookup_reply after = bus_lookup(&h, &req, &server, 5, "AIMEE_AUTONOMY_MAX_TURNS");
-   must(after.found == 1 && after.value == 99,
-        "bus reflects the live env override (real lookup ran on the far side)");
-   printf("  env override AIMEE_AUTONOMY_MAX_TURNS=99 -> bus{found=%d,val=%lld} (was 42)\n",
-          after.found, (long long)after.value);
-   unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
+   must(config_remove_model_concurrency("provider/model") == 0, "model removal");
+   expect_operation("remove-model-concurrency");
+   value = request_value();
+   must(!strcmp(cJSON_GetObjectItemCaseSensitive(value, "model")->valuestring, "provider/model"),
+        "removed model name");
 
-   bus_client_detach(&req);
-   bus_client_detach(&server);
-   bus_host_destroy(&h);
-   printf("test_bus_config_autonomy: OK (a second, distinct module works over the bus)\n");
+   must(config_client_key_is_secret("db2_url"), "DB URL is not config data");
+   must(
+       !strcmp(config_client_secret_name("kb_client_bearer_token"), "AIMEE_KB_CLIENT_BEARER_TOKEN"),
+       "KB client credential maps to runtime secret");
+   must(!config_client_key_is_secret("max_iterations"), "ordinary key is public");
+
+   cJSON_Delete(last_request);
+   cJSON_Delete(last_mutation);
+   puts("test_bus_config_autonomy: OK (native caller contract matches pure-Go module bus API)");
    return 0;
 }

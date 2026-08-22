@@ -1485,9 +1485,11 @@ int db2_fact_commit_rollback(const fact_actor_t *actor, const char *target_commi
    cq = aimee_pg_prepare(
        conn,
        "SELECT 1 FROM fact_graph_changes t JOIN fact_graph_changes n ON n.id>t.id"
-       " AND n.commit_id<>t.commit_id AND ((t.assertion_id>0 AND n.assertion_id=t.assertion_id)"
+       " AND n.commit_id<>t.commit_id JOIN fact_graph_commits nc ON nc.commit_id=n.commit_id"
+       " AND nc.status='applied' AND nc.operation NOT IN ('revert','fact.ingest.rollback')"
+       " WHERE ((t.assertion_id>0 AND n.assertion_id=t.assertion_id)"
        " OR (t.assertion_id=0 AND n.assertion_id=0 AND n.object_kind=t.object_kind"
-       " AND n.object_key=t.object_key)) WHERE t.commit_id=?1 LIMIT 1",
+       " AND n.object_key=t.object_key)) AND t.commit_id=?1 LIMIT 1",
        err, sizeof(err));
    if (!cq)
       return fm_end(conn, 0);
@@ -1672,6 +1674,7 @@ int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_r
        " n.object_kind=t.object_kind AND n.object_key=t.object_key))"
        " JOIN fact_graph_commits nc ON nc.commit_id=n.commit_id"
        " WHERE tc.parent_commit_id=?1 AND nc.status='applied'"
+       " AND nc.operation NOT IN ('revert','fact.ingest.rollback')"
        " AND nc.parent_commit_id<>?1 LIMIT 1",
        err, sizeof(err));
    if (!cq)

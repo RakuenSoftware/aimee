@@ -29,7 +29,7 @@ typedef struct
    const char *name;  /* stable id (config/GUI key), e.g. "index_claims" */
    const char *label; /* human status label, e.g. "index claims" */
    /* Enabled predicate; NULL => always on. Asks config for this stage's flag
-    * itself — the pipeline no longer threads a config_t through to it. */
+    * itself — the pipeline no longer threads a legacy_config_record through to it. */
    int (*enabled)(void);
    /* Worker: process one unit. Returns 1=did work, 0=queue empty, <0=error. */
    int (*run)(const kb_curator_extract_opts_t *opts);

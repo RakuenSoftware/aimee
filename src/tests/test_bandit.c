@@ -21,7 +21,6 @@
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
 #include "config.h"
-#include "config_learning.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
@@ -55,7 +54,7 @@ static void test_bandit_arm_register(void)
    printf("  bandit_arm_register: ok\n");
 }
 
-/* kb_bandit_sample now reads the LIVE config rather than taking a config_t, so the
+/* kb_bandit_sample reads the live module config, so the
  * "disabled" case must pin the config it reads — otherwise it inherits the developer's real
  * aimee.yaml and fails wherever bandit_optimize_command is set. An empty HOME yields the
  * declared defaults (command empty = disabled). */
@@ -71,6 +70,7 @@ static void pin_empty_config(void)
    setenv("HOME", g_cfg_home, 1);
    unsetenv("AIMEE_HOME");
    setenv("AIMEE_NO_CACHE", "1", 1);
+   assert(config_set_bandit_optimize_command("") == 0);
 }
 
 static void unpin_config(void)
@@ -135,14 +135,11 @@ static void test_bandit_reward_closed(void)
 /* ---- 4. config_bandit_defaults ---- */
 static void test_config_bandit_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_bandit_settings(&cfg, NULL);
-
-   assert(cfg.bandit_optimize_command[0] == '\0');
-   assert(cfg.bandit_exploration_fraction >= 0.04 && cfg.bandit_exploration_fraction <= 0.06);
-   assert(cfg.bandit_ipw_weight_cap >= 9.9 && cfg.bandit_ipw_weight_cap <= 10.1);
-   assert(cfg.bandit_exploration_window_seconds == 7 * 24 * 3600);
+   assert(config_bandit_optimize_command()[0] == '\0');
+   assert(config_bandit_exploration_fraction() >= 0.04 &&
+          config_bandit_exploration_fraction() <= 0.06);
+   assert(config_bandit_ipw_weight_cap() >= 9.9 && config_bandit_ipw_weight_cap() <= 10.1);
+   assert(config_bandit_exploration_window_seconds() == 7 * 24 * 3600);
 
    printf("  config_bandit_defaults: ok\n");
 }

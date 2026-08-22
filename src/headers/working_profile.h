@@ -3,7 +3,7 @@
 
 /* Working profile: learned, revisable model of how the user wants to
  * collaborate. Backed by DB1 `working_profile_*_local`, and paired
- * with the operator-authored charter in `config_t`. */
+ * with the operator-authored charter in `legacy_config_record`. */
 
 #define WORKING_PROFILE_FIELD_LEN 64
 #define WORKING_PROFILE_VALUE_LEN 256

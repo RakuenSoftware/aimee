@@ -17,7 +17,7 @@ The engine and first-class entry points described by the original proposal have 
 - `delegate_roundtable_run` and roundtable result types exist in `delegate_ensemble`.
 - `agent_task_t` can select a named participant, and the runtime has explicit per-task temperature support.
 - Named participant execution clones the selected agent before mutation, avoiding the old shared-agent parallel mutation path.
-- Roundtable config keys are represented in `config_t` and parsed/saved through the config section plumbing.
+- Roundtable config keys are represented in `legacy_config_record` and parsed/saved through the config section plumbing.
 
 ## Verification Notes
 

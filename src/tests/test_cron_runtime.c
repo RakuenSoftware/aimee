@@ -164,12 +164,6 @@ int notify_deliver_target(const notify_target_t *target, const char *event_name,
    return 0;
 }
 
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   return 0;
-}
-
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 {
    (void)level;
@@ -529,13 +523,4 @@ int main(void)
    test_parallel_workdir_jobs_are_serialized();
    printf("cron runtime tests passed\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

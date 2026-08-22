@@ -54,7 +54,7 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
    return 0;
 }
 
-/* The aux handlers read config through accessors now. Same values the config_load
+/* The aux handlers read config through accessors now. Same values the legacy_config_read
  * stub these replace put in the struct, so the JSON assertions are unchanged. */
 int config_present(void)
 {
@@ -347,13 +347,4 @@ int main(void)
    reset_last_response();
    printf("All tests passed.\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

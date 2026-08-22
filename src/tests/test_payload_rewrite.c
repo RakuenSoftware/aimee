@@ -20,13 +20,9 @@ static void reset_db(const char *path)
 
 static void set_rewrite_config(int enabled, int min_savings_tokens, double hard_threshold)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   assert(config_load(&cfg) == 0);
-   cfg.cache_aware_rewrite_enabled = enabled;
-   cfg.cache_aware_rewrite_min_savings_tokens = min_savings_tokens;
-   cfg.cache_aware_rewrite_hard_context_threshold = hard_threshold;
-   assert(config_save(&cfg) == 0);
+   assert(config_set_cache_aware_rewrite_enabled(enabled) == 0);
+   assert(config_set_cache_aware_rewrite_min_savings_tokens(min_savings_tokens) == 0);
+   assert(config_set_cache_aware_rewrite_hard_context_threshold(hard_threshold) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
 }
 
@@ -193,19 +189,15 @@ static void test_cache_horizon_trigger(const char *path)
    assert(strcmp(dec.reason, "cache_horizon") == 0);
 
    /* Max=0 disables the ceiling check (also disable segment check to isolate) */
-   config_t cfg;
-   assert(config_load(&cfg) == 0);
-   cfg.cache_aware_rewrite_max_defer_turns = 0;
-   cfg.cache_aware_rewrite_segment_check_turns = 0;
-   assert(config_save(&cfg) == 0);
+   assert(config_set_cache_aware_rewrite_max_defer_turns(0) == 0);
+   assert(config_set_cache_aware_rewrite_segment_check_turns(0) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
    seed_state_with_consecutive("horizon-test", hash, 100);
    assert(payload_rewrite_should_defer("horizon-test", hash, 100, 1000, &dec) == 0);
    assert(dec.defer == 1);
    /* restore defaults */
-   cfg.cache_aware_rewrite_max_defer_turns = 20;
-   cfg.cache_aware_rewrite_segment_check_turns = 5;
-   assert(config_save(&cfg) == 0);
+   assert(config_set_cache_aware_rewrite_max_defer_turns(20) == 0);
+   assert(config_set_cache_aware_rewrite_segment_check_turns(5) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
 }
 
@@ -231,17 +223,13 @@ static void test_required_segment_miss_trigger(const char *path)
    assert(strcmp(dec.reason, "cache_warm") == 0);
 
    /* Segment check=0 disables periodic check */
-   config_t cfg;
-   assert(config_load(&cfg) == 0);
-   cfg.cache_aware_rewrite_segment_check_turns = 0;
-   assert(config_save(&cfg) == 0);
+   assert(config_set_cache_aware_rewrite_segment_check_turns(0) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
    seed_state_with_consecutive("seg-test", hash, 5);
    assert(payload_rewrite_should_defer("seg-test", hash, 100, 1000, &dec) == 0);
    assert(dec.defer == 1);
    /* restore default */
-   cfg.cache_aware_rewrite_segment_check_turns = 5;
-   assert(config_save(&cfg) == 0);
+   assert(config_set_cache_aware_rewrite_segment_check_turns(5) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
 }
 

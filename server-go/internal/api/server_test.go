@@ -13,11 +13,34 @@ import (
 	"strings"
 	"testing"
 
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
+	configcontract "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	appconfig "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
 )
+
+type externalConfigStore struct{ *appconfig.Store }
+
+func (s externalConfigStore) TriggerRules() ([]configcontract.TriggerRule, error) {
+	rules, err := s.Store.TriggerRules()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]configcontract.TriggerRule, len(rules))
+	for i, rule := range rules {
+		out[i] = configcontract.TriggerRule{
+			Source: rule.Source, Event: rule.Event, Schedule: rule.Schedule, Mode: rule.Mode,
+			Pipeline: configcontract.TriggerPipeline{Template: rule.Pipeline.Template,
+				Workspace: rule.Pipeline.Workspace, MaxSpendUSD: rule.Pipeline.MaxSpendUSD},
+		}
+	}
+	return out, nil
+}
+
+func setExternalConfig(server *Server, store *appconfig.Store) {
+	server.SetConfigStore(externalConfigStore{Store: store})
+}
 
 func newTestServer(t *testing.T) (*Server, *db1.Store, *wfe.ArtifactStore) {
 	t.Helper()
@@ -341,7 +364,7 @@ func TestWorkflowTriggerRegistryRoundTripFromBrowserContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.SetConfigStore(configStore)
+	setExternalConfig(server, configStore)
 
 	get := func(user string) map[string]any {
 		t.Helper()
@@ -428,7 +451,7 @@ func TestWorkflowOperatorCapabilityIsIndependentOfTriggerRegistryAvailability(t 
 func TestWorkflowTriggerRegistryRejectsUnsafeWrites(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	configStore, _ := appconfig.NewStore(filepath.Join(t.TempDir(), "aimee.yaml"))
-	server.SetConfigStore(configStore)
+	setExternalConfig(server, configStore)
 	version, _ := configStore.Version("trigger_rules")
 	validRule := `[{"source":"watch-dir","pipeline":{"template":"build","workspace":"/repo"}}]`
 
@@ -464,7 +487,7 @@ func TestWorkflowTriggerRegistryReportsMalformedConfigWithoutHidingIt(t *testing
 		t.Fatal(err)
 	}
 	configStore, _ := appconfig.NewStore(configPath)
-	server.SetConfigStore(configStore)
+	setExternalConfig(server, configStore)
 	req := httptest.NewRequest(http.MethodGet, "/v1/workflow/triggers", nil)
 	setWorkflowIdentity(req, "admin", true)
 	rec := httptest.NewRecorder()
@@ -621,7 +644,7 @@ func TestConfiguredTriggerScannerFilesPendingProposalWithoutManualFire(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.SetConfigStore(configStore)
+	setExternalConfig(server, configStore)
 	server.ScanTriggers(context.Background())
 	items, err := store.WorkItems(context.Background())
 	if err != nil || len(items) != 1 {
@@ -764,7 +787,7 @@ func TestConfiguredZeroConcurrencyPausesAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.SetConfigStore(store)
+	setExternalConfig(server, store)
 	if got := store.Int("trigger.max_concurrent", 2); got != 0 {
 		t.Fatalf("config did not load max_concurrent=0, got %d", got)
 	}

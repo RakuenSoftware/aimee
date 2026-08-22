@@ -42,7 +42,7 @@ bad()  { red   "  FAIL  $*"; FAIL=$((FAIL + 1)); }
 #  - AIMEE_API_* (client_transport + tcp:host:port endpoint): the POSIX
 #    HTTP-transport cutover path.
 #  - AIMEE_SERVER_URL/_TOKEN: the cross-platform thin client (incl. Windows),
-#    which has no config_load and reads the URL straight from the environment.
+#    which has no legacy_config_read and reads the URL straight from the environment.
 host_port="${SERVER_URL#http://}"; host_port="${host_port#https://}"; host_port="${host_port%/}"
 case "$SERVER_URL" in
   https://*) endpoint_scheme=tls ;;

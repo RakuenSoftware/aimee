@@ -401,6 +401,10 @@ SELECT derived_memory_declare('recommendation','rec-a',jsonb_build_array(jsonb_b
  'input_kind','code_unit','input_id',:p4_file_a_id::TEXT,'input_version','1','source_hash','hash-a')));
 SELECT derived_memory_declare('recommendation','rec-b',jsonb_build_array(jsonb_build_object(
  'input_kind','code_unit','input_id',:p4_file_b_id::TEXT,'input_version','1','source_hash','hash-b')));
+SELECT e2e_assert((SELECT count(*) FROM derived_memory_freshness_for(
+ 'code_unit',:p4_file_a_id::TEXT))=1,'targeted freshness excludes unrelated dependents');
+SELECT e2e_assert((SELECT count(*) FROM derived_memory_freshness_for(
+ 'memory','no-such-input'))=0,'targeted freshness avoids a global fallback');
 INSERT INTO derivation_policy_versions(derived_kind,current_version,updated_at)
  VALUES('policy-old','v1',pg_now_text()),('policy-new','v2',pg_now_text());
 SELECT derived_memory_declare('policy-old','old-item',jsonb_build_array(jsonb_build_object(

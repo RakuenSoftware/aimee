@@ -53,7 +53,7 @@ int gateway_policy_pin_model(struct cJSON *req, const char *agent_model);
 int gateway_policy_is_denied_tool(const char *name);
 
 /* True when the response-side tool-policing policy is enabled. Cheap — one
- * config_load + one bool read. The streaming /v1/messages path uses this as a
+ * legacy_config_read + one bool read. The streaming /v1/messages path uses this as a
  * single-branch dispatcher: when ON, the upstream is buffered + policed +
  * replayed as SSE (via emit_message_as_sse); when OFF (the default), today's
  * incremental relay/translator runs unchanged. */

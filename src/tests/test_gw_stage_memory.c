@@ -26,7 +26,8 @@
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
  * (the "pre-injection off / recall empty" path). */
 static int g_no_recall = 0;
-static int g_test_placement = 0; /* drives ingress_cache_placement_enabled in config_load stub */
+static int g_test_placement =
+    0; /* drives ingress_cache_placement_enabled in legacy_config_read stub */
 
 /* --- stubs: make ingress_preinject_build deterministic without the kb graph --- */
 char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)
@@ -105,21 +106,7 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    snprintf(out[0].snippet, sizeof(out[0].snippet), "builder emits a bounded context envelope");
    return 1;
 }
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->ingress_preinject_enabled = 1;
-      cfg->ingress_preinject_assembly_budget = 1200;
-      cfg->ingress_cache_placement_enabled = g_test_placement;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values match what this file's config_load stub produced, so the
- * assertions below are unchanged. */
+/* Accessor stubs expose the fixture values used by the assertions below. */
 int config_ingress_cache_placement_enabled(void)
 {
    return g_test_placement;

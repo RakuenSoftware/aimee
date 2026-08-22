@@ -23,7 +23,6 @@
     "src/tests/test_cmd_profile.c": 2,
     "src/tests/test_code_audit.c": 1,
     "src/tests/test_codex_auth.c": 1,
-    "src/tests/test_config.c": 15,
     "src/tests/test_curator_notify.c": 1,
     "src/tests/test_curiosity.c": 1,
     "src/tests/test_db1_agent_job_cancel_unassigned.c": 1,
@@ -80,7 +79,7 @@
     "src/tests/test_role_templates.c": 1,
     "src/tests/test_roundtable_pipeline_capture.c": 1,
     "src/tests/test_roundtable_pipeline_ctl.c": 2,
-    "src/tests/test_script_runner.c": 5,
+    "src/tests/test_script_runner.c": 4,
     "src/tests/test_server_compute.c": 1,
     "src/tests/test_server_delegate_monitor.c": 1,
     "src/tests/test_server_dispatch.c": 13,
@@ -91,7 +90,6 @@
     "src/tests/test_tdd.c": 1,
     "src/tests/test_token_audit_load.c": 1,
     "src/tests/test_tool_validation.c": 6,
-    "src/tests/test_toolset.c": 4,
     "src/tests/test_trajectory_batch.c": 2,
     "src/tests/test_trigger.c": 11,
     "src/tests/test_vault_audit.c": 1,
@@ -112,6 +110,6 @@
     "src/tests/test_workspace.c": 1,
     "src/tests/test_workspace_migration.c": 1,
     "src/tests/test_workspace_mirror.c": 3,
-    "src/tests/test_workspace_turn.c": 31
+    "src/tests/test_workspace_turn.c": 34
   }
 }

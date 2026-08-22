@@ -71,7 +71,7 @@ or a requested forge capability is absent instead of claiming a generic ready st
 ### Config touchpoint
 
 The module consumes project verification config, Git identity, forge/provider credentials, live-forge
-gates registered at `src/modules/config/config_fields.c:146`,
+gates registered in the external config-module field metadata,
 gates, and shell-Git restrictions; `config` owns general parsing and projection. OAuth-for-forge settings
 belong to Git providers. Federated OIDC/SSO settings belong to optional governance and must not appear as
 a required Git configuration dependency.
