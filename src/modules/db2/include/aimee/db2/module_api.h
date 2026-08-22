@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "cd1326ac1db484d876752e035d658919e0da2b606481cdf93259f046e0dc24e5"
+#define AIMEE_DB2_CONTRACT_SHA256 "e8b03d636dbc80e88f3ff0da1aefdf1a42852a03763d4ce805c2acbb2a623524"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -6664,6 +6664,36 @@
 #define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RESPONSE_MIN_LEN                             28u
 #define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RESPONSE_MAX_LEN                             28u
 #define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_ERROR_LEN                                    24u
+#define AIMEE_DB2_EVENT_WITNESS_CHECKPOINT_FRESHNESS                                  AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_WITNESS_CHECKPOINT_FRESHNESS                                  AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_FRESHNESS                              71u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_REQUEST_MIN_LEN                        24u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_REQUEST_MAX_LEN                        24u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_FRESHNESS_READ_MIN                     0u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_FRESHNESS_READ_MAX                     1u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_CHECKPOINT_COUNT_MIN                   0ull
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_CHECKPOINT_COUNT_MAX                   9223372036854775807ull
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_LATEST_AGE_SECONDS_MIN                 0ull
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_LATEST_AGE_SECONDS_MAX                 9223372036854775807ull
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_RESPONSE_MIN_LEN                       44u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_RESPONSE_MAX_LEN                       44u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_ERROR_LEN                              24u
+#define AIMEE_DB2_EVENT_WITNESS_CHECKPOINT_ANCHOR_COVERAGE                            AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_WITNESS_CHECKPOINT_ANCHOR_COVERAGE                            AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_ANCHOR_COVERAGE                        72u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_REQUEST_MIN_LEN                  28u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_REQUEST_MAX_LEN                  60u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MIN            32u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MAX            32u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_COVERAGE_READ_MIN                0u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_COVERAGE_READ_MAX                1u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_CHECKPOINTS_MIN          0ull
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_CHECKPOINTS_MAX          9223372036854775807ull
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MIN           0u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MAX           32u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_RESPONSE_MIN_LEN                 40u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_RESPONSE_MAX_LEN                 72u
+#define AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_ERROR_LEN                        24u
 #define AIMEE_DB2_STRING_ACK_ARGUMENT_MAX                                             255u
 #define AIMEE_DB2_STRING_COUNT_ARGUMENT_MAX                                           511u
 #define AIMEE_DB2_STRING_PAIR_FIRST_MAX                                               511u
@@ -60897,6 +60927,248 @@ static inline int aimee_db2_vector_index_op_remove_reply_decode(const uint8_t *i
    *recorded = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*recorded < AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MIN || *recorded > AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_freshness_request_encode(uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   uint8_t scratch[AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_REQUEST_MAX_LEN];
+   uint32_t cursor = 0u;
+
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_FRESHNESS, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_freshness_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_FRESHNESS || header.flags != 0u ||
+       input_len < AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_REQUEST_MAX_LEN)
+      return -1;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_freshness_reply_encode(uint32_t freshness_read, uint64_t checkpoint_count, uint64_t latest_age_seconds,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (freshness_read > AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_FRESHNESS_READ_MAX ||
+       checkpoint_count > AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_CHECKPOINT_COUNT_MAX ||
+       latest_age_seconds > AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_LATEST_AGE_SECONDS_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, freshness_read);
+   cursor += 4u;
+   aimee_db2_put_u64(payload + cursor, checkpoint_count);
+   cursor += 8u;
+   aimee_db2_put_u64(payload + cursor, latest_age_seconds);
+   cursor += 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_FRESHNESS, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_freshness_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *freshness_read, uint64_t *checkpoint_count, uint64_t *latest_age_seconds)
+{
+   if (freshness_read)
+      *freshness_read = 0u;
+   if (checkpoint_count)
+      *checkpoint_count = 0u;
+   if (latest_age_seconds)
+      *latest_age_seconds = 0u;
+   if (!freshness_read || !checkpoint_count || !latest_age_seconds)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_FRESHNESS ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *freshness_read = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*freshness_read > AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_FRESHNESS_READ_MAX)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *checkpoint_count = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*checkpoint_count > AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_CHECKPOINT_COUNT_MAX)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *latest_age_seconds = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*latest_age_seconds > AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_LATEST_AGE_SECONDS_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_anchor_coverage_request_encode(const char *signer_key_id_hex,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!signer_key_id_hex || !output || !output_len)
+      return -1;
+   size_t signer_key_id_hex_len = 0u;
+   while (signer_key_id_hex_len <= AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MAX && signer_key_id_hex[signer_key_id_hex_len])
+      ++signer_key_id_hex_len;
+   if (signer_key_id_hex_len < AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MIN || signer_key_id_hex_len > AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)signer_key_id_hex_len);
+   memcpy(payload + cursor + 4u, signer_key_id_hex, signer_key_id_hex_len);
+   cursor += 4u + (uint32_t)signer_key_id_hex_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_ANCHOR_COVERAGE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_anchor_coverage_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *signer_key_id_hex, size_t signer_key_id_hex_capacity)
+{
+   if (signer_key_id_hex && signer_key_id_hex_capacity)
+      signer_key_id_hex[0] = '\0';
+   if (!signer_key_id_hex || signer_key_id_hex_capacity < (size_t)AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_ANCHOR_COVERAGE || header.flags != 0u ||
+       input_len < AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, signer_key_id_hex,
+                                 AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (signer_key_id_hex[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_anchor_coverage_reply_encode(uint32_t coverage_read, uint64_t unknown_checkpoints, const char *unknown_key_id_hex,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!unknown_key_id_hex || !output || !output_len)
+      return -1;
+   size_t unknown_key_id_hex_len = 0u;
+   while (unknown_key_id_hex_len <= AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MAX && unknown_key_id_hex[unknown_key_id_hex_len])
+      ++unknown_key_id_hex_len;
+   if (coverage_read > AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_COVERAGE_READ_MAX ||
+       unknown_checkpoints > AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_CHECKPOINTS_MAX ||
+       unknown_key_id_hex_len > AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, coverage_read);
+   cursor += 4u;
+   aimee_db2_put_u64(payload + cursor, unknown_checkpoints);
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)unknown_key_id_hex_len);
+   memcpy(payload + cursor + 4u, unknown_key_id_hex, unknown_key_id_hex_len);
+   cursor += 4u + (uint32_t)unknown_key_id_hex_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_ANCHOR_COVERAGE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_witness_checkpoint_anchor_coverage_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *coverage_read, uint64_t *unknown_checkpoints, char *unknown_key_id_hex, size_t unknown_key_id_hex_capacity)
+{
+   if (coverage_read)
+      *coverage_read = 0u;
+   if (unknown_checkpoints)
+      *unknown_checkpoints = 0u;
+   if (unknown_key_id_hex && unknown_key_id_hex_capacity)
+      unknown_key_id_hex[0] = '\0';
+   if (!coverage_read || !unknown_checkpoints || !unknown_key_id_hex || unknown_key_id_hex_capacity < (size_t)AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MAX + 1u)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WITNESS_CHECKPOINT_ANCHOR_COVERAGE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *coverage_read = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*coverage_read > AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_COVERAGE_READ_MAX)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *unknown_checkpoints = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*unknown_checkpoints > AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_CHECKPOINTS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, unknown_key_id_hex,
+                                 AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MAX) != 0)
       return -1;
    if (cursor != payload_len)
       return -1;

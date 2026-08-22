@@ -24249,6 +24249,103 @@
           }
         ]
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 71,
+      "name": "witness_checkpoint_freshness",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Witness checkpoints are relational DB2 rows signed from the vault key.",
+      "c_symbols": [
+        "db2_witness_checkpoint_freshness"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a query that could not run is carried apart from a chain with no checkpoints"
+        },
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "freshness_read",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "checkpoint_count",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "latest_age_seconds",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 72,
+      "name": "witness_checkpoint_anchor_coverage",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Witness checkpoints are relational DB2 rows signed from the vault key.",
+      "c_symbols": [
+        "db2_witness_checkpoint_anchor_coverage"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the sixteen-byte key id crosses as hex, and a check that could not run is not a clean one"
+        },
+        "fields": [
+          {
+            "name": "signer_key_id_hex",
+            "type": "utf8",
+            "minimum_bytes": 32,
+            "maximum_bytes": 32
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "coverage_read",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "unknown_checkpoints",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "unknown_key_id_hex",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 32
+          }
+        ]
+      }
     }
   ]
 }

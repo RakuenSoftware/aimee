@@ -5324,6 +5324,22 @@
       "reason": "This reads a process configuration flag and issues no statement: it reports whether DB2 was started ephemeral. On the bus it would let one process ask another about its startup configuration, which is not a fact DB2 owns on the caller's behalf. A caller that needs it is asking about its own runtime and should read its own configuration."
     },
     {
+      "symbol": "db2_witness_checkpoint_anchor_coverage",
+      "signature_sha256": "1f2d5c4ccb8726df3e6dba96760bede13a2d62d87731ad57feea249c84b3f4f3",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.witness_checkpoint_anchor_coverage operation counts retained checkpoints signed by a key id other than the one the caller can verify with -- evidence a key-holding kb cannot check, which must stop startup. The key id is sixteen raw bytes and the envelope has no byte field, so it crosses as thirty-two hex characters and is decoded here; a malformed one is refused rather than truncated. coverage_read is carried because could-not-verify is not verified."
+    },
+    {
+      "symbol": "db2_witness_checkpoint_freshness",
+      "signature_sha256": "32c423eeaeff417559cc879c90649590c327e76d99308c80641feb0acdb51d65",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.witness_checkpoint_freshness operation reports how many checkpoints exist and how old the newest is. The release gate closes on a chain that has stalled, because a local rewrite stops being caught once signed-root production stops -- but a kb with no checkpoints has not stalled, it has no evidence yet, so zero is deliberately not stale. That makes carrying freshness_read necessary: the caller must fail closed on a read that did not happen, which otherwise arrives as the same zero."
+    },
+    {
       "symbol": "db2_workflow_pattern_insert",
       "signature_sha256": "28d0245578071308077b124731cb590da2e29b4db1cf012177b683a6d3dc9d79",
       "disposition": "wire-operation",

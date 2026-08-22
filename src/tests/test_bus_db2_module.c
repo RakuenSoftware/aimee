@@ -3839,6 +3839,27 @@ void db2_vector_index_op_remove(int64_t point_id)
    (void)point_id;
 }
 
+int db2_witness_checkpoint_freshness(int64_t *out_count, int64_t *out_age_seconds)
+{
+   if (out_count)
+      *out_count = 0;
+   if (out_age_seconds)
+      *out_age_seconds = 0;
+   return -1;
+}
+
+int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_len,
+                                           int64_t *out_unknown, char *sample, size_t sample_cap)
+{
+   (void)key_id;
+   (void)key_id_len;
+   if (out_unknown)
+      *out_unknown = 0;
+   if (sample && sample_cap)
+      sample[0] = '\0';
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -26243,9 +26243,15 @@
           "line": 56
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.witness_checkpoint_anchor_coverage operation counts retained checkpoints signed by a key id other than the one the caller can verify with -- evidence a key-holding kb cannot check, which must stop startup. The key id is sixteen raw bytes and the envelope has no byte field, so it crosses as thirty-two hex characters and is decoded here; a malformed one is refused rather than truncated. coverage_read is carried because could-not-verify is not verified."
+      },
       "signature": "int db2_witness_checkpoint_anchor_coverage ( const uint8_t * key_id , size_t key_id_len , int64_t * out_unknown , char * sample , size_t sample_cap )",
       "signature_sha256": "1f2d5c4ccb8726df3e6dba96760bede13a2d62d87731ad57feea249c84b3f4f3",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_witness_checkpoint_anchor_coverage"
     },
     {
@@ -26258,9 +26264,15 @@
           "line": 69
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.witness_checkpoint_freshness operation reports how many checkpoints exist and how old the newest is. The release gate closes on a chain that has stalled, because a local rewrite stops being caught once signed-root production stops -- but a kb with no checkpoints has not stalled, it has no evidence yet, so zero is deliberately not stale. That makes carrying freshness_read necessary: the caller must fail closed on a read that did not happen, which otherwise arrives as the same zero."
+      },
       "signature": "int db2_witness_checkpoint_freshness ( int64_t * out_count , int64_t * out_age_seconds )",
       "signature_sha256": "32c423eeaeff417559cc879c90649590c327e76d99308c80641feb0acdb51d65",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_witness_checkpoint_freshness"
     },
     {
@@ -28423,15 +28435,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4241ae8f8e739b7378ff9705947f2f4399c604acc53f82121315a01c16c7a954",
+  "fingerprint": "d14523c1249b43ffee0469e3e0beda2917c291fa6875a5a4b74431181e1668da",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 229,
+    "audit_pending": 227,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 730
+    "reviewed": 732
   }
 }

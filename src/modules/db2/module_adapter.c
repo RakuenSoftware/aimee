@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/db2_witness_checkpoint.h"
 #include "c/org_telemetry.h"
 #include "c/vector_index_ops.h"
 #include "c/write_tier_grant.h"
@@ -1109,6 +1110,8 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .telemetry_allow = db2_telemetry_allow,
        .vector_index_op_record = db2_vector_index_op_record,
        .vector_index_op_remove = db2_vector_index_op_remove,
+       .witness_checkpoint_freshness = db2_witness_checkpoint_freshness,
+       .witness_checkpoint_anchor_coverage = db2_witness_checkpoint_anchor_coverage,
    };
    return &backend;
 }
@@ -14691,6 +14694,104 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_vector_index_op_remove_reply_encode(recorded, response_body,
                                                               response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         if (aimee_db2_witness_checkpoint_freshness_request_decode(request_body, request_len) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->witness_checkpoint_freshness)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t freshness_read = 0u;
+            uint64_t checkpoint_count = 0u;
+            uint64_t latest_age_seconds = 0u;
+            {
+               int64_t existing = 0;
+               int64_t age = 0;
+               if (backend->witness_checkpoint_freshness(&existing, &age) == 0)
+               {
+                  freshness_read = 1u;
+                  checkpoint_count = existing > 0 ? (uint64_t)existing : 0u;
+                  /* The backend leaves the age untouched when the count is
+                   * zero, so it is only meaningful beside a non-zero count. */
+                  latest_age_seconds = (existing > 0 && age > 0) ? (uint64_t)age : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_witness_checkpoint_freshness_reply_encode(
+                    freshness_read, checkpoint_count, latest_age_seconds, response_body,
+                    response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char signer_key_id_hex[AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MAX +
+                                1] = "";
+         if (aimee_db2_witness_checkpoint_anchor_coverage_request_decode(
+                 request_body, request_len, signer_key_id_hex, sizeof(signer_key_id_hex)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->witness_checkpoint_anchor_coverage)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t coverage_read = 0u;
+            uint64_t unknown_checkpoints = 0u;
+            char unknown_key_id_hex
+                [AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MAX + 1] = "";
+            {
+               /* Sixteen raw bytes on the C side, thirty-two hex characters on
+                * the wire. Decoded strictly: a character that is not a hex digit
+                * fails the whole request rather than contributing a zero nibble,
+                * because a key id that is nearly right is not a key id. */
+               uint8_t
+                   key_id[AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_SIGNER_KEY_ID_HEX_MAX / 2];
+               int decoded = 1;
+               for (size_t byte = 0; decoded && byte < sizeof(key_id); byte++)
+               {
+                  unsigned value = 0;
+                  for (int nibble = 0; nibble < 2; nibble++)
+                  {
+                     char digit = signer_key_id_hex[byte * 2 + (size_t)nibble];
+                     if (digit >= '0' && digit <= '9')
+                        value = (value << 4) | (unsigned)(digit - '0');
+                     else if (digit >= 'a' && digit <= 'f')
+                        value = (value << 4) | (unsigned)(digit - 'a' + 10);
+                     else if (digit >= 'A' && digit <= 'F')
+                        value = (value << 4) | (unsigned)(digit - 'A' + 10);
+                     else
+                        decoded = 0;
+                  }
+                  key_id[byte] = (uint8_t)value;
+               }
+               int64_t unknown = 0;
+               if (decoded && backend->witness_checkpoint_anchor_coverage(
+                                  key_id, sizeof(key_id), &unknown, unknown_key_id_hex,
+                                  sizeof(unknown_key_id_hex)) == 0)
+               {
+                  coverage_read = 1u;
+                  unknown_checkpoints = unknown > 0 ? (uint64_t)unknown : 0u;
+               }
+               else
+                  unknown_key_id_hex[0] = '\0';
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_witness_checkpoint_anchor_coverage_reply_encode(
+                    coverage_read, unknown_checkpoints, unknown_key_id_hex, response_body,
+                    response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

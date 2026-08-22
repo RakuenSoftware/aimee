@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "cd1326ac1db484d876752e035d658919e0da2b606481cdf93259f046e0dc24e5"
+const ContractSHA256 = "e8b03d636dbc80e88f3ff0da1aefdf1a42852a03763d4ce805c2acbb2a623524"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -19317,6 +19317,80 @@ func DecodeVectorIndexOpRemoveRequest(request []byte) (uint64, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return pointID, nil
+}
+
+const EventWitnessCheckpointFreshness = EventMaintenance
+const StageWitnessCheckpointFreshness = FamilyMaintenance
+const OperationWitnessCheckpointFreshness uint32 = 71
+
+
+// EncodeWitnessCheckpointFreshnessRequest writes the schema witness_checkpoint_freshness declares, in order.
+func EncodeWitnessCheckpointFreshnessRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationWitnessCheckpointFreshness, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeWitnessCheckpointFreshnessRequest reads it back, checking each field against its own bound.
+func DecodeWitnessCheckpointFreshnessRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationWitnessCheckpointFreshness || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventWitnessCheckpointAnchorCoverage = EventMaintenance
+const StageWitnessCheckpointAnchorCoverage = FamilyMaintenance
+const OperationWitnessCheckpointAnchorCoverage uint32 = 72
+const WitnessCheckpointAnchorCoverageSignerKeyIDHexMin = 32
+const WitnessCheckpointAnchorCoverageSignerKeyIDHexMax = 32
+
+// EncodeWitnessCheckpointAnchorCoverageRequest writes the schema witness_checkpoint_anchor_coverage declares, in order.
+func EncodeWitnessCheckpointAnchorCoverageRequest(signerKeyIDHex string) ([]byte, error) {
+	if len(signerKeyIDHex) < WitnessCheckpointAnchorCoverageSignerKeyIDHexMin || len(signerKeyIDHex) > WitnessCheckpointAnchorCoverageSignerKeyIDHexMax || hasNUL(signerKeyIDHex) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, signerKeyIDHex, WitnessCheckpointAnchorCoverageSignerKeyIDHexMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationWitnessCheckpointAnchorCoverage, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeWitnessCheckpointAnchorCoverageRequest reads it back, checking each field against its own bound.
+func DecodeWitnessCheckpointAnchorCoverageRequest(request []byte) (string, error) {
+	var signerKeyIDHex string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationWitnessCheckpointAnchorCoverage || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if signerKeyIDHex, err = takeRowText(payload, &cursor, WitnessCheckpointAnchorCoverageSignerKeyIDHexMax); err != nil ||
+		len(signerKeyIDHex) < WitnessCheckpointAnchorCoverageSignerKeyIDHexMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return signerKeyIDHex, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

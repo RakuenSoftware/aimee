@@ -946,3 +946,63 @@ aimee_db2_vector_index_op_remove_call(aimee_db2_call_fn call, void *call_context
 
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_witness_checkpoint_freshness_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t *freshness_read, uint64_t *checkpoint_count, uint64_t *latest_age_seconds,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_WITNESS_CHECKPOINT_FRESHNESS_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_witness_checkpoint_freshness_request_encode(request, sizeof(request),
+                                                             &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_WITNESS_CHECKPOINT_FRESHNESS,
+            AIMEE_DB2_STAGE_WITNESS_CHECKPOINT_FRESHNESS, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_witness_checkpoint_freshness_reply_decode(
+           response, response_len, freshness_read, checkpoint_count, latest_age_seconds) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t aimee_db2_witness_checkpoint_anchor_coverage_call(
+    aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    const char *signer_key_id_hex, uint32_t *coverage_read, uint64_t *unknown_checkpoints,
+    char *unknown_key_id_hex, size_t unknown_key_id_hex_capacity,
+    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_RESPONSE_MAX_LEN];
+   const size_t response_capacity = sizeof(response);
+   uint32_t request_len = 0u;
+   uint32_t response_len = 0u;
+   if (aimee_db2_witness_checkpoint_anchor_coverage_request_encode(
+           signer_key_id_hex, request, sizeof(request), &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_WITNESS_CHECKPOINT_ANCHOR_COVERAGE,
+            AIMEE_DB2_STAGE_WITNESS_CHECKPOINT_ANCHOR_COVERAGE, trace_id, deadline_ns, request,
+            request_len, response, response_capacity, &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_witness_checkpoint_anchor_coverage_reply_decode(
+           response, response_len, coverage_read, unknown_checkpoints, unknown_key_id_hex,
+           unknown_key_id_hex_capacity) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+
+   return AIMEE_MODULE_CALL_OK;
+}

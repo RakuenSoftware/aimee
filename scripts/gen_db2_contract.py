@@ -14057,6 +14057,18 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_vector_index_op_remove",
         "policy": {"writes": 200},
     },
+    "witness_checkpoint_freshness": {
+        "key": ("maintenance", 71),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_witness_checkpoint_freshness",
+        "policy": {"reads": 200},
+    },
+    "witness_checkpoint_anchor_coverage": {
+        "key": ("maintenance", 72),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_witness_checkpoint_anchor_coverage",
+        "policy": {"reads": 200},
+    },
 }
 
 

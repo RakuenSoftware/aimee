@@ -4464,6 +4464,46 @@ int main(int argc, char **argv)
     * design, so the receipt would read the same either way. */
    assert(vector_index_op_remove_recorded == 1);
 
+   /* Batch 60: what the witness chain can be asked from a process holding no signing key. */
+   uint32_t witness_checkpoint_freshness_freshness_read = 99;
+   uint64_t witness_checkpoint_freshness_checkpoint_count = 99;
+   uint64_t witness_checkpoint_freshness_latest_age_seconds = 99;
+   assert(aimee_db2_witness_checkpoint_freshness_call(
+              call_client, &client, 9556, 0, &witness_checkpoint_freshness_freshness_read,
+              &witness_checkpoint_freshness_checkpoint_count,
+              &witness_checkpoint_freshness_latest_age_seconds, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* The read ran and the chain is empty, which is the pair this operation
+    * exists to keep apart: a kb with no checkpoints has no evidence yet and
+    * has not stalled, so the release gate must not close on it -- while a
+    * read that could not run must close it. Both arrive as a zero count and
+    * only the flag separates them. The age stays zero beside a zero count. */
+   assert(witness_checkpoint_freshness_freshness_read == 1 &&
+          witness_checkpoint_freshness_checkpoint_count == 0 &&
+          witness_checkpoint_freshness_latest_age_seconds == 0);
+
+   uint32_t witness_checkpoint_anchor_coverage_coverage_read = 99;
+   uint64_t witness_checkpoint_anchor_coverage_unknown_checkpoints = 99;
+   static char witness_checkpoint_anchor_coverage_unknown_key_id_hex
+       [AIMEE_DB2_WITNESS_CHECKPOINT_ANCHOR_COVERAGE_UNKNOWN_KEY_ID_HEX_MAX + 1];
+   witness_checkpoint_anchor_coverage_unknown_key_id_hex[0] = 'x';
+   assert(aimee_db2_witness_checkpoint_anchor_coverage_call(
+              call_client, &client, 9557, 0, "000102030405060708090a0b0c0d0e0f",
+              &witness_checkpoint_anchor_coverage_coverage_read,
+              &witness_checkpoint_anchor_coverage_unknown_checkpoints,
+              witness_checkpoint_anchor_coverage_unknown_key_id_hex,
+              sizeof(witness_checkpoint_anchor_coverage_unknown_key_id_hex), NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* Likewise: the check ran, and an empty chain holds no checkpoint signed
+    * by a key this caller cannot verify with. The sample stays empty because
+    * there is no offending key id to render, which is what a clean answer
+    * looks like -- and is why could-not-check is carried separately rather
+    * than arriving as the same three zeroes. The key id crossed as hex and
+    * was decoded here; the sixteen bytes reached the query. */
+   assert(witness_checkpoint_anchor_coverage_coverage_read == 1 &&
+          witness_checkpoint_anchor_coverage_unknown_checkpoints == 0 &&
+          witness_checkpoint_anchor_coverage_unknown_key_id_hex[0] == '\0');
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

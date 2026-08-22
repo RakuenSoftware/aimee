@@ -1833,4 +1833,12 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t point_id, uint32_t *recorded, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_witness_checkpoint_freshness_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *freshness_read, uint64_t *checkpoint_count, uint64_t *latest_age_seconds, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_witness_checkpoint_anchor_coverage_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *signer_key_id_hex, uint32_t *coverage_read, uint64_t *unknown_checkpoints, char *unknown_key_id_hex, size_t unknown_key_id_hex_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
 #endif /* AIMEE_DB2_CLIENT_H */

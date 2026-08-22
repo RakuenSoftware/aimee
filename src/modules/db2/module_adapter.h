@@ -16,6 +16,7 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "db2_witness_checkpoint.h"
 #include "org_telemetry.h"
 #include "vector_index_ops.h"
 #include "write_tier_grant.h"
@@ -675,6 +676,9 @@ typedef struct
    void (*vector_index_op_record)(int64_t point_id, const char *collection, int64_t memory_id,
                                   int ok, const char *error_msg);
    void (*vector_index_op_remove)(int64_t point_id);
+   int (*witness_checkpoint_freshness)(int64_t *out_count, int64_t *out_age_seconds);
+   int (*witness_checkpoint_anchor_coverage)(const uint8_t *key_id, size_t key_id_len,
+                                             int64_t *out_unknown, char *sample, size_t sample_cap);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

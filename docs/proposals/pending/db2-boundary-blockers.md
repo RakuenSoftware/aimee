@@ -163,54 +163,70 @@ call.
 Until one of those exists the sixty-six stay unreviewed, and the count is worth
 watching: it is roughly one in seven of what is left.
 
-## Twenty-seven declarations run whatever the host process installed into them
+## Thirty-three declarations run whatever the host process installed into them
 
 `src/modules/db2/include/aimee/db2/host_contracts.h` lets the surrounding
 process hand DB2 function pointers -- twelve registration functions covering
 embedding, fact extraction, retraction scanning, the fact gate, MDL scoring,
-audit hashing, identity keys, CSS analysis and the vault's crypto. Seven of
-them have a consumer inside the module today. The providers live in the process
-that installed them, and the module process installs none.
+audit hashing, identity keys, CSS analysis and rendering, and the vault's
+crypto, reseal and witness signing. Ten of them have a consumer inside the
+module today. The providers live in the process that installed them, and the
+module process installs none.
 
-This count has now been wrong twice, and how it was wrong is the useful part.
-The first search asked which declarations name a provider global in their own
-body, and found six. Following calls to a fixed point *within each file* found
-ten. Neither saw `db2_code_project_detach`, which reaches the audit hash
-through `db2_kb_audit_append_in_txn` in a different translation unit
-altogether. A call graph over the whole module finds twenty-seven, nine of them
-already published:
+This count has now been wrong three times, and how it was wrong each time is
+the useful part. The first search asked which declarations name a provider
+global in their own body, and found six. Following calls to a fixed point
+*within each file* found ten. Neither saw `db2_code_project_detach`, which
+reaches the audit hash through `db2_kb_audit_append_in_txn` in a different
+translation unit altogether, so a call graph over the whole module was written
+and found twenty-seven.
 
-    operation                      declaration                                   provider
-    artifact_write                 db2_artifact_write                            mdl_score
+That graph was right about reachability and wrong about what it was reaching
+for. It recognised a provider global by its `g_` prefix, and four of them do
+not carry one: `witness_provider`, `css_render_compare_provider` and the three
+`ci_css_*` globals are providers by every property that matters -- installed by
+an `aimee_db2_register_*_provider` function, null in the module process, and
+consulted before any work happens -- and fail to look like one only by their
+names. Reading the globals from what each registration function actually
+assigns, rather than from a naming convention, finds thirty-three, ten of
+them already published:
+
+    artifact_reject                db2_artifact_reject                           audit_hash,mdl_score
     artifact_set_state             db2_artifact_set_state                        mdl_score
-    artifact_reject                db2_artifact_reject                           mdl_score, audit_hash
+    artifact_write                 db2_artifact_write                            mdl_score
     audit_event_write              db2_audit_event_write                         audit_hash
-    kb_audit_append                db2_kb_audit_append                           audit_hash
-    corpus_pipeline_drain          db2_corpus_pipeline_drain                     mdl_score, audit_hash
-    curator_invalidate_doc         db2_curator_invalidate_doc                    mdl_score, audit_hash
+    calibration_profile_write      db2_calibration_profile_write                 mdl_score
+    corpus_pipeline_drain          db2_corpus_pipeline_drain                     audit_hash,mdl_score
+    curator_invalidate_doc         db2_curator_invalidate_doc                    audit_hash,mdl_score
     demotion_profile_write         db2_demotion_profile_write                    mdl_score
+    kb_audit_append                db2_kb_audit_append                           audit_hash
     retrieval_attribution_write    db2_demotion_retrieval_attribution_write      mdl_score
 
-Eighteen more are still pending review:
+Twenty-three more are still pending review:
 
+    canonical_index_scan_files                      ci_css_extract_tokens,ci_css_stylesheet_free
+    canonical_index_scan_project                    ci_css_extract_tokens,ci_css_stylesheet_free
     db2_artifact_review_rollback                    mdl_score
-    db2_calibration_profile_write                   mdl_score
     db2_code_project_detach                         audit_hash
     db2_code_project_gc_confirm                     audit_hash
     db2_code_project_purge_confirm                  audit_hash
+    db2_css_render_oracle_evaluate                  css_render_compare
+    db2_demotion_retrieval_event_merge_refs_turn    mdl_score
     db2_demotion_retrieval_event_write              mdl_score
     db2_demotion_retrieval_event_write_turn         mdl_score
-    db2_demotion_retrieval_event_merge_refs_turn    mdl_score
     db2_fact_commit                                 fact_gate
-    db2_fact_ingest_text                            fact_extract, fact_gate
-    db2_typed_fact_ingress                          fact_extract, fact_gate, fact_scan
+    db2_fact_ingest_text                            fact_extract,fact_gate
     db2_identity_intent_start                       identity_key
     db2_identity_login_context                      identity_key
+    db2_kb_pdf_search_chunks                        embed
+    db2_kb_service_async_queue_drain                embed
     db2_management_action_intent_start              identity_key
     db2_management_action_outcome_append            identity_key
     db2_management_read_intent_start                identity_key
-    db2_kb_pdf_search_chunks                        embed
-    db2_kb_service_async_queue_drain                embed
+    db2_typed_fact_ingress                          fact_extract,fact_gate,fact_scan
+    db2_witness_checkpoint_produce                  witness
+    db2_witness_checkpoint_verify_run               witness
+    db2_witness_emit_run                            witness
 
 What a missing provider does splits three ways, and only one of them is loud.
 
@@ -223,6 +239,18 @@ stays empty. `maintenance.corpus_pipeline_drain` only looks fine there because
 the replay corpus is empty; a drain with work to do runs stage handlers that
 reach the same provider.
 
+The witness declarations fail the same way, and the replay found that too
+rather than the reading did. `db2_witness_checkpoint_produce` builds its Merkle
+root and signs it through the provider, so in the module process it reads its
+leaves, gets a null signer, rolls back and returns an error -- the shard scan
+happens and no checkpoint is ever written. `db2_witness_checkpoint_verify_run`
+cannot derive the signer identity it verifies against, so it returns -1, which
+its own header says a caller must treat as "unverified, never clean".
+`db2_witness_checkpoint_freshness` and `_anchor_coverage` are pure SQL beside
+them and crossed the boundary without trouble, which is what makes the split
+visible: the chain can be measured from the module process and cannot be
+produced or checked there.
+
 `db2_kb_pdf_search_chunks` degrades and says so in its own comment: the vector
 leg is skipped and the lexical leg answers alone. Fewer results, no error, and
 the code is explicit that this is intended.
@@ -234,15 +262,19 @@ scorer was absent rather than the artifact unscorable. `db2_fact_commit`
 without its gate leaves the verdict at DEFER and writes no semantic edge --
 every edge withheld, and withheld looks exactly like rejected.
 `db2_typed_fact_ingress` treats a missing scanner as "no answer" and declines
-to retract, which is the safe direction and an equally quiet one.
+to retract, which is the safe direction and an equally quiet one. The two
+canonical-index scans reach the CSS token extractor the same way: a stylesheet
+contributes no class tokens and the scan reports success, so a project indexed
+from the module process has its CSS silently unlinked from the graph the CSS
+tree-sitter front-end now feeds.
 
 The seam is deliberate and documented; what is undecided is which side of the
 boundary each provider belongs on once DB2 is its own process. Embedding is a
-question about where model inference runs, and audit hashing is a question
-about who holds the signing material -- neither is really about DB2. Recorded
-here so that these twenty-seven are not migrated as ordinary reads and writes,
-and so that the next count is taken from a whole-program call graph rather than
-from a grep.
+question about where model inference runs, audit hashing and witness signing
+are questions about who holds the signing material -- none of them is really
+about DB2. Recorded here so that these thirty-three are not migrated as ordinary
+reads and writes, and so that the next count is taken from what the
+registration functions assign rather than from what the globals are called.
 
 ## One test declares its own copies of six DB2 row types and stubs them untyped
 
@@ -527,6 +559,38 @@ That is a decision for whoever owns the code graph, not for a migration moving
 existing calls onto a bus, and it is recorded here because the migration is
 what surfaced it: nine oversized list operations are the shape of a language
 that had to build its own index.
+
+## `db2_witness_emit_run` takes the consumer as an argument
+
+The witness provider already keeps this declaration on the host side, so it
+appears in the table above. It is recorded separately because installing the
+provider in the module process would not be enough: a second obstruction sits
+underneath, and that one is about shape rather than about who holds a key.
+
+`db2_witness_emit_run(sink, ctx, max_per_stream, stats)` drains the witness
+export streams, frames each record and each checkpoint into canonical bytes,
+and hands every frame to `sink` as it goes. The sink is not configuration
+installed once at startup: it is an argument of this call, it is invoked many
+times inside it, and what it returns decides what happens next. A frame the
+sink rejects stops the run at `DB2_WITNESS_EMIT_SINK_FAILED` and the cursor is
+deliberately not advanced past it, so the next tick re-emits exactly that
+frame. Never losing a frame is the entire point of the export.
+
+A request envelope can carry the budget and a reply can carry the stats. It
+cannot carry a function, and it cannot carry the interleaving: the module would
+have to call back into the caller once per frame, mid-run, with the cursor's
+fate depending on each answer. That is not a request/reply operation in a
+different dress -- it is a stream with backpressure, and the module protocol
+has no shape for one.
+
+Two shapes would work and both are decisions beyond this migration. The module
+could own the sink, which means moving the destination -- today
+`src/kb/kb_witness_cadence.c` base64-encodes each frame into the log -- across
+the boundary with it, and the destination is the part an operator configures.
+Or the frames could be pulled rather than pushed: an operation that returns the
+next N frames and a second that advances the cursor once the caller has them
+somewhere durable, which is a two-call protocol whose crash semantics have to
+be designed rather than derived.
 
 ## An answer that is a list and a summary has nowhere to go
 
