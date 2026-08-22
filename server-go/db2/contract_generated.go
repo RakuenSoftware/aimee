@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "87021b625ef51a843e18c4ec448f943a8e9b4bc104cc5206e046fa9ee42c703c"
+const ContractSHA256 = "70b89a3727e1dec9fe89305210999297c25af4990b5e406fecc733e7d01576dc"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -4199,6 +4199,111 @@ func DecodeMemoryPriorInSessionRequest(request []byte) (string, uint64, uint32, 
 		return "", 0, 0, ErrMalformedEnvelope
 	}
 	return sessionID, beforeMemoryID, rowLimit, nil
+}
+
+const EventLifecycleStalePending = EventMemory
+const StageLifecycleStalePending = FamilyMemory
+const OperationLifecycleStalePending uint32 = 137
+
+
+// EncodeLifecycleStalePendingRequest writes the schema lifecycle_stale_pending declares, in order.
+func EncodeLifecycleStalePendingRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationLifecycleStalePending, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLifecycleStalePendingRequest reads it back, checking each field against its own bound.
+func DecodeLifecycleStalePendingRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleStalePending || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+const EventLifecycleNewlySuperseded = EventMemory
+const StageLifecycleNewlySuperseded = FamilyMemory
+const OperationLifecycleNewlySuperseded uint32 = 138
+const LifecycleNewlySupersededSinceMin = 0
+const LifecycleNewlySupersededSinceMax = 31
+
+// EncodeLifecycleNewlySupersededRequest writes the schema lifecycle_newly_superseded declares, in order.
+func EncodeLifecycleNewlySupersededRequest(since string) ([]byte, error) {
+	if len(since) < LifecycleNewlySupersededSinceMin || len(since) > LifecycleNewlySupersededSinceMax || hasNUL(since) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, since, LifecycleNewlySupersededSinceMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationLifecycleNewlySuperseded, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLifecycleNewlySupersededRequest reads it back, checking each field against its own bound.
+func DecodeLifecycleNewlySupersededRequest(request []byte) (string, error) {
+	var since string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleNewlySuperseded || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if since, err = takeRowText(payload, &cursor, LifecycleNewlySupersededSinceMax); err != nil ||
+		len(since) < LifecycleNewlySupersededSinceMin {
+		return "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", ErrMalformedEnvelope
+	}
+	return since, nil
+}
+
+const EventLifecycleUnresolvedContradictions = EventMemory
+const StageLifecycleUnresolvedContradictions = FamilyMemory
+const OperationLifecycleUnresolvedContradictions uint32 = 139
+
+
+// EncodeLifecycleUnresolvedContradictionsRequest writes the schema lifecycle_unresolved_contradictions declares, in order.
+func EncodeLifecycleUnresolvedContradictionsRequest() ([]byte, error) {
+	var payload []byte
+	header, err := EncodeRequestHeader(OperationLifecycleUnresolvedContradictions, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeLifecycleUnresolvedContradictionsRequest reads it back, checking each field against its own bound.
+func DecodeLifecycleUnresolvedContradictionsRequest(request []byte) (error) {
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationLifecycleUnresolvedContradictions || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor != len(payload) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 const EventEntityObservationCount = EventIndex

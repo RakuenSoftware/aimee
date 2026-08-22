@@ -13829,6 +13829,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_list_prior_in_session",
         "policy": {"reads": 200},
     },
+    "lifecycle_stale_pending": {
+        "key": ("memory", 137),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lifecycle_list_stale_pending",
+        "policy": {"reads": 200},
+    },
+    "lifecycle_newly_superseded": {
+        "key": ("memory", 138),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lifecycle_list_newly_superseded",
+        "policy": {"reads": 200},
+    },
+    "lifecycle_unresolved_contradictions": {
+        "key": ("memory", 139),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_memory_lifecycle_list_unresolved_contradictions",
+        "policy": {"reads": 200},
+    },
 }
 
 

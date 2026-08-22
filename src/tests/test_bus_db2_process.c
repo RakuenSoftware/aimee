@@ -3954,6 +3954,35 @@ int main(int argc, char **argv)
               &memory_prior_in_session_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(memory_prior_in_session_count == 0);
 
+   /* The three lifecycle lists, over a corpus with no memories. */
+   static aimee_db2_lifecycle_stale_pending_row_t
+       lifecycle_stale_pending_rows[AIMEE_DB2_LIFECYCLE_STALE_PENDING_MAX_ROWS];
+   uint32_t lifecycle_stale_pending_count = 99;
+   assert(aimee_db2_lifecycle_stale_pending_call(
+              call_client, &client, 9517, 0, lifecycle_stale_pending_rows,
+              AIMEE_DB2_LIFECYCLE_STALE_PENDING_MAX_ROWS, &lifecycle_stale_pending_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(lifecycle_stale_pending_count == 0);
+
+   static aimee_db2_lifecycle_newly_superseded_row_t
+       lifecycle_newly_superseded_rows[AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MAX_ROWS];
+   uint32_t lifecycle_newly_superseded_count = 99;
+   assert(aimee_db2_lifecycle_newly_superseded_call(
+              call_client, &client, 9518, 0, "2026-01-01T00:00:00Z",
+              lifecycle_newly_superseded_rows, AIMEE_DB2_LIFECYCLE_NEWLY_SUPERSEDED_MAX_ROWS,
+              &lifecycle_newly_superseded_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(lifecycle_newly_superseded_count == 0);
+
+   static aimee_db2_lifecycle_unresolved_contradictions_row_t
+       lifecycle_unresolved_contradictions_rows
+           [AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_MAX_ROWS];
+   uint32_t lifecycle_unresolved_contradictions_count = 99;
+   assert(aimee_db2_lifecycle_unresolved_contradictions_call(
+              call_client, &client, 9519, 0, lifecycle_unresolved_contradictions_rows,
+              AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_MAX_ROWS,
+              &lifecycle_unresolved_contradictions_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(lifecycle_unresolved_contradictions_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -3517,6 +3517,30 @@ int db2_memory_list_prior_in_session(const char *session_id, int64_t before_id, 
    return 0;
 }
 
+int db2_memory_lifecycle_list_stale_pending(db2_memory_lifecycle_stale_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_lifecycle_list_newly_superseded(const char *since,
+                                               db2_memory_lifecycle_superseded_t *out, int max)
+{
+   (void)since;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_lifecycle_list_unresolved_contradictions(db2_memory_lifecycle_conflict_t *out,
+                                                        int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

@@ -18434,9 +18434,15 @@
           "line": 103
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lifecycle_newly_superseded operation lists memories recently superseded. An empty since is not the beginning of time: the backend substitutes seven days, so a caller asking without a bound gets a week rather than everything, and cannot ask for everything at all. Superseded-at is the row's updated stamp rather than a supersession stamp, so any later edit to a superseded memory moves it back into this window."
+      },
       "signature": "int db2_memory_lifecycle_list_newly_superseded ( const char * since , db2_memory_lifecycle_superseded_t * out , int max )",
       "signature_sha256": "ce4364d49ac4c66d2a7b59f8aedb795cfc1cee02d0f5058c8b42628265cb9cd2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lifecycle_list_newly_superseded"
     },
     {
@@ -18449,9 +18455,15 @@
           "line": 100
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lifecycle_stale_pending operation lists pending memories past their deadline. A pending memory whose deadline is empty is absent -- memory.lifecycle_mark_pending always writes one, but memory.lifecycle_update_state can move a memory to pending without one, so the two writers disagree about whether a pending memory has a deadline and this list only sees the half that does. The ordering puts a scope expression ahead of age, so the oldest is not necessarily first."
+      },
       "signature": "int db2_memory_lifecycle_list_stale_pending ( db2_memory_lifecycle_stale_t * out , int max )",
       "signature_sha256": "f4ad7c36d7160ee5b0d2ef0981018e624f2b621a95e6ca4e625d6b852f0dd721",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lifecycle_list_stale_pending"
     },
     {
@@ -18464,9 +18476,15 @@
           "line": 101
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.lifecycle_unresolved_contradictions operation lists contradictions with the text of both sides, so a reader can judge them without a second read. Only the first memory's key is returned, not the second's -- so the two sides are not symmetric in what a caller can see, and identifying the second requires another read. It is the third operation here that lists unresolved contradictions, alongside memory.conflict_list and the directive counts, each returning a different shape of the same rows."
+      },
       "signature": "int db2_memory_lifecycle_list_unresolved_contradictions ( db2_memory_lifecycle_conflict_t * out , int max )",
       "signature_sha256": "4e76fe6f59262e7ec4dcbd85c50a143bfe1b9eedc600dd23505dc18faaac382a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_lifecycle_list_unresolved_contradictions"
     },
     {
@@ -28195,15 +28213,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c58b1d8d5f4a9be472243d399b2c6f88e55dad3755fd31c4a2b0668bba0ea91f",
+  "fingerprint": "d4e1815a0312b57b6d4be5f5afd76adcc2b30d0aa2ae5b45202e92dfc58ff328",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 267,
+    "audit_pending": 264,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 692
+    "reviewed": 695
   }
 }

@@ -611,6 +611,10 @@ typedef struct
    int (*memory_search_by_pattern)(const char *pattern, db2_memory_search_match_t *out, int max);
    int (*memory_prior_in_session)(const char *session_id, int64_t before_id, int limit,
                                   db2_memory_prior_row_t *out, int max);
+   int (*lifecycle_stale_pending)(db2_memory_lifecycle_stale_t *out, int max);
+   int (*lifecycle_newly_superseded)(const char *since, db2_memory_lifecycle_superseded_t *out,
+                                     int max);
+   int (*lifecycle_unresolved_contradictions)(db2_memory_lifecycle_conflict_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -3740,6 +3740,30 @@
       "reason": "The typed memory.lifecycle_get_state operation reads one memory's lifecycle state. An empty column is answered as active, so a memory whose state was never written reads exactly like one that is active -- and memory.lifecycle_counts, which groups by the same column, counts that memory under no state at all. The two operations disagree about the same row. A memory that is not there and a read that failed are both an empty answer."
     },
     {
+      "symbol": "db2_memory_lifecycle_list_newly_superseded",
+      "signature_sha256": "ce4364d49ac4c66d2a7b59f8aedb795cfc1cee02d0f5058c8b42628265cb9cd2",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_newly_superseded operation lists memories recently superseded. An empty since is not the beginning of time: the backend substitutes seven days, so a caller asking without a bound gets a week rather than everything, and cannot ask for everything at all. Superseded-at is the row's updated stamp rather than a supersession stamp, so any later edit to a superseded memory moves it back into this window."
+    },
+    {
+      "symbol": "db2_memory_lifecycle_list_stale_pending",
+      "signature_sha256": "f4ad7c36d7160ee5b0d2ef0981018e624f2b621a95e6ca4e625d6b852f0dd721",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_stale_pending operation lists pending memories past their deadline. A pending memory whose deadline is empty is absent -- memory.lifecycle_mark_pending always writes one, but memory.lifecycle_update_state can move a memory to pending without one, so the two writers disagree about whether a pending memory has a deadline and this list only sees the half that does. The ordering puts a scope expression ahead of age, so the oldest is not necessarily first."
+    },
+    {
+      "symbol": "db2_memory_lifecycle_list_unresolved_contradictions",
+      "signature_sha256": "4e76fe6f59262e7ec4dcbd85c50a143bfe1b9eedc600dd23505dc18faaac382a",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.lifecycle_unresolved_contradictions operation lists contradictions with the text of both sides, so a reader can judge them without a second read. Only the first memory's key is returned, not the second's -- so the two sides are not symmetric in what a caller can see, and identifying the second requires another read. It is the third operation here that lists unresolved contradictions, alongside memory.conflict_list and the directive counts, each returning a different shape of the same rows."
+    },
+    {
       "symbol": "db2_memory_lifecycle_mark_pending",
       "signature_sha256": "097028fd4e99b43e70c24715c33cda20a790e4cf77c8021a07873f1a2a3fe0ba",
       "disposition": "wire-operation",
