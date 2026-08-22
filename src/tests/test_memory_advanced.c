@@ -1497,24 +1497,21 @@ int main(void)
          {
             char key[64];
             snprintf(key, sizeof(key), "stress:%d", i);
-            memory_t m;
-            memory_insert(TIER_L2, KIND_FACT, key, "I'll ship this next week", 0.9, "s1", &m);
-
-            char ageq[512];
+            char ageq[1024];
             int age_days = 90 - (i % 90); /* 1..90 */
             char created_ts[TEST_TS_MAX], ttl_ts[TEST_TS_MAX];
             test_ts_days(created_ts, sizeof(created_ts), -age_days);
             test_ts_days(ttl_ts, sizeof(ttl_ts), -age_days + 10);
             snprintf(ageq, sizeof(ageq),
-                     "UPDATE memories SET lifecycle_state = 'pending',"
-                     " created_at = '%s', ttl_at = '%s'"
-                     " WHERE key = '%s'",
-                     created_ts, ttl_ts, key);
+                     "INSERT INTO memories(tier,kind,key,content,confidence,source_session,"
+                     " lifecycle_state,created_at,ttl_at) VALUES('L2','fact','%s',"
+                     " 'I''ll ship this next week',0.9,'s1','pending','%s','%s')",
+                     key, created_ts, ttl_ts);
             err[0] = '\0';
             int urc = aimee_pg_exec(db2_conn(), ageq, err, sizeof(err));
             if (urc != 0)
             {
-               fprintf(stderr, "stress update failed at i=%d: %s\nSQL: %s\n", i, err, ageq);
+               fprintf(stderr, "stress seed failed at i=%d: %s\nSQL: %s\n", i, err, ageq);
                assert(0);
             }
          }
