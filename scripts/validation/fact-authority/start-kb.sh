@@ -13,6 +13,11 @@ export AIMEE_HOME=/root/.config/aimee
 export AIMEE_DB2_URL="postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared"
 export AIMEE_KB_HTTP_BIND=1
 export AIMEE_KB_API_BEARER_TOKEN="$(cat /root/kb-bearer.txt)"
+# OIDC, when an issuer has been minted. kb verifies an RS256 bearer against this
+# JWKS file and pins iss/aud, so the whole issuer is three env vars and a
+# document -- no network IdP. Sourced rather than hardcoded so a container
+# without make-oidc-idp.sh still starts in owner-bearer mode.
+[ -f /root/.config/aimee-oidc/env.sh ] && . /root/.config/aimee-oidc/env.sh
 # Start the curator's LLM lane, which is where the memory_facts drain runs (the
 # lane will not start without a CONFIGURED endpoint -- see kb_curator_drain.c).
 #

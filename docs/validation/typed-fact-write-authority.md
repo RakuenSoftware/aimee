@@ -674,3 +674,99 @@ that a cert or OIDC caller is now treated as that account rests on
 `server_account_is_person` being account-keyed plus the unit matrix over all
 four account forms -- which is a much smaller inferential step than the transport
 table required, but it is not the same as having run one.
+
+## mTLS and OIDC, proven live
+
+The correction above was first reported with these two paths covered by unit
+assertion only. That was a limitation to remove, not to report, and removing it
+found a defect that made one of them unusable in production.
+
+### mTLS
+
+`test-mtls-authority.sh`. Legs 2 and 3 are the whole test: same port, same TLS,
+same bearer, same body, and the ONLY difference is whether a client certificate
+is presented.
+
+| leg | request | result |
+|---|---|---|
+| 1 | certificate from an unrelated CA | refused at the handshake (curl rc=56) |
+| 2 | TLS + bearer, **no** certificate | 403 (caps), alice `A current` |
+| 3 | TLS + the same bearer + trusted certificate | 200 `retracted:1`, alice `A gone` |
+| 4 | the same certificate, Class-B fact | 200 `retracted:1` |
+
+Under the transport table legs 2 and 3 were both MODEL. Leg 1 stops this being
+read as "any certificate is accepted"; leg 4 stops it being read as "the
+endpoint retracts for anyone".
+
+Four things had to be built, and each failed in a way that named the wrong
+component:
+
+- **db1.** `server_tls_init_default()` runs the mTLS ramp self-test at startup,
+  and that test IS db1 stage 19 (db1-pki). Without the module the ramp refuses
+  and the operator is told `tls_port=8743 set but TLS cert/key not loadable` --
+  which blames a certificate that is fine. It also needs its own
+  `AIMEE_DB1_PATH`, and refuses outright rather than guessing, which is right.
+- **The client certificate must be issued by aimee.** Verification is two gates:
+  the chain against `mtls_client_ca`, then the serial against the durable roster
+  (`pki_cert_check` then `db1_pki_cert_check`). An openssl-made cert clears the
+  first and fails the second as "no longer valid (revoked, expired, or
+  unrecognized)" -- which reads like a revocation rather than a cert that was
+  never aimee's.
+- **The server identity must NOT be hand-made.** An existing `server.crt` is
+  authoritative and its key is sealed into the Vault on first load, with the
+  on-disk copy erased. Regenerating it orphans the vaulted key
+  (`Vault-held server TLS key does not match ...`) and TLS silently stops
+  serving. Removing the cert lets pki generate and vault its own.
+- **The certificate must be enrolled.** A verified cert still stops at the
+  write-tier wall until its serial is bound to a grant
+  (`db1_remote_client_tier`). `enroll-client-cert.sh` writes the row the wizard
+  flow would have left behind.
+
+### OIDC, and a defect that made it unusable
+
+`test-oidc-authority.sh`, every leg over plain TCP so transport is constant:
+
+| leg | request | result |
+|---|---|---|
+| 1 | JWT signed by a key **absent** from the JWKS | `unauthorized`, alice `A current` |
+| 2 | no credential | `unauthorized`, alice `A current` |
+| 3 | the real OIDC bearer | `retracted:1`, alice `A gone` |
+| 4 | the same bearer, Class-B fact | `retracted:1` |
+
+No network IdP is needed: kb verifies an RS256 bearer against a JWKS **file**,
+so an issuer is a keypair, a JWKS document and a signer (`make-oidc-idp.sh`).
+
+Getting there surfaced a real defect. Every OIDC bearer was rejected as
+`unauthorized`, with a correct signature, a matching JWKS modulus, and matching
+iss/aud/sub/exp. The cause was `char auth_val[512]` on the kb's plain-HTTP
+listener (`kb_http_conn.c`), and `header_value()` **silently truncating** to fit:
+a valid credential became a mangled one, which then failed verification and was
+reported as a rejected credential.
+
+Measured on the box, same key and same JWKS both times:
+
+    338-byte token (plus 7 for "Bearer ")  ->  {"status":"ok"}
+    509-byte token (plus 7 for "Bearer ")  ->  {"error":"unauthorized"}
+
+A 2048-bit RS256 signature is 342 base64url characters on its own, and ordinary
+claims (`nbf`, `azp`, `scope`, `email`, `name`) push a routine IdP token past 700
+bytes. **OIDC bearer auth over that listener was unusable for essentially every
+real token**, and it failed as an authentication error, so it looked like a bad
+credential rather than a request the server never read in full. aimee-server has
+always sized its own bearer buffer for exactly this
+(`server_http_identity.c`, `tl_bearer[4097]`); the kb side had not, and the TLS
+front end already answered 400 for the same condition while the plain path could
+not, because `header_value` had no way to report it.
+
+Fixed: the buffer matches the server's, and an over-long Authorization header is
+now a 400 that says so rather than a 401 that misattributes it.
+
+### What that leaves
+
+Both account forms the design names -- OIDC and PAM host accounts -- and the
+machine identity that accompanies them are now exercised against running
+daemons, not asserted. The one account form still covered by unit assertion
+alone is a **PAM host account presented to aimee-server over TCP**: that path
+needs the management JWKS plane (signed envelope, manifest, and a hash-pinned
+trust bundle cached in DB1) to verify a kb-issued identity token, which is a
+provisioning exercise in its own right and is not what this charter changed.
