@@ -1216,6 +1216,39 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "demotion_profile_read",
+			stage: db2contract.StageDemotionProfileRead,
+			// Three lookups run against a schema holding no profile, so all
+			// three fall through -- and the CTE that stamps what it finds has
+			// to plan even when it finds nothing.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDemotionProfileReadRequest(
+					"live-probe-class", "project", "live-probe-scope")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				profile, err := db2contract.DecodeDemotionProfileReadReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if profile != "" {
+					t.Fatalf("profile = %q where none is committed", profile)
+				}
+			},
+		},
+		{
+			name:  "learning_proposal_find_pending",
+			stage: db2contract.StageLearningProposalFindPending,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLearningProposalFindPendingRequest(
+					"rules", "live-probe-key", 1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeLearningProposalFindPendingReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -2235,6 +2268,86 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "artifact_cite",
+			stage: db2contract.StageArtifactCite,
+			// artifact_citations carries a foreign key into artifacts, so the
+			// citing artifact has to exist for the insert to reach its own
+			// conflict clause.
+			seed:   []string{liveProbeArtifact},
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactCiteRequest(
+					liveProbeArtifactID, "kb_document", "900010")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeArtifactCiteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the citation was not recorded")
+				}
+			},
+		},
+		{
+			name:  "artifact_link",
+			stage: db2contract.StageArtifactLink,
+			// Both ends have to exist, so a second artifact is seeded beside
+			// the first.
+			seed:   []string{liveProbeArtifact, liveProbeArtifactTarget},
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactLinkRequest(
+					liveProbeArtifactID, liveProbeArtifactTargetID, "supersedes")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeArtifactLinkReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the link was not recorded")
+				}
+			},
+		},
+		{
+			name:  "collab_rule_propose",
+			stage: db2contract.StageCollabRulePropose,
+			// The gating WHERE has to plan and admit: a rule is expected back,
+			// which is what tells an INSERT ... SELECT that inserted from one
+			// that did not.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCollabRuleProposeRequest(
+					"live probe rule", "live probe reason", "live-probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				id, err := db2contract.DecodeCollabRuleProposeReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if id == 0 {
+					t.Fatal("no rule was raised; the cap subquery may have refused it")
+				}
+			},
+		},
+		{
+			name:  "task_update_state",
+			stage: db2contract.StageTaskUpdateState,
+			seed:  []string{liveProbeTask},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTaskUpdateStateRequest(liveProbeTaskID, "done")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				changed, err := db2contract.DecodeTaskUpdateStateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if changed != 1 {
+					t.Fatal("a task that exists did not change state")
+				}
+			},
+		},
 	}
 }
 
@@ -2358,6 +2471,16 @@ const (
 	liveProbeDocID = 900009
 	liveProbeDoc   = `INSERT INTO docs (id, content_hash, filename)
  VALUES (900009, 'live-probe-content-hash', 'live-probe.md')`
+)
+
+// A second artifact for the link probe, and a task for the state probe.
+const (
+	liveProbeArtifactTargetID = "live-probe-artifact-target"
+	liveProbeArtifactTarget   = `INSERT INTO artifacts (id, kind, state, payload)
+ VALUES ('live-probe-artifact-target', 'live-probe', 'committed', '{}'::jsonb)`
+	liveProbeTaskID = 900010
+	liveProbeTask   = `INSERT INTO tasks (id, title, state, created_at, updated_at)
+ VALUES (900010, 'live probe task', 'open', '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
