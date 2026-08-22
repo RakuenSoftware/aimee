@@ -85,7 +85,7 @@ curator_profile_t curator_profile_select(int vram_mb, const char *endpoint_url)
 
 /* Persist a profile's curator settings.
  *
- * This took a config_t * and mutated it in place, leaving the caller to own the
+ * This took a legacy_config_record * and mutated it in place, leaving the caller to own the
  * load and the save. Writing through the config module's setters means no
  * caller needs the struct — and the settings are actually persisted rather than
  * left in a caller's copy that may never be saved. */

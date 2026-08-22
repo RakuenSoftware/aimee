@@ -143,16 +143,17 @@ int main(void)
    int s = db2_entity_edge_search_by_token("zoe", ze, 16, 16);
    assert(s == 1 && strcmp(ze[0].relation, "co_seen_with") == 0);
 
-   /* Traversal: both populations. */
+   /* Traversal: co-occurrence plus reviewed semantic assertions. The model
+    * assertion above is still a candidate, so it remains quarantined. */
    int w = db2_entity_edge_walk_step("zoe", ze, 16);
-   assert(w == 2);
+   assert(w == 1);
    assert(edge_relation_present(ze, w, "co_seen_with"));
-   assert(edge_relation_present(ze, w, "works_for"));
+   assert(!edge_relation_present(ze, w, "works_for"));
    db2_entity_neighbor_t nb[16];
    int nn = db2_entity_edge_neighbors("zoe", nb, 16, 50);
-   assert(nn == 2);
+   assert(nn == 1);
    assert(neighbor_node_present(nb, nn, "quux"));
-   assert(neighbor_node_present(nb, nn, "initech"));
+   assert(!neighbor_node_present(nb, nn, "initech"));
 
    /* A retracted fact leaves the walk. Semantic edges carry transaction-time
     * state that co-occurrence edges do not, so admitting them to the walk is

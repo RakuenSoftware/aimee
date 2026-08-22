@@ -37,7 +37,7 @@ struct ev
 
 static const struct ev SESSION[] = {
     {"read_file", "{\"file_path\":\"src/config.c\"}",
-     "config_load parses aimee.yaml; the session.virtual_context block sets "
+     "legacy_config_read parses aimee.yaml; the session.virtual_context block sets "
      "virtual_context_enabled. Default flipped on for the rollout.",
      3400},
     {"bash", "{\"command\":\"grep -rn virtual_context_enabled src\"}",

@@ -198,7 +198,7 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
 {
    if (!path || !path[0])
       return 0;
-   /* config_load here mirrors the per-call pattern already used elsewhere in
+   /* legacy_config_read here mirrors the per-call pattern already used elsewhere in
     * this file (it is cheap and reads the cached config). Default-off: when the
     * flag is unset — or the config is unreadable, which leaves the default 0 —
     * this is a no-op, matching the feature's opt-in nature. */

@@ -12,8 +12,9 @@ extern "C"
 {
 #endif
 
-   /* SELECT DISTINCT kind FROM memories WHERE tier = ?. Fills `out` with up
-    * to `max` short kind strings (15 chars + NUL each); returns count. */
+   /* SELECT DISTINCT epistemic_kind FROM memories WHERE tier = ?. The field is
+    * retained as `kind` in this compatibility type, but lifecycle selection is
+    * exclusively epistemic. */
    typedef struct
    {
       char kind[16];
@@ -21,6 +22,10 @@ extern "C"
 
    int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promotion_kind_t *out,
                                                int max);
+   /* Expiry policy is the one lifecycle operation keyed by epistemic kind.
+    * Keep it separate from content-kind promotion/calibration (P6). */
+   int db2_memory_promotion_list_epistemic_kinds_in_tier(const char *tier,
+                                                         db2_memory_promotion_kind_t *out, int max);
 
    /* L1 -> L2 promotion for a single kind, with the kind's own thresholds.
     * `ts` is the updated_at value to stamp. Returns rows changed. */

@@ -87,11 +87,11 @@ class CProcessBuildTests(unittest.TestCase):
         descriptor = self.descriptor()
         descriptor["c_build"]["header_dependencies"] = [
             "src/headers/aimee.h",
-            "src/modules/config/config.h",
+            "src/headers/config_embedder_dims.h",
         ]
         files = exporter.module_repository_files("db2", descriptor)
         self.assertIn("src/headers/aimee.h", files)
-        self.assertIn("src/modules/config/config.h", files)
+        self.assertIn("src/headers/config_embedder_dims.h", files)
         self.assertNotIn(
             "src/headers/aimee.h", exporter.module_owned_files("db2", descriptor)
         )

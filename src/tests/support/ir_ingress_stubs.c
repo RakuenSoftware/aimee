@@ -6,18 +6,9 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "config.h"              /* config_t + econ_preset_t (for the econ_preset stub) */
+#include "config.h"
 #include "gateway_mutate_wire.h" /* gw_mutate_ctx_t + gw_post_action_t (header-only deps) */
 #include "agent_exec.h"
-
-/* The minimal ingress links do not carry config.o. Mirror the production hard-kill
- * resolver so the real immutable wire-snapshot fence can be exercised. */
-__attribute__((weak)) int econ_mode(const config_t *cfg)
-{
-   if (!cfg || cfg->module_economizer == 0)
-      return ECON_MODE_OFF;
-   return cfg->economizer_mode;
-}
 
 /* Exact-length transport adapters for ingress tests whose capture doubles expose
  * the historical string API. Production links the real byte-counted transport. */
@@ -282,24 +273,9 @@ __attribute__((weak)) int gw_response_governance_enabled(void)
    return 1;
 }
 
-/* The economizer gateway-seam stubs that used to live here are gone with the C
- * reducer. context_reduce / context_reduce_result_free / agent_record_reduce_ledger
- * no longer exist anywhere, and gw_economizer_measure has no caller in the ingress,
- * so nothing here needs resolving. econ_preset stays: anthropic_http.c / openai_chat.c
- * still gate on it. */
-/* Inert weak preset: returns an all-zero preset (gateway_seam off) so the shadow
- * block is never entered. The real config.o wins when linked. */
-__attribute__((weak)) void econ_preset(const config_t *cfg, econ_preset_t *out)
-{
-   (void)cfg;
-   if (out)
-      memset(out, 0, sizeof(*out));
-}
-
 /* Config-surface slice: the ingress now resolves module toggles via config_module_enabled
- * (memory slot + governance egress). It is a pure resolver; the minimal-link ingress tests
- * stub config_load (not the whole config.o), so provide the real logic as a weak symbol here
- * (config.o's strong definition wins when a test links it). */
+ * (memory slot + governance egress). It is a pure resolver, so provide the real
+ * logic as a weak symbol for minimal-link tests. */
 __attribute__((weak)) int config_module_enabled(int config_tristate, int env_default)
 {
    if (config_tristate == 0 || config_tristate == 1)

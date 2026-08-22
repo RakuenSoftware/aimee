@@ -15,13 +15,10 @@
 #include "modules/db2/c/db2_test_shim.h"
 #include "../kb_reasoning.h"
 #include "config.h"
-#include "config_learning.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* The "disabled" cases below assert that an unset reasoning.datalog_command
- * returns -1. They used to guarantee that precondition with memset on a local
- * config_t; now that the reasoning entry points read config themselves, the
- * precondition has to come from the config they read. Point HOME at an empty
+ * returns -1. Point HOME at an empty
  * temp dir so it is the suite that decides, not whatever the developer running
  * it happens to have configured -- otherwise a machine with a real
  * datalog_command would both fail here AND execute it. */
@@ -34,8 +31,7 @@ static void isolate_home(void)
    assert(setenv("HOME", g_home, 1) == 0);
    assert(unsetenv("AIMEE_HOME") == 0);
    assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
-   /* No aimee.yaml written: config_load fills defaults, and the default
-    * reasoning.datalog_command is empty -- which is the condition under test. */
+   assert(config_set_reasoning_datalog_command("") == 0);
    assert(config_reasoning_datalog_command()[0] == '\0');
 }
 
@@ -91,13 +87,9 @@ static void test_reasoning_query_disabled(void)
 /* ---- 4. config_reasoning_defaults ---- */
 static void test_config_reasoning_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_reasoning_settings(&cfg, NULL);
-
-   assert(cfg.reasoning_datalog_command[0] == '\0');
-   assert(cfg.reasoning_row_budget == 0);
-   assert(cfg.reasoning_time_limit_ms == 0);
+   assert(config_reasoning_datalog_command()[0] == '\0');
+   assert(config_reasoning_row_budget() == 0);
+   assert(config_reasoning_time_limit_ms() == 0);
 
    printf("  config_reasoning_defaults: ok\n");
 }
@@ -106,8 +98,6 @@ static void test_config_reasoning_defaults(void)
 static void test_reasoning_case_recall_disabled(void)
 {
    open_db();
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
    kb_reasoning_case_result_t results[4];
    int rc = kb_reasoning_case_recall("{}", NULL, NULL, results, 4);
    /* disabled (no sidecar) or empty DB — both return >= 0 or -1 */

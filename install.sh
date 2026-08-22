@@ -234,12 +234,12 @@ fi
 #   (provisioned by bootstrap_postgres in install-deps.sh).
 # Remote: point this install at an existing aimee-kb over HTTP; no local sidecar
 #   and no Postgres. The choice persists as kb_client_url / kb_client_bearer_token
-#   in aimee.yaml (the file aimee-server reads via config_load); the server
+#   in aimee.yaml (the file aimee-server reads through the config module); the server
 #   exports them to AIMEE_KB_API_URL / AIMEE_KB_API_BEARER_TOKEN at startup
 #   (every launch path), and the kb unit is only enabled in local mode.
 #   AIMEE_KB_MODE is exported for install-deps.sh.
 # aimee config lives in aimee.yaml (YAML), not config.json — that is the file
-# config_load / aimee-server actually read. These helpers upsert/read/remove a
+# the config module / aimee-server actually read. These helpers upsert/read/remove a
 # top-level scalar key without a YAML library, matching aimee's own unquoted
 # config_save emit (cf. db2_url with colons). Column-0-anchored so nested keys
 # are never matched.

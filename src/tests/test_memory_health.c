@@ -40,20 +40,42 @@ static int edge_weight_max(const char *relation)
    return v;
 }
 
-/* Insert a semantic edge with an explicit §5 lifecycle state. Written straight to
- * SQL rather than through db2_fact_commit so the test can pin confidence_class,
- * weight and asserted_at exactly, without standing up the fact-gate provider. */
+/* Insert a semantic edge with an explicit §5 lifecycle state. The fixture owns
+ * an explicit graph changeset so it exercises the database transaction guard,
+ * while still pinning confidence_class, weight and asserted_at exactly. */
 static void insert_semantic_edge(const char *source, const char *relation, const char *target,
                                  const char *cls, double confidence, int weight,
                                  const char *asserted_at)
 {
+   static unsigned long fixture_seq = 0;
    char qerr[256] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
-                        "INSERT INTO entity_edges (source, relation, target, weight, edge_class,"
-                        " confidence_class, confidence, asserted_at, superseded_at, suppressed)"
-                        " VALUES (?1, ?2, ?3, ?4, 'semantic', ?5, ?6, ?7, '', 0)",
-                        qerr, sizeof(qerr));
+   char commit_id[64];
+   snprintf(commit_id, sizeof(commit_id), "test-memory-health-%lu", ++fixture_seq);
+
+   aimee_pg_stmt_t *commit = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO fact_graph_commits (commit_id, operation, actor_principal, actor_role,"
+       " authority_rank, status) VALUES (?1, 'test.fixture', 'test', 'test', 100, 'open')",
+       qerr, sizeof(qerr));
+   assert(commit);
+   aimee_pg_bind_text(commit, "?1", commit_id);
+   assert(aimee_pg_step(commit, qerr, sizeof(qerr)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(commit);
+
+   const char *insert_sql =
+       aimee_pg_is_shim()
+           ? "INSERT INTO entity_edges (source, relation, target, weight, edge_class,"
+             " confidence_class, confidence, asserted_at, superseded_at, suppressed,"
+             " lifecycle_state, commit_id)"
+             " VALUES (?1, ?2, ?3, ?4, 'semantic', ?5, ?6, ?7, '', 0, 'candidate', ?8)"
+           : "WITH inserted AS (INSERT INTO entity_edges (source, relation, target, weight,"
+             " edge_class,confidence_class,confidence,asserted_at,superseded_at,suppressed,"
+             " lifecycle_state,commit_id) VALUES (?1,?2,?3,?4,'semantic',?5,?6,?7,'',0,"
+             " 'candidate',?8) RETURNING id)"
+             " INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,"
+             " existed_after,after_lifecycle,after_confidence,after_version)"
+             " SELECT ?8,id,'assert',0,1,'candidate',?6,1 FROM inserted RETURNING assertion_id";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), insert_sql, qerr, sizeof(qerr));
    assert(st);
    aimee_pg_bind_text(st, "?1", source);
    aimee_pg_bind_text(st, "?2", relation);
@@ -62,21 +84,69 @@ static void insert_semantic_edge(const char *source, const char *relation, const
    aimee_pg_bind_text(st, "?5", cls);
    aimee_pg_bind_double(st, "?6", confidence);
    aimee_pg_bind_text(st, "?7", asserted_at);
-   assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_DONE);
+   aimee_pg_bind_text(st, "?8", commit_id);
+   int insert_step = aimee_pg_step(st, qerr, sizeof(qerr));
+   assert(insert_step == (aimee_pg_is_shim() ? AIMEE_PG_DONE : AIMEE_PG_ROW));
+   int64_t assertion_id = aimee_pg_is_shim() ? 0 : aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
+
+   if (aimee_pg_is_shim())
+   {
+      st = aimee_pg_prepare(db2_conn(),
+                            "SELECT id FROM entity_edges WHERE source=?1 AND relation=?2"
+                            " AND target=?3 ORDER BY id DESC LIMIT 1",
+                            qerr, sizeof(qerr));
+      assert(st);
+      aimee_pg_bind_text(st, "?1", source);
+      aimee_pg_bind_text(st, "?2", relation);
+      aimee_pg_bind_text(st, "?3", target);
+      assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
+      assertion_id = aimee_pg_column_int64(st, 0);
+      aimee_pg_finalize(st);
+   }
+
+   /* Preserve the old fixture's convenient `weight == confirmations` shape,
+    * but represent those confirmations in the authoritative evidence ledger. */
+   for (int i = 0; i < weight; i++)
+   {
+      char source_id[96];
+      snprintf(source_id, sizeof(source_id), "%s-evidence-%d", commit_id, i + 1);
+      st = aimee_pg_prepare(db2_conn(),
+                            "INSERT INTO fact_evidence(assertion_id,source_kind,source_id,"
+                            " actor_principal,observed_at,commit_id)"
+                            " VALUES(?1,'test_fixture',?2,'test',?3,?4)",
+                            qerr, sizeof(qerr));
+      assert(st);
+      aimee_pg_bind_int64(st, "?1", assertion_id);
+      aimee_pg_bind_text(st, "?2", source_id);
+      aimee_pg_bind_text(st, "?3", asserted_at);
+      aimee_pg_bind_text(st, "?4", commit_id);
+      assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_DONE);
+      aimee_pg_finalize(st);
+   }
+
+   commit = aimee_pg_prepare(db2_conn(),
+                             "UPDATE fact_graph_commits SET status='applied' WHERE commit_id=?1",
+                             qerr, sizeof(qerr));
+   assert(commit);
+   aimee_pg_bind_text(commit, "?1", commit_id);
+   assert(aimee_pg_step(commit, qerr, sizeof(qerr)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(commit);
 }
 
-/* (superseded_at, confidence) for a semantic edge, so the test can tell an
- * expired row from a live one and a durable row from an unconfirmed one. */
+/* (retirement timestamp, confidence) for a semantic edge, so the test can tell
+ * an invalidated/superseded row from a live one and a durable row from an
+ * unconfirmed one. */
 static void semantic_edge_state(const char *source, const char *relation, char *out_superseded,
                                 size_t cap, double *out_confidence)
 {
    char qerr[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(),
-                                          "SELECT superseded_at, confidence FROM entity_edges"
-                                          " WHERE source = ?1 AND relation = ?2"
-                                          "   AND edge_class = 'semantic' LIMIT 1",
-                                          qerr, sizeof(qerr));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "SELECT CASE WHEN invalidated_at<>'' THEN invalidated_at ELSE superseded_at END,"
+       " confidence FROM entity_edges WHERE source = ?1 AND relation = ?2"
+       " AND edge_class = 'semantic' LIMIT 1",
+       qerr, sizeof(qerr));
    assert(st);
    aimee_pg_bind_text(st, "?1", source);
    aimee_pg_bind_text(st, "?2", relation);
@@ -437,8 +507,8 @@ int main(void)
        * the co-occurrence rule — and a maintenance cycle just ran. If the prune
        * treated them as co-occurrence edges they would have been DELETEd rather
        * than stamped, and the reads above would have found nothing at all. Assert
-       * the rows are still present, including the one expiry superseded: a
-       * superseded fact is archived, not erased. */
+       * the rows are still present, including the invalidated expiry: retiring
+       * a fact archives its assertion and evidence history rather than erasing it. */
       char qerr[128] = "";
       aimee_pg_stmt_t *st =
           aimee_pg_prepare(db2_conn(),
@@ -454,13 +524,12 @@ int main(void)
       /* Weight normalisation must not touch typed facts either. The same cycle
        * that runs the lifecycle jobs also rescales edge weights per relation so
        * the maximum is 100 -- which is meaningful for a co-occurrence tally and
-       * destructive for a semantic edge, where weight IS the confirmation count
-       * the §5 thresholds read (promote_durable weight>=threshold,
-       * expire_speculative weight<=1).
+       * destructive for a semantic edge, where weight retains the legacy
+       * observation count even though §5 decisions now read fact_evidence.
        *
        * Give 'works_for' a co-occurrence edge heavy enough to set the scale.
        * Before the fix, lifecycle-b (weight 5) was rescaled and the Class A row
-       * went 1 -> 20, which on the next cycle is "confirmed 20 times". */
+       * went 1 -> 20, corrupting the assertion's historical observation count. */
       insert_semantic_edge("norm-a", "works_for", "norm-corp", "A", 1.0, 1, "2026-01-01 00:00:00");
       {
          char qerr2[128] = "";
@@ -498,7 +567,7 @@ int main(void)
                            sizeof(qerr3));
       assert(w);
       assert(aimee_pg_step(w, qerr3, sizeof(qerr3)) == AIMEE_PG_ROW);
-      assert(aimee_pg_column_int(w, 0) == 5); /* still five confirmations, not 100 */
+      assert(aimee_pg_column_int(w, 0) == 5); /* preserved legacy count, not 100 */
       aimee_pg_finalize(w);
       printf("semantic_weight_not_normalised OK ");
    }

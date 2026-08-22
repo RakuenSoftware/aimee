@@ -1971,7 +1971,7 @@ static int server_agent_route_is_degraded(const char *agent_name)
  * explicit agent policy plus review-role membership; they do not invent a
  * second hidden exclusion based on the configured primary provider.
  * The gate is config-independent (it reads the agent record), so it holds even
- * when config_load would fail. */
+ * when legacy_config_read would fail. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
 {
    if (!ag)

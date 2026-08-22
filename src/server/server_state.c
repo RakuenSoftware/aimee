@@ -1715,7 +1715,7 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * config_reload_if_changed() tick — the same read-your-writes fix workspace.add
     * already carries, which this path was simply never given.
     *
-    * config_load() returns the SNAPSHOT in the server, not the file, so until that
+    * legacy_config_read() returns the SNAPSHOT in the server, not the file, so until that
     * tick every reader still saw the removed entry. Measured: `workspace remove`
     * followed immediately by `workspace add` answered "already registered", and a
     * second `workspace remove` answered "removed" again — both reading a registry

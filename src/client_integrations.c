@@ -3,7 +3,7 @@
 #include "aimee_client.h"
 #include "cli_client.h"
 #include "aimee_home.h"
-#include "yaml.h"
+#include "client_config.h"
 #include "platform_path.h"
 #include "platform_process.h"
 #include "cJSON.h"
@@ -26,10 +26,6 @@ void client_integrations_set_delegate_probe(int (*probe)(void))
 {
    g_delegate_probe = probe;
 }
-
-/* Defined further down; forward-declared for ensure_subagent_ban (which sits
- * beside ensure_claude_code_hooks, above the definition). */
-static int client_config_bool(const char *key, int default_val);
 
 typedef enum
 {
@@ -1630,7 +1626,7 @@ static void remove_permissions_deny_tool(cJSON *root, const char *tool, int *dir
  * install nor tear down on a transient outage. */
 static void ensure_subagent_ban(cJSON *root, cJSON *hooks, int *dirty)
 {
-   /* Config opt-out is checked FIRST, from local aimee.yaml — no server call. So
+   /* Config opt-out is checked FIRST through the server config contract. So
     * `subagent_ban_enabled: false` reliably tears the ban down even when the
     * server is unreachable, and we never probe when the operator has opted out. */
    if (!client_config_bool("subagent_ban_enabled", 1))
@@ -2194,82 +2190,11 @@ static void ensure_copilot_integration(const char *home)
    cJSON_Delete(root);
 }
 
-/* Read a single top-level boolean from aimee.yaml, returning default_val when
- * the file is absent/unparseable or the key is missing. client_integrations.c
- * links into the thin, DB-free CLI client, which excludes config.c (and thus
- * config_load), so we read the key directly with the lightweight yaml + cJSON
- * primitives the thin client does link, from the same path config_load uses
- * (aimee_home()/aimee.yaml). */
-static int client_config_bool(const char *key, int default_val)
-{
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return default_val;
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   FILE *fp = fopen(path, "r");
-   if (!fp)
-      return default_val;
-   fseek(fp, 0, SEEK_END);
-   long sz = ftell(fp);
-   fseek(fp, 0, SEEK_SET);
-   if (sz < 0 || sz >= (long)(1 << 20))
-   {
-      fclose(fp);
-      return default_val;
-   }
-   char *buf = malloc((size_t)sz + 1);
-   if (!buf)
-   {
-      fclose(fp);
-      return default_val;
-   }
-   size_t n = fread(buf, 1, (size_t)sz, fp);
-   fclose(fp);
-   buf[n] = '\0';
-
-   cJSON *root = yaml_parse(buf);
-   free(buf);
-
-   int val = default_val;
-   if (cJSON_IsObject(root))
-   {
-      cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
-      if (cJSON_IsBool(item))
-         val = cJSON_IsTrue(item);
-   }
-   if (root)
-      cJSON_Delete(root);
-   return val;
-}
-
 static client_tool_transport_preference_t client_tool_transport_preference(void)
 {
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return CLIENT_TOOL_TRANSPORT_CLI_FIRST;
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-   dstr_t content;
-   dstr_init(&content);
-   if (dstr_read_file(&content, path) != 0)
-   {
-      dstr_free(&content);
-      return CLIENT_TOOL_TRANSPORT_CLI_FIRST;
-   }
-
-   cJSON *root = yaml_parse(content.data ? content.data : "");
-   dstr_free(&content);
-   cJSON *item = cJSON_IsObject(root)
-                     ? cJSON_GetObjectItemCaseSensitive(root, "client_tool_transport_preference")
-                     : NULL;
-   client_tool_transport_preference_t preference =
-       client_tool_transport_parse(cJSON_IsString(item) ? item->valuestring : NULL);
-   cJSON_Delete(root);
-   return preference;
+   char value[32];
+   client_config_string("client_tool_transport_preference", value, sizeof(value), "cli-first");
+   return client_tool_transport_parse(value);
 }
 
 /* Whether aimee is allowed to auto-register itself into external AI-tool user

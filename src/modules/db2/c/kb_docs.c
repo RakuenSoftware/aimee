@@ -215,21 +215,11 @@ int db2_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
 
 int db2_kb_doc_delete(int64_t id)
 {
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "DELETE FROM docs WHERE id=?1", err, sizeof(err));
-   if (!st)
-      return -1;
-
-   aimee_pg_bind_int64(st, "?1", id);
-
-   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
-   int changed = aimee_pg_stmt_changes(st);
-   aimee_pg_finalize(st);
-   return (rc == AIMEE_PG_DONE && changed > 0) ? 0 : -1;
+   /* Retained as an ABI compatibility symbol only.  Physical removal must go
+    * through document_lifecycle_preview/apply so the evidence, derived-memory,
+    * trace and receipt changes are atomic. */
+   (void)id;
+   return -1;
 }
 
 int db2_kb_doc_list_review(int limit, int64_t cursor_id, db2_kb_doc_t *out, int max_out)

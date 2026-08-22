@@ -69,10 +69,10 @@ static void scratch_env(char *tmpdir, size_t cap)
    platform_setenv("HOME", tmpdir);
    platform_setenv("AIMEE_NO_CACHE", "1");
 
-   config_t cfg;
-   config_load(&cfg);
-   assert(config_save(&cfg) == 0);
-   assert(db1_init(cfg.db1_path) == 0);
+   char db_path[4096];
+   snprintf(db_path, sizeof(db_path), "%s/aimee.db", tmpdir);
+   assert(config_set_db1_path(db_path) == 0);
+   assert(db1_init(config_db1_path()) == 0);
    db1_shutdown();
 }
 

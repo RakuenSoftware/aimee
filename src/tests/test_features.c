@@ -28,7 +28,6 @@
 #include "../kb_ranker.h"
 #include "../kb_detect.h"
 #include "config.h"
-#include "config_learning.h"
 
 static void open_db(void)
 {
@@ -146,10 +145,6 @@ static void test_ranker_model_write(void)
 static void test_ranker_rerank_noop(void)
 {
    /* When no model is loaded in the global cache, rerank returns 0. */
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_enabled = 1;
-
    int64_t ids[3] = {10, 20, 30};
    double lex[3] = {0.5, 0.6, 0.4};
    double dense[3] = {0.7, 0.8, 0.6};
@@ -179,10 +174,6 @@ static void test_ranker_rerank_sketch_features(void)
    assert(rc == 0);
    assert(kb_ranker_model_load() == 0);
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_enabled = 1;
-
    int64_t ids[2] = {10, 20};
    double lex[2] = {0.0, 0.0};
    double dense[2] = {0.0, 0.0};
@@ -203,13 +194,9 @@ static void test_ranker_rerank_sketch_features(void)
 /* ---- 9. config_ranking_defaults ---- */
 static void test_config_ranking_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_ranking_settings(&cfg, NULL);
-
-   assert(cfg.kb_ranker_enabled == 0);
-   assert(cfg.ranker_fuse_command[0] == '\0');
-   assert(cfg.drift_detect_shadow_enabled == 0);
+   assert(config_kb_ranker_enabled() == 0);
+   assert(config_ranker_fuse_command()[0] == '\0');
+   assert(config_drift_detect_shadow_enabled() == 0);
 
    printf("  config_ranking_defaults: ok\n");
 }
@@ -217,9 +204,7 @@ static void test_config_ranking_defaults(void)
 /* ---- 10. drift_detect_disabled ---- */
 static void test_drift_detect_disabled(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.drift_detect_shadow_enabled = 0;
+   assert(config_set("drift_detect_shadow_enabled", "false") == 0);
 
    int rc = kb_detect_observe(0.85, 10);
    assert(rc == 0);

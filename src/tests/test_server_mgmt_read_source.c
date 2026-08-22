@@ -33,7 +33,7 @@ int agent_is_available_for_routing(const agent_t *agent)
 }
 
 /* server_mgmt_read_load_config reads these five through accessors now rather than
- * copying them out of a config_t. Same five values the config_load stub set.
+ * copying them out of a legacy_config_record. Same five values the legacy_config_read stub set.
  *
  * That stub also filled the rest of the struct with 0xa5 so a whole-struct copy
  * into the output would be visible; with the struct gone from this seam there is

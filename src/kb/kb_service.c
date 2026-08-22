@@ -1,5 +1,5 @@
 #include "aimee.h"
-#include "config.h" /* config_load — reembed default embedder */
+#include "config.h" /* legacy_config_read — reembed default embedder */
 #include "kb_background.h"
 #include "kb_service.h"
 #include "kb_service_code_embed.h"

@@ -23,6 +23,7 @@
 #include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "modules/db2/c/db_postgres.h"  /* aimee_pg_* */
 #include "kb_audit_worm.h"              /* db2_kb_audit_append / verify / count */
+#include "config_embedder_dims.h"       /* CONFIG_EMBEDDER_DIMS_DEFAULT */
 
 #include <assert.h>
 #include <stdio.h>
@@ -173,6 +174,11 @@ int main(void)
    snprintf(mk, sizeof(mk), "rm -rf %s && mkdir -p %s", home, home);
    assert(system(mk) == 0);
    setenv("AIMEE_HOME", home, 1);
+
+   /* Real-PG tests bypass the production entry points, so they must perform the
+    * same explicit width injection as cmd_core/kb_main before db2_init(). */
+   db2_set_embedding_dim_default(CONFIG_EMBEDDER_DIMS_DEFAULT);
+   db2_set_embedding_dim(CONFIG_EMBEDDER_DIMS_DEFAULT);
 
    if (db2_init(url) != 0)
    {

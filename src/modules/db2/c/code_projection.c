@@ -618,7 +618,8 @@ int db2_code_projection_edge_upsert(int64_t gen_id, const char *project, const c
                             "  projection_generation_id = excluded.projection_generation_id,"
                             "  weight = entity_edges.weight,"
                             "  utility_score = entity_edges.utility_score,"
-                            "  utility_touched_at = entity_edges.utility_touched_at";
+                            "  utility_touched_at = entity_edges.utility_touched_at"
+                            " WHERE entity_edges.edge_class <> 'semantic'";
    char err[CP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

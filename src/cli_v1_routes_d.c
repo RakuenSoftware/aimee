@@ -261,64 +261,14 @@ static int write_delegate_output_file(const char *path, const char *text)
    return 0;
 }
 
-/* The remote-endpoint resolvers below are portable (env + aimee.yaml, no UDS)
+/* The remote-endpoint resolvers below are portable (env + remote.conf, no UDS)
  * and MUST compile on Windows too: cli_v1_forward calls them unconditionally
  * and the Windows thin client always takes the remote /v1 path. */
 
-/* cli_v1_aimee_yaml_value: scan <aimee_home>/aimee.yaml for the first
- * (non-comment) line containing <key> and return its malloc'd, unquoted value,
- * or NULL when absent/empty. The full config_t parser is not linked into the
- * thin client, so the api.client_* settings are read with this lightweight
- * scan. Caller frees. */
-static char *cli_v1_aimee_yaml_value(const char *key)
-{
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return NULL;
-   char path[512];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-   FILE *fp = fopen(path, "r");
-   if (!fp)
-      return NULL;
-
-   char *result = NULL;
-   char line[512];
-   while (fgets(line, sizeof(line), fp))
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-      if (*p == '#')
-         continue; /* comment line */
-      char *k = strstr(line, key);
-      if (!k)
-         continue;
-      k += strlen(key);
-      while (*k == ' ' || *k == '\t')
-         k++;
-      char val[256];
-      int i = 0;
-      while (*k && *k != '\n' && *k != '\r' && *k != '#' && i < (int)sizeof(val) - 1)
-      {
-         if (*k != '"' && *k != '\'')
-            val[i++] = *k;
-         k++;
-      }
-      while (i > 0 && (val[i - 1] == ' ' || val[i - 1] == '\t'))
-         i--;
-      val[i] = '\0';
-      if (val[0])
-         result = strdup(val);
-      break;
-   }
-   fclose(fp);
-   return result;
-}
-
 /* cli_v1_client_endpoint: a remote aimee-server /v1 endpoint for the HTTP
  * transport — "tcp:host:port" (or an explicit "unix:/path"). AIMEE_API_ENDPOINT
- * overrides; otherwise aimee.api.client_endpoint in aimee.yaml. NULL means no
- * remote is configured and the caller falls back to the local aimee-http.sock.
+ * overrides; otherwise the explicit remote target is used. NULL means no remote
+ * is configured and the caller falls back to the local aimee-http.sock.
  * This is the only client path that reaches an aimee-server on another host
  * (e.g. a container's published port); the aimee-http.sock helpers above are
  * loopback-only. Caller frees. */
@@ -368,13 +318,6 @@ char *cli_v1_client_endpoint(void)
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
       return cli_v1_normalize_endpoint(env);
-   char *yaml = cli_v1_aimee_yaml_value("client_endpoint:");
-   if (yaml)
-   {
-      char *norm = cli_v1_normalize_endpoint(yaml);
-      free(yaml);
-      return norm;
-   }
    /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
     * by synthesizing the transport endpoint cli_http_request expects: "tls:" for
     * an https:// target (native client TLS, #304), else "tcp:". This makes the
@@ -392,17 +335,13 @@ char *cli_v1_client_endpoint(void)
 }
 
 /* cli_v1_client_bearer: bearer token sent with the remote HTTP transport.
- * AIMEE_API_BEARER overrides; otherwise the `bearer_token:` key in aimee.yaml
- * (the same value aimee-server reads for aimee.api.bearer_token). NULL means no
- * Authorization header. Caller frees. */
+ * AIMEE_API_BEARER overrides; otherwise use the explicit remote credential.
+ * Credentials are never read from public config storage. Caller frees. */
 char *cli_v1_client_bearer(void)
 {
    const char *env = getenv("AIMEE_API_BEARER");
    if (env && env[0])
       return strdup(env);
-   char *yaml = cli_v1_aimee_yaml_value("bearer_token:");
-   if (yaml)
-      return yaml;
    /* Token for a synthesized aimee_client endpoint: --server-token /
     * AIMEE_SERVER_TOKEN / remote.conf line 2. */
    char tok[300];
@@ -430,7 +369,7 @@ void cli_v1_warn_no_endpoint(const char *method)
            "aimee: no remote aimee-server is configured, so '%s' cannot run.\n"
            "  aimee is a thin client: there is no co-located server to fall back to.\n"
            "  set one with: aimee remote set https://<host>:8743\n"
-           "  (or aimee.api.client_endpoint in aimee.yaml, or AIMEE_API_ENDPOINT)\n",
+           "  (or set AIMEE_API_ENDPOINT)\n",
            method ? method : "this command");
 }
 
@@ -454,7 +393,7 @@ int cli_v1_has_remote_endpoint(void)
    }
    return 0;
 #else
-   /* Windows has no UDS path and no AIMEE_API_ENDPOINT/aimee.yaml config: its
+   /* Windows has no UDS path and no AIMEE_API_ENDPOINT config: its
     * remote target comes from aimee_client (AIMEE_SERVER_URL or --server). Report
     * that so the dispatcher skips the (always-failing) local-socket preflight and
     * lets cli_v1_forward route over the remote /v1 via aimee_client_request. */

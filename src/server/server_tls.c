@@ -2,7 +2,7 @@
  * client-cert verification + revocation. */
 #include "server_tls.h"
 #include "server_conn_io.h" /* register/clear the per-conn SSL on the I/O shim */
-#include "config.h"         /* config_default_dir, config_load */
+#include "config.h"         /* config_default_dir, legacy_config_read */
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
 #include "log.h"

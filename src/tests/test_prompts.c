@@ -15,7 +15,7 @@
 #include "dstr.h"
 
 /* Point config at a temp dir this test owns and write the keys the case needs.
- * prompt_apply_* read live config now instead of taking a config_t, so a case
+ * prompt_apply_* read live config now instead of taking a legacy_config_record, so a case
  * that does not write its own precondition would inherit the developer's real
  * aimee.yaml and quietly stop testing what it names. Per-pid path rather than
  * mkdtemp() on a static buffer, which fails on a second call. */

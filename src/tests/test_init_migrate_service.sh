@@ -25,10 +25,17 @@ export AIMEE_SOCK="$SOCKET"
 # (server/provider_cli_adapter.c).
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 SERVER_PID=""
+CONFIG_PID=""
+CONFIG_MODULE="$REPO_ROOT/src/build/obj/aimee-module-config"
+MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 PASS=0
 FAIL=0
 
 cleanup() {
+    if [ -n "$CONFIG_PID" ]; then
+        kill "$CONFIG_PID" 2>/dev/null || true
+        wait "$CONFIG_PID" 2>/dev/null || true
+    fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
@@ -97,9 +104,17 @@ sys.stdout.write(status)
 
 require_binary "$AIMEE"
 require_binary "$AIMEE_SERVER"
+require_binary "$CONFIG_MODULE"
 
-mkdir -p "$AIMEE_HOME" "$SERVICE_BIN_DIR"
+mkdir -p "$AIMEE_HOME/modules.d/server" "$SERVICE_BIN_DIR"
 cp "$AIMEE_SERVER" "$SERVICE_SERVER"
+CONFIG_GRANT="$REPO_ROOT/src/build/obj/module-bundle/grants/server/config.grant"
+if [ ! -r "$CONFIG_GRANT" ]; then
+    python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+        --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null
+fi
+sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$CONFIG_GRANT" \
+    >"$AIMEE_HOME/modules.d/server/config.grant"
 cat > "$SERVICE_BIN_DIR/aimee-kb" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -122,6 +137,16 @@ chmod +x "$SERVICE_SERVER" "$SERVICE_BIN_DIR/aimee-kb"
 
 "$SERVICE_SERVER" --foreground >/dev/null 2>&1 &
 SERVER_PID=$!
+
+# The server validates configuration before opening HTTP. Attach the required
+# pure-Go module as soon as the daemon creates its event-bus socket.
+for _ in $(seq 1 300); do
+    [ -S "$MODULE_BUS_SOCK" ] && break
+    kill -0 "$SERVER_PID" 2>/dev/null || break
+    sleep 0.1
+done
+"$CONFIG_MODULE" "$MODULE_BUS_SOCK" >"$HOME/config-module.log" 2>&1 &
+CONFIG_PID=$!
 
 # Wait for the server to actually bind its HTTP socket instead of guessing with a
 # fixed `sleep 1`. On a loaded CI runner startup regularly takes several seconds,

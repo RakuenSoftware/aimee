@@ -105,8 +105,8 @@ static void golden(const char *provider, const char *model, const char *expect)
    cJSON_Delete(req);
 }
 
-/* Drive the knob through the REAL config file rather than materialising a config_t.
- * config_t is a secret of the config module (check-config-encapsulation), so a test may
+/* Drive the knob through the REAL config file rather than materialising a legacy_config_record.
+ * legacy_config_record is a secret of the config module (check-config-encapsulation), so a test may
  * not name it -- and going through aimee.yaml is the better test anyway: it exercises the
  * extended_thinking parse in config_sections.c, which a struct poke would skip entirely.
  * AIMEE_NO_CACHE forces a re-read per rewrite so on and off can alternate in-process. */

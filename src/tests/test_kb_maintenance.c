@@ -122,14 +122,12 @@ static void test_config_defaults_are_disabled_but_complete(void)
    assert(setenv("HOME", tmpdir, 1) == 0);
    assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
 
-   config_t cfg;
-   assert(config_load(&cfg) == 0);
-   assert(cfg.kb_maintenance_enabled == 0);
-   assert(cfg.kb_maintenance_interval_hours == 24);
-   assert(fabs(cfg.kb_maintenance_lambda - 0.005) < TOL);
-   assert(fabs(cfg.kb_maintenance_floor - 0.10) < TOL);
-   assert(cfg.kb_maintenance_min_age_days == 7);
-   assert(cfg.kb_maintenance_orphan_days == 90);
+   assert(config_kb_maintenance_enabled() == 0);
+   assert(config_kb_maintenance_interval_hours() == 24);
+   assert(fabs(config_kb_maintenance_lambda() - 0.005) < TOL);
+   assert(fabs(config_kb_maintenance_floor() - 0.10) < TOL);
+   assert(config_kb_maintenance_min_age_days() == 7);
+   assert(config_kb_maintenance_orphan_days() == 90);
 
    if (old_home_buf[0])
       assert(setenv("HOME", old_home_buf, 1) == 0);

@@ -87,7 +87,7 @@ and `aimee kb` commands, learning, skills, response-composition, and KB ingestio
 ## Providers and readiness
 
 Memory is ready only when durable storage can open and the configured embedding path has a compatible
-dimension; semantic ranking additionally requires the reranking path selected by `config_t`.
+dimension; semantic ranking additionally requires the reranking path selected by `legacy_config_record`.
 Lexical fallbacks may preserve a degraded lookup journey, but they do not make a deployment compliant
 with the required embedding-and-reranking capability boundary.
 

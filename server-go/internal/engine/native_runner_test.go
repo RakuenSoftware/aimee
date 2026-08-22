@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
+	appconfig "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"

@@ -21,7 +21,7 @@ int subcmd_dispatch(const subcmd_t *table, const char *name, app_ctx_t *ctx, int
 void subcmd_usage(const char *parent, const subcmd_t *table);
 
 /* Load config and open DB1, aborting with `errmsg` on failure. Replaces the
- * repeated config_t + config_load + db1_init + fatal prolog in command handlers
+ * repeated legacy_config_record + legacy_config_read + db1_init + fatal prolog in command handlers
  * that only need DB1 (not other config fields). */
 void cmd_require_db1(const char *errmsg);
 
@@ -226,7 +226,6 @@ const subcmd_t *get_mcp_subcmds(void);
 /* cmd_autopilot.c */
 void cmd_autopilot(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_autopilot_subcmds(void);
-
 
 /* cmd_run.c */
 void cmd_run(app_ctx_t *ctx, int argc, char **argv);
