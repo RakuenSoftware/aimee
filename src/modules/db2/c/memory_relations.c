@@ -409,9 +409,26 @@ int db2_memory_entity_profile_stats(const char *normalized_entity, int *mention_
        "SELECT"
        " (SELECT COUNT(DISTINCT men.memory_id) FROM memory_entities men"
        "   WHERE LOWER(men.entity) = LOWER(?1)" MR_PROFILE_MENTION_SCOPE "),"
-       " (SELECT COUNT(*) FROM memory_relations mrc"
+       /* memory_relations AND entity_edges. The typed-fact layer writes
+        * entity_edges; this counted only the older table, so an entity known
+        * ONLY through typed facts reported relation_count 0 -- and because
+        * `hit` is (mentions > 0 OR relations > 0), it had no profile at all.
+        * Measured: `user` and `Dana` were both live sources in entity_edges and
+        * both answered "entity profile not found", while an entity with one
+        * mention and no typed facts got a card saying relation_count 0.
+        *
+        * Currency is the product's own definition (db2_fact_current_count):
+        * persistent or promoted, not superseded, invalidated or suppressed. A
+        * quarantined candidate is a proposal, not a relation this entity has. */
+       " ((SELECT COUNT(*) FROM memory_relations mrc"
        "   WHERE (LOWER(mrc.src_entity) = LOWER(?2)"
-       "      OR LOWER(mrc.dst_entity) = LOWER(?3))" MR_PROFILE_RELATION_SCOPE "),"
+       "      OR LOWER(mrc.dst_entity) = LOWER(?3))" MR_PROFILE_RELATION_SCOPE ")"
+       "  + (SELECT COUNT(*) FROM entity_edges eec"
+       "      WHERE (LOWER(eec.source) = LOWER(?8) OR LOWER(eec.target) = LOWER(?9))"
+       "        AND eec.edge_class = 'semantic'"
+       "        AND eec.lifecycle_state IN ('persistent','promoted')"
+       "        AND eec.superseded_at = '' AND eec.invalidated_at = ''"
+       "        AND eec.suppressed = 0)),"
        " COALESCE((SELECT me.episode_key FROM memory_episodes me"
        "            JOIN memory_relations mre ON mre.episode_id = me.id"
        "            WHERE (LOWER(mre.src_entity) = LOWER(?4)"
@@ -433,6 +450,8 @@ int db2_memory_entity_profile_stats(const char *normalized_entity, int *mention_
    aimee_pg_bind_text(st, "?5", normalized_entity);
    aimee_pg_bind_text(st, "?6", normalized_entity);
    aimee_pg_bind_text(st, "?7", normalized_entity);
+   aimee_pg_bind_text(st, "?8", normalized_entity);
+   aimee_pg_bind_text(st, "?9", normalized_entity);
    db2_memory_scope_bind_current(st);
    int hit = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)

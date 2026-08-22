@@ -1095,3 +1095,57 @@ recording:
 - moving the db1 binary aside did not remove db1: `install-db1-module.sh`
   refuses on a missing binary BEFORE it reaches its own `pkill`, so a module
   started by an earlier run stayed attached and answered the ramp perfectly well
+
+## The two graph surfaces
+
+Both were recorded earlier as data-model judgement calls. They turned out to be
+different from each other: one was a defect with a small correct fix, the other
+is genuinely a decision, and the attempt to treat it as a defect was wrong.
+
+### `memory.entity_profile` could not see typed facts — fixed
+
+`db2_memory_entity_profile_stats` counted relations from `memory_relations`
+only. The typed-fact layer writes `entity_edges`. Because the "found" test is
+`(mentions > 0 OR relations > 0)`, an entity known ONLY through typed facts had
+no profile at all:
+
+    user   -> "entity profile not found"    (2 live entity_edges, 0 mentions)
+    Dana   -> "entity profile not found"    (live entity_edges, 0 mentions)
+    deployment runbook -> profile, relation_count 0   (1 mention, no typed facts)
+
+The relation count now sums both tables, with currency defined as the product
+defines it (`db2_fact_current_count`: persistent or promoted, not superseded,
+invalidated or suppressed) so a quarantined candidate is not counted as a
+relation the entity has. Verified against ground truth rather than by the call
+succeeding:
+
+    entity: user  (live typed-fact edges: 2, memory_entities mentions: 0)
+    {"status":"ok","profile":{"entity":"user","mention_count":0,"relation_count":2,...}}
+
+The probe deliberately picks an entity with typed-fact edges and NO mentions,
+because an entity with mentions would have been found either way and would prove
+nothing.
+
+### `relations.schema_list` is empty for a reason — and my fix was wrong
+
+I tried to make this surface truthful by serving the compiled seed ontology when
+`memory_relation_schema` is empty, on the reasoning that the seed is what the
+enforcement path actually uses. That was wrong, and the test caught it.
+
+`memory_relation_schema.relation_id` is a `memory_relation_kind_t`: the
+CODE-GRAPH ontology (`depends_on`, `implements`, `fixes`, `calls`, `tests`,
+`authored_by`). The typed-fact seed is a different vocabulary entirely
+(`works_for`, `has_email`, `lives_in`). Feeding seed relations through that
+struct mapped every one of them through `memory_ontology_relation_from_text`,
+which returns `REL_OTHER` (99) for a name it does not know — so the surface
+reported seventeen rows all saying "other".
+
+That is worse than empty, because it looks like an answer. Reverted.
+
+The finding stands as originally recorded: nothing in the tree writes
+`memory_relation_schema`, so this surface can only ever be empty, and the
+code-graph kind constraints it was meant to describe are unenforced. Whether to
+populate the table or retire the surface is a data-model decision about an
+ontology this branch does not touch, and it is left as one. The probe asserts
+only that the surface is not serving the WRONG ontology, which is the failure I
+introduced and would not want reintroduced.
