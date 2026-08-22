@@ -266,16 +266,35 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
  * reach bypasses that: its tool calls go through the server, which resolves
  * authority from attestation and never from the payload. Over mTLS the human
  * arrives as an asserted host actor instead, handled above. */
+/* Who is this request, in the only terms that decide whether it may speak as the
+ * user: is there an authenticated account?
+ *
+ * Authentication happens once, at message receipt -- the channel, the session
+ * and the account are each verified there, and a request that fails any of them
+ * never reaches an action. `actor` IS that result, so this reads it rather than
+ * re-deriving anything: only the constructors in kb_identity.h set
+ * authenticated = 1, and a zero-initialized principal is unauthenticated.
+ *
+ * Every authenticated kind counts, and the list is deliberately not filtered by
+ * how the caller reached us:
+ *
+ *   OIDC   an issuer-scoped subject -- the same account whatever carried it
+ *   HOST   a local host account PAM accepted
+ *   CERT   a verified mTLS peer, which names one enrolled machine
+ *   OWNER  the single-org owner, for a deployment running without an IdP
+ *
+ * CERT was previously excluded, mirroring a matching exclusion of
+ * ATTEST_MTLS_CLIENT on the server, and the two together were the bug: a client
+ * presenting a verified certificate was an authenticated principal everywhere
+ * else in the tree (vault_capability.c puts it with UDS/webchat precisely
+ * because it "makes the grant expressible per client") yet an anonymous agent
+ * here. A caller could be a person to one daemon and not to the other. */
 static fact_authority_t kb_memory_request_authority(void)
 {
    const kb_principal_t *actor = kb_reqctx_actor(); /* NULL unless authenticated */
-   if (!actor)
+   if (!actor || !actor->authenticated || actor->kind == KB_PRIN_NONE)
       return FACT_AUTHORITY_MODEL;
-   if (actor->kind == KB_PRIN_OIDC || actor->kind == KB_PRIN_HOST)
-      return FACT_AUTHORITY_USER;
-   if (actor->kind == KB_PRIN_OWNER && kb_login_throttle_peer_is_loopback())
-      return FACT_AUTHORITY_USER;
-   return FACT_AUTHORITY_MODEL;
+   return FACT_AUTHORITY_USER;
 }
 
 static int kb_memory_scope_begin(cJSON *req, int force, int *missing_out)

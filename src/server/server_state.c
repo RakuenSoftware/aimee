@@ -214,7 +214,7 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * out of it, and a caller must not be able to claim that by asking. A bearer
     * over TCP/TLS is a service or an agent, not a person. */
    return send_and_free(
-       conn, memory_store_command(req, server_attested_memory_authority(conn->attested_transport)));
+       conn, memory_store_command(req, server_account_memory_authority(server_request_account())));
 }
 
 cJSON *memory_list_command(const cJSON *req)
@@ -361,14 +361,14 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * user's one non-recoverable verb. An un-attested caller that clears the
  * capability still deletes — it retires the memory, which memory_fact_history
  * can still read — so this narrows the blast radius rather than the feature. */
-cJSON *memory_delete_command(cJSON *req, attested_transport_t transport)
+cJSON *memory_delete_command(cJSON *req, const char *account)
 {
    int64_t id = 0;
    if (memory_request_positive_id(req, "id", &id) != 0)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   memory_authority_t authority = server_attested_memory_authority(transport);
+   memory_authority_t authority = server_account_memory_authority(account);
    if (kb_client_memory_delete_as(id, authority) != 0)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
@@ -386,7 +386,7 @@ cJSON *memory_delete_command(cJSON *req, attested_transport_t transport)
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return server_send_ok(conn, memory_delete_command(req, conn->attested_transport));
+   return server_send_ok(conn, memory_delete_command(req, server_request_account()));
 }
 
 cJSON *memory_get_command(cJSON *req)
