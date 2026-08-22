@@ -10227,9 +10227,15 @@
           "line": 338
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_doc_assets_list operation lists the figures and tables a PDF holds, by page. Four conditions narrow it and none is in the request: the document must be a PDF, its quarantine state must not be pending, and it must belong to the current generation of a project the index calls current. So a document mid-reindex, or one held for review, answers as though it had no assets rather than as unavailable. The rectangle is returned as four coordinates with no stated origin or unit."
+      },
       "signature": "int db2_kb_doc_assets_list ( const char * project , const char * document_key , db2_kb_doc_asset_t * out , int max )",
       "signature_sha256": "35033ea757fa05ab9f4f86885b883da26e70a8858e2a7e4a48fc5ef73f76e81d",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_assets_list"
     },
     {
@@ -10284,9 +10290,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_doc_list_review operation lists documents waiting for review, paged by identifier rather than offset -- so a page is stable while documents are being added, which most lists here are not. Two conditions define waiting and both are in the statement: the state must be staged and the review flag set. maintenance.kb_doc_set_state can clear the flag without changing the state, so a document can leave this list while remaining staged."
+      },
       "signature": "int db2_kb_doc_list_review ( int limit , int64_t cursor_id , db2_kb_doc_t * out , int max_out )",
       "signature_sha256": "1f94dbe3cddacf3f0cc1ec5cf31eebb1cc406bdc33fb0b2c127d2647e2f963f4",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_list_review"
     },
     {
@@ -10321,9 +10333,15 @@
           "line": 237
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "maintenance",
+        "reason": "The typed maintenance.kb_doc_regions_for_chunk operation lists where in a PDF a chunk's text sits, so an answer can cite a rectangle on a page. The quote is stored rather than derived, so it is what the extractor saw and not necessarily what the document now says -- a re-ingest that changes the text leaves the old quote until the region is rewritten. The chunk identifier carries no project, so a caller holding one reads whichever project's chunk it names."
+      },
       "signature": "int db2_kb_doc_regions_for_chunk ( int64_t chunk_id , db2_kb_pdf_region_t * out , int max )",
       "signature_sha256": "06b14944e7a893fe0ad57a00a65755ea89d953e9c6ff982371f7842631da0032",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_doc_regions_for_chunk"
     },
     {
@@ -28213,15 +28231,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d4e1815a0312b57b6d4be5f5afd76adcc2b30d0aa2ae5b45202e92dfc58ff328",
+  "fingerprint": "8099fefb2f60a78fd8d153cfce0e0e59efd2c9bbc67e67887ed1280e796bd2ec",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 264,
+    "audit_pending": 261,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 695
+    "reviewed": 698
   }
 }

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "70b89a3727e1dec9fe89305210999297c25af4990b5e406fecc733e7d01576dc"
+const ContractSHA256 = "fa688bfc7fb6ca589afd14c1f16fca91b968abe2e0c6d13b21993ad938ccf9e1"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -17040,6 +17040,169 @@ func DecodeKBDocumentFetchRequest(request []byte) (uint64, string, error) {
 		return 0, "", ErrMalformedEnvelope
 	}
 	return kBDocumentID, projectName, nil
+}
+
+const EventKBDocAssetsList = EventMaintenance
+const StageKBDocAssetsList = FamilyMaintenance
+const OperationKBDocAssetsList uint32 = 56
+const KBDocAssetsListProjectNameMin = 1
+const KBDocAssetsListProjectNameMax = 255
+const KBDocAssetsListDocumentKeyMin = 1
+const KBDocAssetsListDocumentKeyMax = 511
+
+// EncodeKBDocAssetsListRequest writes the schema kb_doc_assets_list declares, in order.
+func EncodeKBDocAssetsListRequest(projectName string, documentKey string) ([]byte, error) {
+	if len(projectName) < KBDocAssetsListProjectNameMin || len(projectName) > KBDocAssetsListProjectNameMax || hasNUL(projectName) ||
+		len(documentKey) < KBDocAssetsListDocumentKeyMin || len(documentKey) > KBDocAssetsListDocumentKeyMax || hasNUL(documentKey) {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, projectName, KBDocAssetsListProjectNameMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, documentKey, KBDocAssetsListDocumentKeyMax); err != nil {
+		return nil, err
+	}
+	header, err := EncodeRequestHeader(OperationKBDocAssetsList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocAssetsListRequest reads it back, checking each field against its own bound.
+func DecodeKBDocAssetsListRequest(request []byte) (string, string, error) {
+	var projectName string
+	var documentKey string
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocAssetsList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if projectName, err = takeRowText(payload, &cursor, KBDocAssetsListProjectNameMax); err != nil ||
+		len(projectName) < KBDocAssetsListProjectNameMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if documentKey, err = takeRowText(payload, &cursor, KBDocAssetsListDocumentKeyMax); err != nil ||
+		len(documentKey) < KBDocAssetsListDocumentKeyMin {
+		return "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", ErrMalformedEnvelope
+	}
+	return projectName, documentKey, nil
+}
+
+const EventKBDocListReview = EventMaintenance
+const StageKBDocListReview = FamilyMaintenance
+const OperationKBDocListReview uint32 = 57
+const KBDocListReviewRowLimitMin uint32 = 0
+const KBDocListReviewRowLimitMax uint32 = 65535
+const KBDocListReviewCursorIDMin uint64 = 0
+const KBDocListReviewCursorIDMax uint64 = 9223372036854775807
+
+// EncodeKBDocListReviewRequest writes the schema kb_doc_list_review declares, in order.
+func EncodeKBDocListReviewRequest(rowLimit uint32, cursorID uint64) ([]byte, error) {
+	if rowLimit < KBDocListReviewRowLimitMin || rowLimit > KBDocListReviewRowLimitMax ||
+		cursorID < KBDocListReviewCursorIDMin || cursorID > KBDocListReviewCursorIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var rowLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(rowLimitBytes[:], rowLimit)
+	payload = append(payload, rowLimitBytes[:]...)
+	var cursorIDBytes [8]byte
+	binary.LittleEndian.PutUint64(cursorIDBytes[:], cursorID)
+	payload = append(payload, cursorIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBDocListReview, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocListReviewRequest reads it back, checking each field against its own bound.
+func DecodeKBDocListReviewRequest(request []byte) (uint32, uint64, error) {
+	var rowLimit uint32
+	var cursorID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocListReview || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	rowLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if rowLimit < KBDocListReviewRowLimitMin || rowLimit > KBDocListReviewRowLimitMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor+8 > len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	cursorID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if cursorID < KBDocListReviewCursorIDMin || cursorID > KBDocListReviewCursorIDMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return rowLimit, cursorID, nil
+}
+
+const EventKBDocRegionsForChunk = EventMaintenance
+const StageKBDocRegionsForChunk = FamilyMaintenance
+const OperationKBDocRegionsForChunk uint32 = 58
+const KBDocRegionsForChunkChunkIDMin uint64 = 1
+const KBDocRegionsForChunkChunkIDMax uint64 = 9223372036854775807
+
+// EncodeKBDocRegionsForChunkRequest writes the schema kb_doc_regions_for_chunk declares, in order.
+func EncodeKBDocRegionsForChunkRequest(chunkID uint64) ([]byte, error) {
+	if chunkID < KBDocRegionsForChunkChunkIDMin || chunkID > KBDocRegionsForChunkChunkIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var chunkIDBytes [8]byte
+	binary.LittleEndian.PutUint64(chunkIDBytes[:], chunkID)
+	payload = append(payload, chunkIDBytes[:]...)
+	header, err := EncodeRequestHeader(OperationKBDocRegionsForChunk, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeKBDocRegionsForChunkRequest reads it back, checking each field against its own bound.
+func DecodeKBDocRegionsForChunkRequest(request []byte) (uint64, error) {
+	var chunkID uint64
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationKBDocRegionsForChunk || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+8 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	chunkID = binary.LittleEndian.Uint64(payload[cursor:])
+	cursor += 8
+	if chunkID < KBDocRegionsForChunkChunkIDMin || chunkID > KBDocRegionsForChunkChunkIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return chunkID, nil
 }
 
 const EventEntityEdgePruneOrphans = EventIndex

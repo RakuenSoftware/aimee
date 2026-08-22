@@ -1693,4 +1693,16 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t kb_document_id, const char *project_name, uint32_t *document_found, char *document_project, size_t document_project_capacity, char *file_path, size_t file_path_capacity, char *file_hash, size_t file_hash_capacity, char *heading_path, size_t heading_path_capacity, uint32_t *line_start, uint32_t *line_end, char *document_content, size_t document_content_capacity, char *doc_kind, size_t doc_kind_capacity, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_kb_doc_assets_list_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *project_name, const char *document_key, aimee_db2_kb_doc_assets_list_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_doc_list_review_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t row_limit, uint64_t cursor_id, aimee_db2_kb_doc_list_review_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_kb_doc_regions_for_chunk_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t chunk_id, aimee_db2_kb_doc_regions_for_chunk_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
 #endif /* AIMEE_DB2_CLIENT_H */

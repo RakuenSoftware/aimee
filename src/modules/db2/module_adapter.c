@@ -1071,6 +1071,9 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .lifecycle_stale_pending = db2_memory_lifecycle_list_stale_pending,
        .lifecycle_newly_superseded = db2_memory_lifecycle_list_newly_superseded,
        .lifecycle_unresolved_contradictions = db2_memory_lifecycle_list_unresolved_contradictions,
+       .kb_doc_assets_list = db2_kb_doc_assets_list,
+       .kb_doc_list_review = db2_kb_doc_list_review,
+       .kb_doc_regions_for_chunk = db2_kb_doc_regions_for_chunk,
    };
    return &backend;
 }
@@ -13324,6 +13327,195 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char project_name[AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MAX + 1] = "";
+         char document_key[AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MAX + 1] = "";
+         if (aimee_db2_kb_doc_assets_list_request_decode(request_body, request_len, project_name,
+                                                         sizeof(project_name), document_key,
+                                                         sizeof(document_key)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_DOC_ASSETS_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_doc_assets_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_kb_doc_assets_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_kb_doc_asset_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->kb_doc_assets_list(project_name, document_key, listed,
+                                                      (int)AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].asset_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  rows[index].page_no =
+                      listed[index].page_no > 0 ? (uint32_t)listed[index].page_no : 0u;
+                  rows[index].x0 = listed[index].x0;
+                  rows[index].y0 = listed[index].y0;
+                  rows[index].x1 = listed[index].x1;
+                  rows[index].y1 = listed[index].y1;
+                  snprintf(rows[index].asset_kind, sizeof(rows[index].asset_kind), "%s",
+                           listed[index].kind);
+                  snprintf(rows[index].asset_caption, sizeof(rows[index].asset_caption), "%s",
+                           listed[index].caption);
+                  snprintf(rows[index].content_type, sizeof(rows[index].content_type), "%s",
+                           listed[index].content_type);
+                  snprintf(rows[index].sensitivity_class, sizeof(rows[index].sensitivity_class),
+                           "%s", listed[index].sensitivity_class);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_doc_assets_list_reply_encode(rows, count, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t row_limit = 0u;
+         uint64_t cursor_id = 0u;
+         if (aimee_db2_kb_doc_list_review_request_decode(request_body, request_len, &row_limit,
+                                                         &cursor_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_DOC_LIST_REVIEW_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_doc_list_review)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_kb_doc_list_review_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_kb_doc_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->kb_doc_list_review((int)row_limit, (int64_t)cursor_id, listed,
+                                                      (int)AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].doc_id = listed[index].id > 0 ? (uint64_t)listed[index].id : 0u;
+                  snprintf(rows[index].content_hash, sizeof(rows[index].content_hash), "%s",
+                           listed[index].content_hash);
+                  snprintf(rows[index].doc_filename, sizeof(rows[index].doc_filename), "%s",
+                           listed[index].filename);
+                  snprintf(rows[index].doc_scope, sizeof(rows[index].doc_scope), "%s",
+                           listed[index].scope);
+                  snprintf(rows[index].converter, sizeof(rows[index].converter), "%s",
+                           listed[index].converter);
+                  snprintf(rows[index].converter_version, sizeof(rows[index].converter_version),
+                           "%s", listed[index].converter_version);
+                  snprintf(rows[index].doc_state, sizeof(rows[index].doc_state), "%s",
+                           listed[index].state);
+                  rows[index].review_needed =
+                      listed[index].review_needed > 0 ? (uint32_t)listed[index].review_needed : 0u;
+                  snprintf(rows[index].review_reason, sizeof(rows[index].review_reason), "%s",
+                           listed[index].review_reason);
+                  snprintf(rows[index].doc_created_at, sizeof(rows[index].doc_created_at), "%s",
+                           listed[index].created_at);
+                  snprintf(rows[index].doc_updated_at, sizeof(rows[index].doc_updated_at), "%s",
+                           listed[index].updated_at);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_doc_list_review_reply_encode(rows, count, response_body,
+                                                          response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t chunk_id = 0u;
+         if (aimee_db2_kb_doc_regions_for_chunk_request_decode(request_body, request_len,
+                                                               &chunk_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->kb_doc_regions_for_chunk)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_kb_doc_regions_for_chunk_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_kb_pdf_region_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->kb_doc_regions_for_chunk(
+                      (int64_t)chunk_id, listed, (int)AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].page_no =
+                      listed[index].page_no > 0 ? (uint32_t)listed[index].page_no : 0u;
+                  rows[index].x0 = listed[index].x0;
+                  rows[index].y0 = listed[index].y0;
+                  rows[index].x1 = listed[index].x1;
+                  rows[index].y1 = listed[index].y1;
+                  snprintf(rows[index].region_quote, sizeof(rows[index].region_quote), "%s",
+                           listed[index].quote);
+                  rows[index].line_index =
+                      listed[index].line_index > 0 ? (uint32_t)listed[index].line_index : 0u;
+                  snprintf(rows[index].content_type, sizeof(rows[index].content_type), "%s",
+                           listed[index].content_type);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_kb_doc_regions_for_chunk_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
             return AIMEE_MODULE_STATUS_OK;
          }
       }

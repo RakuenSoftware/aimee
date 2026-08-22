@@ -21935,6 +21935,303 @@
           }
         ]
       }
+    },
+    {
+      "family": "maintenance",
+      "id": 56,
+      "name": "kb_doc_assets_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ingested documents and their regions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_doc_assets_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "PDF documents only, in the project's current generation, excluding anything quarantined"
+        },
+        "fields": [
+          {
+            "name": "project_name",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 255
+          },
+          {
+            "name": "document_key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "asset_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "page_no",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "x0",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "y0",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "x1",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "y1",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "asset_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "asset_caption",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 511
+            },
+            {
+              "name": "content_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 47
+            },
+            {
+              "name": "sensitivity_class",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 57,
+      "name": "kb_doc_list_review",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ingested documents and their regions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_doc_list_review"
+      ],
+      "request": {
+        "policy": {
+          "reads": "staged documents awaiting review, paged by identifier"
+        },
+        "fields": [
+          {
+            "name": "row_limit",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          },
+          {
+            "name": "cursor_id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "doc_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "content_hash",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 64
+            },
+            {
+              "name": "doc_filename",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "doc_scope",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "converter",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "converter_version",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "doc_state",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "review_needed",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "name": "review_reason",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 255
+            },
+            {
+              "name": "doc_created_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "doc_updated_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
+    },
+    {
+      "family": "maintenance",
+      "id": 58,
+      "name": "kb_doc_regions_for_chunk",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Ingested documents and their regions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_kb_doc_regions_for_chunk"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the citation regions of one chunk, which is what makes a PDF answer quotable"
+        },
+        "fields": [
+          {
+            "name": "chunk_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "page_no",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "x0",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "y0",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "x1",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "y1",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "region_quote",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 1023
+            },
+            {
+              "name": "line_index",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "name": "content_type",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 15
+            }
+          ]
+        },
+        "maximum_rows": 256
+      }
     }
   ]
 }

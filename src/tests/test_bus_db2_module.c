@@ -3541,6 +3541,33 @@ int db2_memory_lifecycle_list_unresolved_contradictions(db2_memory_lifecycle_con
    return 0;
 }
 
+int db2_kb_doc_assets_list(const char *project, const char *document_key, db2_kb_doc_asset_t *out,
+                           int max)
+{
+   (void)project;
+   (void)document_key;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_kb_doc_list_review(int limit, int64_t cursor_id, db2_kb_doc_t *out, int max_out)
+{
+   (void)limit;
+   (void)cursor_id;
+   (void)out;
+   (void)max_out;
+   return 0;
+}
+
+int db2_kb_doc_regions_for_chunk(int64_t chunk_id, db2_kb_pdf_region_t *out, int max)
+{
+   (void)chunk_id;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

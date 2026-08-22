@@ -3983,6 +3983,34 @@ int main(int argc, char **argv)
               &lifecycle_unresolved_contradictions_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(lifecycle_unresolved_contradictions_count == 0);
 
+   /* Three document reads, over a corpus holding no PDFs and nothing under review. */
+   static aimee_db2_kb_doc_assets_list_row_t
+       kb_doc_assets_list_rows[AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS];
+   uint32_t kb_doc_assets_list_count = 99;
+   assert(aimee_db2_kb_doc_assets_list_call(
+              call_client, &client, 9520, 0, "replay-project", "replay/doc.pdf",
+              kb_doc_assets_list_rows, AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS,
+              &kb_doc_assets_list_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_doc_assets_list_count == 0);
+
+   static aimee_db2_kb_doc_list_review_row_t
+       kb_doc_list_review_rows[AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS];
+   uint32_t kb_doc_list_review_count = 99;
+   assert(aimee_db2_kb_doc_list_review_call(
+              call_client, &client, 9521, 0, 16, 0, kb_doc_list_review_rows,
+              AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS, &kb_doc_list_review_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_doc_list_review_count == 0);
+
+   static aimee_db2_kb_doc_regions_for_chunk_row_t
+       kb_doc_regions_for_chunk_rows[AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS];
+   uint32_t kb_doc_regions_for_chunk_count = 99;
+   assert(aimee_db2_kb_doc_regions_for_chunk_call(
+              call_client, &client, 9522, 0, 4242, kb_doc_regions_for_chunk_rows,
+              AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS, &kb_doc_regions_for_chunk_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(kb_doc_regions_for_chunk_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

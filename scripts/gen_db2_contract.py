@@ -13847,6 +13847,24 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_memory_lifecycle_list_unresolved_contradictions",
         "policy": {"reads": 200},
     },
+    "kb_doc_assets_list": {
+        "key": ("maintenance", 56),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_doc_assets_list",
+        "policy": {"reads": 200},
+    },
+    "kb_doc_list_review": {
+        "key": ("maintenance", 57),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_doc_list_review",
+        "policy": {"reads": 200},
+    },
+    "kb_doc_regions_for_chunk": {
+        "key": ("maintenance", 58),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_kb_doc_regions_for_chunk",
+        "policy": {"reads": 200},
+    },
 }
 
 

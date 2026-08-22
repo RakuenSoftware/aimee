@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "70b89a3727e1dec9fe89305210999297c25af4990b5e406fecc733e7d01576dc"
+#define AIMEE_DB2_CONTRACT_SHA256 "fa688bfc7fb6ca589afd14c1f16fca91b968abe2e0c6d13b21993ad938ccf9e1"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -5952,6 +5952,93 @@
 #define AIMEE_DB2_KB_DOCUMENT_FETCH_RESPONSE_MIN_LEN                                  60u
 #define AIMEE_DB2_KB_DOCUMENT_FETCH_RESPONSE_MAX_LEN                                  9830u
 #define AIMEE_DB2_KB_DOCUMENT_FETCH_ERROR_LEN                                         24u
+#define AIMEE_DB2_EVENT_KB_DOC_ASSETS_LIST                                            AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_KB_DOC_ASSETS_LIST                                            AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_KB_DOC_ASSETS_LIST                                        56u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_REQUEST_MIN_LEN                                  32u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_REQUEST_MAX_LEN                                  798u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MIN                                 1u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MAX                                 255u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MIN                                 1u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MAX                                 511u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_ID_MIN                                     0ull
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_ID_MAX                                     9223372036854775807ull
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_PAGE_NO_MIN                                      0u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_PAGE_NO_MAX                                      4294967295u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_X0_MAX_MAGNITUDE_BITS                            4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_Y0_MAX_MAGNITUDE_BITS                            4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_X1_MAX_MAGNITUDE_BITS                            4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_Y1_MAX_MAGNITUDE_BITS                            4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_KIND_MIN                                   0u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_KIND_MAX                                   31u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_CAPTION_MIN                                0u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_CAPTION_MAX                                511u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_CONTENT_TYPE_MIN                                 0u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_CONTENT_TYPE_MAX                                 47u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_SENSITIVITY_CLASS_MIN                            0u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_SENSITIVITY_CLASS_MAX                            15u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS                                         256u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_RESPONSE_MIN_LEN                                 28u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_RESPONSE_MAX_LEN                                 170012u
+#define AIMEE_DB2_KB_DOC_ASSETS_LIST_ERROR_LEN                                        24u
+#define AIMEE_DB2_EVENT_KB_DOC_LIST_REVIEW                                            AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_KB_DOC_LIST_REVIEW                                            AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_KB_DOC_LIST_REVIEW                                        57u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_REQUEST_MIN_LEN                                  36u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_REQUEST_MAX_LEN                                  36u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_ROW_LIMIT_MIN                                    0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_ROW_LIMIT_MAX                                    65535u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CURSOR_ID_MIN                                    0ull
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CURSOR_ID_MAX                                    9223372036854775807ull
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_ID_MIN                                       0ull
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_ID_MAX                                       9223372036854775807ull
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CONTENT_HASH_MIN                                 0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CONTENT_HASH_MAX                                 64u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_FILENAME_MIN                                 0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_FILENAME_MAX                                 255u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_SCOPE_MIN                                    0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_SCOPE_MAX                                    63u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_MIN                                    0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_MAX                                    63u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_VERSION_MIN                            0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_VERSION_MAX                            127u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_STATE_MIN                                    0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_STATE_MAX                                    31u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_NEEDED_MIN                                0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_NEEDED_MAX                                1u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_REASON_MIN                                0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_REASON_MAX                                255u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_CREATED_AT_MIN                               0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_CREATED_AT_MAX                               31u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_UPDATED_AT_MIN                               0u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_UPDATED_AT_MAX                               31u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS                                         256u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_RESPONSE_MIN_LEN                                 28u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_RESPONSE_MAX_LEN                                 247836u
+#define AIMEE_DB2_KB_DOC_LIST_REVIEW_ERROR_LEN                                        24u
+#define AIMEE_DB2_EVENT_KB_DOC_REGIONS_FOR_CHUNK                                      AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_KB_DOC_REGIONS_FOR_CHUNK                                      AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_KB_DOC_REGIONS_FOR_CHUNK                                  58u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REQUEST_MIN_LEN                            32u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REQUEST_MAX_LEN                            32u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CHUNK_ID_MIN                               1ull
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CHUNK_ID_MAX                               9223372036854775807ull
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_PAGE_NO_MIN                                0u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_PAGE_NO_MAX                                4294967295u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_X0_MAX_MAGNITUDE_BITS                      4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_Y0_MAX_MAGNITUDE_BITS                      4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_X1_MAX_MAGNITUDE_BITS                      4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_Y1_MAX_MAGNITUDE_BITS                      4741671816366391296ull
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REGION_QUOTE_MIN                           0u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REGION_QUOTE_MAX                           1023u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_LINE_INDEX_MIN                             0u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_LINE_INDEX_MAX                             4294967295u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CONTENT_TYPE_MIN                           0u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CONTENT_TYPE_MAX                           15u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS                                   256u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_RESPONSE_MIN_LEN                           28u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_RESPONSE_MAX_LEN                           278044u
+#define AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_ERROR_LEN                                  24u
 #define AIMEE_DB2_STRING_ACK_ARGUMENT_MAX                                             255u
 #define AIMEE_DB2_STRING_COUNT_ARGUMENT_MAX                                           511u
 #define AIMEE_DB2_STRING_PAIR_FIRST_MAX                                               511u
@@ -54599,6 +54686,705 @@ static inline int aimee_db2_kb_document_fetch_reply_decode(const uint8_t *input,
       return -1;
    if (cursor != payload_len)
       return -1;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_assets_list_request_encode(const char *project_name, const char *document_key,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!project_name || !document_key || !output || !output_len)
+      return -1;
+   size_t project_name_len = 0u;
+   while (project_name_len <= AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MAX && project_name[project_name_len])
+      ++project_name_len;
+   size_t document_key_len = 0u;
+   while (document_key_len <= AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MAX && document_key[document_key_len])
+      ++document_key_len;
+   if (project_name_len < AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MIN || project_name_len > AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MAX ||
+       document_key_len < AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MIN || document_key_len > AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_DOC_ASSETS_LIST_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_name_len);
+   memcpy(payload + cursor + 4u, project_name, project_name_len);
+   cursor += 4u + (uint32_t)project_name_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)document_key_len);
+   memcpy(payload + cursor + 4u, document_key, document_key_len);
+   cursor += 4u + (uint32_t)document_key_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KB_DOC_ASSETS_LIST, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_assets_list_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *project_name, size_t project_name_capacity, char *document_key, size_t document_key_capacity)
+{
+   if (project_name && project_name_capacity)
+      project_name[0] = '\0';
+   if (document_key && document_key_capacity)
+      document_key[0] = '\0';
+   if (!project_name || project_name_capacity < (size_t)AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MAX + 1u || !document_key || document_key_capacity < (size_t)AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_DOC_ASSETS_LIST || header.flags != 0u ||
+       input_len < AIMEE_DB2_KB_DOC_ASSETS_LIST_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_KB_DOC_ASSETS_LIST_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project_name,
+                                 AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (project_name[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_KB_DOC_ASSETS_LIST_PROJECT_NAME_MIN)
+         return -1;
+   }
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, document_key,
+                                 AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (document_key[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_KB_DOC_ASSETS_LIST_DOCUMENT_KEY_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+typedef struct
+{
+   uint64_t asset_id;
+   uint32_t page_no;
+   double x0;
+   double y0;
+   double x1;
+   double y1;
+   char asset_kind[AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_KIND_MAX + 1];
+   char asset_caption[AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_CAPTION_MAX + 1];
+   char content_type[AIMEE_DB2_KB_DOC_ASSETS_LIST_CONTENT_TYPE_MAX + 1];
+   char sensitivity_class[AIMEE_DB2_KB_DOC_ASSETS_LIST_SENSITIVITY_CLASS_MAX + 1];
+} aimee_db2_kb_doc_assets_list_row_t;
+
+static inline int aimee_db2_kb_doc_assets_list_reply_encode(const aimee_db2_kb_doc_assets_list_row_t *rows,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !rows) || count > AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_DOC_ASSETS_LIST_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   aimee_db2_put_u32(payload, count);
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < count; index++)
+   {
+      size_t asset_kind_len = 0u;
+      while (asset_kind_len <= AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_KIND_MAX && rows[index].asset_kind[asset_kind_len])
+         ++asset_kind_len;
+      size_t asset_caption_len = 0u;
+      while (asset_caption_len <= AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_CAPTION_MAX && rows[index].asset_caption[asset_caption_len])
+         ++asset_caption_len;
+      size_t content_type_len = 0u;
+      while (content_type_len <= AIMEE_DB2_KB_DOC_ASSETS_LIST_CONTENT_TYPE_MAX && rows[index].content_type[content_type_len])
+         ++content_type_len;
+      size_t sensitivity_class_len = 0u;
+      while (sensitivity_class_len <= AIMEE_DB2_KB_DOC_ASSETS_LIST_SENSITIVITY_CLASS_MAX && rows[index].sensitivity_class[sensitivity_class_len])
+         ++sensitivity_class_len;
+      if (rows[index].asset_id > AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_ID_MAX ||
+       rows[index].page_no > AIMEE_DB2_KB_DOC_ASSETS_LIST_PAGE_NO_MAX ||
+       (aimee_db2_binary64_bits(rows[index].x0) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_X0_MAX_MAGNITUDE_BITS ||
+       (aimee_db2_binary64_bits(rows[index].y0) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_Y0_MAX_MAGNITUDE_BITS ||
+       (aimee_db2_binary64_bits(rows[index].x1) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_X1_MAX_MAGNITUDE_BITS ||
+       (aimee_db2_binary64_bits(rows[index].y1) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_Y1_MAX_MAGNITUDE_BITS ||
+       asset_kind_len > AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_KIND_MAX ||
+       asset_caption_len > AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_CAPTION_MAX ||
+       content_type_len > AIMEE_DB2_KB_DOC_ASSETS_LIST_CONTENT_TYPE_MAX ||
+       sensitivity_class_len > AIMEE_DB2_KB_DOC_ASSETS_LIST_SENSITIVITY_CLASS_MAX)
+         return -1;
+      aimee_db2_put_u64(payload + cursor, rows[index].asset_id);
+      cursor += 8u;
+      aimee_db2_put_u32(payload + cursor, rows[index].page_no);
+      cursor += 4u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].x0));
+      cursor += 8u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].y0));
+      cursor += 8u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].x1));
+      cursor += 8u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].y1));
+      cursor += 8u;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)asset_kind_len);
+      memcpy(payload + cursor + 4u, rows[index].asset_kind, asset_kind_len);
+      cursor += 4u + (uint32_t)asset_kind_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)asset_caption_len);
+      memcpy(payload + cursor + 4u, rows[index].asset_caption, asset_caption_len);
+      cursor += 4u + (uint32_t)asset_caption_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)content_type_len);
+      memcpy(payload + cursor + 4u, rows[index].content_type, content_type_len);
+      cursor += 4u + (uint32_t)content_type_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)sensitivity_class_len);
+      memcpy(payload + cursor + 4u, rows[index].sensitivity_class, sensitivity_class_len);
+      cursor += 4u + (uint32_t)sensitivity_class_len;
+   }
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_KB_DOC_ASSETS_LIST, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_assets_list_reply_decode(const uint8_t *input, size_t input_len,
+                                                 aimee_db2_kb_doc_assets_list_row_t *rows, uint32_t capacity,
+                                                 uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !rows))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_DOC_ASSETS_LIST ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_KB_DOC_ASSETS_LIST_MAX_ROWS || decoded > capacity)
+      return -1;
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      memset(&rows[index], 0, sizeof(rows[index]));
+      if (cursor + 8u > payload_len)
+         return -1;
+      rows[index].asset_id = aimee_db2_get_u64(payload + cursor);
+      cursor += 8u;
+      if (rows[index].asset_id > AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_ID_MAX)
+         return -1;
+      if (cursor + 4u > payload_len)
+         return -1;
+      rows[index].page_no = aimee_db2_get_u32(payload + cursor);
+      cursor += 4u;
+      if (rows[index].page_no > AIMEE_DB2_KB_DOC_ASSETS_LIST_PAGE_NO_MAX)
+         return -1;
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_X0_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].x0 = aimee_db2_binary64_value(bits);
+      }
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_Y0_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].y0 = aimee_db2_binary64_value(bits);
+      }
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_X1_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].x1 = aimee_db2_binary64_value(bits);
+      }
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_ASSETS_LIST_Y1_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].y1 = aimee_db2_binary64_value(bits);
+      }
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].asset_kind,
+                                    AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_KIND_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].asset_caption,
+                                    AIMEE_DB2_KB_DOC_ASSETS_LIST_ASSET_CAPTION_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].content_type,
+                                    AIMEE_DB2_KB_DOC_ASSETS_LIST_CONTENT_TYPE_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].sensitivity_class,
+                                    AIMEE_DB2_KB_DOC_ASSETS_LIST_SENSITIVITY_CLASS_MAX) != 0)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   *count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_list_review_request_encode(uint32_t row_limit, uint64_t cursor_id,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (row_limit > AIMEE_DB2_KB_DOC_LIST_REVIEW_ROW_LIMIT_MAX ||
+       cursor_id > AIMEE_DB2_KB_DOC_LIST_REVIEW_CURSOR_ID_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_DOC_LIST_REVIEW_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, row_limit);
+   cursor += 4u;
+   aimee_db2_put_u64(payload + cursor, cursor_id);
+   cursor += 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KB_DOC_LIST_REVIEW, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_list_review_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *row_limit, uint64_t *cursor_id)
+{
+   if (row_limit)
+      *row_limit = 0u;
+   if (cursor_id)
+      *cursor_id = 0u;
+   if (!row_limit || !cursor_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_DOC_LIST_REVIEW || header.flags != 0u ||
+       input_len < AIMEE_DB2_KB_DOC_LIST_REVIEW_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *row_limit = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*row_limit > AIMEE_DB2_KB_DOC_LIST_REVIEW_ROW_LIMIT_MAX)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *cursor_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*cursor_id > AIMEE_DB2_KB_DOC_LIST_REVIEW_CURSOR_ID_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+typedef struct
+{
+   uint64_t doc_id;
+   char content_hash[AIMEE_DB2_KB_DOC_LIST_REVIEW_CONTENT_HASH_MAX + 1];
+   char doc_filename[AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_FILENAME_MAX + 1];
+   char doc_scope[AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_SCOPE_MAX + 1];
+   char converter[AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_MAX + 1];
+   char converter_version[AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_VERSION_MAX + 1];
+   char doc_state[AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_STATE_MAX + 1];
+   uint32_t review_needed;
+   char review_reason[AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_REASON_MAX + 1];
+   char doc_created_at[AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_CREATED_AT_MAX + 1];
+   char doc_updated_at[AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_UPDATED_AT_MAX + 1];
+} aimee_db2_kb_doc_list_review_row_t;
+
+static inline int aimee_db2_kb_doc_list_review_reply_encode(const aimee_db2_kb_doc_list_review_row_t *rows,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !rows) || count > AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_DOC_LIST_REVIEW_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   aimee_db2_put_u32(payload, count);
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < count; index++)
+   {
+      size_t content_hash_len = 0u;
+      while (content_hash_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_CONTENT_HASH_MAX && rows[index].content_hash[content_hash_len])
+         ++content_hash_len;
+      size_t doc_filename_len = 0u;
+      while (doc_filename_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_FILENAME_MAX && rows[index].doc_filename[doc_filename_len])
+         ++doc_filename_len;
+      size_t doc_scope_len = 0u;
+      while (doc_scope_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_SCOPE_MAX && rows[index].doc_scope[doc_scope_len])
+         ++doc_scope_len;
+      size_t converter_len = 0u;
+      while (converter_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_MAX && rows[index].converter[converter_len])
+         ++converter_len;
+      size_t converter_version_len = 0u;
+      while (converter_version_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_VERSION_MAX && rows[index].converter_version[converter_version_len])
+         ++converter_version_len;
+      size_t doc_state_len = 0u;
+      while (doc_state_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_STATE_MAX && rows[index].doc_state[doc_state_len])
+         ++doc_state_len;
+      size_t review_reason_len = 0u;
+      while (review_reason_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_REASON_MAX && rows[index].review_reason[review_reason_len])
+         ++review_reason_len;
+      size_t doc_created_at_len = 0u;
+      while (doc_created_at_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_CREATED_AT_MAX && rows[index].doc_created_at[doc_created_at_len])
+         ++doc_created_at_len;
+      size_t doc_updated_at_len = 0u;
+      while (doc_updated_at_len <= AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_UPDATED_AT_MAX && rows[index].doc_updated_at[doc_updated_at_len])
+         ++doc_updated_at_len;
+      if (rows[index].doc_id > AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_ID_MAX ||
+       content_hash_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_CONTENT_HASH_MAX ||
+       doc_filename_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_FILENAME_MAX ||
+       doc_scope_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_SCOPE_MAX ||
+       converter_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_MAX ||
+       converter_version_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_VERSION_MAX ||
+       doc_state_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_STATE_MAX ||
+       rows[index].review_needed > AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_NEEDED_MAX ||
+       review_reason_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_REASON_MAX ||
+       doc_created_at_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_CREATED_AT_MAX ||
+       doc_updated_at_len > AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_UPDATED_AT_MAX)
+         return -1;
+      aimee_db2_put_u64(payload + cursor, rows[index].doc_id);
+      cursor += 8u;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)content_hash_len);
+      memcpy(payload + cursor + 4u, rows[index].content_hash, content_hash_len);
+      cursor += 4u + (uint32_t)content_hash_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)doc_filename_len);
+      memcpy(payload + cursor + 4u, rows[index].doc_filename, doc_filename_len);
+      cursor += 4u + (uint32_t)doc_filename_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)doc_scope_len);
+      memcpy(payload + cursor + 4u, rows[index].doc_scope, doc_scope_len);
+      cursor += 4u + (uint32_t)doc_scope_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)converter_len);
+      memcpy(payload + cursor + 4u, rows[index].converter, converter_len);
+      cursor += 4u + (uint32_t)converter_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)converter_version_len);
+      memcpy(payload + cursor + 4u, rows[index].converter_version, converter_version_len);
+      cursor += 4u + (uint32_t)converter_version_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)doc_state_len);
+      memcpy(payload + cursor + 4u, rows[index].doc_state, doc_state_len);
+      cursor += 4u + (uint32_t)doc_state_len;
+      aimee_db2_put_u32(payload + cursor, rows[index].review_needed);
+      cursor += 4u;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)review_reason_len);
+      memcpy(payload + cursor + 4u, rows[index].review_reason, review_reason_len);
+      cursor += 4u + (uint32_t)review_reason_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)doc_created_at_len);
+      memcpy(payload + cursor + 4u, rows[index].doc_created_at, doc_created_at_len);
+      cursor += 4u + (uint32_t)doc_created_at_len;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)doc_updated_at_len);
+      memcpy(payload + cursor + 4u, rows[index].doc_updated_at, doc_updated_at_len);
+      cursor += 4u + (uint32_t)doc_updated_at_len;
+   }
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_KB_DOC_LIST_REVIEW, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_list_review_reply_decode(const uint8_t *input, size_t input_len,
+                                                 aimee_db2_kb_doc_list_review_row_t *rows, uint32_t capacity,
+                                                 uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !rows))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_DOC_LIST_REVIEW ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_KB_DOC_LIST_REVIEW_MAX_ROWS || decoded > capacity)
+      return -1;
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      memset(&rows[index], 0, sizeof(rows[index]));
+      if (cursor + 8u > payload_len)
+         return -1;
+      rows[index].doc_id = aimee_db2_get_u64(payload + cursor);
+      cursor += 8u;
+      if (rows[index].doc_id > AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_ID_MAX)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].content_hash,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_CONTENT_HASH_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].doc_filename,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_FILENAME_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].doc_scope,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_SCOPE_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].converter,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].converter_version,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_CONVERTER_VERSION_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].doc_state,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_STATE_MAX) != 0)
+         return -1;
+      if (cursor + 4u > payload_len)
+         return -1;
+      rows[index].review_needed = aimee_db2_get_u32(payload + cursor);
+      cursor += 4u;
+      if (rows[index].review_needed > AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_NEEDED_MAX)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].review_reason,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_REVIEW_REASON_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].doc_created_at,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_CREATED_AT_MAX) != 0)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].doc_updated_at,
+                                    AIMEE_DB2_KB_DOC_LIST_REVIEW_DOC_UPDATED_AT_MAX) != 0)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   *count = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_regions_for_chunk_request_encode(uint64_t chunk_id,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (chunk_id < AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CHUNK_ID_MIN || chunk_id > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CHUNK_ID_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u64(payload + cursor, chunk_id);
+   cursor += 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_KB_DOC_REGIONS_FOR_CHUNK, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_regions_for_chunk_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *chunk_id)
+{
+   if (chunk_id)
+      *chunk_id = 0u;
+   if (!chunk_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_DOC_REGIONS_FOR_CHUNK || header.flags != 0u ||
+       input_len < AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *chunk_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*chunk_id < AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CHUNK_ID_MIN || *chunk_id > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CHUNK_ID_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+typedef struct
+{
+   uint32_t page_no;
+   double x0;
+   double y0;
+   double x1;
+   double y1;
+   char region_quote[AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REGION_QUOTE_MAX + 1];
+   uint32_t line_index;
+   char content_type[AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CONTENT_TYPE_MAX + 1];
+} aimee_db2_kb_doc_regions_for_chunk_row_t;
+
+static inline int aimee_db2_kb_doc_regions_for_chunk_reply_encode(const aimee_db2_kb_doc_regions_for_chunk_row_t *rows,
+                                                 uint32_t count, uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || (count > 0u && !rows) || count > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   aimee_db2_put_u32(payload, count);
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < count; index++)
+   {
+      size_t region_quote_len = 0u;
+      while (region_quote_len <= AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REGION_QUOTE_MAX && rows[index].region_quote[region_quote_len])
+         ++region_quote_len;
+      size_t content_type_len = 0u;
+      while (content_type_len <= AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CONTENT_TYPE_MAX && rows[index].content_type[content_type_len])
+         ++content_type_len;
+      if (rows[index].page_no > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_PAGE_NO_MAX ||
+       (aimee_db2_binary64_bits(rows[index].x0) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_X0_MAX_MAGNITUDE_BITS ||
+       (aimee_db2_binary64_bits(rows[index].y0) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_Y0_MAX_MAGNITUDE_BITS ||
+       (aimee_db2_binary64_bits(rows[index].x1) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_X1_MAX_MAGNITUDE_BITS ||
+       (aimee_db2_binary64_bits(rows[index].y1) & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_Y1_MAX_MAGNITUDE_BITS ||
+       region_quote_len > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REGION_QUOTE_MAX ||
+       rows[index].line_index > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_LINE_INDEX_MAX ||
+       content_type_len > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CONTENT_TYPE_MAX)
+         return -1;
+      aimee_db2_put_u32(payload + cursor, rows[index].page_no);
+      cursor += 4u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].x0));
+      cursor += 8u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].y0));
+      cursor += 8u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].x1));
+      cursor += 8u;
+      aimee_db2_put_u64(payload + cursor, aimee_db2_binary64_bits(rows[index].y1));
+      cursor += 8u;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)region_quote_len);
+      memcpy(payload + cursor + 4u, rows[index].region_quote, region_quote_len);
+      cursor += 4u + (uint32_t)region_quote_len;
+      aimee_db2_put_u32(payload + cursor, rows[index].line_index);
+      cursor += 4u;
+      aimee_db2_put_u32(payload + cursor, (uint32_t)content_type_len);
+      memcpy(payload + cursor + 4u, rows[index].content_type, content_type_len);
+      cursor += 4u + (uint32_t)content_type_len;
+   }
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_KB_DOC_REGIONS_FOR_CHUNK, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_kb_doc_regions_for_chunk_reply_decode(const uint8_t *input, size_t input_len,
+                                                 aimee_db2_kb_doc_regions_for_chunk_row_t *rows, uint32_t capacity,
+                                                 uint32_t *count)
+{
+   if (count)
+      *count = 0u;
+   if (!count || (capacity > 0u && !rows))
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_KB_DOC_REGIONS_FOR_CHUNK ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len < 4u ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t decoded = aimee_db2_get_u32(payload);
+   if (decoded > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_MAX_ROWS || decoded > capacity)
+      return -1;
+   uint32_t cursor = 4u;
+   for (uint32_t index = 0u; index < decoded; index++)
+   {
+      memset(&rows[index], 0, sizeof(rows[index]));
+      if (cursor + 4u > payload_len)
+         return -1;
+      rows[index].page_no = aimee_db2_get_u32(payload + cursor);
+      cursor += 4u;
+      if (rows[index].page_no > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_PAGE_NO_MAX)
+         return -1;
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_X0_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].x0 = aimee_db2_binary64_value(bits);
+      }
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_Y0_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].y0 = aimee_db2_binary64_value(bits);
+      }
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_X1_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].x1 = aimee_db2_binary64_value(bits);
+      }
+      if (cursor + 8u > payload_len)
+         return -1;
+      {
+         uint64_t bits = aimee_db2_get_u64(payload + cursor);
+         cursor += 8u;
+         if ((bits & 0x7fffffffffffffffull) > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_Y1_MAX_MAGNITUDE_BITS)
+            return -1;
+         rows[index].y1 = aimee_db2_binary64_value(bits);
+      }
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].region_quote,
+                                    AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_REGION_QUOTE_MAX) != 0)
+         return -1;
+      if (cursor + 4u > payload_len)
+         return -1;
+      rows[index].line_index = aimee_db2_get_u32(payload + cursor);
+      cursor += 4u;
+      if (rows[index].line_index > AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_LINE_INDEX_MAX)
+         return -1;
+      if (aimee_db2_memory_row_take(payload, payload_len, &cursor, rows[index].content_type,
+                                    AIMEE_DB2_KB_DOC_REGIONS_FOR_CHUNK_CONTENT_TYPE_MAX) != 0)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   *count = decoded;
    return 0;
 }
 

@@ -615,6 +615,10 @@ typedef struct
    int (*lifecycle_newly_superseded)(const char *since, db2_memory_lifecycle_superseded_t *out,
                                      int max);
    int (*lifecycle_unresolved_contradictions)(db2_memory_lifecycle_conflict_t *out, int max);
+   int (*kb_doc_assets_list)(const char *project, const char *document_key, db2_kb_doc_asset_t *out,
+                             int max);
+   int (*kb_doc_list_review)(int limit, int64_t cursor_id, db2_kb_doc_t *out, int max_out);
+   int (*kb_doc_regions_for_chunk)(int64_t chunk_id, db2_kb_pdf_region_t *out, int max);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
