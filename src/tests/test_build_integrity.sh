@@ -364,6 +364,12 @@ else
     pass "Go is the exclusive WFE runtime owner"
 fi
 
+if grep -qE 'aimee-wfe.*--config([ =]|$)' ../deploy/container/server-entrypoint.sh; then
+    fail "server entrypoint still passes the retired direct config-file flag to the Go WFE"
+else
+    pass "server entrypoint leaves WFE configuration behind the event-bus config module"
+fi
+
 if grep -qF '[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME/workflows"' \
     ../deploy/container/server-entrypoint.sh; then
     pass "server entrypoint makes the workflow registry writable by the Go WFE"

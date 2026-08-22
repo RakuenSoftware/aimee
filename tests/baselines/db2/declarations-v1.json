@@ -1607,6 +1607,7 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
+        "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -2154,6 +2155,7 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
+        "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -2359,6 +2361,7 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
+        "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -2539,6 +2542,7 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
+        "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -5060,6 +5064,7 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
+        "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm.c",
@@ -8528,7 +8533,8 @@
       "consumers": [
         "src/kb/kb_memory_facts.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c"
+        "src/tests/test_fact_recall.c",
+        "src/tests/test_graph_scoring.c"
       ],
       "locations": [
         {
@@ -8813,7 +8819,8 @@
     {
       "consumers": [
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c"
+        "src/tests/test_fact_recall.c",
+        "src/tests/test_graph_scoring.c"
       ],
       "locations": [
         {
@@ -8869,7 +8876,8 @@
       "consumers": [
         "src/kb/http/kb_http_console.c",
         "src/tests/support/kb_http_route_stubs.c",
-        "src/tests/test_fact_lifecycle.c"
+        "src/tests/test_fact_lifecycle.c",
+        "src/tests/test_graph_scoring.c"
       ],
       "locations": [
         {
@@ -26476,7 +26484,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "87c07eabc041f23ca4053aa5a53f5083693f317aa38577de73e122d05896229f",
+  "fingerprint": "3363625f40ba9432fde3946e2e780b8377e94e8bb944e816fe6c749a0725fd7f",
   "module": "db2",
   "schema_version": 1,
   "summary": {

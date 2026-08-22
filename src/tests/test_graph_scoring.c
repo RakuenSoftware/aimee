@@ -14,6 +14,7 @@
 #include "modules/db2/c/db_postgres.h"
 #include "platform_test_util.h"
 #include "../modules/db2/c/entity_edges.h"
+#include "../modules/db2/c/fact_mutation.h"
 #include "../headers/memory.h"
 
 static char g_db_path[512];
@@ -182,6 +183,37 @@ static void test_backfill_idempotent(void)
 static void insert_test_edge(const char *source, const char *target, const char *edge_class,
                              const char *lifecycle, const char *commit_id)
 {
+   if (strcmp(edge_class, "semantic") == 0)
+   {
+      fact_actor_t actor;
+      fact_actor_rank_t rank =
+          strcmp(lifecycle, FACT_LIFECYCLE_PERSISTENT) == 0 ? FACT_ACTOR_SYSTEM : FACT_ACTOR_MODEL;
+      assert(db2_fact_actor_internal(rank, &actor) == 0);
+      fact_evidence_input_t evidence = {.source_kind = "test",
+                                        .source_id = target,
+                                        .evidence_hash = target,
+                                        .observed_at = "2026-01-01 00:00:00"};
+      fact_assertion_input_t input = {.source = source,
+                                      .relation = "related_to",
+                                      .target = target,
+                                      .confidence_class = "B",
+                                      .confidence = 0.8,
+                                      .assertion_kind = FACT_KIND_WORLD_FACT,
+                                      .evidence = &evidence};
+      fact_mutation_result_t result;
+      assert(db2_fact_mutation_assert(&actor, &input, &result) == 0);
+      if (strcmp(lifecycle, FACT_LIFECYCLE_PROMOTED) == 0)
+      {
+         fact_actor_t operator_actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
+         snprintf(operator_actor.principal, sizeof(operator_actor.principal), "test:operator");
+         snprintf(operator_actor.role, sizeof(operator_actor.role), "operator");
+         assert(db2_fact_mutation_review(&operator_actor, result.assertion_id, FACT_REVIEW_APPROVE,
+                                         &result) == 0);
+      }
+      assert(strcmp(result.lifecycle, lifecycle) == 0);
+      return;
+   }
+
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        db2_conn(),
@@ -210,19 +242,7 @@ static int weighted_contains(const db2_entity_edge_weighted_neighbor_t *rows, in
 static void test_candidate_semantic_edges_are_quarantined_from_graph_recall(void)
 {
    setup();
-   char err[256] = "";
    const char *commit_id = "test-graph-recall-lifecycle";
-   aimee_pg_stmt_t *commit = aimee_pg_prepare(
-       db2_conn(),
-       "INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,"
-       "authority_rank,status,reversible)"
-       " VALUES(?1,'test.seed','test','system',20,'open',1)",
-       err, sizeof(err));
-   assert(commit);
-   aimee_pg_bind_text(commit, "?1", commit_id);
-   assert(aimee_pg_step(commit, err, sizeof(err)) == AIMEE_PG_DONE);
-   aimee_pg_finalize(commit);
-
    insert_test_edge("recall-root", "candidate-direct", "semantic", "candidate", commit_id);
    insert_test_edge("recall-root", "persistent-direct", "semantic", "persistent", commit_id);
    insert_test_edge("recall-root", "promoted-direct", "semantic", "promoted", commit_id);

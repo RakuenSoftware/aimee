@@ -968,8 +968,8 @@ AIMEE_VERIFY_TEST_JOBS ?= 2
 # tests are red. Discover modules instead of maintaining another service list.
 GO_MODULE_DIRS ?= $(sort $(patsubst %/go.mod,%,$(wildcard ../*/go.mod)))
 GO ?= $(shell command -v go 2>/dev/null || { test -x /usr/local/go/bin/go && echo /usr/local/go/bin/go; })
-CONFIG_TEST_DEFAULTS ?= $(shell cd ../server-go && $(GO) list -m -f '{{.Dir}}' \
-	github.com/RakuenSoftware/aimee-module-config 2>/dev/null)/server-go/modules/config/defaults.json
+CONFIG_TEST_DEFAULTS ?= $(shell cd ../server-go && $(GO) list -mod=mod -f '{{.Dir}}' \
+	github.com/RakuenSoftware/aimee-module-config/server-go/modules/config 2>/dev/null)/defaults.json
 
 go-unit-tests:
 	@test -n "$(GO)" || { echo "go-unit-tests: ERROR go is required"; exit 1; }

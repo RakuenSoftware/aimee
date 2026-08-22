@@ -480,11 +480,16 @@ def _config_metadata():
         return _CONFIG_METADATA
     override = os.environ.get("AIMEE_CONFIG_MODULE_DIR")
     if override:
-        module_dir = Path(override)
+        metadata_path = (Path(override) / "server-go" / "modules" /
+                         "config" / "metadata.json")
     else:
+        # Listing a module with `go list -m` may legitimately return an empty
+        # Dir until its zip has already been downloaded.  Resolve the package
+        # instead: package loading downloads the pinned dependency and returns
+        # the exact directory containing the metadata we consume.
         result = subprocess.run(
-            ["go", "list", "-mod=mod", "-m", "-f", "{{.Dir}}",
-             "github.com/RakuenSoftware/aimee-module-config"],
+            ["go", "list", "-mod=mod", "-f", "{{.Dir}}",
+             "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"],
             cwd=ROOT / "server-go", check=True, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -494,8 +499,7 @@ def _config_metadata():
                 "gen-reference-docs: pinned config module was not downloaded "
                 "and go list returned no module directory"
             )
-        module_dir = Path(resolved)
-    metadata_path = module_dir / "server-go" / "modules" / "config" / "metadata.json"
+        metadata_path = Path(resolved) / "metadata.json"
     try:
         _CONFIG_METADATA = json.loads(metadata_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

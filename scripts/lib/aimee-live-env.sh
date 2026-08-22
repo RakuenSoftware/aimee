@@ -534,10 +534,15 @@ live_env_arm_module() { # executable bus-socket log-file pid-variable [env assig
    local executable=$1 socket=$2 log=$3 pid_var=$4
    shift 4
    (
+      child=
+      trap '[ -n "$child" ] && kill "$child" 2>/dev/null; [ -n "$child" ] && wait "$child" 2>/dev/null; exit 0' TERM INT
       i=0
       while [ "$i" -lt 600 ]; do
          if [ -S "$socket" ]; then
-            env "$@" AIMEE_HOME="$AIMEE_HOME" "$executable" "$socket"
+            env "$@" AIMEE_HOME="$AIMEE_HOME" "$executable" "$socket" &
+            child=$!
+            wait "$child"
+            child=
          fi
          i=$((i + 1))
          sleep 0.1
@@ -707,7 +712,10 @@ live_env_cleanup() {
       fi
       return 0
    fi
-   pg_admin "DROP DATABASE IF EXISTS $LIVE_DB" >/dev/null 2>&1
+   # A crashed daemon or module must not turn cleanup itself into a credential
+   # leak. PostgreSQL 13+ can atomically terminate any remaining test sessions
+   # while dropping this rig's uniquely named database.
+   pg_admin "DROP DATABASE IF EXISTS $LIVE_DB WITH (FORCE)" >/dev/null 2>&1
    # After the database is gone: drop a role this rig created, restore one it
    # borrowed. A borrowed role is cluster-global and other databases may own
    # objects with it, so it is never dropped.
