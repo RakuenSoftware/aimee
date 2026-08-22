@@ -93,25 +93,11 @@ ADMITTED_HOST_ADAPTER_INCLUDES = {
         "modules/db2/c/kb_service_backend.h",
     ),
 }
-# Reviewed dependency admissions, of two kinds.
-#
-# The first are S2 dependency inversions: they replace broader host/vault/CSS
-# implementation edges with an exact private contract import.
-#
-# The second are project-wide contracts -- a header every tree may name because
-# it defines something the whole project agrees on rather than something one
-# subsystem owns. src/headers/aimee_result.h is the first: the integer a
-# function answers with, which a boundary cannot have a private opinion about
-# without the two sides reading the same number as different outcomes.
-#
-# Both are pinned by source, spelling, resolution, class, and count, which is
-# what keeps either from becoming a general dependency-growth escape hatch.
+# Reviewed S2 dependency inversions may introduce only these exact private
+# contract imports. They replace broader host/vault/CSS implementation edges;
+# pinning source, spelling, resolution, class, and count keeps this exception
+# from becoming a general dependency-growth escape hatch.
 ADMITTED_OUTBOUND_DEPENDENCIES = {
-    (
-        "src/modules/db2/c/typed_facts.h",
-        "../headers/aimee_result.h",
-        "src/headers/aimee_result.h",
-    ): (1, "host-api"),
     (
         "src/modules/db2/c/canonical_index.h",
         "css_analyze.h",
