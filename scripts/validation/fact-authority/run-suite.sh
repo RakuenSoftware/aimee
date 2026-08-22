@@ -140,6 +140,12 @@ hdr "read surfaces"
 run "entity profile / schema list" bash /root/test-graph-surfaces.sh
 run "grant administration path"    bash /root/test-grant-admin.sh
 
+hdr "embedding"
+# Last, because it restarts the kb pointed at a stub embedder and leaves that
+# pointing in place; nothing after it should depend on the earlier config.
+run "EMBED call path" bash /root/test-embed-stage.sh
+bring_up_kb
+
 hdr "summary"
 # A stage that could not be reached makes a probe green for the wrong reason:
 # every consumer reports "no answer" and carries on. Counted across the run so a

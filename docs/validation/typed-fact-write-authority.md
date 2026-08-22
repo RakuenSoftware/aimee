@@ -1271,3 +1271,45 @@ the envelope cannot be observed. With the proxy:
     module RUNNING    envelope PRESENT
     module STOPPED    envelope ABSENT + 1 "rerank confidence unavailable"
     module RESTARTED  envelope PRESENT
+
+## EMBED (5891): the last unexercised stage, partly closed
+
+This was the one memory-module stage never run. `aimee status` reported
+"BLOCKED: no embedder configured -- memory and KB search cannot embed"
+throughout, and the llama-server serving Qwen answers 501 for `/v1/embeddings`,
+so the call path had never once executed.
+
+`stub-embedder.py` is a deterministic embedding service, in the same spirit as
+the JWKS file that made OIDC testable: the PATH is real, the vectors are not.
+
+    embed requests seen by the endpoint: 31  (200s: 31)
+    further requests while the embedder was down: 0
+
+So the kb resolves a configured embedder, posts to it, and receives vectors, and
+the control ties those calls to the store rather than to a health probe or a
+retry.
+
+**What is deliberately NOT claimed.** Persistence and recall. Memory embeddings
+are not written synchronously by the store path, and this run produced no rows I
+could attribute with confidence, so the probe asserts only what its evidence
+supports and says so in its own output. Retrieval QUALITY is further out of
+reach: the stub's vectors are deterministic but meaningless, and any ranking
+judgement from them would be worthless.
+
+Two things learned that are worth keeping:
+
+- The two endpoints take DIFFERENT body shapes. `/embed_batch` takes a JSON array
+  of strings; `/embed` takes **the raw text**, not JSON
+  (`memory_core_scope_embed.c`: "the polarity rides in the query string because
+  the body is the raw text itself"). A stub that assumes JSON on both answers 400
+  to every single-text call.
+- Those 400s then trip the embedding circuit breaker, which keeps refusing for a
+  while: `WARN memory: embedding dependency unavailable; retry after 1237 ms`.
+  So a later, CORRECT attempt fails for a reason that has nothing to do with it.
+  The probe therefore starts the embedder BEFORE the kb, and the first version of
+  it -- which took a baseline with the embedder down -- was tripping the breaker
+  itself and then measuring the result.
+
+## Suite
+
+    pass 17   fail 0   skip 1
