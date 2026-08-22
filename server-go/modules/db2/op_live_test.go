@@ -31,6 +31,14 @@ import (
 // The address is read rather than written down: the container takes a DHCP
 // lease, so it changes whenever the container is recreated -- which it has
 // been, repeatedly.
+//
+// Do not run these while scripts/db2_verify_batch.sh is running. They share one
+// database with the C replay, and sharing it is not safe in either direction:
+// the replay rebuilds the schema underneath a probe, a probe holds row locks
+// the replay then blocks on, and the sequence restoration below writes to
+// sequences the replay is drawing identities from. A probe run concurrent with
+// a replay has already produced a replay failure that looked like a code
+// defect and was not one.
 
 func liveStore(t *testing.T) (Store, func()) {
 	t.Helper()
@@ -1207,6 +1215,20 @@ func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	defer closeStore()
 	pool := store.(*PoolStore).pool
 
+	// Sequences do not roll back. A transaction that inserts a row with a
+	// defaulted identity consumes a value, and rolling the row away leaves the
+	// sequence where the insert left it -- by design, because two transactions
+	// must not be handed the same identity.
+	//
+	// That makes the name of this test a half-truth, and the half it misses has
+	// bitten: the C replay promotes doc_releases id 1, and a probe that created
+	// a release moved the sequence on so the replay's own release was no longer
+	// id 1. Snapshotting every sequence and putting them back is the general
+	// fix, and it is general on purpose -- most write probes insert something,
+	// and a list of which ones would go stale on the next batch.
+	restoreSequences := snapshotSequences(t, pool)
+	defer restoreSequences()
+
 	for _, testCase := range liveWrites() {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1243,6 +1265,58 @@ func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 				testCase.decoded(t, body)
 			}
 		})
+	}
+}
+
+// snapshotSequences records every sequence in the schema and hands back a
+// function that puts them all back where they were.
+//
+// is_called is carried as well as last_value: a sequence that has never been
+// used reports last_value as its start with is_called false, and restoring it
+// as called would silently skip the first identity the schema ever issues.
+func snapshotSequences(t *testing.T, pool *pgxpool.Pool) func() {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type sequenceState struct {
+		name      string
+		lastValue int64
+		isCalled  bool
+	}
+	rows, err := pool.Query(ctx, `SELECT schemaname || '.' || sequencename,
+ COALESCE(last_value, start_value), last_value IS NOT NULL
+ FROM pg_sequences WHERE schemaname = current_schema()`)
+	if err != nil {
+		t.Fatalf("read sequences: %v", err)
+	}
+	var states []sequenceState
+	for rows.Next() {
+		var state sequenceState
+		if err := rows.Scan(&state.name, &state.lastValue, &state.isCalled); err != nil {
+			rows.Close()
+			t.Fatalf("scan sequence: %v", err)
+		}
+		states = append(states, state)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read sequences: %v", err)
+	}
+
+	return func() {
+		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer restoreCancel()
+		for _, state := range states {
+			if _, err := pool.Exec(restoreCtx, "SELECT setval($1, $2, $3)",
+				state.name, state.lastValue, state.isCalled); err != nil {
+				// Reported rather than fatal: the probes have already run and
+				// their assertions are the point of the test. A sequence left
+				// advanced is a real leak and has to be visible, but failing
+				// here would hide whatever the probes actually found.
+				t.Errorf("restore sequence %s: %v", state.name, err)
+			}
+		}
 	}
 }
 
