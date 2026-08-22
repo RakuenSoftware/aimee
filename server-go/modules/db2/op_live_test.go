@@ -1293,6 +1293,60 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_entities_list",
+			stage: db2contract.StageMemoryEntitiesList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryEntitiesListRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryEntitiesListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_id_key_content",
+			stage: db2contract.StageMemoryIDKeyContent,
+			// Zero, the branch NULLIF covers: a plain LIMIT would answer empty
+			// here and look identical to a schema with no memories.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryIDKeyContentRequest(0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryIDKeyContentReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_evidence_fields",
+			stage: db2contract.StageMemoryEvidenceFields,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryEvidenceFieldsRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, err := db2contract.DecodeMemoryEvidenceFieldsReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a memory nothing holds reported as found")
+				}
+			},
+		},
+		{
+			name:   "directive_counts_by_state",
+			stage:  db2contract.StageDirectiveCountsByState,
+			encode: db2contract.EncodeDirectiveCountsByStateRequest,
+			decoded: func(t *testing.T, body []byte) {
+				// Four filtered aggregates in one pass, which a fake cannot run.
+				if _, _, _, _, err := db2contract.DecodeDirectiveCountsByStateReply(
+					body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -2454,6 +2508,65 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "lifecycle_update_state",
+			stage: db2contract.StageLifecycleUpdateState,
+			// Four CASE expressions have to plan, including the one comparing
+			// against an empty valid_until.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLifecycleUpdateStateRequest(
+					2147483000, "archived", "live probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeLifecycleUpdateStateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the update did not run")
+				}
+			},
+		},
+		{
+			name:  "memory_alias_insert",
+			stage: db2contract.StageMemoryAliasInsert,
+			// Seeded because memory_aliases carries a foreign key into
+			// memories, and run twice so the conflict path executes.
+			repeat: 2,
+			seed:   []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryAliasInsertRequest(
+					liveProbeAliasMemoryID, "live-probe-alias", 0.8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryAliasInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the alias was not recorded")
+				}
+			},
+		},
+		{
+			name:   "memory_episode_card_insert",
+			stage:  db2contract.StageMemoryEpisodeCardInsert,
+			repeat: 2,
+			seed:   []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryEpisodeCardInsertRequest(
+					liveProbeAliasMemoryID, "live-probe-key", "live probe card")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryEpisodeCardInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the card was not recorded")
+				}
+			},
+		},
 	}
 }
 
@@ -2596,6 +2709,16 @@ const (
  (id, name, root, scanned_at, lifecycle_state, current_generation)
  VALUES (900011, 'live-probe-upsert-project', '/live-probe',
  '2026-01-01 00:00:00', 'current', 1)`
+)
+
+// A memory for the alias and card probes, both of which carry a foreign key
+// into memories.
+const (
+	liveProbeAliasMemoryID = 900012
+	liveProbeAliasMemory   = `INSERT INTO memories
+ (id, tier, kind, key, content, created_at, updated_at)
+ VALUES (900012, 'L2', 'fact', 'live-probe-alias-memory', 'live probe',
+ '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
