@@ -30,6 +30,20 @@ def _first_memory_index(catalog: dict[str, object]) -> int:
                 if operation["family"] == "memory")
 
 
+def _operation(baseline: dict, name: str) -> dict:
+    """The named operation's vectors.
+
+    By name, never by position. An index into the operation list is correct
+    until something is inserted before it, and then the test asserts against its
+    neighbour's fixture and passes -- which the Go module's tests did for
+    however long it took anyone to run them.
+    """
+    for operation in baseline["operations"]:
+        if operation["name"] == name:
+            return operation
+    raise AssertionError(f"no operation named {name!r} in the wire baseline")
+
+
 class ContractTests(unittest.TestCase):
     def catalog(self) -> dict[str, object]:
         return json.loads((REPO_ROOT / generator.CATALOG).read_text(encoding="utf-8"))
@@ -138,7 +152,7 @@ class ContractTests(unittest.TestCase):
 
     def test_wire_vectors_cover_every_flag_and_closed_failure_fields(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][0]
+        operation = _operation(baseline, "health")
         self.assertEqual([row["flags"] for row in operation["reply"]["positive"]], list(range(8)))
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
@@ -153,8 +167,7 @@ class ContractTests(unittest.TestCase):
 
     def test_embedding_dimension_vectors_cover_results_and_bounds(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][1]
-        self.assertEqual(operation["name"], "embedding_dimension")
+        operation = _operation(baseline, "embedding_dimension")
         self.assertEqual(
             [(row["result"], row["dimension"])
              for row in operation["reply"]["positive"]],
@@ -173,8 +186,7 @@ class ContractTests(unittest.TestCase):
 
     def test_level3_count_vectors_cover_closed_result_and_bound(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][10]
-        self.assertEqual(operation["name"], "level3_count")
+        operation = _operation(baseline, "level3_count")
         self.assertEqual(
             [(row["result"], row["count"]) for row in operation["reply"]["positive"]],
             [(0, 42)],
@@ -187,8 +199,7 @@ class ContractTests(unittest.TestCase):
 
     def test_level2_count_vectors_cover_closed_result_and_bound(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][11]
-        self.assertEqual(operation["name"], "level2_count")
+        operation = _operation(baseline, "level2_count")
         self.assertEqual(
             [(row["result"], row["count"]) for row in operation["reply"]["positive"]],
             [(0, 17)],
@@ -201,8 +212,7 @@ class ContractTests(unittest.TestCase):
 
     def test_orphaned_l0_count_vectors_cover_closed_result_and_bound(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][12]
-        self.assertEqual(operation["name"], "orphaned_l0_count")
+        operation = _operation(baseline, "orphaned_l0_count")
         self.assertEqual(
             [(row["result"], row["count"]) for row in operation["reply"]["positive"]],
             [(0, 5)],
@@ -210,8 +220,7 @@ class ContractTests(unittest.TestCase):
 
     def test_total_count_vectors_cover_closed_result_and_bound(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][13]
-        self.assertEqual(operation["name"], "total_count")
+        operation = _operation(baseline, "total_count")
         self.assertEqual(
             [(row["result"], row["count"]) for row in operation["reply"]["positive"]],
             [(0, 1234567890123)],
@@ -224,8 +233,7 @@ class ContractTests(unittest.TestCase):
 
     def test_session_l2_count_vectors_cover_string_and_count_bounds(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][14]
-        self.assertEqual(operation["name"], "session_l2_count")
+        operation = _operation(baseline, "session_l2_count")
         self.assertEqual(operation["request"]["source_session"], "session-123")
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
@@ -239,8 +247,7 @@ class ContractTests(unittest.TestCase):
 
     def test_key_exists_vectors_cover_key_and_boolean_bounds(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][15]
-        self.assertEqual(operation["name"], "key_exists")
+        operation = _operation(baseline, "key_exists")
         self.assertEqual(operation["request"]["key"], "recovery:tool-a->tool-b")
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
@@ -254,8 +261,7 @@ class ContractTests(unittest.TestCase):
 
     def test_find_id_by_key_kind_vectors_cover_strings_and_result_consistency(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][16]
-        self.assertEqual(operation["name"], "find_id_by_key_kind")
+        operation = _operation(baseline, "find_id_by_key_kind")
         self.assertEqual(operation["request"]["key"], "task:deploy-fix")
         self.assertEqual(operation["request"]["kind"], "task")
         self.assertEqual(
@@ -278,8 +284,7 @@ class ContractTests(unittest.TestCase):
 
     def test_key_exists_in_tier_pair_vectors_cover_three_strings_and_boolean(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][17]
-        self.assertEqual(operation["name"], "key_exists_in_tier_pair")
+        operation = _operation(baseline, "key_exists_in_tier_pair")
         self.assertEqual(operation["request"]["key"], "recovery:tool-a->tool-b")
         self.assertEqual(operation["request"]["tier_a"], "L3")
         self.assertEqual(operation["request"]["tier_b"], "L4")
@@ -303,8 +308,7 @@ class ContractTests(unittest.TestCase):
 
     def test_effectiveness_update_vectors_preserve_binary64_and_closed_results(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][18]
-        self.assertEqual(operation["name"], "effectiveness_update")
+        operation = _operation(baseline, "effectiveness_update")
         self.assertEqual(
             (operation["request"]["memory_id"], operation["request"]["has_value"],
              operation["request"]["value_bits"]),
@@ -326,8 +330,7 @@ class ContractTests(unittest.TestCase):
 
     def test_retention_enforce_vectors_cover_fixed_policy_result(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][19]
-        self.assertEqual(operation["name"], "retention_enforce")
+        operation = _operation(baseline, "retention_enforce")
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
             ["bad_flags", "payload_length", "short", "long"],
@@ -345,8 +348,7 @@ class ContractTests(unittest.TestCase):
 
     def test_effectiveness_demote_vectors_cover_fixed_threshold_result(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][20]
-        self.assertEqual(operation["name"], "effectiveness_demote")
+        operation = _operation(baseline, "effectiveness_demote")
         self.assertEqual(operation["request"]["threshold_bits"], 0x3fd3333333333333)
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
@@ -365,8 +367,7 @@ class ContractTests(unittest.TestCase):
 
     def test_effectiveness_stats_vectors_cover_fixed_threshold_summary(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][21]
-        self.assertEqual(operation["name"], "effectiveness_stats")
+        operation = _operation(baseline, "effectiveness_stats")
         self.assertEqual(operation["request"]["low_threshold_bits"], 0x3fd3333333333333)
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
@@ -388,8 +389,7 @@ class ContractTests(unittest.TestCase):
 
     def test_l2_memory_ids_vectors_cover_bounded_identifier_list(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][22]
-        self.assertEqual(operation["name"], "l2_memory_ids")
+        operation = _operation(baseline, "l2_memory_ids")
         self.assertEqual(operation["request"]["maximum_ids"], 2048)
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
@@ -408,8 +408,7 @@ class ContractTests(unittest.TestCase):
 
     def test_health_record_vectors_cover_the_three_cycle_counters(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][23]
-        self.assertEqual(operation["name"], "health_record")
+        operation = _operation(baseline, "health_record")
         self.assertEqual(operation["request"]["conflict_window_days"], 1)
         self.assertEqual(
             [operation["request"][name]
@@ -431,8 +430,7 @@ class ContractTests(unittest.TestCase):
 
     def test_health_retention_vectors_cover_both_halves(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][24]
-        self.assertEqual(operation["name"], "health_retention")
+        operation = _operation(baseline, "health_retention")
         self.assertEqual(operation["request"]["snapshot_retention_days"], 90)
         self.assertEqual(operation["request"]["contradiction_retention_days"], 90)
         self.assertEqual(
@@ -453,8 +451,7 @@ class ContractTests(unittest.TestCase):
 
     def test_health_counters_vectors_cover_the_whole_aggregate(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][25]
-        self.assertEqual(operation["name"], "health_counters")
+        operation = _operation(baseline, "health_counters")
         self.assertEqual(operation["request"]["promote_use_count"], 3)
         self.assertEqual(operation["request"]["promote_confidence_bits"], 0x3feccccccccccccd)
         self.assertEqual(
@@ -475,8 +472,7 @@ class ContractTests(unittest.TestCase):
 
     def test_stats_counts_vectors_cover_every_labelled_bucket(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][26]
-        self.assertEqual(operation["name"], "stats_counts")
+        operation = _operation(baseline, "stats_counts")
         self.assertEqual(
             [row["mutation"] for row in operation["request"]["negative"]],
             ["bad_flags", "payload_length", "short", "long"],
@@ -507,8 +503,7 @@ class ContractTests(unittest.TestCase):
 
     def test_expire_vectors_cover_both_stages(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][27]
-        self.assertEqual(operation["name"], "expire")
+        operation = _operation(baseline, "expire")
         self.assertEqual(operation["request"]["stale_l1_tier"], "L1")
         self.assertEqual(operation["request"]["maximum_kinds"], 16)
         self.assertEqual(
@@ -528,8 +523,7 @@ class ContractTests(unittest.TestCase):
 
     def test_demote_vectors_cover_the_cascade_invariant(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][28]
-        self.assertEqual(operation["name"], "demote")
+        operation = _operation(baseline, "demote")
         self.assertEqual(operation["request"]["demote_tier"], "L2")
         self.assertEqual(operation["request"]["maximum_kinds"], 16)
         self.assertEqual(
@@ -550,8 +544,7 @@ class ContractTests(unittest.TestCase):
 
     def test_promote_stable_vectors_cover_the_whole_policy(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][29]
-        self.assertEqual(operation["name"], "promote_stable")
+        operation = _operation(baseline, "promote_stable")
         request = operation["request"]
         self.assertEqual(
             (request["source_tier"], request["target_tier"], request["kinds"],
@@ -574,8 +567,7 @@ class ContractTests(unittest.TestCase):
 
     def test_reclassify_directives_vectors_cover_both_gate_settings(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][30]
-        self.assertEqual(operation["name"], "reclassify_directives")
+        operation = _operation(baseline, "reclassify_directives")
         request = operation["request"]
         self.assertEqual(
             (request["source_tier"], request["target_tier"], request["kinds"],
@@ -601,8 +593,7 @@ class ContractTests(unittest.TestCase):
 
     def test_record_l4_approval_vectors_cover_the_bounded_fields(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][31]
-        self.assertEqual(operation["name"], "record_l4_approval")
+        operation = _operation(baseline, "record_l4_approval")
         request = operation["request"]
         self.assertEqual(
             (request["target_tier"], request["memory_id"], request["approver"],
@@ -624,8 +615,7 @@ class ContractTests(unittest.TestCase):
 
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][2]
-        self.assertEqual(operation["name"], "pool_status")
+        operation = _operation(baseline, "pool_status")
         self.assertEqual(
             [(row["result"], row["size"], row["in_use"])
              for row in operation["reply"]["positive"]],
@@ -640,8 +630,7 @@ class ContractTests(unittest.TestCase):
 
     def test_embedding_refusal_vectors_cover_relational_failures(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][3]
-        self.assertEqual(operation["name"], "embedding_refusals")
+        operation = _operation(baseline, "embedding_refusals")
         self.assertEqual(
             [(row["result"], row["refused_count"], row["last_offered"])
              for row in operation["reply"]["positive"]],
@@ -656,8 +645,7 @@ class ContractTests(unittest.TestCase):
 
     def test_postgres_status_vectors_cover_availability_failures(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][4]
-        self.assertEqual(operation["name"], "postgres_status")
+        operation = _operation(baseline, "postgres_status")
         self.assertEqual(
             [(row["result"], row["available"], row["active_connections"],
               row["max_connections"], row["is_replica"], row["replica_lag_bytes"])
@@ -680,8 +668,7 @@ class ContractTests(unittest.TestCase):
 
     def test_reembed_status_vectors_cover_result_domain(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][5]
-        self.assertEqual(operation["name"], "reembed_status")
+        operation = _operation(baseline, "reembed_status")
         self.assertEqual(
             [(row["result"], row["target_dimension"], row["started_epoch"])
              for row in operation["reply"]["positive"]],
@@ -696,8 +683,7 @@ class ContractTests(unittest.TestCase):
 
     def test_reembed_clear_vectors_are_zero_payload(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][6]
-        self.assertEqual(operation["name"], "reembed_clear")
+        operation = _operation(baseline, "reembed_clear")
         self.assertEqual(
             [row["result"] for row in operation["reply"]["positive"]],
             [0, 5],
@@ -710,8 +696,7 @@ class ContractTests(unittest.TestCase):
 
     def test_embedder_serving_id_vectors_cover_bounds(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][8]
-        self.assertEqual(operation["name"], "embedder_serving_id")
+        operation = _operation(baseline, "embedder_serving_id")
         self.assertEqual(
             [(row["result"], len(row["serving_id"]))
              for row in operation["reply"]["positive"]],
@@ -726,8 +711,7 @@ class ContractTests(unittest.TestCase):
 
     def test_dimension_reset_vectors_cover_closed_results_and_bounds(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
-        operation = baseline["operations"][9]
-        self.assertEqual(operation["name"], "dimension_reset")
+        operation = _operation(baseline, "dimension_reset")
         self.assertEqual(
             [row["result"] for row in operation["reply"]["positive"]],
             [0, 2, 3, 5],
