@@ -599,3 +599,78 @@ is why `test-drain-supersede` still has a working positive control.
 
 Not diagnosed further here. It is a real functional gap, it is not an authority
 defect, and the authority conclusions above do not rest on it.
+
+## Correction: authority is the account, not the transport
+
+The fix recorded above derived "is this caller a person" from
+`attested_transport_t`. That was wrong, and the sections above that reason in
+terms of UDS-vs-TCP should be read with this correction in front of them.
+
+Authentication happens **once, at message receipt**. The channel (mTLS), the
+session (bearer) and the account (OIDC or PAM) are each verified there, and a
+request that fails any of them never reaches a handler. By the time a surface
+asks who the caller is, identity is already proven. Re-deriving it per surface
+spends work to re-learn something already established -- and, worse, arrived at a
+different answer.
+
+What the transport table got wrong:
+
+- **An mTLS client certificate names one enrolled machine.** That is *narrower*
+  than a person, not weaker: one person may connect several thin clients to the
+  same server. It was classed with shared bearers as "not a person".
+- **An OIDC subject is the same account whichever socket carried it.** The same
+  person was the user over UDS and an anonymous agent over TCP.
+- **aimee-kb already derived this from the authenticated principal**, so a single
+  caller could be a person to one daemon and an agent to the other.
+- `vault_capability.c:255` had it right the whole time, placing a verified client
+  cert with UDS/webchat precisely because holding `cert:<CN>` "makes the grant
+  expressible per client, which a bearer -- carrying no principal at all --
+  cannot be."
+
+`server_attested_is_person(transport)` is now
+`server_account_is_person(account)`, with `server_request_account()` as the one
+place every surface below ingress asks who the caller is. It reads the account
+ingress already carried on the request: a thread-local read, no verification
+repeated. `facts_retract_command` and `memory_delete_command` take the account
+rather than the transport enum. On the kb, `kb_memory_request_authority` accepts
+any authenticated principal -- OIDC, PAM host account, verified cert, or the
+single-org owner -- where `KB_PRIN_CERT` had been excluded for the same reason
+`ATTEST_MTLS_CLIENT` was.
+
+The account is verify-then-trust at every entry: a kernel-verified UDS peer uid
+resolved to a host account, a verified KB-signed identity token's subject, an
+enrolled client certificate's grant, or a proxy stamp honoured only from the
+root UDS hop or a caller presenting the vaulted ingress secret. A plain
+authorized TCP client cannot choose its own. An empty account is a bare bearer:
+it authorizes the call but names nobody, so it still acts with model authority.
+
+The vault's transport checks are deliberately untouched. Those gate channel
+confidentiality (D2b: never mint a server credential over plaintext), which is a
+different contract from who the caller is.
+
+### One behavioural widening, stated plainly
+
+The kb's owner case previously required loopback. That qualifier was the same
+transport reasoning and is gone. A bearer reaching the kb over the network still
+has to pass the write-tier capability gate before it can write at all -- as every
+run above shows, that gate refuses first -- so this does not open the destructive
+path. It is still a widening, and it is called out rather than buried.
+
+### What is proven live, and what is not
+
+Re-run against the account-based build on CT 9078, real PostgreSQL, both daemons
+and all modules attached: `test-retract`, `test-server-retract`,
+`test-transport-authority`, `test-memory-delete` and `test-provenance` all pass
+unchanged, so the refactor is not a regression on the paths that were already
+covered.
+
+**The mTLS and OIDC paths are proven by unit assertion only, not live.** This
+container has TLS disabled (`tls_port=8743 set but TLS cert/key not loadable`,
+and the mTLS ramp self-test refuses without a reachable DB1 pki module) and no
+IdP, so no request has actually arrived here bearing `cert:<CN>` or
+`oidc:<sub>`. What the live runs demonstrate is the account-vs-no-account split
+using a PAM host account on one side and a bare bearer on the other. The claim
+that a cert or OIDC caller is now treated as that account rests on
+`server_account_is_person` being account-keyed plus the unit matrix over all
+four account forms -- which is a much smaller inferential step than the transport
+table required, but it is not the same as having run one.

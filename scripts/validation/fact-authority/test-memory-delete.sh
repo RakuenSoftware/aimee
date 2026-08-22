@@ -28,7 +28,7 @@ mk() { # $1 = key -> prints the new memory id
 
 rows() { $P "select count(*) from memories where id=$1"; }
 
-echo "=== TCP + bearer, no write-tier grant (the default deployment) ==="
+echo "=== bearer only, NO account, no write-tier grant (the default deployment) ==="
 ID="$(mk e2e-del-tcp)"
 echo "  stored id=${ID}, rows=$(rows "$ID")"
 resp="$(curl -s -m 20 -H "Authorization: Bearer ${SB}" -H 'content-type: application/json' \
@@ -40,7 +40,7 @@ esac
 echo "  rows remaining: $(rows "$ID")   <- untouched (never reached the delete)"
 
 echo
-echo "=== UDS, kernel-attested local uid (a person at the terminal) ==="
+echo "=== an authenticated account (PAM host account here) ==="
 ID2="$(mk e2e-del-uds)"
 echo "  stored id=${ID2}, rows=$(rows "$ID2")"
 echo "  response: $(curl -s -m 20 --unix-socket /root/aimee-http.sock -H 'content-type: application/json' \

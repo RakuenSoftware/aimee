@@ -34,12 +34,12 @@ tcp()  { curl -s -m 20 -H "Authorization: Bearer ${SB}" -H 'content-type: applic
 bash /root/seed-facts.sh >/dev/null 2>&1
 echo "seeded:  alice=$(state alice)   bob=$(state bob)"
 echo
-echo "=== TCP + bearer (what an AGENT presents), asking for user authority ==="
+echo "=== bearer only, NO account (what an agent presents) ==="
 echo "  alice (Class A): $(tcp alice)   -> $(state alice)"
 echo "  bob   (Class B): $(tcp bob)   -> $(state bob)"
 
 bash /root/seed-facts.sh >/dev/null 2>&1
 echo
-echo "=== UDS, kernel-attested local uid (what a PERSON at the terminal gets) ==="
+echo "=== an authenticated account (PAM host account here) ==="
 echo "  alice (Class A): $(uds alice)   -> $(state alice)"
 echo "  bob   (Class B): $(uds bob)   -> $(state bob)"
