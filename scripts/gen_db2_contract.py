@@ -15352,6 +15352,15 @@ def _generic_fields(section: dict[str, object], where: str,
             ceiling = 0xffffffff if kind == "u32" else 0x7fffffffffffffff
             if not (0 <= checked["minimum"] <= checked["maximum"] <= ceiling):
                 fail("generic-fields", f"{where}[{index}] has impossible bounds")
+        elif kind == "i32":
+            # The signed type, and the reason it exists: a result code in the
+            # project convention is negative for a failure, so an unsigned field
+            # cannot carry one without a private mapping at each end -- which is
+            # what every hand-rolled `outcome` field published so far had to be.
+            # See docs/proposals/pending/project-result-code-convention.md.
+            checked = _keys(field, {"name", "type", "minimum", "maximum"}, f"{where}[{index}]")
+            if not (-0x80000000 <= checked["minimum"] <= checked["maximum"] <= 0x7fffffff):
+                fail("generic-fields", f"{where}[{index}] has impossible bounds")
         elif kind == "f64":
             if "maximum_magnitude_binary64_bits" in field:
                 checked = _keys(field, {"name", "type", "encoding",
@@ -15380,7 +15389,7 @@ def _generic_fixed_bytes(fields: list[dict[str, object]]) -> int:
     total = 0
     for field in fields:
         kind = field["type"]
-        total += 4 if kind in ("u32", "utf8") else 8
+        total += 4 if kind in ("u32", "i32", "utf8") else 8
     return total
 
 
@@ -15406,6 +15415,8 @@ def _generic_row_struct(operation: dict[str, object]) -> str:
             members.append(f"   char {name}[AIMEE_DB2_{upper}_{name.upper()}_MAX + 1];")
         elif kind == "u32":
             members.append(f"   uint32_t {name};")
+        elif kind == "i32":
+            members.append(f"   int32_t {name};")
         elif kind == "u64":
             members.append(f"   uint64_t {name};")
         else:
@@ -15433,6 +15444,13 @@ def _generic_field_constants(operation: dict[str, object], fields: list[dict[str
         elif kind == "u32":
             rows.append((f"AIMEE_DB2_{upper}_{name}_MIN", f"{field['minimum']}u"))
             rows.append((f"AIMEE_DB2_{upper}_{name}_MAX", f"{field['maximum']}u"))
+        elif kind == "i32":
+            # Parenthesised and unsuffixed: a negative bound is a unary minus
+            # applied to a literal, and it has to survive being pasted into a
+            # comparison. INT32_MIN has no positive literal to negate at all,
+            # which is why the schema's floor stops one short of it.
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MIN", f"({field['minimum']})"))
+            rows.append((f"AIMEE_DB2_{upper}_{name}_MAX", f"({field['maximum']})"))
         elif kind == "u64":
             rows.append((f"AIMEE_DB2_{upper}_{name}_MIN", f"{field['minimum']}ull"))
             rows.append((f"AIMEE_DB2_{upper}_{name}_MAX", f"{field['maximum']}ull"))
@@ -15500,6 +15518,8 @@ def _generic_c_parameters(operation: dict[str, object], fields: list[dict[str, o
                          else f"const char *{name}")
         elif kind == "u32":
             parts.append(f"uint32_t *{name}" if writing else f"uint32_t {name}")
+        elif kind == "i32":
+            parts.append(f"int32_t *{name}" if writing else f"int32_t {name}")
         elif kind == "u64":
             parts.append(f"uint64_t *{name}" if writing else f"uint64_t {name}")
         else:
@@ -15539,6 +15559,12 @@ def _generic_c_encode_body(operation: dict[str, object], fields: list[dict[str, 
             checks.append(f"{value} < {bound}_MIN || {value} > {bound}_MAX"
                           if int(field["minimum"]) else f"{value} > {bound}_MAX")
             writes.append(f"""   aimee_db2_put_u32(payload + cursor, {value});
+   cursor += 4u;""")
+        elif kind == "i32":
+            # Both bounds always: a signed floor of zero still has to be checked,
+            # where an unsigned one is checked by the type.
+            checks.append(f"{value} < {bound}_MIN || {value} > {bound}_MAX")
+            writes.append(f"""   aimee_db2_put_u32(payload + cursor, (uint32_t){value});
    cursor += 4u;""")
         elif kind == "u64":
             checks.append(f"{value} < {bound}_MIN || {value} > {bound}_MAX"
@@ -15594,6 +15620,16 @@ def _generic_c_decode_body(operation: dict[str, object], fields: list[dict[str, 
    {value} = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if ({floor}{value} > {bound}_MAX)
+      return -1;""")
+        elif kind == "i32":
+            # The cast is the decode: four bytes little-endian, read as two's
+            # complement. Both bounds are checked, because a signed floor is not
+            # implied by the type the way an unsigned one is.
+            steps.append(f"""   if (cursor + 4u > payload_len)
+      return -1;
+   {value} = (int32_t)aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if ({value} < {bound}_MIN || {value} > {bound}_MAX)
       return -1;""")
         elif kind == "u64":
             steps.append(f"""   if (cursor + 8u > payload_len)
@@ -15876,6 +15912,8 @@ def _generic_pack(fields: list[dict[str, object]], values: list[object]) -> byte
             payload += _put_u32(len(encoded)) + encoded
         elif kind == "u32":
             payload += _put_u32(int(value))
+        elif kind == "i32":
+            payload += _put_u32(int(value) & 0xffffffff)
         else:
             payload += _put_u64(int(value))
     return payload
@@ -15929,6 +15967,21 @@ def _generic_vectors(catalog: dict[str, object],
                 negative.append({
                     "mutation": f"{name}_above_maximum",
                     "hex": _mutate_u32(request, offset, int(field["maximum"]) + 1).hex()})
+            offset += 4
+        elif kind == "i32":
+            # A signed field is mutated at both ends: past the ceiling, and past
+            # the floor. The second is the one an unsigned field never needed and
+            # the one a decoder that forgot the cast would accept.
+            if int(field["maximum"]) < 0x7fffffff:
+                negative.append({
+                    "mutation": f"{name}_above_maximum",
+                    "hex": _mutate_u32(request, offset,
+                                       (int(field["maximum"]) + 1) & 0xffffffff).hex()})
+            if int(field["minimum"]) > -0x80000000:
+                negative.append({
+                    "mutation": f"{name}_below_minimum",
+                    "hex": _mutate_u32(request, offset,
+                                       (int(field["minimum"]) - 1) & 0xffffffff).hex()})
             offset += 4
         elif kind == "f64" and "maximum_magnitude_binary64_bits" in field:
             # One past the bound, sign kept: the mutation has to be too large
@@ -16004,7 +16057,8 @@ def _generic_vectors(catalog: dict[str, object],
 
 
 def _generic_go_type(field: dict[str, object]) -> str:
-    return {"utf8": "string", "u32": "uint32", "u64": "uint64", "f64": "float64"}[field["type"]]
+    return {"utf8": "string", "u32": "uint32", "i32": "int32", "u64": "uint64",
+            "f64": "float64"}[field["type"]]
 
 
 def _generic_go(operation: dict[str, object]) -> str:
@@ -16031,14 +16085,14 @@ def _generic_go(operation: dict[str, object]) -> str:
             bounds.append(f"const {name}{upper}MinBits uint64 = {field['minimum_binary64_bits']}")
             bounds.append(f"const {name}{upper}MaxBits uint64 = {field['maximum_binary64_bits']}")
         else:
-            kind = "uint32" if field["type"] == "u32" else "uint64"
+            kind = {"u32": "uint32", "i32": "int32"}.get(str(field["type"]), "uint64")
             bounds.append(f"const {name}{upper}Min {kind} = {field['minimum']}")
             bounds.append(f"const {name}{upper}Max {kind} = {field['maximum']}")
 
     parameters = ", ".join(f"{_go_lower(str(field['name']))} {_generic_go_type(field)}"
                            for field in request_fields)
     results = ", ".join(_generic_go_type(field) for field in request_fields)
-    zeros = ", ".join({"string": '""', "uint32": "0", "uint64": "0",
+    zeros = ", ".join({"string": '""', "uint32": "0", "int32": "0", "uint64": "0",
                        "float64": "0"}[_generic_go_type(field)] for field in request_fields)
 
     writes, reads, checks = [], [], []
@@ -16064,6 +16118,20 @@ def _generic_go(operation: dict[str, object]) -> str:
 		return {zeros}, ErrMalformedEnvelope
 	}}
 	{local} = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if {local} < {name}{upper}Min || {local} > {name}{upper}Max {{
+		return {zeros}, ErrMalformedEnvelope
+	}}""")
+        elif field["type"] == "i32":
+            # Same four bytes as u32; the conversions are where the sign lives.
+            checks.append(f"{local} < {name}{upper}Min || {local} > {name}{upper}Max")
+            writes.append(f"""	var {local}Bytes [4]byte
+	binary.LittleEndian.PutUint32({local}Bytes[:], uint32({local}))
+	payload = append(payload, {local}Bytes[:]...)""")
+            reads.append(f"""	if cursor+4 > len(payload) {{
+		return {zeros}, ErrMalformedEnvelope
+	}}
+	{local} = int32(binary.LittleEndian.Uint32(payload[cursor:]))
 	cursor += 4
 	if {local} < {name}{upper}Min || {local} > {name}{upper}Max {{
 		return {zeros}, ErrMalformedEnvelope

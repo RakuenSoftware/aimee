@@ -1566,6 +1566,64 @@ class ContractTests(unittest.TestCase):
             with self.assertRaisesRegex(generator.ContractError, "rule=json-array-size"):
                 generator.load_json(path)
 
+    # --- the signed field type ------------------------------------------
+    #
+    # i32 exists so a result in the project convention can cross as itself. An
+    # unsigned field cannot carry a negative, so every operation that needed one
+    # before had a private mapping at each end that no schema described. See
+    # docs/proposals/pending/project-result-code-convention.md.
+
+    def test_i32_accepts_a_signed_range(self) -> None:
+        fields = generator._generic_fields(
+            {"fields": [{"name": "result", "type": "i32",
+                         "minimum": -2147483647, "maximum": 2147483647}]},
+            "request")
+        self.assertEqual(fields[0]["type"], "i32")
+
+    def test_i32_refuses_bounds_outside_the_type(self) -> None:
+        for minimum, maximum in ((-2147483649, 0), (0, 2147483648), (5, -5)):
+            with self.subTest(minimum=minimum, maximum=maximum):
+                with self.assertRaisesRegex(generator.ContractError, "rule=generic-fields"):
+                    generator._generic_fields(
+                        {"fields": [{"name": "result", "type": "i32",
+                                     "minimum": minimum, "maximum": maximum}]},
+                        "request")
+
+    def test_i32_occupies_the_same_four_bytes_as_u32(self) -> None:
+        signed = [{"name": "result", "type": "i32", "minimum": -1, "maximum": 1}]
+        unsigned = [{"name": "result", "type": "u32", "minimum": 0, "maximum": 1}]
+        self.assertEqual(generator._generic_fixed_bytes(signed),
+                         generator._generic_fixed_bytes(unsigned))
+
+    def test_i32_packs_negatives_in_twos_complement(self) -> None:
+        fields = [{"name": "result", "type": "i32", "minimum": -100, "maximum": 100}]
+        self.assertEqual(generator._generic_pack(fields, [-1]), b"\xff\xff\xff\xff")
+        self.assertEqual(generator._generic_pack(fields, [-3]), b"\xfd\xff\xff\xff")
+        self.assertEqual(generator._generic_pack(fields, [1]), b"\x01\x00\x00\x00")
+
+    def test_i32_c_decode_casts_before_comparing(self) -> None:
+        # Without the cast the four bytes read as a large unsigned value, which
+        # passes a floor of -1 and fails a ceiling of 1 for the wrong reason.
+        # The generated line has to say int32_t.
+        operation = {"name": "probe"}
+        fields = [{"name": "result", "type": "i32", "minimum": -1, "maximum": 1}]
+        body = generator._generic_c_decode_body(operation, fields, "", False)
+        self.assertIn("(int32_t)aimee_db2_get_u32", body)
+        self.assertIn("AIMEE_DB2_PROBE_RESULT_MIN", body)
+
+    def test_i32_constants_parenthesise_a_negative(self) -> None:
+        # (-1) rather than -1: the value is pasted into a comparison, and a bare
+        # unary minus there changes what the expression means.
+        rows = generator._generic_field_constants(
+            {"name": "probe"},
+            [{"name": "result", "type": "i32", "minimum": -1, "maximum": 1}],
+            "")
+        self.assertIn(("AIMEE_DB2_PROBE_RESULT_MIN", "(-1)"), rows)
+
+    def test_i32_go_type_is_signed(self) -> None:
+        self.assertEqual(
+            generator._generic_go_type({"name": "result", "type": "i32"}), "int32")
+
     def test_cli_is_cwd_independent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(
