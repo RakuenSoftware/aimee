@@ -80,11 +80,16 @@ make -C src ../aimee ../aimee-server ../aimee-kb \
   build/obj/aimee-module-db1 build/obj/aimee-module-config \
   build/obj/aimee-module >/dev/null
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
+RUN_ROOT="$(mktemp -d)"
+BUNDLE="$RUN_ROOT/module-bundle"
+cleanup_run_root() { rm -rf "$RUN_ROOT"; }
+trap cleanup_run_root EXIT INT TERM
 python3 scripts/export_c_repositories.py \
-  --runtime-bundle src/build/obj/module-bundle >/dev/null
+  --runtime-bundle "$BUNDLE" >/dev/null
 
 # --- scratch home ---------------------------------------------------------
-SCRATCH="$(mktemp -d)"
+SCRATCH="$RUN_ROOT/stack"
+mkdir -p "$SCRATCH"
 export AIMEE_HOME="$SCRATCH"
 mkdir -p "$AIMEE_HOME/.config/aimee"
 # Server config: move both /v1 listeners to the requested scratch ports. The
@@ -131,13 +136,13 @@ SERVER_POLICY="$AIMEE_HOME/modules.d/server"
 KB_POLICY="$AIMEE_HOME/modules.d/kb"
 mkdir -p "$SERVER_POLICY" "$KB_POLICY"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
-  src/build/obj/module-bundle/grants/server/db1.grant > "$SERVER_POLICY/db1.grant"
+  "$BUNDLE/grants/server/db1.grant" > "$SERVER_POLICY/db1.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
-  src/build/obj/module-bundle/grants/server/config.grant > "$SERVER_POLICY/config.grant"
+  "$BUNDLE/grants/server/config.grant" > "$SERVER_POLICY/config.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
-  src/build/obj/module-bundle/grants/kb/config.grant > "$KB_POLICY/config.grant"
+  "$BUNDLE/grants/kb/config.grant" > "$KB_POLICY/config.grant"
 sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
-  src/build/obj/module-bundle/grants/kb/postgres.grant > "$KB_POLICY/postgres.grant"
+  "$BUNDLE/grants/kb/postgres.grant" > "$KB_POLICY/postgres.grant"
 chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
 
 kb_pid=""; server_pid=""
@@ -176,7 +181,7 @@ cleanup() {
   stop_modules
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
   [[ -n "$kb_pid" ]] && kill "$kb_pid" 2>/dev/null || true
-  rm -rf "$SCRATCH"
+  rm -rf "$RUN_ROOT"
 }
 trap cleanup EXIT
 
