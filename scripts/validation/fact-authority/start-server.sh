@@ -57,6 +57,12 @@ nohup /usr/local/bin/aimee-server --socket=/root/aimee-server.sock >/root/server
 # the daemon it would find no socket; started after the wait below, the daemon
 # would already have given up.
 bash /root/install-config-module.sh start-server >/root/config-start-server.log 2>&1 &
+# db1 the same way, and for a sharper reason: server_tls_init_default() runs the
+# mTLS ramp self-test during startup, and that test is db1 stage 19 (db1-pki).
+# If db1 is not answering by then the ramp refuses and TLS is disabled for the
+# life of the process -- reported as "tls_port set but TLS cert/key not
+# loadable", which blames the certificate.
+bash /root/install-db1-module.sh start >/root/db1-start.log 2>&1 &
 echo $! > /root/server.pid
 sleep 10
 echo "server pid=$(cat /root/server.pid)"
