@@ -14123,6 +14123,30 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_artifact_list_proposed",
         "policy": {"reads": 200},
     },
+    "audit_event_list": {
+        "key": ("learning", 90),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_audit_event_list",
+        "policy": {"reads": 200},
+    },
+    "demotion_candidates": {
+        "key": ("learning", 91),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_demotion_candidates",
+        "policy": {"reads": 200},
+    },
+    "calibration_conformal_window": {
+        "key": ("learning", 92),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_calibration_conformal_window",
+        "policy": {"reads": 200},
+    },
+    "calibration_audit_stats": {
+        "key": ("learning", 93),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_calibration_audit_stats",
+        "policy": {"reads": 200},
+    },
 }
 
 

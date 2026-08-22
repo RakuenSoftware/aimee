@@ -4284,6 +4284,54 @@ int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifa
    return 0;
 }
 
+int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
+                         db2_audit_event_row_t *out, int max)
+{
+   (void)since;
+   (void)until;
+   (void)scope_kind;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_demotion_candidates(int n_min, db2_demotion_candidate_t *out, int max)
+{
+   (void)n_min;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_calibration_conformal_window(const char *target_surface, const char *kind,
+                                     const char *scope_kind, const char *scope_id, int window_rows,
+                                     db2_calibration_conformal_row_t *rows, int max_rows)
+{
+   (void)target_surface;
+   (void)kind;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)window_rows;
+   (void)rows;
+   (void)max_rows;
+   return 0;
+}
+
+int db2_calibration_audit_stats(const char *target_surface, const char *kind,
+                                const char *scope_kind, const char *scope_id, int window_rows,
+                                db2_calibration_bucket_t *buckets, int max_buckets)
+{
+   (void)target_surface;
+   (void)kind;
+   (void)scope_kind;
+   (void)scope_id;
+   (void)window_rows;
+   (void)buckets;
+   (void)max_buckets;
+   return -1;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

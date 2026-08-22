@@ -701,6 +701,16 @@ typedef struct
                                int max);
    int (*artifact_list_proposed)(const char *target_surface, int limit,
                                  db2_artifact_proposed_t *out, int max_out);
+   int (*audit_event_list)(const char *since, const char *until, const char *scope_kind, int limit,
+                           db2_audit_event_row_t *out, int max);
+   int (*demotion_candidates)(int n_min, db2_demotion_candidate_t *out, int max);
+   int (*calibration_conformal_window)(const char *target_surface, const char *kind,
+                                       const char *scope_kind, const char *scope_id,
+                                       int window_rows, db2_calibration_conformal_row_t *rows,
+                                       int max_rows);
+   int (*calibration_audit_stats)(const char *target_surface, const char *kind,
+                                  const char *scope_kind, const char *scope_id, int window_rows,
+                                  db2_calibration_bucket_t *buckets, int max_buckets);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

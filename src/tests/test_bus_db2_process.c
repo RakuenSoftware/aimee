@@ -4855,6 +4855,61 @@ int main(int argc, char **argv)
           artifact_list_proposed_rows[4].confidence == 0.5 &&
           artifact_list_proposed_rows[4].artifact_id[0] != '\0');
 
+   /* Batch 64: the audit window, the demotion candidates, and the two calibration reads. */
+   static aimee_db2_audit_event_list_row_t
+       audit_event_list_rows[AIMEE_DB2_AUDIT_EVENT_LIST_MAX_ROWS];
+   uint32_t audit_event_list_count = 99;
+   assert(aimee_db2_audit_event_list_call(
+              call_client, &client, 9570, 0, "2000-01-01T00:00:00Z", "", "", 32,
+              audit_event_list_rows, AIMEE_DB2_AUDIT_EVENT_LIST_MAX_ROWS, &audit_event_list_count,
+              NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* The two audit events earlier cases applied. Both were stamped in the same
+    * second, and the ordering is by that stamp, so which comes first is the
+    * database's -- this pins the count and that both rows carry an identifier,
+    * and nothing about their order. */
+   assert(audit_event_list_count == 2 && audit_event_list_rows[0].event_id[0] != '\0' &&
+          audit_event_list_rows[1].event_id[0] != '\0');
+
+   static aimee_db2_demotion_candidates_row_t
+       demotion_candidates_rows[AIMEE_DB2_DEMOTION_CANDIDATES_MAX_ROWS];
+   uint32_t demotion_candidates_count = 99;
+   assert(aimee_db2_demotion_candidates_call(
+              call_client, &client, 9571, 0, 1, demotion_candidates_rows,
+              AIMEE_DB2_DEMOTION_CANDIDATES_MAX_ROWS, &demotion_candidates_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* One scope with one attribution. The scope identifier is text in the table
+    * and a number here, so this proves the conversion as well as the grouping:
+    * a scope named something non-numeric would have been dropped without
+    * lowering any count a caller can see. */
+   assert(demotion_candidates_count == 1 && demotion_candidates_rows[0].candidate_row_id == 4242 &&
+          demotion_candidates_rows[0].attribution_count == 1);
+
+   static aimee_db2_calibration_conformal_window_row_t
+       calibration_conformal_window_rows[AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_MAX_ROWS];
+   uint32_t calibration_conformal_window_count = 99;
+   assert(aimee_db2_calibration_conformal_window_call(
+              call_client, &client, 9572, 0, "", "probe", "", "", 64,
+              calibration_conformal_window_rows, AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_MAX_ROWS,
+              &calibration_conformal_window_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* Empty, and not because there are no audit events: there are two, against
+    * an artifact of this kind and this surface. Both have an empty verdict, and
+    * the window takes only 'accepted' or 'rejected' -- an event that has been
+    * applied but not judged is not evidence about calibration. */
+   assert(calibration_conformal_window_count == 0);
+
+   static aimee_db2_calibration_audit_stats_row_t
+       calibration_audit_stats_rows[AIMEE_DB2_CALIBRATION_AUDIT_STATS_MAX_ROWS];
+   uint32_t calibration_audit_stats_count = 99;
+   assert(aimee_db2_calibration_audit_stats_call(
+              call_client, &client, 9573, 0, "", "probe", "", "", 64, calibration_audit_stats_rows,
+              AIMEE_DB2_CALIBRATION_AUDIT_STATS_MAX_ROWS, &calibration_audit_stats_count, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   /* Empty for the same reason, through a different filter: this one excludes
+    * an empty verdict rather than requiring one of two. No bucket appears at
+    * all, so the ten buckets are what a populated window would produce, not a
+    * fixed frame that is always returned. */
+   assert(calibration_audit_stats_count == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

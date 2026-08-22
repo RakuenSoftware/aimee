@@ -18093,6 +18093,328 @@
       }
     },
     {
+      "family": "learning",
+      "id": 90,
+      "name": "audit_event_list",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events are relational DB2 rows.",
+      "c_symbols": [
+        "db2_audit_event_list"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a start time is required, an end and a scope are optional, newest first"
+        },
+        "fields": [
+          {
+            "name": "since_at",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "until_at",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "list_limit",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 100
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "event_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "target_surface",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 63
+            },
+            {
+              "name": "target_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 159
+            },
+            {
+              "name": "operator_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "event_scope_kind",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "scope_id",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 127
+            },
+            {
+              "name": "applied_at",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            },
+            {
+              "name": "applied_confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "flagged_for_review",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 1
+            }
+          ]
+        },
+        "maximum_rows": 100
+      }
+    },
+    {
+      "family": "learning",
+      "id": 91,
+      "name": "demotion_candidates",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Retrieval attributions are relational DB2 rows.",
+      "c_symbols": [
+        "db2_demotion_candidates"
+      ],
+      "request": {
+        "policy": {
+          "reads": "the scope identifier is read back as a number, so a non-numeric scope is dropped"
+        },
+        "fields": [
+          {
+            "name": "minimum_attributions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "candidate_row_id",
+              "type": "u64",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "name": "attribution_count",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 512
+      }
+    },
+    {
+      "family": "learning",
+      "id": 92,
+      "name": "calibration_conformal_window",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events are relational DB2 rows.",
+      "c_symbols": [
+        "db2_calibration_conformal_window"
+      ],
+      "request": {
+        "policy": {
+          "reads": "a scope kind alone widens, a scope kind with an identifier narrows, neither is refused"
+        },
+        "fields": [
+          {
+            "name": "target_surface",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "artifact_kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "window_rows",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 512
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "applied_confidence",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "verdict",
+              "type": "utf8",
+              "minimum_bytes": 0,
+              "maximum_bytes": 31
+            }
+          ]
+        },
+        "maximum_rows": 512
+      }
+    },
+    {
+      "family": "learning",
+      "id": 93,
+      "name": "calibration_audit_stats",
+      "wire_format": "db2-envelope-generic-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Audit events are relational DB2 rows.",
+      "c_symbols": [
+        "db2_calibration_audit_stats"
+      ],
+      "request": {
+        "policy": {
+          "reads": "ten fixed confidence buckets, each with the Beta counts observed in it"
+        },
+        "fields": [
+          {
+            "name": "target_surface",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "artifact_kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "scope_kind",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 31
+          },
+          {
+            "name": "scope_id",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 127
+          },
+          {
+            "name": "window_rows",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        ]
+      },
+      "reply": {
+        "row": {
+          "fields": [
+            {
+              "name": "range_lo",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "range_hi",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "alpha",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "beta",
+              "type": "f64",
+              "encoding": "ieee754-binary64-le",
+              "maximum_magnitude_binary64_bits": 4741671816366391296
+            },
+            {
+              "name": "sample_n",
+              "type": "u32",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          ]
+        },
+        "maximum_rows": 10
+      }
+    },
+    {
       "family": "organization",
       "id": 1,
       "name": "rel_types_ensure_seed",

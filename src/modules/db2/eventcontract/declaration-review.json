@@ -380,6 +380,14 @@
       "reason": "The typed learning.artifact_write_ex operation records an artifact with an attempt count of the caller's choosing. It is otherwise learning.artifact_write, including the part that matters: writing an identifier that exists does nothing and is acknowledged. So the attempt count can only be set when the artifact is created, and a caller raising it on a retry writes nothing and is told it worked. Its state, scope-kind and payload defaults need a null the wire cannot send."
     },
     {
+      "symbol": "db2_audit_event_list",
+      "signature_sha256": "8004a960a194bca608c184cb208ed7780dc2930648da4d5144675c8203306e2e",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.audit_event_list operation reads applied artifact decisions in a time window. The start is required and the backend refuses without one, which is the rule that keeps this from becoming a full-table scan -- so the cheapest way to ask for everything is closed, deliberately. The end and the scope are optional and widen by being empty, so a caller that fails to assemble a scope reads across all of them rather than none."
+    },
+    {
       "symbol": "db2_audit_event_write",
       "signature_sha256": "996924ace3f43aa69b680a7bca9922ce96381a673846d295c084d018b88ce508",
       "disposition": "wire-operation",
@@ -466,6 +474,22 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.bandit_promotion_set operation replaces the promotion write. There is one promotion per decision point, so setting a second replaces the first and the previous rollback arm is lost with it. The stamp is DB2's clock. An empty rollback arm is allowed, which records a promotion with nothing to fall back to. The backend discards the step result, so the acknowledgement cannot say the row landed."
+    },
+    {
+      "symbol": "db2_calibration_audit_stats",
+      "signature_sha256": "ba6c246becdb6234d561c67ed731d9b9ae705337d405aadfe03bf481b7828867",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.calibration_audit_stats operation reports how well confidence has predicted outcome, in ten fixed buckets across the range. Each bucket carries the Beta parameters counted from the window rather than a computed rate, so a bucket nobody has landed in is reported as its prior rather than as a rate of zero -- the difference between unmeasured and measured-badly, which a single number would lose. The window bounds rows and not time, so a busy surface reports a shorter period than a quiet one."
+    },
+    {
+      "symbol": "db2_calibration_conformal_window",
+      "signature_sha256": "1c8e7d2bc1f82a4eb02393e1aaaa1a0a2a074c0c104d41e4fceb31669a487e4e",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.calibration_conformal_window operation reads the recent confidence and verdict pairs a conformal bound is computed from. Its two scope arguments are not a pair: a kind on its own restricts to that kind across every identifier, a kind with an identifier restricts to one, and an identifier without a kind is ignored entirely rather than refused -- so a caller that assembles the identifier and loses the kind silently reads a wider window than it asked for."
     },
     {
       "symbol": "db2_calibration_profile_read",
@@ -1066,6 +1090,14 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.decision_log_set_status operation replaces the status write. Like the outcome beside it the value is stored unchecked, so a caller can put a decision into a status no reader understands. Unlike the outcome an empty status is refused, because a decision always has one and the empty string is not it."
+    },
+    {
+      "symbol": "db2_demotion_candidates",
+      "signature_sha256": "405096b4a822079ca9a6b29ab2b0fbc4044d57b7854c37713054a30bbe22ef0a",
+      "disposition": "wire-operation",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The typed learning.demotion_candidates operation finds what has been retrieved often enough to be worth demoting. It groups retrieval attributions by scope and reads each scope identifier back as a number, because the thing being demoted is a row -- so a scope whose identifier is not numeric is skipped silently, and the count returned is smaller than the number of groups without saying so. The ceiling is the caller's; asking for fewer than exist returns an arbitrary subset."
     },
     {
       "symbol": "db2_demotion_profile_read",

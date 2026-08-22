@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "d96ccfee0edc21119b9e6ce602fc6c9434cac91d23116687a366360893bc4b95"
+const ContractSHA256 = "021b9d5a9c3c4dfb198dcfd0ed8673b799860d865b5dd16036de2e6f30f33b2f"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -13977,6 +13977,315 @@ func DecodeArtifactListProposedRequest(request []byte) (string, uint32, error) {
 		return "", 0, ErrMalformedEnvelope
 	}
 	return targetSurface, listLimit, nil
+}
+
+const EventAuditEventList = EventLearning
+const StageAuditEventList = FamilyLearning
+const OperationAuditEventList uint32 = 90
+const AuditEventListSinceAtMin = 1
+const AuditEventListSinceAtMax = 31
+const AuditEventListUntilAtMin = 0
+const AuditEventListUntilAtMax = 31
+const AuditEventListScopeKindMin = 0
+const AuditEventListScopeKindMax = 31
+const AuditEventListListLimitMin uint32 = 1
+const AuditEventListListLimitMax uint32 = 100
+
+// EncodeAuditEventListRequest writes the schema audit_event_list declares, in order.
+func EncodeAuditEventListRequest(sinceAt string, untilAt string, scopeKind string, listLimit uint32) ([]byte, error) {
+	if len(sinceAt) < AuditEventListSinceAtMin || len(sinceAt) > AuditEventListSinceAtMax || hasNUL(sinceAt) ||
+		len(untilAt) < AuditEventListUntilAtMin || len(untilAt) > AuditEventListUntilAtMax || hasNUL(untilAt) ||
+		len(scopeKind) < AuditEventListScopeKindMin || len(scopeKind) > AuditEventListScopeKindMax || hasNUL(scopeKind) ||
+		listLimit < AuditEventListListLimitMin || listLimit > AuditEventListListLimitMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, sinceAt, AuditEventListSinceAtMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, untilAt, AuditEventListUntilAtMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeKind, AuditEventListScopeKindMax); err != nil {
+		return nil, err
+	}
+	var listLimitBytes [4]byte
+	binary.LittleEndian.PutUint32(listLimitBytes[:], listLimit)
+	payload = append(payload, listLimitBytes[:]...)
+	header, err := EncodeRequestHeader(OperationAuditEventList, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeAuditEventListRequest reads it back, checking each field against its own bound.
+func DecodeAuditEventListRequest(request []byte) (string, string, string, uint32, error) {
+	var sinceAt string
+	var untilAt string
+	var scopeKind string
+	var listLimit uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationAuditEventList || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if sinceAt, err = takeRowText(payload, &cursor, AuditEventListSinceAtMax); err != nil ||
+		len(sinceAt) < AuditEventListSinceAtMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if untilAt, err = takeRowText(payload, &cursor, AuditEventListUntilAtMax); err != nil ||
+		len(untilAt) < AuditEventListUntilAtMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if scopeKind, err = takeRowText(payload, &cursor, AuditEventListScopeKindMax); err != nil ||
+		len(scopeKind) < AuditEventListScopeKindMin {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	listLimit = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if listLimit < AuditEventListListLimitMin || listLimit > AuditEventListListLimitMax {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", 0, ErrMalformedEnvelope
+	}
+	return sinceAt, untilAt, scopeKind, listLimit, nil
+}
+
+const EventDemotionCandidates = EventLearning
+const StageDemotionCandidates = FamilyLearning
+const OperationDemotionCandidates uint32 = 91
+const DemotionCandidatesMinimumAttributionsMin uint32 = 0
+const DemotionCandidatesMinimumAttributionsMax uint32 = 65535
+
+// EncodeDemotionCandidatesRequest writes the schema demotion_candidates declares, in order.
+func EncodeDemotionCandidatesRequest(minimumAttributions uint32) ([]byte, error) {
+	if minimumAttributions < DemotionCandidatesMinimumAttributionsMin || minimumAttributions > DemotionCandidatesMinimumAttributionsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	var minimumAttributionsBytes [4]byte
+	binary.LittleEndian.PutUint32(minimumAttributionsBytes[:], minimumAttributions)
+	payload = append(payload, minimumAttributionsBytes[:]...)
+	header, err := EncodeRequestHeader(OperationDemotionCandidates, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeDemotionCandidatesRequest reads it back, checking each field against its own bound.
+func DecodeDemotionCandidatesRequest(request []byte) (uint32, error) {
+	var minimumAttributions uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemotionCandidates || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if cursor+4 > len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	minimumAttributions = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if minimumAttributions < DemotionCandidatesMinimumAttributionsMin || minimumAttributions > DemotionCandidatesMinimumAttributionsMax {
+		return 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, ErrMalformedEnvelope
+	}
+	return minimumAttributions, nil
+}
+
+const EventCalibrationConformalWindow = EventLearning
+const StageCalibrationConformalWindow = FamilyLearning
+const OperationCalibrationConformalWindow uint32 = 92
+const CalibrationConformalWindowTargetSurfaceMin = 0
+const CalibrationConformalWindowTargetSurfaceMax = 63
+const CalibrationConformalWindowArtifactKindMin = 1
+const CalibrationConformalWindowArtifactKindMax = 63
+const CalibrationConformalWindowScopeKindMin = 0
+const CalibrationConformalWindowScopeKindMax = 31
+const CalibrationConformalWindowScopeIDMin = 0
+const CalibrationConformalWindowScopeIDMax = 127
+const CalibrationConformalWindowWindowRowsMin uint32 = 0
+const CalibrationConformalWindowWindowRowsMax uint32 = 512
+
+// EncodeCalibrationConformalWindowRequest writes the schema calibration_conformal_window declares, in order.
+func EncodeCalibrationConformalWindowRequest(targetSurface string, artifactKind string, scopeKind string, scopeID string, windowRows uint32) ([]byte, error) {
+	if len(targetSurface) < CalibrationConformalWindowTargetSurfaceMin || len(targetSurface) > CalibrationConformalWindowTargetSurfaceMax || hasNUL(targetSurface) ||
+		len(artifactKind) < CalibrationConformalWindowArtifactKindMin || len(artifactKind) > CalibrationConformalWindowArtifactKindMax || hasNUL(artifactKind) ||
+		len(scopeKind) < CalibrationConformalWindowScopeKindMin || len(scopeKind) > CalibrationConformalWindowScopeKindMax || hasNUL(scopeKind) ||
+		len(scopeID) < CalibrationConformalWindowScopeIDMin || len(scopeID) > CalibrationConformalWindowScopeIDMax || hasNUL(scopeID) ||
+		windowRows < CalibrationConformalWindowWindowRowsMin || windowRows > CalibrationConformalWindowWindowRowsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, targetSurface, CalibrationConformalWindowTargetSurfaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactKind, CalibrationConformalWindowArtifactKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeKind, CalibrationConformalWindowScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeID, CalibrationConformalWindowScopeIDMax); err != nil {
+		return nil, err
+	}
+	var windowRowsBytes [4]byte
+	binary.LittleEndian.PutUint32(windowRowsBytes[:], windowRows)
+	payload = append(payload, windowRowsBytes[:]...)
+	header, err := EncodeRequestHeader(OperationCalibrationConformalWindow, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCalibrationConformalWindowRequest reads it back, checking each field against its own bound.
+func DecodeCalibrationConformalWindowRequest(request []byte) (string, string, string, string, uint32, error) {
+	var targetSurface string
+	var artifactKind string
+	var scopeKind string
+	var scopeID string
+	var windowRows uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCalibrationConformalWindow || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if targetSurface, err = takeRowText(payload, &cursor, CalibrationConformalWindowTargetSurfaceMax); err != nil ||
+		len(targetSurface) < CalibrationConformalWindowTargetSurfaceMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if artifactKind, err = takeRowText(payload, &cursor, CalibrationConformalWindowArtifactKindMax); err != nil ||
+		len(artifactKind) < CalibrationConformalWindowArtifactKindMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if scopeKind, err = takeRowText(payload, &cursor, CalibrationConformalWindowScopeKindMax); err != nil ||
+		len(scopeKind) < CalibrationConformalWindowScopeKindMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if scopeID, err = takeRowText(payload, &cursor, CalibrationConformalWindowScopeIDMax); err != nil ||
+		len(scopeID) < CalibrationConformalWindowScopeIDMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	windowRows = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if windowRows < CalibrationConformalWindowWindowRowsMin || windowRows > CalibrationConformalWindowWindowRowsMax {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	return targetSurface, artifactKind, scopeKind, scopeID, windowRows, nil
+}
+
+const EventCalibrationAuditStats = EventLearning
+const StageCalibrationAuditStats = FamilyLearning
+const OperationCalibrationAuditStats uint32 = 93
+const CalibrationAuditStatsTargetSurfaceMin = 0
+const CalibrationAuditStatsTargetSurfaceMax = 63
+const CalibrationAuditStatsArtifactKindMin = 1
+const CalibrationAuditStatsArtifactKindMax = 63
+const CalibrationAuditStatsScopeKindMin = 0
+const CalibrationAuditStatsScopeKindMax = 31
+const CalibrationAuditStatsScopeIDMin = 0
+const CalibrationAuditStatsScopeIDMax = 127
+const CalibrationAuditStatsWindowRowsMin uint32 = 0
+const CalibrationAuditStatsWindowRowsMax uint32 = 65535
+
+// EncodeCalibrationAuditStatsRequest writes the schema calibration_audit_stats declares, in order.
+func EncodeCalibrationAuditStatsRequest(targetSurface string, artifactKind string, scopeKind string, scopeID string, windowRows uint32) ([]byte, error) {
+	if len(targetSurface) < CalibrationAuditStatsTargetSurfaceMin || len(targetSurface) > CalibrationAuditStatsTargetSurfaceMax || hasNUL(targetSurface) ||
+		len(artifactKind) < CalibrationAuditStatsArtifactKindMin || len(artifactKind) > CalibrationAuditStatsArtifactKindMax || hasNUL(artifactKind) ||
+		len(scopeKind) < CalibrationAuditStatsScopeKindMin || len(scopeKind) > CalibrationAuditStatsScopeKindMax || hasNUL(scopeKind) ||
+		len(scopeID) < CalibrationAuditStatsScopeIDMin || len(scopeID) > CalibrationAuditStatsScopeIDMax || hasNUL(scopeID) ||
+		windowRows < CalibrationAuditStatsWindowRowsMin || windowRows > CalibrationAuditStatsWindowRowsMax {
+		return nil, ErrMalformedEnvelope
+	}
+	var payload []byte
+	if err := putRowText(&payload, targetSurface, CalibrationAuditStatsTargetSurfaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, artifactKind, CalibrationAuditStatsArtifactKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeKind, CalibrationAuditStatsScopeKindMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, scopeID, CalibrationAuditStatsScopeIDMax); err != nil {
+		return nil, err
+	}
+	var windowRowsBytes [4]byte
+	binary.LittleEndian.PutUint32(windowRowsBytes[:], windowRows)
+	payload = append(payload, windowRowsBytes[:]...)
+	header, err := EncodeRequestHeader(OperationCalibrationAuditStats, 0, uint32(len(payload)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return append(header, payload...), nil
+}
+
+// DecodeCalibrationAuditStatsRequest reads it back, checking each field against its own bound.
+func DecodeCalibrationAuditStatsRequest(request []byte) (string, string, string, string, uint32, error) {
+	var targetSurface string
+	var artifactKind string
+	var scopeKind string
+	var scopeID string
+	var windowRows uint32
+	var err error
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationCalibrationAuditStats || header.Flags != 0 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	cursor := 0
+	if targetSurface, err = takeRowText(payload, &cursor, CalibrationAuditStatsTargetSurfaceMax); err != nil ||
+		len(targetSurface) < CalibrationAuditStatsTargetSurfaceMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if artifactKind, err = takeRowText(payload, &cursor, CalibrationAuditStatsArtifactKindMax); err != nil ||
+		len(artifactKind) < CalibrationAuditStatsArtifactKindMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if scopeKind, err = takeRowText(payload, &cursor, CalibrationAuditStatsScopeKindMax); err != nil ||
+		len(scopeKind) < CalibrationAuditStatsScopeKindMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if scopeID, err = takeRowText(payload, &cursor, CalibrationAuditStatsScopeIDMax); err != nil ||
+		len(scopeID) < CalibrationAuditStatsScopeIDMin {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor+4 > len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	windowRows = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if windowRows < CalibrationAuditStatsWindowRowsMin || windowRows > CalibrationAuditStatsWindowRowsMax {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return "", "", "", "", 0, ErrMalformedEnvelope
+	}
+	return targetSurface, artifactKind, scopeKind, scopeID, windowRows, nil
 }
 
 const EventDocumentExists = EventOrganization

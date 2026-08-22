@@ -1122,6 +1122,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .code_index_project_list = db2_code_index_project_list,
        .css_token_candidates = db2_css_token_candidates,
        .artifact_list_proposed = db2_artifact_list_proposed,
+       .audit_event_list = db2_audit_event_list,
+       .demotion_candidates = db2_demotion_candidates,
+       .calibration_conformal_window = db2_calibration_conformal_window,
+       .calibration_audit_stats = db2_calibration_audit_stats,
    };
    return &backend;
 }
@@ -12928,6 +12932,229 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
                return AIMEE_MODULE_STATUS_INTERNAL;
             }
             free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char since_at[AIMEE_DB2_AUDIT_EVENT_LIST_SINCE_AT_MAX + 1] = "";
+         char until_at[AIMEE_DB2_AUDIT_EVENT_LIST_UNTIL_AT_MAX + 1] = "";
+         char scope_kind[AIMEE_DB2_AUDIT_EVENT_LIST_SCOPE_KIND_MAX + 1] = "";
+         uint32_t list_limit = 0u;
+         if (aimee_db2_audit_event_list_request_decode(
+                 request_body, request_len, since_at, sizeof(since_at), until_at, sizeof(until_at),
+                 scope_kind, sizeof(scope_kind), &list_limit) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_AUDIT_EVENT_LIST_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->audit_event_list)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_audit_event_list_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_AUDIT_EVENT_LIST_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_audit_event_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_AUDIT_EVENT_LIST_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found =
+                      backend->audit_event_list(since_at, until_at, scope_kind, (int)list_limit,
+                                                listed, (int)AIMEE_DB2_AUDIT_EVENT_LIST_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  snprintf(rows[index].event_id, sizeof(rows[index].event_id), "%s",
+                           listed[index].id);
+                  snprintf(rows[index].target_surface, sizeof(rows[index].target_surface), "%s",
+                           listed[index].target_surface);
+                  snprintf(rows[index].target_id, sizeof(rows[index].target_id), "%s",
+                           listed[index].target_id);
+                  snprintf(rows[index].operator_id, sizeof(rows[index].operator_id), "%s",
+                           listed[index].operator_id);
+                  snprintf(rows[index].event_scope_kind, sizeof(rows[index].event_scope_kind), "%s",
+                           listed[index].scope_kind);
+                  snprintf(rows[index].scope_id, sizeof(rows[index].scope_id), "%s",
+                           listed[index].scope_id);
+                  snprintf(rows[index].applied_at, sizeof(rows[index].applied_at), "%s",
+                           listed[index].applied_at);
+                  rows[index].applied_confidence = listed[index].applied_confidence;
+                  rows[index].flagged_for_review = listed[index].flagged_for_review > 0
+                                                       ? (uint32_t)listed[index].flagged_for_review
+                                                       : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_audit_event_list_reply_encode(rows, count, response_body,
+                                                        response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint32_t minimum_attributions = 0u;
+         if (aimee_db2_demotion_candidates_request_decode(request_body, request_len,
+                                                          &minimum_attributions) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_DEMOTION_CANDIDATES_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->demotion_candidates)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_demotion_candidates_row_t rows[AIMEE_DB2_DEMOTION_CANDIDATES_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_demotion_candidate_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_DEMOTION_CANDIDATES_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->demotion_candidates((int)minimum_attributions, listed,
+                                                       (int)AIMEE_DB2_DEMOTION_CANDIDATES_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].candidate_row_id =
+                      listed[index].row_id > 0 ? (uint64_t)listed[index].row_id : 0u;
+                  rows[index].attribution_count =
+                      listed[index].attribution_n > 0 ? (uint32_t)listed[index].attribution_n : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_demotion_candidates_reply_encode(rows, count, response_body,
+                                                           response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char target_surface[AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_TARGET_SURFACE_MAX + 1] = "";
+         char artifact_kind[AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_ARTIFACT_KIND_MAX + 1] = "";
+         char scope_kind[AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_SCOPE_KIND_MAX + 1] = "";
+         char scope_id[AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_SCOPE_ID_MAX + 1] = "";
+         uint32_t window_rows = 0u;
+         if (aimee_db2_calibration_conformal_window_request_decode(
+                 request_body, request_len, target_surface, sizeof(target_surface), artifact_kind,
+                 sizeof(artifact_kind), scope_kind, sizeof(scope_kind), scope_id, sizeof(scope_id),
+                 &window_rows) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->calibration_conformal_window)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_calibration_conformal_window_row_t *rows =
+                malloc(sizeof(*rows) * AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_MAX_ROWS);
+            uint32_t count = 0u;
+            if (!rows)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            {
+               db2_calibration_conformal_row_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->calibration_conformal_window(
+                      target_surface, artifact_kind, scope_kind, scope_id, (int)window_rows, listed,
+                      (int)AIMEE_DB2_CALIBRATION_CONFORMAL_WINDOW_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].applied_confidence = listed[index].applied_confidence;
+                  snprintf(rows[index].verdict, sizeof(rows[index].verdict), "%s",
+                           listed[index].verdict);
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_calibration_conformal_window_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               free(rows);
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            free(rows);
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char target_surface[AIMEE_DB2_CALIBRATION_AUDIT_STATS_TARGET_SURFACE_MAX + 1] = "";
+         char artifact_kind[AIMEE_DB2_CALIBRATION_AUDIT_STATS_ARTIFACT_KIND_MAX + 1] = "";
+         char scope_kind[AIMEE_DB2_CALIBRATION_AUDIT_STATS_SCOPE_KIND_MAX + 1] = "";
+         char scope_id[AIMEE_DB2_CALIBRATION_AUDIT_STATS_SCOPE_ID_MAX + 1] = "";
+         uint32_t window_rows = 0u;
+         if (aimee_db2_calibration_audit_stats_request_decode(
+                 request_body, request_len, target_surface, sizeof(target_surface), artifact_kind,
+                 sizeof(artifact_kind), scope_kind, sizeof(scope_kind), scope_id, sizeof(scope_id),
+                 &window_rows) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_CALIBRATION_AUDIT_STATS_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->calibration_audit_stats)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            aimee_db2_calibration_audit_stats_row_t
+                rows[AIMEE_DB2_CALIBRATION_AUDIT_STATS_MAX_ROWS];
+            uint32_t count = 0u;
+            {
+               db2_calibration_bucket_t *listed =
+                   malloc(sizeof(*listed) * AIMEE_DB2_CALIBRATION_AUDIT_STATS_MAX_ROWS);
+               /* The frame owns `rows` and frees it at its own returns -- and
+                * declares it on the stack when the reply is narrow enough, so
+                * freeing it here is a leak in one case and undefined in the
+                * other. Fall through with nothing rather than return. */
+               int found = 0;
+               if (listed)
+                  found = backend->calibration_audit_stats(
+                      target_surface, artifact_kind, scope_kind, scope_id, (int)window_rows, listed,
+                      (int)AIMEE_DB2_CALIBRATION_AUDIT_STATS_MAX_ROWS);
+               for (int index = 0; index < found; index++)
+               {
+                  rows[index].range_lo = listed[index].range_lo;
+                  rows[index].range_hi = listed[index].range_hi;
+                  rows[index].alpha = listed[index].alpha;
+                  rows[index].beta = listed[index].beta;
+                  rows[index].sample_n =
+                      listed[index].sample_n > 0 ? (uint32_t)listed[index].sample_n : 0u;
+               }
+               count = found < 0 ? 0u : (uint32_t)found;
+               free(listed);
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_calibration_audit_stats_reply_encode(
+                    rows, count, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
             return AIMEE_MODULE_STATUS_OK;
          }
       }

@@ -3872,9 +3872,15 @@
           "line": 131
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.audit_event_list operation reads applied artifact decisions in a time window. The start is required and the backend refuses without one, which is the rule that keeps this from becoming a full-table scan -- so the cheapest way to ask for everything is closed, deliberately. The end and the scope are optional and widen by being empty, so a caller that fails to assemble a scope reads across all of them rather than none."
+      },
       "signature": "int db2_audit_event_list ( const char * since , const char * until , const char * scope_kind , int limit , db2_audit_event_row_t * out , int max )",
       "signature_sha256": "8004a960a194bca608c184cb208ed7780dc2930648da4d5144675c8203306e2e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_audit_event_list"
     },
     {
@@ -4158,9 +4164,15 @@
           "line": 87
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.calibration_audit_stats operation reports how well confidence has predicted outcome, in ten fixed buckets across the range. Each bucket carries the Beta parameters counted from the window rather than a computed rate, so a bucket nobody has landed in is reported as its prior rather than as a rate of zero -- the difference between unmeasured and measured-badly, which a single number would lose. The window bounds rows and not time, so a busy surface reports a shorter period than a quiet one."
+      },
       "signature": "int db2_calibration_audit_stats ( const char * target_surface , const char * kind , const char * scope_kind , const char * scope_id , int window_rows , db2_calibration_bucket_t * buckets , int max_buckets )",
       "signature_sha256": "ba6c246becdb6234d561c67ed731d9b9ae705337d405aadfe03bf481b7828867",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_calibration_audit_stats"
     },
     {
@@ -4174,9 +4186,15 @@
           "line": 93
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.calibration_conformal_window operation reads the recent confidence and verdict pairs a conformal bound is computed from. Its two scope arguments are not a pair: a kind on its own restricts to that kind across every identifier, a kind with an identifier restricts to one, and an identifier without a kind is ignored entirely rather than refused -- so a caller that assembles the identifier and loses the kind silently reads a wider window than it asked for."
+      },
       "signature": "int db2_calibration_conformal_window ( const char * target_surface , const char * kind , const char * scope_kind , const char * scope_id , int window_rows , db2_calibration_conformal_row_t * rows , int max_rows )",
       "signature_sha256": "1c8e7d2bc1f82a4eb02393e1aaaa1a0a2a074c0c104d41e4fceb31669a487e4e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_calibration_conformal_window"
     },
     {
@@ -7190,9 +7208,15 @@
           "line": 141
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "learning",
+        "reason": "The typed learning.demotion_candidates operation finds what has been retrieved often enough to be worth demoting. It groups retrieval attributions by scope and reads each scope identifier back as a number, because the thing being demoted is a row -- so a scope whose identifier is not numeric is skipped silently, and the count returned is smaller than the number of groups without saying so. The ceiling is the caller's; asking for fewer than exist returns an arbitrary subset."
+      },
       "signature": "int db2_demotion_candidates ( int n_min , db2_demotion_candidate_t * out , int max )",
       "signature_sha256": "405096b4a822079ca9a6b29ab2b0fbc4044d57b7854c37713054a30bbe22ef0a",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_demotion_candidates"
     },
     {
@@ -28555,15 +28579,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "6f5725acbda9d5a257d6bd29644c986323f7f5435582a93f97a047c94a635116",
+  "fingerprint": "92c4bab1a546aa7a0636b7ffe136e47bf8062b2939b73eab5e6a051444e0a5dd",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 207,
+    "audit_pending": 203,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 752
+    "reviewed": 756
   }
 }
