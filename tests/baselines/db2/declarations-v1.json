@@ -9544,9 +9544,15 @@
           "line": 15
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Maps a polarity abbreviation onto its canonical word and answers NULL for anything else. No connection, no query: a caller in another process would spend a round trip to learn that '+' means 'positive'. It stays linked wherever it is called, and the operation that writes the feedback row takes the canonical word it produced."
+      },
       "signature": "const char * db2_feedback_parse_polarity ( const char * input )",
       "signature_sha256": "a9dc1420f43f15b05af0f9624fa783078c3c4bbdacebfcf17d081bd5415a37eb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_feedback_parse_polarity"
     },
     {
@@ -9777,9 +9783,15 @@
           "line": 107
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Validates and packs the arguments of an identity intent into the struct identity.intent_start takes, generating the correlation id and jti. It is the caller's half of that call, run before anything crosses, and it reaches no store -- sending it would mean a round trip to build the request for the next round trip."
+      },
       "signature": "db2_management_action_result_t db2_identity_intent_operation_init ( int64_t team_id , const char * target_server_id , db2_identity_auth_mode_t auth_mode , const char * token_issuer , const char * kid , int ttl_seconds , const char * installation_id , db2_identity_intent_operation_t * out )",
       "signature_sha256": "e8d09fa25bd28d86d0b891d158cf052e8cd8acd48e88448d35bd3a79dff0af91",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_identity_intent_operation_init"
     },
     {
@@ -15669,9 +15681,15 @@
           "line": 141
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "The same shape for a management action: bounds-checks every field, hex-renders the request digest, and mints the correlation id and jti the intent will carry. Caller-side argument construction, reaching no store. The identifiers it generates are what make the intent it precedes idempotent, so generating them at the caller is deliberate."
+      },
       "signature": "db2_management_action_result_t db2_management_action_operation_init ( int64_t team_id , const char * target_server_id , db2_management_action_capability_t capability , const uint8_t request_sha256 [ 32 ] , const char * token_issuer , const char * kid , int ttl_seconds , const char * installation_id , db2_management_action_operation_t * out )",
       "signature_sha256": "152c6c7947171675e4939f13818a3b01243ff2ae381f7c5cc3b9cfab91e7c9ae",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_management_action_operation_init"
     },
     {
@@ -15780,9 +15798,15 @@
           "line": 171
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Packs an issuer, a subject and two anchors into a client-instance binding and computes the digest over them. The digest is the identity of the binding, so computing it beside the values rather than after they have crossed a wire is what keeps it a digest of what the caller meant. It reaches no store."
+      },
       "signature": "db2_management_client_instance_result_t db2_management_client_instance_binding_init ( const char * issuer , const char * subject , const uint8_t proof_anchor [ DB2_MANAGEMENT_CLIENT_INSTANCE_ANCHOR_LEN ] , const uint8_t custody_anchor [ DB2_MANAGEMENT_CLIENT_INSTANCE_ANCHOR_LEN ] , db2_management_client_instance_binding_t * out )",
       "signature_sha256": "89c030a1e7933e9ccfd8e10f36472b027dba616522a2fcf0e2644121a2473dad",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_management_client_instance_binding_init"
     },
     {
@@ -22949,9 +22973,15 @@
           "line": 86
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Names the tier a rule weight falls in. Three comparisons against two constants, no store -- the weight already crossed the boundary on the rule row, and naming its band is arithmetic the reader of that row can do."
+      },
       "signature": "const char * db2_rules_tier ( int weight )",
       "signature_sha256": "b5a838c221d09665e332c40b1ca6f495c6d5bae4f385fb4f68ebee33603695de",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_rules_tier"
     },
     {
@@ -26554,9 +26584,15 @@
           "line": 23
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Fills a maintenance configuration struct with its default values. It reads nothing and writes nothing: the defaults are constants in the source. A caller needs them before it can decide what to ask for, which is the wrong side of a request to be answering."
+      },
       "signature": "void kb_maintenance_config_defaults ( kb_maintenance_config_t * cfg )",
       "signature_sha256": "5880cc78cf0f5f4a922c3c2630354c4e9946cd2ee9cdb5aa7841f14fd8b522b0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "kb_maintenance_config_defaults"
     },
     {
@@ -26609,9 +26645,15 @@
           "line": 41
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Answers whether a string is a well-formed metric name, by length and character class. Validation the caller must do before it sends anything, so making it a round trip would put the check after the request it is meant to gate."
+      },
       "signature": "int org_telemetry_metric_name_valid ( const char * s )",
       "signature_sha256": "0532113ef895a0be4fd05ef4f1503926c98e93cbb6a23c4ef9bb46710a8705a7",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "org_telemetry_metric_name_valid"
     },
     {
@@ -26641,9 +26683,15 @@
           "line": 55
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Renders metric rows as a Prometheus exposition. The rows come from the organization.metrics_snapshot read; this turns them into text. Formatting rows a caller already holds is not a question about the store, and sending them back to be formatted would double the bytes for no answer that is not already there."
+      },
       "signature": "int org_telemetry_render_prom ( const org_metric_row_t * rows , int n , char * out , size_t cap )",
       "signature_sha256": "bb8a84df303cf0b322c200087a97ba1682fd9b85d4e0f8f5157f29de6bbca036",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "org_telemetry_render_prom"
     },
     {
@@ -26657,9 +26705,15 @@
           "line": 58
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Hashes a string to hex. Nothing about it is DB2; it lives here because the telemetry token check needed a digest and this is where that check is. It stays linked."
+      },
       "signature": "void org_telemetry_sha256_hex ( const char * s , char out [ 65 ] )",
       "signature_sha256": "4e814e34788399a4ac701e4162eaef238fc1ec2096212262ca4a0ae6466aa74f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "org_telemetry_sha256_hex"
     },
     {
@@ -26673,9 +26727,15 @@
           "line": 64
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Compares two hex digests in constant time. Sending it over a bus would cost the property it exists for -- the comparison would still be constant-time, and the round trip around it would not be, so the timing it hides would reappear at the boundary. It must stay a linked call."
+      },
       "signature": "int org_telemetry_token_hash_eq ( const char * presented_hex , const char * expected_hex )",
       "signature_sha256": "da2f907af1144a1421968b58cf679bbc34209da190c20e75ae0ab319bc1e0460",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "org_telemetry_token_hash_eq"
     },
     {
@@ -28415,9 +28475,15 @@
           "line": 28
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "linked-library",
+        "family": "lifecycle",
+        "reason": "Names a cross-repository dependency tier. A switch over an enumeration with no default beyond 'none', reaching no store. The tier crossed the boundary on the row that carries it; naming it is the caller's own arithmetic."
+      },
       "signature": "const char * xrepo_tier_name ( xrepo_tier_t t )",
       "signature_sha256": "6cecb5326f469439025e238b3eba0d0eae0989dcf344767f6a1f8a6fb2bf3db0",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "xrepo_tier_name"
     },
     {
@@ -28435,15 +28501,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d14523c1249b43ffee0469e3e0beda2917c291fa6875a5a4b74431181e1668da",
+  "fingerprint": "911f393141e32ecaac41ed313935c6dc2b8afa7b0eaff60e1e97593e5aaf7e95",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 227,
+    "audit_pending": 216,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 152,
     "private_test_only": 286,
-    "reviewed": 732
+    "reviewed": 743
   }
 }

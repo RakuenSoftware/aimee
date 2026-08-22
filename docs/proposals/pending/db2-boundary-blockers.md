@@ -204,8 +204,8 @@ them already published:
 
 Twenty-three more are still pending review:
 
-    canonical_index_scan_files                      ci_css_extract_tokens,ci_css_stylesheet_free
-    canonical_index_scan_project                    ci_css_extract_tokens,ci_css_stylesheet_free
+    canonical_index_scan_files                      ci_css_analyze,ci_css_extract_tokens,ci_css_stylesheet_free
+    canonical_index_scan_project                    ci_css_analyze,ci_css_extract_tokens,ci_css_stylesheet_free
     db2_artifact_review_rollback                    mdl_score
     db2_code_project_detach                         audit_hash
     db2_code_project_gc_confirm                     audit_hash
@@ -559,6 +559,59 @@ That is a decision for whoever owns the code graph, not for a migration moving
 existing calls onto a bus, and it is recorded here because the migration is
 what surfaced it: nine oversized list operations are the shape of a language
 that had to build its own index.
+
+## Eleven declarations never reach the database, and one must not
+
+A boundary operation exists so a caller in another process can ask this one to
+touch the store. Eleven pending declarations touch no store at all. A call
+graph across the module -- the same one the provider count uses -- finds no
+path from any of them to `db2_conn`, `aimee_pg_*`, or the tenancy and ephemeral
+guards that mean a function knows which store it is on.
+
+They are library functions that happen to live in the DB2 tree:
+
+    db2_feedback_parse_polarity                  "+" -> "positive"
+    db2_rules_tier                               a weight -> "Rule" | "Inclination" | "Archived"
+    xrepo_tier_name                              a tier enum -> its name
+    org_telemetry_metric_name_valid              is this a well-formed metric name
+    org_telemetry_sha256_hex                     a string -> its digest in hex
+    org_telemetry_token_hash_eq                  two hex digests, compared in constant time
+    org_telemetry_render_prom                    metric rows -> Prometheus exposition text
+    kb_maintenance_config_defaults               fill a config struct with its constants
+    db2_identity_intent_operation_init           pack and validate an intent's arguments
+    db2_management_action_operation_init         the same, for a management action
+    db2_management_client_instance_binding_init  the same, plus the binding digest
+
+Making any of them an operation buys nothing and costs a round trip. Three of
+them are worse than merely pointless.
+
+`org_telemetry_token_hash_eq` compares two digests in constant time, which is
+its entire reason for existing. Behind a request/reply boundary the comparison
+would still be constant-time and the round trip around it would not be, so the
+timing the function hides would reappear one layer out, in a place nobody is
+looking for it. It must stay a linked call.
+
+The three `*_init` functions are the caller's half of a call that does cross.
+They validate arguments and mint the correlation id and jti that make the
+intent they precede idempotent. Sending them would mean one round trip to build
+the request for the next round trip, and would move the generation of an
+idempotency key away from the party whose retry it is meant to deduplicate.
+
+`org_telemetry_metric_name_valid` gates a request. Behind the boundary it would
+run after the thing it is meant to gate.
+
+They are recorded as `linked-library`: reviewed, not an operation, and
+distinguished from `private-db2` because these are called from outside DB2
+today and go on being. That is a third answer to "what happens to this
+declaration", alongside "it crosses as an operation" and "it stays inside".
+
+Finding them needed the call graph to be fixed first. The pattern it used to
+recognise a function definition required whitespace between the return type and
+the name, so `const char *xrepo_tier_name(...)` was not a definition to it --
+along with a hundred and eight others, `ci_conn` among them, which is the
+connection helper the whole reachability question turns on. Two patterns are
+needed rather than one permissive enough for both: a wrapped signature puts a
+newline between type and name, and a pointer return puts nothing at all.
 
 ## `db2_witness_emit_run` takes the consumer as an argument
 

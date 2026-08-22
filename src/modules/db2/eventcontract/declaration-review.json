@@ -1484,6 +1484,14 @@
       "reason": "The typed learning.feature_row_upsert operation records a computed feature row. The key is the subject and the feature-set version -- not the scope -- so a rewrite under a different scope replaces the row rather than adding one. Two scopes cannot hold different features for the same subject and version, which the scope arguments make it look as though they could. The insert's result is discarded and the operation acknowledges either way, so a refused write is reported as a kept one."
     },
     {
+      "symbol": "db2_feedback_parse_polarity",
+      "signature_sha256": "a9dc1420f43f15b05af0f9624fa783078c3c4bbdacebfcf17d081bd5415a37eb",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Maps a polarity abbreviation onto its canonical word and answers NULL for anything else. No connection, no query: a caller in another process would spend a round trip to learn that '+' means 'positive'. It stays linked wherever it is called, and the operation that writes the feedback row takes the canonical word it produced."
+    },
+    {
       "symbol": "db2_feedback_record",
       "signature_sha256": "923fbba7ce09917eddd4b35c6919078d6b4830edcb20747b2ebfeae45e9be281",
       "disposition": "wire-operation",
@@ -1514,6 +1522,14 @@
       "family": "lifecycle",
       "db3_placement": "retained-db2",
       "reason": "The typed lifecycle.health operation replaces production direct callers; PostgreSQL schema and extension readiness remain DB2 authority."
+    },
+    {
+      "symbol": "db2_identity_intent_operation_init",
+      "signature_sha256": "e8d09fa25bd28d86d0b891d158cf052e8cd8acd48e88448d35bd3a79dff0af91",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Validates and packs the arguments of an identity intent into the struct identity.intent_start takes, generating the correlation id and jti. It is the caller's half of that call, run before anything crosses, and it reaches no store -- sending it would mean a round trip to build the request for the next round trip."
     },
     {
       "symbol": "db2_init",
@@ -3250,6 +3266,22 @@
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "A caller-controlled rollback is process-local transaction cleanup; failed or cancelled maintenance operations roll back inside DB2 before returning transport status."
+    },
+    {
+      "symbol": "db2_management_action_operation_init",
+      "signature_sha256": "152c6c7947171675e4939f13818a3b01243ff2ae381f7c5cc3b9cfab91e7c9ae",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The same shape for a management action: bounds-checks every field, hex-renders the request digest, and mints the correlation id and jti the intent will carry. Caller-side argument construction, reaching no store. The identifiers it generates are what make the intent it precedes idempotent, so generating them at the caller is deliberate."
+    },
+    {
+      "symbol": "db2_management_client_instance_binding_init",
+      "signature_sha256": "89c030a1e7933e9ccfd8e10f36472b027dba616522a2fcf0e2644121a2473dad",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Packs an issuer, a subject and two anchors into a client-instance binding and computes the digest over them. The digest is the identity of the binding, so computing it beside the values rather than after they have crossed a wire is what keeps it a digest of what the caller meant. It reaches no store."
     },
     {
       "symbol": "db2_memory_active_kind_dedupe_candidates",
@@ -5020,6 +5052,14 @@
       "reason": "The typed learning.rules_reinforce_directive operation sets a rule's directive type and stamps it reinforced, optionally setting its weight. The backend decides whether to set the weight from the sign of the argument, and a negative number is not something this envelope can carry, so the request says so in a flag of its own instead. Nothing checks a row matched. Unlike learning.rules_update_directive_type this does touch updated_at, so the two writes leave the same column in different states."
     },
     {
+      "symbol": "db2_rules_tier",
+      "signature_sha256": "b5a838c221d09665e332c40b1ca6f495c6d5bae4f385fb4f68ebee33603695de",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Names the tier a rule weight falls in. Three comparisons against two constants, no store -- the weight already crossed the boundary on the rule row, and naming its band is arithmetic the reader of that row can do."
+    },
+    {
       "symbol": "db2_rules_update_directive_type",
       "signature_sha256": "f1ccfe382f422ded514b08cddd5111ae77411e852535761456c33ffa89e7c5d9",
       "disposition": "wire-operation",
@@ -5364,12 +5404,52 @@
       "reason": "The typed organization.write_tier_grant_set_reporting operation grants a write tier and reports what it replaced, both under one lock -- a separate read then write would let two commands interleave and report a tier that was already gone. had_previous is carried apart from previous_tier because tier zero is a real tier, so absence cannot be a sentinel. The subject not being a team member is reported and not refused: grants and memberships are provisioned in either order."
     },
     {
+      "symbol": "kb_maintenance_config_defaults",
+      "signature_sha256": "5880cc78cf0f5f4a922c3c2630354c4e9946cd2ee9cdb5aa7841f14fd8b522b0",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Fills a maintenance configuration struct with its default values. It reads nothing and writes nothing: the defaults are constants in the source. A caller needs them before it can decide what to ask for, which is the wrong side of a request to be answering."
+    },
+    {
       "symbol": "memory_lint_run",
       "signature_sha256": "caff5c88ace0ea5c51d9e6cb92a96fa579fd25b7d47e48c6ef233a1ca5e46b0a",
       "disposition": "wire-operation",
       "family": "maintenance",
       "db3_placement": "retained-db2",
       "reason": "The typed maintenance.memory_lint operation reports what is wrong with the memory store. Three checks -- orphans, concept gaps, stale references -- fill one list in that order and each stops at the bound, so a full list does not mean those are the worst problems, it means the later checks never ran. The issue type is the only thing saying which check produced a row."
+    },
+    {
+      "symbol": "org_telemetry_metric_name_valid",
+      "signature_sha256": "0532113ef895a0be4fd05ef4f1503926c98e93cbb6a23c4ef9bb46710a8705a7",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Answers whether a string is a well-formed metric name, by length and character class. Validation the caller must do before it sends anything, so making it a round trip would put the check after the request it is meant to gate."
+    },
+    {
+      "symbol": "org_telemetry_render_prom",
+      "signature_sha256": "bb8a84df303cf0b322c200087a97ba1682fd9b85d4e0f8f5157f29de6bbca036",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Renders metric rows as a Prometheus exposition. The rows come from the organization.metrics_snapshot read; this turns them into text. Formatting rows a caller already holds is not a question about the store, and sending them back to be formatted would double the bytes for no answer that is not already there."
+    },
+    {
+      "symbol": "org_telemetry_sha256_hex",
+      "signature_sha256": "4e814e34788399a4ac701e4162eaef238fc1ec2096212262ca4a0ae6466aa74f",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Hashes a string to hex. Nothing about it is DB2; it lives here because the telemetry token check needed a digest and this is where that check is. It stays linked."
+    },
+    {
+      "symbol": "org_telemetry_token_hash_eq",
+      "signature_sha256": "da2f907af1144a1421968b58cf679bbc34209da190c20e75ae0ab319bc1e0460",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Compares two hex digests in constant time. Sending it over a bus would cost the property it exists for -- the comparison would still be constant-time, and the round trip around it would not be, so the timing it hides would reappear at the boundary. It must stay a linked call."
     },
     {
       "symbol": "pgvec_code_delete_project",
@@ -5858,6 +5938,14 @@
       "family": "index",
       "db3_placement": "retained-db2",
       "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "xrepo_tier_name",
+      "signature_sha256": "6cecb5326f469439025e238b3eba0d0eae0989dcf344767f6a1f8a6fb2bf3db0",
+      "disposition": "linked-library",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "Names a cross-repository dependency tier. A switch over an enumeration with no default beyond 'none', reaching no store. The tier crossed the boundary on the row that carries it; naming it is the caller's own arithmetic."
     }
   ]
 }

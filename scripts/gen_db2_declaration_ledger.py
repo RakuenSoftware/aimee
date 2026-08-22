@@ -32,7 +32,13 @@ KEYWORDS = {
     "volatile", "while",
 }
 IGNORED_CALL_LIKE = {"__attribute__", "__declspec", "__asm__", "asm"}
-DISPOSITIONS = {"private-db2", "wire-operation", "compatibility-wrapper"}
+# private-db2 stays inside the module; wire-operation crosses as a typed
+# operation; linked-library crosses as neither, because it never reaches the
+# store -- it is a library function that happens to live in the DB2 tree, and
+# it stays linked into whichever binary calls it. The distinction from
+# private-db2 is that these ARE called from outside DB2 and go on being.
+DISPOSITIONS = {"private-db2", "wire-operation", "compatibility-wrapper",
+                "linked-library"}
 PLACEMENTS = {"retained-db2", "db3-eligible"}
 FAMILIES = {
     "lifecycle", "tenancy", "memory", "index", "learning", "organization",
