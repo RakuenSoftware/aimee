@@ -1313,3 +1313,40 @@ Two things learned that are worth keeping:
 ## Suite
 
     pass 17   fail 0   skip 1
+
+### EMBED persistence: a correction, and an open observation
+
+The entry above said persistence was "not claimed" because the run "produced no
+rows I could attribute with confidence". That was true by accident. I counted
+`memory_vectors`, which does not exist; the query errored, the count read as
+zero, and I recorded a limitation on the strength of a typo. The table is
+`PGVEC_MEMORY_TABLE` in `pgvec_transport.h`, i.e. `memory_embeddings`.
+
+Checking the right table changes the picture and raises a better question.
+
+Vectors DO persist. `memory_embeddings` holds `halfvec(384)` rows, and `kb_meta`
+records:
+
+    schema_embedder_serving_id | aimee-e2e-stub-v1-dim384
+    schema_embedding_dim       | 384
+
+That serving identity is this stub, so those rows were produced by it: the write
+path works and the vector space agrees end to end.
+
+But a NEW store does not add one. Measured at 5, 10, 15, 20, 30 and 40 seconds
+after storing a memory, the count did not move, while the endpoint took 15
+successful embed calls in the same window and `vector_index_ops` sat at the same
+16. The existing rows look like the product of a bulk path that ran when the
+embedder first became available -- `db2_init` records the serving identity and
+dim at that point -- rather than of the store.
+
+This is left as an observation, not a verdict. It may be correct: a queue this
+probe does not wait long enough for, or a sync deliberately kept off the store
+hot path. Calling it a defect on this evidence would be the same kind of guess
+as the "protocol-level mismatch" claim corrected earlier in this document. The
+probe prints the counts so the next person starts from the measurement rather
+than from my inference.
+
+What IS established: the call path (15 requests, 15 × 200, none once the
+embedder is stopped) and the write path plus vector space (rows exist, produced
+by this stub, at the recorded dimension).

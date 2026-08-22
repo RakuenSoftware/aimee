@@ -11,11 +11,33 @@
 # request log is the evidence -- ground truth for "was this endpoint called",
 # which no amount of reading the C could settle.
 #
-# WHAT IT DOES NOT ESTABLISH: that vectors are persisted, indexed, or used in
-# recall. Memory embeddings are not written synchronously by the store path, and
-# this run produced no rows I could attribute with confidence, so nothing is
-# claimed about persistence. Retrieval QUALITY is doubly out of reach: the stub's
-# vectors are deterministic but carry no meaning.
+PERSISTENCE, which is reported rather than asserted, because what was found is
+# more interesting than a pass or a fail.
+#
+# Vectors DO persist -- `memory_embeddings` holds rows of halfvec(384), and
+# kb_meta records `schema_embedder_serving_id = aimee-e2e-stub-v1-dim384`, i.e.
+# THIS stub produced them. So the write path works and the vector space agrees.
+#
+# But a NEW store does not add a row: measured at 5, 10, 15, 20, 30 and 40
+# seconds after storing, the count did not move, while the endpoint took 15
+# successful embed calls in the same window. The existing rows appear to come
+# from a bulk path that ran when the embedder first became available (db2_init
+# records the serving identity and dim at that point), not from the store.
+#
+# That is left as an open observation, not a verdict. It may be correct
+# behaviour -- a queue this probe does not wait long enough for, or a sync
+# deliberately not on the store hot path -- and calling it a defect on this
+# evidence would be a guess. The counts are printed so the next person starts
+# from the measurement rather than from my inference.
+#
+# (An earlier version counted `memory_vectors`, which does not exist. The query
+# errored, the count read as zero, and I wrote "persistence is not claimed" on
+# the strength of a typo. The name is PGVEC_MEMORY_TABLE in pgvec_transport.h;
+# checking the wrong table is indistinguishable from the feature being broken.)
+#
+# WHAT IT DOES NOT ESTABLISH: retrieval QUALITY. The stub's vectors are
+# deterministic but carry no meaning, so any judgement about ranking or recall
+# relevance from this run would be worthless.
 #
 # Two request shapes, which cost a round trip to find and are worth stating:
 #     POST /embed_batch   body: a JSON array of strings
@@ -40,6 +62,12 @@ store() {
        http://localhost/v1/memory/store
 }
 embed_calls() { grep -ac 'POST /embed' /root/stub-embedder.log 2>/dev/null || echo 0; }
+# PGVEC_MEMORY_TABLE (pgvec_transport.h). NOT "memory_vectors", which does not
+# exist -- see the header comment.
+vec_rows() {
+  PGPASSWORD=aimee-e2e psql -q -h 127.0.0.1 -U aimee -d aimee_shared \
+    -Atc "select count(*) from memory_embeddings" 2>/dev/null | tail -1
+}
 
 pkill -f stub-embedder.py 2>/dev/null
 sleep 1
@@ -70,8 +98,12 @@ sleep 4
 
 echo
 echo "=== 2. store a memory ==="
+rows_before="$(vec_rows)"
+echo "  memory_embeddings rows before: ${rows_before:-0}"
 store embed-probe-up "The release captain for the deployment runbook is Dana." >/dev/null
 sleep 8
+rows_after="$(vec_rows)"
+echo "  memory_embeddings rows after:  ${rows_after:-0}"
 calls="$(embed_calls)"
 ok="$(grep -a 'POST /embed' /root/stub-embedder.log 2>/dev/null | grep -c ' 200 ' || true)"
 echo "  embed requests seen by the endpoint: ${calls:-0}  (200s: ${ok:-0})"
@@ -96,6 +128,14 @@ else
   echo "FAIL: the endpoint saw no successful embed request, so the stage did not run"
   tail -4 /root/stub-embedder.log 2>/dev/null | sed 's/^/      /'
   rc=1
+fi
+# Reported, not asserted -- see the header. The store path did not add a row in
+# this window, and whether it should is not settled by this evidence.
+echo "NOTE: memory_embeddings ${rows_before:-0} -> ${rows_after:-0} across this store."
+if [ "${rows_after:-0}" -eq "${rows_before:-0}" ]; then
+  echo "      Unchanged. The rows that exist were produced by this stub (kb_meta"
+  echo "      schema_embedder_serving_id), so the write path and vector space are"
+  echo "      fine; what is unclear is whether a store is meant to sync one."
 fi
 if [ "$(( after_down - before_down ))" -eq 0 ]; then
   echo "PASS: nothing reached it once down, so leg 2's calls were real"
