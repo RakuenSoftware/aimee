@@ -3,6 +3,9 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/org_telemetry.h"
+#include "c/vector_index_ops.h"
+#include "c/write_tier_grant.h"
 #include "c/memory_conflicts.h"
 #include "c/workflow_patterns.h"
 #include "c/tool_registry.h"
@@ -1101,6 +1104,11 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .learning_proposal_insert = db2_learning_proposal_insert,
        .enrollment_insert = db2_enrollment_insert,
        .enrollment_revoke = db2_enrollment_revoke,
+       .write_tier_grant_lookup = db2_write_tier_grant_lookup,
+       .write_tier_grant_set_reporting = db2_write_tier_grant_set_reporting,
+       .telemetry_allow = db2_telemetry_allow,
+       .vector_index_op_record = db2_vector_index_op_record,
+       .vector_index_op_remove = db2_vector_index_op_remove,
    };
    return &backend;
 }
@@ -9957,6 +9965,132 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_OK;
          }
       }
+      {
+         char server_id[AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MAX + 1] = "";
+         uint64_t team_id = 0u;
+         char grant_subject[AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MAX + 1] = "";
+         if (aimee_db2_write_tier_grant_lookup_request_decode(
+                 request_body, request_len, server_id, sizeof(server_id), &team_id, grant_subject,
+                 sizeof(grant_subject)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->write_tier_grant_lookup)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t lookup_outcome = 0u;
+            uint32_t grant_tier = 0u;
+            {
+               kb_identity_tier_t tier = KB_IDENTITY_TIER_OFF;
+               int outcome = backend->write_tier_grant_lookup(server_id, (int64_t)team_id,
+                                                              grant_subject, &tier);
+               /* Granted, not granted, and could-not-tell, in that order. A
+                * negative code is any failure -- an outage, a refused tenancy,
+                * or a row whose tier string the mapping does not recognize --
+                * and the caller must deny without recording a decision. */
+               if (outcome == DB2_WRITE_TIER_GRANT_FOUND)
+               {
+                  lookup_outcome = 1u;
+                  grant_tier = (uint32_t)tier;
+               }
+               else if (outcome == DB2_WRITE_TIER_GRANT_NONE)
+                  lookup_outcome = 0u;
+               else
+                  lookup_outcome = 2u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_write_tier_grant_lookup_reply_encode(lookup_outcome, grant_tier,
+                                                               response_body, response_capacity,
+                                                               response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char server_id[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MAX + 1] = "";
+         uint64_t team_id = 0u;
+         char grant_subject[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MAX + 1] = "";
+         uint32_t grant_tier = 0u;
+         char granted_by[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MAX + 1] = "";
+         if (aimee_db2_write_tier_grant_set_reporting_request_decode(
+                 request_body, request_len, server_id, sizeof(server_id), &team_id, grant_subject,
+                 sizeof(grant_subject), &grant_tier, granted_by, sizeof(granted_by)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->write_tier_grant_set_reporting)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t acknowledged = 0u;
+            uint32_t grant_changed = 0u;
+            uint32_t was_revoked = 0u;
+            uint32_t had_previous = 0u;
+            uint32_t previous_tier = 0u;
+            uint32_t subject_is_member = 0u;
+            {
+               db2_write_tier_grant_report_t report;
+               memset(&report, 0, sizeof(report));
+               if (backend->write_tier_grant_set_reporting(
+                       server_id, (int64_t)team_id, grant_subject, (kb_identity_tier_t)grant_tier,
+                       granted_by, &report) == 0)
+               {
+                  acknowledged = 1u;
+                  grant_changed = report.changed ? 1u : 0u;
+                  was_revoked = report.was_revoked ? 1u : 0u;
+                  had_previous = report.had_previous ? 1u : 0u;
+                  previous_tier = report.had_previous ? (uint32_t)report.previous_tier : 0u;
+                  subject_is_member = report.is_member ? 1u : 0u;
+               }
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_write_tier_grant_set_reporting_reply_encode(
+                    acknowledged, grant_changed, was_revoked, had_previous, previous_tier,
+                    subject_is_member, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         char event_schema[AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MAX + 1] = "";
+         char metric_names_array[AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MAX + 1] = "";
+         uint32_t allow_enabled = 0u;
+         if (aimee_db2_telemetry_allow_request_decode(
+                 request_body, request_len, event_schema, sizeof(event_schema), metric_names_array,
+                 sizeof(metric_names_array), &allow_enabled) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_TELEMETRY_ALLOW_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->telemetry_allow)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t allow_outcome = 0u;
+            {
+               int outcome =
+                   backend->telemetry_allow(event_schema, metric_names_array, (int)allow_enabled);
+               /* Applied, refused because the caller is not an admin, or failed.
+                * The middle one is a decision the operator can act on; the last
+                * one is not, and reading them as one would hide an outage. */
+               allow_outcome = outcome == 0 ? 1u : outcome == DB2_TELEMETRY_ERR_DENIED ? 2u : 0u;
+            }
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_telemetry_allow_reply_encode(allow_outcome, response_body,
+                                                       response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
       char project[AIMEE_DB2_CLEAR_PROJECT_PROJECT_MAX + 1] = {0};
       if (aimee_db2_clear_project_request_decode(request_body, request_len, project,
                                                  sizeof(project)) == 0)
@@ -14503,6 +14637,60 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             }
             if (aimee_db2_kb_documents_link_neighbours_reply_encode(
                     acknowledged, response_body, response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t point_id = 0u;
+         char collection[AIMEE_DB2_VECTOR_INDEX_OP_RECORD_COLLECTION_MAX + 1] = "";
+         uint64_t memory_id = 0u;
+         uint32_t index_ok = 0u;
+         char error_message[AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_MESSAGE_MAX + 1] = "";
+         if (aimee_db2_vector_index_op_record_request_decode(
+                 request_body, request_len, &point_id, collection, sizeof(collection), &memory_id,
+                 &index_ok, error_message, sizeof(error_message)) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->vector_index_op_record)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t recorded = 0u;
+            backend->vector_index_op_record((int64_t)point_id, collection, (int64_t)memory_id,
+                                            (int)index_ok, error_message);
+            recorded = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_vector_index_op_record_reply_encode(recorded, response_body,
+                                                              response_capacity, response_len) != 0)
+            {
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            }
+            return AIMEE_MODULE_STATUS_OK;
+         }
+      }
+      {
+         uint64_t point_id = 0u;
+         if (aimee_db2_vector_index_op_remove_request_decode(request_body, request_len,
+                                                             &point_id) == 0)
+         {
+            if (response_capacity < AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RESPONSE_MAX_LEN)
+               return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+            if (!backend || !backend->vector_index_op_remove)
+               return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+            uint32_t recorded = 0u;
+            backend->vector_index_op_remove((int64_t)point_id);
+            recorded = 1u;
+            if (aimee_module_invocation_cancelled(invocation))
+            {
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            }
+            if (aimee_db2_vector_index_op_remove_reply_encode(recorded, response_body,
+                                                              response_capacity, response_len) != 0)
             {
                return AIMEE_MODULE_STATUS_INTERNAL;
             }

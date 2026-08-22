@@ -1547,6 +1547,18 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *tool_name, uint32_t *tool_found, char *input_schema, size_t input_schema_capacity, char *side_effect, size_t side_effect_capacity, uint32_t *tool_enabled, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_write_tier_grant_lookup_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *server_id, uint64_t team_id, const char *grant_subject, uint32_t *lookup_outcome, uint32_t *grant_tier, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_write_tier_grant_set_reporting_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *server_id, uint64_t team_id, const char *grant_subject, uint32_t grant_tier, const char *granted_by, uint32_t *acknowledged, uint32_t *grant_changed, uint32_t *was_revoked, uint32_t *had_previous, uint32_t *previous_tier, uint32_t *subject_is_member, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_telemetry_allow_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *event_schema, const char *metric_names_array, uint32_t allow_enabled, uint32_t *allow_outcome, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_enrollment_active_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        const char *cert_issuer, const char *cert_serial_norm, uint32_t *active,
@@ -1812,5 +1824,13 @@ extern "C"
    aimee_module_call_result_t aimee_db2_kb_documents_link_neighbours_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t doc_id, uint64_t prev_doc_id, uint32_t *acknowledged, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_vector_index_op_record_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t point_id, const char *collection, uint64_t memory_id, uint32_t index_ok, const char *error_message, uint32_t *recorded, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_vector_index_op_remove_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t point_id, uint32_t *recorded, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #endif /* AIMEE_DB2_CLIENT_H */

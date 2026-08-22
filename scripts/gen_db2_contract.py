@@ -14027,6 +14027,36 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "symbol": "db2_enrollment_revoke",
         "policy": {"writes": 200},
     },
+    "write_tier_grant_lookup": {
+        "key": ("organization", 35),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_write_tier_grant_lookup",
+        "policy": {"reads": 200},
+    },
+    "write_tier_grant_set_reporting": {
+        "key": ("organization", 36),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_write_tier_grant_set_reporting",
+        "policy": {"writes": 200},
+    },
+    "telemetry_allow": {
+        "key": ("organization", 37),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_telemetry_allow",
+        "policy": {"writes": 200},
+    },
+    "vector_index_op_record": {
+        "key": ("maintenance", 69),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_vector_index_op_record",
+        "policy": {"writes": 200},
+    },
+    "vector_index_op_remove": {
+        "key": ("maintenance", 70),
+        "format": "db2-envelope-generic-v1",
+        "symbol": "db2_vector_index_op_remove",
+        "policy": {"writes": 200},
+    },
 }
 
 

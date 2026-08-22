@@ -560,6 +560,39 @@ the whole-reply bound existed only for row lists, and there was no bound at all
 on a request. Both are checked now against the megabyte the row lists are
 checked against, which is what the per-field cap had been standing in for.
 
+## Three list reads have an outcome no row list can carry
+
+`db2_write_tier_grant_lookup` crossed the boundary in this batch carrying three
+outcomes apart: granted, not granted, and could-not-tell. It could, because its
+reply is a field list, and a field list can say anything the schema declares.
+
+Its sibling `db2_write_tier_grant_list_ex` cannot. A row reply carries rows and
+a count, and nothing else -- the schema check that reads one refuses any other
+key beside it. The backend returns 0, or a negative tenancy refusal, or -1 for
+an outage or a row whose tier string the mapping does not recognize; every one
+of those would arrive as a count of zero, which is also what a server with no
+grants returns. The question an operator asks this is "who may write here", and
+an outage answering "nobody" is the wrong answer to act on: it invites
+re-granting a subject who already has a grant, or reading a revocation as
+having worked.
+
+`db2_telemetry_allow_show` and `db2_metrics_snapshot` are the same shape with a
+sharper loss. Both return a count, or `DB2_TELEMETRY_ERR_DENIED`, or -1, and
+the denial is not a failure at all -- it is Postgres answering "you are not an
+admin", which the HTTP route turns into a 403 while everything else becomes a
+500. Flattened to a count, a refusal becomes an empty allowlist and a non-admin
+is told the org has no telemetry configured. `db2_metrics_snapshot` adds
+`DB2_TELEMETRY_ERR_TOOBIG`, which exists precisely so a Prometheus export
+missing series fails loudly instead of exporting a plausible subset; a count
+cannot express it, so the loud failure becomes a quiet truncation, which is the
+defect that sentinel was added to prevent.
+
+The generic fix is the one the previous section already names: an envelope that
+can carry a header alongside a list. These three want less than
+`db2_kb_pdf_search_chunks` does -- one small enumerated outcome, not a
+structure -- but they want it in the same place, and inventing a second
+mechanism for the narrow case would leave two.
+
 ## `db2_kb_doc_write` takes a whole document as an argument
 
 Every request field in `db2-envelope-generic-v1` carries a maximum byte count,

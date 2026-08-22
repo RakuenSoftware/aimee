@@ -4404,6 +4404,66 @@ int main(int argc, char **argv)
           enrollment_revoke_legacy_row == 0);
 
    /* A proposal refused for its signal, and an enrolment that upgrades its own backfill. */
+   /* Batch 59: the write-tier grant gate, the telemetry allowlist, and the vector-index
+    * bookkeeping. */
+   uint32_t write_tier_grant_set_reporting_acknowledged = 99;
+   uint32_t write_tier_grant_set_reporting_grant_changed = 99;
+   uint32_t write_tier_grant_set_reporting_was_revoked = 99;
+   uint32_t write_tier_grant_set_reporting_had_previous = 99;
+   uint32_t write_tier_grant_set_reporting_previous_tier = 99;
+   uint32_t write_tier_grant_set_reporting_subject_is_member = 99;
+   assert(aimee_db2_write_tier_grant_set_reporting_call(
+              call_client, &client, 9551, 0, "replay-server", 1, "replay-subject", 2,
+              "replay-admin", &write_tier_grant_set_reporting_acknowledged,
+              &write_tier_grant_set_reporting_grant_changed,
+              &write_tier_grant_set_reporting_was_revoked,
+              &write_tier_grant_set_reporting_had_previous,
+              &write_tier_grant_set_reporting_previous_tier,
+              &write_tier_grant_set_reporting_subject_is_member, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(write_tier_grant_set_reporting_acknowledged == 0 &&
+          write_tier_grant_set_reporting_grant_changed == 0 &&
+          write_tier_grant_set_reporting_was_revoked == 0 &&
+          write_tier_grant_set_reporting_had_previous == 0 &&
+          write_tier_grant_set_reporting_previous_tier == 0 &&
+          write_tier_grant_set_reporting_subject_is_member == 0);
+
+   uint32_t write_tier_grant_lookup_lookup_outcome = 99;
+   uint32_t write_tier_grant_lookup_grant_tier = 99;
+   assert(aimee_db2_write_tier_grant_lookup_call(
+              call_client, &client, 9552, 0, "replay-server", 1, "replay-subject",
+              &write_tier_grant_lookup_lookup_outcome, &write_tier_grant_lookup_grant_tier, NULL,
+              NULL) == AIMEE_MODULE_CALL_OK);
+   assert(write_tier_grant_lookup_lookup_outcome == 0 && write_tier_grant_lookup_grant_tier == 0);
+
+   uint32_t telemetry_allow_allow_outcome = 99;
+   assert(aimee_db2_telemetry_allow_call(call_client, &client, 9553, 0, "replay.schema",
+                                         "{alpha,beta}", 1, &telemetry_allow_allow_outcome, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   /* Applied. The definer's admin gate did not fire, so this proves the
+    * applied path and not the refused one -- the replay connects as the
+    * database owner, and there is no non-admin role here to be refused as.
+    * The enabled flag crosses as an integer and the definer takes a
+    * boolean; it is the unknown-type parameter that coerces it. */
+   assert(telemetry_allow_allow_outcome == 1);
+
+   uint32_t vector_index_op_record_recorded = 99;
+   assert(aimee_db2_vector_index_op_record_call(
+              call_client, &client, 9554, 0, 4242, "replay-collection", 0, 1, "",
+              &vector_index_op_record_recorded, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   /* A receipt for the call, not for the row: the backend returns void, so
+    * this is 1 whether or not the insert landed. Everything downstream that
+    * retries a failed vector write reads a table this cannot report on. */
+   assert(vector_index_op_record_recorded == 1);
+
+   uint32_t vector_index_op_remove_recorded = 99;
+   assert(aimee_db2_vector_index_op_remove_call(call_client, &client, 9555, 0, 4242,
+                                                &vector_index_op_remove_recorded, NULL,
+                                                NULL) == AIMEE_MODULE_CALL_OK);
+   /* Likewise, and the point named here has no row -- which is a success by
+    * design, so the receipt would read the same either way. */
+   assert(vector_index_op_remove_recorded == 1);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

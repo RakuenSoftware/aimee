@@ -16,6 +16,9 @@
 #include "code_projection.h"
 #include "corpus_jobs.h"
 #include "entity_edges.h"
+#include "org_telemetry.h"
+#include "vector_index_ops.h"
+#include "write_tier_grant.h"
 #include "evidence_vectors.h"
 #include "memory_conflicts.h"
 #include "memory_scenes.h"
@@ -662,6 +665,16 @@ typedef struct
                             const char *cert_serial_norm, const char *expires_at, int legacy,
                             int64_t *out_id);
    int (*enrollment_revoke)(int64_t id, db2_enrollment_row_t *out);
+   int (*write_tier_grant_lookup)(const char *server_id, int64_t team_id, const char *subject,
+                                  kb_identity_tier_t *out);
+   int (*write_tier_grant_set_reporting)(const char *server_id, int64_t team_id,
+                                         const char *subject, kb_identity_tier_t tier,
+                                         const char *granted_by,
+                                         db2_write_tier_grant_report_t *out);
+   int (*telemetry_allow)(const char *event_schema, const char *metric_names_array, int enabled);
+   void (*vector_index_op_record)(int64_t point_id, const char *collection, int64_t memory_id,
+                                  int ok, const char *error_msg);
+   void (*vector_index_op_remove)(int64_t point_id);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

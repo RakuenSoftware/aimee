@@ -3791,6 +3791,54 @@ int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
    return -1;
 }
 
+int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                kb_identity_tier_t *out)
+{
+   (void)server_id;
+   (void)team_id;
+   (void)subject;
+   if (out)
+      *out = KB_IDENTITY_TIER_OFF;
+   return -1;
+}
+
+int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, const char *subject,
+                                       kb_identity_tier_t tier, const char *granted_by,
+                                       db2_write_tier_grant_report_t *out)
+{
+   (void)server_id;
+   (void)team_id;
+   (void)subject;
+   (void)tier;
+   (void)granted_by;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_telemetry_allow(const char *event_schema, const char *metric_names_array, int enabled)
+{
+   (void)event_schema;
+   (void)metric_names_array;
+   (void)enabled;
+   return -1;
+}
+
+void db2_vector_index_op_record(int64_t point_id, const char *collection, int64_t memory_id, int ok,
+                                const char *error_msg)
+{
+   (void)point_id;
+   (void)collection;
+   (void)memory_id;
+   (void)ok;
+   (void)error_msg;
+}
+
+void db2_vector_index_op_remove(int64_t point_id)
+{
+   (void)point_id;
+}
+
 int db2_anti_pattern_exists_exact(const char *pattern)
 {
    (void)pattern;

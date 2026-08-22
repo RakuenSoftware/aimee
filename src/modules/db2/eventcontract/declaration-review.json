@@ -5196,6 +5196,14 @@
       "reason": "The typed organization.task_update_state operation replaces the task state write. Unlike the other state writes in this batch its backend distinguishes an update that matched no row from one that did, so the reply carries that rather than a bare acknowledgement -- a caller can tell that the task it named does not exist, which the others cannot."
     },
     {
+      "symbol": "db2_telemetry_allow",
+      "signature_sha256": "86b6ac3be19aa0234cfe851ad10b921d1b692151c65cec79bbf65a8b8cd74eab",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.telemetry_allow operation sets which metrics of a schema may be ingested. Postgres enforces the admin gate inside the definer, which raises, so this boundary learns it was refused by reading the message text -- and the wire keeps that apart from any other failure, because one is an answer and the other is an outage. The metric names cross as the Postgres array literal, so their syntax is checked by the database and not here."
+    },
+    {
       "symbol": "db2_tenant_scope_begin",
       "signature_sha256": "c1aed4cab1fc4d2813d1102f3cc7e77716752c5599de05af5592530a70775ef5",
       "disposition": "private-db2",
@@ -5292,6 +5300,22 @@
       "reason": "A memcmp of two caller-owned structs. It reads nothing and belongs to whoever holds the snapshots; sending two structures across a boundary to be compared would cost more than the comparison."
     },
     {
+      "symbol": "db2_vector_index_op_record",
+      "signature_sha256": "42819ed41c4b3405644ffdabff6943b21d2efe54cb8bb7a85d9a8fce1fd35354",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.vector_index_op_record operation records whether a vector write landed. The backend returns nothing at all, so this reply says the call arrived and cannot say the row did -- the bookkeeping that exists to notice failed writes cannot itself report failing. Recording the same point again counts an attempt rather than replacing one, which is what lets the retry sweep give up. A successful record stamps the index time; a failed one leaves it null."
+    },
+    {
+      "symbol": "db2_vector_index_op_remove",
+      "signature_sha256": "474d4f4f0bc585c307c860cf2dd6c75e98cffabafb466542f6ff43eaeb311499",
+      "disposition": "wire-operation",
+      "family": "maintenance",
+      "db3_placement": "retained-db2",
+      "reason": "The typed maintenance.vector_index_op_remove operation forgets a vector point's bookkeeping once the point itself is gone. The backend returns nothing, so this reply is a receipt for the call and not for the delete -- a caller cannot learn whether a row was there. That is tolerable only because absence is the intended end state either way: removing a point with no row is a success, so a lost delete shows up as a retry row that never clears rather than as anything unsafe."
+    },
+    {
       "symbol": "db2_vector_index_sync_suppressed",
       "signature_sha256": "37c358e622746945efce1903c0dcec2fb44ae587c8b38c9ae07f7abfb4c4635e",
       "disposition": "private-db2",
@@ -5306,6 +5330,22 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The typed learning.workflow_pattern_insert operation records a workflow pattern. Nothing deduplicates the pattern text, so the same pattern learned twice becomes two rows. The confidence is stored as sent and nothing bounds it to a probability. The backend fills its output struct from the arguments rather than reading the row back, so a caller that trusted that struct was told what it sent -- which is why this operation answers with the identifier alone."
+    },
+    {
+      "symbol": "db2_write_tier_grant_lookup",
+      "signature_sha256": "6a6c7c86814b03107c2df5cbb2e9d5c91c3eb95759487a710ada64cf656860f3",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.write_tier_grant_lookup operation resolves what a subject may write. It is the fail-closed gate, so its three outcomes must stay apart on the wire: granted, not granted, and could-not-tell. Folding a failure into not-granted would record an outage as a policy decision, and folding it into tier zero would make it read as granted-off, which is a real permission. The tier crosses as its ordinal, so both ends now depend on kb_identity_tier_t keeping its order."
+    },
+    {
+      "symbol": "db2_write_tier_grant_set_reporting",
+      "signature_sha256": "1c08d87cc35f96eeb3eb2111d4f90437d3ae369a6474024a46b30ca4bfe8936d",
+      "disposition": "wire-operation",
+      "family": "organization",
+      "db3_placement": "retained-db2",
+      "reason": "The typed organization.write_tier_grant_set_reporting operation grants a write tier and reports what it replaced, both under one lock -- a separate read then write would let two commands interleave and report a tier that was already gone. had_previous is carried apart from previous_tier because tier zero is a real tier, so absence cannot be a sentinel. The subject not being a team member is reported and not refused: grants and memberships are provisioned in either order."
     },
     {
       "symbol": "memory_lint_run",

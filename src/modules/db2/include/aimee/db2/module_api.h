@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "74b174b7ff1f507a69eb1bbe58399641779928d64ef1ac09ad62065b2835ab99"
+#define AIMEE_DB2_CONTRACT_SHA256 "cd1326ac1db484d876752e035d658919e0da2b606481cdf93259f046e0dc24e5"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -5250,6 +5250,70 @@
 #define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_RESPONSE_MIN_LEN                               40u
 #define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_RESPONSE_MAX_LEN                               8262u
 #define AIMEE_DB2_TOOL_REGISTRY_LOOKUP_ERROR_LEN                                      24u
+#define AIMEE_DB2_EVENT_WRITE_TIER_GRANT_LOOKUP                                       AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_WRITE_TIER_GRANT_LOOKUP                                       AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_LOOKUP                                   35u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_REQUEST_MIN_LEN                             40u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_REQUEST_MAX_LEN                             743u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MIN                               1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MAX                               127u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_TEAM_ID_MIN                                 1ull
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_TEAM_ID_MAX                                 9223372036854775807ull
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MIN                           1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MAX                           576u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_LOOKUP_OUTCOME_MIN                          0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_LOOKUP_OUTCOME_MAX                          2u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_TIER_MIN                              0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_TIER_MAX                              2u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_RESPONSE_MIN_LEN                            32u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_RESPONSE_MAX_LEN                            32u
+#define AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_ERROR_LEN                                   24u
+#define AIMEE_DB2_EVENT_WRITE_TIER_GRANT_SET_REPORTING                                AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_WRITE_TIER_GRANT_SET_REPORTING                                AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_SET_REPORTING                            36u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_REQUEST_MIN_LEN                      48u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_REQUEST_MAX_LEN                      1327u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MIN                        1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MAX                        127u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_TEAM_ID_MIN                          1ull
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_TEAM_ID_MAX                          9223372036854775807ull
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MIN                    1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MAX                    576u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_TIER_MIN                       0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_TIER_MAX                       2u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MIN                       1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MAX                       576u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_ACKNOWLEDGED_MIN                     0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_ACKNOWLEDGED_MAX                     1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_CHANGED_MIN                    0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_CHANGED_MAX                    1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_WAS_REVOKED_MIN                      0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_WAS_REVOKED_MAX                      1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_HAD_PREVIOUS_MIN                     0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_HAD_PREVIOUS_MAX                     1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_PREVIOUS_TIER_MIN                    0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_PREVIOUS_TIER_MAX                    2u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SUBJECT_IS_MEMBER_MIN                0u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SUBJECT_IS_MEMBER_MAX                1u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_RESPONSE_MIN_LEN                     48u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_RESPONSE_MAX_LEN                     48u
+#define AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_ERROR_LEN                            24u
+#define AIMEE_DB2_EVENT_TELEMETRY_ALLOW                                               AIMEE_DB2_EVENT_ORGANIZATION
+#define AIMEE_DB2_STAGE_TELEMETRY_ALLOW                                               AIMEE_DB2_FAMILY_ORGANIZATION
+#define AIMEE_DB2_OPERATION_TELEMETRY_ALLOW                                           37u
+#define AIMEE_DB2_TELEMETRY_ALLOW_REQUEST_MIN_LEN                                     36u
+#define AIMEE_DB2_TELEMETRY_ALLOW_REQUEST_MAX_LEN                                     1218u
+#define AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MIN                                    1u
+#define AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MAX                                    159u
+#define AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MIN                              0u
+#define AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MAX                              1023u
+#define AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_ENABLED_MIN                                   0u
+#define AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_ENABLED_MAX                                   1u
+#define AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_OUTCOME_MIN                                   0u
+#define AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_OUTCOME_MAX                                   2u
+#define AIMEE_DB2_TELEMETRY_ALLOW_RESPONSE_MIN_LEN                                    28u
+#define AIMEE_DB2_TELEMETRY_ALLOW_RESPONSE_MAX_LEN                                    28u
+#define AIMEE_DB2_TELEMETRY_ALLOW_ERROR_LEN                                           24u
 #define AIMEE_DB2_EVENT_ENROLLMENT_ACTIVE                                             AIMEE_DB2_EVENT_CUSTODY
 #define AIMEE_DB2_STAGE_ENROLLMENT_ACTIVE                                             AIMEE_DB2_FAMILY_CUSTODY
 #define AIMEE_DB2_OPERATION_ENROLLMENT_ACTIVE                                         4u
@@ -6568,6 +6632,38 @@
 #define AIMEE_DB2_KB_DOCUMENTS_LINK_NEIGHBOURS_RESPONSE_MIN_LEN                       28u
 #define AIMEE_DB2_KB_DOCUMENTS_LINK_NEIGHBOURS_RESPONSE_MAX_LEN                       28u
 #define AIMEE_DB2_KB_DOCUMENTS_LINK_NEIGHBOURS_ERROR_LEN                              24u
+#define AIMEE_DB2_EVENT_VECTOR_INDEX_OP_RECORD                                        AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_VECTOR_INDEX_OP_RECORD                                        AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_RECORD                                    69u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_REQUEST_MIN_LEN                              52u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_REQUEST_MAX_LEN                              690u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_POINT_ID_MIN                                 0ull
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_POINT_ID_MAX                                 9223372036854775807ull
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_COLLECTION_MIN                               0u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_COLLECTION_MAX                               127u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_MEMORY_ID_MIN                                0ull
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_MEMORY_ID_MAX                                9223372036854775807ull
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_INDEX_OK_MIN                                 0u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_INDEX_OK_MAX                                 1u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_MESSAGE_MIN                            0u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_MESSAGE_MAX                            511u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RECORDED_MIN                                 1u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RECORDED_MAX                                 1u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RESPONSE_MIN_LEN                             28u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RESPONSE_MAX_LEN                             28u
+#define AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_LEN                                    24u
+#define AIMEE_DB2_EVENT_VECTOR_INDEX_OP_REMOVE                                        AIMEE_DB2_EVENT_MAINTENANCE
+#define AIMEE_DB2_STAGE_VECTOR_INDEX_OP_REMOVE                                        AIMEE_DB2_FAMILY_MAINTENANCE
+#define AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_REMOVE                                    70u
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_REQUEST_MIN_LEN                              32u
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_REQUEST_MAX_LEN                              32u
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_POINT_ID_MIN                                 0ull
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_POINT_ID_MAX                                 9223372036854775807ull
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MIN                                 1u
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MAX                                 1u
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RESPONSE_MIN_LEN                             28u
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RESPONSE_MAX_LEN                             28u
+#define AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_ERROR_LEN                                    24u
 #define AIMEE_DB2_STRING_ACK_ARGUMENT_MAX                                             255u
 #define AIMEE_DB2_STRING_COUNT_ARGUMENT_MAX                                           511u
 #define AIMEE_DB2_STRING_PAIR_FIRST_MAX                                               511u
@@ -50037,6 +50133,518 @@ static inline int aimee_db2_tool_registry_lookup_reply_decode(const uint8_t *inp
    return 0;
 }
 
+static inline int aimee_db2_write_tier_grant_lookup_request_encode(const char *server_id, uint64_t team_id, const char *grant_subject,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!server_id || !grant_subject || !output || !output_len)
+      return -1;
+   size_t server_id_len = 0u;
+   while (server_id_len <= AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MAX && server_id[server_id_len])
+      ++server_id_len;
+   size_t grant_subject_len = 0u;
+   while (grant_subject_len <= AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MAX && grant_subject[grant_subject_len])
+      ++grant_subject_len;
+   if (server_id_len < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MIN || server_id_len > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MAX ||
+       team_id < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_TEAM_ID_MIN || team_id > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_TEAM_ID_MAX ||
+       grant_subject_len < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MIN || grant_subject_len > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)server_id_len);
+   memcpy(payload + cursor + 4u, server_id, server_id_len);
+   cursor += 4u + (uint32_t)server_id_len;
+   aimee_db2_put_u64(payload + cursor, team_id);
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)grant_subject_len);
+   memcpy(payload + cursor + 4u, grant_subject, grant_subject_len);
+   cursor += 4u + (uint32_t)grant_subject_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_LOOKUP, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_write_tier_grant_lookup_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *server_id, size_t server_id_capacity, uint64_t *team_id, char *grant_subject, size_t grant_subject_capacity)
+{
+   if (server_id && server_id_capacity)
+      server_id[0] = '\0';
+   if (team_id)
+      *team_id = 0u;
+   if (grant_subject && grant_subject_capacity)
+      grant_subject[0] = '\0';
+   if (!server_id || server_id_capacity < (size_t)AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MAX + 1u || !team_id || !grant_subject || grant_subject_capacity < (size_t)AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_LOOKUP || header.flags != 0u ||
+       input_len < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, server_id,
+                                 AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (server_id[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_SERVER_ID_MIN)
+         return -1;
+   }
+   if (cursor + 8u > payload_len)
+      return -1;
+   *team_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*team_id < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_TEAM_ID_MIN || *team_id > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_TEAM_ID_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, grant_subject,
+                                 AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (grant_subject[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_SUBJECT_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_write_tier_grant_lookup_reply_encode(uint32_t lookup_outcome, uint32_t grant_tier,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (lookup_outcome > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_LOOKUP_OUTCOME_MAX ||
+       grant_tier > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_TIER_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, lookup_outcome);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, grant_tier);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_LOOKUP, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_write_tier_grant_lookup_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *lookup_outcome, uint32_t *grant_tier)
+{
+   if (lookup_outcome)
+      *lookup_outcome = 0u;
+   if (grant_tier)
+      *grant_tier = 0u;
+   if (!lookup_outcome || !grant_tier)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_LOOKUP ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *lookup_outcome = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*lookup_outcome > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_LOOKUP_OUTCOME_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *grant_tier = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*grant_tier > AIMEE_DB2_WRITE_TIER_GRANT_LOOKUP_GRANT_TIER_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_write_tier_grant_set_reporting_request_encode(const char *server_id, uint64_t team_id, const char *grant_subject, uint32_t grant_tier, const char *granted_by,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!server_id || !grant_subject || !granted_by || !output || !output_len)
+      return -1;
+   size_t server_id_len = 0u;
+   while (server_id_len <= AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MAX && server_id[server_id_len])
+      ++server_id_len;
+   size_t grant_subject_len = 0u;
+   while (grant_subject_len <= AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MAX && grant_subject[grant_subject_len])
+      ++grant_subject_len;
+   size_t granted_by_len = 0u;
+   while (granted_by_len <= AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MAX && granted_by[granted_by_len])
+      ++granted_by_len;
+   if (server_id_len < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MIN || server_id_len > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MAX ||
+       team_id < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_TEAM_ID_MIN || team_id > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_TEAM_ID_MAX ||
+       grant_subject_len < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MIN || grant_subject_len > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MAX ||
+       grant_tier > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_TIER_MAX ||
+       granted_by_len < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MIN || granted_by_len > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)server_id_len);
+   memcpy(payload + cursor + 4u, server_id, server_id_len);
+   cursor += 4u + (uint32_t)server_id_len;
+   aimee_db2_put_u64(payload + cursor, team_id);
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)grant_subject_len);
+   memcpy(payload + cursor + 4u, grant_subject, grant_subject_len);
+   cursor += 4u + (uint32_t)grant_subject_len;
+   aimee_db2_put_u32(payload + cursor, grant_tier);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)granted_by_len);
+   memcpy(payload + cursor + 4u, granted_by, granted_by_len);
+   cursor += 4u + (uint32_t)granted_by_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_SET_REPORTING, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_write_tier_grant_set_reporting_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *server_id, size_t server_id_capacity, uint64_t *team_id, char *grant_subject, size_t grant_subject_capacity, uint32_t *grant_tier, char *granted_by, size_t granted_by_capacity)
+{
+   if (server_id && server_id_capacity)
+      server_id[0] = '\0';
+   if (team_id)
+      *team_id = 0u;
+   if (grant_subject && grant_subject_capacity)
+      grant_subject[0] = '\0';
+   if (grant_tier)
+      *grant_tier = 0u;
+   if (granted_by && granted_by_capacity)
+      granted_by[0] = '\0';
+   if (!server_id || server_id_capacity < (size_t)AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MAX + 1u || !team_id || !grant_subject || grant_subject_capacity < (size_t)AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MAX + 1u || !grant_tier || !granted_by || granted_by_capacity < (size_t)AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_SET_REPORTING || header.flags != 0u ||
+       input_len < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, server_id,
+                                 AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (server_id[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SERVER_ID_MIN)
+         return -1;
+   }
+   if (cursor + 8u > payload_len)
+      return -1;
+   *team_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*team_id < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_TEAM_ID_MIN || *team_id > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_TEAM_ID_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, grant_subject,
+                                 AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (grant_subject[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_SUBJECT_MIN)
+         return -1;
+   }
+   if (cursor + 4u > payload_len)
+      return -1;
+   *grant_tier = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*grant_tier > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_TIER_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, granted_by,
+                                 AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (granted_by[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANTED_BY_MIN)
+         return -1;
+   }
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_write_tier_grant_set_reporting_reply_encode(uint32_t acknowledged, uint32_t grant_changed, uint32_t was_revoked, uint32_t had_previous, uint32_t previous_tier, uint32_t subject_is_member,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (acknowledged > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_ACKNOWLEDGED_MAX ||
+       grant_changed > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_CHANGED_MAX ||
+       was_revoked > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_WAS_REVOKED_MAX ||
+       had_previous > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_HAD_PREVIOUS_MAX ||
+       previous_tier > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_PREVIOUS_TIER_MAX ||
+       subject_is_member > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SUBJECT_IS_MEMBER_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, acknowledged);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, grant_changed);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, was_revoked);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, had_previous);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, previous_tier);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, subject_is_member);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_SET_REPORTING, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_write_tier_grant_set_reporting_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *acknowledged, uint32_t *grant_changed, uint32_t *was_revoked, uint32_t *had_previous, uint32_t *previous_tier, uint32_t *subject_is_member)
+{
+   if (acknowledged)
+      *acknowledged = 0u;
+   if (grant_changed)
+      *grant_changed = 0u;
+   if (was_revoked)
+      *was_revoked = 0u;
+   if (had_previous)
+      *had_previous = 0u;
+   if (previous_tier)
+      *previous_tier = 0u;
+   if (subject_is_member)
+      *subject_is_member = 0u;
+   if (!acknowledged || !grant_changed || !was_revoked || !had_previous || !previous_tier || !subject_is_member)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_WRITE_TIER_GRANT_SET_REPORTING ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *acknowledged = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*acknowledged > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *grant_changed = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*grant_changed > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_GRANT_CHANGED_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *was_revoked = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*was_revoked > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_WAS_REVOKED_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *had_previous = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*had_previous > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_HAD_PREVIOUS_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *previous_tier = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*previous_tier > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_PREVIOUS_TIER_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *subject_is_member = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*subject_is_member > AIMEE_DB2_WRITE_TIER_GRANT_SET_REPORTING_SUBJECT_IS_MEMBER_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_telemetry_allow_request_encode(const char *event_schema, const char *metric_names_array, uint32_t allow_enabled,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!event_schema || !metric_names_array || !output || !output_len)
+      return -1;
+   size_t event_schema_len = 0u;
+   while (event_schema_len <= AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MAX && event_schema[event_schema_len])
+      ++event_schema_len;
+   size_t metric_names_array_len = 0u;
+   while (metric_names_array_len <= AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MAX && metric_names_array[metric_names_array_len])
+      ++metric_names_array_len;
+   if (event_schema_len < AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MIN || event_schema_len > AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MAX ||
+       metric_names_array_len > AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MAX ||
+       allow_enabled > AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_ENABLED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TELEMETRY_ALLOW_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)event_schema_len);
+   memcpy(payload + cursor + 4u, event_schema, event_schema_len);
+   cursor += 4u + (uint32_t)event_schema_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)metric_names_array_len);
+   memcpy(payload + cursor + 4u, metric_names_array, metric_names_array_len);
+   cursor += 4u + (uint32_t)metric_names_array_len;
+   aimee_db2_put_u32(payload + cursor, allow_enabled);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TELEMETRY_ALLOW, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_telemetry_allow_request_decode(const uint8_t *input, size_t input_len,
+                                                   char *event_schema, size_t event_schema_capacity, char *metric_names_array, size_t metric_names_array_capacity, uint32_t *allow_enabled)
+{
+   if (event_schema && event_schema_capacity)
+      event_schema[0] = '\0';
+   if (metric_names_array && metric_names_array_capacity)
+      metric_names_array[0] = '\0';
+   if (allow_enabled)
+      *allow_enabled = 0u;
+   if (!event_schema || event_schema_capacity < (size_t)AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MAX + 1u || !metric_names_array || metric_names_array_capacity < (size_t)AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MAX + 1u || !allow_enabled)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TELEMETRY_ALLOW || header.flags != 0u ||
+       input_len < AIMEE_DB2_TELEMETRY_ALLOW_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_TELEMETRY_ALLOW_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, event_schema,
+                                 AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MAX) != 0)
+      return -1;
+   {
+      size_t taken = 0u;
+      while (event_schema[taken])
+         ++taken;
+      if (taken < AIMEE_DB2_TELEMETRY_ALLOW_EVENT_SCHEMA_MIN)
+         return -1;
+   }
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, metric_names_array,
+                                 AIMEE_DB2_TELEMETRY_ALLOW_METRIC_NAMES_ARRAY_MAX) != 0)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *allow_enabled = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*allow_enabled > AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_ENABLED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_telemetry_allow_reply_encode(uint32_t allow_outcome,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (allow_outcome > AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_OUTCOME_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_TELEMETRY_ALLOW_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, allow_outcome);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TELEMETRY_ALLOW, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_telemetry_allow_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *allow_outcome)
+{
+   if (allow_outcome)
+      *allow_outcome = 0u;
+   if (!allow_outcome)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_TELEMETRY_ALLOW ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *allow_outcome = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*allow_outcome > AIMEE_DB2_TELEMETRY_ALLOW_ALLOW_OUTCOME_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
 static inline int aimee_db2_enrollment_active_request_encode(const char *cert_issuer, const char *cert_serial_norm,
                                                    uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
@@ -60036,6 +60644,259 @@ static inline int aimee_db2_kb_documents_link_neighbours_reply_decode(const uint
    *acknowledged = aimee_db2_get_u32(payload + cursor);
    cursor += 4u;
    if (*acknowledged > AIMEE_DB2_KB_DOCUMENTS_LINK_NEIGHBOURS_ACKNOWLEDGED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_record_request_encode(uint64_t point_id, const char *collection, uint64_t memory_id, uint32_t index_ok, const char *error_message,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!collection || !error_message || !output || !output_len)
+      return -1;
+   size_t collection_len = 0u;
+   while (collection_len <= AIMEE_DB2_VECTOR_INDEX_OP_RECORD_COLLECTION_MAX && collection[collection_len])
+      ++collection_len;
+   size_t error_message_len = 0u;
+   while (error_message_len <= AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_MESSAGE_MAX && error_message[error_message_len])
+      ++error_message_len;
+   if (point_id > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_POINT_ID_MAX ||
+       collection_len > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_COLLECTION_MAX ||
+       memory_id > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_MEMORY_ID_MAX ||
+       index_ok > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_INDEX_OK_MAX ||
+       error_message_len > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_MESSAGE_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_VECTOR_INDEX_OP_RECORD_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u64(payload + cursor, point_id);
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)collection_len);
+   memcpy(payload + cursor + 4u, collection, collection_len);
+   cursor += 4u + (uint32_t)collection_len;
+   aimee_db2_put_u64(payload + cursor, memory_id);
+   cursor += 8u;
+   aimee_db2_put_u32(payload + cursor, index_ok);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)error_message_len);
+   memcpy(payload + cursor + 4u, error_message, error_message_len);
+   cursor += 4u + (uint32_t)error_message_len;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_RECORD, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_record_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *point_id, char *collection, size_t collection_capacity, uint64_t *memory_id, uint32_t *index_ok, char *error_message, size_t error_message_capacity)
+{
+   if (point_id)
+      *point_id = 0u;
+   if (collection && collection_capacity)
+      collection[0] = '\0';
+   if (memory_id)
+      *memory_id = 0u;
+   if (index_ok)
+      *index_ok = 0u;
+   if (error_message && error_message_capacity)
+      error_message[0] = '\0';
+   if (!point_id || !collection || collection_capacity < (size_t)AIMEE_DB2_VECTOR_INDEX_OP_RECORD_COLLECTION_MAX + 1u || !memory_id || !index_ok || !error_message || error_message_capacity < (size_t)AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_MESSAGE_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_RECORD || header.flags != 0u ||
+       input_len < AIMEE_DB2_VECTOR_INDEX_OP_RECORD_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *point_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*point_id > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_POINT_ID_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, collection,
+                                 AIMEE_DB2_VECTOR_INDEX_OP_RECORD_COLLECTION_MAX) != 0)
+      return -1;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *memory_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*memory_id > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_MEMORY_ID_MAX)
+      return -1;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *index_ok = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*index_ok > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_INDEX_OK_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, error_message,
+                                 AIMEE_DB2_VECTOR_INDEX_OP_RECORD_ERROR_MESSAGE_MAX) != 0)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_record_reply_encode(uint32_t recorded,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (recorded < AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RECORDED_MIN || recorded > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RECORDED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, recorded);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_RECORD, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_record_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *recorded)
+{
+   if (recorded)
+      *recorded = 0u;
+   if (!recorded)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_RECORD ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *recorded = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*recorded < AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RECORDED_MIN || *recorded > AIMEE_DB2_VECTOR_INDEX_OP_RECORD_RECORDED_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_remove_request_encode(uint64_t point_id,
+                                                   uint8_t *output, size_t capacity,
+                                                   uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (point_id > AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_POINT_ID_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u64(payload + cursor, point_id);
+   cursor += 8u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_REMOVE, 0u, cursor, output,
+                                       capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_remove_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint64_t *point_id)
+{
+   if (point_id)
+      *point_id = 0u;
+   if (!point_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_REMOVE || header.flags != 0u ||
+       input_len < AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_REQUEST_MAX_LEN)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 8u > payload_len)
+      return -1;
+   *point_id = aimee_db2_get_u64(payload + cursor);
+   cursor += 8u;
+   if (*point_id > AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_POINT_ID_MAX)
+      return -1;
+   if (cursor != payload_len)
+      return -1;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_remove_reply_encode(uint32_t recorded,
+                                                 uint8_t *output, size_t capacity,
+                                                 uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len)
+      return -1;
+
+   if (recorded < AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MIN || recorded > AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MAX)
+      return -1;
+   uint8_t scratch[AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RESPONSE_MAX_LEN - AIMEE_DB2_ENVELOPE_HEADER_LEN];
+   uint8_t *payload = scratch;
+   uint32_t cursor = 0u;
+   aimee_db2_put_u32(payload + cursor, recorded);
+   cursor += 4u;
+   if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_REMOVE, AIMEE_DB2_RESULT_OK, cursor,
+                                     output, capacity) != 0)
+      return -1;
+   memcpy(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, scratch, cursor);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor;
+   return 0;
+}
+
+static inline int aimee_db2_vector_index_op_remove_reply_decode(const uint8_t *input, size_t input_len,
+                                                 uint32_t *recorded)
+{
+   if (recorded)
+      *recorded = 0u;
+   if (!recorded)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_VECTOR_INDEX_OP_REMOVE ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       input_len != (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t payload_len = header.payload_len;
+   uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *recorded = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*recorded < AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MIN || *recorded > AIMEE_DB2_VECTOR_INDEX_OP_REMOVE_RECORDED_MAX)
       return -1;
    if (cursor != payload_len)
       return -1;
