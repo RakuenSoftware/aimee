@@ -189,6 +189,16 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
        jo_need_str((cJSON *)req, "content", &content) < 0)
       return jo_err("missing key or content");
+   /* An empty key or content is a malformed REQUEST, not a storage failure. The
+    * store already refuses it, but the refusal surfaced as "failed to store
+    * memory" -- which reads as the database declining a valid write and sends
+    * the caller to look at the store. jo_need_str only proves the field is a
+    * string and present; "" satisfies that. Refused here, beside the sibling
+    * argument checks (memory.delete's positive id, facts.retract's non-empty
+    * source), and with the same kind so a client can tell the two apart. */
+   if (!key[0] || !content[0])
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store requires a non-empty key and content", NULL);
 
    const char *tier = jo_str((cJSON *)req, "tier", TIER_L0);
    const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);

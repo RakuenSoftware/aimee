@@ -29,6 +29,24 @@ try() {
   printf '%-46s %s%s\n' "$label" "$(printf '%s' "$out" | tr '\n' ' ' | head -c 150)" "$flag"
 }
 
+# For probes that are DELIBERATELY malformed. A validation refusal is the right
+# answer there, so flagging it produces permanent noise and trains the reader to
+# skim past the flags -- which is how a real one gets missed. This inverts the
+# check: the probe is flagged when it SUCCEEDS, or when it fails with something
+# other than a clean argument refusal.
+try_bad() {
+  local label="$1"; shift
+  local out
+  out="$("$@" 2>&1 | head -c 600)"
+  local flag=""
+  case "$out" in
+    *invalid_argument*) ;;                       # refused, and said why
+    *'"status":"ok"'*) flag=" <-- LOOK (accepted a malformed request)"; fails=$((fails + 1)) ;;
+    *) flag=" <-- LOOK (refused, but not as an argument error)"; fails=$((fails + 1)) ;;
+  esac
+  printf '%-46s %s%s\n' "$label" "$(printf '%s' "$out" | tr '\n' ' ' | head -c 150)" "$flag"
+}
+
 api() {  # $1 = path, $2 = json
   curl -s -m 60 --unix-socket "$SOCK" -H 'content-type: application/json' \
        -X POST --data "$2" "http://localhost$1"
@@ -65,7 +83,7 @@ try "relations.schema_list" kb relations.schema_list '{}'
 hdr "typed-fact correction surface"
 try "facts.retract no-authority" api /v1/facts/retract '{"source":"user","relation":"nonexistent_rel"}'
 try "facts.retract as user"      api /v1/facts/retract '{"source":"user","relation":"nonexistent_rel","authority":"user"}'
-try "entities.merge bad ids"     api /v1/entities/merge '{"from_id":0,"into_id":0}'
+try_bad "entities.merge bad ids" api /v1/entities/merge '{"from_id":0,"into_id":0}'
 
 hdr "edge cases the probes never sent"
 try "empty query"        kb memory.context_block '{"query":"","block_type":"general","limit":3}'
@@ -73,7 +91,7 @@ try "very long query"    kb memory.context_block "{\"query\":\"$(head -c 3000 /d
 try "unicode + quotes"   kb memory.context_block '{"query":"café \"quoted\" — em dash 日本語","limit":3}'
 try "sql-ish query"      kb memory.context_block "{\"query\":\"'; DROP TABLE memories; --\",\"limit\":3}"
 try "negative limit"     kb memory.context_block '{"query":"release","limit":-5}'
-try "store empty content" api /v1/memory/store '{"key":"explore-empty","content":"","tier":"L2","kind":"fact"}'
+try_bad "store empty content" api /v1/memory/store '{"key":"explore-empty","content":"","tier":"L2","kind":"fact"}'
 
 hdr "daemons and modules after"
 echo "kb=$(pgrep -cf aimee-kb) server=$(pgrep -cf aimee-server) modules=$(pgrep -cf aimee-module-memory)"
