@@ -126,6 +126,8 @@ func (r *fakeRow) Scan(dest ...any) error {
 			*typed, _ = r.values[index].(*int64)
 		case **string:
 			*typed, _ = r.values[index].(*string)
+		case **float64:
+			*typed, _ = r.values[index].(*float64)
 		default:
 			return errors.New("unexpected scan type")
 		}
@@ -170,6 +172,8 @@ func (r *fakeRows) Scan(dest ...any) error {
 			*typed, _ = row[index].(*int64)
 		case **string:
 			*typed, _ = row[index].(*string)
+		case **float64:
+			*typed, _ = row[index].(*float64)
 		default:
 			return errors.New("unexpected scan type")
 		}

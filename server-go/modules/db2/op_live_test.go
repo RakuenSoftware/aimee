@@ -909,6 +909,96 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "scene_member_exists",
+			stage: db2contract.StageSceneMemberExists,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeSceneMemberExistsRequest(2147483000, 2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeSceneMemberExistsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "unit_edge_exists",
+			stage: db2contract.StageUnitEdgeExists,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeUnitEdgeExistsRequest(2147483000, 2147483001)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeUnitEdgeExistsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memories_by_key",
+			stage: db2contract.StageMemoriesByKey,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoriesByKeyRequest("live-probe-no-such-key")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoriesByKeyReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_scopes_list",
+			stage: db2contract.StageMemoryScopesList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryScopesListRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryScopesListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_scene_memberships",
+			stage: db2contract.StageMemorySceneMemberships,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySceneMembershipsRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemorySceneMembershipsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_tier_kind_counts",
+			stage: db2contract.StageMemoryTierKindCounts,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryTierKindCountsRequest()
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryTierKindCountsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_confidence_by_key",
+			stage: db2contract.StageMemoryConfidenceByKey,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryConfidenceByKeyRequest("live-probe-no-such-key")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, err := db2contract.DecodeMemoryConfidenceByKeyReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				// Found is what separates a memory nobody believes from a key
+				// nothing holds. Against this schema it must be the second.
+				if found != 0 {
+					t.Fatal("a key nothing holds reported as found")
+				}
+			},
+		},
 	}
 }
 
