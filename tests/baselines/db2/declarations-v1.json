@@ -19308,7 +19308,8 @@
     {
       "consumers": [
         "src/modules/memory/memory_core_crud.c",
-        "src/modules/memory/memory_core_helpers_b.c"
+        "src/modules/memory/memory_core_helpers_b.c",
+        "src/tests/test_memory_retrieval_eval.c"
       ],
       "locations": [
         {
@@ -25906,6 +25907,7 @@
       "consumers": [
         "src/modules/memory/memory_core_crud.c",
         "src/modules/memory/memory_core_helpers_b.c",
+        "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_pgvec_neardup.c"
       ],
@@ -26484,7 +26486,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3363625f40ba9432fde3946e2e780b8377e94e8bb944e816fe6c749a0725fd7f",
+  "fingerprint": "9db131969f66a499e4a0a4a4a0d356aaa8102fcc2798bcf49c3b76be1119f8a4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
