@@ -35,7 +35,7 @@ question. This is not an extension of it.
 ## Storage
 
 From the `postgres` module, over the event bus. This module opens no pool and
-imports no driver — what it owns is meaning, not connections.
+imports no driver. What it owns is meaning, not connections.
 
 Its schema is versioned under owner `control-plane`, independent of `db1`'s and
 `db2`'s histories, applied through the storage module's `MIGRATE` operation with
@@ -55,5 +55,5 @@ rather than being discovered by a caller that gets no answer.
 ## State
 
 The module exists and serves health. The KB-specific operations move in as
-batches, each one leaving db2 rather than being copied — 157 of the 195
+batches, each one leaving db2 rather than being copied. 157 of the 195
 uncatalogued db2 symbols are consumed only by `src/kb` and belong here.

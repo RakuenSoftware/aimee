@@ -49,6 +49,14 @@ if [ "$(on_host "pct status $CT" 2>/dev/null)" != "status: running" ]; then
    done
 fi
 
+
+# Renew the lease before doing anything long. The reaper reclaims a guest 4h
+# after creation or its last renewal; nothing here ever renewed, which is why
+# this container has been destroyed repeatedly mid-run. A renewal here buys a
+# full 4h for the run that is about to start.
+on_host "aimee-keepalive ct:$CT" >/dev/null 2>&1 ||
+   say "could not renew the lease; this container is reaped 4h after creation"
+
 if ! on_host "pct exec $CT -- test -x /usr/lib/postgresql/17/bin/postgres" 2>/dev/null; then
    say "installing postgres, pgvector and pgvectorscale"
    on_host "pct exec $CT -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; \
