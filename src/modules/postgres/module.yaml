@@ -11,10 +11,19 @@
   },
   "ownership_complete": true,
   "go_sources": [
-    "server-go/modules/postgres/postgres.go"
+    "server-go/modules/postgres/postgres.go",
+    "server-go/modules/postgres/schema.go",
+    "server-go/modules/postgres/schema_store.go",
+    "server-go/modules/postgres/sql.go",
+    "server-go/modules/postgres/sql_tx.go",
+    "server-go/modules/postgres/sql_wire.go"
   ],
   "go_tests": [
-    "server-go/modules/postgres/postgres_test.go"
+    "server-go/modules/postgres/postgres_test.go",
+    "server-go/modules/postgres/schema_test.go",
+    "server-go/modules/postgres/sql_live_test.go",
+    "server-go/modules/postgres/sql_tx_test.go",
+    "server-go/modules/postgres/sql_wire_test.go"
   ],
   "public_headers": [
     "src/modules/postgres/include/aimee/postgres/module_api.h"
