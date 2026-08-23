@@ -74,8 +74,13 @@ func statusFor(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, ErrDenied):
 		return http.StatusForbidden
-	case errors.Is(err, ErrInboxFull), errors.Is(err, ErrHopLimit):
+	case errors.Is(err, ErrInboxFull), errors.Is(err, ErrHopLimit),
+		errors.Is(err, ErrRegistryFull), errors.Is(err, ErrGrantsFull):
 		return http.StatusTooManyRequests
+	case errors.Is(err, ErrDirectoryUnavailable):
+		// Retryable, and the only status here that is a fact about the moment
+		// rather than about the request.
+		return http.StatusServiceUnavailable
 	case errors.Is(err, ErrCycle), errors.Is(err, ErrLabelTaken):
 		return http.StatusConflict
 	case errors.Is(err, ErrTooLong):

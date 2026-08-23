@@ -251,7 +251,16 @@ answers `StatusOK` for the FAN-OUT and carries a per-recipient outcome in each
 row, so a partial delivery is visible rather than collapsed into one word.
 `OpInboxTake` leads its reply with the number of messages REMAINING, because
 rows alone cannot distinguish a complete drain from a capped one and a caller
-that assumes the former simply stops asking. Every refusal has a
+that assumes the former simply stops asking.
+
+Every status names one fact, and an unrecognised one names itself
+`unknown_status` rather than borrowing a real name. The default used to return
+`bad_request`, which hid four errors that were never mapped at all: two of them
+capacity (`at_capacity`), where a caller told its request was malformed goes on
+correcting arguments that were never wrong while the table stays full. A test
+asserts every sentinel error maps to a status of its own, and asserts the count,
+since Go cannot enumerate package-level vars and the list would otherwise go
+stale. Every refusal has a
 distinct status name (`Status.String`) rather than collapsing into
 `bad_request`.
 

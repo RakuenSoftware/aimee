@@ -129,9 +129,18 @@ var (
 	// belongs to. Reported as one message, an operator hunts for a malformed
 	// argument that is not there.
 	ErrOwnerMismatch = errors.New("peer: session belongs to a different owner")
-	ErrShutdown      = errors.New("peer: registry shut down while waiting")
-	ErrRegistryFull  = errors.New("peer: session registry is full")
-	ErrGrantsFull    = errors.New("peer: grant table is full")
+)
+
+// SentinelErrorCount is how many sentinel errors this package declares, across
+// this file and channel.go. The wire's mapping test asserts against it, so an
+// error added without a status mapping fails rather than falling to a default
+// and being reported as something it is not.
+const SentinelErrorCount = 21
+
+var (
+	ErrShutdown     = errors.New("peer: registry shut down while waiting")
+	ErrRegistryFull = errors.New("peer: session registry is full")
+	ErrGrantsFull   = errors.New("peer: grant table is full")
 	// ErrDirectoryUnavailable is the directory failing to ANSWER, which is not
 	// the same as answering that a session is gone. A departed session is a
 	// fact to act on; an unreachable directory is a reason to try again. Told

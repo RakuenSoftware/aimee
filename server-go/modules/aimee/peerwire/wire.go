@@ -162,6 +162,16 @@ const (
 	// every other refusal is a fact about the request, this one is a fact about
 	// the moment.
 	StatusUnavailable Status = 16
+	// StatusUnclassified is an error the module could not name. It is NOT
+	// bad_request: telling a caller its request was malformed when the module
+	// merely failed in a way it does not classify sends them to fix a call that
+	// was fine. One says "change what you sent", the other says "this is a bug
+	// worth reporting".
+	StatusUnclassified Status = 17
+	// StatusAtCapacity is a TABLE at its ceiling, as distinct from a malformed
+	// request. Reported as bad_request, a caller goes on correcting arguments
+	// that were never wrong; reported as capacity, it waits or stops creating.
+	StatusAtCapacity Status = 18
 )
 
 // StatusFor maps a registry error onto its wire status.
@@ -201,8 +211,12 @@ func StatusFor(err error) Status {
 		return StatusChannelFull
 	case errors.Is(err, peer.ErrDirectoryUnavailable):
 		return StatusUnavailable
-	default:
+	case errors.Is(err, peer.ErrRegistryFull), errors.Is(err, peer.ErrGrantsFull):
+		return StatusAtCapacity
+	case errors.Is(err, peer.ErrBadRequest), errors.Is(err, peer.ErrChannelNameBad):
 		return StatusBadRequest
+	default:
+		return StatusUnclassified
 	}
 }
 
@@ -241,8 +255,24 @@ func (s Status) String() string {
 		return "channel_full"
 	case StatusUnavailable:
 		return "unavailable"
-	default:
+	case StatusBadRequest:
 		return "bad_request"
+	case StatusUnclassified:
+		return "unclassified"
+	case StatusAtCapacity:
+		return "at_capacity"
+	default:
+		// Deliberately NOT the name of a real status. Falling through to
+		// "bad_request" made an unrecognised value indistinguishable from one a
+		// caller acts on, and it is what let StatusBadRequest live without an
+		// arm of its own.
+		//
+		// This default is also what makes the compile-time guard on these
+		// constants work: every status having an arm is what turns an inserted
+		// value into a duplicate case the compiler refuses. A status added
+		// WITHOUT an arm compiles, lands here, and only the pinning test catches
+		// it -- so that arm is load-bearing, not decoration.
+		return "unknown_status"
 	}
 }
 

@@ -201,8 +201,8 @@ func TestStatusForCoversEveryRefusal(t *testing.T) {
 			t.Errorf("%v collapsed into bad_request", err)
 		}
 	}
-	if got := StatusFor(errors.New("something else")); got != StatusBadRequest {
-		t.Errorf("unknown error = %v; want bad_request", got)
+	if got := StatusFor(errors.New("something else")); got != StatusUnclassified {
+		t.Errorf("unknown error = %v; want unclassified", got)
 	}
 }
 
@@ -245,15 +245,64 @@ func TestStatusIntegersArePinned(t *testing.T) {
 	// is the same collapse in the other direction, where an operator cannot tell
 	// which refusal they got.
 	seen := map[string]Status{}
-	for i := 0; i <= int(StatusUnavailable); i++ {
+	for i := 0; i <= int(StatusAtCapacity); i++ {
 		name := Status(i).String()
 		if prev, dup := seen[name]; dup {
 			t.Errorf("status %d and %d both name themselves %q", int(prev), i, name)
 		}
 		seen[name] = Status(i)
 	}
-	// And an unknown status must not silently read as a known one.
-	if got := Status(9999).String(); got != "bad_request" {
-		t.Errorf("unknown status names itself %q; the default arm changed", got)
+	// An unrecognised status must NOT name itself as a real one. It used to
+	// return "bad_request", which made an unknown value indistinguishable from a
+	// refusal a caller acts on, and is what let StatusBadRequest live without an
+	// arm of its own.
+	if got := Status(9999).String(); got != "unknown_status" {
+		t.Errorf("unrecognised status names itself %q; it must not alias a real one", got)
+	}
+}
+
+// EVERY sentinel error must map to a status of its own choosing, never to the
+// default.
+//
+// StatusFor's default used to return StatusBadRequest, so four errors that were
+// never mapped -- ErrBadRequest itself, ErrChannelNameBad, ErrRegistryFull and
+// ErrGrantsFull -- landed there silently. Two of those are CAPACITY: a caller
+// told its request was malformed goes on correcting arguments that were never
+// wrong, while the table stays full.
+//
+// The list is written out because Go cannot enumerate package-level vars. That
+// makes it a transcription, which is the thing that goes stale, so the count is
+// asserted too: an error added without being mapped fails here rather than
+// passing while being reported as something it is not.
+func TestEverySentinelErrorHasItsOwnStatus(t *testing.T) {
+	sentinels := map[string]error{
+		"ErrNoPeer": peer.ErrNoPeer, "ErrUnknownSender": peer.ErrUnknownSender,
+		"ErrDenied": peer.ErrDenied, "ErrInboxFull": peer.ErrInboxFull,
+		"ErrHopLimit": peer.ErrHopLimit, "ErrCycle": peer.ErrCycle,
+		"ErrTimeout": peer.ErrTimeout, "ErrSelf": peer.ErrSelf,
+		"ErrTooLong": peer.ErrTooLong, "ErrLabelTaken": peer.ErrLabelTaken,
+		"ErrBadRequest": peer.ErrBadRequest, "ErrShutdown": peer.ErrShutdown,
+		"ErrRegistryFull": peer.ErrRegistryFull, "ErrGrantsFull": peer.ErrGrantsFull,
+		"ErrDirectoryUnavailable": peer.ErrDirectoryUnavailable,
+		"ErrOwnerMismatch":        peer.ErrOwnerMismatch, "ErrNoChannel": peer.ErrNoChannel,
+		"ErrNotMember": peer.ErrNotMember, "ErrChannelFull": peer.ErrChannelFull,
+		"ErrChannelsFull": peer.ErrChannelsFull, "ErrChannelNameBad": peer.ErrChannelNameBad,
+	}
+	if len(sentinels) != peer.SentinelErrorCount {
+		t.Fatalf("this list has %d errors, the package declares %d. An error added "+
+			"without being mapped falls to the default and is reported as something "+
+			"it is not.", len(sentinels), peer.SentinelErrorCount)
+	}
+	for name, err := range sentinels {
+		if got := StatusFor(err); got == StatusUnclassified {
+			t.Errorf("%s falls to the default; give it a status", name)
+		}
+	}
+
+	// Capacity is not malformed input: they call for different repairs.
+	for _, err := range []error{peer.ErrRegistryFull, peer.ErrGrantsFull} {
+		if got := StatusFor(err); got != StatusAtCapacity {
+			t.Errorf("a full table reported %v; want at_capacity", got)
+		}
 	}
 }
