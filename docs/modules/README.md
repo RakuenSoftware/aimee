@@ -25,7 +25,8 @@ Current contracts:
 - [IR](ir.md), [translation](translation.md), [response composition](response-composition.md),
   and [protocols](protocols.md);
 - [gateway](gateway.md), [runtime web](runtime-web.md), [control web](control-web.md), and
-  [vault](vault.md).
+  [vault](vault.md);
+- [postgres](postgres.md), [control plane](control-plane.md), and [vectordb](vectordb.md).
 
 See the [technical reference](../../src/README.md) for the process and source map.
 

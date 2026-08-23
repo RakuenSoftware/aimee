@@ -208,3 +208,33 @@ func TestQueryReplyCarriesWidthBeforeRows(t *testing.T) {
 		t.Fatal("row count wrong")
 	}
 }
+
+func TestStatusIntegersAreTheContract(t *testing.T) {
+	// These integers cross the wire. A peer built against one numbering and a
+	// module built against another both compile, both pass their own tests, and
+	// the disagreement shows up as a caller acting on the wrong fact: reading
+	// "unsupported" as "limit exceeded" and retrying forever, or reading a
+	// failure as OK.
+	//
+	// They are declared explicitly rather than by iota for that reason -- with
+	// iota, inserting a status in the middle silently renumbers every one after
+	// it. This test is the second guard, for the edit that renumbers a constant
+	// directly rather than by insertion. Neither catches what the other does.
+	for _, c := range []struct {
+		name  string
+		value uint32
+		want  uint32
+	}{
+		{"OK", StatusOK, 0},
+		{"InvalidRequest", StatusInvalidRequest, 1},
+		{"Unsupported", StatusUnsupported, 2},
+		{"LimitExceeded", StatusLimitExceeded, 3},
+		{"StatementFailed", StatusStatementFailed, 4},
+		{"Unavailable", StatusUnavailable, 5},
+		{"MigrationFailed", StatusMigrationFailed, 6},
+	} {
+		if c.value != c.want {
+			t.Errorf("Status%s = %d, and the wire says %d", c.name, c.value, c.want)
+		}
+	}
+}
