@@ -88,9 +88,15 @@ operations over this wire and is proven at parity against a real schema -- 193
 operation probes answering identically through a pool and through this module,
 with the codec proven to have carried them -- but it is not the deployed `db2`.
 
-Flipping that is a one-line contract change with a blast radius across the whole KB, and
-the thing that would make it safe is a test running both processes against one
-database. That does not exist yet.
+**What gates that flip is not the transport.** `db2`'s declared runtime is one
+line in process-contracts.json, but the C data layer is a LIBRARY linked into
+the KB as well as a module process: 168 files outside the module call `db2_*`
+directly, 765 distinct symbols from `src/kb` alone. Those callers are
+in-process and would not follow a runtime change -- they have to move to the bus
+first, one family at a time, which is the C purge rather than a switch to throw.
+
+Counted rather than estimated, because "a one-line change" was the shape of the
+first answer and it was wrong by 168 files.
 
 ## Providers and readiness
 
