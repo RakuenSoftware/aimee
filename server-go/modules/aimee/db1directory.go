@@ -67,6 +67,25 @@ const (
 	// db1ReplyPrincipal is the index of `principal` in the ten-cell reply:
 	// id, client_type, principal, title, created_at, last_activity_at,
 	// claude_session_id, outcome, source, chat_key.
+	//
+	// THE OTHER NINE ARE IGNORED DELIBERATELY, checked rather than assumed. A
+	// peer's audit found visibility predicates living in SQL that no caller
+	// passed, on the principle that a filter you never named cannot be one you
+	// notice dropping -- so the same question was asked here: does addressability
+	// depend on anything in this row besides the principal?
+	//
+	// It does not. The candidate was `outcome`, which looks like a lifecycle
+	// state and is not: it holds "success", "partial" or "failure", a judgment
+	// about how the work went, written from agent_log entries and only when
+	// there are any. Its absence means "no log entries", not "still running",
+	// and reading it as liveness would be treating the absence of a row as a
+	// value.
+	//
+	// Liveness is PRESENCE. Closing a session deletes the row
+	// (server_session.c calls db1_server_session_delete), after which
+	// server_session_get answers Missing and this maps it to ErrNoPeer. So the
+	// existence question and the addressability question have the same answer,
+	// and there is no second predicate to carry.
 	db1ReplyPrincipal = 2
 	db1ReplyWidth     = 10
 )
