@@ -101,6 +101,11 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 	}
 	directory, err := aimee.NewDB1Directory(caller, 5*time.Second)
 	if err != nil {
+		// CloseAndWait BEFORE Detach. The caller's goroutine is polling the
+		// shared-memory region by now and Detach unmaps it; the Detach above is
+		// safe only because the constructor failed and no goroutine exists yet.
+		// Same defect that segfaulted the probe after every check passed.
+		caller.CloseAndWait()
 		busClient.Detach()
 		return aimee.NoDirectory{}, fmt.Sprintf("none: %v", err)
 	}
@@ -129,6 +134,9 @@ func economizerStore(ctx context.Context, moduleBusSocket string) economizer.Sta
 	}
 	store, err := db1.NewClient(caller, 0)
 	if err != nil {
+		// CloseAndWait before Detach: the poll goroutine is live here and
+		// Detach unmaps the region it reads.
+		caller.CloseAndWait()
 		busClient.Detach()
 		return nil
 	}
@@ -158,6 +166,9 @@ func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtabl
 	}
 	client, err := delegatecontract.NewBusClient(caller, 0)
 	if err != nil {
+		// CloseAndWait before Detach: the poll goroutine is live here and
+		// Detach unmaps the region it reads.
+		caller.CloseAndWait()
 		busClient.Detach()
 		return nil, err
 	}
