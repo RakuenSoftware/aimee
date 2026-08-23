@@ -253,14 +253,25 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 	}
 	defer rows.Close()
 
+	return collectReply(rows), bus.ModuleStatusOK
+}
+
+// collectReply turns a result set into a reply, or into the refusal its size
+// earns.
+//
+// A function of its own because both ceilings below are refusals that nothing
+// could reach where they used to live: inside the statement path, exercising
+// them meant a database with four thousand columns or a stub of every pgx.Tx
+// method. Taking a pgx.Rows means a dozen-line fake can drive both, which is
+// the difference between a bound that is checked and one that is asserted.
+func collectReply(rows pgx.Rows) []byte {
 	columns := len(rows.FieldDescriptions())
 	if columns > MaxReplyColumns {
 		// Refused rather than narrowed. The width crosses as a four-byte field,
 		// and a width that wrapped would tell the reader to size every row wrong
 		// -- which is not a bad number, it is a misparse of everything after it.
 		return EncodeError(StatusLimitExceeded, sqlStateResultTooLarge,
-				fmt.Sprintf("result has %d columns, over %d", columns, MaxReplyColumns)),
-			bus.ModuleStatusOK
+			fmt.Sprintf("result has %d columns, over %d", columns, MaxReplyColumns))
 	}
 	width := uint32(columns)
 	collected := make([][]Value, 0, 64)
@@ -268,7 +279,7 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 		raw, valueErr := rows.Values()
 		if valueErr != nil {
 			status, state, detail := classifyFailure(valueErr)
-			return EncodeError(status, state, detail), bus.ModuleStatusOK
+			return EncodeError(status, state, detail)
 		}
 		if len(collected) >= MaxReplyRows {
 			// Refused, not truncated. A caller handed exactly the ceiling
@@ -277,7 +288,7 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 			// behalf is not.
 			return EncodeError(StatusLimitExceeded, sqlStateResultTooLarge,
 				fmt.Sprintf("result exceeds %d rows; narrow or page the query",
-					MaxReplyRows)), bus.ModuleStatusOK
+					MaxReplyRows))
 		}
 		row := make([]Value, 0, width)
 		for _, value := range raw {
@@ -287,9 +298,9 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 	}
 	if rows.Err() != nil {
 		status, state, detail := classifyFailure(rows.Err())
-		return EncodeError(status, state, detail), bus.ModuleStatusOK
+		return EncodeError(status, state, detail)
 	}
-	return EncodeQueryReply(width, collected), bus.ModuleStatusOK
+	return EncodeQueryReply(width, collected)
 }
 
 // begin opens a transaction and hands back a handle bound to the caller.

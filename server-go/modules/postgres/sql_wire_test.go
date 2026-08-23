@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -411,5 +412,84 @@ func TestNoLengthBypassesTheFieldCheck(t *testing.T) {
 					"payload into framing", name, number+1, strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+// shapedRows answers with whatever shape a test asks for, so the reply ceilings
+// can be reached without a database that has four thousand columns.
+type shapedRows struct {
+	columns int
+	rows    int
+	at      int
+}
+
+func (r *shapedRows) Next() bool {
+	r.at++
+	return r.at <= r.rows
+}
+
+func (r *shapedRows) Values() ([]any, error) {
+	out := make([]any, 0, r.columns)
+	for index := 0; index < r.columns; index++ {
+		out = append(out, int64(index))
+	}
+	return out, nil
+}
+
+func (r *shapedRows) FieldDescriptions() []pgconn.FieldDescription {
+	return make([]pgconn.FieldDescription, r.columns)
+}
+
+func (r *shapedRows) Err() error                    { return nil }
+func (r *shapedRows) Close()                        {}
+func (r *shapedRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+func (r *shapedRows) RawValues() [][]byte           { return nil }
+func (r *shapedRows) Conn() *pgx.Conn               { return nil }
+func (r *shapedRows) Scan(...any) error             { return nil }
+
+func TestTheReplyCeilingsRefuseRatherThanTruncate(t *testing.T) {
+	// Both refusals existed and nothing had ever made either of them fire.
+	//
+	// Truncating instead would be worse than failing in both cases. A caller
+	// handed exactly the ceiling cannot tell a complete answer from a capped one
+	// and will record the cap as fact. And a width that wrapped would tell the
+	// reader to size EVERY row wrong, which is a misparse of the whole reply
+	// rather than one bad number.
+	for _, c := range []struct {
+		name    string
+		columns int
+		rows    int
+		refused bool
+	}{
+		{"an ordinary result", 3, 10, false},
+		{"exactly the row ceiling", 2, MaxReplyRows, false},
+		{"one row past it", 2, MaxReplyRows + 1, true},
+		{"exactly the column ceiling", MaxReplyColumns, 1, false},
+		{"one column past it", MaxReplyColumns + 1, 1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			body := collectReply(&shapedRows{columns: c.columns, rows: c.rows})
+			status := binary.LittleEndian.Uint32(body[0:4])
+			if refused := status == StatusLimitExceeded; refused != c.refused {
+				t.Fatalf("status = %d, refused = %v, want %v", status, refused, c.refused)
+			}
+		})
+	}
+}
+
+func TestAnArgumentCountPastTheCeilingIsRefused(t *testing.T) {
+	// Refused from the header field before a single argument is read, so a
+	// sender claiming five thousand arguments costs nothing to reject. That is
+	// also why it is cheap to test and had never been tested: it needs a crafted
+	// count rather than four thousand arguments.
+	out := binary.LittleEndian.AppendUint32(nil, OpExec)
+	out = binary.LittleEndian.AppendUint32(out, 2)
+	out = append(out, "op"...)
+	out = binary.LittleEndian.AppendUint64(out, 0)
+	out = binary.LittleEndian.AppendUint32(out, 1)
+	out = append(out, "x"...)
+	out = binary.LittleEndian.AppendUint32(out, uint32(MaxArguments+1))
+	if _, err := DecodeRequest(out); err == nil {
+		t.Fatal("a request claiming more arguments than the ceiling decoded")
 	}
 }
