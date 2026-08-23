@@ -48,6 +48,13 @@ func liveStore(t *testing.T) (Store, func()) {
 	if dsn == "" {
 		t.Skip("AIMEE_DB2_URL is unset; this test needs a real database")
 	}
+	if os.Getenv("AIMEE_DB2_STORE") == "bus" {
+		// The same operations, reaching the database through the postgres
+		// module rather than a pool of their own. Whether the two paths agree
+		// is exactly what the parity harness can answer, so it is offered as a
+		// switch rather than asserted in a comment.
+		return liveBusBackedStore(t)
+	}
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("parse AIMEE_DB2_URL: %v", err)
@@ -5477,7 +5484,16 @@ const liveProbeEnrollment = `INSERT INTO kb_enrollments
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
 	defer closeStore()
-	pool := store.(*PoolStore).pool
+	direct, ok := store.(*PoolStore)
+	if !ok {
+		// This one reads sequence state through the pool directly, which is
+		// deliberately not something the storage wire exposes: a sequence is
+		// connection state, not a row. Skipped rather than adapted, because
+		// adapting it would mean widening the wire to carry something no
+		// operation needs.
+		t.Skip("this test reads the pool directly; run it without AIMEE_DB2_STORE=bus")
+	}
+	pool := direct.pool
 
 	// Sequences do not roll back. A transaction that inserts a row with a
 	// defaulted identity consumes a value, and rolling the row away leaves the

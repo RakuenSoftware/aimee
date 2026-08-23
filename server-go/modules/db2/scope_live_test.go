@@ -42,7 +42,14 @@ INSERT INTO memory_scopes (memory_id, scope_type, scope_value) VALUES
 func TestLiveScopeActuallyFiltersOtherWorkspaces(t *testing.T) {
 	store, closeStore := liveStore(t)
 	defer closeStore()
-	pool := store.(*PoolStore).pool
+	direct, ok := store.(*PoolStore)
+	if !ok {
+		// Seeds fixtures through the pool directly, which the storage wire
+		// does not expose. Widening the wire so a test can reach past it would
+		// be widening it for something no operation needs.
+		t.Skip("this test uses the pool directly; run it without AIMEE_DB2_STORE=bus")
+	}
+	pool := direct.pool
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -120,7 +127,14 @@ func TestLiveScopeActuallyFiltersOtherWorkspaces(t *testing.T) {
 func TestLiveScopeSurvivesEveryScopedOperation(t *testing.T) {
 	store, closeStore := liveStore(t)
 	defer closeStore()
-	pool := store.(*PoolStore).pool
+	direct, ok := store.(*PoolStore)
+	if !ok {
+		// Seeds fixtures through the pool directly, which the storage wire
+		// does not expose. Widening the wire so a test can reach past it would
+		// be widening it for something no operation needs.
+		t.Skip("this test uses the pool directly; run it without AIMEE_DB2_STORE=bus")
+	}
+	pool := direct.pool
 
 	for _, testCase := range scopedOperations() {
 		t.Run(testCase.name, func(t *testing.T) {
