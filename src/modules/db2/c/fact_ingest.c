@@ -193,7 +193,34 @@ int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *
       else if (db2_fact_actor_from_request(0, &actor) != 0 &&
                db2_fact_actor_internal(FACT_ACTOR_USER, &actor) != 0)
          return 0;
-      (void)db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
+      /* A REFUSED RETRACTION IS NOT A SUCCESSFUL ONE, and this used to discard
+       * the difference. db2_fact_mutation_invalidate() distinguishes its
+       * outcomes -- -2 when the target is an episode/experience that may only
+       * be annotated, -1 when it is a policy needing operator authority or the
+       * write failed -- and every one of them was thrown away with a (void)
+       * cast. The turn then completed normally with the fact still standing, so
+       * "I forgot it" and "I refused to forget it" looked identical from
+       * outside and left nothing in the log.
+       *
+       * That cost real time: a retraction silently not landing under real
+       * Postgres, while succeeding under the sqlite shim, presented only as a
+       * unit-test count assertion three layers away with no indication that the
+       * mutation had been declined at all.
+       *
+       * Refusals are legitimate outcomes here, not errors -- an annotate-only
+       * target SHOULD survive -- so this logs rather than fails the turn. What
+       * it must not do is stay silent. */
+      int inv = db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
+      if (inv == -2)
+         LOG_WARN("memory",
+                  "retraction declined for '%s': target is an episode/experience "
+                  "(annotate-only); the fact still stands",
+                  attr);
+      else if (inv < 0)
+         LOG_WARN("memory",
+                  "retraction of '%s' did not land (rank=%d): refused as policy "
+                  "without operator authority, or the write failed",
+                  attr, (int)actor.rank);
    }
 
    /* §7 read: the user's facts + facts about any entity named in the turn,

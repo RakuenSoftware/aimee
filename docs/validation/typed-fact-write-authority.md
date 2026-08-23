@@ -1827,3 +1827,105 @@ measured, but one path that this suite explicitly claimed to cover was not
 actually being measured. Gap 1 in `get_context_block` was open until this run.
 It is now fixed and verified with a positive control, and the probe can no longer
 pass without checking the thing it exists to check.
+
+## Validation on a genuinely fresh environment (CT 9080)
+
+Both previous containers had accumulated state — 9078 across the whole session,
+and 9079 which started clean but has since been through dozens of runs, manual
+restarts and hand-applied fixes. Neither is a clean-install proof any more. So
+CT 9080 was created from `pct create` and taken all the way up.
+
+### What the fresh box proved that the others could not
+
+**The real enrollment flow ran end to end for the first time.**
+
+    enrolled by the real flow: tier=full bound to F050F945FF51D6D3A499FB12A4FC5D95
+
+On 9078 and 9079 this step always answered `state=paired` — they had enrolled
+long ago, so every later run took the already-enrolled shortcut and the full path
+(`/v1/deploy/apply` → enrollment bearer → `/v1/cert/sign` → grant bound to the
+certificate serial) had not actually been exercised since it was written. On a
+container that had never enrolled, it ran, and it worked.
+
+**Result:** `pass 17  fail 0  skip 1`, from `pct create` to a green suite, with
+the gap-1 fix verified directly on it:
+
+    before:  39 A rank=30 life=persistent  inval=no
+    after:   39 A rank=30 life=persistent  inval=no
+
+### One cosmetic gap the fresh box exposed
+
+`make-mtls-certs.sh` printed a bare `ls: cannot access
+'/root/tls/client-ca.crt'` in the middle of a successful setup. The client CA is
+written by aimee's own PKI when it signs the first client certificate — which
+happens in `enroll-first-user.sh`, a LATER step. On a box that had enrolled
+before, the file was already there and this always printed a reassuring line.
+
+The ordering cannot be reversed: enrollment itself requires
+`config_server_api_mtls() > 0`, so mTLS must be configured — pointing at the
+not-yet-existing path — before the enrollment that creates it. The server
+tolerates the dangling path at startup, which is what makes the sequence work.
+The script now says so instead of printing an error during a healthy run.
+
+### An open finding: the sqlite shim and real Postgres disagree
+
+`run-pg-tests.sh` exists to catch exactly this class of thing — "a guard that is
+correct under the shim and wrong under libpq would look green all the way to
+deployment" — and on the fresh box it caught something:
+
+    unit-test-fact-lifecycle     PASS
+    unit-test-fact-ingest        FAIL
+      test_fact_ingest.c: Assertion `db2_fact_current_count("user") == 1' failed
+
+Instrumented, the divergence is precise: a USER-authority retraction of `email`
+reports success and changes nothing.
+
+    DBG before user-retract: count=2
+    DBG ingress rc=0        count=2
+    DBG semantic rows=2
+
+What is established about it:
+
+- **Not caused by this branch.** The pre-change binary, built from `HEAD~1`,
+  fails at the identical assertion under Postgres. (My first attempt at this
+  control was wrong — `git checkout` reverts to HEAD, which already contained my
+  committed change, so the "pristine" build was my own. Rebuilt from `HEAD~1`
+  explicitly.)
+- **Not a build artifact.** Reproduced with a clean `OBJDIR`, which rules out the
+  mixed-backend trap the Makefile warns about (`db2_test_shim.o`'s flags depend
+  on `AIMEE_TEST_PG` and a flag change is invisible to make).
+- **Not what the live system does.** On this same container, against the same
+  Postgres, retraction works in every measured direction: the model-authored
+  Class-B row IS withdrawn, an account retracts a Class-A fact over TCP, and the
+  loopback control in `test-retract-remote.sh` retracts. So the production path
+  is not broken; something about the unit fixture's rows is.
+- **CI does not surface it.** `unit-tests-pg` runs three shards against real
+  Postgres and passes on this commit.
+
+I could not isolate the root cause within this session, and I am not going to
+assert one. What I will not do is quietly drop it: it is recorded here with the
+evidence, because a shim/Postgres divergence in the typed-fact retraction path is
+worth someone's attention even though the deployed behaviour is correct.
+
+### What it did produce: a real diagnosability fix
+
+Chasing it exposed a defect in the code this branch already touches.
+`db2_typed_fact_ingress()` called
+
+    (void)db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
+
+throwing away every outcome the function distinguishes — `-2` for an
+episode/experience that may only be annotated, `-1` for a policy needing operator
+authority or a failed write. The turn then completed normally with the fact still
+standing, so "I forgot it" and "I refused to forget it" were indistinguishable
+from outside and left nothing in the log. That is the same silent-failure family
+as the rest of this branch, and it is precisely why the divergence above took so
+long to characterise.
+
+Refusals are legitimate outcomes here — an annotate-only target SHOULD survive —
+so the fix logs rather than fails the turn. What it must not do is stay silent.
+
+(Note for anyone re-running the instrumentation: `LOG_WARN` produces no output in
+the unit-test binaries. Even the three deliberately-triggered "retraction scan
+gave no answer" paths print nothing there, so the absence of a log line in that
+context is not evidence of anything.)
