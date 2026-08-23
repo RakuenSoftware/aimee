@@ -1597,6 +1597,73 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "callers_find",
+			stage: db2contract.StageCallersFind,
+			// The unfiltered branch, which binds two parameters where the
+			// filtered one binds three -- a statement built by concatenation is
+			// exactly where that goes wrong.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCallersFindRequest("", "live_probe_callee")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCallersFindReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "callers_find_scoped",
+			stage: db2contract.StageCallersFindScoped,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCallersFindScopedRequest(
+					liveProbeScopeProject, "live_probe_callee")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCallersFindScopedReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "callers_find_excluding_project",
+			stage: db2contract.StageCallersFindExcludingProject,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCallersFindExcludingProjectRequest(
+					liveProbeScopeProject, "live_probe_callee")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCallersFindExcludingProjectReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "file_definitions",
+			stage: db2contract.StageFileDefinitions,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeFileDefinitionsRequest(
+					liveProbeScopeProject, "src/live-probe.c")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeFileDefinitionsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "term_find",
+			stage: db2contract.StageTermFind,
+			// A grouping over five columns with a CASE leading the ordering.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTermFindRequest("live_probe_symbol")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeTermFindReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
