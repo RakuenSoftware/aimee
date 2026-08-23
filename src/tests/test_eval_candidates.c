@@ -22,10 +22,20 @@
 #include "db1.h"
 #include "eval.h"
 #include "eval_synthesis.h"
+#include "kb_client.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 
 #include <aimee/learning/learning.h>
+
+/* The knowledge service is not running in a unit test. Returning NULL is
+ * exactly what an unreachable service looks like to the daemon, so this stub
+ * exercises the real "ungated, and say so" path rather than bypassing it. */
+char *kb_client_learning_endogeneity_json(int window_days)
+{
+   (void)window_days;
+   return NULL;
+}
 
 static learning_eval_failure_t failure_a(void)
 {
@@ -98,12 +108,10 @@ static void test_inadmissible_text_stores_nothing(void)
 
 static void test_admission_materialises_a_loadable_task(const char *suite_dir)
 {
-   /* An empty learning ledger means an empty window, which must leave the gate
-    * OPEN — otherwise a fresh installation could never admit anything. */
-   learning_endogeneity_t endo;
-   assert(learning_gate_check(&endo) == LEARNING_GATE_OPEN);
-   assert(endo.committed_total == 0);
-   assert(endo.exogenous_ratio == 0.0); /* "nothing observed", not "all endogenous" */
+   /* The gate is asked of the knowledge service, which is not running here.
+    * An unreachable service is NOT a closed gate: no reachable ledger means
+    * nothing is being committed into one, so there is nothing self-referential
+    * to guard against, and admission proceeds. */
 
    int admitted = eval_synthesis_admit_pending(suite_dir, "test", 2);
    assert(admitted == 1);

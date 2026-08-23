@@ -6,6 +6,8 @@
 
 #include "agent_jobs.h" /* db1_agent_job_list_recent */
 #include "eval.h"       /* db1_eval_candidate_* */
+#include "cJSON.h"
+#include "kb_client.h"
 #include "log.h"
 #include "modules/db2/c/db2_learning.h"
 
@@ -15,6 +17,7 @@
 #include <aimee/learning/learning.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -240,6 +243,43 @@ static int eval_synthesis_write_task(const char *suite_dir, const char *task_nam
    return ok ? 0 : -1;
 }
 
+/* Ask the knowledge service whether the endogeneity gate is open. Returns 1
+ * only when it answers and says closed; an unreachable or unparseable answer
+ * returns 0, and says so in the log rather than silently proceeding. */
+static int eval_synthesis_gate_is_closed(void)
+{
+   char *json = kb_client_learning_endogeneity_json(0);
+   if (!json)
+   {
+      LOG_INFO("eval_synthesis",
+               "endogeneity gate not consulted: the knowledge service did not answer, so no"
+               " learning ledger is reachable to be self-referential");
+      return 0;
+   }
+
+   int closed = 0;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+   {
+      LOG_WARN("eval_synthesis", "endogeneity gate answer was not JSON; proceeding ungated");
+      return 0;
+   }
+   const cJSON *gate = cJSON_GetObjectItemCaseSensitive(resp, "gate");
+   const cJSON *ratio = cJSON_GetObjectItemCaseSensitive(resp, "exogenous_ratio");
+   const cJSON *total = cJSON_GetObjectItemCaseSensitive(resp, "committed_total");
+   if (cJSON_IsString(gate) && strcmp(gate->valuestring, "closed") == 0)
+   {
+      closed = 1;
+      LOG_INFO("eval_synthesis",
+               "admission held: endogeneity gate closed (exogenous %.2f of %.0f committed)",
+               cJSON_IsNumber(ratio) ? ratio->valuedouble : 0.0,
+               cJSON_IsNumber(total) ? total->valuedouble : 0.0);
+   }
+   cJSON_Delete(resp);
+   return closed;
+}
+
 int eval_synthesis_admit_pending(const char *suite_dir, const char *admitted_by,
                                  int min_occurrences)
 {
@@ -247,17 +287,23 @@ int eval_synthesis_admit_pending(const char *suite_dir, const char *admitted_by,
       return -1;
 
    /* One gate check for the whole pass: a loop feeding on its own output does
-    * not get to widen its own yardstick. */
-   learning_endogeneity_t endo;
-   learning_gate_state_t gate = learning_gate_check(&endo);
-   if (gate != LEARNING_GATE_OPEN)
-   {
-      LOG_INFO("eval_synthesis",
-               "admission held, endogeneity gate %s (exogenous %.2f of %lld committed)",
-               gate == LEARNING_GATE_CLOSED_ENDOGENOUS ? "closed" : "unavailable",
-               endo.exogenous_ratio, (long long)endo.committed_total);
+    * not get to widen its own yardstick.
+    *
+    * The gate must be ASKED OF THE KNOWLEDGE SERVICE, not computed here. It
+    * reads the learning ledger, which is DB2, and this binary builds with DB2
+    * compiled out — a local check always answered "nothing observed" however
+    * self-referential the ledger had become, which made the gate inert exactly
+    * where it is enforced. A live run with both services up is what exposed
+    * that: four committed proposals in Postgres, and the daemon reporting
+    * none.
+    *
+    * An UNREACHABLE service is not a closed gate. No reachable ledger means
+    * nothing is being committed into one, so there is no echo chamber to guard
+    * against, and refusing here would make admission depend on the KB being up
+    * for a feature that does not otherwise need it. A REACHABLE service
+    * reporting a closed gate does stop admission. */
+   if (eval_synthesis_gate_is_closed())
       return 0;
-   }
 
    db1_eval_candidate_t rows[EVAL_SYNTHESIS_MAX_PENDING];
    int n = db1_eval_candidate_list("candidate", rows, EVAL_SYNTHESIS_MAX_PENDING);

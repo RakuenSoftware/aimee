@@ -866,6 +866,38 @@ static int kb_handle_learning_list(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to list learning proposals");
 }
 
+/* The endogeneity gate (recursive-self-improvement S0).
+ *
+ * It has to be answered HERE. The gate reads the learning ledger, which is
+ * DB2, and the daemon builds with DB2 compiled out — so a daemon computing it
+ * locally always answered "nothing observed" no matter how self-referential
+ * the ledger had become. A live run with both services up is what showed that:
+ * four committed proposals in Postgres, and the daemon reporting none. */
+static int kb_handle_learning_endogeneity(int fd, cJSON *req)
+{
+   cJSON *window_j = cJSON_GetObjectItemCaseSensitive(req, "window_days");
+   int window = cJSON_IsNumber(window_j) ? (int)window_j->valuedouble : 0;
+
+   learning_endogeneity_t endo;
+   learning_gate_state_t gate = learning_gate_check_with(
+       window > 0 ? window : LEARNING_METRICS_DEFAULT_WINDOW_DAYS,
+       LEARNING_ENDOGENEITY_MIN_EXOGENOUS_RATIO, LEARNING_ENDOGENEITY_MIN_SAMPLE, &endo);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return kb_send_error(fd, "out of memory");
+   cJSON_AddStringToObject(resp, "gate",
+                           gate == LEARNING_GATE_OPEN                ? "open"
+                           : gate == LEARNING_GATE_CLOSED_ENDOGENOUS ? "closed"
+                                                                     : "unavailable");
+   cJSON_AddNumberToObject(resp, "exogenous_ratio", endo.exogenous_ratio);
+   cJSON_AddNumberToObject(resp, "committed_total", (double)endo.committed_total);
+   cJSON_AddNumberToObject(resp, "committed_exogenous", (double)endo.committed_exogenous);
+   cJSON_AddNumberToObject(resp, "committed_endogenous", (double)endo.committed_endogenous);
+   cJSON_AddNumberToObject(resp, "window_days", endo.window_days);
+   return kb_reply_or_error(fd, resp, "failed to compute endogeneity");
+}
+
 static int kb_handle_learning_mutate(int fd, cJSON *req, const char *verb)
 {
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
@@ -1108,6 +1140,7 @@ static const struct
     {"roadmap.rebuild", kb_handle_roadmap_rebuild},
     {"roadmap.report", kb_handle_roadmap_report},
     {"learning.list_proposals", kb_handle_learning_list},
+    {"learning.endogeneity", kb_handle_learning_endogeneity},
 };
 
 static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)

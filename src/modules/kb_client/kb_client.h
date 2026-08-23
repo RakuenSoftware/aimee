@@ -1033,6 +1033,12 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
  * {"status":"error","message":"..."}. */
 char *kb_client_learning_list_proposals_json(const char *state, const char *sink, int limit);
 
+/* The endogeneity gate, answered by the knowledge service because the ledger it
+ * reads is DB2 and the daemon builds without it. Returns the response JSON (the
+ * caller frees), or NULL when the service is unreachable — which is NOT the same
+ * as a closed gate, and callers must not conflate them. */
+char *kb_client_learning_endogeneity_json(int window_days);
+
 /* Fetch a single learning proposal via the aimee-kb sidecar.  Sends
  * `learning.get_proposal` with {id} and returns the heap-allocated JSON
  * response (caller frees).  {"status":"ok","proposal":{...}} on success. */
