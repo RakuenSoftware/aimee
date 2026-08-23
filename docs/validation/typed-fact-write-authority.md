@@ -2040,3 +2040,109 @@ On a stock deployment with nothing configured:
       -> {"ok":true,"enabled":true,"auto_promote":true,"promote_threshold":4}
 
 lint 64/64; full unit suite green.
+
+## Closing round: the tooling had the same defect as the product
+
+Asked whether the work was complete, the honest answer was no, and checking
+rather than asserting turned up four more things. Three are fixed; one is
+genuinely outside this repository.
+
+### The claim I had to correct
+
+I reported that `config.typed_facts_enabled` "defaulted to off". That is wrong
+for the shipped product: the C struct zero-initialises to 0, but that only
+applies to a process that never receives a config snapshot — the unit-test
+binaries. The external config module ships `"typed_facts_enabled": 1`, and the
+live evidence agrees, since retraction demonstrably worked on every container
+before the retirement. The accurate claim is smaller: the layer was on by
+default, and the gate was a switch that could silently disable it. The
+correction is recorded in place above rather than edited away.
+
+### `run-pg-tests.sh` was producing results about nothing
+
+Two separate faults, both of which manufacture confident wrong answers:
+
+**No config environment.** `make unit-tests` exports
+`AIMEE_CONFIG_TEST_DEFAULTS` and `AIMEE_CONFIG_TEST_MODULE`; this runner exported
+only the template URL, so every config accessor fell back to the zero-initialised
+struct. That is what produced the false failure I misdiagnosed as a shim/Postgres
+divergence — I ran one binary inside the harness and the other outside it. Fixed,
+and when the module or defaults are absent the runner now says so rather than
+running anyway.
+
+**A broken template did not stop the run.** The builder's output went through
+`tail -3` with its exit status ignored. On a container where `db2_test_reset.sql`
+had not been staged, the builder printed "cannot read ..." and then seven tests
+failed against an unmigrated schema — reading exactly like product failures — and
+one *passed*, which is worse. The run now refuses to start without the reset SQL
+and stops on a failed build.
+
+**Coverage.** It ran two tests and called that "the typed-fact tests".
+`unit-test-typed-facts` was not run at all, nor recall, entity, ontology or
+rel-types-store — precisely the ones whose assertions rest on DB2's SQL. All
+eight now run on all three containers, and an unstaged binary is reported
+MISSING rather than skipped.
+
+### Two more silent drops, found by sweeping the shape
+
+The retraction fix was "a result that distinguishes outcomes, thrown away". The
+same shape appears twice more on this path, and both matter more now the layer
+actually does work:
+
+- `db2_kb_service_memory_facts_json()` discarded `db2_fact_recall_in_query()`'s
+  return, so a DB failure produced `facts=""` inside a `"status":"ok"` response —
+  indistinguishable from "no facts", on the path `ingress_preinject` calls every
+  turn. `db2_typed_fact_ingress()` already logged this exact condition, with the
+  reasoning written down; the sibling call site was left silent.
+- On `memory.store`, a failed actor capture skipped the extraction enqueue and a
+  failed enqueue was discarded. The memory is stored, the caller is told "ok",
+  and its facts are never mined. Survivable while the drain was gated off and did
+  nothing; now the enqueue is the whole extraction path.
+
+Every other `(void)db2_*` in the kb, db2 and curator sources was reviewed. The
+rest sit outside the typed-fact layer with materially different contracts and
+were left alone rather than swept up on resemblance.
+
+### The tooling had it too
+
+`deploy-all.sh` pushed with a bare `pct push` and never checked. A push that does
+not happen leaves the container running the previous copy, and every later result
+is about that copy.
+
+This is not hypothetical: a probe was corrected, appeared to deploy, and the old
+version kept running and kept failing. Three runs were spent on code that was not
+the code being executed. The file had never reached the host — the `scp` carrying
+it had its output redirected to `/dev/null`, so a failed transfer looked exactly
+like a successful one. The Proxmox host also cleans `/tmp`, which is where
+everything was being staged.
+
+`p()` now refuses a missing source, checks the push's exit status, compares
+md5sums afterwards, and the script exits non-zero if anything did not land. The
+same silent-failure shape this branch has spent its length removing from the
+product was sitting in the tooling used to validate it.
+
+### Out of reach, stated rather than implied
+
+The `typed_facts_enabled` key is owned by the external pure-Go
+`aimee-module-config`, pinned in `server-go/go.mod` with no `replace` directive
+and no sibling checkout — a read-only module-cache entry. Nothing in this
+repository reads it, and the symbol is deleted so reintroduction fails to
+compile, but retiring the key at source is a change in that module.
+`docs/gen/configuration.md` is generated from its metadata and still describes it
+as "master gate; default off" — a description that disagrees with the module's
+own `defaults.json` and was wrong before any of this.
+
+### Final verification
+
+All three containers — 9078, 9079, and CT 9080 built from `pct create` — on the
+same hash-verified build:
+
+    suite                          17 pass / 0 fail / 1 skip   (each)
+    typed-fact tests, Postgres     8 / 8                       (each)
+    gap 1 in get_context_block     Class-A fact survives       (each)
+    non-loopback retraction        PASS + loopback control     (each)
+    explore.sh / explore-cli.sh    flagged 0                   (each)
+    aimee status                   server ok, kb ok            (each)
+
+    lint 64/64; full unit suite green
+    CI 31/31 on 104fc2d0fd, both runs completed success
