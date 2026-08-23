@@ -1779,6 +1779,52 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:   "memory_conflict_list",
+			stage:  db2contract.StageMemoryConflictList,
+			encode: db2contract.EncodeMemoryConflictListRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryConflictListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_event_frames_list",
+			stage: db2contract.StageMemoryEventFramesList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryEventFramesListRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryEventFramesListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_provenance_list",
+			stage: db2contract.StageMemoryProvenanceList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryProvenanceListRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryProvenanceListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_lookup_by_key",
+			stage: db2contract.StageMemoryLookupByKey,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryLookupByKeyRequest("live-probe-missing-key")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, err := db2contract.DecodeMemoryLookupByKeyReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -3468,6 +3514,45 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("the settings were not stored")
+				}
+			},
+		},
+		{
+			name:  "memory_lineage_insert",
+			stage: db2contract.StageMemoryLineageInsert,
+			// The identifier comes back from the insert, so this is the probe
+			// that says RETURNING actually returns.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryLineageInsertRequest(
+					"memory", 900012, "ingest", "docs/live-probe.md", 0.8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				lineageID, err := db2contract.DecodeMemoryLineageInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if lineageID == 0 {
+					t.Fatal("no lineage record was written")
+				}
+			},
+		},
+		{
+			name:  "memory_relation_insert",
+			stage: db2contract.StageMemoryRelationInsert,
+			// memory_id is a foreign key, so the memory has to exist.
+			seed: []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryRelationInsertRequest(
+					liveProbeAliasMemoryID, "aimee", "depends_on", "postgres",
+					"aimee stores memories in postgres")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryRelationInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the relation was not recorded")
 				}
 			},
 		},
