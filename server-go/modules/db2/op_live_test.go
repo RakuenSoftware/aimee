@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2202,6 +2203,60 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "code_search",
+			stage: db2contract.StageCodeSearch,
+			// ts_headline and ts_rank over a generated tsvector column, with the
+			// query parsed by plainto_tsquery. None of that exists outside a
+			// real PostgreSQL.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCodeSearchRequest(
+					"live probe symbol", liveProbeScopeProject, 1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCodeSearchReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "code_search_excluding_project",
+			stage: db2contract.StageCodeSearchExcludingProject,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCodeSearchExcludingProjectRequest(
+					"live probe symbol", liveProbeScopeProject, 0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err :=
+					db2contract.DecodeCodeSearchExcludingProjectReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_walk_step_typed",
+			stage: db2contract.StageEntityWalkStepTyped,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityWalkStepTypedRequest("live-probe-entity")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityWalkStepTypedReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_low_effectiveness",
+			stage: db2contract.StageMemoryLowEffectiveness,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryLowEffectivenessRequest(0.3, 32)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryLowEffectivenessReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -4254,6 +4309,30 @@ func liveWrites() []liveRequest {
 				}
 				if proposalID == 0 {
 					t.Fatal("no proposal was written")
+				}
+			},
+		},
+		{
+			name:  "entity_edge_upsert",
+			stage: db2contract.StageEntityEdgeUpsert,
+			// Twice: the first call inserts and the second takes whichever
+			// repeat path the database supports. Which path that is depends on
+			// whether the unique index exists, and the probe caches its answer
+			// per process -- the unit tests drive that cache with a fake, so it
+			// is reset here to make this probe ask the real database.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				entityEdgeIndexOnce = sync.Once{}
+				return db2contract.EncodeEntityEdgeUpsertRequest(
+					"live-probe-source", "depends_on", "live-probe-target", 0, 12, 99, 99)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, _, err := db2contract.DecodeEntityEdgeUpsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the edge was not recorded")
 				}
 			},
 		},
