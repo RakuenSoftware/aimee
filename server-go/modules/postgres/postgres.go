@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -183,6 +184,17 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 
 // Close releases the process-local connection pool during graceful module
 // shutdown. Configuration rotation is applied by restarting this process.
+//
+// Open transactions are rolled back FIRST. pgxpool.Close waits for leased
+// connections to be returned, an open transaction holds one, and the
+// transaction table is only reaped from a call -- so once calls stop arriving,
+// closing would wait for a release that can no longer happen. A module told to
+// stop while a caller holds a transaction would never stop.
 func Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if ended := closeAllTables(ctx); ended > 0 {
+		log.Printf("postgres: rolled back %d open transaction(s) during shutdown", ended)
+	}
 	productionProbe.close()
 }

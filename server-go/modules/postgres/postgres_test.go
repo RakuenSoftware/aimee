@@ -88,3 +88,18 @@ func TestHealthMapsProbeFailureAndCancellation(t *testing.T) {
 		t.Fatalf("cancelled = (%x, %v)", response, status)
 	}
 }
+
+func TestTheExportedHandleReachesTheHandler(t *testing.T) {
+	// A thin wrapper is the thing that can point at the wrong place with every
+	// test underneath it green, because the tests drive the handler directly.
+	// This asserts the wiring rather than the logic: main.go registers Handle,
+	// and a Handle that reached nothing would refuse nothing.
+	body, status := Handle(bus.ModuleInvocation{StageID: StageHealth}, nil)
+	if status == bus.ModuleStatusOK {
+		t.Fatal("a malformed health request was accepted; Handle is not reaching " +
+			"the handler that refuses it")
+	}
+	if body != nil {
+		t.Errorf("a refusal carried a body of %d bytes", len(body))
+	}
+}

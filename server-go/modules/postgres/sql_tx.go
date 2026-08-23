@@ -87,8 +87,35 @@ type transactionTable struct {
 	open map[uint64]*openTransaction
 }
 
+// Every table ever built, so shutdown can reach all of them.
+//
+// Production builds one handler and this is a slice of length one. Tests build
+// many, and a single hook pointing at the newest cannot reclaim what an older
+// one holds -- which is exactly how the deadlock this exists to fix survived my
+// first attempt at fixing it.
+var (
+	tablesMu sync.Mutex
+	tables   []*transactionTable
+)
+
 func newTransactionTable() *transactionTable {
-	return &transactionTable{open: map[uint64]*openTransaction{}}
+	table := &transactionTable{open: map[uint64]*openTransaction{}}
+	tablesMu.Lock()
+	tables = append(tables, table)
+	tablesMu.Unlock()
+	return table
+}
+
+// closeAllTables ends every open transaction in every table.
+func closeAllTables(ctx context.Context) int {
+	tablesMu.Lock()
+	snapshot := append([]*transactionTable(nil), tables...)
+	tablesMu.Unlock()
+	ended := 0
+	for _, table := range snapshot {
+		ended += table.closeAll(ctx)
+	}
+	return ended
 }
 
 // newHandle mints an unguessable identifier.
@@ -152,6 +179,32 @@ func (t *transactionTable) remove(handle uint64) *openTransaction {
 	entry := t.open[handle]
 	delete(t.open, handle)
 	return entry
+}
+
+// closeAll ends every open transaction, for shutdown.
+//
+// pgxpool.Close waits for leased connections to come back, and an open
+// transaction holds one. reapIdle only runs from Handle, so once calls stop
+// arriving nothing releases anything: a module told to stop while a caller
+// holds a transaction never stops.
+//
+// Rolling back is the honest end. The work is lost either way because the
+// process is going away, and the choice is between losing it in a rollback the
+// database records and losing it in a kill.
+func (t *transactionTable) closeAll(ctx context.Context) int {
+	t.mu.Lock()
+	open := make([]*openTransaction, 0, len(t.open))
+	for handle, entry := range t.open {
+		open = append(open, entry)
+		delete(t.open, handle)
+	}
+	t.mu.Unlock()
+
+	for _, entry := range open {
+		_ = entry.tx.Rollback(ctx)
+		entry.conn.Release()
+	}
+	return len(open)
 }
 
 // reapIdle rolls back and releases every transaction that has gone quiet.

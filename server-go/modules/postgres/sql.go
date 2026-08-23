@@ -37,6 +37,10 @@ type SQLHandler struct {
 }
 
 // NewSQLHandler builds the stage over an already-open pool.
+//
+// The table registers itself for shutdown, so Close can roll back what this
+// stage still holds. Without that, closing the pool waits for connections an
+// open transaction will never return.
 func NewSQLHandler() *SQLHandler {
 	return &SQLHandler{store: &poolSchemaStore{}, transactions: newTransactionTable()}
 }

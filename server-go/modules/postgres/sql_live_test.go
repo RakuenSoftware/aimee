@@ -424,3 +424,175 @@ func TestLiveAColumnTheWireCannotCarryIsRefusedNotRendered(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveCurrentVersionAnswersWhatMigrateRecorded(t *testing.T) {
+	// Found by measuring coverage rather than by reading: the handler, the reply
+	// encoder, the store read and the client method were all at zero. One of the
+	// seven operations this module serves, untouched at every layer.
+	//
+	// It is the operation a caller uses to decide whether to migrate, so a wrong
+	// answer is a migration applied twice or never applied at all.
+	h, invocation := liveHandler(t)
+	owner := "livetest_currentversion"
+	if err := h.store.Exec(context.Background(),
+		`DELETE FROM aimee_schema_version WHERE owner = $1`, owner); err != nil {
+		t.Logf("clear: %v", err)
+	}
+
+	currentVersionRequest := func(owner string) []byte {
+		out := binary.LittleEndian.AppendUint32(nil, OpCurrentVersion)
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(owner)))
+		return append(out, owner...)
+	}
+	decode := func(t *testing.T, payload []byte) (uint64, string) {
+		t.Helper()
+		r := &reader{buf: payload}
+		version, err := r.u64()
+		if err != nil {
+			t.Fatalf("version: %v", err)
+		}
+		checksum, err := r.str(MaxStatementIDBytes)
+		if err != nil {
+			t.Fatalf("checksum: %v", err)
+		}
+		return version, checksum
+	}
+
+	// An owner with no history answers zero rather than failing. "Nothing has
+	// been applied" is an answer, and a caller deciding whether to migrate needs
+	// it to be one.
+	code, state, message, payload := call(t, h, invocation, currentVersionRequest(owner))
+	if code != StatusOK {
+		t.Fatalf("unmigrated owner: status=%d sqlstate=%s %s", code, state, message)
+	}
+	if version, checksum := decode(t, payload); version != 0 || checksum != "" {
+		t.Fatalf("an owner with no history answered version %d checksum %q",
+			version, checksum)
+	}
+
+	// Version 1, because an owner at 0 cannot jump to 3 -- the gap check refuses
+	// it, which is how I learned this test was wrong rather than the engine.
+	migration := Migration{Owner: owner, Version: 1,
+		Statements: []string{`CREATE TABLE IF NOT EXISTS live_currentversion (id BIGINT)`}}
+	out := binary.LittleEndian.AppendUint32(nil, OpMigrate)
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(migration.Owner)))
+	out = append(out, migration.Owner...)
+	out = binary.LittleEndian.AppendUint64(out, uint64(migration.Version))
+	checksum := migration.Checksum()
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(checksum)))
+	out = append(out, checksum...)
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(migration.Statements)))
+	for _, statement := range migration.Statements {
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(statement)))
+		out = append(out, statement...)
+	}
+	if code, state, message, _ := call(t, h, invocation, out); code != StatusOK {
+		t.Fatalf("migrate: status=%d sqlstate=%s %s", code, state, message)
+	}
+
+	// And now it answers what MIGRATE recorded -- both halves. The checksum is
+	// the half that matters most: a version alone cannot tell a caller whether
+	// the statements it holds are the ones that ran.
+	code, state, message, payload = call(t, h, invocation, currentVersionRequest(owner))
+	if code != StatusOK {
+		t.Fatalf("migrated owner: status=%d sqlstate=%s %s", code, state, message)
+	}
+	version, recorded := decode(t, payload)
+	if version != 1 {
+		t.Errorf("version = %d, want 1", version)
+	}
+	if recorded != checksum {
+		t.Errorf("checksum = %q, want %q -- a caller cannot tell whether the "+
+			"statements it holds are the ones that ran", recorded, checksum)
+	}
+
+	// A different owner is still untouched, which is what namespacing means.
+	code, _, _, payload = call(t, h, invocation,
+		currentVersionRequest("livetest_currentversion_other"))
+	if code != StatusOK {
+		t.Fatalf("another owner: status=%d", code)
+	}
+	if version, _ := decode(t, payload); version != 0 {
+		t.Errorf("a different owner answered version %d; owners are separate "+
+			"histories, not one counter", version)
+	}
+}
+
+func TestLiveTheProbePoolReopensAfterClose(t *testing.T) {
+	// getPool says a failed open is deliberately not latched: "a DSN corrected
+	// after start, or a database that was not up yet, recovers on the next call
+	// rather than requiring a restart". Close is what makes that path reachable
+	// on demand, and nothing had ever taken it -- Close, close and the reopen
+	// were all at zero.
+	//
+	// The property matters at startup: the KB and its database come up
+	// together, and a module that latched its first failure would need a
+	// restart to notice the database arriving.
+	h, invocation := liveHandler(t)
+	if cells := queryCells(t, h, invocation, `SELECT 1`); len(cells) != 1 {
+		t.Fatalf("cells before close = %d", len(cells))
+	}
+
+	Close()
+
+	// The next call opens a new pool rather than answering from a closed one.
+	cells := queryCells(t, h, invocation, `SELECT 2`)
+	if len(cells) != 1 || cells[0].Type != ValueInt || cells[0].Int != 2 {
+		t.Fatalf("after close the pool did not reopen: %+v", cells)
+	}
+
+	// And closing twice is safe, because shutdown is not always orderly.
+	Close()
+	Close()
+	if cells := queryCells(t, h, invocation, `SELECT 3`); len(cells) != 1 {
+		t.Fatalf("cells after a double close = %d", len(cells))
+	}
+}
+
+func TestLiveCloseDoesNotBlockOnAnOpenTransaction(t *testing.T) {
+	// pgxpool.Close waits for leased connections to be returned, and an open
+	// transaction holds one. The transaction table is only reaped from a call,
+	// so once calls stop arriving nothing releases anything: a module told to
+	// stop while a caller holds a transaction never stops, and the supervisor
+	// has to kill it.
+	//
+	// Found by a test written for coverage rather than for this. The pool-reopen
+	// probe passed alone and hung for ten minutes inside the suite, because an
+	// earlier live test had left a transaction open. Alone it passes; in company
+	// it deadlocks, which is a fair description of the production case too.
+	//
+	// Timed rather than left to hang, so a regression costs ten seconds instead
+	// of a test timeout -- and so the failure names the cause rather than
+	// arriving as a stack dump.
+	h, invocation := liveHandler(t)
+	open := binary.LittleEndian.AppendUint32(nil, OpBegin)
+	open = binary.LittleEndian.AppendUint32(open, uint32(len("live_test")))
+	open = append(open, "live_test"...)
+	open = binary.LittleEndian.AppendUint64(open, 0)
+	open = binary.LittleEndian.AppendUint32(open, 0)
+	open = binary.LittleEndian.AppendUint32(open, 0)
+	code, state, message, payload := call(t, h, invocation, open)
+	if code != StatusOK {
+		t.Fatalf("begin: status=%d sqlstate=%s %s", code, state, message)
+	}
+	if binary.LittleEndian.Uint64(payload) == 0 {
+		t.Fatal("no transaction was opened; this test would pass vacuously")
+	}
+
+	finished := make(chan struct{})
+	go func() {
+		Close()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close blocked with a transaction open: shutdown is waiting for a " +
+			"connection the open transaction will never return")
+	}
+
+	// And the pool reopens afterwards, so a Close mid-life is survivable.
+	if cells := queryCells(t, h, invocation, `SELECT 1`); len(cells) != 1 {
+		t.Fatalf("cells after close = %d", len(cells))
+	}
+}
