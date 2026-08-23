@@ -41,6 +41,17 @@ func TestValidationRecordMatchesTheProbe(t *testing.T) {
 	names := regexp.MustCompile(`check\("([^"]*)"`).FindAllStringSubmatch(string(source), -1)
 	// Names built with fmt.Sprintf carry a kind number, so they are counted but
 	// not matched: the number is a property of the run, not of the source.
+	//
+	// Both counts read RAW SOURCE, comments included, while the name matching
+	// below reads only table rows. The asymmetry is deliberate, and the DIRECTION
+	// is what decides it: a `check(` written inside a comment would INFLATE the
+	// probe's count and mismatch the record, so it fails loudly. Stripping
+	// comments here would be guarding the safe direction.
+	//
+	// What remains is the tempting repair. Adding a row to silence that mismatch
+	// would put a result in the record for a check that never ran, which is the
+	// over-claiming direction. The failure is loud and its obvious fix is wrong,
+	// and that is worth knowing before meeting it at speed.
 	formatted := strings.Count(string(source), "check(fmt.Sprintf(")
 	rows := strings.Count(string(record), "| pass |")
 
