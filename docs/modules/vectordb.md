@@ -107,6 +107,40 @@ This is a consequence of the ceiling above. An embedded array makes the struct's
 size the dimension ceiling, so a 32k-capable contract would mean 128 KB structs
 passed and copied by value.
 
+## What v1 cannot ask for
+
+The search request carries three filters. Of the fourteen vector searches DB2
+holds, six fit and eight do not, in four kinds:
+
+| gap | affects |
+|---|---|
+| no exact-label filter on search (apply has one) | four curator searches |
+| no collection on search (apply names one) | claim and code-unit search, which choose between vector columns on one row |
+| no negation | the two `exclude_project` kb searches |
+| no set membership | the two `kinds` memory searches |
+
+`vector-portability.json` records this as `portable-after-db3-v2` rather than
+leaving the count optimistic.
+
+**A missing filter is refused at the build, not dropped.** This is the one rule
+worth stating twice. A request built without a filter it was given is
+well-formed: a provider answers it, scores it, ranks it, and the result cannot
+be told apart from a correct one. It simply has more rows in it.
+
+Everything else here is loud about skew, because framing is exact-length and a
+provider handed a message it does not understand refuses to decode it. That
+protection lives on the reading side; this failure happens on the writing side,
+where there is no wire to be strict about. So
+`aimee_db3_search_request_build()` takes the full filter set a caller has and
+refuses if any of it has nowhere to go, and
+`aimee_db3_search_filters_expressible()` answers the same question for a caller
+deciding whether to route externally at all.
+
+Closing the first two gaps is a v2: labels on search, and the collection apply
+already names. Negation and set membership are a filter language, which is more
+than this contract should answer at v1 -- once there is NOT and IN, the next
+question is OR and the one after is precedence.
+
 ## What a provider must do
 
 1. **Announce capabilities.** Dimensions, distance metrics and label filtering
