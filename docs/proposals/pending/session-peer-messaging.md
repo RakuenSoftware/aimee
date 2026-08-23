@@ -362,7 +362,7 @@ and that is how this went unnoticed through a container validation.
 | D8 bus stages | **done** — 12033/12034/12035/12036 | advertised and routed; session stages answer `no_directory` |
 | D8 `/v1` routes | **done** and MOUNTED BY NOTHING — no caller constructs `Registry.Handler`, so no client can reach a route | no |
 | D8 MCP / ACP mirroring | not started (P4) | no |
-| Directory read from `db1` | **blocked, and not on the absorption** — see below | no — and this is what gates every "no" above |
+| Directory read from `db1` | **written and tested, deliberately not wired** — `DB1Directory`; see below | no — one line away, once db1 runs the Go store |
 | Durable inboxes | **not started** — needs the `postgres` generic storage wire | no |
 
 60 tests green under `-race`. Verified by mutation, not only by passing:
@@ -397,17 +397,35 @@ written down correctly. The false premise was in this design's own
 `DirectorySource` comment, which asserted the distinction from the shape of the
 family without checking the operation.
 
-**So the directory is deliberately still unwired**, and that is a choice rather
-than an omission. Wiring it against the current contract means picking one of two
-wrong answers: map `failed` to "absent" and a store outage reports every session
-as departed, which under the undeliverable rule is the direction that destroys
-mail; or map it to "unavailable" and every genuinely unknown session becomes a
-retry that never terminates. Today's `no_directory` is a true statement, and
-replacing a true statement with a plausible one is not progress.
+**Correction, from the module's owner.** The handler was never the problem. The
+GO store has answered three outcomes since the port -- `StatusMissing` for no
+row, `StatusFailed` for a broken store -- and the CATALOG was what said
+`["ok", "invalid", "failed"]`. So reading the contract and believing it was the
+right move and still produced the wrong conclusion, because the contract
+disagreed with its own implementation and nothing compared the two. The owner
+has since corrected the declaration to all four statuses and added a check that
+every handler's returned statuses match what it declares, which found 69
+undeclared statuses across 399 operations.
 
-The fix is small and belongs to `db1`: have `server_session_get` separate
-no-row from error, and add `"missing"` to its catalog `results` beside the three
-siblings that already have it. Reported to the module's owner.
+The C store, however, is what this branch's tree still runs: `db1` declares
+`runtime: "c"` in `process-contracts.json`, `server-go/db1/families/` does not
+exist here, and the C `db1_server_session_get` does collapse no-row into `-1`.
+Both readings were correct about their own tree, which resolves the earlier
+question: the blocker IS the missing distinction, and the absorption IS what
+lifts it, because the absorption is what makes the Go store the one answering.
+
+**So `DB1Directory` is written, fully tested, and deliberately not wired.** It
+maps all four db1 statuses plus the transport outcome, addresses the stage by
+the bus formula rather than a transcribed kind, and is asserted against db1's
+own declaration in `process-contracts.json`. Against the Go store it is exact.
+Against the C store it would degrade safely -- absence reads as unavailable, so
+nothing concludes a session is gone and no mail is destroyed -- but every unknown
+session would become a retry that never terminates, and the module would report
+directory trouble about a session that simply does not exist. `no_directory` is
+true today, and replacing a true statement with a plausible one is not progress.
+
+Wiring is one line in `cmd/aimee-module` once `db1` runs the Go store, followed
+by re-running the deployment validation against it.
 
 **Known gaps, stated rather than implied.** The largest one was not stated at
 all until it was found by asking what CALLS this in production, rather than

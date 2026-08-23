@@ -422,6 +422,18 @@ func DecodeResponse(body []byte) (Status, []string, error) {
 	return Status(head), cells, err
 }
 
+// DecodeReply decodes a fields-v2 reply WITHOUT typing its status word.
+//
+// For replies from another module, whose status enum is its own. db1's status 1
+// is MISSING and 4 is FAILED; this package's 1 is no_peer and 4 is hop_limit.
+// The integers collide and the meanings do not, so handing a db1 reply to
+// DecodeResponse would produce a peerwire.Status that reads as a sensible value
+// and means something else entirely -- a wrong answer with no wrong-looking
+// step in it.
+//
+// Returning the raw u32 forces the caller to name which enum it is reading.
+func DecodeReply(body []byte) (uint32, []string, error) { return decodeCells(body) }
+
 // ---- scalars as text -----------------------------------------------------
 
 // Itoa renders an integer as the decimal text the wire carries.

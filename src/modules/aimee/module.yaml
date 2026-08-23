@@ -15,6 +15,7 @@
   "go_sources": [
     "server-go/modules/aimee/module.go",
     "server-go/modules/aimee/peer_capability.go",
+    "server-go/modules/aimee/db1directory.go",
     "server-go/modules/aimee/peerwire/wire.go",
     "server-go/modules/aimee/peer/peer.go",
     "server-go/modules/aimee/peer/channel.go",
@@ -23,6 +24,7 @@
   ],
   "go_tests": [
     "server-go/modules/aimee/module_test.go",
+    "server-go/modules/aimee/db1directory_test.go",
     "server-go/modules/aimee/peerwire/wire_test.go",
     "server-go/modules/aimee/peer/peer_test.go",
     "server-go/modules/aimee/peer/channel_test.go",
