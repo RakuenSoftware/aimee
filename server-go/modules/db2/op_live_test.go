@@ -2284,6 +2284,79 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:   "rules_list",
+			stage:  db2contract.StageRulesList,
+			encode: db2contract.EncodeRulesListRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRulesListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "rules_list_hard",
+			stage:  db2contract.StageRulesListHard,
+			encode: db2contract.EncodeRulesListHardRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRulesListHardReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "rules_list_by_tier",
+			stage: db2contract.StageRulesListByTier,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRulesListByTierRequest(75)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRulesListByTierReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "rules_find_by_title",
+			stage: db2contract.StageRulesFindByTitle,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRulesFindByTitleRequest("live probe rule")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeRulesFindByTitleReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "task_get",
+			stage: db2contract.StageTaskGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTaskGetRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, err := db2contract.DecodeTaskGetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a task that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "task_subtasks",
+			stage: db2contract.StageTaskSubtasks,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTaskSubtasksRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeTaskSubtasksReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
