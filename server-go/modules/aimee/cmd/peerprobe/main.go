@@ -84,10 +84,6 @@ func main() {
 		return peerwire.DecodeResponse(reply)
 	}
 
-	// The module has no directory source, so sessions must register through the
-	// bus before they can be addressed. Registration is not a stage; the
-	// registry is process-local, so the probe drives what IS reachable: a send
-	// to an unregistered sender must be refused, not crash the module.
 	fmt.Println("stage reachability and domain refusals over the bus:")
 
 	var cells []string
@@ -95,15 +91,41 @@ func main() {
 		[]string{"probe-A", "probe-B", "hello over the bus", "", "0", "0"})
 	check(fmt.Sprintf("delivery stage (kind %d) reachable", peerwire.EventKind(aimee.PrincipalRef, peerwire.StageDelivery)), err == nil,
 		fmt.Sprintf("err=%v status=%v", err, status))
-	check("unknown sender refused as a SERVED call", err == nil && status == peerwire.StatusUnknownSender,
-		fmt.Sprintf("status=%v (want unknown_sender, and no transport error)", status))
+
+	// WHICH MODULE IS THIS. Established before anything is asserted about a
+	// refusal, because a refusal on its own does not say.
+	//
+	// An earlier version of this probe asserted unknown_sender here and called
+	// it a pass. It was: the module refuses an unregistered sender correctly.
+	// But a module with NO SESSION DIRECTORY refuses identically, and that is
+	// what shipped -- nothing registers a session there, so the check could not
+	// have failed and proved nothing about delivery ever working. Every
+	// session-scoped check below had the same blind spot.
+	//
+	// So the configuration is a finding in its own right, and the refusal
+	// assertions are made against it rather than against a hope.
+	wired := status != peerwire.StatusNoDirectory
+	if wired {
+		fmt.Println("  ....  module HAS a session directory; asserting real refusals")
+	} else {
+		fmt.Println("  ....  module has NO session directory; peer messaging is inert here")
+	}
+	check("module states whether it has a session directory", true,
+		fmt.Sprintf("wired=%v (send answered %v)", wired, status))
+
+	wantSender, wantSession := peerwire.StatusUnknownSender, peerwire.StatusNoPeer
+	if !wired {
+		wantSender, wantSession = peerwire.StatusNoDirectory, peerwire.StatusNoDirectory
+	}
+	check("unknown sender refused as a SERVED call", err == nil && status == wantSender,
+		fmt.Sprintf("status=%v (want %v, and no transport error)", status, wantSender))
 
 	status, cells, err = call(peerwire.StageInbox, peerwire.OpInboxLen, []string{"probe-B"})
 	check(fmt.Sprintf("inbox stage (kind %d) reachable", peerwire.EventKind(aimee.PrincipalRef, peerwire.StageInbox)), err == nil,
 		fmt.Sprintf("err=%v", err))
 	check("unknown session refused, not reported empty",
-		err == nil && status == peerwire.StatusNoPeer,
-		fmt.Sprintf("status=%v cells=%v (want no_peer)", status, cells))
+		err == nil && status == wantSession,
+		fmt.Sprintf("status=%v cells=%v (want %v)", status, cells, wantSession))
 
 	// Owners are unique per run. The module is a long-lived process that holds
 	// its grants in memory, so a probe reusing fixed owners passes once and then
@@ -136,8 +158,8 @@ func main() {
 	// A drain reply leads with how many remain, so a caller can tell a complete
 	// drain from a capped one without a second call.
 	status, cells, err = call(peerwire.StageInbox, peerwire.OpInboxTake, []string{"probe-A", "1"})
-	check("take on an unknown session is refused", err == nil && status == peerwire.StatusNoPeer,
-		fmt.Sprintf("status=%v (want no_peer)", status))
+	check("take on an unknown session is refused", err == nil && status == wantSession,
+		fmt.Sprintf("status=%v (want %v)", status, wantSession))
 
 	// Channel stage: reachable, and refusing a non-member rather than fanning
 	// out to sessions that never agreed to hear from the sender.
@@ -146,13 +168,24 @@ func main() {
 	check(fmt.Sprintf("channel stage (kind %d) reachable", peerwire.EventKind(aimee.PrincipalRef, peerwire.StageChannel)), err == nil,
 		fmt.Sprintf("err=%v", err))
 	check("channel send by an unknown sender is refused",
-		err == nil && status == peerwire.StatusUnknownSender,
-		fmt.Sprintf("status=%v (want unknown_sender)", status))
+		err == nil && status == wantSender,
+		fmt.Sprintf("status=%v (want %v)", status, wantSender))
 
+	// The sharpest case, and the one that most deserved to be caught here.
+	//
+	// An absent channel answering OK with no members is correct FOR A MODULE
+	// THAT HAS SESSIONS. Unwired, the same call answered ok/none too -- a
+	// successful empty answer from a module where no channel can ever have a
+	// member. That is not a refusal a reader would question; it is a healthy
+	// reply, and it is the one shape that looks like the feature working.
 	status, cells, err = call(peerwire.StageChannel, peerwire.OpChannelMembers, []string{"nosuch"})
+	wantMembers := peerwire.StatusOK
+	if !wired {
+		wantMembers = peerwire.StatusNoDirectory
+	}
 	check("members of an absent channel answers OK with none",
-		err == nil && status == peerwire.StatusOK && len(cells) == 0,
-		fmt.Sprintf("status=%v cells=%v", status, cells))
+		err == nil && status == wantMembers && len(cells) == 0,
+		fmt.Sprintf("status=%v cells=%v (want %v)", status, cells, wantMembers))
 
 	// A malformed frame is a TRANSPORT-level refusal, distinct from a domain one.
 	_, err = caller.Call(ctx, peerwire.EventKind(aimee.PrincipalRef, peerwire.StageDelivery), peerwire.StageDelivery, 0, callDeadline,

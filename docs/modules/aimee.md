@@ -270,6 +270,39 @@ No handler here blocks, specifically so that ceiling is never reached by waiting
 
 ## Compatibility
 
+## The module as deployed has no session directory
+
+`aimee-module` builds the capability with `NoDirectory{}`, and that is accurate
+rather than provisional. There is no `DirectorySource` yet -- it needs db1's
+session family, which arrives with the absorption -- and nothing else populates
+the registry: `Register` has no caller outside tests, and no bus op reaches it.
+No session can exist, so **peer messaging is inert in this configuration** and
+the session-scoped stages answer `no_directory`.
+
+The grant stage is still served, because grants are owner-to-owner and need no
+session directory. Refusing them would be a second wrong answer and would hide
+that the module is otherwise healthy.
+
+`no_directory` is deliberately not `unavailable`. Unavailable is the one status
+a caller should retry on -- a fact about this moment. This one is a fact about
+how the module was built, and a caller retrying against it never stops.
+
+The reason this is written down rather than left to the code is that it was
+invisible for a whole validation cycle. The construction site passed `nil`, and
+`nil` meant "answer existence from the registry's own map". Every session-scoped
+call then refused with `unknown_sender` or `no_peer`: answers about the CALLER'S
+session, from a module that could not know about any session. Fifteen checks in
+the container run passed against exactly that, and had to -- a correct refusal
+and a module that can never do anything produce the same word. The channel case
+was worse than a refusal: `members` answered OK with none, a healthy-looking
+reply that read as the feature working.
+
+So `nil` is now refused at construction. The two real configurations are named:
+`LocalDirectory{}` claims the registry's own map is the truth, which is what the
+tests and an in-process host use; `NoDirectory{}` states there is none. They
+answer the same call oppositely, which is why one of them has to be said out
+loud.
+
 Message rows are a fixed width and new cells **append**, so a reader built
 against an older width never has its field numbering shift underneath it.
 

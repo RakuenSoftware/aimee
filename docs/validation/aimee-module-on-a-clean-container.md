@@ -99,7 +99,7 @@ after the cause. 69 is validation-only and is not declared in
 `process-contracts.json`; its grant is written by hand into the container and
 never shipped.
 
-Fifteen checks, green on consecutive runs. The count and the rows are asserted
+Sixteen checks, green on consecutive runs. The count and the rows are asserted
 against the probe by `TestValidationRecordMatchesTheProbe`, because this table
 was hand-transcribed from probe output and dropped a row: the run made fifteen
 checks while the record claimed fourteen. An evidence table nothing checks
@@ -109,6 +109,7 @@ to fail.
 | Check | Result |
 |---|---|
 | delivery stage 12033 reachable | pass |
+| module states whether it has a session directory | pass |
 | unknown sender refused as a SERVED call | pass |
 | inbox stage 12034 reachable | pass |
 | unknown session refused, not reported as an empty inbox | pass |
@@ -178,10 +179,26 @@ longer the clean room the evidence claims it was.
 
 ## What this run did NOT exercise, stated so the record is not read as more than it is
 
-- **Peer messaging end to end between two sessions.** The module has no
-  `DirectorySource` wired, so sessions cannot register over the bus yet and the
-  probe drives refusal paths rather than a delivered message. The send/reply path
-  is covered only by the in-process suite.
+- **Peer messaging end to end between two sessions.** Stated too gently when
+  this was written. It is not that the run did not happen to exercise delivery;
+  the module as built COULD NOT DELIVER AT ALL, and this run could not tell.
+
+  There is no `DirectorySource`, and nothing else populates the registry either:
+  `Register` has no caller outside tests and no bus op reaches it. So no session
+  could exist, and every session-scoped check above was made against a module
+  where none ever would.
+
+  Those checks still passed, and had to. A module that correctly refuses an
+  unregistered sender and a module that can never have a sender produce the same
+  word -- `unknown_sender`. The channel row is the sharpest: "members of an
+  absent channel answers OK with none" is a SUCCESSFUL, healthy-looking reply,
+  and it read as the feature working.
+
+  The module now answers `no_directory` for session-scoped stages, which is a
+  fact about the module rather than about the caller's session, and the probe
+  establishes which configuration it is talking to before asserting any refusal.
+  The rows above were produced by the UNWIRED configuration; a wired one asserts
+  different statuses for the same checks.
 - **Retrieval quality on the kb.** The embedder is a stub returning hash-derived
   vectors with no semantic content. It proves the service starts and the wire
   works; any relevance measured against it is noise.

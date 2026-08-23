@@ -172,6 +172,17 @@ const (
 	// request. Reported as bad_request, a caller goes on correcting arguments
 	// that were never wrong; reported as capacity, it waits or stops creating.
 	StatusAtCapacity Status = 18
+	// StatusNoDirectory is this module having NO session directory wired, so it
+	// cannot answer any question about who exists. Distinct from
+	// StatusUnavailable, which is the one status a caller should retry on: this
+	// one is permanent until the module is rebuilt differently, and a caller
+	// retrying against it never stops.
+	//
+	// It exists because the deployed module was in exactly this state and said
+	// unknown_sender instead -- an answer about the CALLER'S session, from a
+	// module that had no way to know about any session at all. Every refusal
+	// check in the container run passed against it.
+	StatusNoDirectory Status = 19
 
 	// StatusCount is one past the highest status, and the pinning test asserts
 	// against it.
@@ -183,7 +194,7 @@ const (
 	// insert that duplicates a case; the pinned values catch a renumber into a
 	// gap; only this catches an addition that never joined the list. All three are
 	// needed, and each is invisible to the others.
-	StatusCount = 19
+	StatusCount = 20
 )
 
 // StatusFor maps a registry error onto its wire status.
@@ -221,6 +232,10 @@ func StatusFor(err error) Status {
 		return StatusNotMember
 	case errors.Is(err, peer.ErrChannelFull), errors.Is(err, peer.ErrChannelsFull):
 		return StatusChannelFull
+	// Ordered before ErrDirectoryUnavailable deliberately: "there is none" must
+	// not be answered by the arm that means "it did not reply this time".
+	case errors.Is(err, peer.ErrNoDirectory):
+		return StatusNoDirectory
 	case errors.Is(err, peer.ErrDirectoryUnavailable):
 		return StatusUnavailable
 	case errors.Is(err, peer.ErrRegistryFull), errors.Is(err, peer.ErrGrantsFull):
@@ -273,6 +288,8 @@ func (s Status) String() string {
 		return "unclassified"
 	case StatusAtCapacity:
 		return "at_capacity"
+	case StatusNoDirectory:
+		return "no_directory"
 	default:
 		// Deliberately NOT the name of a real status. Falling through to
 		// "bad_request" made an unrecognised value indistinguishable from one a

@@ -1,6 +1,8 @@
 package aimee
 
 import (
+	"errors"
+
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
@@ -33,6 +35,41 @@ type DirectorySource interface {
 	Owner(sessionID string) (string, error)
 }
 
+// NoDirectory is a DirectorySource for a module built without one. It answers
+// every existence question with peer.ErrNoDirectory.
+//
+// It exists so that "this module has no directory" is DECLARED at the
+// construction site rather than being the emergent behaviour of a nil. The
+// deployed module passed nil, and nil meant the registry answered existence
+// from its own map -- a map nothing in production ever writes to, because
+// Register has no caller outside tests and no bus op reaches it. So every
+// session-scoped call refused, and refused with unknown_sender or no_peer:
+// answers ABOUT A SESSION, from a module that could not know about any session.
+//
+// That is invisible to testing from the outside. Every refusal check in the
+// container run passed against a registry in this state, because a correct
+// refusal and a module that can never do anything produce the same word.
+type NoDirectory struct{}
+
+// Owner reports that there is no directory to ask.
+func (NoDirectory) Owner(string) (string, error) { return "", peer.ErrNoDirectory }
+
+// LocalDirectory declares that the registry's OWN map is the source of truth:
+// whoever built this registry registers every session in it, so a session it has
+// not seen is genuinely absent.
+//
+// This is what passing nil used to mean, and it is a real configuration -- it is
+// what the tests and an in-process host use. It is named because it is a CLAIM,
+// and one that is false for the module as shipped: nothing registers there, so
+// the same fallback that is authoritative in process is a guess in the module.
+// One of the two had to say which it was, and a nil could not.
+type LocalDirectory struct{}
+
+// Owner is never called: NewPeer recognises LocalDirectory and leaves the
+// registry's own fallback in place rather than binding over it. The method
+// exists to satisfy DirectorySource.
+func (LocalDirectory) Owner(string) (string, error) { return "", peer.ErrNoPeer }
+
 // PeerCapability serves session peer messaging: the verb by which one aimee
 // session addresses another as a peer rather than as a delegate or a client.
 //
@@ -44,21 +81,46 @@ type DirectorySource interface {
 // after the first one was removed.
 type PeerCapability struct {
 	registry *peer.Registry
+	// unwired records that this capability was built with NoDirectory, so the
+	// session-scoped stages can say so instead of answering about a session.
+	//
+	// This is not the second access path the comment above warns against: it is
+	// one bool about how the module was CONFIGURED, not a way to reach the
+	// directory. The registry remains the only route to the directory itself.
+	unwired bool
 }
 
-// NewPeer builds the peer-messaging capability. dir may be nil, in which case
-// the registry answers directory questions from its own map, which is a test
-// and bring-up fallback rather than a source of truth.
+// ErrNoDirectorySource is NewPeer being given no directory at all.
 //
-// When dir IS given it is bound into the registry, so existence has one answer
-// whichever surface asked. Leaving them separate is how a module ends up
-// authoritative for a caller arriving over the bus and guessing for the same
-// caller arriving over HTTP.
-func NewPeer(registry *peer.Registry, dir DirectorySource) *PeerCapability {
-	if dir != nil && registry != nil {
+// nil is refused rather than treated as "use the local map". A module with no
+// session source is a real configuration -- it is the one that shipped -- but it
+// has to be SAID, because the failure it produces is silent: every session-scoped
+// call refuses with a plausible answer about a session, and every test of those
+// refusals passes.
+var ErrNoDirectorySource = errors.New("aimee: peer capability needs a DirectorySource; pass NoDirectory{} to declare there is none")
+
+// NewPeer builds the peer-messaging capability.
+//
+// dir is bound into the registry so existence has one answer whichever surface
+// asked. Leaving them separate is how a module ends up authoritative for a
+// caller arriving over the bus and guessing for the same caller arriving over
+// HTTP.
+//
+// Pass NoDirectory{} to declare that there is no directory. That is not the
+// same as passing nil, which is refused: one states a configuration, the other
+// forgets one, and they used to be the same call.
+func NewPeer(registry *peer.Registry, dir DirectorySource) (*PeerCapability, error) {
+	if dir == nil {
+		return nil, ErrNoDirectorySource
+	}
+	_, local := dir.(LocalDirectory)
+	// LocalDirectory is a claim ABOUT the registry's own fallback, so binding
+	// over that fallback would replace the thing it is describing.
+	if registry != nil && !local {
 		registry.SetSessionOwner(dir.Owner)
 	}
-	return &PeerCapability{registry: registry}
+	_, unwired := dir.(NoDirectory)
+	return &PeerCapability{registry: registry, unwired: unwired}, nil
 }
 
 // Stages are the peer stages. Event kinds are derived from the bus formula
@@ -83,6 +145,23 @@ func (c *PeerCapability) Handle(invocation bus.ModuleInvocation, request []byte)
 	op, cells, err := peerwire.DecodeRequest(request)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
+	}
+
+	// A module with no directory cannot answer anything about a session, so it
+	// says that once here rather than letting each path reach a refusal that
+	// names the caller's session as the problem.
+	//
+	// The grant stage is deliberately still served: grants are owner-to-owner
+	// and need no session directory, so they work in this configuration and
+	// refusing them would be a second wrong answer. This is the same split the
+	// module draws everywhere else -- report the thing that is actually true,
+	// not the nearest available word.
+	if c.unwired && invocation.StageID != peerwire.StageGrant {
+		body, err := refuse(peerwire.StatusNoDirectory)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return body, bus.ModuleStatusOK
 	}
 
 	var body []byte

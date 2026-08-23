@@ -135,7 +135,7 @@ var (
 // this file and channel.go. The wire's mapping test asserts against it, so an
 // error added without a status mapping fails rather than falling to a default
 // and being reported as something it is not.
-const SentinelErrorCount = 21
+const SentinelErrorCount = 22
 
 var (
 	ErrShutdown     = errors.New("peer: registry shut down while waiting")
@@ -147,6 +147,15 @@ var (
 	// apart because collapsing them turns a transient fault into a terminal
 	// refusal, and would let a sweep destroy mail on a momentary outage.
 	ErrDirectoryUnavailable = errors.New("peer: directory did not answer")
+	// ErrNoDirectory is there being NO directory to ask, which is not the
+	// directory failing to answer. Unavailable is a fact about this moment and
+	// the caller's right response is to retry; this is a fact about how the
+	// module was built, and retrying will never help.
+	//
+	// Collapsing the two is the same mistake as collapsing absent with
+	// unanswerable, one level up: it hides a module that can NEVER serve behind
+	// a status that promises it might.
+	ErrNoDirectory = errors.New("peer: no session directory is configured")
 )
 
 // Message is one peer message and its envelope. Everything before Text is
@@ -447,6 +456,12 @@ func (r *Registry) Owner(sessionID string) (string, error) {
 			// that no longer exists, which is undeliverable rather than
 			// addressable.
 			return "", ErrNoPeer
+		}
+		if errors.Is(err, ErrNoDirectory) {
+			// There is no directory at all. Reporting that as "did not answer"
+			// would send the caller into a retry loop against something that
+			// cannot ever succeed.
+			return "", err
 		}
 		// The directory could not answer. Saying "gone" here would be a guess
 		// with the shape of a fact, and the caller's correct response to "gone"

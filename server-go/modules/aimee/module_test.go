@@ -28,9 +28,22 @@ func newRegistry(t *testing.T, ids ...string) *peer.Registry {
 	return r
 }
 
+// mustPeer builds the capability over a registry whose own map IS the truth,
+// which is what these tests set up: every session they exercise is registered
+// here. That is LocalDirectory, and it is deliberately not what the shipped
+// module passes -- see NoDirectory.
+func mustPeer(t *testing.T, r *peer.Registry) *PeerCapability {
+	t.Helper()
+	c, err := NewPeer(r, LocalDirectory{})
+	if err != nil {
+		t.Fatalf("NewPeer: %v", err)
+	}
+	return c
+}
+
 func moduleOver(t *testing.T, r *peer.Registry) *Module {
 	t.Helper()
-	m, err := New(NewPeer(r, nil))
+	m, err := New(mustPeer(t, r))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -388,7 +401,7 @@ func TestStageConflictRefusedAtConstruction(t *testing.T) {
 	clash := fakeCapability{stages: []bus.ModuleStage{
 		{EventKind: peerwire.EventKind(PrincipalRef, peerwire.StageInbox), StageID: peerwire.StageInbox},
 	}}
-	_, err := New(NewPeer(newRegistry(t), nil), clash)
+	_, err := New(mustPeer(t, newRegistry(t)), clash)
 	if !errors.Is(err, ErrStageConflict) {
 		t.Fatalf("duplicate stage: err = %v; want ErrStageConflict", err)
 	}
@@ -413,14 +426,14 @@ func TestModuleHostsMultipleCapabilities(t *testing.T) {
 	second := fakeCapability{stages: []bus.ModuleStage{
 		{EventKind: peerwire.EventKind(PrincipalRef, 9), StageID: 9},
 	}}
-	m, err := New(NewPeer(newRegistry(t, "A", "B"), nil), second)
+	m, err := New(mustPeer(t, newRegistry(t, "A", "B")), second)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	// Derived, not transcribed: how many stages peer messaging serves is its own
 	// business and grows when it gains one. A literal here fails every time that
 	// happens, which says nothing about whether hosting works.
-	wantStages := len(NewPeer(newRegistry(t), nil).Stages()) + 1
+	wantStages := len(mustPeer(t, newRegistry(t)).Stages()) + 1
 	if got := len(m.Stages()); got != wantStages {
 		t.Fatalf("stages = %d; want %d (peer's own, plus one other)", got, wantStages)
 	}
@@ -435,7 +448,71 @@ func TestModuleHostsMultipleCapabilities(t *testing.T) {
 	}
 	// A nil capability is ignored rather than panicking, so a caller can pass
 	// one conditionally without branching.
-	if _, err := New(NewPeer(newRegistry(t), nil), nil); err != nil {
+	if _, err := New(mustPeer(t, newRegistry(t)), nil); err != nil {
 		t.Errorf("nil capability: %v", err)
+	}
+}
+
+// The configuration that SHIPPED, pinned because nothing else caught it.
+//
+// The module was built with a nil DirectorySource, and nil meant "answer
+// existence from the registry's own map". Nothing writes to that map in
+// production: Register has no caller outside tests, and no bus op reaches it.
+// So no session could exist, every session-scoped call refused, and the refusals
+// named the CALLER'S session as the problem -- unknown_sender, no_peer -- from a
+// module that had no way to know about any session at all.
+//
+// Every refusal check in the container validation passed against this. They had
+// to: a correct refusal and a module that can never do anything produce the same
+// word. That is why this guard asserts what the module SAYS, rather than being
+// one more refusal check.
+func TestUnwiredModuleSaysSoRatherThanBlamingTheSession(t *testing.T) {
+	capability, err := NewPeer(peer.New(peer.Options{}), NoDirectory{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := New(capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		stage uint32
+		op    uint32
+		cells []string
+	}{
+		{"send", peerwire.StageDelivery, peerwire.OpSend, []string{"A", "B", "hi", "", "0", "0"}},
+		{"inbox length", peerwire.StageInbox, peerwire.OpInboxLen, []string{"B"}},
+		{"channel members", peerwire.StageChannel, peerwire.OpChannelMembers, []string{"c"}},
+	} {
+		status, _ := call(t, m, tc.stage, tc.op, tc.cells)
+		if status != peerwire.StatusNoDirectory {
+			t.Errorf("%s = %v; want no_directory. %v is an answer about a session, "+
+				"from a module that cannot know about any session.", tc.name, status, status)
+		}
+	}
+
+	// Grants need no session directory, so they still work. Refusing them would
+	// be a second wrong answer, and would hide that the module is otherwise
+	// healthy.
+	if status, _ := call(t, m, peerwire.StageGrant, peerwire.OpGrant,
+		[]string{"uid:1000", "uid:2000"}); status != peerwire.StatusOK {
+		t.Errorf("grant = %v; want ok: grants are owner-scoped and need no directory", status)
+	}
+	status, cells := call(t, m, peerwire.StageGrant, peerwire.OpGrantExists,
+		[]string{"uid:1000", "uid:2000"})
+	if status != peerwire.StatusOK || len(cells) != 1 || cells[0] != "1" {
+		t.Errorf("grant readback = %v %q; the grant table works without a directory", status, cells)
+	}
+}
+
+// nil is refused rather than quietly meaning one of the two real configurations.
+// Those are LocalDirectory (the registry's map is the truth) and NoDirectory
+// (there is none), and they answer the SAME call oppositely -- so a nil that
+// picks one silently is the bug this change is about.
+func TestNewPeerRefusesAnUndeclaredDirectory(t *testing.T) {
+	if _, err := NewPeer(peer.New(peer.Options{}), nil); !errors.Is(err, ErrNoDirectorySource) {
+		t.Fatalf("NewPeer(nil) = %v; want ErrNoDirectorySource", err)
 	}
 }

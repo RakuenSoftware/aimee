@@ -313,7 +313,31 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// The registry is process-local today: inboxes and grants live in
 		// memory and do not survive a bounce. Durable storage arrives through
 		// the postgres module's generic wire and changes nothing here.
-		module, err := aimee.New(aimee.NewPeer(peer.New(peer.Options{}), nil))
+		//
+		// NoDirectory{} is not a placeholder, it is the accurate description of
+		// this build. There is no DirectorySource yet -- it needs db1's session
+		// family, which lands with the absorption -- and nothing else populates
+		// the registry either: Register has no caller outside tests, and no bus
+		// op reaches it. So no session can exist here, and PEER MESSAGING IS
+		// INERT IN THIS CONFIGURATION.
+		//
+		// Said explicitly because the previous nil said it silently. Every
+		// session-scoped call refused with unknown_sender or no_peer, which are
+		// answers ABOUT A SESSION from a module that could not know about any
+		// session, and every refusal check in the container validation passed
+		// against exactly this state. A correct refusal and a module that can
+		// never do anything produce the same word.
+		peerCapability, err := aimee.NewPeer(peer.New(peer.Options{}), aimee.NoDirectory{})
+		if err != nil {
+			log.Printf("aimee module unavailable: %v", err)
+			return bus.ModuleProcessConfig{}, false
+		}
+		// Logged at every start, not once at build time: an operator reading
+		// why a peer send refuses should find the reason in the log of the
+		// process that refused it.
+		log.Printf("aimee module: no session directory configured; " +
+			"peer stages will answer no_directory until one is wired (grants still served)")
+		module, err := aimee.New(peerCapability)
 		if err != nil {
 			// A stage conflict is a programming error in the capability list,
 			// not a runtime condition: refusing to advertise is better than
