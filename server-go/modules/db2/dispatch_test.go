@@ -17,10 +17,14 @@ type fakeStore struct {
 	rows     *fakeRows
 	row      *fakeRow
 	rowQueue []*fakeRow
-	queryErr error
-	execErr  error
-	lastSQL  string
-	lastArgs []any
+	// A queue of result sets, for an operation that issues several row-returning
+	// statements in one call -- memory_lint runs three checks and concatenates
+	// them, and a single scripted set could not tell them apart.
+	rowsQueue []*fakeRows
+	queryErr  error
+	execErr   error
+	lastSQL   string
+	lastArgs  []any
 	// Every statement in order. An operation that issues more than one -- a
 	// write and the read-back of what it wrote -- needs the first inspected,
 	// and lastSQL by then holds the last.
@@ -41,6 +45,11 @@ func (s *fakeStore) Query(ctx context.Context, sql string, args ...any) (pgx.Row
 	s.argsLog = append(s.argsLog, args)
 	if s.queryErr != nil {
 		return nil, s.queryErr
+	}
+	if len(s.rowsQueue) > 0 {
+		next := s.rowsQueue[0]
+		s.rowsQueue = s.rowsQueue[1:]
+		return next, nil
 	}
 	return s.rows, nil
 }

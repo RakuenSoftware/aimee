@@ -1732,6 +1732,53 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:   "memory_lint",
+			stage:  db2contract.StageMemoryLint,
+			encode: db2contract.EncodeMemoryLintRequest,
+			// Three statements in one operation, two of them with subqueries
+			// over memory_links and one with a correlated NOT EXISTS. Nothing
+			// but a real planner says whether all three run.
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryLintReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "witness_checkpoint_anchor_coverage",
+			stage: db2contract.StageWitnessCheckpointAnchorCoverage,
+			// encode() over the first element of an array_agg of a bytea, and a
+			// bytea parameter on the other side of the comparison. Both are
+			// places where pgx and libpq differ about types.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeWitnessCheckpointAnchorCoverageRequest(
+					"00112233445566778899aabbccddeeff")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				read, _, _, err :=
+					db2contract.DecodeWitnessCheckpointAnchorCoverageReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if read != 1 {
+					t.Fatal("coverage could not be read against a real schema")
+				}
+			},
+		},
+		{
+			name:  "enrollment_authority_resolve",
+			stage: db2contract.StageEnrollmentAuthorityResolve,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEnrollmentAuthorityResolveRequest(
+					"live-probe-fingerprint", "CN=live-probe", "01ab")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, err := db2contract.DecodeEnrollmentAuthorityResolveReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -3400,6 +3447,27 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("the alias was not written")
+				}
+			},
+		},
+		{
+			name:  "console_oidc_put",
+			stage: db2contract.StageConsoleOidcPut,
+			// Twice, for the conflict branch: the row is a singleton, so the
+			// second call is the only one that exercises the replacement.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeConsoleOidcPutRequest(
+					"https://live-probe", "aimee-console",
+					"https://live-probe/jwks", "groups", "admins")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeConsoleOidcPutReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the settings were not stored")
 				}
 			},
 		},
