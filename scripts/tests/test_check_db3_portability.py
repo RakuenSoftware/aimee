@@ -40,12 +40,9 @@ class PortabilityTests(unittest.TestCase):
         summary = checker.run(REPO_ROOT)
         self.assertEqual(sum(summary.values()), 74)
         self.assertEqual(summary, {
-            # Six searches DB3 v1 can carry, and eight that need a v2: an exact
-            # label filter on search, a collection naming which vector column to
-            # rank against, negation, or set membership. Split out rather than
-            # left at fourteen because this file is read as a work list.
-            "portable-search": 6,
-            "search-needs-db3-v2": 8,
+            # All fourteen, and none of them portable to DB3 v1: every one
+            # filters by a relational predicate the point does not carry.
+            "portable-search": 14,
             "committed-mutation": 32,
             "provider-control": 13,
             "db2-authority": 12,
@@ -63,14 +60,16 @@ class PortabilityTests(unittest.TestCase):
         # which is exactly what happened when portable-search was split.
         groups = {group["id"]: group["symbols"]
                   for group in self.audit()["classifications"]}
-        self.assertIn("pgvec_memory_vector_search_record_type", groups["portable-search"])
         self.assertIn("pgvec_schema_version", groups["db2-authority"])
-        # And the eight that cannot: each named for the filter that blocks it.
-        for symbol in ("pgvec_kb_search_scoped", "pgvec_kb_vector_search_scoped",
-                       "pgvec_memory_search", "pgvec_memory_vector_search_with_kinds",
-                       "pgvec_curator_claim_search", "pgvec_curator_code_unit_search",
-                       "pgvec_curator_entity_search", "pgvec_curator_narrative_search"):
-            self.assertIn(symbol, groups["search-needs-db3-v2"])
+        # The two families, named by a member of each. Currency: code and kb
+        # searches JOIN projects for lifecycle_state and current_generation.
+        # Scope membership: memory searches decide visibility from rows in
+        # memory_scopes and memory_workspaces. Neither is an attribute of a
+        # point, which is what DB3 v1 filters on.
+        for symbol in ("pgvec_code_search", "pgvec_kb_search",
+                       "pgvec_memory_vector_search_record_type",
+                       "pgvec_memory_vector_search_with_kinds"):
+            self.assertIn(symbol, groups["portable-search"])
 
     def test_root_identity_and_closed_classifications(self) -> None:
         cases = (

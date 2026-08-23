@@ -6,31 +6,23 @@
   "classifications": [
     {
       "id": "portable-search",
-      "disposition": "portable-now",
-      "db3_operation_family": "candidate-search",
-      "rationale": "The logical operation accepts a bounded vector and filters DB3 v1 can carry -- workspace, project, record_type -- and returns only opaque candidate IDs and scores; DB2 must rehydrate and authorize every hit.",
-      "symbols": [
-        "pgvec_code_search",
-        "pgvec_kb_search",
-        "pgvec_kb_service_search_memory_points",
-        "pgvec_kb_vector_search_project",
-        "pgvec_kbpdf_search",
-        "pgvec_memory_vector_search_record_type"
-      ]
-    },
-    {
-      "id": "search-needs-db3-v2",
       "disposition": "portable-after-db3-v2",
       "db3_operation_family": "candidate-search",
-      "rationale": "The same shape as portable-search, refused by the wire rather than by the operation: DB3 v1 carries workspace, project and record_type and nothing else. These need an exact-label filter on search (four curator searches), a collection naming which vector column to rank against (claim, code_unit), negation (exclude_project), or set membership (kinds). A request built without the filter is well-formed, so every provider answers it happily and wrongly; the route must refuse to build one.",
+      "rationale": "None is portable to DB3 v1: the blocker is the search model, not a missing field. Every one filters by a relational predicate the point does not carry -- currency (JOIN projects, lifecycle_state='current', generation = current_generation) for code and kb, scope membership (memory_scopes and memory_workspaces rows, including their ABSENCE meaning shared) for memory. Dropping currency returns superseded generations; dropping scope returns too few. Authorization only removes candidates, so it repairs neither.",
       "symbols": [
+        "pgvec_code_search",
         "pgvec_curator_claim_search",
         "pgvec_curator_code_unit_search",
         "pgvec_curator_entity_search",
         "pgvec_curator_narrative_search",
+        "pgvec_kb_search",
         "pgvec_kb_search_scoped",
+        "pgvec_kb_service_search_memory_points",
+        "pgvec_kb_vector_search_project",
         "pgvec_kb_vector_search_scoped",
+        "pgvec_kbpdf_search",
         "pgvec_memory_search",
+        "pgvec_memory_vector_search_record_type",
         "pgvec_memory_vector_search_with_kinds"
       ]
     },

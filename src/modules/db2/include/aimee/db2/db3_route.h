@@ -147,6 +147,31 @@ typedef struct
    const char *const *label_keys;
    const char *const *label_values;
    size_t label_count;
+
+   /* Predicates the internal query applies that are not attributes of a point.
+    *
+    * These are the dangerous ones, because an adapter does not think of them as
+    * filters: it never passes them, the SQL applies them. A filter you never
+    * named cannot be one you notice dropping, so they are named here and
+    * refused with the rest.
+    *
+    * scope_membership: visibility decided by rows in memory_scopes and
+    * memory_workspaces -- active project, active workspace, global, '_shared',
+    * and the ABSENCE of any scope row meaning legacy-untagged and therefore
+    * shared. A join, and in the last case the absence of a row, neither of
+    * which is a value a label can hold.
+    *
+    * current_generation_only: visibility decided by the point's project being
+    * lifecycle_state = 'current' with the point's generation matching
+    * p.current_generation. A property of the project at query time that changes
+    * for every existing point when the project is re-ingested.
+    *
+    * Dropping the first returns too FEW rows and the short answer looks
+    * complete; dropping the second returns too many, from superseded
+    * generations, ranked among the current ones. Authorisation can only remove
+    * candidates, so it repairs neither. */
+   int scope_membership;
+   int current_generation_only;
 } aimee_db3_search_filters_t;
 
 /* Build a search request, or refuse.

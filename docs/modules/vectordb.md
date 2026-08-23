@@ -109,18 +109,40 @@ passed and copied by value.
 
 ## What v1 cannot ask for
 
-The search request carries three filters. Of the fourteen vector searches DB2
-holds, six fit and eight do not, in four kinds:
+None of the fourteen vector searches DB2 holds can cross this contract today,
+and the blocker is the search model rather than a shortage of fields.
 
-| gap | affects |
-|---|---|
-| no exact-label filter on search (apply has one) | four curator searches |
-| no collection on search (apply names one) | claim and code-unit search, which choose between vector columns on one row |
-| no negation | the two `exclude_project` kb searches |
-| no set membership | the two `kinds` memory searches |
+**The model is: filter by attributes carried on the point.** Every DB2 vector
+search instead filters by a relational predicate, in two families:
 
-`vector-portability.json` records this as `portable-after-db3-v2` rather than
-leaving the count optimistic.
+| family | the predicate | who |
+|---|---|---|
+| currency | `JOIN projects`, `lifecycle_state = 'current'`, `generation = p.current_generation` | code, kb, kb-pdf, kb-scoped |
+| scope membership | rows in `memory_scopes` and `memory_workspaces`: active project, active workspace, `global`, `_shared`, and the *absence* of any scope row meaning legacy-untagged and therefore shared | every memory search |
+
+A join is not an attribute, and the absence of a row is not a value.
+
+Four searches additionally want filters the message has no field for at all: an
+exact-label filter on search (apply carries labels; search carries none), a
+collection naming which vector column on a row to rank against (apply names one;
+search does not), negation (`exclude_project`), and set membership (`kinds`).
+
+**The two families fail in opposite directions and neither is recoverable.**
+Drop currency and the provider returns points from superseded generations,
+scored and ranked among the current ones. Approximate scope membership with
+workspace and project equality and the provider never returns the global,
+`_shared` and legacy-untagged rows at all. Authorisation only removes
+candidates, so it repairs neither: too many and plausible, or too few and
+indistinguishable from complete.
+
+Closing this is a real design rather than a field. DB3's model allows only one
+answer -- denormalise the visibility decision into labels at apply time -- and
+that is not free: a generation bump rewrites the labels of every point in the
+project, and the legacy-untagged case has to be computed because it is the
+absence of rows rather than the presence of one. Worth deciding before a
+provider exists rather than discovering while wiring one.
+
+`vector-portability.json` records all fourteen as `portable-after-db3-v2`.
 
 **A missing filter is refused at the build, not dropped.** This is the one rule
 worth stating twice. A request built without a filter it was given is
@@ -136,10 +158,19 @@ refuses if any of it has nowhere to go, and
 `aimee_db3_search_filters_expressible()` answers the same question for a caller
 deciding whether to route externally at all.
 
-Closing the first two gaps is a v2: labels on search, and the collection apply
-already names. Negation and set membership are a filter language, which is more
-than this contract should answer at v1 -- once there is NOT and IN, the next
-question is OR and the one after is precedence.
+That guard covers filters a caller PASSES, which is not enough on its own. The
+two relational predicates above are applied by the SQL and passed by nobody, so
+an adapter would build a request from workspace, project and record_type --
+every one expressible -- and drop scope membership without ever holding it. They
+are therefore named in the filter struct and refused like the rest: declaring
+what the query actually does is what gets the request refused. A filter you never
+named cannot be one you notice dropping.
+
+Labels on search and the collection apply already names are a v2. Negation and
+set membership are a filter language, which is more than this contract should
+answer at v1 -- once there is NOT and IN, the next question is OR and the one
+after is precedence. The two relational families are the larger question above,
+and they gate every search rather than four of them.
 
 ## What a provider must do
 

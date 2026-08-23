@@ -177,6 +177,11 @@ int aimee_db3_search_filters_expressible(const aimee_db3_search_filters_t *filte
       return 0;
    if (filters->label_count > 0 || filters->label_keys || filters->label_values)
       return 0;
+   /* The two the caller does not pass and the SQL applies. Refused for the same
+    * reason as the rest and with more urgency: these are the ones an adapter
+    * omits without noticing it omitted anything. */
+   if (filters->scope_membership || filters->current_generation_only)
+      return 0;
    return 1;
 }
 

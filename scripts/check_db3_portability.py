@@ -31,13 +31,13 @@ STANDARD_HEADERS = {
     "stdbool.h", "stddef.h", "stdint.h", "stdio.h", "stdlib.h", "string.h", "time.h",
 }
 CLASSIFICATIONS = (
-    ("portable-search", "portable-now", "candidate-search"),
-    # Portable in shape, refused by the wire: DB3 v1's search request carries
-    # workspace, project and record_type, and these need a label filter, a
-    # collection, negation or set membership. Kept as its own disposition rather
-    # than folded into deferred, because the blocker is a named protocol change
-    # and not a decision nobody has made.
-    ("search-needs-db3-v2", "portable-after-db3-v2", "candidate-search"),
+    # No vector search is portable to DB3 v1. Measured against the signatures,
+    # six looked portable; measured against the SQL, all fourteen filter by a
+    # relational predicate the point does not carry -- currency for the code and
+    # kb searches, scope membership for the memory ones. The blocker is the
+    # search model, not a missing field, which is why they share one disposition
+    # rather than being split by which field they lack.
+    ("portable-search", "portable-after-db3-v2", "candidate-search"),
     ("committed-mutation", "portable-after-commit", "apply"),
     ("provider-control", "provider-local", "provider-control"),
     ("db2-authority", "retained-db2", "none"),

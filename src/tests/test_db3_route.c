@@ -438,6 +438,45 @@ static void test_a_filter_the_wire_cannot_carry_is_refused(void)
    assert(aimee_db3_search_request_build(&base, 91, 7, vec, 0, 3, &request) != 0);
 }
 
+static void test_a_predicate_the_sql_applies_is_refused_too(void)
+{
+   /* The filters the earlier test covers are ones a caller holds: it was handed
+    * an exclude_project, it was handed a kinds list. These two are not passed by
+    * anybody -- the query applies them -- which is exactly why an adapter would
+    * build a request without them and never notice anything was missing.
+    *
+    * Both are real. Every kb and code search JOINs projects and requires
+    * lifecycle_state = 'current' with the point's generation matching
+    * p.current_generation. Every memory search applies the scope filter, which
+    * decides visibility from rows in memory_scopes and memory_workspaces --
+    * including the case where the ABSENCE of rows means legacy-untagged and
+    * therefore shared, which is not a value any label can hold. */
+   float vec[3] = {0.25f, -0.5f, 0.75f};
+   aimee_db3_search_filters_t base = {
+       .workspace = "workspace-a", .project = "project-a", .record_type = "memory"};
+
+   /* Everything a memory search passes is expressible, which is the trap. */
+   aimee_db3_search_request_t request;
+   assert(aimee_db3_search_request_build(&base, 91, 7, vec, 3, 3, &request) == 0);
+
+   /* Declaring what the query actually does is what refuses it. */
+   aimee_db3_search_filters_t scoped = base;
+   scoped.scope_membership = 1;
+   assert(aimee_db3_search_filters_expressible(&scoped) == 0);
+   assert(aimee_db3_search_request_build(&scoped, 91, 7, vec, 3, 3, &request) != 0);
+
+   aimee_db3_search_filters_t current = base;
+   current.current_generation_only = 1;
+   assert(aimee_db3_search_filters_expressible(&current) == 0);
+   assert(aimee_db3_search_request_build(&current, 91, 7, vec, 3, 3, &request) != 0);
+
+   /* Both at once, since a search can need both. */
+   aimee_db3_search_filters_t both = base;
+   both.scope_membership = 1;
+   both.current_generation_only = 1;
+   assert(aimee_db3_search_filters_expressible(&both) == 0);
+}
+
 int main(void)
 {
    test_default_external_and_authorization();
@@ -445,6 +484,7 @@ int main(void)
    test_invalid_requests();
    test_wire_codecs();
    test_a_filter_the_wire_cannot_carry_is_refused();
+   test_a_predicate_the_sql_applies_is_refused_too();
    puts("test_db3_route: routing, fallback, revalidation, and codecs passed");
    return 0;
 }
