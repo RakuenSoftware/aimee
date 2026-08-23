@@ -305,6 +305,9 @@ func collectReply(rows pgx.Rows) []byte {
 	}
 	width := uint32(columns)
 	collected := make([][]Value, 0, 64)
+	// Status, empty sqlstate, empty message, width, count: what a reply carries
+	// before any row does.
+	size := 4 + 4 + 4 + 4 + 4
 	for rows.Next() {
 		raw, valueErr := rows.Values()
 		if valueErr != nil {
@@ -330,7 +333,16 @@ func collectReply(rows pgx.Rows) []byte {
 				// caller's mistake.
 				return EncodeError(StatusUnsupported, "", cellErr.Error())
 			}
+			size += encodedSize(converted)
 			row = append(row, converted)
+		}
+		if size > MaxReplyBytes {
+			// Checked here rather than after encoding, because the product of
+			// the other bounds is gigabytes: a reply built and then rejected is
+			// a reply this module allocated on a caller's say-so.
+			return EncodeError(StatusLimitExceeded, sqlStateResultTooLarge,
+				fmt.Sprintf("result exceeds %d bytes; narrow or page the query",
+					MaxReplyBytes))
 		}
 		collected = append(collected, row)
 	}

@@ -67,7 +67,19 @@ const (
 	// narrowed to the wire's four-byte field, and a bound with a reason beats a
 	// bound at the type's edge: 4 billion columns is not a number anybody should
 	// have to think about to know this is safe.
-	MaxReplyColumns   = 4096
+	MaxReplyColumns = 4096
+
+	// The one bound that counts BYTES rather than things.
+	//
+	// Every other reply bound counts rows, columns or cell sizes, and their
+	// product is 4096 x 4096 x 1 MiB. The transport carries 16 MiB
+	// (bus.ModuleMessageMaxBody), and the module runtime turns a reply over that
+	// into ModuleStatusInternal: a bare status, no body, no explanation. So a
+	// caller whose result was merely too large would be told the module broke.
+	//
+	// Reachable with ordinary data, not pathological data: 4096 rows of 4 KiB
+	// each is 16 MiB, and 4 KiB is one document chunk.
+	MaxReplyBytes     = 16 * 1024 * 1024
 	MaxOwnerBytes     = 64
 	MaxMigrationCount = 4096
 )
@@ -402,6 +414,31 @@ func (w *writer) value(value Value) {
 			w.str(text)
 		}
 	}
+}
+
+// encodedSize is what this value will occupy in a reply, exactly.
+//
+// Exact rather than estimated because it is checked WHILE collecting: the
+// product of the other bounds is gigabytes, so a running total is what stops
+// this module building an answer it could never send.
+func encodedSize(value Value) int {
+	switch value.Type {
+	case ValueText:
+		return 1 + 4 + len(value.Text)
+	case ValueInt, ValueFloat:
+		return 1 + 8
+	case ValueBool:
+		return 1 + 1
+	case ValueBytes:
+		return 1 + 4 + len(value.Bytes)
+	case ValueTexts:
+		total := 1 + 4
+		for _, text := range value.Texts {
+			total += 4 + len(text)
+		}
+		return total
+	}
+	return 1 // null
 }
 
 // header writes the part every reply carries. sqlstate and message are empty on

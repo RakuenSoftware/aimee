@@ -421,6 +421,9 @@ type shapedRows struct {
 	columns int
 	rows    int
 	at      int
+	// Non-empty makes every cell this text, so a test can reach the byte
+	// ceiling without four thousand columns.
+	text string
 }
 
 func (r *shapedRows) Next() bool {
@@ -431,6 +434,10 @@ func (r *shapedRows) Next() bool {
 func (r *shapedRows) Values() ([]any, error) {
 	out := make([]any, 0, r.columns)
 	for index := 0; index < r.columns; index++ {
+		if r.text != "" {
+			out = append(out, r.text)
+			continue
+		}
 		out = append(out, int64(index))
 	}
 	return out, nil
@@ -491,5 +498,34 @@ func TestAnArgumentCountPastTheCeilingIsRefused(t *testing.T) {
 	out = binary.LittleEndian.AppendUint32(out, uint32(MaxArguments+1))
 	if _, err := DecodeRequest(out); err == nil {
 		t.Fatal("a request claiming more arguments than the ceiling decoded")
+	}
+}
+
+func TestAReplyTooLargeToSendIsRefusedNotBroken(t *testing.T) {
+	// Every other reply bound counts things -- rows, columns, cell sizes -- and
+	// their product is 4096 x 4096 x 1 MiB. The transport carries 16 MiB, and
+	// the module runtime converts a reply over that into ModuleStatusInternal:
+	// a bare status, no body, no explanation. A caller whose result was merely
+	// too large would be told the module broke.
+	//
+	// Ordinary data, not pathological: 4096 rows of 4 KiB is 16 MiB, and 4 KiB
+	// is one document chunk. So this is the shape of a real query against a real
+	// corpus, which is why it gets a refusal with a SQLSTATE rather than a
+	// transport failure.
+	wide := &shapedRows{columns: 1, rows: MaxReplyRows}
+	wide.text = strings.Repeat("x", 8*1024)
+	body := collectReply(wide)
+	status := binary.LittleEndian.Uint32(body[0:4])
+	if status != StatusLimitExceeded {
+		t.Fatalf("status = %d, want LimitExceeded: a reply the bus cannot carry "+
+			"must be refused here, where the caller can be told why", status)
+	}
+
+	// And a reply that fits still crosses, so the bound is a ceiling rather than
+	// a wall.
+	small := &shapedRows{columns: 1, rows: 8}
+	small.text = strings.Repeat("y", 1024)
+	if status := binary.LittleEndian.Uint32(collectReply(small)[0:4]); status != StatusOK {
+		t.Fatalf("an ordinary reply was refused: status = %d", status)
 	}
 }
