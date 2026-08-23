@@ -349,10 +349,11 @@ measured (S5), and the recursion is bounded (S0).
   clean, and ASAN over the new DB paths.
 
 ```yaml acceptance
-- {id: 1, tier: mechanical, check: "make -C src test-learning"}
-- {id: 2, tier: mechanical, check: "make -C src unit-tests"}
-- {id: 3, tier: mechanical, check: "make -C src lint && python3 scripts/check_background_skill_curator_absence.py"}
-- {id: 4, tier: integration, check: "make -C src test-learning test-memory test-workflows"}
+- {id: 1, tier: mechanical, check: "make -C src build/obj/tests/unit-test-learning-eval-synthesis && src/build/obj/tests/unit-test-learning-eval-synthesis"}
+- {id: 2, tier: mechanical, check: "make -C src build/obj/tests/unit-test-eval-candidates && src/build/obj/tests/unit-test-eval-candidates"}
+- {id: 3, tier: mechanical, check: "make -C src unit-tests"}
+- {id: 4, tier: mechanical, check: "make -C src lint && python3 scripts/check_background_skill_curator_absence.py"}
+- {id: 5, tier: integration, check: "make -C src integration-tests"}
 ```
 
 ## Slice order and status
