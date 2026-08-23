@@ -370,6 +370,10 @@ measured (S5), and the recursion is bounded (S0).
 
 ## Delivery record — S2 to S6 (2026-08-23)
 
+Validated on a separate host, including against real PostgreSQL, a live server,
+and exploratory probing:
+[validation report](../../validation/recursive-self-improvement-s2-s6-2026-08-23.md).
+
 Each slice below was built, unit-tested, and landed with `make -j8 all`,
 `make unit-tests`, and `make lint` (63/63) clean. Three were narrowed against
 the design above; each narrowing and its reason is stated, because a slice
@@ -398,9 +402,10 @@ a PASSED one — a pure ratchet toward weight 100. A per-rule counterfactual doe
 not exist yet, so the honest move was to stop manufacturing the signal rather
 than keep a wrong one.
 
-### S3 — narrowed from "extend anti_patterns" to a sibling store, and from embeddings to token overlap
+### S3 — narrowed to a sibling store in DB1, and to token overlap
 
-Two changes from the design, both deliberate:
+Three changes from the design. The third was not a choice — it was a defect the
+live run caught:
 
 - `approach_failures` is a **sibling** of `anti_patterns`, not an extension.
   That table's hot rows drive a BLOCKING escalation path; putting fuzzy
@@ -412,6 +417,13 @@ Two changes from the design, both deliberate:
   with no KB reachable. Overlap is weaker at paraphrase and exactly as good at
   the case that matters — the same goal, worded differently. Upgrading is a
   follow-up that must first give the recall site a route to the embedder.
+- The store is in **DB1, not DB2**. It was written into DB2 first, and the live
+  run showed the feature was inert: both the writer (the failed-job scan) and
+  the reader (the plan-time route) run in the daemon, which builds with DB2
+  compiled out. The rows belong in DB1 anyway — they are this machine's
+  observations about its own failed jobs, sourced from `agent_jobs` — and the
+  move forced the pure/storage split the module boundary requires. See
+  [the validation report](../../validation/recursive-self-improvement-s2-s6-2026-08-23.md).
 
 ### S4 — narrowed to the curiosity backlog; graph-audit verification deferred
 
