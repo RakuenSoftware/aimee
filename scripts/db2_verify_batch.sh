@@ -98,6 +98,12 @@ step gocoverage python3 scripts/db2_go_coverage.py || exit 1
 # AS TEXT against pg_now_text(), so a spelling that disagrees makes a sweep skip
 # or collect a day of rows and says nothing about it.
 step stamps python3 scripts/db2_check_stamp_formats.py || exit 1
+# Columns checked in characters that are bounded in bytes by whoever reads
+# them. A value of N multi-byte characters is then accepted by the database and
+# unreadable afterwards -- written, not corrupted, with nothing at write time
+# saying so. Fails on the actionable set; also prints the columns whose readers
+# disagree about the SIZE, which are open questions rather than defects.
+step units python3 scripts/db2_check_length_units.py || exit 1
 step scripttests python3 -m unittest discover -s scripts/tests -q || exit 1
 step lint make -C src lint || exit 1
 tail -1 "${LOGS}/lint.log"
