@@ -82,20 +82,22 @@ print("boundary: source_files", summary["source_files"],
       "consumers", summary["consumer_files"], "includes", summary["include_directives"])
 PY
 
-step gotest bash -c 'cd server-go && go test -count=1 ./db2/' || exit 1
-# The ported module's own suite. The contract package above tests the wire; this
-# tests what the operations do with it, and nothing here ran it: a change that
-# broke two of its tests passed every step this gate had.
+# Every Go package in server-go, by wildcard rather than by name.
 #
-# Offline: the live probes and the parity comparison both skip unless their
-# environment variables name a database, so this step needs nothing running.
-step gomodule bash -c 'cd server-go && go test -count=1 ./modules/db2/' || exit 1
-# The storage module and its client: the wire, the transaction table, the
-# migration engine, and the caller side every module reaches PostgreSQL through.
-# Neither was gated by anything above -- gotest covers ./db2/ and gomodule covers
-# ./modules/db2/ -- so both were tested only when someone remembered to.
-step gopostgres bash -c 'cd server-go && go test -count=1 ./postgres/ ./modules/postgres/' ||
-   exit 1
+# This was three enumerated steps: ./db2/, then ./modules/db2/ after a batch
+# landed with two of its tests failing because nothing ran them, then
+# ./postgres/ ./modules/postgres/ after the storage packages turned out to be
+# gated by nothing at all. Each entry was added once the gap it closed had
+# already cost something.
+#
+# A list is the wrong shape for this. A new package falls outside an enumeration
+# silently -- the gate stays green, and it is green having run nothing over the
+# new code. ./... covers whatever is there, so coverage follows from the layout
+# instead of from somebody remembering to extend a list.
+#
+# Offline: the live probes and the parity comparison skip unless their
+# environment variables name a database, so this needs nothing running.
+step gotest bash -c 'cd server-go && go test -count=1 ./...' || exit 1
 # Every catalogued operation has a handler, counted from the contract's own
 # constants rather than a list anyone maintains -- a hand-kept list is how a
 # batch was once reported complete at 307 of 307 when it was not.

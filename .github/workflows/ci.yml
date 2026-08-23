@@ -474,6 +474,28 @@ jobs:
             sleep $((i*4))
           done
           sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3
+      # The schema REQUIRES pgvectorscale: diskann is the only index method over
+      # the embedding columns, so its extension block raises rather than warning
+      # and a database without it cannot apply the schema at all. The pgvector
+      # image ships pgvector and not pgvectorscale.
+      #
+      # Pinned to the same release scripts/db2_replay_env.sh installs, so the
+      # container a developer runs the replay against and the one CI runs it
+      # against cannot drift into testing different things.
+      - name: Install pgvectorscale into the Postgres container
+        run: |
+          docker exec aimee-db2-process-pg bash -c '
+            set -eu
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get -qq update
+            apt-get -qq -y install curl unzip >/dev/null
+            cd /tmp
+            curl -fsSL -o pgvs.zip \
+              https://github.com/timescale/pgvectorscale/releases/download/0.9.0/pgvectorscale-0.9.0-pg18-amd64.zip
+            unzip -p pgvs.zip pgvectorscale-postgresql-18_0.9.0-Linux_amd64.deb > pgvs.deb
+            dpkg -i pgvs.deb
+            ls /usr/lib/postgresql/18/lib/vectorscale*.so'
+          docker restart aimee-db2-process-pg
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do

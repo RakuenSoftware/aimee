@@ -32,6 +32,12 @@ STANDARD_HEADERS = {
 }
 CLASSIFICATIONS = (
     ("portable-search", "portable-now", "candidate-search"),
+    # Portable in shape, refused by the wire: DB3 v1's search request carries
+    # workspace, project and record_type, and these need a label filter, a
+    # collection, negation or set membership. Kept as its own disposition rather
+    # than folded into deferred, because the blocker is a named protocol change
+    # and not a decision nobody has made.
+    ("search-needs-db3-v2", "portable-after-db3-v2", "candidate-search"),
     ("committed-mutation", "portable-after-commit", "apply"),
     ("provider-control", "provider-local", "provider-control"),
     ("db2-authority", "retained-db2", "none"),

@@ -40,7 +40,12 @@ class PortabilityTests(unittest.TestCase):
         summary = checker.run(REPO_ROOT)
         self.assertEqual(sum(summary.values()), 74)
         self.assertEqual(summary, {
-            "portable-search": 14,
+            # Six searches DB3 v1 can carry, and eight that need a v2: an exact
+            # label filter on search, a collection naming which vector column to
+            # rank against, negation, or set membership. Split out rather than
+            # left at fourteen because this file is read as a work list.
+            "portable-search": 6,
+            "search-needs-db3-v2": 8,
             "committed-mutation": 32,
             "provider-control": 13,
             "db2-authority": 12,
@@ -53,10 +58,19 @@ class PortabilityTests(unittest.TestCase):
             for symbol in group["symbols"]
         ]
         self.assertEqual(sorted(classified), source)
-        self.assertIn("pgvec_memory_vector_search_record_type",
-                      self.audit()["classifications"][0]["symbols"])
-        self.assertIn("pgvec_schema_version",
-                      self.audit()["classifications"][3]["symbols"])
+        # By id, not by position. Inserting a group shifts every index after it,
+        # so a positional assertion silently starts checking its neighbour --
+        # which is exactly what happened when portable-search was split.
+        groups = {group["id"]: group["symbols"]
+                  for group in self.audit()["classifications"]}
+        self.assertIn("pgvec_memory_vector_search_record_type", groups["portable-search"])
+        self.assertIn("pgvec_schema_version", groups["db2-authority"])
+        # And the eight that cannot: each named for the filter that blocks it.
+        for symbol in ("pgvec_kb_search_scoped", "pgvec_kb_vector_search_scoped",
+                       "pgvec_memory_search", "pgvec_memory_vector_search_with_kinds",
+                       "pgvec_curator_claim_search", "pgvec_curator_code_unit_search",
+                       "pgvec_curator_entity_search", "pgvec_curator_narrative_search"):
+            self.assertIn(symbol, groups["search-needs-db3-v2"])
 
     def test_root_identity_and_closed_classifications(self) -> None:
         cases = (
