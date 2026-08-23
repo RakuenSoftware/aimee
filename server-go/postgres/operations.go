@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -226,4 +228,20 @@ func (c *Client) Migrate(ctx context.Context, owner string, version uint64,
 	}
 	_, err = header(reply)
 	return err
+}
+
+// Checksum computes a migration's checksum, matching the module's construction
+// exactly.
+//
+// Exported so a caller does not write its own. Per statement: decimal length,
+// NUL, the statement, NUL. Length-prefixed so statement boundaries are part of
+// the digest -- without that ["a;b"] and ["a","b"] collide, and an edit that
+// merged two statements into one would read as no change at all, which is
+// exactly the edit this exists to catch.
+func Checksum(statements []string) string {
+	sum := sha256.New()
+	for _, statement := range statements {
+		fmt.Fprintf(sum, "%d\x00%s\x00", len(statement), statement)
+	}
+	return hex.EncodeToString(sum.Sum(nil))
 }

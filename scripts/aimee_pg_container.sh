@@ -92,7 +92,7 @@ cat <<PGVS | in_ct >/dev/null 2>&1 || { say "pgvectorscale install failed"; exit
 set -eu
 if ls /usr/lib/postgresql/$PG_MAJOR/lib/vectorscale*.so >/dev/null 2>&1; then exit 0; fi
 export DEBIAN_FRONTEND=noninteractive
-apt-get -qq -y install unzip >/dev/null
+apt-get -qq -y install curl unzip >/dev/null
 cd /tmp
 curl -fsSL -o pgvs.zip \\
   https://github.com/timescale/pgvectorscale/releases/download/$VECTORSCALE/pgvectorscale-$VECTORSCALE-pg$PG_MAJOR-amd64.zip

@@ -102,7 +102,7 @@ PKGS
 set -eu
 if ls /usr/lib/postgresql/17/lib/vectorscale*.so >/dev/null 2>&1; then exit 0; fi
 export DEBIAN_FRONTEND=noninteractive
-apt-get -qq -y install unzip >/dev/null
+apt-get -qq -y install curl unzip >/dev/null
 cd /tmp
 curl -fsSL -o pgvs.zip \
   https://github.com/timescale/pgvectorscale/releases/download/0.9.0/pgvectorscale-0.9.0-pg17-amd64.zip
