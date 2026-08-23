@@ -207,17 +207,6 @@ type Options struct {
 	// conversation as it happens rather than only in an audit query.
 	// Called WITHOUT the registry lock held.
 	Notify func(sessionID string, m Message)
-	// Resolve maps (owner, label) to a session id against the DIRECTORY'S OWNER,
-	// which is db1 in production. When set it is authoritative, including when
-	// it answers "no such label": db1 knows, so a negative is a fact.
-	//
-	// When unset, Lookup falls back to this registry's own map, and a negative
-	// is a GUESS. That distinction matters more than it looks. A caller's
-	// correct response to "no such peer" is to stop asking, so a wrong negative
-	// is silent and terminal: no error, no retry, nothing to notice. The
-	// fallback exists for tests and for bringing a process up before db1 is
-	// reachable; production sets this.
-	Resolve func(owner, label string) (string, bool)
 	// SessionOwner reports a session's owner principal, and by returning false
 	// reports that it does not exist. One hook rather than two, because that is
 	// the shape the directory actually has: db1 answers both from one row.
@@ -400,15 +389,6 @@ func (r *Registry) SetLabel(sessionID, label string) error {
 	return nil
 }
 
-// SetResolver binds the authoritative directory after construction, which is
-// when the bus client that reaches it exists. Passing nil restores the
-// in-memory fallback.
-func (r *Registry) SetResolver(resolve func(owner, label string) (string, bool)) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.opts.Resolve = resolve
-}
-
 // SetSessionOwner binds the authoritative owner lookup, for the same reason and
 // at the same moment as SetResolver. Passing nil restores the in-memory
 // fallback.
@@ -449,33 +429,29 @@ func (r *Registry) Lookup(owner, label string) (string, bool) {
 	if label == "" {
 		return "", false
 	}
-	// One resolution path, not two. If the directory has an owner, ask it.
-	// Otherwise a caller arriving through the HTTP edge would get this map's
-	// answer while a caller arriving through DirectorySource got db1's, which is
-	// the two-directories problem wearing a different hat.
-	//
-	// Read the hook under the lock, then call it outside: SetResolver writes it,
-	// and the call crosses a process boundary that must never run while this
-	// registry's mutex is held.
+	// Labels are THIS module's state, so the local map is authoritative for them
+	// and there is no second answer to reconcile. What is not local is whether the
+	// session behind a label still exists, so a match is confirmed against the
+	// directory before it is handed out: a label pointing at a departed session
+	// would otherwise send a caller somewhere unreachable.
 	r.mu.Lock()
-	resolve := r.opts.Resolve
+	var candidate string
+	for id, sess := range r.sessions {
+		if sess.label != label {
+			continue
+		}
+		if owner != "" && sess.owner != owner {
+			continue
+		}
+		candidate = id
+		break
+	}
 	r.mu.Unlock()
-	if resolve != nil {
-		return resolve(owner, label)
-	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for id, s := range r.sessions {
-		if s.label != label {
-			continue
-		}
-		if owner != "" && s.owner != owner {
-			continue
-		}
-		return id, true
+	if candidate == "" || !r.Exists(candidate) {
+		return "", false
 	}
-	return "", false
+	return candidate, true
 }
 
 // Directory lists addressable peers, newest activity first. An empty owner
@@ -993,32 +969,22 @@ func (r *Registry) Inbox(sessionID string) []Message {
 	return out
 }
 
-// Exists reports whether a session is addressable — registered, or still held
-// open by an undrained inbox.
+// Exists reports whether a session is addressable.
+//
+// It delegates to Owner rather than deciding separately: two functions answering
+// nearly the same question is how they come to disagree, and they did. Exists
+// short-circuited on a local entry ("holding mail is proof enough") while Owner
+// let the directory's denial outrank one. Under the undeliverable rule the
+// second is right: mail held for a session that no longer exists is undeliverable
+// rather than evidence the session is there.
 //
 // Callers need this to tell "no mail" from "no such session". Those look
 // identical in a message count, and conflating them is how a poller waits
 // forever on a session that was torn down: the loop that should have failed
 // fast instead reads zero and goes round again.
 func (r *Registry) Exists(sessionID string) bool {
-	// Read the hook under the lock, call it outside: it crosses a process
-	// boundary and must never run while this mutex is held.
-	r.mu.Lock()
-	lookup := r.opts.SessionOwner
-	_, local := r.sessions[sessionID]
-	r.mu.Unlock()
-
-	// A local entry settles it: holding mail for a session is proof enough that
-	// it is addressable, and it saves a call across the boundary on the common
-	// path.
-	if local {
-		return true
-	}
-	if lookup != nil {
-		_, ok := lookup(sessionID)
-		return ok
-	}
-	return false
+	_, ok := r.Owner(sessionID)
+	return ok
 }
 
 // Len reports how many messages are waiting.

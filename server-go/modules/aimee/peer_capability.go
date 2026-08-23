@@ -6,27 +6,25 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
 
-// DirectorySource resolves peer directory questions against their owner — db1
-// in production. Absent, the registry's own in-memory view answers, which
-// exists for tests and for bringing a process up before db1 is reachable; it is
-// never a second source of truth in production.
+// DirectorySource answers WHO EXISTS, against the owner of that fact: db1's
+// server_sessions, whose rows are created and deleted by the session lifecycle.
 //
-// The db1 implementation needs NO new operations and no new stage. The existing
-// db1-sessions family (stage 6, kind 11782) already covers this from
-// server_sessions, whose columns map onto the directory exactly — session id to
-// `id`, owner to `principal`, label to `title`, surface to `client_type`:
+//	Owner -> server_session_get
 //
-//	Resolve  -> server_session_search_by_title (scoped to the caller's principal)
-//	Owner    -> server_session_get
-//	listing  -> server_session_list_recent
+// It deliberately does NOT resolve labels. An earlier version of this interface
+// did, on the reading that a peer label is db1's server_sessions.title. That was
+// a match of column SHAPE rather than meaning, and the column turns out to have
+// no writer at all: the session insert stores the literal empty string and no
+// statement ever updates it. Deferring to a writer that does not exist would
+// have left peer addressing with nobody able to set a name.
 //
-// Calling that catalog rather than adding peer-shaped operations is the point:
-// two directories would mean two answers to "which sessions exist", and the
-// interesting failure is the one row where they disagree.
+// A peer label and a session title are different things. A title is a display
+// name for a session; a label is the handle peer messaging is addressed by, and
+// it is per-session state of exactly the kind this module already owns
+// alongside inboxes. So labels are owned here, and only EXISTENCE is deferred.
 type DirectorySource interface {
-	// Resolve maps (owner, label) to a session id.
-	Resolve(owner, label string) (string, bool)
-	// Owner reports a session's owner principal.
+	// Owner reports a session's owner principal, and by returning false reports
+	// that the session does not exist.
 	Owner(sessionID string) (string, bool)
 }
 
@@ -47,13 +45,12 @@ type PeerCapability struct {
 // the registry answers directory questions from its own map, which is a test
 // and bring-up fallback rather than a source of truth.
 //
-// When dir IS given it is bound into the registry, so label resolution has one
-// path whichever surface asked. Leaving them separate is how a module ends up
+// When dir IS given it is bound into the registry, so existence has one answer
+// whichever surface asked. Leaving them separate is how a module ends up
 // authoritative for a caller arriving over the bus and guessing for the same
 // caller arriving over HTTP.
 func NewPeer(registry *peer.Registry, dir DirectorySource) *PeerCapability {
 	if dir != nil && registry != nil {
-		registry.SetResolver(dir.Resolve)
 		registry.SetSessionOwner(dir.Owner)
 	}
 	return &PeerCapability{registry: registry}

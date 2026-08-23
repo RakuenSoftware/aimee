@@ -690,87 +690,43 @@ func TestRegistryAndGrantTablesAreBounded(t *testing.T) {
 	}
 }
 
-// Label resolution must have ONE path. Before this, Lookup answered from the
-// in-memory map while the capability held a separate DirectorySource, so the
-// same question got different answers depending on which surface asked -- the
-// two-directories problem in miniature.
+// Labels are THIS module's state, and the local map is authoritative for them.
 //
-// The negative case is the one that matters. A caller told "no such peer"
-// correctly stops asking, so a wrong negative is silent and terminal: no error,
-// no retry, nothing to notice. That makes an authoritative negative valuable and
-// a guessed one dangerous.
-func TestLookupPrefersTheAuthoritativeDirectory(t *testing.T) {
-	r, _ := newTestRegistry(t, "A")
-	if err := r.SetLabel("A", "local-only"); err != nil {
+// An earlier version deferred label resolution to the directory, on the reading
+// that a peer label is db1's server_sessions.title. That column has no writer at
+// all: the session insert stores the literal empty string and nothing updates
+// it. Deferring to a writer that does not exist would have left peer addressing
+// with nobody able to set a name.
+//
+// A title is a display name; a label is the handle peer messaging is addressed
+// by. Matching them by column shape rather than meaning was the error.
+func TestLabelsAreOwnedHereAndConfirmedAgainstTheDirectory(t *testing.T) {
+	r, _ := newTestRegistry(t, "A", "B")
+	if err := r.SetLabel("A", "reviewer"); err != nil {
 		t.Fatal(err)
 	}
 
-	// With no resolver the map answers, which is the bring-up fallback.
-	if got, ok := r.Lookup("uid:1000", "local-only"); !ok || got != "A" {
-		t.Fatalf("fallback lookup = %q,%v; want A,true", got, ok)
+	got, ok := r.Lookup("uid:1000", "reviewer")
+	if !ok || got != "A" {
+		t.Fatalf("lookup = %q,%v; want A,true", got, ok)
+	}
+	// Scoped by owner: a label is unique per principal, not globally.
+	if _, ok := r.Lookup("uid:9999", "reviewer"); ok {
+		t.Error("a label resolved for the wrong owner")
 	}
 
-	var asked int
-	r.SetResolver(func(owner, label string) (string, bool) {
-		asked++
-		if label == "known-to-db1" {
-			return "S-42", true
-		}
-		return "", false
-	})
-
-	// A label only the directory knows resolves.
-	if got, ok := r.Lookup("uid:1000", "known-to-db1"); !ok || got != "S-42" {
-		t.Errorf("authoritative lookup = %q,%v; want S-42,true", got, ok)
+	// The one thing that is NOT local is whether the session still exists. A
+	// label pointing at a departed session must not be handed out, or a caller
+	// is sent somewhere unreachable.
+	r.SetSessionOwner(func(id string) (string, bool) { return "uid:1000", id != "A" })
+	if got, ok := r.Lookup("uid:1000", "reviewer"); ok {
+		t.Errorf("resolved %q to a session the directory says is gone", got)
 	}
-	// A label only the LOCAL map knows must NOT resolve: the directory said no,
-	// and it is the one that knows. Falling back here is how two answers appear.
-	if got, ok := r.Lookup("uid:1000", "local-only"); ok {
-		t.Errorf("lookup fell back to the local map: got %q; the directory said no", got)
+	// With the directory agreeing it exists, it resolves again.
+	r.SetSessionOwner(func(id string) (string, bool) { return "uid:1000", true })
+	if _, ok := r.Lookup("uid:1000", "reviewer"); !ok {
+		t.Error("a live session's label did not resolve")
 	}
-	if asked != 2 {
-		t.Errorf("resolver consulted %d times; want 2", asked)
-	}
-
-	// Clearing it restores the fallback, so tests and bring-up still work.
-	r.SetResolver(nil)
-	if _, ok := r.Lookup("uid:1000", "local-only"); !ok {
-		t.Error("clearing the resolver did not restore the fallback")
-	}
-}
-
-// The resolver is read under the lock and called outside it: it crosses a
-// process boundary and must never run while the registry mutex is held, and
-// SetResolver can race a concurrent Lookup. Run under -race, this is the proof.
-func TestResolverSwapIsSafeUnderConcurrency(t *testing.T) {
-	r, _ := newTestRegistry(t, "A")
-
-	var wg sync.WaitGroup
-	stop := make(chan struct{})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; ; i++ {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if i%2 == 0 {
-				r.SetResolver(func(string, string) (string, bool) { return "S", true })
-			} else {
-				r.SetResolver(nil)
-			}
-		}
-	}()
-
-	for i := 0; i < 500; i++ {
-		// A resolver that itself calls back into the registry would deadlock if
-		// Lookup held the mutex while calling out. It does not, so this returns.
-		r.Lookup("uid:1000", "anything")
-	}
-	close(stop)
-	wg.Wait()
 }
 
 // Existence must be answered by whoever owns the directory, for the same reason
@@ -810,14 +766,13 @@ func TestExistsAsksTheDirectoryForSessionsItHasNotSeen(t *testing.T) {
 		t.Error("a session the directory denies was reported present")
 	}
 
-	// A local entry short-circuits: holding mail is proof enough, and it saves a
-	// call across the boundary on the common path.
-	before := len(asked)
-	if !r.Exists("seen") {
-		t.Error("a locally-known session should not need the directory")
-	}
-	if len(asked) != before {
-		t.Errorf("directory consulted for a session already held locally: %v", asked)
+	// The directory OUTRANKS a local entry. Holding mail for a session is not
+	// evidence the session exists: under the undeliverable rule that mail is
+	// exactly what a departed session leaves behind. Exists and Owner therefore
+	// share one implementation, because two functions answering nearly the same
+	// question is how they came to disagree.
+	if r.Exists("seen") {
+		t.Error("a locally-held session the directory denies was reported present")
 	}
 
 	// Owner comes from the same hook, so a label lookup is scoped against the

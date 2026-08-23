@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -34,6 +35,7 @@ type HTTPOptions struct {
 //	POST /v1/sessions/{id}/peer/reply    reply to a message taken from the inbox
 //	GET  /v1/sessions/{id}/inbox         read pending messages, removing none
 //	POST /v1/sessions/{id}/inbox/take    drain, removing what it returns
+//	POST /v1/sessions/{id}/label         set this session's addressable handle
 //	POST /v1/peers/grants                grant or revoke cross-owner peering
 func (r *Registry) Handler(opts HTTPOptions) http.Handler {
 	mux := http.NewServeMux()
@@ -43,6 +45,7 @@ func (r *Registry) Handler(opts HTTPOptions) http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{id}/peer/reply", h.reply)
 	mux.HandleFunc("GET /v1/sessions/{id}/inbox", h.inbox)
 	mux.HandleFunc("POST /v1/sessions/{id}/inbox/take", h.take)
+	mux.HandleFunc("POST /v1/sessions/{id}/label", h.label)
 	mux.HandleFunc("POST /v1/peers/grants", h.grants)
 	return mux
 }
@@ -255,18 +258,37 @@ func (h *httpAPI) take(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
 }
 
-// There is deliberately NO label-write route here.
+// label sets a session's addressable handle.
 //
-// A label is db1's server_sessions.title, and this module does not own the
-// directory. Writing one into the local map would be a second WRITE path to
-// state another module owns, which is worse than a second read path: the
-// copies diverge silently, and the divergence surfaces later as an
-// authoritative lookup reporting no-such-label for a name somebody believes
-// they set.
+// This route was briefly removed on the reading that a label is db1's
+// server_sessions.title, so writing one here would be a second write path to
+// another module's state. The reasoning was right and the premise was wrong:
+// that column has NO writer. The session insert stores the literal empty string
+// and nothing updates it, so deferring to db1 would have left peer addressing
+// with nobody able to set a name at all.
 //
-// Label writes belong to db1's session family. Registry.SetLabel remains for
-// tests and for bringing a process up before db1 is reachable, and is not
-// reachable from any surface.
+// A label is not a session title. A title is a display name; a label is the
+// handle peer messaging is addressed by, and it is per-session state of exactly
+// the kind this module already owns beside inboxes. So it is written here, and
+// there is exactly one writer.
+func (h *httpAPI) label(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !h.authorized(w, r, id) {
+		return
+	}
+	var req struct {
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.reg.SetLabel(id, strings.TrimSpace(req.Label)); err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "label": req.Label})
+}
 
 func (h *httpAPI) grants(w http.ResponseWriter, r *http.Request) {
 	if h.opts.AdminAllowed == nil || !h.opts.AdminAllowed(r) {

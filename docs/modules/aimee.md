@@ -56,10 +56,16 @@ optional provider: when absent the registry falls back to its own in-memory
 view, which exists for tests and for bringing a process up before `db1` is
 reachable, and is never a second source of truth in production.
 
-Binding it binds **one** resolution path: `NewPeer` installs the source into the
-registry as well, so a caller arriving over the bus and one arriving over `/v1`
-cannot get different answers to the same question. Leaving those separate is how
-a module ends up authoritative for one surface and guessing for another.
+`DirectorySource` answers one question only: **who exists**. Labels are this
+module's own state, so there is no second answer to reconcile for them; what is
+not local is whether the session behind a label still exists, and a label match
+is confirmed against the directory before it is handed out.
+
+`Exists` and `Owner` share one implementation. Two functions answering nearly the
+same question is how they come to disagree, and they did: one short-circuited on
+a local entry while the other let the directory's denial outrank one. The second
+is right, because under the undeliverable rule mail held for a departed session
+is exactly what that session leaves behind rather than evidence it is there.
 
 The negative is the case that matters. A caller told "no such peer" correctly
 stops asking, so a wrong negative is silent and terminal: no error is raised, no
@@ -96,13 +102,19 @@ Bus stages are the module's interface to other modules. A `/v1` HTTP edge in
 `POST /v1/sessions/{id}/peer`, `GET /v1/sessions/{id}/inbox`,
 `POST /v1/sessions/{id}/inbox/take`, and `POST /v1/peers/grants`.
 
-There is deliberately **no label-write route**. A label is db1's
-`server_sessions.title`, and a second WRITE path to another module's state is
-worse than a second read path: the copies diverge silently, and the divergence
-surfaces later as an authoritative lookup reporting no-such-label for a name
-somebody believes they set. Label writes belong to db1's session family;
-`Registry.SetLabel` survives only as a test and bring-up helper, reachable from
-no surface.
+`POST /v1/sessions/{id}/label` sets a session's addressable handle, and this
+module is its only writer.
+
+That route was briefly removed on the reading that a label is db1's
+`server_sessions.title`. The reasoning was right and the premise was wrong: that
+column has **no writer at all**. The session insert stores the literal empty
+string and no statement updates it, so deferring to db1 would have left peer
+addressing with nobody able to set a name.
+
+A label is not a session title. A title is a display name for a session; a label
+is the handle peer messaging is addressed by, and it is per-session state of
+exactly the kind this module already owns beside inboxes. Matching them by
+column shape rather than by meaning was the original error.
 
 That edge fails closed: without an `Authorize` hook every session route answers
 503, because a peer surface that authorizes by accident is worse than one that

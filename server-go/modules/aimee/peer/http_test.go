@@ -51,6 +51,7 @@ func TestHandlerFailsClosedWithoutAuthorize(t *testing.T) {
 		{"POST", "/v1/sessions/A/peer/reply"},
 		{"GET", "/v1/sessions/A/inbox"},
 		{"POST", "/v1/sessions/A/inbox/take"},
+		{"POST", "/v1/sessions/A/label"},
 		{"GET", "/v1/sessions/peers"},
 	} {
 		code, _ := do(t, h, tc.method, tc.path, map[string]any{})
@@ -223,14 +224,14 @@ func TestHandlerErrorStatuses(t *testing.T) {
 	if code, _ := do(t, h, "POST", "/v1/sessions/A/peer", sendRequest{To: "B", Text: "over"}); code != http.StatusTooManyRequests {
 		t.Errorf("inbox full = %d; want 429", code)
 	}
-	// Label writes are NOT served here: a label is db1's server_sessions.title,
-	// and a second write path to another module's state diverges silently. The
-	// route is absent rather than refusing, so this reads the recorder directly
-	// (the 404 body is plain text, not the JSON every served route returns).
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/sessions/B/label", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("label write = %d; want 404 (this module does not own labels)", rec.Code)
+	// Label collision: 409. Labels ARE this module's state, since
+	// server_sessions.title has no writer at all, so the route exists here and
+	// enforces per-owner uniqueness.
+	if err := r.SetLabel("A", "taken"); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := do(t, h, "POST", "/v1/sessions/B/label", map[string]any{"label": "taken"}); code != http.StatusConflict {
+		t.Errorf("label collision = %d; want 409", code)
 	}
 }
 
