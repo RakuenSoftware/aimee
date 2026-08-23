@@ -136,6 +136,34 @@ func IsUnavailable(err error) bool {
 	return errors.As(err, &storeErr) && storeErr.Status == statusUnavailable
 }
 
+// IsPermanent reports that the same request will never succeed.
+//
+// InvalidRequest, Unsupported and LimitExceeded are all decisions about the
+// request rather than about the moment: a statement over the size ceiling, a
+// column type this wire has no representation for, a result larger than the bus
+// will carry. Sending it again produces the same answer.
+//
+// It exists because IsUnavailable's promise is only usable if its opposite can
+// be named. "The one failure worth retrying unchanged" tells a caller what to
+// retry and nothing about what to stop retrying, and a retry loop keyed on "an
+// error I do not recognise" will sit on a 2 MiB statement forever.
+//
+// A statement PostgreSQL refused is deliberately not here. A unique violation
+// may become insertable, a foreign key may arrive: those are facts about the
+// data at a moment, and the SQLSTATE predicates above are how a caller reads
+// them.
+func IsPermanent(err error) bool {
+	var storeErr *Error
+	if !errors.As(err, &storeErr) {
+		return false
+	}
+	switch storeErr.Status {
+	case statusInvalidRequest, statusUnsupported, statusLimitExceeded:
+		return true
+	}
+	return false
+}
+
 // IsCanceled reports that the caller's own deadline ended the statement.
 //
 // Distinct from unavailable: the database is fine and the statement may well be

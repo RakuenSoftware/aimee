@@ -387,3 +387,47 @@ func TestNoLengthBypassesTheFieldCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestAPermanentFailureIsDistinguishableFromAMoment(t *testing.T) {
+	// The question a caller with a retry loop actually asks: will sending this
+	// again help. Before IsPermanent it could name only the yes -- and a loop
+	// keyed on "an error I do not recognise" retries a statement over the size
+	// ceiling forever, because nothing it can call says otherwise.
+	permanent := []*Error{
+		{Status: statusInvalidRequest, Message: "statement is 2 MiB, over 1 MiB"},
+		{Status: statusUnsupported, Message: "no wire type for a []int64 column"},
+		{Status: statusLimitExceeded, SQLState: "54000", Message: "result exceeds 4096 rows"},
+	}
+	for _, err := range permanent {
+		if !IsPermanent(err) {
+			t.Errorf("status %d is not reported permanent; a caller retries it forever",
+				err.Status)
+		}
+		if IsUnavailable(err) {
+			t.Errorf("status %d reported as an outage", err.Status)
+		}
+	}
+
+	// The moment-shaped ones are not permanent. An outage ends, a deadline can
+	// be raised, and a unique violation may become insertable when the row that
+	// clashed is gone.
+	moments := []*Error{
+		{Status: statusUnavailable, SQLState: "08006", Message: "connection reset"},
+		{Status: statusStatementFailed, SQLState: "57014", Message: "deadline exceeded"},
+		{Status: statusStatementFailed, SQLState: "23505", Message: "duplicate key"},
+	}
+	for _, err := range moments {
+		if IsPermanent(err) {
+			t.Errorf("status %d/%s reported permanent; a caller stops retrying "+
+				"something that would have succeeded", err.Status, err.SQLState)
+		}
+	}
+
+	// Wrapped, and a non-storage error is neither.
+	if !IsPermanent(fmt.Errorf("loading grants: %w", permanent[0])) {
+		t.Error("wrapping hid a permanent failure")
+	}
+	if IsPermanent(errors.New("something else entirely")) {
+		t.Error("an unrelated error was called permanent")
+	}
+}
