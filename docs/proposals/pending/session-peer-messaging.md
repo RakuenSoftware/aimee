@@ -337,6 +337,16 @@ component at principal ref 31 in `src/modules/process-contracts.json`, the inven
 `tests/baselines/modules/canonical-inventory.yaml`, the dispatch case in
 `server-go/cmd/aimee-module/main.go`, and `docs/modules/aimee.md`.
 
+**Peer messaging now works end to end.** On a clean container with the full
+stack, two sessions db1 holds exchange a message over the real bus: 23 of 23
+probe checks pass twice consecutively, including the recipient draining the
+sender's exact text. See the validation record.
+
+The shipped default is still `NoDirectory`, because on db1's C store an absent
+session is indistinguishable from a broken one. `AIMEE_PEER_DIRECTORY=db1` wires
+the directory, which is how the end-to-end run was made, and it becomes the
+default when db1 runs the Go store that reports `missing`.
+
 **"Done" below means BUILT AND TESTED, which is not the same as reachable.** The
 distinction is not pedantic here: as deployed, the module has no session
 directory and nothing registers a session, so no session can exist and every

@@ -845,3 +845,64 @@ func TestOwnerMismatchIsNotAMalformedRequest(t *testing.T) {
 		t.Errorf("same-owner re-register: %v", err)
 	}
 }
+
+// A session the DIRECTORY vouches for can send and be sent to, without having
+// been registered here first.
+//
+// This is what a directory is for. The local map holds inboxes, labels and
+// wait-for edges -- state this module owns -- and a session appears in it once
+// somebody has dealt with that session. Requiring an entry to already exist
+// asked the wrong question: it refused a session db1 knows about merely because
+// no message had touched it yet.
+//
+// That is the "only holds what it has SEEN" hazard the Options comment warns
+// about for the inbox, arriving on the delivery path, where it is worse. An
+// inbox read that answers early is a missing message; a send that refuses is a
+// conversation that cannot start at all.
+func TestDirectoryVouchedSessionsCanExchangeWithoutRegistering(t *testing.T) {
+	r := New(Options{})
+	known := map[string]string{"A": "uid:1000", "B": "uid:1000"}
+	r.SetSessionOwner(func(id string) (string, error) {
+		if owner, ok := known[id]; ok {
+			return owner, nil
+		}
+		return "", ErrNoPeer
+	})
+
+	// Nothing was registered here. The directory is the only source of existence.
+	if _, err := r.Send("A", "B", "hello from the directory", SendOptions{}); err != nil {
+		t.Fatalf("send between directory-known sessions: %v", err)
+	}
+	got := r.Take("B", 10)
+	if len(got) != 1 || got[0].Text != "hello from the directory" {
+		t.Fatalf("B's inbox = %+v", got)
+	}
+	// Provenance is stamped from the directory's answer, not from the caller.
+	if got[0].FromSession != "A" || got[0].FromOwner != "uid:1000" {
+		t.Errorf("provenance = %+v", got[0])
+	}
+
+	// A session the directory does NOT know stays refused, and the two failures
+	// remain distinguishable: the sender is unknown, the recipient is absent.
+	if _, err := r.Send("ghost", "B", "hi", SendOptions{}); !errors.Is(err, ErrUnknownSender) {
+		t.Errorf("unknown sender = %v; want ErrUnknownSender", err)
+	}
+	if _, err := r.Send("A", "ghost", "hi", SendOptions{}); !errors.Is(err, ErrNoPeer) {
+		t.Errorf("unknown recipient = %v; want ErrNoPeer", err)
+	}
+}
+
+// With no directory, admission cannot happen and says so, rather than reporting
+// a verdict about a session it was never able to look up.
+func TestAdmissionWithoutADirectoryReportsNoDirectory(t *testing.T) {
+	r := New(Options{})
+	r.SetSessionOwner(func(string) (string, error) { return "", ErrNoDirectory })
+
+	_, err := r.Send("A", "B", "hi", SendOptions{})
+	if !errors.Is(err, ErrNoDirectory) {
+		t.Fatalf("send with no directory = %v; want ErrNoDirectory", err)
+	}
+	if errors.Is(err, ErrNoPeer) || errors.Is(err, ErrUnknownSender) {
+		t.Error("reported as a verdict about the session; the module could not look it up at all")
+	}
+}

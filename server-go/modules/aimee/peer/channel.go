@@ -64,6 +64,11 @@ func (r *Registry) ChannelJoin(name, sessionID string) error {
 	if !validChannelName(name) || sessionID == "" {
 		return ErrChannelNameBad
 	}
+	// Joining is admission too: a session the directory vouches for may join,
+	// and one it does not know may not.
+	if _, err := r.admit(sessionID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -164,6 +169,20 @@ func (r *Registry) ChannelSend(from, name, text string, opts SendOptions) ([]Del
 		to  string
 		msg Message
 		err error
+	}
+
+	// Admitted through the directory, exactly as a direct send is.
+	//
+	// This was missed when Send gained admission, and the hardware run caught it:
+	// the delivery stage answered from the directory while the channel stage
+	// still answered from the local map, so one sender got two different verdicts
+	// depending on which stage it used. A session the directory vouches for could
+	// message a peer directly and not a channel.
+	if _, err := r.admit(from); err != nil {
+		if errors.Is(err, ErrNoPeer) {
+			return nil, ErrUnknownSender
+		}
+		return nil, err
 	}
 
 	r.mu.Lock()

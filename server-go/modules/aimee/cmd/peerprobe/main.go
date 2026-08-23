@@ -70,6 +70,25 @@ func main() {
 		fmt.Printf("caller: %v\n", err)
 		os.Exit(2)
 	}
+	// The caller polls the bus's SHARED-MEMORY region from its own goroutine,
+	// and Detach unmaps that region. CloseAndWait says so in as many words:
+	// "It must run before the underlying Client is detached and its
+	// shared-memory region is unmapped."
+	//
+	// Without this the probe segfaulted AFTER printing "all checks passed" --
+	// every check green, then a fault in Control.Epoch reading through an
+	// unmapped page. Deferred here so it runs before the Detach deferred above
+	// it, and called explicitly on every os.Exit path below, because os.Exit
+	// runs no defers at all and those paths would keep the fault.
+	//
+	// Nothing in process can find this: there is no region to unmap, so the
+	// lifecycle rule has nothing to enforce it and the tests cannot fail.
+	defer caller.CloseAndWait()
+	exit := func(code int) {
+		caller.CloseAndWait()
+		client.Detach()
+		os.Exit(code)
+	}
 	fmt.Printf("attached to %s as principal %d/%d\n\n", socket, principalClass, principalRef)
 
 	call := func(stage, op uint32, cells []string) (peerwire.Status, []string, error) {
@@ -104,6 +123,25 @@ func main() {
 	//
 	// So the configuration is a finding in its own right, and the refusal
 	// assertions are made against it rather than against a hope.
+	// A TRANSPORT failure first, because every judgement below reads a status
+	// word that only means anything if the call was actually served.
+	//
+	// Found on hardware: with the module absent the bus answers "capability
+	// absent" and the status is left at its zero value, which is StatusOK. The
+	// test below then read ok != no_directory and reported wired=true -- "the
+	// module has a directory" about a module that was not running at all. Every
+	// subsequent check then asserted the wired expectations and failed for a
+	// reason that had nothing to do with what it was testing.
+	//
+	// Stopping here is the honest outcome: nothing downstream can be measured
+	// through a module that is not there.
+	if err != nil {
+		fmt.Printf("  FAIL  %-46s %v\n",
+			"delivery stage answered at all", err)
+		fmt.Println("\npeerprobe: the module is not serving its stages; nothing below can be measured")
+		exit(1)
+	}
+
 	wired := status != peerwire.StatusNoDirectory
 	if wired {
 		fmt.Println("  ....  module HAS a session directory; asserting real refusals")
@@ -116,6 +154,25 @@ func main() {
 	wantSender, wantSession := peerwire.StatusUnknownSender, peerwire.StatusNoPeer
 	if !wired {
 		wantSender, wantSession = peerwire.StatusNoDirectory, peerwire.StatusNoDirectory
+	}
+
+	// WHICH DIRECTORY IS THIS, one level below "is there one at all".
+	//
+	// A wired module's answer for an ABSENT session depends on the store behind
+	// it. db1's Go store reports Missing, which arrives as no_peer -- a fact the
+	// caller may act on. The C store returns -1 for a bad argument, a dead
+	// connection AND a row that is not there, and its stage maps any non-zero rc
+	// to FAILED, so absence arrives as unavailable.
+	//
+	// Both are accepted here and the observed one is REPORTED, because failing
+	// on the C store would be failing the probe for a defect in a component it
+	// does not own -- and an expected FAIL is how people learn to skim past
+	// failures. What must never happen is the third possibility: absence
+	// arriving as ok.
+	if wired && status == peerwire.StatusUnavailable {
+		fmt.Println("  ....  the directory CANNOT distinguish absent from broken; " +
+			"this is db1's C store (its Go store reports missing)")
+		wantSender, wantSession = peerwire.StatusUnavailable, peerwire.StatusUnavailable
 	}
 	check("unknown sender refused as a SERVED call", err == nil && status == wantSender,
 		fmt.Sprintf("status=%v (want %v, and no transport error)", status, wantSender))
@@ -198,10 +255,28 @@ func main() {
 	check("unadvertised stage 9 is not served", err != nil,
 		fmt.Sprintf("err=%v (want refusal)", err))
 
+	// ---- delivery, end to end ------------------------------------------
+	//
+	// Everything above is reachability and refusal, and every one of those
+	// checks passes against a module that can never deliver anything. This is
+	// the part that cannot: two sessions that really exist, a message that
+	// really crosses, and an inbox that really holds it.
+	//
+	// It runs only when a directory is wired, because without one no session
+	// can exist and there is nothing to send between. Skipped is reported as
+	// skipped rather than passed -- a run that could not try must not read like
+	// a run that succeeded.
+	if !wired {
+		fmt.Println("\ndelivery end to end: SKIPPED, no session directory (peer messaging is inert here)")
+	} else {
+		fmt.Println("\ndelivery end to end, between two sessions db1 actually holds:")
+		deliveryChecks(ctx, caller, call)
+	}
+
 	fmt.Println()
 	if failures > 0 {
 		fmt.Printf("peerprobe: %d check(s) FAILED\n", failures)
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Println("peerprobe: all checks passed")
 }
@@ -221,4 +296,99 @@ func mustFrame() []byte {
 		os.Exit(2)
 	}
 	return f
+}
+
+// db1's sessions family, addressed by the same bus formula. Op and status
+// numbers are db1's, not this module's: its 1 is MISSING where peerwire's is
+// no_peer, so they are named separately here and never crossed.
+const (
+	db1SessionsStage   uint32 = 6
+	db1OpSessionCreate uint32 = 1
+	db1OpSessionDelete uint32 = 4
+	db1StatusOK        uint32 = 0
+)
+
+// deliveryChecks proves the thing the rest of this probe cannot: that a message
+// sent by one real session arrives in another real session's inbox.
+//
+// The sessions are created in db1 over the bus rather than by a CLI, so the
+// module's directory reads them from the same store this probe wrote them to --
+// which is the point. Nothing here registers a session with the peer module; it
+// learns of them entirely through db1.
+func deliveryChecks(ctx context.Context, caller *bus.ConcurrentModuleCaller,
+	call func(stage, op uint32, cells []string) (peerwire.Status, []string, error)) {
+
+	// Unique per run: this module holds inboxes in memory and the store keeps
+	// rows, so fixed ids would make a second run collide with the first.
+	sessionA := fmt.Sprintf("probe-a-%d", os.Getpid())
+	sessionB := fmt.Sprintf("probe-b-%d", os.Getpid())
+	owner := fmt.Sprintf("uid:probe-%d", os.Getpid())
+
+	db1Call := func(op uint32, cells []string) (uint32, error) {
+		frame, err := peerwire.EncodeRequest(op, cells)
+		if err != nil {
+			return 0, err
+		}
+		reply, err := caller.Call(ctx, peerwire.EventKind(aimee.DB1PrincipalRef, db1SessionsStage),
+			db1SessionsStage, 0, callDeadline, frame)
+		if err != nil {
+			return 0, err
+		}
+		status, _, err := peerwire.DecodeReply(reply)
+		return status, err
+	}
+
+	// Cleanup is arranged before the rows exist, so a failure below still
+	// removes them.
+	defer func() {
+		for _, id := range []string{sessionA, sessionB} {
+			if _, err := db1Call(db1OpSessionDelete, []string{id}); err != nil {
+				fmt.Printf("  WARN  could not delete session %s: %v\n", id, err)
+			}
+		}
+	}()
+
+	for _, id := range []string{sessionA, sessionB} {
+		status, err := db1Call(db1OpSessionCreate, []string{id, "cli", owner})
+		check(fmt.Sprintf("db1 holds session %s", id), err == nil && status == db1StatusOK,
+			fmt.Sprintf("db1 status=%d err=%v", status, err))
+	}
+
+	// The module has never been told these sessions exist. It must learn that
+	// from db1 alone.
+	const body = "hello across the bus, from one session to another"
+	status, cells, err := call(peerwire.StageDelivery, peerwire.OpSend,
+		[]string{sessionA, sessionB, body, "", "0", "0"})
+	check("send between two directory-known sessions is accepted",
+		err == nil && status == peerwire.StatusOK,
+		fmt.Sprintf("status=%v err=%v", status, err))
+
+	sent, rowErr := peerwire.MessageRows(cells)
+	check("the send reply carries a stamped envelope",
+		rowErr == nil && len(sent) == 1 && sent[0].FromSession == sessionA && sent[0].FromOwner == owner,
+		fmt.Sprintf("rows=%d err=%v", len(sent), rowErr))
+
+	status, cells, err = call(peerwire.StageInbox, peerwire.OpInboxLen, []string{sessionB})
+	check("the recipient's inbox reports exactly one message",
+		err == nil && status == peerwire.StatusOK && len(cells) == 2 && cells[0] == "1",
+		fmt.Sprintf("status=%v cells=%v", status, cells))
+
+	// The payload itself. This is the only check in the probe that reads the
+	// text a sender actually wrote.
+	status, cells, err = call(peerwire.StageInbox, peerwire.OpInboxTake, []string{sessionB, "10"})
+	remaining, taken, takeErr := peerwire.TakeReply(cells)
+	check("DELIVERED: the recipient drains the sender's exact text",
+		err == nil && status == peerwire.StatusOK && takeErr == nil &&
+			len(taken) == 1 && taken[0].Text == body && taken[0].FromSession == sessionA,
+		fmt.Sprintf("status=%v remaining=%d rows=%d err=%v", status, remaining, len(taken), takeErr))
+
+	check("the drain reports nothing left behind", takeErr == nil && remaining == 0,
+		fmt.Sprintf("remaining=%d", remaining))
+
+	// Draining removed it: a second take must find the inbox empty rather than
+	// handing the same message out twice.
+	status, cells, err = call(peerwire.StageInbox, peerwire.OpInboxLen, []string{sessionB})
+	check("the drained message is gone, not re-delivered",
+		err == nil && status == peerwire.StatusOK && len(cells) == 2 && cells[0] == "0",
+		fmt.Sprintf("status=%v cells=%v", status, cells))
 }

@@ -99,6 +99,72 @@ after the cause. 69 is validation-only and is not declared in
 `process-contracts.json`; its grant is written by hand into the container and
 never shipped.
 
+## END TO END: two sessions exchange a message
+
+**The feature works.** On a clean Debian 13 container, against the current tree,
+with the whole stack running -- `aimee-server` hosting the bus, the config
+module, the C `db1` module over SQLite, and this module wired to db1's session
+family -- **23 of 23 checks pass, twice consecutively, `probe exit=0`**:
+
+```
+2026/08/23 21:15 aimee module: session directory = db1 sessions (kind 11782) as principal 1/67
+
+delivery end to end, between two sessions db1 actually holds:
+  PASS  db1 holds session probe-a-9768                 db1 status=0 err=<nil>
+  PASS  db1 holds session probe-b-9768                 db1 status=0 err=<nil>
+  PASS  send between two directory-known sessions is accepted status=ok err=<nil>
+  PASS  the send reply carries a stamped envelope      rows=1 err=<nil>
+  PASS  the recipient's inbox reports exactly one message status=ok cells=[1 0]
+  PASS  DELIVERED: the recipient drains the sender's exact text status=ok remaining=0 rows=1
+  PASS  the drain reports nothing left behind          remaining=0
+  PASS  the drained message is gone, not re-delivered  status=ok cells=[0 0]
+```
+
+Two sessions created in db1's own store over the bus, a message sent by one,
+carried across the real transport, landing in the other's inbox with the exact
+text, and gone after draining. Nothing registered those sessions with this
+module: it learned they exist entirely from db1.
+
+### What the end-to-end run found
+
+- **Sessions the directory vouches for could not send.** `Send` required a LOCAL
+  entry, so a session db1 knew about was refused until some message had already
+  touched it -- a conversation that could never start. The local map holds
+  inboxes and labels, which is this module's state; existence is db1's. Admission
+  through the directory now creates the entry on first use.
+- **The channel stage did not follow.** Fixed `Send` and not `ChannelSend`, so
+  one sender got two different verdicts depending on which stage it used: it
+  could message a peer directly and not a channel. Caught by the probe on
+  hardware, and now `Reply`, `Ask`, `ChannelJoin` and `ChannelSend` all admit the
+  same way.
+- **The probe reported a module that was not running as one WITH a directory.**
+  A `capability absent` transport error leaves the status word at its zero value,
+  which is `StatusOK`, so `ok != no_directory` read as wired. It now refuses to
+  judge anything until the call was actually served.
+- **A segfault after "all checks passed".** The probe's caller polls the bus's
+  shared-memory region from its own goroutine, and `Detach` unmaps it.
+  `CloseAndWait` says in as many words that it "must run before the underlying
+  Client is detached"; the probe never called it. Every check green, then a fault
+  in `Control.Epoch` reading through an unmapped page. Nothing in process can
+  find this -- there is no region to unmap, so the rule has nothing to enforce it.
+
+### Two characteristics, stated rather than left to be discovered
+
+**An absent session reports `unavailable`, not `no_peer`,** because the C store
+returns -1 for a bad argument, a dead connection and a missing row alike. The
+probe accepts either and names which it saw, since failing on a defect in another
+component teaches people to skim past failures. The Go store reports `missing`,
+and this becomes `no_peer` when db1 runs it.
+
+**A directory lookup blocks the handler.** With `db1` killed underneath a live
+module, a send waits on the directory call and the caller's own deadline expires
+first, so it sees a timeout rather than the `unavailable` the module would
+eventually return. This is the hazard `module.go` warns about in its own header:
+a handler that waits holds one of sixteen in-flight slots. It matters only when
+the store is unreachable, and it is a real cost of reading existence remotely.
+Recorded rather than patched at the end of a session, because a cache or a
+shorter deadline is a design decision and both need their own tests.
+
 ## Re-run against the current code
 
 The run recorded below was made at an earlier commit. Everything the module
@@ -195,6 +261,13 @@ to fail.
 | channel send by an unknown sender refused | pass |
 | members of an absent channel answers OK with none | pass |
 | unadvertised stage 9 is not served | pass |
+| db1 holds session (probe-a and probe-b) | pass |
+| send between two directory-known sessions is accepted | pass |
+| the send reply carries a stamped envelope | pass |
+| the recipient's inbox reports exactly one message | pass |
+| DELIVERED: the recipient drains the sender's exact text | pass |
+| the drain reports nothing left behind | pass |
+| the drained message is gone, not re-delivered | pass |
 
 The load-bearing result is the pair in the middle. A domain refusal
 (`unknown_sender`, `no_peer`) arrives as a **successful** bus call carrying a

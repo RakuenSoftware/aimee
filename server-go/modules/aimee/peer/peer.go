@@ -801,6 +801,53 @@ func validateText(text string) error {
 	return nil
 }
 
+// admit makes a session usable here on the strength of the DIRECTORY, creating
+// the local entry that holds this module's own state for it.
+//
+// Existence is not this module's fact. The local map holds inboxes, labels and
+// wait-for edges -- state this module owns -- and a session only appears in it
+// once somebody has dealt with that session. Requiring an entry to already be
+// there therefore asked the wrong question: it refused a session the directory
+// vouches for merely because no message had touched it yet, which is the
+// "registry only holds what it has SEEN" hazard the Options comment warns about,
+// reaching the delivery path.
+//
+// With no directory this cannot admit anything, and says so: ErrNoDirectory
+// rather than a verdict about the session.
+func (r *Registry) admit(sessionID string) (*session, error) {
+	r.mu.Lock()
+	if s, ok := r.sessions[sessionID]; ok {
+		r.mu.Unlock()
+		return s, nil
+	}
+	full := len(r.sessions) >= SessionsMax
+	r.mu.Unlock()
+
+	// Asked OUTSIDE the lock: the directory may be a bus call to db1, and
+	// holding the registry lock across it would stall every other peer while a
+	// remote store is slow.
+	owner, err := r.Owner(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if full {
+		return nil, ErrRegistryFull
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Re-checked: another caller may have admitted it while the lock was down.
+	if s, ok := r.sessions[sessionID]; ok {
+		return s, nil
+	}
+	if len(r.sessions) >= SessionsMax {
+		return nil, ErrRegistryFull
+	}
+	s := &session{id: sessionID, owner: owner, surface: "directory", lastSeen: r.opts.now()}
+	r.sessions[sessionID] = s
+	return s, nil
+}
+
 // Send delivers a message and returns immediately. It never takes the
 // receiver's turn: the message waits in the inbox until the receiver drains it,
 // so a turn in flight is neither interrupted nor raced.
@@ -814,6 +861,20 @@ func (r *Registry) Send(from, to, text string, opts SendOptions) (Message, error
 		return Message{}, ErrSelf
 	}
 	if err := validateText(text); err != nil {
+		return Message{}, err
+	}
+
+	// Admitted before the lock is taken, because admission may consult the
+	// directory. The sender's failure is reported as ErrUnknownSender and the
+	// recipient's as whatever the directory said, so "I do not know you" stays
+	// distinct from "there is no such peer" and from "the directory is down".
+	if _, err := r.admit(from); err != nil {
+		if errors.Is(err, ErrNoPeer) {
+			return Message{}, ErrUnknownSender
+		}
+		return Message{}, err
+	}
+	if _, err := r.admit(to); err != nil {
 		return Message{}, err
 	}
 
@@ -870,6 +931,19 @@ func (r *Registry) Reply(from string, to Message, text string) (Message, error) 
 	corr := to.CorrelationID
 	if corr == "" {
 		corr = to.ID
+	}
+
+	// Admitted for the same reason Send is: a reply is the second half of a
+	// conversation, and refusing it because no local entry exists yet would
+	// leave an ask answerable only by a session that had already been messaged.
+	if _, err := r.admit(from); err != nil {
+		if errors.Is(err, ErrNoPeer) {
+			return Message{}, ErrUnknownSender
+		}
+		return Message{}, err
+	}
+	if _, err := r.admit(to.FromSession); err != nil {
+		return Message{}, err
 	}
 
 	r.mu.Lock()
