@@ -1876,6 +1876,90 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "term_find_in_project",
+			stage: db2contract.StageTermFindInProject,
+			// Three statements against an empty index: the exact search finds
+			// nothing, so both LIKE tiers run too. That is the only way to see
+			// all three plan.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTermFindInProjectRequest(
+					liveProbeScopeProject, "live_probe_symbol")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeTermFindInProjectReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "term_find_excluding_project",
+			stage: db2contract.StageTermFindExcludingProject,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTermFindExcludingProjectRequest(
+					liveProbeScopeProject, "live_probe_symbol")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeTermFindExcludingProjectReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_edges_for_entity",
+			stage: db2contract.StageEntityEdgesForEntity,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityEdgesForEntityRequest("live-probe-entity", 32)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityEdgesForEntityReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_edges_by_token",
+			stage: db2contract.StageEntityEdgesByToken,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityEdgesByTokenRequest("live-probe-token", 32)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityEdgesByTokenReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_neighbors_weighted",
+			stage: db2contract.StageEntityNeighborsWeighted,
+			// A regex guard over a text column feeding an interval subtraction,
+			// inside a union wrapped in a subselect. Whether PostgreSQL accepts
+			// that shape is the whole question here.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityNeighborsWeightedRequest(
+					"live-probe-entity", 32, 1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityNeighborsWeightedReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "entity_neighbors_filtered",
+			stage: db2contract.StageEntityNeighborsFiltered,
+			// The ordered branch, because the sort is appended to a statement
+			// built by concatenation and the LIMIT parameter follows it.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityNeighborsFilteredRequest(
+					"live-probe-entity", "depends_on", "used_by", 1, 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityNeighborsFilteredReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
