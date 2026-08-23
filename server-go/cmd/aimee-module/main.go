@@ -15,6 +15,8 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
+	"github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
@@ -302,6 +304,25 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// the module reduces without warming up.
 		config.Handler = economizer.NewHandlerWithStore(
 			economizerStore(ctx, moduleBusSocket))
+	case "aimee":
+		config.ModuleName = name
+		config.PrincipalRef = aimee.PrincipalRef
+		// The module hosts capabilities; peer messaging is the first. A second
+		// capability is another argument here, not a restructure.
+		//
+		// The registry is process-local today: inboxes and grants live in
+		// memory and do not survive a bounce. Durable storage arrives through
+		// the postgres module's generic wire and changes nothing here.
+		module, err := aimee.New(aimee.NewPeer(peer.New(peer.Options{}), nil))
+		if err != nil {
+			// A stage conflict is a programming error in the capability list,
+			// not a runtime condition: refusing to advertise is better than
+			// advertising a stage served by the wrong owner.
+			log.Printf("aimee module unavailable: %v", err)
+			return bus.ModuleProcessConfig{}, false
+		}
+		config.Stages = module.Stages()
+		config.Handler = module.Handle
 	case "postgres":
 		config.ModuleName = name
 		config.PrincipalRef = 28

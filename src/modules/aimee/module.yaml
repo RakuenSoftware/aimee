@@ -1,0 +1,35 @@
+{
+  "descriptor_version": 1,
+  "id": "aimee",
+  "dependencies": [
+    "audit",
+    "config",
+    "db1",
+    "execution-policy",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "go_sources": [
+    "server-go/modules/aimee/module.go",
+    "server-go/modules/aimee/peer_capability.go",
+    "server-go/modules/aimee/wire.go",
+    "server-go/modules/aimee/peer/peer.go",
+    "server-go/modules/aimee/peer/http.go",
+    "server-go/modules/aimee/cmd/peerprobe/main.go",
+    "server-go/modules/aimee/peer/channel.go"
+  ],
+  "go_tests": [
+    "server-go/modules/aimee/module_test.go",
+    "server-go/modules/aimee/wire_test.go",
+    "server-go/modules/aimee/peer/peer_test.go",
+    "server-go/modules/aimee/peer/http_test.go",
+    "server-go/modules/aimee/peer/channel_test.go",
+    "server-go/modules/aimee/cmd/peerprobe/main_test.go"
+  ],
+  "docs": [
+    "docs/modules/aimee.md"
+  ]
+}

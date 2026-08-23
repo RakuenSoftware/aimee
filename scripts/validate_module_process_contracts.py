@@ -24,11 +24,20 @@ PROCESS_REQUIRED = {
     # It is deliberately absent from GO_PROCESSES below: its implementation is
     # still C, which the contract permits and which no other process is yet.
     "db1",
+    # aimee is the home for aimee-server-specific functionality. Required for the
+    # same reason db1 is: a server without it is not a smaller server. Being
+    # optional was also actively wrong -- an optional module with
+    # enabled_by_default false is declared and never spawned, which is how peer
+    # messaging came to be green in every test and absent from server.modules.
+    "aimee",
 }
 GO_PROCESSES = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
     "runtime-web", "control-web", "benchmarks", "sandbox", "economizer", "postgres",
+    # aimee is Go-only from the start: it was created after the Go-first ruling
+    # in docs/dev/GO_REWRITE.md, so it never had a C implementation to migrate.
+    "aimee",
 }
 # Executables that host a process other than the module runtime's multicall binary.
 HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}

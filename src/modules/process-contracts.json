@@ -756,6 +756,37 @@
           "event_kind": 11795
         }
       ]
+    },
+    {
+      "execution": "process",
+      "id": "aimee",
+      "placements": [
+        "server"
+      ],
+      "principal_ref": 31,
+      "runtime": "go",
+      "stages": [
+        {
+          "event_kind": 12033,
+          "id": 1,
+          "name": "peer-delivery"
+        },
+        {
+          "event_kind": 12034,
+          "id": 2,
+          "name": "peer-inbox"
+        },
+        {
+          "event_kind": 12035,
+          "id": 3,
+          "name": "peer-grant"
+        },
+        {
+          "event_kind": 12036,
+          "id": 4,
+          "name": "peer-channel"
+        }
+      ]
     }
   ],
   "clients": [

@@ -1,0 +1,235 @@
+# aimee module
+
+The core module for functionality specific to **aimee-server**, served as a bus
+process. Principal ref `31`; outbound client ref `67` (`aimee-db1`). Runtime Go,
+sources under `server-go/modules/aimee/`.
+
+## Purpose and non-goals
+
+`aimee` is where aimee-server-specific domain logic lives, as distinct from the
+generic `postgres` module (which owns PostgreSQL and carries nothing
+domain-specific) and the `control-plane` module (which takes the aimee-kb side).
+It was created after the Go-first ruling in `docs/dev/GO_REWRITE.md`, so it has
+no C implementation to migrate from.
+
+Today it carries **session peer messaging**: the verb by which one aimee session
+addresses another as a peer rather than as a delegate or a client.
+
+Non-goals: it does not own the session directory (`db1` does), it does not own
+turn arbitration (the C presence registry does), and it is not a general
+pub/sub bus — the module event bus is the event substrate.
+
+## Public contracts
+
+Stages, whose event kinds derive from the bus formula
+`4096 + principal_ref*256 + stage` rather than being written by hand:
+
+- `peer-delivery` (stage 1, kind 12033): `OpSend`, `OpReply`, `OpCancelWait`.
+- `peer-inbox` (stage 2, kind 12034): `OpInboxLen`, `OpInboxPeek`, `OpInboxTake`.
+- `peer-grant` (stage 3, kind 12035): `OpGrant`, `OpRevoke`, `OpGrantExists`.
+- `peer-channel` (stage 4, kind 12036): `OpChannelJoin`, `OpChannelLeave`,
+  `OpChannelSend`, `OpChannelMembers`.
+
+The wire is `db1-fields-v2`, reused rather than reinvented:
+`op(u32) | field_count(u32) | (len(u32) | bytes) * field_count` for requests and
+the same shape with a leading `status(u32)` for responses.
+
+## Dependencies and consumers
+
+- `audit`: peer sends are action-class events; the tap records each with its
+  verdict.
+- `config`: hop ceiling and inbox bounds.
+- `db1`: the session directory (`server_sessions`) and, once durable, the
+  `peer_inbox` and `peer_grants` families.
+- `execution-policy`: the pre-delivery verdict on an action-class send.
+- `module-runtime`: process lifecycle, admission, and the stage table.
+
+Consumers are the session/turn layer when a model invokes a peer verb, the `/v1`
+surface for thin clients, and `protocols` for MCP/ACP once external agents can
+address aimee sessions.
+
+## Providers and readiness
+
+The module is ready as soon as its stages are advertised: `Stages()` is static
+and its handlers hold no external connection. `DirectorySource` is the one
+optional provider — when absent the registry falls back to its own in-memory
+view, which exists for tests and for bringing a process up before `db1` is
+reachable, and is never a second source of truth in production.
+
+Binding it binds **one** resolution path: `NewPeer` installs the source into the
+registry as well, so a caller arriving over the bus and one arriving over `/v1`
+cannot get different answers to the same question. Leaving those separate is how
+a module ends up authoritative for one surface and guessing for another.
+
+The negative is the case that matters. A caller told "no such peer" correctly
+stops asking, so a wrong negative is silent and terminal: no error is raised, no
+retry happens, and nothing ever revisits it. An authoritative negative is a
+fact; a fallback negative is a guess, and the two are worth telling apart.
+
+## Configuration and activation
+
+- `runtime_toggle.supported`: `false`. The module is either admitted at startup
+  or absent; there is no live enable/disable, because a session mid-ask would
+  have no defined outcome if delivery vanished underneath it.
+
+The module is **required** rather than optional, so it carries no
+`enabled_by_default` key at all. It was briefly optional, which was actively
+wrong: an optional module with `enabled_by_default` false is declared and never
+spawned, which is how peer messaging came to be green in every test and absent
+from `server.modules`.
+
+Bounds are compile-time defaults in `peer`: `SessionsMax`, `GrantsMax`,
+`InboxMax`, `ChannelsMax`, `ChannelMembersMax`, `DefaultMaxHops`,
+`MaxTextBytes`, `DefaultWaitExpiry`.
+
+Every collection the module owns is bounded, and the first two were not: the C
+registry capped both the session table and the grant table, the Go port dropped
+both caps, and the bounds comment went on asserting a property the code no
+longer had. An unbounded grant table is also an unbounded authorization surface.
+Both refuse at the ceiling rather than evicting, since evicting would discard an
+inbox somebody is waiting on and choose the victim by map order.
+
+## Surfaces
+
+Bus stages are the module's interface to other modules. A `/v1` HTTP edge in
+`peer/http.go` serves thin clients directly: `GET /v1/sessions/peers`,
+`POST /v1/sessions/{id}/peer`, `GET /v1/sessions/{id}/inbox`,
+`POST /v1/sessions/{id}/inbox/take`, and `POST /v1/peers/grants`.
+
+There is deliberately **no label-write route**. A label is db1's
+`server_sessions.title`, and a second WRITE path to another module's state is
+worse than a second read path: the copies diverge silently, and the divergence
+surfaces later as an authoritative lookup reporting no-such-label for a name
+somebody believes they set. Label writes belong to db1's session family;
+`Registry.SetLabel` survives only as a test and bring-up helper, reachable from
+no surface.
+
+That edge fails closed: without an `Authorize` hook every session route answers
+503, because a peer surface that authorizes by accident is worse than one that
+is switched off.
+
+## Data and migrations
+
+Inboxes and grants are the module's own state. Durable storage arrives through
+the `postgres` module's generic wire under owner `aimee`, with `peer_inbox`
+numbered version 1 and `peer_grants` version 2 — explicit numbers rather than
+values derived from sorted filenames, so a file whose name later sorts into the
+middle cannot renumber the history and invalidate every recorded checksum.
+
+**Length checks on these tables must use `octet_length`, never `length`.**
+`length()` counts characters and a byte buffer holds bytes; at the same number
+they disagree the moment a value is non-ASCII, and the check passes while the
+buffer overflows. `text`, `from_owner` and `from_label` are all candidates, and
+`text` most of all — a peer message body is the most likely thing in this system
+to carry multi-byte characters. The cheap detection rule needs no C header and
+no wire declaration: a `length()`-checked `TEXT` column with no ASCII-restricting
+regex is suspect on its own.
+
+The same confusion has a Go form, already fixed here: `Preview` bounds a
+notification excerpt in BYTES but cuts at a rune boundary, because slicing a
+string at a byte offset splits whatever character straddles it and puts invalid
+UTF-8 into a live notification.
+
+**A test database must be created UTF8 with `TEMPLATE template0`.** Under
+`SQL_ASCII` — which is what `initdb` gives you by default in a bare container —
+`char_length()` and `octet_length()` are the same function, so an assertion
+about the difference between them passes whether or not the schema is right.
+That is unfalsifiable on precisely the property it exists to prove. Check the
+encoding before trusting any `octet_length` assertion here.
+
+`db1` carries no cross-family foreign keys, so `peer_inbox` cannot reference
+`server_sessions` and nothing cascades when a session is deleted. The rule is
+therefore explicit: **an inbox row whose session no longer exists is
+undeliverable, not delivered.** The message was never drained, so recording it
+as delivered would put a falsehood in the audit trail. The sweep runs after
+`server_session_delete_expired` rather than on a timer of its own, so it cannot
+race ahead of the lifecycle that creates the orphans.
+
+## Security and privacy
+
+**A peer is not an operator.** Peer content carries no authority: it cannot
+grant, widen, or borrow a receiver's capabilities, and a receiver's
+`execution-policy` decision is always evaluated against the receiver's own
+principal. A message must never be rendered as a user turn or satisfy a
+confirmation.
+
+Provenance is unforgeable because `FromSession`, `FromOwner` and `FromLabel` are
+read from the sender's own directory entry under the registry lock, never taken
+from an argument. Same-owner peering is implicit; crossing owners requires a
+directed grant, and a grant says nothing about the reverse direction.
+
+## Supported journeys
+
+A model in session A lists its peers, addresses one by label, and sends. The
+message waits in B's inbox until B drains it at the head of its next turn, so a
+turn in flight is neither interrupted nor raced.
+
+For an answer, A sends with `expect_reply`, which records the wait-for edge and
+returns immediately; A then polls its own inbox for the correlated reply. A
+Codex-backed session and a Claude-backed session converse this way with no
+vendor-specific code, because a peer is addressed by session id and its backend
+is invisible to the sender.
+
+## Tests and failure behavior
+
+`server-go/modules/aimee/module_test.go` pins the stage advertisement against
+`process-contracts.json`; `wire_test.go` covers framing, NUL rejection, row
+division and status mapping; `peer/peer_test.go` and `peer/http_test.go` cover
+the registry and the HTTP edge under `-race`.
+
+Failure behavior distinguishes three levels deliberately. A malformed frame is
+`ModuleStatusInvalidRequest` — the module could not understand the question. A
+refusal (`hop_limit`, `cycle`, `denied`, `inbox_full`, `no_peer`) is a
+**successful** invocation carrying a domain status, because collapsing those two
+would leave the tap unable to tell "the module is broken" from "the module said
+no". And a question whose truthful answer is negative — does this grant exist,
+is there mail — answers `StatusOK` with the "no" in a field, because a tap
+seeing a steady rate of non-OK cannot tell working-as-designed from broken.
+
+The test for which of the last two applies is whether the caller must do
+something differently. `denied` on a send is a refusal; `grant_exists` returning
+false is an answer. One case sits on the line and is deliberately a refusal:
+reading the inbox of a session that does not exist, since "no such session" and
+"no mail" are indistinguishable as a count, and answering `StatusOK` with zero
+rows is how a caller polling for a reply waits forever on a session that was
+torn down.
+
+## Operational diagnostics
+
+`OpInboxLen` reports both depth and a monotonic `dropped` count, so an inbox
+that overflowed is diagnosable rather than silently lossy. `OpChannelSend`
+answers `StatusOK` for the FAN-OUT and carries a per-recipient outcome in each
+row, so a partial delivery is visible rather than collapsed into one word.
+`OpInboxTake` leads its reply with the number of messages REMAINING, because
+rows alone cannot distinguish a complete drain from a capped one and a caller
+that assumes the former simply stops asking. Every refusal has a
+distinct status name (`Status.String`) rather than collapsing into
+`bad_request`.
+
+The bus caps a module at `moduleMaxInFlight` (16) and refuses the seventeenth
+invocation with a generic `Internal` status that does not read as backpressure.
+No handler here blocks, specifically so that ceiling is never reached by waiting.
+
+## Compatibility
+
+Message rows are a fixed width and new cells **append**, so a reader built
+against an older width never has its field numbering shift underneath it. A list
+reply carries no row count: the caller divides by the row width and refuses a
+remainder rather than accepting a short final row.
+
+Stage ids and event kinds are stable once declared; a stage declared in
+`process-contracts.json` but not advertised by `Stages()` is never available and
+every call to it returns `CAPABILITY_ABSENT` while the module runs normally.
+
+## Extension and removal
+
+New capabilities join as new stages with the next free stage id, appended to both
+`Stages()` and the component's `stages` in `process-contracts.json` — the two
+are compared by test, so neither can drift. New Go files must be added to
+`go_sources` in `src/modules/aimee/module.yaml`; an undeclared file owning state
+is the defect this module's own history illustrates.
+
+Removing a stage means removing it from both places in the same change. The
+module can be removed entirely only when no session depends on peer addressing,
+since a caller blocked on `expect_reply` resolves through its own inbox rather
+than through a live connection.
