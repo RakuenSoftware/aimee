@@ -61,11 +61,24 @@ module's own state, so there is no second answer to reconcile for them; what is
 not local is whether the session behind a label still exists, and a label match
 is confirmed against the directory before it is handed out.
 
-`Exists` and `Owner` share one implementation. Two functions answering nearly the
-same question is how they come to disagree, and they did: one short-circuited on
-a local entry while the other let the directory's denial outrank one. The second
-is right, because under the undeliverable rule mail held for a departed session
-is exactly what that session leaves behind rather than evidence it is there.
+**Existence has three answers, not two:** present, definitely absent, and
+could-not-say. db1 distinguishes them (`StatusOK`, `StatusMissing`, a failure)
+and the Go caller side preserves the status word, so this module preserves it
+too: `ErrNoPeer` for a definite absence, `ErrDirectoryUnavailable` for a
+directory that did not answer, and `StatusUnavailable` on the wire.
+
+That is the one refusal a caller should retry on. Every other status here is a
+fact about the request; this one is a fact about the moment. Reporting it as
+`no_peer` would turn a momentary outage into a permanent conclusion, since a
+caller told "no such peer" correctly stops asking, and would let the
+undeliverable sweep destroy mail on a transient fault.
+
+`Owner` is the single decision point, and there is no separate `Exists`: two
+functions answering nearly the same question is how they come to disagree, and
+they did. One short-circuited on a local entry while the other let the
+directory's denial outrank one. The second is right, because under the
+undeliverable rule mail held for a departed session is exactly what that session
+leaves behind rather than evidence it is there.
 
 The negative is the case that matters. A caller told "no such peer" correctly
 stops asking, so a wrong negative is silent and terminal: no error is raised, no

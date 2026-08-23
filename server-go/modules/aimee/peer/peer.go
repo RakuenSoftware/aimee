@@ -126,6 +126,12 @@ var (
 	ErrShutdown      = errors.New("peer: registry shut down while waiting")
 	ErrRegistryFull  = errors.New("peer: session registry is full")
 	ErrGrantsFull    = errors.New("peer: grant table is full")
+	// ErrDirectoryUnavailable is the directory failing to ANSWER, which is not
+	// the same as answering that a session is gone. A departed session is a
+	// fact to act on; an unreachable directory is a reason to try again. Told
+	// apart because collapsing them turns a transient fault into a terminal
+	// refusal, and would let a sweep destroy mail on a momentary outage.
+	ErrDirectoryUnavailable = errors.New("peer: directory did not answer")
 )
 
 // Message is one peer message and its envelope. Everything before Text is
@@ -207,9 +213,14 @@ type Options struct {
 	// conversation as it happens rather than only in an audit query.
 	// Called WITHOUT the registry lock held.
 	Notify func(sessionID string, m Message)
-	// SessionOwner reports a session's owner principal, and by returning false
-	// reports that it does not exist. One hook rather than two, because that is
-	// the shape the directory actually has: db1 answers both from one row.
+	// SessionOwner reports a session's owner principal, or why it cannot.
+	//
+	// THREE outcomes, because the directory has three. db1's session lookup
+	// answers OK, MISSING or a failure, and the Go caller side preserves the
+	// status word rather than collapsing it. An implementation returns
+	// ErrNoPeer for a definite absence and any other error for "I could not
+	// answer" -- returning ErrNoPeer on a transport failure would report a live
+	// session as gone.
 	//
 	// Set it for the same reason as Resolve, and it is the more dangerous of the
 	// two to leave unset. This registry only holds an entry for a session it has
@@ -218,7 +229,7 @@ type Options struct {
 	// and answering "no such session" for it inverts the very distinction the
 	// inbox stage exists to make: the truthful answer is "no mail", an empty
 	// inbox, not a missing peer. A caller told the latter stops asking.
-	SessionOwner func(sessionID string) (string, bool)
+	SessionOwner func(sessionID string) (string, error)
 	// MaxHops overrides DefaultMaxHops when > 0.
 	MaxHops int
 	// now is injectable for tests.
@@ -392,7 +403,7 @@ func (r *Registry) SetLabel(sessionID, label string) error {
 // SetSessionOwner binds the authoritative owner lookup, for the same reason and
 // at the same moment as SetResolver. Passing nil restores the in-memory
 // fallback.
-func (r *Registry) SetSessionOwner(owner func(sessionID string) (string, bool)) {
+func (r *Registry) SetSessionOwner(owner func(sessionID string) (string, error)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.opts.SessionOwner = owner
@@ -401,7 +412,7 @@ func (r *Registry) SetSessionOwner(owner func(sessionID string) (string, bool)) 
 // Owner reports a session's owner principal, preferring the directory that owns
 // it. A caller needs this to scope a label lookup to the right principal, and
 // reading it from the local map would scope against a copy.
-func (r *Registry) Owner(sessionID string) (string, bool) {
+func (r *Registry) Owner(sessionID string) (string, error) {
 	r.mu.Lock()
 	lookup := r.opts.SessionOwner
 	s, local := r.sessions[sessionID]
@@ -412,15 +423,25 @@ func (r *Registry) Owner(sessionID string) (string, bool) {
 	r.mu.Unlock()
 
 	if lookup != nil {
-		if owner, ok := lookup(sessionID); ok {
-			return owner, true
+		owner, err := lookup(sessionID)
+		if err == nil {
+			return owner, nil
 		}
-		// The directory denies it. A local entry means we hold mail for a
-		// session that no longer exists, which is undeliverable rather than
-		// addressable.
-		return "", false
+		if errors.Is(err, ErrNoPeer) {
+			// A definite absence. A local entry means we hold mail for a session
+			// that no longer exists, which is undeliverable rather than
+			// addressable.
+			return "", ErrNoPeer
+		}
+		// The directory could not answer. Saying "gone" here would be a guess
+		// with the shape of a fact, and the caller's correct response to "gone"
+		// is to stop.
+		return "", fmt.Errorf("%w: %v", ErrDirectoryUnavailable, err)
 	}
-	return localOwner, local
+	if local {
+		return localOwner, nil
+	}
+	return "", ErrNoPeer
 }
 
 // Lookup resolves (owner, label) to a session id. An empty owner searches every
@@ -448,7 +469,13 @@ func (r *Registry) Lookup(owner, label string) (string, bool) {
 	}
 	r.mu.Unlock()
 
-	if candidate == "" || !r.Exists(candidate) {
+	if candidate == "" {
+		return "", false
+	}
+	// Confirm the session behind the label still exists. An unanswerable
+	// directory is deliberately treated as unresolved rather than absent: the
+	// caller retries instead of concluding the peer is gone.
+	if _, err := r.Owner(candidate); err != nil {
 		return "", false
 	}
 	return candidate, true
@@ -967,24 +994,6 @@ func (r *Registry) Inbox(sessionID string) []Message {
 	out := make([]Message, len(s.inbox))
 	copy(out, s.inbox)
 	return out
-}
-
-// Exists reports whether a session is addressable.
-//
-// It delegates to Owner rather than deciding separately: two functions answering
-// nearly the same question is how they come to disagree, and they did. Exists
-// short-circuited on a local entry ("holding mail is proof enough") while Owner
-// let the directory's denial outrank one. Under the undeliverable rule the
-// second is right: mail held for a session that no longer exists is undeliverable
-// rather than evidence the session is there.
-//
-// Callers need this to tell "no mail" from "no such session". Those look
-// identical in a message count, and conflating them is how a poller waits
-// forever on a session that was torn down: the loop that should have failed
-// fast instead reads zero and goes round again.
-func (r *Registry) Exists(sessionID string) bool {
-	_, ok := r.Owner(sessionID)
-	return ok
 }
 
 // Len reports how many messages are waiting.

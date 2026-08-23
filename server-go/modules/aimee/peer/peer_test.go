@@ -694,12 +694,9 @@ func TestRegistryAndGrantTablesAreBounded(t *testing.T) {
 //
 // An earlier version deferred label resolution to the directory, on the reading
 // that a peer label is db1's server_sessions.title. That column has no writer at
-// all: the session insert stores the literal empty string and nothing updates
-// it. Deferring to a writer that does not exist would have left peer addressing
-// with nobody able to set a name.
-//
-// A title is a display name; a label is the handle peer messaging is addressed
-// by. Matching them by column shape rather than meaning was the error.
+// all, so deferring to it would have left peer addressing with nobody able to
+// set a name. A title is a display name; a label is an address. Matching them by
+// column shape rather than meaning was the error.
 func TestLabelsAreOwnedHereAndConfirmedAgainstTheDirectory(t *testing.T) {
 	r, _ := newTestRegistry(t, "A", "B")
 	if err := r.SetLabel("A", "reviewer"); err != nil {
@@ -710,87 +707,113 @@ func TestLabelsAreOwnedHereAndConfirmedAgainstTheDirectory(t *testing.T) {
 	if !ok || got != "A" {
 		t.Fatalf("lookup = %q,%v; want A,true", got, ok)
 	}
-	// Scoped by owner: a label is unique per principal, not globally.
 	if _, ok := r.Lookup("uid:9999", "reviewer"); ok {
 		t.Error("a label resolved for the wrong owner")
 	}
 
-	// The one thing that is NOT local is whether the session still exists. A
-	// label pointing at a departed session must not be handed out, or a caller
-	// is sent somewhere unreachable.
-	r.SetSessionOwner(func(id string) (string, bool) { return "uid:1000", id != "A" })
+	// A label pointing at a departed session must not be handed out: the caller
+	// would be sent somewhere unreachable.
+	r.SetSessionOwner(func(id string) (string, error) {
+		if id == "A" {
+			return "", ErrNoPeer
+		}
+		return "uid:1000", nil
+	})
 	if got, ok := r.Lookup("uid:1000", "reviewer"); ok {
 		t.Errorf("resolved %q to a session the directory says is gone", got)
 	}
-	// With the directory agreeing it exists, it resolves again.
-	r.SetSessionOwner(func(id string) (string, bool) { return "uid:1000", true })
-	if _, ok := r.Lookup("uid:1000", "reviewer"); !ok {
-		t.Error("a live session's label did not resolve")
-	}
 }
 
-// Existence must be answered by whoever owns the directory, for the same reason
-// resolution is -- and this one is the more dangerous of the pair.
+// Existence has THREE answers, because the directory has three: present,
+// definitely absent, and could-not-say.
 //
-// The registry only holds an entry for a session it has SEEN: one that
-// registered in process, or that somebody has messaged. A session db1 knows
-// about but nobody has yet written to has no entry here. Answering "no such
-// session" for it INVERTS the distinction the inbox stage exists to make: the
-// truthful answer is "no mail", and a caller told "no such peer" stops asking.
-func TestExistsAsksTheDirectoryForSessionsItHasNotSeen(t *testing.T) {
+// Collapsing the last two is the defect this design keeps meeting. A caller told
+// "no such peer" stops asking, so reporting an unreachable directory that way
+// turns a momentary outage into a permanent conclusion -- and if the
+// undeliverable sweep ever ran on it, into destroyed mail.
+func TestOwnerDistinguishesAbsentFromUnanswerable(t *testing.T) {
 	r, _ := newTestRegistry(t, "seen")
 
-	// Without a hook, only what the registry has seen exists.
-	if !r.Exists("seen") {
-		t.Error("a registered session should exist")
+	// No hook: the local map answers, and absence is a definite ErrNoPeer.
+	if owner, err := r.Owner("seen"); err != nil || owner != "uid:1000" {
+		t.Fatalf("local owner = %q,%v; want uid:1000,nil", owner, err)
 	}
-	if r.Exists("known-to-db1") {
-		t.Error("fallback claimed a session it has never seen")
+	if _, err := r.Owner("never-seen"); !errors.Is(err, ErrNoPeer) {
+		t.Fatalf("local absence = %v; want ErrNoPeer", err)
 	}
 
-	var asked []string
-	r.SetSessionOwner(func(id string) (string, bool) {
-		asked = append(asked, id)
-		return "uid:1000", id == "known-to-db1"
+	r.SetSessionOwner(func(id string) (string, error) {
+		switch id {
+		case "known-to-db1":
+			return "uid:2000", nil
+		case "departed":
+			return "", ErrNoPeer
+		default:
+			return "", errors.New("store unreachable")
+		}
 	})
 
-	// The directory knows it, so it exists and its inbox is merely EMPTY.
-	if !r.Exists("known-to-db1") {
-		t.Error("a session the directory knows was reported missing")
+	// Present: the directory's owner wins over any local copy.
+	if owner, err := r.Owner("known-to-db1"); err != nil || owner != "uid:2000" {
+		t.Errorf("directory owner = %q,%v; want uid:2000,nil", owner, err)
 	}
-	if n := r.Len("known-to-db1"); n != 0 {
-		t.Errorf("len = %d; want 0 -- no mail, which is not the same as no session", n)
+	// Definitely absent: a fact the caller may act on.
+	if _, err := r.Owner("departed"); !errors.Is(err, ErrNoPeer) {
+		t.Errorf("departed = %v; want ErrNoPeer", err)
 	}
-	// The directory does not know this one, so it really is missing.
-	if r.Exists("never-existed") {
-		t.Error("a session the directory denies was reported present")
+	// Could not say: NOT absence. This is the one a caller retries.
+	_, err := r.Owner("anything-else")
+	if !errors.Is(err, ErrDirectoryUnavailable) {
+		t.Errorf("unanswerable = %v; want ErrDirectoryUnavailable", err)
 	}
-
-	// The directory OUTRANKS a local entry. Holding mail for a session is not
-	// evidence the session exists: under the undeliverable rule that mail is
-	// exactly what a departed session leaves behind. Exists and Owner therefore
-	// share one implementation, because two functions answering nearly the same
-	// question is how they came to disagree.
-	if r.Exists("seen") {
-		t.Error("a locally-held session the directory denies was reported present")
+	if errors.Is(err, ErrNoPeer) {
+		t.Error("an unreachable directory was reported as a missing session")
 	}
 
-	// Owner comes from the same hook, so a label lookup is scoped against the
-	// principal the DIRECTORY reports rather than a local copy of it.
-	if owner, ok := r.Owner("known-to-db1"); !ok || owner != "uid:1000" {
-		t.Errorf("Owner = %q,%v; want uid:1000,true", owner, ok)
-	}
-	// The directory denying a session outranks a local entry: holding mail for a
-	// session that no longer exists is undeliverable, not addressable.
-	if _, ok := r.Owner("seen"); ok {
-		t.Error("a locally-held session the directory denies was reported addressable")
+	// A locally-held session is not evidence against the directory: under the
+	// undeliverable rule, held mail is what a departed session leaves behind.
+	r.SetSessionOwner(func(string) (string, error) { return "", ErrNoPeer })
+	if _, err := r.Owner("seen"); !errors.Is(err, ErrNoPeer) {
+		t.Errorf("locally-held but denied = %v; want ErrNoPeer", err)
 	}
 
 	r.SetSessionOwner(nil)
-	if r.Exists("known-to-db1") {
-		t.Error("clearing the hook did not restore the fallback")
+	if _, err := r.Owner("seen"); err != nil {
+		t.Errorf("clearing the hook did not restore the fallback: %v", err)
 	}
-	if owner, ok := r.Owner("seen"); !ok || owner != "uid:1000" {
-		t.Errorf("fallback Owner = %q,%v; want uid:1000,true", owner, ok)
+}
+
+// The directory hook is read under the lock and called outside it: it crosses a
+// process boundary and must never run while the registry mutex is held, and
+// SetSessionOwner can race a concurrent Owner. Run under -race, this is the
+// proof.
+func TestDirectoryHookSwapIsSafeUnderConcurrency(t *testing.T) {
+	r, _ := newTestRegistry(t, "A")
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if i%2 == 0 {
+				r.SetSessionOwner(func(string) (string, error) { return "uid:1000", nil })
+			} else {
+				r.SetSessionOwner(nil)
+			}
+		}
+	}()
+
+	for i := 0; i < 500; i++ {
+		// A hook that called back into the registry would deadlock if Owner held
+		// the mutex while calling out. It does not, so this returns.
+		r.Owner("A")
 	}
+	close(stop)
+	wg.Wait()
 }

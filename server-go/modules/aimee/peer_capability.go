@@ -23,9 +23,14 @@ import (
 // it is per-session state of exactly the kind this module already owns
 // alongside inboxes. So labels are owned here, and only EXISTENCE is deferred.
 type DirectorySource interface {
-	// Owner reports a session's owner principal, and by returning false reports
-	// that the session does not exist.
-	Owner(sessionID string) (string, bool)
+	// Owner reports a session's owner principal, or why it cannot.
+	//
+	// Return peer.ErrNoPeer for a definite absence and any other error for "I
+	// could not answer". db1 distinguishes these (StatusMissing versus a
+	// failure) and the Go caller side preserves the status word, so collapsing
+	// them here would discard a distinction the store took care to make -- and
+	// would report a live session as gone whenever the store hiccups.
+	Owner(sessionID string) (string, error)
 }
 
 // PeerCapability serves session peer messaging: the verb by which one aimee
@@ -171,8 +176,12 @@ func (c *PeerCapability) inbox(op uint32, cells []string) ([]byte, error) {
 	// reading zero and going round again instead of failing fast. Every read
 	// below is otherwise "I understood, and the answer is none", which is a
 	// legitimate peerwire.StatusOK.
-	if !c.registry.Exists(cells[0]) {
-		return refuse(peerwire.StatusNoPeer)
+	if _, err := c.registry.Owner(cells[0]); err != nil {
+		// Three outcomes, not two. A departed session is no_peer and the caller
+		// should stop; a directory that did not answer is unavailable and the
+		// caller should retry. Reporting the second as the first turns a
+		// momentary outage into a permanent conclusion.
+		return refuse(peerwire.StatusFor(err))
 	}
 	switch op {
 	case peerwire.OpInboxLen:

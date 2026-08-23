@@ -140,8 +140,8 @@ func (h *httpAPI) resolveTarget(from string, req sendRequest) (string, bool) {
 	// Ask the registry rather than reaching into its map: the owner must come
 	// from whoever owns the directory, and scoping a label lookup against a
 	// local copy scopes it against the wrong thing.
-	owner, ok := h.reg.Owner(from)
-	if !ok {
+	owner, err := h.reg.Owner(from)
+	if err != nil {
 		return "", false
 	}
 	return h.reg.Lookup(owner, req.ToLabel)

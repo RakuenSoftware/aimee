@@ -152,6 +152,11 @@ const (
 	StatusNoChannel
 	StatusNotMember
 	StatusChannelFull
+	// StatusUnavailable is a dependency that did not ANSWER, which is not the
+	// same as answering no. It is the one status here a caller should RETRY on:
+	// every other refusal is a fact about the request, this one is a fact about
+	// the moment.
+	StatusUnavailable
 )
 
 // StatusFor maps a registry error onto its wire status.
@@ -187,6 +192,8 @@ func StatusFor(err error) Status {
 		return StatusNotMember
 	case errors.Is(err, peer.ErrChannelFull), errors.Is(err, peer.ErrChannelsFull):
 		return StatusChannelFull
+	case errors.Is(err, peer.ErrDirectoryUnavailable):
+		return StatusUnavailable
 	default:
 		return StatusBadRequest
 	}
@@ -225,6 +232,8 @@ func (s Status) String() string {
 		return "not_member"
 	case StatusChannelFull:
 		return "channel_full"
+	case StatusUnavailable:
+		return "unavailable"
 	default:
 		return "bad_request"
 	}
