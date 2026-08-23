@@ -1487,6 +1487,35 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "kb_purge_fence_read",
+			stage: db2contract.StageKBPurgeFenceRead,
+			// A self-join over kb_runtime_state with a cast from text to
+			// timestamp and a parameterised interval. The cast is the part worth
+			// running: a fake never evaluates it, and a heartbeat written in the
+			// wrong format would only fail here.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBPurgeFenceReadRequest(liveProbeFenceProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, err := db2contract.DecodeKBPurgeFenceReadReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_file_index_get",
+			stage: db2contract.StageKBFileIndexGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBFileIndexGetRequest(
+					liveProbeScopeProject, "docs/live-probe.md")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, err := db2contract.DecodeKBFileIndexGetReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -2893,6 +2922,44 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "kb_ingest_queue_complete",
+			stage: db2contract.StageKBIngestQueueComplete,
+			seed:  []string{liveProbeIngestJob},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBIngestQueueCompleteRequest(900017, 7, 90, 88)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBIngestQueueCompleteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the completion did not run")
+				}
+			},
+		},
+		{
+			name:  "kb_doc_set_state",
+			stage: db2contract.StageKBDocSetState,
+			// The clearing branch, because it is the one that writes three
+			// columns and the one review_needed's type has to accept a boolean
+			// literal for.
+			seed: []string{liveProbeReviewDoc},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocSetStateRequest(
+					900018, "published", 1, "live probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBDocSetStateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the state change did not run")
+				}
+			},
+		},
 	}
 }
 
@@ -3078,6 +3145,20 @@ const (
  VALUES ('project_purging:live-probe-purge-project',
  'live-probe-generation live-probe-purge')
  ON CONFLICT (state_key) DO UPDATE SET state_value = EXCLUDED.state_value`
+)
+
+// A queued ingest job and a document awaiting review, for the two KB write
+// probes. Both operations acknowledge a statement that matched nothing, so
+// without a row to act on neither probe would prove anything about the write.
+const (
+	liveProbeIngestJob = `INSERT INTO kb_ingest_queue
+ (id, project, root_path, status)
+ VALUES (900017, 'live-probe-project', '/live-probe', 'running')`
+	liveProbeReviewDoc = `INSERT INTO docs
+ (id, content_hash, filename, state, review_needed, review_reason,
+ created_at, updated_at)
+ VALUES (900018, 'live-probe-hash', 'live-probe.md', 'staged', true, 'seeded',
+ '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
