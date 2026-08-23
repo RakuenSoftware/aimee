@@ -10,7 +10,7 @@ natively, and for ordinary embedding widths that is the whole story: the vectors
 sit in the same database as the rows they belong to, in the same transaction,
 with no second system to operate, back up or keep consistent.
 
-What the default cannot do is very large vectors. Measured against
+What the default cannot do is wide vectors. Measured against
 pgvectorscale 0.9.0 on PostgreSQL 17:
 
 | index | element type | largest dimension that builds |

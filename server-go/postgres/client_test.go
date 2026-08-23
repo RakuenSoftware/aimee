@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -280,5 +281,60 @@ func TestBytesRoundTripThroughTheCodec(t *testing.T) {
 	}
 	if value.Type != typeBytes || !bytes.Equal(value.Bytes, raw) {
 		t.Fatalf("bytes did not survive: %#v", value)
+	}
+}
+
+func TestTheClientAgreesWithTheWireAboutStatusNumbers(t *testing.T) {
+	// A second transcription of the same numbering, so a second pin. The module
+	// side has the matching test; either one edited alone leaves both suites
+	// green and the two ends disagreeing about what a 5 means.
+	for _, c := range []struct {
+		name  string
+		value uint32
+		want  uint32
+	}{
+		{"OK", statusOK, 0},
+		{"InvalidRequest", statusInvalidRequest, 1},
+		{"Unsupported", statusUnsupported, 2},
+		{"LimitExceeded", statusLimitExceeded, 3},
+		{"StatementFailed", statusStatementFailed, 4},
+		{"Unavailable", statusUnavailable, 5},
+		{"MigrationFailed", statusMigrationFailed, 6},
+	} {
+		if c.value != c.want {
+			t.Errorf("status%s = %d, and the wire says %d", c.name, c.value, c.want)
+		}
+	}
+}
+
+func TestARetryableFailureIsDistinguishableFromARejectedOne(t *testing.T) {
+	// The distinction a caller acts on: the server objected to the statement, or
+	// the server never saw it. Retrying the first gets the same objection
+	// forever; not retrying the second abandons a healthy query over a blink.
+	unavailable := &Error{Status: statusUnavailable, SQLState: "08006",
+		Message: "connection reset"}
+	rejected := &Error{Status: statusStatementFailed, SQLState: "23505",
+		Message: "duplicate key"}
+	canceled := &Error{Status: statusStatementFailed, SQLState: "57014",
+		Message: "context deadline exceeded"}
+
+	if !IsUnavailable(unavailable) {
+		t.Error("an outage did not report as unavailable")
+	}
+	if IsUnavailable(rejected) || IsUnavailable(canceled) {
+		t.Error("a statement the server read and answered reported as an outage")
+	}
+	if !IsCanceled(canceled) {
+		t.Error("an expired deadline did not report as cancelled")
+	}
+	if IsCanceled(rejected) || IsCanceled(unavailable) {
+		t.Error("something that was not cancelled reported as cancelled")
+	}
+	if !IsUniqueViolation(rejected) {
+		t.Error("the existing predicates stopped working")
+	}
+	// Wrapped, since callers rarely hold the error bare.
+	if !IsUnavailable(fmt.Errorf("loading grants: %w", unavailable)) {
+		t.Error("wrapping hid the outage")
 	}
 }

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"syscall"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -37,19 +40,46 @@ func NewSQLHandler() *SQLHandler {
 	return &SQLHandler{store: &poolSchemaStore{}, transactions: newTransactionTable()}
 }
 
-// sqlState pulls the five-character SQLSTATE out of a driver error.
+// classifyFailure decides which fact a driver error actually carries, and which
+// five-character SQLSTATE says so.
 //
-// It crosses the wire because a caller cannot retry sensibly without it: a
-// unique violation is often an expected answer, a foreign key violation is a
-// caller error, and a lost connection is an outage. Collapsing all three into
-// "failed" is what forces a caller to guess, and db1 today has a comment
-// working around exactly that absence.
-func sqlState(err error) string {
+// The SQLSTATE crosses the wire because a caller cannot retry sensibly without
+// it: a unique violation is often an expected answer, a foreign key violation is
+// a caller error, and a lost connection is an outage. Collapsing all three into
+// "failed" is what forces a caller to guess, and db1 today has a comment working
+// around exactly that absence.
+//
+// If PostgreSQL rejected the statement it sent an ErrorResponse, which pgx
+// surfaces as a *pgconn.PgError with a SQLSTATE. So the absence of a PgError is
+// evidence, not an absence of evidence: it means the server never rejected
+// anything, and reporting "statement failed" would send the caller to rewrite a
+// statement that was never read.
+//
+// Two other outcomes can be named. The caller's deadline expired, which is a
+// cancelled statement (57014, the same code PostgreSQL returns when its own
+// statement_timeout fires). Or the connection failed, which is an outage
+// (08006) and a different repair entirely.
+//
+// Anything else keeps StatusStatementFailed. Guessing "unavailable" for an
+// unfamiliar client-side error would be this same collapse pointing the other
+// way.
+func classifyFailure(err error) (uint32, string, string) {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
-		return pgErr.Code
+		return StatusStatementFailed, pgErr.Code, err.Error()
 	}
-	return ""
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return StatusStatementFailed, sqlStateQueryCanceled, err.Error()
+	}
+	var connErr *pgconn.ConnectError
+	var netErr net.Error
+	if errors.As(err, &connErr) || errors.As(err, &netErr) ||
+		errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EPIPE) {
+		return StatusUnavailable, sqlStateConnectionFailure, err.Error()
+	}
+	return StatusStatementFailed, "", err.Error()
 }
 
 // bind converts one wire value into something pgx can send.
@@ -210,16 +240,16 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 	if request.Op == OpExec {
 		tag, execErr := run.Exec(ctx, request.SQL, args...)
 		if execErr != nil {
-			return EncodeError(StatusStatementFailed, sqlState(execErr),
-				execErr.Error()), bus.ModuleStatusOK
+			status, state, detail := classifyFailure(execErr)
+			return EncodeError(status, state, detail), bus.ModuleStatusOK
 		}
 		return EncodeExecReply(uint64(tag.RowsAffected())), bus.ModuleStatusOK
 	}
 
 	rows, queryErr := run.Query(ctx, request.SQL, args...)
 	if queryErr != nil {
-		return EncodeError(StatusStatementFailed, sqlState(queryErr),
-			queryErr.Error()), bus.ModuleStatusOK
+		status, state, detail := classifyFailure(queryErr)
+		return EncodeError(status, state, detail), bus.ModuleStatusOK
 	}
 	defer rows.Close()
 
@@ -228,8 +258,8 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 	for rows.Next() {
 		raw, valueErr := rows.Values()
 		if valueErr != nil {
-			return EncodeError(StatusStatementFailed, sqlState(valueErr),
-				valueErr.Error()), bus.ModuleStatusOK
+			status, state, detail := classifyFailure(valueErr)
+			return EncodeError(status, state, detail), bus.ModuleStatusOK
 		}
 		if len(collected) >= MaxReplyRows {
 			// Refused, not truncated. A caller handed exactly the ceiling
@@ -247,8 +277,8 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 		collected = append(collected, row)
 	}
 	if rows.Err() != nil {
-		return EncodeError(StatusStatementFailed, sqlState(rows.Err()),
-			rows.Err().Error()), bus.ModuleStatusOK
+		status, state, detail := classifyFailure(rows.Err())
+		return EncodeError(status, state, detail), bus.ModuleStatusOK
 	}
 	return EncodeQueryReply(width, collected), bus.ModuleStatusOK
 }
@@ -276,8 +306,8 @@ func (h *SQLHandler) begin(ctx context.Context, invocation bus.ModuleInvocation)
 	tx, beginErr := conn.Begin(ctx)
 	if beginErr != nil {
 		conn.Release()
-		return EncodeError(StatusStatementFailed, sqlState(beginErr),
-			beginErr.Error()), bus.ModuleStatusOK
+		status, state, detail := classifyFailure(beginErr)
+		return EncodeError(status, state, detail), bus.ModuleStatusOK
 	}
 	handle, handleErr := newHandle()
 	if handleErr != nil {
@@ -314,7 +344,8 @@ func (h *SQLHandler) finish(ctx context.Context, invocation bus.ModuleInvocation
 		err = entry.tx.Rollback(ctx)
 	}
 	if err != nil {
-		return EncodeError(StatusStatementFailed, sqlState(err), err.Error()), bus.ModuleStatusOK
+		status, state, detail := classifyFailure(err)
+		return EncodeError(status, state, detail), bus.ModuleStatusOK
 	}
 	return EncodeAckReply(), bus.ModuleStatusOK
 }
@@ -333,7 +364,15 @@ func (h *SQLHandler) migrate(ctx context.Context, request Request) ([]byte, bus.
 			"checksum does not match the statements sent"), bus.ModuleStatusOK
 	}
 	if _, err := Migrate(ctx, h.store, migration); err != nil {
-		return EncodeError(StatusMigrationFailed, sqlState(err), err.Error()), bus.ModuleStatusOK
+		// A migration PostgreSQL rejected and a migration it never received are
+		// opposite repairs: the first must never be retried, the second must be.
+		// Reporting both as MigrationFailed stops a rollout that a connection
+		// blip would only have delayed.
+		status, state, detail := classifyFailure(err)
+		if status == StatusStatementFailed {
+			status = StatusMigrationFailed
+		}
+		return EncodeError(status, state, detail), bus.ModuleStatusOK
 	}
 	return EncodeAckReply(), bus.ModuleStatusOK
 }
@@ -344,7 +383,11 @@ func (h *SQLHandler) currentVersion(ctx context.Context, request Request) (
 ) {
 	version, checksum, err := CurrentVersionAndChecksum(ctx, h.store, request.Owner)
 	if err != nil {
-		return EncodeError(StatusMigrationFailed, sqlState(err), err.Error()), bus.ModuleStatusOK
+		status, state, detail := classifyFailure(err)
+		if status == StatusStatementFailed {
+			status = StatusMigrationFailed
+		}
+		return EncodeError(status, state, detail), bus.ModuleStatusOK
 	}
 	return EncodeCurrentVersionReply(uint64(version), checksum), bus.ModuleStatusOK
 }

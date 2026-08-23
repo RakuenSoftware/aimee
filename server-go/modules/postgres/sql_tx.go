@@ -52,6 +52,11 @@ const (
 	// truncated: a caller handed exactly the ceiling cannot tell a capped
 	// answer from a complete one.
 	sqlStateResultTooLarge = "54000"
+	// A statement that did not finish, and a connection that did not answer.
+	// 57014 is what PostgreSQL itself returns when statement_timeout fires, so a
+	// caller-side deadline reports the same fact the server would have.
+	sqlStateQueryCanceled     = "57014"
+	sqlStateConnectionFailure = "08006"
 
 	// How long a transaction may sit idle before it is reclaimed. A caller that
 	// has stopped talking is holding a pooled connection hostage, and the pool

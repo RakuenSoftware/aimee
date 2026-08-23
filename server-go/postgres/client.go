@@ -106,6 +106,25 @@ func IsCheckViolation(err error) bool { return hasState(err, "23514") }
 // IsNotNullViolation reports a missing required value.
 func IsNotNullViolation(err error) bool { return hasState(err, "23502") }
 
+// IsUnavailable reports that the statement never reached PostgreSQL.
+//
+// This is the one failure worth retrying unchanged. Every other error above
+// says the server read the statement and objected to something in it, so
+// sending it again gets the same objection; this one says the server never saw
+// it. A caller that cannot tell them apart either retries a bad statement
+// forever or gives up on a healthy one because a connection blinked.
+func IsUnavailable(err error) bool {
+	var storeErr *Error
+	return errors.As(err, &storeErr) && storeErr.Status == statusUnavailable
+}
+
+// IsCanceled reports that the caller's own deadline ended the statement.
+//
+// Distinct from unavailable: the database is fine and the statement may well be
+// fine, but the time allowed for it ran out. The repair is a longer deadline or
+// a cheaper query, not a retry of the same call with the same budget.
+func IsCanceled(err error) bool { return hasState(err, "57014") }
+
 func hasState(err error, state string) bool {
 	var storeErr *Error
 	return errors.As(err, &storeErr) && storeErr.SQLState == state

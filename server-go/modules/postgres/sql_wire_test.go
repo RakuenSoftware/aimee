@@ -2,9 +2,17 @@ package postgres
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 	"math"
+	"net"
+	"syscall"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // encodeValue mirrors what a client sends, so the tests drive the decoder with
@@ -236,5 +244,84 @@ func TestStatusIntegersAreTheContract(t *testing.T) {
 		if c.value != c.want {
 			t.Errorf("Status%s = %d, and the wire says %d", c.name, c.value, c.want)
 		}
+	}
+}
+
+func TestAFailureIsClassifiedByWhatActuallyHappened(t *testing.T) {
+	// Each case is a fact a caller acts on differently. Before these were
+	// separated, the last three all arrived as StatusStatementFailed with an
+	// empty SQLSTATE -- "your statement is wrong" for a statement PostgreSQL
+	// never read.
+	for _, c := range []struct {
+		name       string
+		err        error
+		wantStatus uint32
+		wantState  string
+	}{
+		{
+			// The server read the statement and refused it. The only case where
+			// rewriting the statement is the repair.
+			name:       "the server rejected it",
+			err:        &pgconn.PgError{Code: "23505", Message: "duplicate key"},
+			wantStatus: StatusStatementFailed,
+			wantState:  "23505",
+		},
+		{
+			// Wrapped, because a driver error rarely arrives bare.
+			name:       "wrapped rejection",
+			err:        fmt.Errorf("exec: %w", &pgconn.PgError{Code: "23503"}),
+			wantStatus: StatusStatementFailed,
+			wantState:  "23503",
+		},
+		{
+			name:       "the caller's deadline expired",
+			err:        context.DeadlineExceeded,
+			wantStatus: StatusStatementFailed,
+			wantState:  sqlStateQueryCanceled,
+		},
+		{
+			name:       "the call was cancelled",
+			err:        fmt.Errorf("query: %w", context.Canceled),
+			wantStatus: StatusStatementFailed,
+			wantState:  sqlStateQueryCanceled,
+		},
+		{
+			name:       "the connection was closed under us",
+			err:        fmt.Errorf("write: %w", net.ErrClosed),
+			wantStatus: StatusUnavailable,
+			wantState:  sqlStateConnectionFailure,
+		},
+		{
+			name:       "the peer reset it",
+			err:        fmt.Errorf("read: %w", syscall.ECONNRESET),
+			wantStatus: StatusUnavailable,
+			wantState:  sqlStateConnectionFailure,
+		},
+		{
+			name:       "the stream ended mid-message",
+			err:        io.ErrUnexpectedEOF,
+			wantStatus: StatusUnavailable,
+			wantState:  sqlStateConnectionFailure,
+		},
+		{
+			// Deliberately unchanged. Guessing "unavailable" for an error we
+			// cannot name would be the same collapse pointing the other way, so
+			// an unfamiliar client-side error keeps the status it had and says
+			// nothing it cannot support.
+			name:       "something we cannot name",
+			err:        errors.New("pgx: could not encode argument"),
+			wantStatus: StatusStatementFailed,
+			wantState:  "",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			status, state, detail := classifyFailure(c.err)
+			if status != c.wantStatus || state != c.wantState {
+				t.Errorf("status = %d/%q, want %d/%q", status, state, c.wantStatus, c.wantState)
+			}
+			if detail == "" {
+				t.Error("the detail was dropped; the caller is left with a number")
+			}
+		})
 	}
 }
