@@ -6,6 +6,8 @@
 
 #include "modules/db2/c/approach_failures.h"
 
+#include <aimee/learning/policy_arms.h>
+
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -254,16 +256,35 @@ int learning_approach_recall(const char *goal, learning_approach_hit_t *out, int
 #endif
 }
 
-int learning_approach_render(const char *goal, char *out, size_t out_len)
+int learning_approach_render(const char *goal, char *out, size_t out_len, char *arm_out,
+                             size_t arm_out_len)
 {
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
    if (!out || out_len == 0)
       return 0;
    out[0] = '\0';
+
+   /* Whether this block is worth its tokens is a question, not a constant. */
+   char arm[LEARNING_POLICY_ARM_LEN] = LEARNING_POLICY_ADVISORY_FULL;
+   (void)learning_policy_select(LEARNING_POLICY_PLAN_ADVISORY, arm, sizeof(arm));
+   if (arm_out && arm_out_len)
+      snprintf(arm_out, arm_out_len, "%s", arm);
+
+   if (strcmp(arm, LEARNING_POLICY_ADVISORY_OFF) == 0)
+      return 0; /* the control arm: say nothing, so the block can be measured */
 
    learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
    int n = learning_approach_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
    if (n <= 0)
       return 0;
+
+   if (strcmp(arm, LEARNING_POLICY_ADVISORY_BRIEF) == 0)
+   {
+      snprintf(out, out_len, "%d approach%s to a goal like this one has already failed.", n,
+               n == 1 ? "" : "es");
+      return n;
+   }
 
    /* Reports, does not instruct: the planner is told what was tried and what
     * happened, and decides for itself. An imperative here would turn advisory

@@ -11,6 +11,7 @@
 #include "eval_synthesis.h" /* the regression-candidate surface stubbed below */
 #include <aimee/learning/approach_memory.h>
 #include <aimee/learning/attribution.h>
+#include "curiosity_resolve.h"
 #include "kb_client.h"       /* kb_health_t for the stub below */
 #include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
@@ -441,11 +442,14 @@ int learning_approach_recall(const char *goal, learning_approach_hit_t *out, int
    return max > 0 ? 0 : -1;
 }
 
-int learning_approach_render(const char *goal, char *out, size_t out_len)
+int learning_approach_render(const char *goal, char *out, size_t out_len, char *arm_out,
+                             size_t arm_out_len)
 {
    (void)goal;
    if (out && out_len)
       out[0] = '\0';
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
    return 0;
 }
 
@@ -454,6 +458,18 @@ int eval_attribution_for_suite(const char *suite_or_null, learning_attribution_t
    (void)suite_or_null;
    (void)out;
    return max > 0 ? 0 : -1;
+}
+
+/* The backlog drain reaches DB2; this test proves routing, not resolution. */
+int curiosity_resolve_pass(int budget, curiosity_resolve_stats_t *out)
+{
+   if (out)
+   {
+      memset(out, 0, sizeof(*out));
+      out->budget = budget > 0 ? budget : CURIOSITY_RESOLVE_DEFAULT_BUDGET;
+      out->no_probe = 1;
+   }
+   return 0;
 }
 
 int server_load_token(server_ctx_t *ctx)

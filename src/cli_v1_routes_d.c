@@ -174,6 +174,7 @@ static const struct
     {"eval.candidates-update", pt_print_eval_candidates_update},
     {"learning.approaches", pt_print_learning_approaches},
     {"learning.attribution", pt_print_learning_attribution},
+    {"learning.resolve", pt_print_learning_resolve},
     {"identity.show", pt_print_identity_show},
     {"api.status", pt_print_api_status},
     {"api.enable", pt_print_api_status},

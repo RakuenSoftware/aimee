@@ -80,9 +80,15 @@ extern "C"
 
    /* Render recalled dead ends as a short advisory block for a plan-time
     * prompt, or write "" when there is nothing to say. Never blocks and never
-    * instructs — it reports what was tried and what happened. Returns the
-    * number of hits rendered. */
-   int learning_approach_render(const char *goal, char *out, size_t out_len);
+    * instructs — it reports what was tried and what happened.
+    *
+    * WHICH form is rendered is a measurable decision, not a constant: the
+    * LEARNING_POLICY_PLAN_ADVISORY arms decide between saying nothing, one
+    * line, or the full block (S6). `arm_out` receives the arm that was used
+    * (may be NULL). Returns the number of hits rendered — 0 when the chosen
+    * arm says nothing, which is a legitimate outcome and not a failure. */
+   int learning_approach_render(const char *goal, char *out, size_t out_len, char *arm_out,
+                                size_t arm_out_len);
 
 #ifdef __cplusplus
 }

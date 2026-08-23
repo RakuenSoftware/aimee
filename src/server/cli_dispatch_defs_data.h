@@ -251,6 +251,7 @@
     {"eval", "candidates-update", "eval.candidates-update", NULL, NULL, 120000},
     {"learning", "approaches", "learning.approaches", NULL, NULL, 0},
     {"learning", "attribution", "learning.attribution", NULL, NULL, 0},
+    {"learning", "resolve", "learning.resolve", NULL, NULL, 120000},
     {"identity", "show", "identity.show", NULL, NULL, 0},
     {"identity", "snapshot", "identity.snapshot", NULL, NULL, 0},
     {"identity", "diff", "identity.diff", NULL, NULL, 0},

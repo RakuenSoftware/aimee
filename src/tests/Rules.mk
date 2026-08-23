@@ -686,6 +686,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-learning-regret \
                $(TESTPREFIX)/unit-test-approach-memory \
                $(TESTPREFIX)/unit-test-learning-attribution \
+               $(TESTPREFIX)/unit-test-policy-arms \
+               $(TESTPREFIX)/unit-test-curiosity-resolve \
                $(TESTPREFIX)/unit-test-eval-candidates \
                $(TESTPREFIX)/unit-test-memory-recall-pivot \
                $(TESTPREFIX)/unit-test-memory-filter \
@@ -6937,12 +6939,25 @@ $(TESTPREFIX)/unit-test-learning-metrics: $(OBJDIR)/tests/test_learning_metrics.
                      $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-curiosity-resolve: $(OBJDIR)/tests/test_curiosity_resolve.o \
+                     $(OBJDIR)/curiosity_resolve.o \
+                     $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-policy-arms: $(OBJDIR)/tests/test_policy_arms.o \
+                     $(OBJDIR)/modules/learning/learning_policy_arms.o \
+                     $(OBJDIR)/modules/learning/learning_approach_memory.o \
+                     $(OBJDIR)/modules/learning/learning_endogeneity.o \
+                     $(OBJDIR)/db2/approach_failures.o \
+                     $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-learning-attribution: $(OBJDIR)/tests/test_learning_attribution.o \
                      $(OBJDIR)/modules/learning/learning_attribution.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-approach-memory: $(OBJDIR)/tests/test_approach_memory.o \
-                     $(OBJDIR)/modules/learning/learning_approach_memory.o \
+                     $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -6967,7 +6982,7 @@ $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o 
                      $(OBJDIR)/modules/db1/eval.o \
                      $(OBJDIR)/modules/db1/agent_jobs.o \
                      $(OBJDIR)/posix/agent_runtime_support.o \
-                     $(OBJDIR)/modules/learning/learning_approach_memory.o \
+                     $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(OBJDIR)/db2/approach_failures.o \
                      $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

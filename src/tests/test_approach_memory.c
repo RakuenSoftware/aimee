@@ -130,8 +130,8 @@ static void test_recall_surfaces_the_dead_end(void)
 static void test_render_reports_and_never_instructs(void)
 {
    char out[2048];
-   int n =
-       learning_approach_render("Rebuild the search index for the docs project", out, sizeof(out));
+   int n = learning_approach_render("Rebuild the search index for the docs project", out,
+                                    sizeof(out), NULL, 0);
    assert(n >= 1);
    assert(strstr(out, "drop and re-ingest every document") != NULL);
    assert(strstr(out, "ran out of disk") != NULL);
@@ -145,7 +145,7 @@ static void test_render_reports_and_never_instructs(void)
    assert(strstr(out, "never") == NULL);
 
    /* Nothing similar: nothing said, rather than an empty header. */
-   n = learning_approach_render("write the quarterly board report", out, sizeof(out));
+   n = learning_approach_render("write the quarterly board report", out, sizeof(out), NULL, 0);
    assert(n == 0);
    assert(out[0] == '\0');
 }

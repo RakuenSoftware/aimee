@@ -40,6 +40,8 @@
 #include "eval_synthesis.h" /* synthesised regression candidates (S1) */
 #include <aimee/learning/approach_memory.h>
 #include <aimee/learning/attribution.h>
+#include <aimee/learning/policy_arms.h>
+#include "curiosity_resolve.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -243,8 +245,12 @@ int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
     * does not have to re-derive the wording (and cannot turn it into an
     * instruction by accident). */
    char rendered[2048];
-   (void)learning_approach_render(goal, rendered, sizeof(rendered));
+   char arm[LEARNING_POLICY_ARM_LEN] = "";
+   (void)learning_approach_render(goal, rendered, sizeof(rendered), arm, sizeof(arm));
    cJSON_AddStringToObject(resp, "advisory", rendered);
+   /* Which arm produced it: a caller measuring whether the block earns its
+    * tokens needs to know which variant it is measuring. */
+   cJSON_AddStringToObject(resp, "advisory_arm", arm);
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);
@@ -279,6 +285,33 @@ int handle_learning_attribution(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
       cJSON_AddBoolToObject(o, "attributable", arms[i].attributable);
       cJSON_AddItemToArray(arr, o);
    }
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_learning_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   curiosity_resolve_stats_t stats;
+   int resolved = curiosity_resolve_pass(server_eval_json_int(req, "budget", 0), &stats);
+   if (resolved < 0)
+      return server_send_error(conn, "learning.resolve: could not read the backlog", request_id);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "resolved", stats.resolved);
+   cJSON_AddNumberToObject(resp, "considered", stats.considered);
+   cJSON_AddNumberToObject(resp, "still_open", stats.still_open);
+   cJSON_AddNumberToObject(resp, "unknown", stats.unknown);
+   cJSON_AddNumberToObject(resp, "skipped", stats.skipped);
+   cJSON_AddNumberToObject(resp, "budget", stats.budget);
+   /* Say so loudly rather than reporting a successful pass that closed
+    * nothing because it had no way to decide. */
+   cJSON_AddBoolToObject(resp, "no_probe", stats.no_probe);
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);

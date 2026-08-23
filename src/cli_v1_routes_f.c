@@ -172,6 +172,33 @@ void pt_print_learning_attribution(const char *method, cJSON *resp)
    }
 }
 
+cJSON *marshal_learning_resolve(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("learning.resolve");
+   const char *budget = cli_args_get(&opts, "budget");
+   if (budget)
+      cJSON_AddNumberToObject(req, "budget", atoi(budget));
+   return req;
+}
+
+void pt_print_learning_resolve(const char *method, cJSON *resp)
+{
+   (void)method;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "no_probe")))
+   {
+      printf("No evidence probe is installed, so nothing was closed.\n"
+             "Closing gaps without a way to check them would empty the backlog by assertion.\n");
+      return;
+   }
+   printf("resolved %d of %d considered (budget %d)\n", json_int(resp, "resolved", 0),
+          json_int(resp, "considered", 0), json_int(resp, "budget", 0));
+   printf("  %d still open, %d undecided, %d skipped as needing a judgement\n",
+          json_int(resp, "still_open", 0), json_int(resp, "unknown", 0),
+          json_int(resp, "skipped", 0));
+}
+
 static void print_eval_run(cJSON *resp)
 {
    cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "results");

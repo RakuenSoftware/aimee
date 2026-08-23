@@ -17,6 +17,7 @@
     "src/modules/learning/learning_eval_synthesis.c",
     "src/modules/learning/learning_evidence.c",
     "src/modules/learning/learning_attribution.c",
+    "src/modules/learning/learning_policy_arms.c",
     "src/modules/learning/learning_regret.c",
     "src/modules/learning/learning_implicit.c",
     "src/modules/learning/learning_router.c",
@@ -33,6 +34,7 @@
     "src/modules/learning/include/aimee/learning/approach_memory.h",
     "src/modules/learning/include/aimee/learning/attribution.h",
     "src/modules/learning/include/aimee/learning/eval_synthesis.h",
+    "src/modules/learning/include/aimee/learning/policy_arms.h",
     "src/modules/learning/include/aimee/learning/learning.h",
     "src/modules/learning/include/aimee/learning/module_api.h"
   ],

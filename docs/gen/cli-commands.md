@@ -593,6 +593,8 @@ Subcommands:
                    (advisory recall for planning; never blocks)
   attribution [suite]
                    Measured per-capability contribution from the ablation grid
+  resolve [--budget N]
+                   Close curiosity gaps the corpus now answers (bounded, on demand)
 ```
 
 ### `aimee model`

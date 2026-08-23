@@ -13,3 +13,4 @@
     {"eval.candidates-update", handle_eval_candidates_update},
     {"learning.approaches", handle_learning_approaches},
     {"learning.attribution", handle_learning_attribution},
+    {"learning.resolve", handle_learning_resolve},
