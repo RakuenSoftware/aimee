@@ -2357,6 +2357,64 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "entity_node_get",
+			stage: db2contract.StageEntityNodeGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityNodeGetRequest("node:live-probe-missing")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeEntityNodeGetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a node that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "entity_edge_explain",
+			stage: db2contract.StageEntityEdgeExplain,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityEdgeExplainRequest("live-probe-entity")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityEdgeExplainReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_doc_regions_for_chunk",
+			stage: db2contract.StageKBDocRegionsForChunk,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocRegionsForChunkRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeKBDocRegionsForChunkReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_document_fetch",
+			stage: db2contract.StageKBDocumentFetch,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocumentFetchRequest(2147483000, "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeKBDocumentFetchReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a chunk that does not exist answered as found")
+				}
+			},
+		},
 	}
 }
 
@@ -4500,6 +4558,27 @@ func liveWrites() []liveRequest {
 				}
 				if invalidated != 1 {
 					t.Fatalf("invalidated %d artifacts, want the seeded one", invalidated)
+				}
+			},
+		},
+		{
+			name:  "entity_node_upsert",
+			stage: db2contract.StageEntityNodeUpsert,
+			// Twice, for the conflict branch: nine columns move there and the
+			// key does not.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityNodeUpsertRequest(
+					"node:live-probe-upsert", 1, liveProbeScopeProject, "main",
+					"src/live-probe.c:main", "src/live-probe.c", "main", "scan", 7)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeEntityNodeUpsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the node was not recorded")
 				}
 			},
 		},
