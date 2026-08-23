@@ -136,27 +136,32 @@ const (
 type Status uint32
 
 const (
-	StatusOK Status = iota
-	StatusNoPeer
-	StatusDenied
-	StatusInboxFull
-	StatusHopLimit
-	StatusCycle
-	StatusTimeout
-	StatusSelf
-	StatusTooLong
-	StatusLabelTaken
-	StatusUnknownSender
-	StatusBadRequest
-	StatusShutdown
-	StatusNoChannel
-	StatusNotMember
-	StatusChannelFull
+	// Values are EXPLICIT, not iota. This integer is what crosses the wire, so
+	// inserting a status in the middle would silently renumber every one after it
+	// and a peer built against either side would misread the rest. New statuses
+	// APPEND, exactly as message cells do; the numbers are a contract, not an
+	// ordering convenience.
+	StatusOK            Status = 0
+	StatusNoPeer        Status = 1
+	StatusDenied        Status = 2
+	StatusInboxFull     Status = 3
+	StatusHopLimit      Status = 4
+	StatusCycle         Status = 5
+	StatusTimeout       Status = 6
+	StatusSelf          Status = 7
+	StatusTooLong       Status = 8
+	StatusLabelTaken    Status = 9
+	StatusUnknownSender Status = 10
+	StatusBadRequest    Status = 11
+	StatusShutdown      Status = 12
+	StatusNoChannel     Status = 13
+	StatusNotMember     Status = 14
+	StatusChannelFull   Status = 15
 	// StatusUnavailable is a dependency that did not ANSWER, which is not the
 	// same as answering no. It is the one status here a caller should RETRY on:
 	// every other refusal is a fact about the request, this one is a fact about
 	// the moment.
-	StatusUnavailable
+	StatusUnavailable Status = 16
 )
 
 // StatusFor maps a registry error onto its wire status.
@@ -166,7 +171,9 @@ func StatusFor(err error) Status {
 		return StatusOK
 	case errors.Is(err, peer.ErrNoPeer):
 		return StatusNoPeer
-	case errors.Is(err, peer.ErrDenied):
+	case errors.Is(err, peer.ErrDenied), errors.Is(err, peer.ErrOwnerMismatch):
+		// Both are "you are not permitted to act here", which is the fact a
+		// caller acts on; the errors stay distinct so a log says which.
 		return StatusDenied
 	case errors.Is(err, peer.ErrInboxFull):
 		return StatusInboxFull

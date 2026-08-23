@@ -123,6 +123,12 @@ var (
 	ErrTooLong       = errors.New("peer: message body exceeds MaxTextBytes")
 	ErrLabelTaken    = errors.New("peer: label already held by another session of this owner")
 	ErrBadRequest    = errors.New("peer: invalid request")
+	// ErrOwnerMismatch is a session id already held by a DIFFERENT principal.
+	// Distinct from ErrBadRequest because the repair is different: one means a
+	// required value was omitted, this means the caller is not who the session
+	// belongs to. Reported as one message, an operator hunts for a malformed
+	// argument that is not there.
+	ErrOwnerMismatch = errors.New("peer: session belongs to a different owner")
 	ErrShutdown      = errors.New("peer: registry shut down while waiting")
 	ErrRegistryFull  = errors.New("peer: session registry is full")
 	ErrGrantsFull    = errors.New("peer: grant table is full")
@@ -347,7 +353,7 @@ func (r *Registry) Register(sessionID, owner, surface string) error {
 		return nil
 	}
 	if owner != "" && s.owner != "" && s.owner != owner {
-		return ErrBadRequest
+		return ErrOwnerMismatch
 	}
 	if s.owner == "" {
 		s.owner = owner

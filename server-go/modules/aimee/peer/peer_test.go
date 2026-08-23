@@ -817,3 +817,31 @@ func TestDirectoryHookSwapIsSafeUnderConcurrency(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+// A session id held by a different principal is its own fact, not a malformed
+// request. One message standing for both sends an operator hunting for a bad
+// argument that is not there.
+func TestOwnerMismatchIsNotAMalformedRequest(t *testing.T) {
+	r := New(Options{})
+	if err := r.Register("S", "uid:1000", "cli"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := r.Register("S", "uid:2000", "cli")
+	if !errors.Is(err, ErrOwnerMismatch) {
+		t.Fatalf("owner mismatch = %v; want ErrOwnerMismatch", err)
+	}
+	if errors.Is(err, ErrBadRequest) {
+		t.Error("an owner mismatch reported itself as a malformed request")
+	}
+
+	// An omitted required value stays ErrBadRequest: that one really is
+	// malformed, and the repair is to supply it.
+	if err := r.Register("", "uid:1000", "cli"); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("empty id = %v; want ErrBadRequest", err)
+	}
+	// Re-registering as the SAME owner is not a mismatch.
+	if err := r.Register("S", "uid:1000", "webchat"); err != nil {
+		t.Errorf("same-owner re-register: %v", err)
+	}
+}

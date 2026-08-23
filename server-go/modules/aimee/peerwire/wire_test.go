@@ -205,3 +205,55 @@ func TestStatusForCoversEveryRefusal(t *testing.T) {
 		t.Errorf("unknown error = %v; want bad_request", got)
 	}
 }
+
+// The status integer crosses the wire, so it is a contract rather than an
+// ordering convenience. This pins every value.
+//
+// Without it, inserting a status in the middle renumbers every one after it and
+// nothing fails: both sides still compile, both still pass their own tests, and
+// a peer built against either one misreads the rest. That is the same
+// append-do-not-insert rule the message cells follow, applied to the enum that
+// was still using iota.
+func TestStatusIntegersArePinned(t *testing.T) {
+	for want, status := range map[int]Status{
+		0:  StatusOK,
+		1:  StatusNoPeer,
+		2:  StatusDenied,
+		3:  StatusInboxFull,
+		4:  StatusHopLimit,
+		5:  StatusCycle,
+		6:  StatusTimeout,
+		7:  StatusSelf,
+		8:  StatusTooLong,
+		9:  StatusLabelTaken,
+		10: StatusUnknownSender,
+		11: StatusBadRequest,
+		12: StatusShutdown,
+		13: StatusNoChannel,
+		14: StatusNotMember,
+		15: StatusChannelFull,
+		16: StatusUnavailable,
+	} {
+		if int(status) != want {
+			t.Errorf("%s = %d; want %d. A status inserted in the middle renumbers "+
+				"every one after it and the wire carries the integer.",
+				status, int(status), want)
+		}
+	}
+
+	// Every value must also have a distinct name: two statuses sharing one name
+	// is the same collapse in the other direction, where an operator cannot tell
+	// which refusal they got.
+	seen := map[string]Status{}
+	for i := 0; i <= int(StatusUnavailable); i++ {
+		name := Status(i).String()
+		if prev, dup := seen[name]; dup {
+			t.Errorf("status %d and %d both name themselves %q", int(prev), i, name)
+		}
+		seen[name] = Status(i)
+	}
+	// And an unknown status must not silently read as a known one.
+	if got := Status(9999).String(); got != "bad_request" {
+		t.Errorf("unknown status names itself %q; the default arm changed", got)
+	}
+}
