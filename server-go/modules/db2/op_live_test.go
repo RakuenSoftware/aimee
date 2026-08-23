@@ -2693,6 +2693,40 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "calibration_audit_stats",
+			stage: db2contract.StageCalibrationAuditStats,
+			// A CAST of a float to an int inside a CASE, grouped and ordered by
+			// its own position. Whether PostgreSQL accepts that shape is the
+			// question, and the bucket arithmetic is the answer's meaning.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCalibrationAuditStatsRequest(
+					"recall", "synthesis", "project", liveProbeScopeProject, 128)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				buckets, err := db2contract.DecodeCalibrationAuditStatsReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if len(buckets) != db2contract.CalibrationAuditStatsMaxRows {
+					t.Fatalf("buckets = %d, want every one", len(buckets))
+				}
+			},
+		},
+		{
+			name:  "css_token_candidates",
+			stage: db2contract.StageCssTokenCandidates,
+			// A four-way join over the stylesheet tables, which only exist in a
+			// real schema.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCssTokenCandidatesRequest(liveProbeScopeProject, 2)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCssTokenCandidatesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -4879,6 +4913,49 @@ func liveWrites() []liveRequest {
 				}
 				if revoked != 1 || state != "revoked" || revokedAt == "" {
 					t.Fatalf("revoked = %d, state = %q, at = %q", revoked, state, revokedAt)
+				}
+			},
+		},
+		{
+			name:   "artifact_write_ex",
+			stage:  db2contract.StageArtifactWriteEx,
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactWriteExRequest(
+					"live-probe-write-ex", "synthesis", "proposed", "project",
+					liveProbeScopeProject, "live-probe", 0.8, 3, `{"claim":"x"}`)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeArtifactWriteExReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the artifact was not written")
+				}
+			},
+		},
+		{
+			name:  "audit_event_write",
+			stage: db2contract.StageAuditEventWrite,
+			// The event carries a foreign key into artifacts, so the artifact
+			// has to exist. Twice, for the conflict path -- the identifier is
+			// the caller's and a retry must collapse.
+			repeat: 2,
+			seed:   []string{liveProbeRejectableArtifact},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeAuditEventWriteRequest(
+					"live-probe-audit", "live-probe-artifact", "recall",
+					"memory:4", "live-probe", "project", liveProbeScopeProject,
+					0.9, 1, "", `{"state":"committed"}`)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeAuditEventWriteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the audit event was not written")
 				}
 			},
 		},
