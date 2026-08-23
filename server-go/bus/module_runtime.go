@@ -39,7 +39,27 @@ type ModuleInvocation struct {
 	StageID    uint32
 	DeadlineNS uint64
 	TraceID    uint64
-	cancelled  *cancelFlag
+
+	// Who called, and over which attachment.
+	//
+	// Both are stamped by the bus daemon from the admitted slot, never taken
+	// from the sender -- bus_route.c is explicit that "a client-supplied
+	// src/principal is never authority". So a handler may authorize on
+	// PrincipalRef without re-verifying it, which is the whole point of the
+	// daemon doing the stamping.
+	//
+	// PrincipalRef says WHO. SrcHandle says WHICH ATTACHMENT, and the two
+	// differ in a way that matters: one principal may attach twice, and state
+	// a module holds on behalf of a caller -- an open transaction, a lease --
+	// belongs to the attachment rather than to the principal, so it can be
+	// reclaimed when that attachment goes away without disturbing the other.
+	//
+	// Zero means the runtime could not attribute the call, which a handler
+	// that authorizes must treat as a refusal rather than as a wildcard.
+	PrincipalRef uint32
+	SrcHandle    uint32
+
+	cancelled *cancelFlag
 }
 
 // Cancelled reports a bus cancellation or an expired absolute CLOCK_MONOTONIC
@@ -442,7 +462,10 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 		cancelled := &cancelFlag{}
 		work := &moduleWork{eventKind: event.Frame.EventKind, correlationID: correlation,
 			cancelled: cancelled, invocation: ModuleInvocation{StageID: expectedStage,
-				DeadlineNS: message.DeadlineNS, TraceID: message.TraceID, cancelled: cancelled}}
+				DeadlineNS: message.DeadlineNS, TraceID: message.TraceID,
+				PrincipalRef: event.Frame.PrincipalRef,
+				SrcHandle:    event.Frame.SrcHandle,
+				cancelled:    cancelled}}
 		jobs[correlation] = work
 		requestBody := append([]byte(nil), assembly.body...)
 		go runHandler(done, work, config.Handler, requestBody)

@@ -266,3 +266,51 @@ func TestModuleDetailRendersAnyHandlerBody(t *testing.T) {
 		t.Fatalf("invalid utf8 rendered %q", got)
 	}
 }
+
+func TestModuleInvocationCarriesTheStampedCallerIdentity(t *testing.T) {
+	// The frame's principal and source handle are stamped by the bus daemon
+	// from the admitted slot, never taken from the sender, so a handler may
+	// authorize on them directly. This proves they arrive: a module that
+	// authorized on an unpopulated field would treat every caller as principal
+	// zero, which is one caller with everyone's rights.
+	const kind uint32 = 5889
+	message := ModuleMessage{Operation: ModuleOpInvoke, StageID: 1, TraceID: 42}
+	event := moduleRequestEvent(t, kind, 11, message, []byte("body"), false)
+	event.Frame.PrincipalRef = 30
+	event.Frame.SrcHandle = 4
+
+	fake := &fakeModuleBus{budget: 4096}
+	fake.input = []Event{event}
+	seen := make(chan ModuleInvocation, 1)
+	config := ModuleProcessConfig{SocketPath: "/unused", ModuleName: "go-test",
+		PrincipalClass: 1, PrincipalRef: 28,
+		Stages: []ModuleStage{{EventKind: kind, StageID: 1}},
+		Handler: func(invocation ModuleInvocation, body []byte) ([]byte, ModuleStatus) {
+			seen <- invocation
+			return nil, ModuleStatusOK
+		}}
+	stages, err := validateModuleConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runModuleClient(ctx, config, stages, fake) }()
+	waitModuleReplies(t, fake, 1)
+
+	invocation := <-seen
+	// The CALLER's principal, not the module's own: this module attached as 28
+	// and the call came from 30, and confusing the two would authorize every
+	// caller as the server itself.
+	if invocation.PrincipalRef != 30 {
+		t.Errorf("PrincipalRef = %d, want the calling principal 30",
+			invocation.PrincipalRef)
+	}
+	if invocation.SrcHandle != 4 {
+		t.Errorf("SrcHandle = %d, want the calling attachment 4", invocation.SrcHandle)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
