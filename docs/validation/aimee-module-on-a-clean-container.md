@@ -99,7 +99,12 @@ after the cause. 69 is validation-only and is not declared in
 `process-contracts.json`; its grant is written by hand into the container and
 never shipped.
 
-Fourteen checks, green on consecutive runs:
+Fifteen checks, green on consecutive runs. The count and the rows are asserted
+against the probe by `TestValidationRecordMatchesTheProbe`, because this table
+was hand-transcribed from probe output and dropped a row: the run made fifteen
+checks while the record claimed fourteen. An evidence table nothing checks
+drifts from the run it describes, and drifts quietly, since a doc has no build
+to fail.
 
 | Check | Result |
 |---|---|
@@ -110,13 +115,14 @@ Fourteen checks, green on consecutive runs:
 | grant stage 12035 reachable | pass |
 | absent grant answers OK with a false value | pass |
 | grant write accepted | pass |
-| grant readable back (the module holds state) | pass |
+| grant is readable back (module holds state) | pass |
 | grant did not leak in the reverse direction | pass |
+| take on an unknown session is refused | pass |
 | malformed frame refused at the TRANSPORT level | pass |
-| channel stage reachable | pass |
+| channel stage 12036 reachable | pass |
 | channel send by an unknown sender refused | pass |
 | members of an absent channel answers OK with none | pass |
-| unadvertised stage not served | pass |
+| unadvertised stage 9 is not served | pass |
 
 The load-bearing result is the pair in the middle. A domain refusal
 (`unknown_sender`, `no_peer`) arrives as a **successful** bus call carrying a
@@ -185,7 +191,21 @@ longer the clean room the evidence claims it was.
 - **`workflows` and `wfe`**, whose grants were skipped, and the LLM synthesis
   lane, which has no endpoint configured.
 - **The ref 30 absorption.** This run validated the module at principal ref 31,
-  stages 1/2/3, kinds 12033/12034/12035. The agreed end state folds peer
-  messaging into ref 30 as stages 20/21/22 (kinds 11796/11797/11798). The
+  stages 1/2/3/4, kinds 12033/12034/12035/12036. The agreed end state folds
+  peer messaging into ref 30 as stages 20/21/22/23 (kinds
+  11796/11797/11798/11799). All FOUR stages renumber, and an earlier draft of
+  this note listed only three. Following it would have left the channel stage
+  at 4 under ref 30, which is kind 11780, and 11780 is not a free number: it is
+  `db1-agent-work`. The off-formula check in `New` would NOT have caught that,
+  because 11780 is exactly what the formula gives for ref 30 stage 4. What
+  catches it is the duplicate-stage check, since after the absorption db1 and
+  peer messaging are capabilities of ONE module, so the two stage 4s meet at
+  construction and `ErrStageConflict` refuses to build the module at all.
+
+  That is the intended outcome and worth stating, because it is the reason the
+  conflict is a startup failure rather than agent-work traffic being served by
+  the channel capability. It also depends on db1 arriving as a capability of
+  this module rather than beside it: two modules at one ref never compare stage
+  tables, and nothing would refuse. The
   mechanism is proved; those numbers are not final and the run must be repeated
   after the renumber.
