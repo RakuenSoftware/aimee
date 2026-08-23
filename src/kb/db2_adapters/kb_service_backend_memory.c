@@ -1251,7 +1251,7 @@ cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const ch
       /* The note's own authority caps the captured actor: it is the same value
        * that chose provenance_category just above, and the two must not be able
        * to disagree about one memory. */
-      if (config_typed_facts_enabled() && out.id > 0 &&
+      if (out.id > 0 &&
           db2_fact_actor_capture_memory(out.id, authority == (int)MEMORY_AUTHORITY_USER) == 0)
          (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
    }
@@ -1286,8 +1286,9 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
    if (!resp)
       return NULL;
 
-   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Default-off via
-    * typed_facts_enabled (writes facts="" when off); orchestration in fact_ingest.
+   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Unconditional:
+    * the config.typed_facts_enabled master gate is retired. Orchestration lives
+    * in fact_ingest.
     * `authority` is the caller's authenticated write authority, resolved by the
     * RPC handler — this call can retract facts, so it must not be inferred from
     * `query`, which the caller supplies. */
@@ -1331,7 +1332,7 @@ cJSON *db2_kb_service_memory_facts_json(const char *query)
    if (!resp)
       return NULL;
    char facts[2048] = "";
-   if (config_typed_facts_enabled() && query && query[0])
+   if (query && query[0])
       (void)db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
                                      sizeof(facts));
    cJSON_AddStringToObject(resp, "status", "ok");

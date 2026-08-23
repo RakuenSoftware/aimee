@@ -826,7 +826,9 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    /* The envelope carries two independently-gated layers: the code/memory preview
     * block (ingress_preinject_enabled, aimed at coding agents) and the typed-fact
     * block. Typed facts are KB-OWNED (proposal §8): aimee-server does NOT read its
-    * own typed_facts_enabled — it asks the KB (cached capability) so the KB is the
+    * own the decision — it asks the KB through kb_client_typed_facts_enabled(),
+    * which is now always 1 since the master gate is retired. Kept as a seam. The
+    * original note read: it asks the KB (cached capability) so the KB is the
     * single source of truth. Build if EITHER layer is on. */
    int preview_configured = config_ingress_preinject_enabled();
    int facts_configured = kb_client_typed_facts_enabled();
@@ -1028,7 +1030,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    /* Typed-fact layer (§7): current facts about entities named in this turn,
     * recalled and injected automatically so the agent grounds on them without
     * having to call the get_context_block tool. Gated kb-side on
-    * typed_facts_enabled (returns NULL when off or none), so this is a no-op
+    * the typed-fact layer (returns NULL when there are none), so this is a no-op
     * then. User-asserted facts are high-signal, so they lift confidence. */
    char *facts = facts_on ? kb_client_memory_facts(query) : NULL;
    if (facts && facts[0])

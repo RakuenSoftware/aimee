@@ -97,7 +97,8 @@ char *kb_client_health_json(void);
 char *kb_client_agent_surfaces_json(void);
 
 /* Cached read of the KB's advertised typed-facts state (proposal §8). aimee-server
- * gates per-turn fact injection on this instead of owning typed_facts_enabled. */
+ * asks through this seam. Always 1: the typed-fact layer is unconditional and
+ * the KB-owned master gate is retired. */
 int kb_client_typed_facts_enabled(void);
 /* §2c: POST /v1/reembed; raw response JSON (caller frees) or NULL on transport
  * failure; *status_out (optional) gets the HTTP status. target_dim>0 pins the

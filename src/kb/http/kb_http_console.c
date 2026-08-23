@@ -183,7 +183,7 @@ static int console_typed_facts(char *out_buf, int out_cap)
    cJSON_AddStringToObject(root, "generated_at", ts);
 
    cJSON *c = cJSON_AddObjectToObject(root, "config");
-   cJSON_AddBoolToObject(c, "typed_facts_enabled", config_typed_facts_enabled() ? 1 : 0);
+   cJSON_AddBoolToObject(c, "typed_facts_enabled", 1); /* unconditional; no master gate */
    cJSON_AddBoolToObject(c, "auto_promote", config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
    cJSON_AddNumberToObject(c, "promote_threshold", thr);
 
@@ -300,23 +300,37 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid request body\"}");
       return 400;
    }
-   /* KB-owned master enable/disable for the whole typed-facts layer. -1 means
-    * "not in this request", which config_set_typed_facts leaves unchanged. */
+   /* `enabled` IS NO LONGER ACCEPTED. The typed-fact layer has no master gate:
+    * it used to default OFF, which turned retraction, recall and class keying
+    * into silent no-ops on a stock install. An endpoint that can still switch it
+    * off would reintroduce exactly that, so a request carrying `enabled` is
+    * refused rather than quietly ignored -- a caller trying to disable the layer
+    * must be told it did not happen.
+    *
+    * The two real knobs stay: -1 means "not in this request", which
+    * config_set_typed_facts leaves unchanged. */
    const cJSON *en = cJSON_GetObjectItemCaseSensitive(req, "enabled");
+   if (en)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"the typed-fact layer is always enabled; `enabled` is not a "
+               "settable option\"}");
+      return 400;
+   }
    const cJSON *ap = cJSON_GetObjectItemCaseSensitive(req, "auto_promote");
    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(req, "promote_threshold");
-   int want_enabled = (en && cJSON_IsBool(en)) ? (cJSON_IsTrue(en) ? 1 : 0) : -1;
    int want_auto = (ap && cJSON_IsBool(ap)) ? (cJSON_IsTrue(ap) ? 1 : 0) : -1;
    int want_threshold = (pt && cJSON_IsNumber(pt) && pt->valueint > 0) ? pt->valueint : -1;
    cJSON_Delete(req);
-   if (config_set_typed_facts(want_enabled, want_auto, want_threshold) != 0)
+   if (config_set_typed_facts(want_auto, want_threshold) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config save failed\"}");
       return 500;
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
-   cJSON_AddBoolToObject(resp, "enabled", config_typed_facts_enabled() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "enabled", 1); /* unconditional; no master gate */
    cJSON_AddBoolToObject(resp, "auto_promote",
                          config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
    cJSON_AddNumberToObject(resp, "promote_threshold", config_kb_typed_facts_promote_threshold());
@@ -1140,10 +1154,10 @@ static const kb_setting_t KB_SETTINGS[] = {
     {"kb_search_max_results", "Knowledge base", 0},
     {"kb_fusion_mode", "Knowledge base", 0},
     {"kb_mining_enabled", "Knowledge base", 0},
-    /* typed_facts_enabled is deliberately absent: the console's Typed Facts page
-     * owns it, next to the promotion queue it gates and the two knobs
-     * (auto-promote, threshold) that are not in config_fields at all and can only
-     * be set through /v1/console/typed_facts/config. One owner per option. */
+    /* typed_facts_enabled is deliberately absent, and now has no owner at all:
+     * the master gate is retired and the layer is unconditional. The Typed Facts
+     * page keeps the two real knobs (auto-promote, threshold), which are not in
+     * config_fields and are set through /v1/console/typed_facts/config. */
     {"kb_api_http_port", "Knowledge base", 1},
     {"kb_api_bearer_token", "Knowledge base", 1},
     /* Document ingest sidecars. */

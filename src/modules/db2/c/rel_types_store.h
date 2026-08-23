@@ -55,7 +55,8 @@ extern "C"
     *   NOVEL       -> stage provisional rel_type, write a Class-C semantic edge;
     *   REJECT_KIND / BADARG -> no write.
     * Returns the gate verdict regardless of `enabled` (so callers can observe what
-    * *would* happen with the flag off). `enabled` is config.typed_facts_enabled.
+    * *would* happen with `enabled` 0). `enabled` is a per-call observe-only
+    * switch, not a config flag: config.typed_facts_enabled is retired.
     * `authority` keys the §5 confidence class: a user assertion writes Class A, a
     * model ACCEPT writes Class B, model NOVEL writes Class C. */
    fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_kind,

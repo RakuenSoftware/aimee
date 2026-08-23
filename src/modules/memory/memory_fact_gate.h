@@ -10,7 +10,8 @@
  * This header exposes the pure type-validation core (no DB), so it unit-tests in
  * isolation. The DB-backed commit (resolve relation_id, write the edge with
  * edge_class='semantic', stage novel types as provisional) lives in
- * db2/rel_types_store.c and is gated behind config.typed_facts_enabled. */
+ * db2/rel_types_store.c. No config gate: the typed-fact layer is
+ * unconditional. */
 #ifndef DEC_MEMORY_FACT_GATE_H
 #define DEC_MEMORY_FACT_GATE_H 1
 

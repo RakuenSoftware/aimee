@@ -5928,7 +5928,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/css_migration.h",
-          "line": 81
+          "line": 83
         }
       ],
       "signature": "int db2_css_migration_assert_conventions ( const char * project , const char * now_iso )",
@@ -8574,7 +8574,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 61
+          "line": 62
         }
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , fact_authority_t authority , int enabled )",
@@ -8626,7 +8626,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 77
+          "line": 78
         }
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit_with_actor ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , const fact_actor_t * actor , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
@@ -8639,7 +8639,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 69
+          "line": 70
         }
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit_with_evidence ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , fact_authority_t authority , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
@@ -8767,7 +8767,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 55
+          "line": 56
         }
       ],
       "signature": "int db2_fact_ingest_text ( const char * text , fact_authority_t authority , int enabled )",
@@ -8782,7 +8782,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 60
+          "line": 61
         }
       ],
       "signature": "int db2_fact_ingest_text_as_actor ( const char * text , const fact_actor_t * actor , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
@@ -8795,7 +8795,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 56
+          "line": 57
         }
       ],
       "signature": "int db2_fact_ingest_text_with_evidence ( const char * text , fact_authority_t authority , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
@@ -22795,7 +22795,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 79
+          "line": 81
         }
       ],
       "signature": "int db2_typed_fact_ingress ( const char * query , fact_authority_t authority , char * facts_out , size_t facts_cap )",
@@ -26471,7 +26471,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "634b90f6c4392754e0d41108c15bdda72ab79d1987a1d29a5a598281a2fcc525",
+  "fingerprint": "c1f00347283764710354242c4e95a47de41675108130995683f60b617658cb14",
   "module": "db2",
   "schema_version": 1,
   "summary": {

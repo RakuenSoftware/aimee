@@ -134,9 +134,12 @@ int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *
    if (!query || !query[0])
       return 0;
 
-   if (!config_typed_facts_enabled())
-      return 0;
-
+   /* The typed-fact layer is unconditional. It used to sit behind
+    * config.typed_facts_enabled, a master gate that defaulted OFF and turned the
+    * whole layer -- retraction, recall, class keying -- into a silent no-op.
+    * A gate that silently disables a correctness feature is worse than no
+    * feature: this one returned 0 here, so a turn asking to forget a fact
+    * completed normally with the fact still standing and nothing logged. */
    int requests_sensitive = memory_pii_turn_requests_sensitive(query);
 
    /* §4: a retraction turn corrects rather than asserts — retract the named

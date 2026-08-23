@@ -594,36 +594,25 @@ char *kb_client_agent_surfaces_json(void)
    return projection;
 }
 
-/* Cached read of the KB's advertised typed-facts capability (proposal §8).
- * aimee-server gates per-turn fact injection on THIS instead of owning
- * typed_facts_enabled itself — the KB is the single source of truth. Short TTL so
- * a facts-off deployment does not fetch /v1/health every turn; a console/config
- * change is picked up within the TTL. Benign cross-thread race on the cache (worst
- * case: a couple of extra fetches). On transport failure the last-known value (or
- * off) is kept, so a briefly-unreachable KB never spuriously injects. */
+/* The typed-fact layer is unconditional, so this is now a constant.
+ *
+ * It used to fetch the KB's advertised `typed_facts_enabled` on a 15s TTL, since
+ * the KB owned the master gate and was the single source of truth for it. That
+ * gate is retired: there is nothing left to ask about, and the round trip only
+ * had one possible answer.
+ *
+ * Removing it also removes a failure mode that mattered more than the fetch. The
+ * cached read defaulted to OFF and kept the last-known value on transport
+ * failure, so a briefly-unreachable KB — or a first turn before any successful
+ * fetch — silently suppressed per-turn fact injection with nothing logged. The
+ * comment called that "never spuriously injects"; the other side of it was
+ * "sometimes silently stops injecting". Neither is possible now.
+ *
+ * The function stays rather than being deleted: it is the seam aimee-server asks
+ * through, and several tests stub it. */
 int kb_client_typed_facts_enabled(void)
 {
-   static int cached = -1; /* -1 = never fetched */
-   static time_t fetched_at = 0;
-   const int TTL_S = 15;
-   time_t now = time(NULL);
-   if (cached >= 0 && (now - fetched_at) < TTL_S)
-      return cached;
-   int v = cached >= 0 ? cached : 0;
-   char *h = kb_client_health_json();
-   if (h)
-   {
-      cJSON *j = cJSON_Parse(h);
-      free(h);
-      if (j)
-      {
-         v = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "typed_facts_enabled")) ? 1 : 0;
-         cJSON_Delete(j);
-      }
-   }
-   cached = v;
-   fetched_at = now;
-   return v;
+   return 1;
 }
 
 /* §2c: POST /v1/reembed {confirm, force, dry_run} — the dim-change reset. Returns

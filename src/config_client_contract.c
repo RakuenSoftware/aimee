@@ -379,13 +379,15 @@ int config_apply_roundtable_preset(const config_roundtable_preset_t *p)
    return config_client_operation("apply-roundtable-preset", value);
 }
 
-int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+/* No `enabled` parameter: the typed-fact layer has no master gate any more. It
+ * used to default OFF, which made the whole layer a silent no-op on a stock
+ * install, so the ability to set it has been removed rather than left as a
+ * switch that can put a deployment back in that state. */
+int config_set_typed_facts(int auto_promote, int promote_threshold)
 {
    cJSON *value = cJSON_CreateObject();
    if (!value)
       return -1;
-   if (enabled >= 0)
-      cJSON_AddBoolToObject(value, "enabled", enabled);
    if (auto_promote >= 0)
       cJSON_AddBoolToObject(value, "auto_promote", auto_promote);
    if (promote_threshold > 0)
@@ -947,7 +949,6 @@ CONFIG_FLAG(config_kb_pdf_vector_enabled, "kb_pdf_vector_enabled")
 CONFIG_FLAG(config_memory_derive_facts_enabled, "memory_derive_facts_enabled")
 CONFIG_FLAG(config_memory_routing_enabled, "memory_routing_enabled")
 CONFIG_FLAG(config_transport_kb_pool_enabled, "transport_kb_pool_enabled")
-CONFIG_FLAG(config_typed_facts_enabled, "typed_facts_enabled")
 CONFIG_FLAG(config_wfe_live_forge_enabled, "wfe_live_forge_enabled")
 CONFIG_FLAG(config_ingress_audit_async, "ingress_audit_async")
 #undef CONFIG_FLAG

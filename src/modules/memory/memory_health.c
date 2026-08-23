@@ -393,9 +393,9 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired)
     * often it was confirmed. They belong in the same cycle as the prose-memory
     * promote/expire jobs and report through the same counters.
     *
-    * Deliberately NOT gated on typed_facts_enabled: that gate stops new typed
-    * writes, but rows written while it was on must still be allowed to age out
-    * after it is turned off. Both are no-ops on an empty semantic population. */
+    * Never gated on the old typed_facts_enabled master flag -- and that flag is
+    * now retired, so the question is moot. Both are no-ops on an empty semantic
+    * population. */
    {
       int n = db2_fact_promote_durable(config_memory_typed_facts_promote_threshold());
       if (n > 0)

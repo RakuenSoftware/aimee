@@ -1929,3 +1929,91 @@ so the fix logs rather than fails the turn. What it must not do is stay silent.
 the unit-test binaries. Even the three deliberately-triggered "retraction scan
 gave no answer" paths print nothing there, so the absence of a log line in that
 context is not evidence of anything.)
+
+## The master gate is retired, and the "shim vs Postgres divergence" was my error
+
+### Correcting the previous entry
+
+The section above reports a sqlite-shim/Postgres divergence in the typed-fact
+retraction path. **That was wrong, and the evidence for it was bad.** Built and
+run the same way, the sqlite binary fails at the identical assertion. There is no
+backend divergence and there never was.
+
+What actually happened: `unit-test-fact-ingest` passes under `make unit-tests`
+because that harness exports `AIMEE_CONFIG_TEST_DEFAULTS` and a config-module
+stub, which switch `config.typed_facts_enabled` ON. `run-pg-tests.sh` invokes the
+binaries directly, without that environment, so the flag read 0 and
+`db2_typed_fact_ingress()` returned at its first line. I ran the PG binary
+outside the harness, ran the sqlite one inside it, and read the difference as a
+backend divergence. It was a difference in how I invoked them.
+
+The instrumentation that settled it:
+
+    FIDBG ingress: typed_facts_enabled=0 scanner=(nil)      <- Postgres
+    FIDBG ingress: typed_facts_enabled=0 scanner=(nil)      <- sqlite, same
+
+Two lessons worth keeping. First, the control has to differ in exactly one thing;
+mine differed in two. Second, an earlier attempt at the same control was also
+invalid — I reverted with `git checkout`, which restores HEAD, and HEAD already
+contained the change I was trying to remove. The valid control had to come from
+`HEAD~1` explicitly.
+
+### The real defect: a master gate that defaulted off
+
+`config.typed_facts_enabled` gated the entire typed-fact layer — §4 retraction,
+§6 ingest, §7 recall, class keying — and **defaulted to off**. With it off:
+
+- `db2_typed_fact_ingress()` returned 0 at its first line, so a turn asking to
+  forget a fact completed normally with the fact still standing and nothing
+  logged;
+- `kb_memory_facts_drain()` returned 0, so extraction never ran;
+- `db2_css_migration_assert_conventions()` asserted nothing;
+- the curator drain thread did not even start when the other gates were off;
+- `kb_client_typed_facts_enabled()` cached OFF and *kept the last-known value on
+  transport failure*, so a briefly-unreachable KB silently stopped per-turn fact
+  injection.
+
+Every one of those is a silent no-op — the failure mode this whole branch exists
+to remove. A correctness feature behind a default-off switch is not a feature.
+
+### What was done
+
+The flag is retired, not defaulted-on. There is no longer an option to disable:
+
+- `config_typed_facts_enabled()` and the `typed_facts_enabled` field are deleted
+  from the DB2 runtime config, from `config.h`, and from the config-client
+  contract. Any reintroduction now fails to compile, which is the strongest
+  guarantee available here.
+- `config_set_typed_facts()` loses its `enabled` parameter entirely.
+- `POST /v1/console/typed_facts/config` **refuses** a request carrying `enabled`
+  with a 400 rather than ignoring it — a caller trying to disable the layer must
+  be told it did not happen. The two real knobs (auto-promote, threshold) are
+  unaffected.
+- `kb_client_typed_facts_enabled()` returns 1 without a round trip, removing both
+  the per-turn health fetch and its fail-to-off behaviour.
+- The curator drain's "all gates off, don't start the thread" early return is
+  gone: the typed-fact drain is unconditional, so the thread always has work.
+- The KB still reports `typed_facts_enabled` in `/v1/health` (an older server
+  reads it and would treat absence as "off"), now always true.
+
+The key itself is owned by the external pure-Go config module and still appears
+in `docs/gen/configuration.md`, which is generated from that module's metadata.
+Nothing in this repository reads it any more. Retiring the key at its source is a
+separate change in that module.
+
+### Verified
+
+    unit-test-fact-ingest, standalone (sqlite)   PASS   (previously failed)
+    unit-test-fact-ingest, real Postgres         PASS   (previously failed)
+    unit-test-fact-lifecycle, real Postgres      PASS
+
+On a stock deployment with nothing configured:
+
+    GET /v1/health                        "typed_facts_enabled":true
+    POST typed_facts/config {enabled:false}
+      -> 400 the typed-fact layer is always enabled; `enabled` is not a
+         settable option
+    POST typed_facts/config {promote_threshold:4}
+      -> {"ok":true,"enabled":true,"auto_promote":true,"promote_threshold":4}
+
+lint 64/64; full unit suite green.

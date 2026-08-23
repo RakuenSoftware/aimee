@@ -42,8 +42,9 @@ extern "C"
 
    /* Run pattern-first ingest on one turn's `text`: extract candidate triples
     * (§6) and route each through the typed gate db2_fact_commit with `authority`
-    * (§5 class keying). `enabled` is the master gate (config.typed_facts_enabled):
-    * when 0 the gate is observe-only and nothing is written. Returns the number of
+    * (§5 class keying). `enabled` is a per-CALL observe-only switch: when 0 the
+    * gate runs but nothing is written. It is no longer wired to a config flag --
+    * config.typed_facts_enabled is retired and the layer is unconditional. Returns the number of
     * extracted triples the gate accepted or staged (verdict ACCEPT or NOVEL) when
     * enabled — note a re-ingest of an already-known triple still counts (it bumps
     * the edge weight rather than inserting a row), so this is a "facts gated in"
@@ -63,10 +64,11 @@ extern "C"
                                      const char *valid_until);
 
    /* The full per-turn typed-fact ingress orchestration (the KB context_block
-    * seam): when config.typed_facts_enabled, run §6 ingest — or §4 retraction on a
-    * retraction-cue turn — then write the §7-PII-gated recall block (the user's
-    * facts + facts about entities named in the turn) into facts_out. No-op with
-    * facts_out="" when the flag is off or the query is empty. Returns the number
+    * seam): run §4 retraction on a retraction-cue turn, then write the
+    * §7-PII-gated recall block (the user's facts + facts about entities named in
+    * the turn) into facts_out. Unconditional -- the former master gate
+    * config.typed_facts_enabled is retired. No-op with facts_out="" when the
+    * query is empty. Returns the number
     * of recalled facts (>=0).
     *
     * `authority` is the WRITE authority of the retraction this turn may perform,
