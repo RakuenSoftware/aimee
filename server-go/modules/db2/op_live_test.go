@@ -1848,6 +1848,34 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:   "kb_async_queue_status",
+			stage:  db2contract.StageKBAsyncQueueStatus,
+			encode: db2contract.EncodeKBAsyncQueueStatusRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, _, err :=
+					db2contract.DecodeKBAsyncQueueStatusReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "fidelity_report_by_turn",
+			stage: db2contract.StageFidelityReportByTurn,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeFidelityReportByTurnRequest("live-probe-turn")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				result, _, _, _, _, err :=
+					db2contract.DecodeFidelityReportByTurnReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if result != 0 {
+					t.Fatal("a turn with no report answered as though it had one")
+				}
+			},
+		},
 	}
 }
 
@@ -3634,6 +3662,66 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "kb_ingest_queue_claim_next",
+			stage: db2contract.StageKBIngestQueueClaimNext,
+			// FOR UPDATE SKIP LOCKED inside a subselect feeding an UPDATE with
+			// RETURNING. Nothing about that shape is checkable without a real
+			// planner, and a pending job is seeded so the claim actually claims.
+			seed:   []string{liveProbePendingIngestJob},
+			encode: db2contract.EncodeKBIngestQueueClaimNextRequest,
+			decoded: func(t *testing.T, body []byte) {
+				claimed, jobID, _, _, _, _, err :=
+					db2contract.DecodeKBIngestQueueClaimNextReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if claimed != 1 || jobID == 0 {
+					t.Fatal("the pending job was not claimed")
+				}
+			},
+		},
+		{
+			name:  "vector_index_op_record",
+			stage: db2contract.StageVectorIndexOpRecord,
+			// Twice, for the conflict branch: the attempt count and the
+			// version-restamp CASE only run there.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeVectorIndexOpRecordRequest(
+					900022, "kb_documents", 0, 1, "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				recorded, err := db2contract.DecodeVectorIndexOpRecordReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if recorded != 1 {
+					t.Fatal("the index operation was not recorded")
+				}
+			},
+		},
+		{
+			name:  "artifact_reject",
+			stage: db2contract.StageArtifactReject,
+			// The audit event carries a foreign key into artifacts, so the
+			// artifact has to exist -- and both snapshots are JSONB, which is
+			// where the empty-string cast would fail.
+			seed: []string{liveProbeRejectableArtifact},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactRejectRequest(
+					"live-probe-artifact", "wrong-scope", "project", "", "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeArtifactRejectReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the rejection did not land")
+				}
+			},
+		},
 	}
 }
 
@@ -3857,6 +3945,20 @@ const (
 const liveProbeEntityNode = `INSERT INTO entity_nodes (node_key, display_name)
  VALUES ('node:live-probe', 'live probe')
  ON CONFLICT (node_key) DO NOTHING`
+
+// A pending ingest job for the claim probe, and an artifact for the rejection
+// probe to reject. The audit event carries a foreign key into artifacts, so
+// without the second the rejection's own audit half fails.
+const (
+	liveProbePendingIngestJob = `INSERT INTO kb_ingest_queue
+ (id, project, root_path, status, priority)
+ VALUES (900023, 'live-probe-project', '/live-probe', 'pending', 100)`
+	liveProbeRejectableArtifact = `INSERT INTO artifacts
+ (id, kind, state, scope_kind, scope_id, payload)
+ VALUES ('live-probe-artifact', 'synthesis', 'proposed', 'project',
+ 'live-probe-project', '{}')
+ ON CONFLICT (id) DO NOTHING`
+)
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
