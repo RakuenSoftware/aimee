@@ -49,7 +49,27 @@ func TestValidationRecordMatchesTheProbe(t *testing.T) {
 			"row is a passing result missing from the evidence.", got, rows)
 	}
 
-	lower := strings.ToLower(string(record))
+	// Matched against THE ROWS ONLY, not the whole document.
+	//
+	// This used to search the entire record, and the record quotes probe output
+	// verbatim in its prose. So a deleted row could be satisfied by the
+	// narrative ABOUT that row -- "send between two directory-known sessions"
+	// appears at line 115 as quoted output and at line 265 as the row, and
+	// searching the document finds it either way.
+	//
+	// A peer hit the same thing an hour ago from the other side: their scan
+	// counted a file as coupled to the store because it matched `db1_conn` in a
+	// comment that said the file does not link the store. Prose about a thing
+	// and the thing itself are not distinguishable to a text search, and the
+	// prose is usually the more quotable of the two.
+	var tableLines strings.Builder
+	for _, line := range strings.Split(string(record), "\n") {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "|") {
+			tableLines.WriteString(strings.ToLower(line))
+			tableLines.WriteString("\n")
+		}
+	}
+	table := tableLines.String()
 	for _, n := range names {
 		// Match on a distinctive prefix: the record reworded some rows for
 		// prose, and pinning whole strings would fail on wording rather than on
@@ -58,8 +78,9 @@ func TestValidationRecordMatchesTheProbe(t *testing.T) {
 		if len(head) > 24 {
 			head = head[:24]
 		}
-		if !strings.Contains(lower, strings.ToLower(head)) {
-			t.Errorf("probe check %q has no row in the validation record", n[1])
+		if !strings.Contains(table, strings.ToLower(head)) {
+			t.Errorf("probe check %q has no ROW in the validation record. Prose "+
+				"quoting the check does not count: the table is the evidence.", n[1])
 		}
 	}
 }
