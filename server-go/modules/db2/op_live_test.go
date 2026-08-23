@@ -1569,6 +1569,18 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "tool_registry_lookup",
+			stage: db2contract.StageToolRegistryLookup,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeToolRegistryLookupRequest("live-probe-tool")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, err := db2contract.DecodeToolRegistryLookupReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -3073,6 +3085,59 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "task_create",
+			stage: db2contract.StageTaskCreate,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTaskCreateRequest(
+					"live probe task", "live-probe-session", 0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				taskID, err := db2contract.DecodeTaskCreateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if taskID == 0 {
+					t.Fatal("no task was created")
+				}
+			},
+		},
+		{
+			name:  "task_add_edge",
+			stage: db2contract.StageTaskAddEdge,
+			// Both ends are foreign keys into tasks, so two tasks are seeded --
+			// without them the insert fails and the probe would be asserting
+			// that a broken write is reported as broken.
+			seed: []string{liveProbeEdgeSource, liveProbeEdgeTarget},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTaskAddEdgeRequest(900019, 900020, "depends_on")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeTaskAddEdgeReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the edge was not recorded")
+				}
+			},
+		},
+		{
+			name:  "recompute_blocked_symbols",
+			stage: db2contract.StageRecomputeBlockedSymbols,
+			// The meta row has to exist for the version bump to find something,
+			// and the fill statement joins four tables with two grouped arms
+			// unioned -- none of which a fake plans.
+			seed: []string{liveProbeCrossRepoMeta},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRecomputeBlockedSymbolsRequest(3, 2, 4)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeRecomputeBlockedSymbolsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -3272,6 +3337,22 @@ const (
  created_at, updated_at)
  VALUES (900018, 'live-probe-hash', 'live-probe.md', 'staged', true, 'seeded',
  '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
+)
+
+// Two tasks for the edge probe's ends, and the cross-repo meta row the blocked
+// symbols recompute bumps. The meta row is a singleton keyed on id = 1, so the
+// seed upserts rather than inserting: the replay schema may already carry one.
+const (
+	liveProbeEdgeSource = `INSERT INTO tasks
+ (id, title, state, session_id, created_at, updated_at)
+ VALUES (900019, 'live probe source', 'todo', 'live-probe-session',
+ '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
+	liveProbeEdgeTarget = `INSERT INTO tasks
+ (id, title, state, session_id, created_at, updated_at)
+ VALUES (900020, 'live probe target', 'todo', 'live-probe-session',
+ '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
+	liveProbeCrossRepoMeta = `INSERT INTO cross_repo_meta (id) VALUES (1)
+ ON CONFLICT (id) DO NOTHING`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
