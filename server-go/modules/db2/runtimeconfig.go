@@ -38,6 +38,16 @@ type RuntimeConfig struct {
 	// view, writing only the opt-out.
 	CSSStyleGraphEnabled *bool
 	TypedFactsEnabled    *bool
+
+	// EmbeddingDimension is the vector width this deployment embeds at, and
+	// EmbedderServingID names the embedder producing them.
+	//
+	// Both are process state in the C -- set once at startup and read from a
+	// global. A zero dimension means unset, and the operations that need one
+	// answer capability-absent rather than guessing: a width guessed wrong
+	// writes vectors the store cannot hold.
+	EmbeddingDimension int
+	EmbedderServingID  string
 }
 
 // kbPurgeFenceTTLDefault is the C's KBRS_FENCE_TTL_DFLT.
@@ -95,4 +105,24 @@ func configuredFlag(pick func(RuntimeConfig) *bool) bool {
 		return *flag
 	}
 	return true
+}
+
+// configuredEmbeddingDimension answers the configured vector width, or zero
+// when the host has not installed one.
+func configuredEmbeddingDimension() int {
+	runtimeConfigMu.RLock()
+	defer runtimeConfigMu.RUnlock()
+	if runtimeConfig.EmbeddingDimension > 0 {
+		return runtimeConfig.EmbeddingDimension
+	}
+	return 0
+}
+
+// configuredEmbedderServingID answers which embedder is serving, or the empty
+// string when nothing is configured -- which is a real answer, not a missing
+// one: a store embedded by the builtin hash has no serving identity.
+func configuredEmbedderServingID() string {
+	runtimeConfigMu.RLock()
+	defer runtimeConfigMu.RUnlock()
+	return runtimeConfig.EmbedderServingID
 }

@@ -91,7 +91,7 @@ func decisionLogSetRevisit(ctx context.Context, store Store, request []byte) (
 
 const proposalArchiveQuery = `UPDATE learning_proposals
  SET state = 'archived', archive_reason = $2,
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     updated_at = pg_now_text()
  WHERE id = $1`
 
 // proposalArchive retires a proposal without acting on it, recording why.

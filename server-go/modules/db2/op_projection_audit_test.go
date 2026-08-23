@@ -215,9 +215,12 @@ func TestAuditAppendRefusesAnActionlessRow(t *testing.T) {
 }
 
 func TestUntriedArmReadsAsZeros(t *testing.T) {
-	// There is no found flag in this reply, and for a bandit an untried arm and
-	// one tried and never rewarded are close enough to the same thing: both
-	// mean there is nothing to prefer it on.
+	// There is no found flag in this reply, so an untried arm has to be
+	// answered with something. It is answered with the uninformative prior:
+	// Beta(1, 1), uniform over [0, 1], which says nothing about the arm. Zeros
+	// would be Beta(0, 0), which is not a distribution -- a Thompson sampler
+	// cannot draw from it, so the arm it has the most to learn from would be
+	// the one arm it could never try.
 	store := &fakeStore{}
 	handler := NewDispatchHandler(store)
 	request, err := db2contract.EncodeBanditArmStatsReadRequest("recall", "arm-a")
@@ -231,7 +234,7 @@ func TestUntriedArmReadsAsZeros(t *testing.T) {
 	decisions, rewards, sum, alpha, beta, decodeErr :=
 		db2contract.DecodeBanditArmStatsReadReply(body)
 	if decodeErr != nil || decisions != 0 || rewards != 0 || sum != 0 ||
-		alpha != 0 || beta != 0 {
+		alpha != 1 || beta != 1 {
 		t.Fatalf("stats = %d %d %v %v %v", decisions, rewards, sum, alpha, beta)
 	}
 }

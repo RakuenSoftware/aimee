@@ -387,6 +387,40 @@ const projectionEdgeUpsertQuery = `INSERT INTO entity_edges
    utility_score = entity_edges.utility_score,
    utility_touched_at = entity_edges.utility_touched_at`
 
+// The same write without the conflict clause, for a database whose unique index
+// has not been built.
+//
+// Delete-then-insert rather than upsert, and both halves are in one statement
+// so the edge is never briefly absent. It writes the same rows the conflict
+// path would; what it cannot do is preserve the observed weight, so that is
+// carried across explicitly from whatever the delete removed.
+const projectionEdgeReplaceQuery = `WITH incoming AS (
+   SELECT edge.source, edge.relation, edge.target, edge.relation_id,
+          edge.subject_kind, edge.object_kind, edge.structural_weight
+     FROM unnest($1::text[], $2::text[], $3::text[], $4::bigint[], $5::bigint[],
+                 $6::bigint[], $7::bigint[])
+       AS edge(source, relation, target, relation_id, subject_kind, object_kind,
+               structural_weight)
+ ), removed AS (
+   DELETE FROM entity_edges e
+    USING incoming i
+    WHERE e.source = i.source AND e.relation = i.relation
+      AND e.target = i.target
+   RETURNING e.source, e.relation, e.target, e.weight, e.utility_score,
+             e.utility_touched_at
+ )
+ INSERT INTO entity_edges
+ (source, relation, target, weight, window_id, relation_id, subject_kind,
+  object_kind, edge_origin, structural_weight, structural_updated_at,
+  projection_generation_id, utility_score, utility_touched_at)
+ SELECT i.source, i.relation, i.target, COALESCE(r.weight, 0), 0, i.relation_id,
+        i.subject_kind, i.object_kind, 'code_projection', i.structural_weight,
+        pg_now_text(), $8, COALESCE(r.utility_score, 0),
+        COALESCE(r.utility_touched_at, '')
+   FROM incoming i
+   LEFT JOIN removed r ON r.source = i.source AND r.relation = i.relation
+     AND r.target = i.target`
+
 // The ledger row for each edge: what this generation claimed, kept even after
 // the graph moves on.
 const projectionEdgeRecordQuery = `INSERT INTO code_projection_edges
@@ -718,7 +752,16 @@ func writeProjectionEdges(ctx context.Context, tx Store, generationID int64,
 		objectKinds[index] = edge.ObjectKind
 		structuralWeights[index] = structuralWeightForRelation(edge.Relation)
 	}
-	if _, err := tx.Exec(ctx, projectionEdgeUpsertQuery, sources, relations,
+	// The unique index the ON CONFLICT names is built by a migration rather
+	// than by the schema, so whether it exists is a property of the database.
+	// entity_edge_upsert probes for it and falls back; this does the same,
+	// because a projection that fails wholesale on an unmigrated instance is
+	// worse than one that writes its edges a slower way.
+	statement := projectionEdgeUpsertQuery
+	if !entityEdgeUniqueIndexReady(ctx, tx) {
+		statement = projectionEdgeReplaceQuery
+	}
+	if _, err := tx.Exec(ctx, statement, sources, relations,
 		targets, relationIDs, subjectKinds, objectKinds, structuralWeights,
 		generationID); err != nil {
 		return err

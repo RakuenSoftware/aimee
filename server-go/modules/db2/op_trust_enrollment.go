@@ -107,7 +107,7 @@ func memoryCorefAuditInsert(ctx context.Context, store Store, request []byte) (
 	}
 	_, execErr := store.Exec(ctx, memoryCorefAuditInsertQuery,
 		int64(memoryID), sessionID, outcome, entity, mode, confidence)
-	return acknowledgement(execErr == nil,
+	return dispatchAcknowledgement(execErr, "memory_coref_audit_insert",
 		db2contract.EncodeMemoryCorefAuditInsertReply)
 }
 

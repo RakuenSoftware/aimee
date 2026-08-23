@@ -22,7 +22,7 @@ func init() {
 
 const ingestQueueFailQuery = `UPDATE kb_ingest_queue
  SET status = 'failed',
-     completed_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
+     completed_at = pg_now_text(),
      error_message = $2
  WHERE id = $1`
 
@@ -65,7 +65,8 @@ func kbDocumentsDeleteForFile(ctx context.Context, store Store, request []byte) 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	_, execErr := store.Exec(ctx, kbDocumentsDeleteForFileQuery, project, filePath)
-	return acknowledgement(execErr == nil, db2contract.EncodeKBDocumentsDeleteForFileReply)
+	return dispatchAcknowledgement(execErr, "kb_documents_delete_for_file",
+		db2contract.EncodeKBDocumentsDeleteForFileReply)
 }
 
 // The two halves of one link. A chunk points back at its predecessor and the

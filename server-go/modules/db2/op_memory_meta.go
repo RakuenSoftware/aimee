@@ -236,7 +236,8 @@ func memoryEntityInsert(ctx context.Context, store Store, request []byte) (
 	}
 	_, execErr := store.Exec(ctx, memoryEntityInsertQuery,
 		int64(memoryID), entityName, entityRole, entityWeight)
-	return acknowledgement(execErr == nil, db2contract.EncodeMemoryEntityInsertReply)
+	return dispatchAcknowledgement(execErr, "memory_entity_insert",
+		db2contract.EncodeMemoryEntityInsertReply)
 }
 
 // memoryTemporalInsert records that a memory refers to a point in time.
@@ -256,5 +257,6 @@ func memoryTemporalInsert(ctx context.Context, store Store, request []byte) (
 	}
 	_, execErr := store.Exec(ctx, memoryTemporalInsertQuery,
 		int64(memoryID), refKey, granularity, refWeight)
-	return acknowledgement(execErr == nil, db2contract.EncodeMemoryTemporalInsertReply)
+	return dispatchAcknowledgement(execErr, "memory_temporal_insert",
+		db2contract.EncodeMemoryTemporalInsertReply)
 }

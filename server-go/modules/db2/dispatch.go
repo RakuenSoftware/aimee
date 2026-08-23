@@ -59,12 +59,22 @@ func lookup(stage, operation uint32) (Op, bool) {
 	return op, ok
 }
 
+// speciallyRouted names the operations the dispatcher serves without a registry
+// entry, because their request is not a generic envelope.
+//
+// Only health, and only because db2-health-v1 has its own magic and no
+// operation field: the generic header decode cannot read it, so there is no
+// (stage, operation) pair to key a registry entry on. It is listed rather than
+// registered so the count below stays honest -- a registry entry nothing looks
+// up would say the dispatch table has an entry it does not have.
+var speciallyRouted = []string{"health"}
+
 // Implemented reports how many operations have implementations, which is what
 // the port's progress actually is.
 func Implemented() int {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
-	return len(registry)
+	return len(registry) + len(speciallyRouted)
 }
 
 // NewDispatchHandler serves every registered operation over one stage table.
@@ -72,7 +82,29 @@ func NewDispatchHandler(store Store) bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		header, err := db2contract.DecodeRequestHeader(request)
 		if err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
+			// Health is the one operation whose request is not a generic
+			// envelope: db2-health-v1 has its own magic and no operation field,
+			// so the decode above cannot read it.
+			//
+			// Recognised by the request failing that decode and passing its
+			// own, never by the stage: a stage is a family, and StageHealth is
+			// StageReembedClear and every other lifecycle operation. Keying on
+			// it sent all ten of them to the health handler, which answered
+			// invalid-request for nine.
+			if invocation.StageID != db2contract.StageHealth ||
+				db2contract.DecodeHealthRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			if store == nil {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			if invocation.Cancelled() {
+				return nil, bus.ModuleStatusCancelled
+			}
+			ctx, cancel := context.WithTimeout(context.Background(),
+				invocation.Remaining(defaultOperationTimeout))
+			defer cancel()
+			return health(ctx, store, request)
 		}
 		op, ok := lookup(invocation.StageID, header.Operation)
 		if !ok {

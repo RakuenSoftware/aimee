@@ -167,11 +167,11 @@ const (
  WHERE state_key = 'active_release_id'`
 	releaseRetireQuery = `UPDATE doc_releases
  SET state = 'retired',
-     retired_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     retired_at = pg_now_text()
  WHERE id = $1`
 	releasePromoteQuery = `UPDATE doc_releases
  SET state = 'active',
-     promoted_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     promoted_at = pg_now_text()
  WHERE id = $1`
 	releasePointerQuery = `INSERT INTO kb_runtime_state (state_key, state_value)
  VALUES ('active_release_id', $1)

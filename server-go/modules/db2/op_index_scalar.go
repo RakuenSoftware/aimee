@@ -152,7 +152,11 @@ const (
 )
 
 // fileIndexDeleteCurrentGeneration clears a project's file index for the
-// generation it is currently publishing.
+// generation it is currently publishing, and answers how many rows it removed.
+//
+// The reply field is a count over the whole of u32, as in project_delete, and
+// this answered a flag until the parity run compared it with the C. How much a
+// clear removed is the only thing the caller can check the clear by.
 func fileIndexDeleteCurrentGeneration(ctx context.Context, store Store, request []byte) (
 	[]byte, bus.ModuleStatus,
 ) {
@@ -160,8 +164,11 @@ func fileIndexDeleteCurrentGeneration(ctx context.Context, store Store, request 
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	_, execErr := store.Exec(ctx, fileIndexDeleteCurrentGenerationQuery, project)
-	return acknowledgement(execErr == nil,
+	deleted, execErr := store.Exec(ctx, fileIndexDeleteCurrentGenerationQuery, project)
+	if execErr != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	return removedCount(deleted,
 		db2contract.EncodeFileIndexDeleteCurrentGenerationReply)
 }
 

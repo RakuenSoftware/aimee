@@ -75,15 +75,52 @@ static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, pid_t chil
    assert(!"timed out waiting for the DB2 process");
 }
 
+/* Every replayed call goes through here, which is the one place that holds both
+ * the request this replay made and the reply the module gave for it.
+ *
+ * With AIMEE_DB2_PARITY_TRACE set, each call is appended to that file as
+ *
+ *    <event_kind> <stage_id> <result> <request_hex> <reply_hex>
+ *
+ * so a second implementation can be handed the identical request bytes and be
+ * asked for the identical reply bytes. Recording them here rather than
+ * restating the arguments elsewhere is the point: the replay's arguments are
+ * hand-written C, and a second copy of them would drift from this one silently
+ * -- which would make a parity run agree about calls neither side is making.
+ *
+ * Unset, this is the plain client call it has always been. */
+static void parity_trace_hex(FILE *trace, const void *bytes, uint32_t length)
+{
+   const unsigned char *raw = bytes;
+   for (uint32_t index = 0; index < length; ++index)
+      fprintf(trace, "%02x", raw[index]);
+   if (length == 0)
+      fputc('-', trace);
+}
+
 static aimee_module_call_result_t
 call_client(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
             uint64_t deadline_ns, const void *request_body, uint32_t request_len,
             void *response_body, uint32_t response_capacity, uint32_t *response_len,
             aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
-   return aimee_module_client_call(context, event_kind, stage_id, trace_id, deadline_ns,
-                                   request_body, request_len, response_body, response_capacity,
-                                   response_len, cancelled, cancel_context);
+   aimee_module_call_result_t result = aimee_module_client_call(
+       context, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
+       response_body, response_capacity, response_len, cancelled, cancel_context);
+
+   const char *trace_path = getenv("AIMEE_DB2_PARITY_TRACE");
+   if (!trace_path || !trace_path[0])
+      return result;
+   FILE *trace = fopen(trace_path, "a");
+   if (!trace)
+      return result;
+   fprintf(trace, "%u %u %d ", event_kind, stage_id, (int)result);
+   parity_trace_hex(trace, request_body, request_len);
+   fputc(' ', trace);
+   parity_trace_hex(trace, response_body, response_len ? *response_len : 0u);
+   fputc('\n', trace);
+   fclose(trace);
+   return result;
 }
 
 static int cancel_after_request(void *context)

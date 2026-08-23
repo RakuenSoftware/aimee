@@ -94,7 +94,7 @@ func TestReinforcingStampsBothTimestamps(t *testing.T) {
 	}
 }
 
-func TestDemotionProfileIsWrittenCommittedAndFindable(t *testing.T) {
+func TestDemotionProfileIsWrittenCommittedUnderTheScopeGiven(t *testing.T) {
 	// The read that finds a profile filters on target_surface, so a profile
 	// inserted without one is invisible to it. Setting it in the insert rather
 	// than in a follow-up update is what closes the window where the row exists
@@ -125,11 +125,16 @@ func TestDemotionProfileIsWrittenCommittedAndFindable(t *testing.T) {
 		t.Errorf("the surface is not set at insert: %q / %v",
 			store.lastSQL, store.lastArgs)
 	}
-	// An empty scope kind becomes global, not the artifact writer's "user":
-	// this caller passes global explicitly for the unscoped case, and a
-	// profile filed under user with no scope id is read back by nobody.
-	if store.lastArgs[1] != "global" {
-		t.Errorf("scope kind = %v, want global", store.lastArgs[1])
+	// An empty scope kind is stored empty rather than promoted to "global".
+	// The C promotes only a NULL one, and nothing on this wire can send NULL,
+	// so reading "" as global here would be this port's own invention -- and it
+	// would turn a write whose scope the caller left unset into a default
+	// applying to every scope there is. The profile is then reachable only by
+	// an exact-scope read, which is a real gap, and a smaller one than
+	// silently widening a request nobody made.
+	if store.lastArgs[1] != "" {
+		t.Errorf("scope kind = %v, want it stored as it arrived",
+			store.lastArgs[1])
 	}
 	if !strings.Contains(store.lastSQL, "$5::jsonb") {
 		t.Errorf("the payload is not cast for a JSONB column: %q", store.lastSQL)

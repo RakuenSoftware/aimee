@@ -197,8 +197,7 @@ func kbIngestQueueStats(ctx context.Context, store Store, request []byte) (
 
 const asyncEnqueueQuery = `INSERT INTO kb_async_jobs
  (kind, document_id, project, status, updated_at)
- VALUES ($1, $2, $3, 'pending',
-         to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
+ VALUES ($1, $2, $3, 'pending', pg_now_text())
  ON CONFLICT (kind, document_id) DO NOTHING`
 
 // asyncEnqueue queues background work for a document.
@@ -240,5 +239,6 @@ func kbDocumentsSetTsrState(ctx context.Context, store Store, request []byte) (
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	_, execErr := store.Exec(ctx, kbDocumentsSetTsrStateQuery, project, filePath, state)
-	return acknowledgement(execErr == nil, db2contract.EncodeKBDocumentsSetTsrStateReply)
+	return dispatchAcknowledgement(execErr, "kb_documents_set_tsr_state",
+		db2contract.EncodeKBDocumentsSetTsrStateReply)
 }

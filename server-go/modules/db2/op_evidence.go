@@ -114,7 +114,7 @@ func featureRowRead(ctx context.Context, store Store, request []byte) ([]byte, b
 
 const miningJobCompleteQuery = `UPDATE mining_jobs
  SET hwm = CASE WHEN hwm > $2 THEN hwm ELSE $2 END,
-     last_run_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
+     last_run_at = pg_now_text(),
      last_error = $3
  WHERE id = $1`
 
@@ -151,8 +151,8 @@ func miningJobComplete(ctx context.Context, store Store, request []byte) (
 const kbDirectiveResolveQuery = `UPDATE epistemic_directives
  SET state = 'resolved',
      resolution_memory_id = $2,
-     resolved_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     resolved_at = pg_now_text(),
+     updated_at = pg_now_text()
  WHERE id = $1 AND state = 'open'`
 
 // kbDirectiveResolve closes an open directive by identifier.
@@ -182,8 +182,8 @@ func kbDirectiveResolve(ctx context.Context, store Store, request []byte) (
 const resolveContradictionQuery = `UPDATE epistemic_directives
  SET state = 'resolved',
      resolution_memory_id = $3,
-     resolved_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     resolved_at = pg_now_text(),
+     updated_at = pg_now_text()
  WHERE state = 'open' AND cause = 'contradiction'
    AND ((memory_a_id = $1 AND memory_b_id = $2)
      OR (memory_a_id = $2 AND memory_b_id = $1))`
@@ -198,6 +198,14 @@ const resolveContradictionQuery = `UPDATE epistemic_directives
 // The C returns how many rows changed; the reply carries a flag, so several
 // directives about the same pair all resolve and the caller learns only that at
 // least one did.
+//
+// This deliberately does not answer what the C answers. The C adapter tests
+// that count for equality with ZERO and reports THAT as the acknowledgement, so
+// it says a contradiction was resolved exactly when nothing was resolved, and
+// says nothing happened whenever something did. The inversion is recorded as an
+// accepted divergence in parity_test.go and against the C; copying it here
+// would carry a live defect into the port, and a caller that believes a
+// contradiction is closed stops re-raising it.
 func resolveContradiction(ctx context.Context, store Store, request []byte) (
 	[]byte, bus.ModuleStatus,
 ) {

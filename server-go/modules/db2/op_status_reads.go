@@ -210,15 +210,20 @@ func miningJobGet(ctx context.Context, store Store, request []byte) (
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	var lastRunAt, lastError string
-	var highWater, intervalSeconds, enabled int64
+	var highWater, intervalSeconds int64
+	// mining_jobs.enabled is BOOLEAN, not an integer flag. Scanning it into an
+	// int64 fails the whole read, so this answered "no such job" for a job that
+	// was there -- which the parity run caught by finding a row the C found and
+	// this did not.
+	var enabled bool
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, miningJobGetQuery, jobID).Scan(&lastRunAt,
 		&highWater, &intervalSeconds, &enabled, &lastError); scanErr != nil {
-		found, highWater, intervalSeconds, enabled = 0, 0, 0, 0
+		found, highWater, intervalSeconds, enabled = 0, 0, 0, false
 		lastRunAt, lastError = "", ""
 	}
 	enabledFlag := uint32(0)
-	if enabled != 0 {
+	if enabled {
 		enabledFlag = 1
 	}
 	if highWater < 0 {

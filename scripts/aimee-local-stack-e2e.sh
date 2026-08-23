@@ -141,6 +141,27 @@ if [[ "$MODE" == "full" ]]; then
   "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
   kb_pid=$!
   export AIMEE_KB_API_URL="http://127.0.0.1:8741"
+  # The kb has to finish sealing its first-boot credentials before the server
+  # starts sealing its own. Both bootstrap the same Vault under the same
+  # AIMEE_HOME, and started together they fail each other closed -- the kb
+  # reports "credential environment bootstrap failed closed" and the server
+  # "first-boot credential Vault bootstrap failed", and neither survives it.
+  # Waiting on the kb's own listener is the readiness signal; the timeout is a
+  # backstop so a kb that cannot start is reported as that rather than as a
+  # server failure.
+  bold "==> Waiting for the kb to seal its credentials (up to 60s)"
+  kb_deadline=$((SECONDS + 60))
+  while ! curl -fsS --max-time 3 "${AIMEE_KB_API_URL}/v1/health" >/dev/null 2>&1; do
+    if ! kill -0 "$kb_pid" 2>/dev/null; then
+      red "    aimee-kb exited during startup"; sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2; exit 1
+    fi
+    if (( SECONDS >= kb_deadline )); then
+      red "    aimee-kb did not answer /v1/health within 60s"
+      sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2; exit 1
+    fi
+    sleep 2
+  done
+  green "    kb is up"
 elif [[ "$MODE" == "hybrid" ]]; then
   bold "==> Mode HYBRID (T6): local server + external kb at ${KB_URL}"
   export AIMEE_KB_API_URL="$KB_URL"
@@ -161,12 +182,21 @@ server_pid=$!
 
 # The enrollment claim is issued over the server's operator UDS, while the client
 # uses the public TLS listener. Wait for both halves of that real wizard path.
+#
+# The operator UDS is aimee-http.sock, not the path --socket= names. That flag
+# sets where the pid file goes; the NDJSON socket it used to open is retired,
+# and the co-located /v1 HTTP UDS replaced it. This script waited for the
+# retired path, so it timed out after ninety seconds against a server that was
+# already listening -- which is why the container entrypoint and the wizard
+# bootstrap test, both of which wait for aimee-http.sock, kept working while
+# this one could not pass at all.
 bold "==> Waiting for the operator socket and TLS listener (up to ${WAIT_SECONDS}s)"
+OPERATOR_SOCK="$AIMEE_HOME/aimee-http.sock"
 deadline=$((SECONDS + WAIT_SECONDS))
 while true; do
   status="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' \
     "${SERVER_URL}/v1/health" 2>/dev/null || true)"
-  [[ -S "$AIMEE_HOME/aimee-server.sock" && "$status" != 000 ]] && break
+  [[ -S "$OPERATOR_SOCK" && "$status" != 000 ]] && break
   if ! kill -0 "$server_pid" 2>/dev/null; then red "    aimee-server exited during startup"; exit 1; fi
   if (( SECONDS >= deadline )); then red "    server listeners did not start within ${WAIT_SECONDS}s"; exit 1; fi
   sleep 2
@@ -179,7 +209,7 @@ done
 CLIENT_HOME="$SCRATCH/client"
 mkdir -p "$CLIENT_HOME"
 bold "==> Claiming the first wizard user"
-deploy_status="$(curl -sS --unix-socket "$AIMEE_HOME/aimee-server.sock" \
+deploy_status="$(curl -sS --unix-socket "$OPERATOR_SOCK" \
   -H 'X-Aimee-Webuser: local-stack-e2e' \
   -H 'content-type: application/json' -X POST -d '{}' -o "$SCRATCH/deploy-apply.json" \
   -w '%{http_code}' http://localhost/v1/deploy/apply)"
@@ -234,8 +264,13 @@ check "GET /v1/version" 'version'                  "${SERVER_URL}/v1/version"
 
 bold "==> kb-backed contract (server -> kb)"
 check "GET /v1/kb/status -> vector" '"vector"' "${SERVER_URL}/v1/kb/status"
+# scope=all is required, not decoration. The route resolves a project from
+# `project`, from `cwd`, or from scope=all, and answers 409 scope_required when
+# it gets none of the three -- so this check, which passed only a query, could
+# never have returned hits. A smoke check has no working directory worth
+# resolving and no project of its own, which makes scope=all the honest one.
 check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: application/json' \
-                                               -d '{"query":"local e2e","max_results":3}' \
+                                               -d '{"query":"local e2e","max_results":3,"scope":"all"}' \
                                                "${SERVER_URL}/v1/kb/search"
 
 bold "==> Write→read round-trip (store a memory, read it back)"

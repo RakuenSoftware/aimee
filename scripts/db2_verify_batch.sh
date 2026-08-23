@@ -83,6 +83,21 @@ print("boundary: source_files", summary["source_files"],
 PY
 
 step gotest bash -c 'cd server-go && go test -count=1 ./db2/' || exit 1
+# The ported module's own suite. The contract package above tests the wire; this
+# tests what the operations do with it, and nothing here ran it: a change that
+# broke two of its tests passed every step this gate had.
+#
+# Offline: the live probes and the parity comparison both skip unless their
+# environment variables name a database, so this step needs nothing running.
+step gomodule bash -c 'cd server-go && go test -count=1 ./modules/db2/' || exit 1
+# Every catalogued operation has a handler, counted from the contract's own
+# constants rather than a list anyone maintains -- a hand-kept list is how a
+# batch was once reported complete at 307 of 307 when it was not.
+step gocoverage python3 scripts/db2_go_coverage.py || exit 1
+# Wall-clock stamps in the format the C writes them. These columns are compared
+# AS TEXT against pg_now_text(), so a spelling that disagrees makes a sweep skip
+# or collect a day of rows and says nothing about it.
+step stamps python3 scripts/db2_check_stamp_formats.py || exit 1
 step scripttests python3 -m unittest discover -s scripts/tests -q || exit 1
 step lint make -C src lint || exit 1
 tail -1 "${LOGS}/lint.log"

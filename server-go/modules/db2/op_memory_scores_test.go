@@ -112,8 +112,9 @@ func TestMarkPendingRefusesAZeroWindow(t *testing.T) {
 func TestProspectiveSetStateAcceptsAnyTransition(t *testing.T) {
 	// A caller cancelling a trigger that has already fired is acting on stale
 	// information, not making a mistake. Failing them would turn a harmless
-	// race into an error.
-	store := &fakeStore{execRowsAt: true, execRows: 0}
+	// race into an error -- so the statement carries no state predicate and the
+	// row moves whatever state it was in.
+	store := &fakeStore{execRowsAt: true, execRows: 1}
 	handler := NewDispatchHandler(store)
 	request, err := db2contract.EncodeProspectiveSetStateRequest(4, "cancelled")
 	if err != nil {
@@ -129,6 +130,26 @@ func TestProspectiveSetStateAcceptsAnyTransition(t *testing.T) {
 	}
 	if strings.Contains(store.lastSQL, "AND state") {
 		t.Errorf("a state predicate was added: %q", store.lastSQL)
+	}
+}
+
+func TestProspectiveSetStateRefusesAMemoryThatIsNotThere(t *testing.T) {
+	// The acknowledgement means a prospective memory moved. A caller arming or
+	// firing one that does not exist has to hear that, or it will wait for a
+	// trigger nothing will ever fire.
+	store := &fakeStore{execRowsAt: true, execRows: 0}
+	handler := NewDispatchHandler(store)
+	request, err := db2contract.EncodeProspectiveSetStateRequest(4, "armed")
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	body, status := handler(invocation(db2contract.StageProspectiveSetState), request)
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("status = %v", status)
+	}
+	acknowledged, decodeErr := db2contract.DecodeProspectiveSetStateReply(body)
+	if decodeErr != nil || acknowledged != 0 {
+		t.Fatalf("acknowledged = %d for a memory that is not there", acknowledged)
 	}
 }
 

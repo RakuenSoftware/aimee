@@ -176,8 +176,11 @@ func TestMiningJobCarriesItsResumePoint(t *testing.T) {
 	// The high water mark is what makes a mining job resumable: it is the last
 	// row the job consumed, so the next run starts there rather than re-reading
 	// everything.
+	// enabled is a BOOLEAN column, so the fake presents a bool: an int64 here
+	// would let a scan pass in the test that fails against Postgres, which is
+	// how this operation came to answer "no such job" for a job that was there.
 	store := &fakeStore{row: &fakeRow{values: []any{
-		"2026-01-01T00:00:00Z", int64(4210), int64(900), int64(1), "",
+		"2026-01-01T00:00:00Z", int64(4210), int64(900), true, "",
 	}}}
 	handler := NewDispatchHandler(store)
 	request, err := db2contract.EncodeMiningJobGetRequest("interaction-mining")

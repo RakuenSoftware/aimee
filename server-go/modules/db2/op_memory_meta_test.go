@@ -270,10 +270,19 @@ func TestExtractionInsertsToleratePriorExtractions(t *testing.T) {
 	}
 }
 
-func TestExtractionInsertsReportAFailedWrite(t *testing.T) {
+func TestExtractionInsertsAcknowledgeTheDispatchTheCAcknowledges(t *testing.T) {
+	// This test used to assert the opposite, and the assertion was wrong.
+	//
 	// The C acknowledges unconditionally: its backend returns void, so by the
-	// time the adapter answers there is nothing left to report. That error is
-	// not lost here, and this is the one place the two answers differ.
+	// time the adapter answers there is nothing left to report, and the flag
+	// means the call was made. Answering zero on a failed write is a better
+	// answer to a different question, and shipping it here would have changed
+	// what the field means depending on which implementation served the
+	// request. The parity run against the C module is what caught it.
+	//
+	// The error is logged instead, so a failed write is visible somewhere even
+	// though the reply has nowhere to carry it. Making the field mean "written"
+	// is a change to the contract, and belongs there rather than here.
 	store := &fakeStore{execErr: errors.New("connection lost")}
 	handler := NewDispatchHandler(store)
 	request, err := db2contract.EncodeMemoryEntityInsertRequest(4, "postgres", "mention", 0.5)
@@ -285,7 +294,7 @@ func TestExtractionInsertsReportAFailedWrite(t *testing.T) {
 		t.Fatalf("status = %v", status)
 	}
 	acknowledged, decodeErr := db2contract.DecodeMemoryEntityInsertReply(body)
-	if decodeErr != nil || acknowledged != 0 {
-		t.Fatalf("acknowledged = %d for a failed insert, want 0", acknowledged)
+	if decodeErr != nil || acknowledged != 1 {
+		t.Fatalf("acknowledged = %d, want the C's answer", acknowledged)
 	}
 }

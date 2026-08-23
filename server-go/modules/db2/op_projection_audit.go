@@ -305,10 +305,13 @@ const banditArmStatsReadQuery = `SELECT n_decisions, n_rewards, sum_reward,
 
 // banditArmStatsRead answers what an arm has done so far.
 //
-// An arm nobody has pulled reads as all zeros rather than as absent, which is
-// what the reply can say -- there is no found flag. A caller cannot tell an
-// untried arm from one tried and never rewarded, and for a bandit those are
-// close enough to the same thing: both mean there is nothing to prefer it on.
+// An arm nobody has pulled reads as the uninformative prior -- no decisions, no
+// rewards, and Beta(1, 1) -- rather than as absent, which is what the reply can
+// say: there is no found flag. The prior is the point. A sampler that draws
+// from the posterior cannot draw from Beta(0, 0), which is not a distribution,
+// so answering an untried arm with zeros would either crash the caller or make
+// it silently skip the arm it has the most to learn from. Beta(1, 1) is uniform
+// over [0, 1]: it says nothing about the arm, which is exactly what is known.
 //
 // The posteriors come back as stored rather than derived from the counts. They
 // are the arm's parameters, which a sampler updates on its own schedule, and
@@ -327,7 +330,8 @@ func banditArmStatsRead(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, banditArmStatsReadQuery,
 		decisionPoint, armID).Scan(&decisions, &rewards, &sumReward,
 		&alpha, &beta); scanErr != nil {
-		decisions, rewards, sumReward, alpha, beta = 0, 0, 0, 0, 0
+		decisions, rewards, sumReward = 0, 0, 0
+		alpha, beta = 1, 1
 	}
 	if decisions < 0 {
 		decisions = 0

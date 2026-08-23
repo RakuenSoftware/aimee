@@ -162,3 +162,22 @@ func CloseProductionStore() {
 	production.store.Close()
 	production.store = nil
 }
+
+// poolStatistics is what pool_status needs and the Store interface does not
+// carry.
+//
+// Optional on purpose: most Stores are not pools, and widening Store itself
+// would make every implementation answer a question only one of them can. A
+// Store that has a pool behind it implements this; one that does not is
+// capability-absent, which is the honest reply.
+type poolStatistics interface {
+	PoolStat() *pgxpool.Stat
+}
+
+// PoolStat answers this pool's counters.
+func (s *PoolStore) PoolStat() *pgxpool.Stat {
+	if s == nil || s.pool == nil {
+		return nil
+	}
+	return s.pool.Stat()
+}

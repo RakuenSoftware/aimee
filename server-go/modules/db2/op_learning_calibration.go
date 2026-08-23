@@ -122,10 +122,16 @@ const demotionProfileWriteQuery = `INSERT INTO artifacts
 // kind "synthesis" -- so that branch cannot fire for this kind or for the
 // attribution below, and neither carries it.
 //
-// An empty scope kind becomes "global". The C's artifact writer defaults an
-// absent one to "user", but this caller passes "global" explicitly for the
-// unscoped case, and a profile that landed under "user" with an empty scope id
-// would be read back by nobody.
+// The scope kind is stored as it arrived, empty included.
+//
+// The C defaults only a NULL scope kind to "global", and nothing on this wire
+// can send NULL, so a profile written with an empty scope kind is stored with
+// an empty one -- and the global fallback in demotion_profile_read therefore
+// cannot be reached by anything written through this operation. That is a real
+// gap, and it is left as it is on purpose: reading an empty scope kind as
+// "global" would turn a write whose scope the caller failed to specify into a
+// default that applies to every scope there is. Widening a request nobody made
+// is worse than storing a profile that only an exact-scope read will find.
 func demotionProfileWrite(ctx context.Context, store Store, request []byte) (
 	[]byte, bus.ModuleStatus,
 ) {
@@ -133,9 +139,6 @@ func demotionProfileWrite(ctx context.Context, store Store, request []byte) (
 		db2contract.DecodeDemotionProfileWriteRequest(request)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
-	}
-	if scopeKind == "" {
-		scopeKind = "global"
 	}
 	artifactID, idErr := newArtifactID()
 	if idErr != nil {

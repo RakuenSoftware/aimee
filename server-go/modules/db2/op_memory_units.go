@@ -48,9 +48,9 @@ const lifecycleUpdateStateQuery = `UPDATE memories
      archive_reason = CASE WHEN $2 = 'archived' THEN $3 ELSE archive_reason END,
      valid_until = CASE WHEN $2 IN ('superseded','archived')
                          AND COALESCE(valid_until, '') = ''
-                        THEN to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+                        THEN pg_now_text()
                         ELSE valid_until END,
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     updated_at = pg_now_text()
  WHERE id = $1`
 
 // lifecycleUpdateState moves a memory between lifecycle states.
@@ -86,7 +86,8 @@ func memoryAliasInsert(ctx context.Context, store Store, request []byte) (
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	_, execErr := store.Exec(ctx, memoryAliasInsertQuery, int64(memoryID), alias, weight)
-	return acknowledgement(execErr == nil, db2contract.EncodeMemoryAliasInsertReply)
+	return dispatchAcknowledgement(execErr, "memory_alias_insert",
+		db2contract.EncodeMemoryAliasInsertReply)
 }
 
 // The weight of 2.0 and the episode-card flag are constants of the row shape
@@ -115,7 +116,8 @@ func memoryEpisodeCardInsert(ctx context.Context, store Store, request []byte) (
 	}
 	_, execErr := store.Exec(ctx, memoryEpisodeCardInsertQuery,
 		int64(memoryID), unitKey, unitText)
-	return acknowledgement(execErr == nil, db2contract.EncodeMemoryEpisodeCardInsertReply)
+	return dispatchAcknowledgement(execErr, "memory_episode_card_insert",
+		db2contract.EncodeMemoryEpisodeCardInsertReply)
 }
 
 const memoryEntitiesListQuery = `SELECT entity, role, weight FROM memory_entities

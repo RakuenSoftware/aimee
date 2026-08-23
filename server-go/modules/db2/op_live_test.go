@@ -78,6 +78,9 @@ type liveRequest struct {
 	// repeat runs a write probe more than once inside its transaction, for an
 	// operation whose second call is the one that used to fail.
 	repeat int
+	// generated marks a probe emitted by scripts/gen_db2_live_probes.py, which
+	// gets the shared fixture below rather than a seed of its own.
+	generated bool
 	// seed runs inside the probe's transaction before the operation, for a
 	// write whose interesting path needs rows to act on. A probe against an
 	// empty schema proves the statement parses and binds; it does not prove the
@@ -2760,7 +2763,18 @@ func liveReads() []liveRequest {
 // job, and TestDecisionLogRecordRollsBackWhenTheSupersedeMissed is where they
 // are checked.
 type rollbackStore struct {
-	tx pgx.Tx
+	tx   pgx.Tx
+	pool *pgxpool.Pool
+}
+
+// PoolStat delegates to the pool this transaction came from, so pool_status can
+// be probed: the operation asks the Store for pool counters, and a store that
+// hides them would answer capability-absent for reasons of test plumbing.
+func (s *rollbackStore) PoolStat() *pgxpool.Stat {
+	if s.pool == nil {
+		return nil
+	}
+	return s.pool.Stat()
 }
 
 func (s *rollbackStore) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -2832,12 +2846,17 @@ func liveWrites() []liveRequest {
 				return db2contract.EncodeFileIndexDeleteCurrentGenerationRequest("replay-project")
 			},
 			decoded: func(t *testing.T, body []byte) {
+				// The reply is a count of removed rows, not an
+				// acknowledgement. This asserted one until the parity run
+				// showed the field was a count and the implementation was
+				// answering a flag; nothing is seeded here, so the honest
+				// expectation is zero.
 				deleted, err := db2contract.DecodeFileIndexDeleteCurrentGenerationReply(body)
 				if err != nil {
 					t.Fatalf("decode reply: %v", err)
 				}
-				if deleted != 1 {
-					t.Fatal("the delete did not run")
+				if deleted != 0 {
+					t.Fatalf("deleted = %d from an unseeded index", deleted)
 				}
 			},
 		},
@@ -5474,7 +5493,9 @@ func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	restoreSequences := snapshotSequences(t, pool)
 	defer restoreSequences()
 
-	for _, testCase := range liveWrites() {
+	cases := append(append([]liveRequest{}, liveWrites()...),
+		liveGeneratedProbes()...)
+	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -5491,8 +5512,21 @@ func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 					t.Fatalf("seed: %v\n%s", err, statement)
 				}
 			}
+			// A generated probe names identifier one and the string "a",
+			// because those are the smallest values its envelope accepts. On an
+			// empty schema that addresses nothing, and the operations that
+			// refuse when their row is absent would be reported as broken
+			// statements. The fixture gives those identifiers something to
+			// point at, so the probe exercises the path it is there to prove.
+			if testCase.generated {
+				for _, statement := range liveGeneratedFixture {
+					if _, err := tx.Exec(ctx, statement); err != nil {
+						t.Fatalf("generated fixture: %v\n%s", err, statement)
+					}
+				}
+			}
 
-			handler := NewDispatchHandler(&rollbackStore{tx: tx})
+			handler := NewDispatchHandler(&rollbackStore{tx: tx, pool: pool})
 			request, err := testCase.encode()
 			if err != nil {
 				t.Fatalf("encode request: %v", err)
@@ -5608,6 +5642,12 @@ func TestLiveCoversEveryPortedOperation(t *testing.T) {
 	// merge, since the two take different paths. Both entries carry the same
 	// name and count once; they sit under different parent tests, so the
 	// subtest names do not collide.
+	//
+	// The generated probes count too. They are weaker than the hand-written
+	// ones -- minimum-valid arguments, and no assertion on what comes back --
+	// and they exist so that an operation cannot be added without something
+	// having run it against Postgres. What checks the answers is the parity
+	// run, which replays the C's own requests for all of them.
 	probed := map[string]bool{}
 	for _, entry := range liveReads() {
 		probed[entry.name] = true
@@ -5615,11 +5655,14 @@ func TestLiveCoversEveryPortedOperation(t *testing.T) {
 	for _, entry := range liveWrites() {
 		probed[entry.name] = true
 	}
+	for _, entry := range liveGeneratedProbes() {
+		probed[entry.name] = true
+	}
 	covered := len(probed) + len(liveExcluded)
 	if covered != Implemented() {
 		t.Fatalf("%d operation(s) ported; %d distinct operation(s) probed, %d excluded "+
-			"(%d read entries, %d write entries)",
+			"(%d read entries, %d write entries, %d generated entries)",
 			Implemented(), len(probed), len(liveExcluded),
-			len(liveReads()), len(liveWrites()))
+			len(liveReads()), len(liveWrites()), len(liveGeneratedProbes()))
 	}
 }

@@ -281,6 +281,6 @@ func memoryRelationInsert(ctx context.Context, store Store, request []byte) (
 	}
 	_, execErr := store.Exec(ctx, memoryRelationInsertQuery,
 		int64(memoryID), srcEntity, relation, dstEntity, factText)
-	return acknowledgement(execErr == nil,
+	return dispatchAcknowledgement(execErr, "memory_relation_insert",
 		db2contract.EncodeMemoryRelationInsertReply)
 }

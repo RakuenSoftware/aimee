@@ -249,26 +249,39 @@ func TestSyncProjectsEveryEdgeClass(t *testing.T) {
 	}
 }
 
-func TestSyncPreservesWhatUseHasTaught(t *testing.T) {
+func TestSyncPreservesWhatUseHasTaughtOnBothPaths(t *testing.T) {
+	// Two paths, because the unique index the conflict clause names is built by
+	// a migration rather than by the schema. Both have to carry the observed
+	// weight and the accumulated utility across a re-projection: a projection
+	// that unlearned them on an unmigrated instance would be a silent
+	// difference between two deployments of the same code.
+	//
+	// The fake answers no rows to the index probe, so the fallback is what runs
+	// here; the fast path is checked by reading its statement directly, because
+	// the probe's answer is cached for the life of the process.
 	store := syncStore(nil)
 	if _, status := syncProject(t, store); status != bus.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	statements := strings.Join(store.sqlLog, "\n")
-	// A re-projection of unchanged structure must not unlearn the observed
-	// weight or the utility the graph has accumulated.
+	if !strings.Contains(statements, "COALESCE(r.weight, 0)") ||
+		!strings.Contains(statements, "COALESCE(r.utility_score, 0)") ||
+		!strings.Contains(statements, "COALESCE(r.utility_touched_at, '')") {
+		t.Errorf("the fallback path unlearns what use taught: %q", statements)
+	}
 	for _, preserved := range []string{
 		"weight = entity_edges.weight",
 		"utility_score = entity_edges.utility_score",
 		"utility_touched_at = entity_edges.utility_touched_at",
 	} {
-		if !strings.Contains(statements, preserved) {
-			t.Errorf("%s is no longer preserved", preserved)
+		if !strings.Contains(projectionEdgeUpsertQuery, preserved) {
+			t.Errorf("the conflict path no longer preserves %s", preserved)
 		}
 	}
-	// The stamp is the canonical one, not the session's timezone.
-	if !strings.Contains(statements, "'code_projection',\n        edge.structural_weight, pg_now_text()") {
-		t.Errorf("the structural stamp changed: %q", statements)
+	// The stamp is the canonical one on both paths, not the session's timezone.
+	if !strings.Contains(projectionEdgeUpsertQuery, "pg_now_text()") ||
+		!strings.Contains(projectionEdgeReplaceQuery, "pg_now_text()") {
+		t.Error("the structural stamp is no longer the canonical one")
 	}
 }
 

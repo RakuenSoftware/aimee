@@ -42,16 +42,16 @@ const maxActiveCollabRules = 10
 // reply cannot tell a caller which of the two refusals it met, and neither
 // could the C: both answer zero.
 const collabRuleApproveQuery = `UPDATE collab_rules
- SET status = 'active', decided_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+ SET status = 'active', decided_at = pg_now_text()
  WHERE id = $1 AND status = 'proposed'
  AND (SELECT COUNT(*) FROM collab_rules WHERE status = 'active') < $2`
 
 const collabRuleRejectQuery = `UPDATE collab_rules
- SET status = 'rejected', decided_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+ SET status = 'rejected', decided_at = pg_now_text()
  WHERE id = $1 AND status = 'proposed'`
 
 const collabRuleRetireQuery = `UPDATE collab_rules
- SET status = 'retired', decided_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+ SET status = 'retired', decided_at = pg_now_text()
  WHERE id = $1 AND status = 'active'`
 
 // collabRulesEpochBumpQuery advances the number agents compare against to learn
@@ -139,8 +139,8 @@ func transitionAndBumpEpoch(ctx context.Context, tx Store, query string, args ..
 
 const proposalMarkCommittedQuery = `UPDATE learning_proposals
  SET state = 'committed',
-     committed_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     committed_at = pg_now_text(),
+     updated_at = pg_now_text()
  WHERE id = $1`
 
 // proposalMarkCommitted records that a proposal was acted on.
@@ -165,7 +165,7 @@ func proposalMarkCommitted(ctx context.Context, store Store, request []byte) (
 
 const proposalBumpCorroborationQuery = `UPDATE learning_proposals
  SET corroboration_count = corroboration_count + 1,
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     updated_at = pg_now_text()
  WHERE id = $1 AND state = 'pending'`
 
 // proposalBumpCorroboration records another observation supporting a proposal.

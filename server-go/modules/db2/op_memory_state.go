@@ -87,7 +87,8 @@ func memoryRetroScanMarker(ctx context.Context, store Store, request []byte) (
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	_, execErr := store.Exec(ctx, memoryRetroScanMarkerQuery, timestamp)
-	return acknowledgement(execErr == nil, db2contract.EncodeMemoryRetroScanMarkerReply)
+	return dispatchAcknowledgement(execErr, "memory_retro_scan_marker",
+		db2contract.EncodeMemoryRetroScanMarkerReply)
 }
 
 // The duplicate set, expressed once. DISTINCT ON picks the canonical row per
@@ -176,9 +177,9 @@ func dedupeByKey(ctx context.Context, store Store, request []byte) ([]byte, bus.
 
 const enrollmentTouchQuery = `INSERT INTO kb_enrollments
  (scope, fingerprint, legacy, last_seen_at, authority_id)
- VALUES ($1, $2, 1, to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'), $3)
+ VALUES ($1, $2, 1, pg_now_text(), $3)
  ON CONFLICT (fingerprint) DO UPDATE
- SET last_seen_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')`
+ SET last_seen_at = pg_now_text()`
 
 // enrollmentTouchLastSeen records that a certificate was used.
 //

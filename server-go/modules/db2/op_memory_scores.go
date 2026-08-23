@@ -88,7 +88,7 @@ func memorySurprise(ctx context.Context, store Store, request []byte) ([]byte, b
 }
 
 const prospectiveSetStateQuery = `UPDATE prospective_memories
- SET state = $2, updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+ SET state = $2, updated_at = pg_now_text()
  WHERE id = $1`
 
 // prospectiveSetState moves a prospective memory between armed, fired and
@@ -105,14 +105,19 @@ func prospectiveSetState(ctx context.Context, store Store, request []byte) (
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	_, execErr := store.Exec(ctx, prospectiveSetStateQuery, int64(prospectiveID), state)
-	return acknowledgement(execErr == nil, db2contract.EncodeProspectiveSetStateReply)
+	// The acknowledgement means a row moved, not that the statement ran: the C
+	// returns success only when its update changed something, and a caller
+	// arming or firing a prospective memory needs to know it addressed one.
+	changed, execErr := store.Exec(ctx, prospectiveSetStateQuery,
+		int64(prospectiveID), state)
+	return acknowledgement(execErr == nil && changed > 0,
+		db2contract.EncodeProspectiveSetStateReply)
 }
 
 const lifecycleMarkPendingQuery = `UPDATE memories
  SET lifecycle_state = 'pending',
      ttl_at = pg_now_text($2),
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     updated_at = pg_now_text()
  WHERE id = $1`
 
 // lifecycleMarkPending gives a memory a deadline to be confirmed by.
@@ -179,8 +184,8 @@ func ontologyEvalCount(ctx context.Context, store Store, request []byte) ([]byte
 const directiveResolveQuery = `UPDATE epistemic_directives
  SET state = 'resolved',
      resolution_memory_id = $2,
-     resolved_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
-     updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+     resolved_at = pg_now_text(),
+     updated_at = pg_now_text()
  WHERE id = $1 AND state = 'open'`
 
 // directiveResolve closes an open question, recording the memory that answered

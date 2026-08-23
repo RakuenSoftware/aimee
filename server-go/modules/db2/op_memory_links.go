@@ -65,7 +65,8 @@ func memoryScopeTagInsert(ctx context.Context, store Store, request []byte) (
 	}
 	_, execErr := store.Exec(ctx, memoryScopeTagInsertQuery,
 		int64(memoryID), scopeType, scopeValue)
-	return acknowledgement(execErr == nil, db2contract.EncodeMemoryScopeTagInsertReply)
+	return dispatchAcknowledgement(execErr, "memory_scope_tag_insert",
+		db2contract.EncodeMemoryScopeTagInsertReply)
 }
 
 const memoryMarkMergedIntoQuery = `UPDATE memories SET merged_into = $1
@@ -93,7 +94,8 @@ func memoryMarkMergedInto(ctx context.Context, store Store, request []byte) (
 	}
 	_, execErr := store.Exec(ctx, memoryMarkMergedIntoQuery,
 		int64(mergedInto), maxConfidence, sessionID)
-	return acknowledgement(execErr == nil, db2contract.EncodeMemoryMarkMergedIntoReply)
+	return dispatchAcknowledgement(execErr, "memory_mark_merged_into",
+		db2contract.EncodeMemoryMarkMergedIntoReply)
 }
 
 const memoryTemporalRefsListQuery = `SELECT ref_key, granularity, weight
