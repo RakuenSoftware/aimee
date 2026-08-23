@@ -17,6 +17,23 @@ import (
 // single global counter would couple two cadences that have no reason to move
 // together, so the version is (owner, version) and each owner advances alone.
 //
+// AN OWNER IS A SCHEMA'S IDENTITY, NOT A MODULE'S. One module may own several,
+// and a namespace outlives the module that created it. That is deliberate: a
+// recorded migration is a fact about a database -- these statements ran, with
+// this checksum, at this time -- and that fact does not stop being true because
+// the module which applied it was renamed or absorbed into another.
+//
+// So an owner is chosen once and never changed. Renaming one orphans its whole
+// history: the rows stay under the old name, the new name starts empty, and the
+// next migration applies against a database that already has its tables. The
+// checksum comparison would then fire on every version at once, which is the
+// mechanism working correctly and telling you something you did to yourself.
+//
+// Nothing here assumes one module means one owner. The gap check, the checksum
+// comparison and the advisory lock are all per owner, so two namespaces
+// migrating from one module serialise independently rather than blocking each
+// other.
+//
 // What this replaces is worth stating, because it is the reason for every rule
 // below. Today db2 applies one idempotent schema.sql and then carries loose
 // migration files -- 2026-embed-halfvec.sql, 2026-embed-dim-1024.sql,

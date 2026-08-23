@@ -266,3 +266,58 @@ func TestOwnerLockKeysDifferPerOwner(t *testing.T) {
 		t.Error("a negative advisory key reads as a bug in pg_locks")
 	}
 }
+
+func TestOneModuleMayOwnSeveralNamespaces(t *testing.T) {
+	// The absorption case, concretely. db1's migrations stay recorded under
+	// "db1" because renaming would orphan all 21 of them, and the module that
+	// now applies them is called aimee -- which also has its own schema
+	// starting at version 1.
+	//
+	// Nothing may couple an owner to the module applying it: if it did, this
+	// version 1 would be refused as a gap against the other namespace's 21.
+	store := newStore()
+	for version := int64(1); version <= 21; version++ {
+		store.recorded[key("db1", version)] = "recorded-earlier"
+	}
+
+	outcome, err := Migrate(context.Background(), store, Migration{
+		Owner: "aimee", Version: 1,
+		Statements: []string{"CREATE TABLE peer_inbox (id BIGINT)"},
+	})
+	if err != nil || outcome != MigrateApplied {
+		t.Fatalf("a new namespace could not start at 1 beside an old one: %v", err)
+	}
+
+	// And the old namespace is undisturbed by the new one.
+	if _, err := Migrate(context.Background(), store, Migration{
+		Owner: "db1", Version: 22, Statements: []string{"SELECT 1"},
+	}); err != nil {
+		t.Fatalf("the established namespace could not advance: %v", err)
+	}
+}
+
+func TestANamespaceRenameOrphansItsHistory(t *testing.T) {
+	// Not a behaviour to fix -- a consequence to know. Renaming an owner leaves
+	// its rows under the old name and starts the new one empty, so the next
+	// migration applies against a database that already has its tables. This
+	// pins the fact so nobody discovers it by doing it.
+	store := newStore()
+	store.recorded[key("db1", 1)] = "already-applied"
+
+	// Under the old name: already applied, nothing runs.
+	same := Migration{Owner: "db1", Version: 1,
+		Statements: []string{"CREATE TABLE t (id BIGINT)"}}
+	store.recorded[key("db1", 1)] = same.Checksum()
+	if outcome, err := Migrate(context.Background(), store, same); err != nil ||
+		outcome != MigrateAlreadyApplied {
+		t.Fatalf("outcome = %v, err = %v", outcome, err)
+	}
+
+	// Under a new name: the same statements run again, against tables that are
+	// already there.
+	renamed := Migration{Owner: "aimee", Version: 1, Statements: same.Statements}
+	if outcome, err := Migrate(context.Background(), store, renamed); err != nil ||
+		outcome != MigrateApplied {
+		t.Fatalf("a renamed owner did not re-run its history: %v", err)
+	}
+}
