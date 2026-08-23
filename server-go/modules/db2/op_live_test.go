@@ -2547,6 +2547,77 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "decision_log_get",
+			stage: db2contract.StageDecisionLogGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDecisionLogGetRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeDecisionLogGetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a decision that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "decision_log_list",
+			stage: db2contract.StageDecisionLogList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDecisionLogListRequest("", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDecisionLogListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "decision_log_list_scoped",
+			stage: db2contract.StageDecisionLogListScoped,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDecisionLogListScopedRequest(
+					"live-probe-subject", "active", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDecisionLogListScopedReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "learning_proposal_get",
+			stage: db2contract.StageLearningProposalGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLearningProposalGetRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeLearningProposalGetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a proposal that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "task_list",
+			stage: db2contract.StageTaskList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTaskListRequest("todo", "", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeTaskListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
