@@ -2257,6 +2257,33 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "anti_pattern_check",
+			stage: db2contract.StageAntiPatternCheck,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeAntiPatternCheckRequest(
+					"src/live-probe.c", "rm -rf /tmp/live-probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeAntiPatternCheckReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "artifact_list_proposed",
+			stage: db2contract.StageArtifactListProposed,
+			// A correlated string_agg with its own ORDER BY inside the
+			// aggregate, which is the shape that replaces the C's query per row.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactListProposedRequest("recall", 20)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeArtifactListProposedReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -4336,6 +4363,73 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "agent_outcome_record",
+			stage: db2contract.StageAgentOutcomeRecord,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeAgentOutcomeRecordRequest(
+					"live-probe", "review", "succeeded", "", 4, 12, 90000, "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeAgentOutcomeRecordReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the outcome was not recorded")
+				}
+			},
+		},
+		{
+			name:  "artifact_write",
+			stage: db2contract.StageArtifactWrite,
+			// Twice, for the conflict path: the identifier is the caller's, so
+			// a retry has to collapse rather than fail.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactWriteRequest(
+					"live-probe-written", "synthesis", "proposed", "project",
+					liveProbeScopeProject, "live-probe", 0.8, `{"claim":"x"}`)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeArtifactWriteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the artifact was not written")
+				}
+			},
+		},
+		{
+			name:  "curator_invalidate_doc",
+			stage: db2contract.StageCuratorInvalidateDoc,
+			// Four chained CTEs, one of them an UPDATE feeding an INSERT that
+			// builds two JSON objects per row. Whether PostgreSQL accepts that
+			// shape -- and whether gen_random_uuid is there -- is the whole
+			// question, and only a real database answers it.
+			//
+			// A document and a citing artifact are seeded so the statement has
+			// something to stale: against an empty schema it would parse and
+			// invalidate nothing, which is the same reply a broken join gives.
+			seed: []string{
+				liveProbeUpsertProject, liveProbeCuratorDoc,
+				liveProbeRejectableArtifact, liveProbeCuratorCitation,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCuratorInvalidateDocRequest(
+					"live-probe-upsert-project", "docs/live-probe.md")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				invalidated, err := db2contract.DecodeCuratorInvalidateDocReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if invalidated != 1 {
+					t.Fatalf("invalidated %d artifacts, want the seeded one", invalidated)
+				}
+			},
+		},
 	}
 }
 
@@ -4586,6 +4680,18 @@ const liveProbeTrustProject = `INSERT INTO projects
 const liveProbeLearningSignal = `INSERT INTO learning_signals
  (id, signal_type, created_at)
  VALUES (900026, 'live-probe', '2026-01-01T00:00:00Z')`
+
+// A chunk of an ingested document and an artifact citing it, so the
+// invalidation probe has something to stale.
+const (
+	liveProbeCuratorDoc = `INSERT INTO kb_documents
+ (id, project, generation, file_path, file_hash, chunk_index, content)
+ VALUES (900027, 'live-probe-upsert-project', 1, 'docs/live-probe.md',
+ 'live-probe-hash', 0, 'live probe')`
+	liveProbeCuratorCitation = `INSERT INTO artifact_citations
+ (artifact_id, source_kind, source_id, span_start, span_end)
+ VALUES ('live-probe-artifact', 'kb_document', '900027', 0, 0)`
+)
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
