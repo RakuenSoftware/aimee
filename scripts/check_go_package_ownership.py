@@ -175,6 +175,30 @@ def run(root: Path) -> str:
     declared = module_declared_go_files(root)
     files = go_files_outside_modules(root)
 
+    # A check that compared NOTHING must not report ok.
+    #
+    # Both of these can come back empty without anything raising: the descriptor
+    # glob matches no module.yaml, or the walk finds no .go files, because a
+    # directory moved. The run then completes, finds no violations, and prints
+    # "0 file(s) accounted for" -- a count of zero rendered as an accomplishment.
+    #
+    # A peer hit this in a validator whose heading pattern stopped matching after
+    # an ordinary edit: it took the not-checked-and-no-problems path and returned
+    # 0. Their own docstring named that failure for an EMPTY GLOB and guarded it,
+    # while the same condition one level in returned success.
+    if not declared:
+        raise SystemExit(
+            f"{NAME}: error: no module.yaml declared any Go file. Either the "
+            f"descriptors moved or the glob stopped matching; both mean this "
+            f"check compared nothing."
+        )
+    if not files:
+        raise SystemExit(
+            f"{NAME}: error: found no non-test .go files outside "
+            f"{MODULES_TREE}. This check exists to account for them, so finding "
+            f"none means the tree moved, not that everything is owned."
+        )
+
     errors: list[str] = []
     matched_entries: set[str] = set()
     covered = 0

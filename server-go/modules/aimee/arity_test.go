@@ -49,15 +49,27 @@ func TestEveryOperationChecksItsFieldCount(t *testing.T) {
 
 	m := moduleOver(t, newRegistry(t, "A", "B"))
 
+	// An empty table would make this test STRICTER, not weaker -- every shape
+	// becomes unknown and any StatusOK fails. An empty STAGE list is the danger:
+	// the loops would not run and the test would pass having sent nothing.
+	if len(legitimate) == 0 {
+		t.Fatal("the arity table is empty; this test would then assert nothing")
+	}
+
 	// Op numbers beyond those that exist are included on purpose: an operation
 	// added later lands inside this range and must arrive with its check.
 	const opCeiling = 8
 	const widthCeiling = 14
 
-	for _, stage := range []uint32{
+	stages := []uint32{
 		peerwire.StageDelivery, peerwire.StageInbox,
 		peerwire.StageGrant, peerwire.StageChannel,
-	} {
+	}
+	if len(stages) == 0 {
+		t.Fatal("no stages to exercise; the loops below would send nothing")
+	}
+	sent := 0
+	for _, stage := range stages {
 		for op := uint32(1); op <= opCeiling; op++ {
 			want, known := legitimate[shape{stage, op}]
 			for width := 0; width <= widthCeiling; width++ {
@@ -72,6 +84,7 @@ func TestEveryOperationChecksItsFieldCount(t *testing.T) {
 				if err != nil {
 					t.Fatalf("encode: %v", err)
 				}
+				sent++
 				body, transport := m.Handle(bus.ModuleInvocation{StageID: stage}, frame)
 				if transport != bus.ModuleStatusOK {
 					continue // refused at the transport level, which is a refusal
@@ -89,6 +102,16 @@ func TestEveryOperationChecksItsFieldCount(t *testing.T) {
 			}
 		}
 	}
+
+	// The count is the proof that the loops above ran. Every guard in this file
+	// is an assertion about what the module REFUSES, and a refusal check that
+	// sent no frames passes trivially -- so the one thing that cannot be
+	// established by observing refusals is whether any were requested.
+	if sent == 0 {
+		t.Fatal("no frames were sent; a test that asserts refusals and sends nothing " +
+			"reports success for having asked no questions")
+	}
+	t.Logf("%d wrong-shaped frames refused across %d stages", sent, len(stages))
 }
 
 // The arity table above must describe the operations that actually exist, or it

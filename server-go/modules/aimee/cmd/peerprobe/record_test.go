@@ -44,6 +44,19 @@ func TestValidationRecordMatchesTheProbe(t *testing.T) {
 	formatted := strings.Count(string(source), "check(fmt.Sprintf(")
 	rows := strings.Count(string(record), "| pass |")
 
+	// Zero on both sides is not agreement, it is an empty comparison. If the
+	// probe stopped using check() under that name, or the record lost its table,
+	// the counts would match at zero and the loop below would iterate over
+	// nothing.
+	if len(names)+formatted == 0 {
+		t.Fatal("found no check() calls in the probe; this test would then compare " +
+			"nothing and pass")
+	}
+	if rows == 0 {
+		t.Fatal("the validation record has no result rows; a record asserting nothing " +
+			"cannot be checked against a probe")
+	}
+
 	if got := len(names) + formatted; got != rows {
 		t.Errorf("probe makes %d checks; the record lists %d rows. A check with no "+
 			"row is a passing result missing from the evidence.", got, rows)
