@@ -58,4 +58,3 @@ int config_kb_curator_cross_repo_review_queue_max(void)
 int config_kb_pdf_vector_enabled(void) { return DB2_RUNTIME_CONFIG.kb_pdf_vector_enabled; }
 int config_kb_purge_fence_ttl_s(void) { return DB2_RUNTIME_CONFIG.kb_purge_fence_ttl_s; }
 int config_present(void) { return DB2_RUNTIME_CONFIG.present; }
-int config_typed_facts_enabled(void) { return DB2_RUNTIME_CONFIG.typed_facts_enabled; }

@@ -1,19 +1,39 @@
 #!/bin/bash
-# Gap 1, end to end: can a caller retract a user-stated Class-A fact by simply
-# declaring itself the user?
+# Gap 1 at the kb, positive half: does a caller the kb recognises AS a person
+# actually get user authority -- and does that authority come from the
+# connection rather than from the body?
 #
-# The kb's plain listener is reached over loopback with the owner bearer, which
-# is what aimee-server presents. Two probes:
-#   alice (Class A) — the escalation attempt; must survive a model authority
-#   bob   (Class B) — the control; a model authority may retract it, so a
-#                     "nothing was retracted" result cannot be mistaken for the
-#                     endpoint being broken or unreachable.
+# This probe reaches the kb's plain listener over loopback with the OWNER
+# bearer. kb_memory_request_authority() maps that to FACT_AUTHORITY_USER
+# deliberately: an owner bearer presented on loopback is the operator at the
+# machine, and that was the chosen policy. So retracting the Class-A row here is
+# CORRECT, not an escalation.
+#
+# An earlier version of this script called that leg "the attack" and expected it
+# to be refused. That was wrong once the policy was settled, and it mattered:
+# labelled that way, the run reads as a security failure every time the system
+# behaves properly.
+#
+# The escalation case is a caller who is NOT a person -- an agent over TCP --
+# and it lives in test-server-retract.sh, which must see the same body refused.
+# Neither script is worth much alone: this one shows the derivation grants
+# authority to a person, that one shows it withholds authority from everything
+# else.
+#
+#   alice (Class A, authority_rank 30) -- retractable only by a user authority
+#   bob   (Class B, authority_rank 10) -- retractable by a model authority too,
+#                                         so "nothing happened" cannot be
+#                                         mistaken for a broken endpoint
 # Run AS ROOT in the container.
 set -u
 B="$(cat /root/kb-bearer.txt)"
 P=/root/psql.sh
 
-state() { $P "select confidence_class || ' ' || case when superseded_at='' and suppressed=0 then 'current' else 'gone' end from entity_edges where source='$1' and relation='works_for'" | tail -1; }
+# A retired fact is lifecycle_state='invalidated' + invalidated_at; only a
+# supersession sets superseded_at. Judging liveness by superseded_at/suppressed
+# alone calls an invalidated row "current", which makes a successful retraction
+# read as a blocked one.
+state() { $P "select confidence_class || ' ' || case when superseded_at='' and invalidated_at='' and suppressed=0 then 'current' else 'gone' end from entity_edges where source='$1' and relation='works_for'" | tail -1; }
 
 retract() { # $1=source  $2=authority-in-body
   curl -s -m 15 -H "Authorization: Bearer ${B}" -H 'content-type: application/json' \
@@ -26,11 +46,27 @@ echo "  alice (Class A, user-stated): $(state alice)"
 echo "  bob   (Class B, model):       $(state bob)"
 
 echo
-echo "=== the attack: a caller declares itself the user and retracts alice ==="
+echo "=== a caller the kb recognises as a person retracts the Class-A fact ==="
 echo "  response: $(retract alice user)"
-echo "  alice is now: $(state alice)"
+a_state="$(state alice)"
+echo "  alice is now: $a_state"
 
 echo
-echo "=== the control: same caller, same authority, against a model-authored fact ==="
+echo "=== control: the same caller against a model-authored fact ==="
 echo "  response: $(retract bob user)"
-echo "  bob is now: $(state bob)"
+b_state="$(state bob)"
+echo "  bob is now: $b_state"
+
+echo
+rc=0
+case "$a_state" in
+  *gone*) echo "PASS: an attested person retracted the Class-A fact" ;;
+  *)      echo "FAIL: a person could not retract a Class-A fact -- the derivation is withholding authority from a real user"; rc=1 ;;
+esac
+case "$b_state" in
+  *gone*) echo "PASS: the control retracted too, so the endpoint is reachable and working" ;;
+  *)      echo "FAIL: the control did not retract -- this run proves nothing either way"; rc=1 ;;
+esac
+echo
+echo "NOTE: the refusal half of gap 1 is test-server-retract.sh (agent over TCP)."
+exit $rc

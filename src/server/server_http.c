@@ -1677,12 +1677,22 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * caller with nowhere to go: following QUICKSTART end to end now lands here
        * on the first kb write, and nothing on screen says a write-tier grant is
        * what is missing or who issues it. The mechanism is already public
-       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
+       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing.
+       *
+       * It named `aimee kb grant set`, which does not dispatch: the server-side
+       * proxy for grant administration was removed deliberately (see
+       * v1_route_requires_uds -- proxying it meant aimee-server holding an
+       * administrative identity on aimee-kb), but this message was left pointing
+       * at it. An operator who hit this 403 followed it to a command that does
+       * not exist. Grants are administered against aimee-kb itself, by a
+       * principal with admin or team-lead authority in the target team. */
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
                     "presented token's scope. Over the network a bearer is read/query only "
-                    "until your subject holds a write-tier grant on this server; an operator "
-                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
+                    "until your subject holds a write-tier grant on this server. Grants are "
+                    "administered on aimee-kb (POST /v1/write-tier-grants/set) by a principal "
+                    "with admin or team-lead authority in that team; aimee-server does not "
+                    "issue them. See docs/UPGRADING.md.\","
                     "\"type\":\"permission_error\"}}",
                     request_id);
       /* Count the requests the retired global would formerly have allowed, so an
@@ -2346,13 +2356,17 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    if (tls_port > 0)
    {
       server_tls_wait_for_store(db1_store_probe);
-      if (server_tls_init_default() == 0)
+      int tls_rc = server_tls_init_default();
+      if (tls_rc == SERVER_TLS_INIT_OK)
          g_tls_fd = tcp_listen(tls_port, bearer_token, 1 /* TLS: may bind 0.0.0.0 */);
       else
-         /* This is the vault's attested write path — make a misconfigured cert/key
-          * loud (the UDS listener still comes up; the operator must fix the cert). */
-         LOG_ERROR("server.http", "tls_port=%d set but TLS cert/key not loadable; TLS DISABLED",
-                   tls_port);
+         /* This is the vault's attested write path, so the failure is loud (the UDS
+          * listener still comes up). It now names WHICH failure: this line said
+          * "cert/key not loadable" for all three, including a ramp self-test that
+          * could not reach DB1, sending the operator to inspect a certificate that
+          * was never the problem. */
+         LOG_ERROR("server.http", "tls_port=%d set but TLS could not start: %s; TLS DISABLED",
+                   tls_port, server_tls_init_result_str(tls_rc));
    }
 
    if (management.enabled)

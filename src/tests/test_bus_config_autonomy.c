@@ -132,13 +132,16 @@ int main(void)
    expect_operation("snapshot");
    must(snapshot_calls == 2, "changed version refetches once");
 
-   int rc = config_set_typed_facts(1, 0, 4);
+   int rc = config_set_typed_facts(0, 4);
    if (rc != 0)
       fprintf(stderr, "typed-facts rc=%d error=%s\n", rc, config_client_last_error());
    must(rc == 0, "typed-facts mutation");
    expect_operation("set-typed-facts");
    cJSON *value = request_value();
-   must(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value, "enabled")), "typed enabled");
+   /* `enabled` must NOT be in the payload: the master gate is retired, and the
+    * setter no longer has a parameter that could put a deployment back behind
+    * it. Asserting its absence keeps it from being quietly reintroduced. */
+   must(cJSON_GetObjectItemCaseSensitive(value, "enabled") == NULL, "no typed enabled key");
    must(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(value, "auto_promote")),
         "typed auto-promote");
    must(cJSON_GetObjectItemCaseSensitive(value, "promote_threshold")->valueint == 4,

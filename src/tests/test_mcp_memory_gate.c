@@ -175,38 +175,42 @@ static void test_no_gate_is_read_only(void)
  * TCP too, under remote_writes=DATA/FULL. That is the right answer for "may this
  * caller delete", and the wrong one for "is this caller the user", which is what
  * decides whether memory.delete destroys the row or retires it and whether a
- * stored note may later mint Class-A facts. Only the two kernel/root-attested
- * local shapes are a person. */
-static void test_attested_identity_is_not_capability(void)
+ * stored note may later mint Class-A facts. The person is the ACCOUNT. */
+static void test_authenticated_identity_is_not_capability(void)
 {
-   assert(server_attested_is_person(ATTEST_UDS_PEERCRED) == 1);
-   assert(server_attested_is_person(ATTEST_WEBCHAT_TRUSTED) == 1);
+   /* Every account form is a person, and none of them names its transport. A
+    * host account PAM accepted, an OIDC subject, an enrolled client cert and a
+    * webuser are the same answer to "who is this" whichever socket carried the
+    * request. */
+   assert(server_account_is_person("alice") == 1);        /* PAM host account */
+   assert(server_account_is_person("oidc:sub-123") == 1); /* OIDC subject */
+   assert(server_account_is_person("cert:thin-client") == 1);
+   assert(server_account_is_person("webuser:alice") == 1);
 
-   /* A shared token is a service or an agent, however much it may do. */
-   assert(server_attested_is_person(ATTEST_TCP_BEARER) == 0);
-   assert(server_attested_is_person(ATTEST_TLS_BEARER) == 0);
-   assert(server_attested_is_person(ATTEST_MTLS_CLIENT) == 0);
+   /* A bare bearer authorizes the call but names nobody, so it cannot speak as
+    * the user. Empty is also the zero value: a missed hop never becomes one. */
+   assert(server_account_is_person("") == 0);
+   assert(server_account_is_person(NULL) == 0);
 
-   /* The zero value: a missed hop must never become a user. */
-   assert(server_attested_is_person(ATTEST_NONE) == 0);
-
-   assert(server_attested_memory_authority(ATTEST_UDS_PEERCRED) == MEMORY_AUTHORITY_USER);
-   assert(server_attested_memory_authority(ATTEST_WEBCHAT_TRUSTED) == MEMORY_AUTHORITY_USER);
-   assert(server_attested_memory_authority(ATTEST_TCP_BEARER) == MEMORY_AUTHORITY_MODEL);
-   assert(server_attested_memory_authority(ATTEST_MTLS_CLIENT) == MEMORY_AUTHORITY_MODEL);
-   assert(server_attested_memory_authority(ATTEST_NONE) == MEMORY_AUTHORITY_MODEL);
+   assert(server_account_memory_authority("alice") == MEMORY_AUTHORITY_USER);
+   assert(server_account_memory_authority("oidc:sub-123") == MEMORY_AUTHORITY_USER);
+   /* The regression this replaces: an mTLS client was MODEL purely because its
+    * bytes arrived over TCP, while aimee-kb called the same caller a person. */
+   assert(server_account_memory_authority("cert:thin-client") == MEMORY_AUTHORITY_USER);
+   assert(server_account_memory_authority("") == MEMORY_AUTHORITY_MODEL);
+   assert(server_account_memory_authority(NULL) == MEMORY_AUTHORITY_MODEL);
 
    /* The point of the split: a caller can hold the destructive capability and
     * still not be a person, which is exactly the case the mapping must catch. */
    assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) != 0);
-   assert(server_attested_is_person(ATTEST_TCP_BEARER) == 0);
-   printf("  PASS: attested identity is asked separately from capability\n");
+   assert(server_account_is_person("") == 0);
+   printf("  PASS: authenticated account is asked separately from capability\n");
 }
 
 int main(void)
 {
    printf("mcp_memory_gate:\n");
-   test_attested_identity_is_not_capability();
+   test_authenticated_identity_is_not_capability();
    test_verb_methods();
    test_verb_grades_are_what_the_fix_intended();
    test_maintain_prune_requires_admin();

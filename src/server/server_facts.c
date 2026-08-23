@@ -19,7 +19,7 @@
  * closest analogue, since none of them destroys a row: retraction stamps or
  * tombstones (the row is retained and auditable) and unmerge flips an audit
  * flag. Delete's tier would misdescribe what they do. */
-cJSON *facts_retract_command(cJSON *req, attested_transport_t transport)
+cJSON *facts_retract_command(cJSON *req, const char *account)
 {
    cJSON *jsrc = cJSON_GetObjectItemCaseSensitive(req, "source");
    cJSON *jrel = cJSON_GetObjectItemCaseSensitive(req, "relation");
@@ -40,14 +40,14 @@ cJSON *facts_retract_command(cJSON *req, attested_transport_t transport)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "facts.retract authority must be \"user\" or \"model\"", NULL);
 
-   /* The body's `authority` REQUESTS a level; the connection's attestation grants
-    * it. "user" is honoured only when the transport attested a person, so the
+   /* The body's `authority` REQUESTS a level; the request's authenticated ACCOUNT
+    * grants it. "user" is honoured only when ingress proved an account, so the
     * documented default stays "model" (least privilege: naming no authority never
     * escalates) and naming "user" without having earned it no longer does either.
     * This is the whole difference between a declared identity and an
     * authenticated one. */
    int wants_user = cJSON_IsString(jauth) && strcmp(jauth->valuestring, "user") == 0;
-   const char *authority = (wants_user && server_attested_is_person(transport)) ? "user" : "model";
+   const char *authority = (wants_user && server_account_is_person(account)) ? "user" : "model";
 
    int retracted = 0;
    int immutable = 0;
@@ -74,7 +74,7 @@ cJSON *facts_retract_command(cJSON *req, attested_transport_t transport)
 int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return server_send_ok(conn, facts_retract_command(req, conn->attested_transport));
+   return server_send_ok(conn, facts_retract_command(req, server_request_account()));
 }
 
 cJSON *entities_merge_command(cJSON *req)

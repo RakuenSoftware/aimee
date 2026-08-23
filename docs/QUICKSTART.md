@@ -493,12 +493,15 @@ non-root owner are rejected. On successful enrollment the certificate and key ar
 at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and the
 identity is revalidated against its CA pin after every process restart.
 
-Grant administration is local-socket only. Run it on the server, using the exact subject returned by
-the user's PAM or OIDC login:
+Grant administration happens **on aimee-kb**, using the exact subject returned by the user's PAM or
+OIDC login. aimee-server does not proxy it: doing so would mean the server holding an administrative
+identity on the KB, so the `aimee kb grant …` commands were removed and no longer dispatch.
 
 ```bash
-aimee kb grant set --server <server-id> --team <team-id> --subject <subject> --tier data
-aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
+# on aimee-kb, as a principal with admin or team-lead authority IN the target team
+POST /v1/write-tier-grants/set  {"server_id": "<server-id>", "team_id": <team-id>,
+                                 "subject": "<subject>", "tier": "data"}
+GET  /v1/write-tier-grants?server_id=<server-id>&team_id=<team-id>&subject=<subject>
 ```
 
 Use `data` for memory, document, and index writes. Use `full` only for users who also need agent,

@@ -21,6 +21,7 @@
 #include "kb_http_grants.h"
 
 #include "cJSON.h"
+#include "modules/db2/c/db2_tenant.h" /* the real tenancy codes this maps from */
 #include "modules/db2/c/write_tier_grant.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
@@ -432,16 +433,38 @@ static void test_db_failures(void)
    assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 403);
    assert(strstr(out, "admin or team-lead authority"));
 
-   /* A NEGATIVE TENANCY CODE means the backend is not Postgres — a deployment fault, not
-    * an authorization one. Collapsing the two would send an operator to debug credentials
+   /* REQUIRES_PG means the backend is not Postgres — a deployment fault, not an
+    * authorization one. Collapsing the two would send an operator to debug credentials
     * when the answer is that RLS cannot be enforced at all on this backend. */
    reset();
-   stub_rc = -42;
+   stub_rc = DB2_ERR_TENANT_REQUIRES_PG;
    assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 503);
    assert(strstr(out, "postgres backend"));
 
+   /* DENIED is the OPPOSITE fault and must not report as the one above. The rule was
+    * `rc < -1`, which swept up every tenancy code, so a caller who simply is not a member
+    * of the team was told the backend was wrong — on a deployment already running
+    * Postgres. Measured live: `tenant scope refused (rc=-104)` answering 503 "requires the
+    * postgres backend". A fixed `-42` used to stand in here, which is not a code the
+    * tenancy layer can return, so the test agreed with the collapse instead of catching
+    * it. The real codes are used now. */
    reset();
-   stub_rc = -42;
+   stub_rc = DB2_ERR_TENANT_DENIED;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 403);
+   assert(strstr(out, "not a member of that team"));
+   assert(!strstr(out, "postgres backend"));
+
+   /* Unauthenticated and scope-open failures are likewise their own answers. */
+   reset();
+   stub_rc = DB2_ERR_TENANT_UNAUTHENTICATED;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 401);
+   reset();
+   stub_rc = DB2_ERR_TENANT_NO_CONN;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 503);
+   assert(!strstr(out, "postgres backend"));
+
+   reset();
+   stub_rc = DB2_ERR_TENANT_REQUIRES_PG;
    assert(route("GET", "/v1/write-tier-grants", "server_id=s&team_id=1", NULL, out, sizeof(out)) ==
           503);
    reset();
@@ -488,8 +511,13 @@ static void test_revoke(void)
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 403);
    assert(stub_revoke_calls == 0); /* and nothing was revoked on a broken read */
    reset();
-   stub_lookup_rc = -42;
+   stub_lookup_rc = DB2_ERR_TENANT_REQUIRES_PG;
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 503);
+   assert(stub_revoke_calls == 0);
+   /* A membership refusal on the read is a 403 here too, and still revokes nothing. */
+   reset();
+   stub_lookup_rc = DB2_ERR_TENANT_DENIED;
+   assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 403);
    assert(stub_revoke_calls == 0);
 
    /* Malformed bodies never reach the database. */

@@ -94,4 +94,23 @@ const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind);
 int memory_ontology_validate(memory_node_kind_t subject_kind, memory_relation_kind_t relation,
                              memory_node_kind_t object_kind);
 
+/* The static schema itself, so a caller can PUBLISH what is enforced rather
+ * than describe it separately.  `memory_relation_schema` in the database is
+ * DDL with no writer -- nothing in the tree ever inserts a row, and
+ * memory_ontology_validate() does not read it -- so a surface served from that
+ * table is structurally always empty, and any row an operator did put there
+ * would misrepresent what is actually enforced.  This table is the authority;
+ * serving it directly is what keeps the two from disagreeing.
+ *
+ * Returns the rule count and, via |out|, the rules.  The sentinel row is not
+ * included.  The storage is static; the caller must not free it. */
+typedef struct
+{
+   memory_node_kind_t sk;
+   memory_relation_kind_t rel;
+   memory_node_kind_t ok;
+} memory_ontology_rule_t;
+
+int memory_ontology_rules(const memory_ontology_rule_t **out);
+
 #endif /* DEC_MEMORY_ONTOLOGY_H */

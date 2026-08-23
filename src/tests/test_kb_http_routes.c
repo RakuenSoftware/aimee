@@ -658,9 +658,8 @@ int config_set(const char *key, const char *value)
    return 0;
 }
 
-int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+int config_set_typed_facts(int auto_promote, int promote_threshold)
 {
-   (void)enabled;
    (void)auto_promote;
    (void)promote_threshold;
    return 0;
@@ -746,11 +745,8 @@ const char *config_client_secret_name(const char *key)
    return config_client_key_is_secret(key) ? "AIMEE_KB_API_BEARER_TOKEN" : NULL;
 }
 
-/* Typed-facts knobs the console echoes back, read through accessors. */
-int config_typed_facts_enabled(void)
-{
-   return 0;
-}
+/* Typed-facts knobs the console echoes back, read through accessors.
+ * config_typed_facts_enabled is gone: the layer has no master gate. */
 int config_kb_typed_facts_auto_promote_enabled(void)
 {
    return 0;
@@ -2585,9 +2581,11 @@ static void test_console_settings(void)
    assert(kb_http_route_ex("GET", "/v1/console/settings/config", NULL, NULL, NULL, NULL, 0, b2,
                            sizeof(b2)) == 405);
 
-   /* typed_facts_enabled is KB-owned but belongs to the Typed Facts page, not
-    * this surface — so the settings route refuses it like any other key it does
-    * not own. */
+   /* typed_facts_enabled is refused here, and now for a second reason: the
+    * master gate is retired entirely, so there is no such option to set. The
+    * key stays in this surface's refusal list deliberately -- a stale caller
+    * that still sends it must be told no rather than have it silently accepted
+    * and dropped. */
    const char *tf = "{\"key\":\"typed_facts_enabled\",\"value\":true}";
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, tf,
                            (int)strlen(tf), b2, sizeof(b2)) == 403);

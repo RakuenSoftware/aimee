@@ -15286,7 +15286,31 @@ DO $$ BEGIN
     UPDATE memories m SET epistemic_kind='world_fact',
       expiry_days_migration_override=COALESCE((SELECT k.expire_days FROM kind_lifecycle k
         WHERE k.kind=m.kind),(SELECT k.expire_days FROM kind_lifecycle k WHERE k.kind='fact'));
-    UPDATE entity_edges SET epistemic_kind='world_fact';
+    -- Scoped to rows that actually need it, because entity_edges carries
+    -- entity_edges_semantic_guard (above): any INSERT or UPDATE of an
+    -- edge_class='semantic' row outside an open fact_mutation commit raises
+    -- 'semantic facts must be changed through fact_mutation'. An unscoped
+    -- UPDATE rewrites the value every row already has, and on any database
+    -- holding semantic facts every one of them trips that guard. The apply is
+    -- one transaction, so the whole schema then rolls back and db2_init reports
+    --   aimee: db2_init: schema apply failed: ERROR: semantic facts must be
+    --   changed through fact_mutation
+    -- leaving aimee-kb permanently "DB2 not ready". It surfaces three layers
+    -- away as "failed to store memory" from the server, because the kb never
+    -- finishes starting.
+    --
+    -- It is invisible on an EMPTY database (the UPDATE touches nothing), which
+    -- is why CI against a fresh template never saw it and every upgrade of a
+    -- populated store did.
+    --
+    -- The ALTER above already gives every existing row 'world_fact', so on the
+    -- ordinary upgrade path this matches zero rows and the statement is a
+    -- no-op. The predicate is kept rather than the statement deleted so a
+    -- database that somehow carries other values is still corrected -- and, if
+    -- those rows are semantic, still refused loudly by the guard rather than
+    -- silently skipped, which is what that guard is for.
+    UPDATE entity_edges SET epistemic_kind='world_fact'
+      WHERE epistemic_kind IS DISTINCT FROM 'world_fact';
     INSERT INTO kb_meta(key,value) VALUES('epistemic_kind_v1_migrated','1');
   END IF;
 END $$;

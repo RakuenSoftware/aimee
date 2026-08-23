@@ -189,6 +189,16 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
        jo_need_str((cJSON *)req, "content", &content) < 0)
       return jo_err("missing key or content");
+   /* An empty key or content is a malformed REQUEST, not a storage failure. The
+    * store already refuses it, but the refusal surfaced as "failed to store
+    * memory" -- which reads as the database declining a valid write and sends
+    * the caller to look at the store. jo_need_str only proves the field is a
+    * string and present; "" satisfies that. Refused here, beside the sibling
+    * argument checks (memory.delete's positive id, facts.retract's non-empty
+    * source), and with the same kind so a client can tell the two apart. */
+   if (!key[0] || !content[0])
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store requires a non-empty key and content", NULL);
 
    const char *tier = jo_str((cJSON *)req, "tier", TIER_L0);
    const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);
@@ -214,7 +224,7 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * out of it, and a caller must not be able to claim that by asking. A bearer
     * over TCP/TLS is a service or an agent, not a person. */
    return send_and_free(
-       conn, memory_store_command(req, server_attested_memory_authority(conn->attested_transport)));
+       conn, memory_store_command(req, server_account_memory_authority(server_request_account())));
 }
 
 cJSON *memory_list_command(const cJSON *req)
@@ -361,14 +371,14 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * user's one non-recoverable verb. An un-attested caller that clears the
  * capability still deletes — it retires the memory, which memory_fact_history
  * can still read — so this narrows the blast radius rather than the feature. */
-cJSON *memory_delete_command(cJSON *req, attested_transport_t transport)
+cJSON *memory_delete_command(cJSON *req, const char *account)
 {
    int64_t id = 0;
    if (memory_request_positive_id(req, "id", &id) != 0)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   memory_authority_t authority = server_attested_memory_authority(transport);
+   memory_authority_t authority = server_account_memory_authority(account);
    if (kb_client_memory_delete_as(id, authority) != 0)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
@@ -386,7 +396,7 @@ cJSON *memory_delete_command(cJSON *req, attested_transport_t transport)
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return server_send_ok(conn, memory_delete_command(req, conn->attested_transport));
+   return server_send_ok(conn, memory_delete_command(req, server_request_account()));
 }
 
 cJSON *memory_get_command(cJSON *req)

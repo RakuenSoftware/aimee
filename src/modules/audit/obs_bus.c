@@ -708,6 +708,56 @@ static int module_call_cancelled(void *context)
           (state->external && state->external(state->context));
 }
 
+/* Say WHICH failure, once, where every caller shares it.
+ *
+ * Both daemons collapse this result to -1 and each caller then reports its own
+ * generic line -- "retraction scan gave no answer", "pattern extraction gave no
+ * answer", "rerank confidence unavailable", "DB1 pki is unreachable". Those read
+ * identically whether the module is absent, the grant does not cover the stage,
+ * the deadline passed, or the module rejected the request, so every one of them
+ * has had to be diagnosed by guessing. The reason is known here and costs
+ * nothing to keep.
+ *
+ * It belongs in the shared bus rather than in either daemon's adapter: both call
+ * through here, and a copy per adapter is a second place to forget. */
+static const char *module_call_result_str(aimee_module_call_result_t rc)
+{
+   switch (rc)
+   {
+   case AIMEE_MODULE_CALL_OK:
+      return "ok";
+   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT:
+      return "capability_absent";
+   case AIMEE_MODULE_CALL_CAPABILITY_DENIED:
+      return "capability_denied";
+   case AIMEE_MODULE_CALL_CANCELLED:
+      return "cancelled";
+   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED:
+      return "deadline_exceeded";
+   case AIMEE_MODULE_CALL_INVALID_REQUEST:
+      return "invalid_request";
+   case AIMEE_MODULE_CALL_INTERNAL:
+      return "internal";
+   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE:
+      return "response_too_large";
+   case AIMEE_MODULE_CALL_TRANSPORT:
+      return "transport";
+   case AIMEE_MODULE_CALL_PROTOCOL:
+      return "protocol";
+   case AIMEE_MODULE_CALL_INVALID_ARGUMENT:
+      return "invalid_argument";
+   }
+   /* An out-of-range code is a bug, and a bug must not read as success. */
+   return "unknown";
+}
+
+static void obs_bus_log_module_call_failure(uint32_t event_kind, uint32_t stage_id,
+                                            aimee_module_call_result_t rc)
+{
+   aimee_log(LOG_WARN, "obs_bus", "module stage call failed: event=%u stage=%u result=%s",
+             event_kind, stage_id, module_call_result_str(rc));
+}
+
 aimee_module_call_result_t obs_bus_module_call(
     uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
     const void *request_body, uint32_t request_len, void *response_body,
@@ -720,12 +770,17 @@ aimee_module_call_result_t obs_bus_module_call(
    if (!atomic_load(&g.accepting_calls))
    {
       atomic_fetch_sub(&g.module_callers, 1);
+      /* Logged like every other failure below: a caller that reports "no answer"
+       * because the bus is shutting down looks exactly like one whose module
+       * refused it. */
+      obs_bus_log_module_call_failure(event_kind, stage_id, AIMEE_MODULE_CALL_TRANSPORT);
       return AIMEE_MODULE_CALL_TRANSPORT;
    }
    int slot = module_client_acquire(deadline_ns);
    if (slot < 0)
    {
       atomic_fetch_sub(&g.module_callers, 1);
+      obs_bus_log_module_call_failure(event_kind, stage_id, AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
       return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
    }
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
@@ -734,6 +789,8 @@ aimee_module_call_result_t obs_bus_module_call(
        request_len, response_body, response_capacity, response_len, module_call_cancelled, &state);
    module_client_release(slot);
    atomic_fetch_sub(&g.module_callers, 1);
+   if (result != AIMEE_MODULE_CALL_OK)
+      obs_bus_log_module_call_failure(event_kind, stage_id, result);
    return result;
 }
 

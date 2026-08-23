@@ -8,10 +8,48 @@
 #include "../modules/db2/c/entity_edges.h"
 #include "../modules/db2/c/ontology_evolution.h"
 #include "../modules/db2/c/db2_test_shim.h"
+#include "../headers/kb_identity.h"
 #include "modules/memory/memory_extract_patterns.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+/* AN AUTHENTICATED REQUEST CONTEXT, because without one this file could not
+ * reach the bug it already had an assertion for.
+ *
+ * The "retracts at the authority it was CALLED with" case below has been here
+ * all along and passed all along -- while the shipped code was doing the
+ * opposite. db2_fact_actor_from_request() consults kb_reqctx_actor(), a WEAK
+ * symbol that no test binary links, so it always returned -1 here and the code
+ * fell through to the authority-derived branch, which is correct. In the KB the
+ * symbol IS defined, the request context always exists for a tool call inside a
+ * user's turn, and the wrong branch ran every time.
+ *
+ * So the assertion was right and blind at once: it could not reach the
+ * condition that breaks it. Defining these makes the failing path reachable, so
+ * the test now fails if the declared authority is ever again treated as a
+ * fallback for the request identity rather than a cap on it. */
+static int g_reqctx_authenticated = 0;
+
+const kb_principal_t *kb_reqctx_actor(void)
+{
+   static kb_principal_t p;
+   if (!g_reqctx_authenticated)
+      return NULL;
+   memset(&p, 0, sizeof(p));
+   p.authenticated = 1;
+   p.kind = KB_PRIN_OIDC;
+   snprintf(p.subject, sizeof(p.subject), "%s", "alice@example.com");
+   return &p;
+}
+
+int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
+{
+   if (!p || !out || !cap)
+      return -1;
+   snprintf(out, cap, "oidc:%s", p->subject);
+   return 0;
+}
 
 static int semantic_count(const char *entity)
 {
@@ -183,6 +221,25 @@ int main(void)
    aimee_db2_register_fact_scan_provider(scan_retract_works_for);
    assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_MODEL, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 2); /* model refused: Class A stands */
+
+   /* THE SAME CALL, WITH SOMEONE AUTHENTICATED. This is the case the KB always
+    * runs and this file never could: get_context_block is a tool the model
+    * calls inside a human's authenticated turn, so a request context exists and
+    * names a real person. The text is still the MODEL's, so MODEL authority must
+    * still refuse -- an authenticated human in the session does not make the
+    * agent's words the human's.
+    *
+    * Before the fix this deleted the row: db2_fact_actor_from_request() was
+    * tried first and returns FACT_ACTOR_USER for any authenticated principal, so
+    * the declared MODEL was discarded whenever this context existed. */
+   g_reqctx_authenticated = 1;
+   assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_MODEL, NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 2); /* still refused: the caller's
+                                                 * identity must not raise the
+                                                 * authority the text was
+                                                 * composed at */
+   g_reqctx_authenticated = 0;
+
    assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 1); /* the user's own retraction lands */
 

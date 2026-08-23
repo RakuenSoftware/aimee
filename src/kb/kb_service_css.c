@@ -189,8 +189,8 @@ int kb_handle_css_signals(int fd, cJSON *req)
    if (strcmp(op, "assert-conventions") == 0)
    {
       /* #2-upgrade: promote the exemplar's machine-derivable conventions into
-       * typed facts. No-op (returns 0) unless both css_style_graph_enabled and
-       * typed_facts_enabled are set. */
+       * typed facts. No-op (returns 0) unless css_style_graph_enabled is set;
+       * it also required the typed-fact master gate until that was retired. */
       char now_iso[40];
       now_utc(now_iso, sizeof(now_iso));
       int n = db2_css_migration_assert_conventions(project, now_iso);

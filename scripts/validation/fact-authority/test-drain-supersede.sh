@@ -18,23 +18,53 @@
 # `age` satisfies all three.
 # Run AS ROOT in the container.
 set -u
+drain_rc=0
 B="$(cat /root/kb-bearer.txt)"
 P=/root/psql.sh
 
 RID="$($P "select id from rel_types where rel_type='age' limit 1")"
 
 reset_age() {
+  # entity_edges carries MORE THAN ONE write guard -- entity_edges_semantic_guard
+# and semantic_evidence_event_guard ("semantic assertion mutation committed
+# without its evidence event"). Naming one leaves the other, so this suspends
+# every user trigger on the table for the seed. They refuse raw INSERT/DELETE of a semantic edge
+  # outside an open fact_mutation commit, and these writes are silenced -- so
+  # without suspending it the seed changes nothing and the test still reports a
+  # state, just the previous run's. Suspended only around the seed, which is the
+  # legitimate case: rows standing in for what an earlier build wrote.
+  # authority_rank is what retraction actually gates on (FACT_ACTOR_MODEL=10,
+  # FACT_ACTOR_USER=30); a Class-A row without rank 30 protects nothing.
+  $P "ALTER TABLE entity_edges DISABLE TRIGGER USER" >/dev/null
   $P "delete from entity_edges where source='user' and relation='age'" >/dev/null
   $P "insert into entity_edges
         (source, relation, target, weight, relation_id, subject_kind, object_kind,
-         edge_class, confidence_class, confidence, asserted_at, superseded_at, suppressed)
-      values ('user','age','30', 1, ${RID}, 1, 10, 'semantic', 'A', 1.0,
-         to_char(now() at time zone 'UTC','YYYY-MM-DD HH24:MI:SS'), '', 0)" >/dev/null
+         edge_class, confidence_class, confidence, authority_rank, lifecycle_state,
+         asserted_at, invalidated_at, superseded_at, suppressed)
+      values ('user','age','30', 1, ${RID}, 1, 10, 'semantic', 'A', 1.0, 30, 'persistent',
+         to_char(now() at time zone 'UTC','YYYY-MM-DD HH24:MI:SS'), '', '', 0)" >/dev/null
+  $P "ALTER TABLE entity_edges ENABLE TRIGGER USER" >/dev/null
 }
 
+# A retired fact is lifecycle_state='invalidated' + invalidated_at; only a
+# supersession sets superseded_at. Judging liveness by superseded_at/suppressed
+# alone calls an invalidated row "current", so a fact that was correctly
+# retracted still reads as standing.
+# "Current" is lifecycle_state IN ('persistent','promoted') -- the product's own
+# definition (db2_fact_current_count). superseded_at/invalidated_at/suppressed
+# alone is NOT enough: a write the authority guard refuses is inserted as a
+# CANDIDATE (fm: `if (quarantined) desired = FACT_LIFECYCLE_CANDIDATE`), which
+# has none of those three set. Judged by the old predicate a quarantined row
+# reads as a live fact sitting beside the user's value, which is precisely the
+# failure gap 2 is about -- so the test reported a breach that had not happened.
+# The lifecycle is printed rather than collapsed, so a future change of state is
+# visible instead of silently re-classified.
 show() {
   $P "select '    ' || target || '  class=' || confidence_class ||
-             case when superseded_at='' and suppressed=0 then '  [current]' else '  [archived]' end
+             '  ' || lifecycle_state ||
+             case when lifecycle_state in ('persistent','promoted')
+                       and superseded_at='' and invalidated_at='' and suppressed=0
+                  then '  [current]' else '  [not current]' end
         from entity_edges where source='user' and relation='age' order by id"
 }
 
@@ -74,8 +104,26 @@ sleep 6
 echo
 echo "current values of user/age after the drain:"
 show
-echo "  (expected: 30 [current] and ALONE -- the Class-B write must neither"
-echo "   supersede the user's value nor sit beside it on a functional relation)"
+echo "  (expected: 30 is the only CURRENT value; the model's contradicting"
+echo "   write must not supersede it and must not itself be current)"
+
+# The requirement is that the user's value still stands ALONE AS CURRENT. It is
+# not that the model's write vanishes: fact_mutation QUARANTINES a write whose
+# actor cannot outrank the incumbent, inserting it as a `candidate` rather than
+# dropping it, so the proposal stays on record for review. Asserting that the
+# row is absent would fail on correct behaviour.
+cur="$($P "select count(*) from entity_edges where source='user' and relation='age'
+             and lifecycle_state in ('persistent','promoted') and superseded_at=''
+             and invalidated_at='' and suppressed=0")"
+cur_t="$($P "select target from entity_edges where source='user' and relation='age'
+               and lifecycle_state in ('persistent','promoted') and superseded_at=''
+               and invalidated_at='' and suppressed=0")"
+if [ "${cur:-0}" = "1" ] && [ "${cur_t:-}" = "30" ]; then
+  echo "  PASS: the user's Class-A value is the only current one"
+else
+  echo "  FAIL: expected exactly one current value '30', got ${cur:-0} (${cur_t:-none})"
+  drain_rc=1
+fi
 
 echo
 echo "=== positive control: the same path with no prior fact to outrank ==="
@@ -102,3 +150,5 @@ echo
 echo "=== job outcomes ==="
 $P "select '    ' || kind || ' ' || status || ' attempts=' || attempts
       from kb_async_jobs where kind='memory_facts' order by id desc limit 4"
+
+exit $drain_rc
