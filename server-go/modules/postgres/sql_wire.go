@@ -80,6 +80,15 @@ const (
 	StatusStatementFailed uint32 = 4
 	StatusUnavailable     uint32 = 5
 	StatusMigrationFailed uint32 = 6
+
+	// statusCount is how many of the above exist, so the test that pins their
+	// values can also assert it is pinning ALL of them. Without it, a status
+	// added here and used on the wire but never added to that list crosses
+	// unchecked and every suite stays green.
+	//
+	// Bump this in the same edit that adds a status. That is the point: the
+	// test fails until the new one is pinned too.
+	statusCount = 7
 )
 
 var errMalformed = errors.New("postgres: malformed storage request")

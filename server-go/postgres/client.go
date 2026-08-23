@@ -51,6 +51,10 @@ const (
 	statusStatementFailed uint32 = 4
 	statusUnavailable     uint32 = 5
 	statusMigrationFailed uint32 = 6
+
+	// See the module side: the count is what makes the pinned list complete
+	// rather than merely correct. Bump it in the same edit that adds a status.
+	statusCount = 7
 )
 
 // Limits checked before sending. The module enforces its own copy -- a limit

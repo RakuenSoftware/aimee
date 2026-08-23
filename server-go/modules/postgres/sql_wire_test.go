@@ -228,6 +228,7 @@ func TestStatusIntegersAreTheContract(t *testing.T) {
 	// iota, inserting a status in the middle silently renumbers every one after
 	// it. This test is the second guard, for the edit that renumbers a constant
 	// directly rather than by insertion. Neither catches what the other does.
+	pinned := 0
 	for _, c := range []struct {
 		name  string
 		value uint32
@@ -244,6 +245,16 @@ func TestStatusIntegersAreTheContract(t *testing.T) {
 		if c.value != c.want {
 			t.Errorf("Status%s = %d, and the wire says %d", c.name, c.value, c.want)
 		}
+		pinned++
+	}
+	// The third guard. Explicit values stop renumbering-by-insertion and the
+	// loop above stops a direct renumber, but neither notices a status added
+	// with a number of its own that simply never joined the list -- which is how
+	// the far end of this wire came to have two statuses in use and seventeen of
+	// nineteen checked.
+	if pinned != statusCount {
+		t.Errorf("pinned %d statuses, the package declares %d; one is crossing the "+
+			"wire unchecked", pinned, statusCount)
 	}
 }
 

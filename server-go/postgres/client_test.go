@@ -288,6 +288,7 @@ func TestTheClientAgreesWithTheWireAboutStatusNumbers(t *testing.T) {
 	// A second transcription of the same numbering, so a second pin. The module
 	// side has the matching test; either one edited alone leaves both suites
 	// green and the two ends disagreeing about what a 5 means.
+	pinned := 0
 	for _, c := range []struct {
 		name  string
 		value uint32
@@ -304,6 +305,11 @@ func TestTheClientAgreesWithTheWireAboutStatusNumbers(t *testing.T) {
 		if c.value != c.want {
 			t.Errorf("status%s = %d, and the wire says %d", c.name, c.value, c.want)
 		}
+		pinned++
+	}
+	if pinned != statusCount {
+		t.Errorf("pinned %d statuses, the package declares %d; one is crossing the "+
+			"wire unchecked", pinned, statusCount)
 	}
 }
 
