@@ -1664,6 +1664,60 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "l2_cross_key_pairs",
+			stage: db2contract.StageL2CrossKeyPairs,
+			// A self-join with a LIKE pattern built by concatenating a SUBSTR of
+			// a STRPOS. Every one of those is a function whose PostgreSQL
+			// spelling differs from the sqlite the C grew up on, and none of
+			// them is checked anywhere but here.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeL2CrossKeyPairsRequest(8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeL2CrossKeyPairsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "l2_fact_decision_pairs",
+			stage: db2contract.StageL2FactDecisionPairs,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeL2FactDecisionPairsRequest(8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeL2FactDecisionPairsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_summarise_clusters",
+			stage: db2contract.StageMemorySummariseClusters,
+			// AVG over a grouped read with the count repeated in HAVING.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySummariseClustersRequest(0.4, 3)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemorySummariseClustersReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_prior_in_session",
+			stage: db2contract.StageMemoryPriorInSession,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryPriorInSessionRequest(
+					"live-probe-session", 2147483000, 8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryPriorInSessionReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
