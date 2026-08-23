@@ -206,7 +206,19 @@ func main() {
 	fmt.Println("peerprobe: all checks passed")
 }
 
+// mustFrame builds the known-good frame used to prove an UNADVERTISED stage is
+// not served.
+//
+// The error was discarded here, which quietly changed what the check tested: a
+// failed encode yields a nil frame, the call is then refused for being empty
+// rather than for naming a stage the module does not advertise, and the check
+// passes for the wrong reason. It is the same defect the probe exists to find,
+// in the probe.
 func mustFrame() []byte {
-	f, _ := peerwire.EncodeRequest(peerwire.OpInboxLen, []string{"x"})
+	f, err := peerwire.EncodeRequest(peerwire.OpInboxLen, []string{"x"})
+	if err != nil {
+		fmt.Printf("peerprobe: cannot build the probe frame: %v\n", err)
+		os.Exit(2)
+	}
 	return f
 }
