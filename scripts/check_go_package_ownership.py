@@ -230,9 +230,13 @@ def run(root: Path) -> str:
             f"    A package with no descriptor has no id, no dependency edges and no "
             f"principal ref — and with no principal ref it has no event kinds, so the "
             f"governance tap cannot observe it even in principle.\n"
-            f"    Either add the file to go_sources in src/modules/<id>/module.yaml, "
-            f"or add '{package}' to UNOWNED_PACKAGES in {Path(__file__).name} with the "
-            f"reason it is not a module."
+            f"    THE REPAIR is to add the file to go_sources in "
+            f"src/modules/<id>/module.yaml, so the code has an owner.\n"
+            f"    Adding '{package}' to UNOWNED_PACKAGES is NOT a cheaper version\n"
+            f"    of that. It is a CLAIM: that this package should never be a\n"
+            f"    module, and so should never be observable. An entry added to\n"
+            f"    silence this message records the invisibility as permission for\n"
+            f"    it. Use it only if the claim is true, and say why it is true."
         )
 
     for package, (kind, _reason) in sorted(UNOWNED_PACKAGES.items()):
