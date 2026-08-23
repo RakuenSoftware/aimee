@@ -256,6 +256,42 @@ func TestDB1DirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
 	}
 }
 
+// A refusal survives the REGISTRY, which is where it was being lost.
+//
+// The mapping tests above check DB1Directory in isolation, and it was correct
+// there the whole time. The defect lived one layer up: Registry.Owner wrapped
+// anything that was not absence into ErrDirectoryUnavailable with %v, breaking
+// the errors.Is chain, so db1 answering INVALID -- "I will not accept what you
+// sent" -- reached the caller as `unavailable`, the one status that means retry.
+// A permanent defect in a request this module built, reported as a transient
+// condition, retried forever.
+//
+// Found by a peer's question: does each CLAUSE matter, and what does this one
+// actually produce? Measured rather than reasoned about, because reading the
+// isolated mapping says it is fine and reading the registry says it is fine, and
+// only running the two together shows what a caller gets.
+func TestARefusalSurvivesTheRegistryAsARefusal(t *testing.T) {
+	r := peer.New(peer.Options{})
+	d, err := NewDB1Directory(&fakeCaller{reply: db1Reply(t, db1StatusInvalid, nil)}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SetSessionOwner(d.Owner)
+
+	_, ownerErr := r.Owner("sess-1")
+	if !errors.Is(ownerErr, peer.ErrDirectoryRefused) {
+		t.Fatalf("Registry.Owner = %v; want ErrDirectoryRefused to survive", ownerErr)
+	}
+	if errors.Is(ownerErr, peer.ErrDirectoryUnavailable) {
+		t.Error("a refusal is reported as unavailable; the caller will retry a " +
+			"request the directory will never accept")
+	}
+	if got := peerwire.StatusFor(ownerErr); got != peerwire.StatusDirectoryRefused {
+		t.Errorf("on the wire = %v; want directory_refused. unavailable means retry, "+
+			"and bad_request blames a caller whose request was fine.", got)
+	}
+}
+
 // A directory with no caller reports that there is none, rather than reporting
 // about a session.
 func TestDB1DirectoryWithoutACallerSaysSo(t *testing.T) {

@@ -238,6 +238,7 @@ func TestStatusIntegersArePinned(t *testing.T) {
 		17: StatusUnclassified,
 		18: StatusAtCapacity,
 		19: StatusNoDirectory,
+		20: StatusDirectoryRefused,
 	}
 	// The count is what catches an ADDITION. A status declared, given a String()
 	// arm and used on the wire but never added here passes every other guard --
@@ -300,7 +301,7 @@ func TestEverySentinelErrorHasItsOwnStatus(t *testing.T) {
 		"ErrOwnerMismatch":        peer.ErrOwnerMismatch, "ErrNoChannel": peer.ErrNoChannel,
 		"ErrNotMember": peer.ErrNotMember, "ErrChannelFull": peer.ErrChannelFull,
 		"ErrChannelsFull": peer.ErrChannelsFull, "ErrChannelNameBad": peer.ErrChannelNameBad,
-		"ErrNoDirectory": peer.ErrNoDirectory,
+		"ErrNoDirectory": peer.ErrNoDirectory, "ErrDirectoryRefused": peer.ErrDirectoryRefused,
 	}
 	if len(sentinels) != peer.SentinelErrorCount {
 		t.Fatalf("this list has %d errors, the package declares %d. An error added "+

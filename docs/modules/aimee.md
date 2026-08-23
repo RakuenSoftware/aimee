@@ -287,6 +287,28 @@ admission tests fail without directory admission, and the sender remap fails
 separately from it, so "I do not know you" and "there is no such peer" are held
 apart by something rather than by coincidence.
 
+## A refusal is not an outage
+
+The directory has FOUR outcomes, not three, and the fourth was found on the last
+pass of the night. `directory_refused` is db1 understanding a request and
+declining it -- the module asked for something the store will not accept.
+
+It is distinct from `unavailable`, which means retry; from `bad_request`, which
+blames a caller whose request was fine; and from `unclassified`, which means an
+error the module could not name. This one is named, the caller cannot fix it, and
+retrying it is pointless.
+
+It exists because a refusal was reaching callers as `unavailable`. `Registry.Owner`
+wrapped anything that was not absence into "did not answer", with `%v` rather
+than `%w`, so the chain broke and a permanent defect in a request THIS MODULE
+built arrived as a transient condition. A caller obeying that status retries
+forever.
+
+The isolated tests were no help: the directory's own mapping was correct, and the
+registry's own wrapping was reasonable. Only running the two together shows what
+a caller receives, which is the argument for testing across a seam rather than on
+both sides of it.
+
 ## The module as deployed has no session directory
 
 `aimee-module` builds the capability with `NoDirectory{}`, and that is accurate

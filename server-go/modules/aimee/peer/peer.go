@@ -135,7 +135,7 @@ var (
 // this file and channel.go. The wire's mapping test asserts against it, so an
 // error added without a status mapping fails rather than falling to a default
 // and being reported as something it is not.
-const SentinelErrorCount = 22
+const SentinelErrorCount = 23
 
 var (
 	ErrShutdown     = errors.New("peer: registry shut down while waiting")
@@ -156,6 +156,17 @@ var (
 	// unanswerable, one level up: it hides a module that can NEVER serve behind
 	// a status that promises it might.
 	ErrNoDirectory = errors.New("peer: no session directory is configured")
+	// ErrDirectoryRefused is the directory REFUSING a request rather than
+	// failing to serve one: it understood, and will not accept what this module
+	// sent. That is a bug here, not a condition that passes.
+	//
+	// Third category, and it exists because two were not enough. The
+	// DirectorySource contract said ErrNoPeer for a definite absence and
+	// "anything else" for could-not-answer, so a permanent refusal fell into the
+	// retryable bucket -- db1 answering INVALID reached a caller as `unavailable`,
+	// the one status that means try again. A caller doing so retries a request
+	// that will never be accepted, forever, over a defect it cannot fix.
+	ErrDirectoryRefused = errors.New("peer: directory refused the request")
 )
 
 // Message is one peer message and its envelope. Everything before Text is
@@ -456,6 +467,11 @@ func (r *Registry) Owner(sessionID string) (string, error) {
 			// that no longer exists, which is undeliverable rather than
 			// addressable.
 			return "", ErrNoPeer
+		}
+		if errors.Is(err, ErrDirectoryRefused) {
+			// Preserved, not wrapped as unavailable. Retrying cannot fix a
+			// request the directory will not accept.
+			return "", err
 		}
 		if errors.Is(err, ErrNoDirectory) {
 			// There is no directory at all. Reporting that as "did not answer"

@@ -198,6 +198,20 @@ const (
 	// module that had no way to know about any session at all. Every refusal
 	// check in the container run passed against it.
 	StatusNoDirectory Status = 19
+	// StatusDirectoryRefused is the directory understanding a request and
+	// REFUSING it: the module asked for something the directory will not accept.
+	//
+	// Distinct from unavailable, which means retry, and from bad_request, which
+	// blames the caller. This one is neither -- the caller's request was fine and
+	// the defective one was the module's, so the caller can only report it. It is
+	// also not unclassified: that status means an error the module could not
+	// NAME, and this one has a name.
+	//
+	// It exists because a refusal was reaching callers as `unavailable`. The
+	// registry wrapped anything that was not absence into "did not answer", so a
+	// permanent refusal became the one status that means try again -- a retry
+	// loop over a request that can never succeed.
+	StatusDirectoryRefused Status = 20
 
 	// StatusCount is one past the highest status, and the pinning test asserts
 	// against it.
@@ -209,7 +223,7 @@ const (
 	// insert that duplicates a case; the pinned values catch a renumber into a
 	// gap; only this catches an addition that never joined the list. All three are
 	// needed, and each is invisible to the others.
-	StatusCount = 20
+	StatusCount = 21
 )
 
 // StatusFor maps a registry error onto its wire status.
@@ -251,6 +265,13 @@ func StatusFor(err error) Status {
 	// not be answered by the arm that means "it did not reply this time".
 	case errors.Is(err, peer.ErrNoDirectory):
 		return StatusNoDirectory
+	// The directory understood and REFUSED, which is a defect in the request
+	// this module built rather than anything the caller sent. Unclassified
+	// rather than bad_request for exactly that reason -- bad_request tells the
+	// caller to fix a call that was fine -- and never unavailable, which would
+	// have them retry something that can never be accepted.
+	case errors.Is(err, peer.ErrDirectoryRefused):
+		return StatusDirectoryRefused
 	case errors.Is(err, peer.ErrDirectoryUnavailable):
 		return StatusUnavailable
 	case errors.Is(err, peer.ErrRegistryFull), errors.Is(err, peer.ErrGrantsFull):
@@ -305,6 +326,8 @@ func (s Status) String() string {
 		return "at_capacity"
 	case StatusNoDirectory:
 		return "no_directory"
+	case StatusDirectoryRefused:
+		return "directory_refused"
 	default:
 		// Deliberately NOT the name of a real status. Falling through to
 		// "bad_request" made an unrecognised value indistinguishable from one a

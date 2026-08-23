@@ -101,13 +101,17 @@ const (
 	db1StatusFailed  uint32 = 4
 )
 
-// ErrDirectoryRefused is db1 refusing the REQUEST rather than failing.
+// ErrDirectoryRefused is db1 refusing the REQUEST rather than failing: it
+// understood, and will not accept what this module sent, which is a bug here
+// that no amount of retrying fixes.
 //
-// Separate from ErrDirectoryUnavailable because it means this module sent
-// something db1 would not accept, which is a bug here and no amount of retrying
-// fixes it. Reported as unavailable, it would look like a store that never
-// recovers.
-var ErrDirectoryRefused = errors.New("aimee: db1 refused the directory request")
+// An ALIAS of peer.ErrDirectoryRefused, and it lives in that package rather than
+// this one because peerwire has to map it and cannot import this package.
+// Declared here it was invisible to StatusFor, and worse than unmapped: the
+// registry wrapped it as ErrDirectoryUnavailable, so a refusal reached the
+// caller as `unavailable` -- the one status meaning retry -- over a request the
+// directory will never accept.
+var ErrDirectoryRefused = peer.ErrDirectoryRefused
 
 // NewDB1Directory builds a directory over a bus caller.
 func NewDB1Directory(caller ModuleCaller, deadline time.Duration) (*DB1Directory, error) {
