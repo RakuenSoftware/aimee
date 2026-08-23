@@ -1562,3 +1562,49 @@ The one SKIP is the TLS ramp-failure branch, which is unreachable in this
 configuration: removing `aimee-module-db1` makes `db1.grant` invalid, and the
 server refuses to start before the ramp can run. That is a tested reason, not an
 assumed one.
+
+### Does the same defect repeat? A scan, and what it found
+
+The `relations.schema_list` defect is a shape, not a one-off: **a read surface
+served from a table nothing writes.** A shape can repeat where nothing calls it,
+so it was searched for rather than assumed unique.
+
+Method: every `CREATE TABLE` in `schema.sql`, cross-referenced against writers
+(`INSERT INTO` / `UPDATE` / `COPY` / `DELETE FROM` in C, Go and SQL, including
+the SECURITY DEFINER functions inside `schema.sql` itself) and readers
+(`SELECT ... FROM`). `src/schema_data.h` has to be excluded from both sides — it
+embeds the entire schema as one C string literal, so it matches every table name
+and turns the whole scan into false positives.
+
+Nine tables came back writerless-but-read. Seven are read only from tests
+(`kb_vault_rewrap_operation`, `kb_vault_rewrap_dek_stage`,
+`kb_vault_witness_emit_cursor`) or from nothing at all once the schema blob is
+excluded (`derivation_policy_versions`, `kb_management_action_intent`,
+`kb_management_status_key`). Those are not surfaces.
+
+Two have real production readers, and **neither is the same defect**, for a
+reason worth stating rather than waving at:
+
+**`memory_scenes` / `memory_scene_members`** back `aimee memory scene list|show`
+and a retrieval boost in `memory_core_search_b.c`. Nothing writes them — and the
+reason is explicit: `memory_cluster_scenes()` and `memory_assign_scene()` in
+`memory_episodes.c` are stubs that `return 0`. The whole feature is gated behind
+`config_memory_scenes_enabled()`, which reads a config key that is absent by
+default and therefore returns 0. So this is an **unimplemented feature that is
+switched off**, whose read surface is correspondingly and correctly empty.
+
+**`stopwords`** is read by `memory_core_search.c` to filter search terms. With
+zero rows the filter passes every term through. The column comment calls these
+"promoted" stopwords — learned data an optional process would populate. Absent
+data here degrades the ranking; it does not produce a wrong answer, and no
+surface anywhere claims stopwords are in effect.
+
+What made `relations.schema_list` a defect was not that its table was empty. It
+was that **the system enforced a rule set and published a different, empty one**
+— the surface contradicted the behaviour. Neither of these two contradicts
+anything: one is a feature that does not run, the other is optional data whose
+absence is honest. Fixing them would mean implementing scene clustering and a
+stopword-promotion process, which are features, not repairs.
+
+So: one instance of the shape, found and fixed. The scan is recorded because
+"I checked" is a claim, and a claim of that kind should carry its method.
