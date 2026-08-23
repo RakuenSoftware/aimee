@@ -220,6 +220,12 @@ int learning_approach_recall(const char *goal, learning_approach_hit_t *out, int
 
    approach_failure_t rows[64];
    int n = db2_approach_failure_candidates(narrow, rows, (int)(sizeof(rows) / sizeof(rows[0])));
+   /* No store is not an error. An installation with no knowledge service has
+    * never recorded a dead end, so the honest answer to "what have we already
+    * tried?" is "nothing" — reporting a failure here would make plan-time
+    * recall look broken on every such install. A real SQL error still is one. */
+   if (n == DB2_APPROACH_UNAVAILABLE)
+      return 0;
    if (n < 0)
       return -1;
 

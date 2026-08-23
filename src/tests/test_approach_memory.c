@@ -161,6 +161,20 @@ static void test_never_touches_the_blocking_path(void)
           0);
 }
 
+/* An installation with no knowledge service has never recorded a dead end. The
+ * honest answer to "what have we already tried?" is "nothing" — not an error,
+ * which would make plan-time recall look broken on every such install. */
+static void test_absent_store_means_nothing_known(void)
+{
+   db2_test_shim_close();
+   learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
+   assert(learning_approach_recall("rebuild the search index", hits, APPROACH_MEM_MAX_RECALL) == 0);
+   char out[512];
+   assert(learning_approach_render("rebuild the search index", out, sizeof(out), NULL, 0) == 0);
+   assert(out[0] == '\0');
+   db2_test_shim_open();
+}
+
 int main(void)
 {
    printf("approach_memory: ");
@@ -174,6 +188,7 @@ int main(void)
    test_recall_surfaces_the_dead_end();
    test_render_reports_and_never_instructs();
    test_never_touches_the_blocking_path();
+   test_absent_store_means_nothing_known();
 
    /* Bad args are refused rather than guessed. */
    assert(learning_approach_record_failure(NULL, "a", "m", "s", "r") == -1);

@@ -45,7 +45,7 @@ int db2_approach_failure_record(const char *goal_signature, const char *goal_tex
       return -1;
    void *conn = db2_conn();
    if (!conn)
-      return -1;
+      return DB2_APPROACH_UNAVAILABLE;
 
    /* The (goal, approach) pair is the identity: seeing the same dead end again
     * is more evidence for one row, not a second row. */
@@ -81,7 +81,7 @@ int db2_approach_failure_candidates(const char *must_contain, approach_failure_t
       return -1;
    void *conn = db2_conn();
    if (!conn)
-      return -1;
+      return DB2_APPROACH_UNAVAILABLE;
 
    const char *needle = (must_contain && must_contain[0]) ? must_contain : "";
    char like[APPROACH_TOKENS_LEN + 8];

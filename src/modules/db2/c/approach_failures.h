@@ -31,6 +31,9 @@ extern "C"
 #define APPROACH_SOURCE_LEN    32
 #define APPROACH_REF_LEN       128
 
+/* No DB2 connection: the store is absent, not broken. */
+#define DB2_APPROACH_UNAVAILABLE (-2)
+
    typedef struct
    {
       int64_t id;
@@ -65,7 +68,12 @@ extern "C"
     * overlap is policy and does not belong in SQL. `must_contain` narrows the
     * pool to rows whose goal_tokens contain that token (pass NULL/"" for no
     * narrowing); it is an optimisation, not the filter.
-    * Returns rows written (capped at max) or -1 on error. */
+    *
+    * Returns rows written (capped at max), -1 on bad args / SQL error, or
+    * DB2_APPROACH_UNAVAILABLE when there is no DB2 connection at all. Those
+    * are different answers: an installation with no knowledge service KNOWS
+    * NOTHING, which is not the same as a query that failed, and a caller
+    * asking "what have we already tried?" must be able to tell them apart. */
    int db2_approach_failure_candidates(const char *must_contain, approach_failure_t *out, int max);
 
    /* Exact-identity lookup. Returns 1 on hit, 0 on miss, -1 on error. */

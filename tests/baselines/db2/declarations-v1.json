@@ -3269,7 +3269,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/approach_failures.h",
-          "line": 69
+          "line": 77
         }
       ],
       "signature": "int db2_approach_failure_candidates ( const char * must_contain , approach_failure_t * out , int max )",
@@ -3284,7 +3284,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/approach_failures.h",
-          "line": 76
+          "line": 84
         }
       ],
       "signature": "int64_t db2_approach_failure_count ( void )",
@@ -3297,7 +3297,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/approach_failures.h",
-          "line": 72
+          "line": 80
         }
       ],
       "signature": "int db2_approach_failure_get ( const char * goal_signature , const char * approach_signature , approach_failure_t * out )",
@@ -3312,7 +3312,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/approach_failures.h",
-          "line": 58
+          "line": 61
         }
       ],
       "signature": "int db2_approach_failure_record ( const char * goal_signature , const char * goal_text , const char * goal_tokens , const char * approach_signature , const char * approach_text , const char * failure_mode , const char * source , const char * source_ref )",
@@ -22548,6 +22548,7 @@
       "consumers": [
         "src/tests/bench_perf.c",
         "src/tests/fuzz_memory_search.c",
+        "src/tests/test_approach_memory.c",
         "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
@@ -26664,7 +26665,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ec94a490fee1c932acf2b894852e47fbe88ff82609620951d3e1014c0131c502",
+  "fingerprint": "4eea849ac68dbe935e1756a56565dba3172bb6110adcf0bd56f5cb2aa606669c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
