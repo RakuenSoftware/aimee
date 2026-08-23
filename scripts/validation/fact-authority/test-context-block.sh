@@ -41,13 +41,26 @@ seed() { # $1 = confidence_class  $2 = confidence
          ${rank}, 'persistent',
          to_char(now() at time zone 'UTC','YYYY-MM-DD HH24:MI:SS'), '', '', 0)" >/dev/null
   $P "ALTER TABLE entity_edges ENABLE TRIGGER USER" >/dev/null
+  # Hand back the id of the row we just wrote. See state() for why.
+  $P "select max(id) from entity_edges where source='user' and relation='email'"
 }
 
 # A retired fact is lifecycle_state='invalidated' + invalidated_at; only a
 # supersession sets superseded_at. Judging liveness by superseded_at/suppressed
 # alone calls an invalidated row "current", which makes a successful retraction
 # read as a blocked one.
-state() { $P "select confidence_class || ' ' || case when superseded_at='' and invalidated_at='' and suppressed=0 then 'current' else 'gone' end from entity_edges where source='user' and relation='email'"; }
+# BY ID, because this store is no longer quiet.
+#
+# This used to select every ('user','email') row, which was fine while the
+# typed-fact layer was gated off and nothing else wrote. Retiring that gate means
+# kb_memory_facts_drain() actually runs, and it legitimately re-asserts facts
+# from stored memories WHILE this probe is mid-assertion -- so the seeded Class-B
+# row was withdrawn correctly and a freshly drained Class-A row appeared beside
+# it, and the multi-row match reported "B current -> A current" as a failure.
+#
+# The drain doing its job is the fix working. The probe just has to measure the
+# row it owns instead of everything that shares the selector.
+state() { $P "select confidence_class || ' ' || case when superseded_at='' and invalidated_at='' and suppressed=0 then 'current' else 'gone' end from entity_edges where id=${1:-0}"; }
 
 # The retraction pre-scan runs through the memory module's EXTRACT_INDEX stage
 # (5889). When that stage does not answer, db2_typed_fact_ingress logs
@@ -71,19 +84,19 @@ ask_forget() {
 
 echo "=== the agent's own query says \"please forget my email\" ==="
 echo
-seed A 1.0
-a_before="$(state)"
-echo "  user-stated (Class A) before: $a_before"
+a_id="$(seed A 1.0)"
+a_before="$(state "$a_id")"
+echo "  user-stated (Class A) id=$a_id before: $a_before"
 ask_forget
-a_after="$(state)"
-echo "  after the agent's query:      $a_after"
+a_after="$(state "$a_id")"
+echo "  after the agent's query:              $a_after"
 echo
-seed B 0.6
-b_before="$(state)"
-echo "  model-authored (Class B) before: $b_before"
+b_id="$(seed B 0.6)"
+b_before="$(state "$b_id")"
+echo "  model-authored (Class B) id=$b_id before: $b_before"
 ask_forget
-b_after="$(state)"
-echo "  after the same query:            $b_after"
+b_after="$(state "$b_id")"
+echo "  after the same query:                  $b_after"
 
 echo
 rc=0
