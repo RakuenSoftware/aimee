@@ -332,3 +332,42 @@ func TestLiveMigrateRefusesAnEditedMigration(t *testing.T) {
 		t.Fatalf("a mismatched checksum was accepted: status=%d", code)
 	}
 }
+
+func TestLiveNumericCrossesAsANumberNotARendering(t *testing.T) {
+	// SUM over a BIGINT is NUMERIC, so this is an ordinary result column. pgx
+	// answers it as pgtype.Numeric, which had no case here and fell to the
+	// default branch that renders with fmt.Sprint. It crossed as a struct dump,
+	// and the caller scanning it into an int64 wrote zero without an error.
+	//
+	// kb_project_status answered a real token count through a pool and zero
+	// through this module, and every live probe passed: they assert the reply
+	// decodes and that a row was found, both true of a zero.
+	h, invocation := liveHandler(t)
+
+	// 2^53+1 is the smallest integer float64 cannot represent. Crossing as a
+	// float rounds it to 2^53, so this distinguishes "a number" from "the right
+	// number" -- a distinction a smaller value cannot make.
+	const beyondFloat64 = int64(1)<<53 + 1
+	cells := queryCells(t, h, invocation,
+		`SELECT SUM(v)::numeric, SUM(v) / 2.0, COUNT(*) FROM (VALUES (9007199254740993::bigint)) t(v)`)
+	if len(cells) != 3 {
+		t.Fatalf("cells = %d", len(cells))
+	}
+	if cells[0].Type != ValueInt {
+		t.Fatalf("an exact NUMERIC crossed as type %d (%q), not an integer",
+			cells[0].Type, cells[0].Text)
+	}
+	if cells[0].Int != beyondFloat64 {
+		t.Errorf("NUMERIC came back as %d, want %d -- a float somewhere in the path",
+			cells[0].Int, beyondFloat64)
+	}
+	// And one with a fractional part, which cannot be an integer and must not
+	// be a rendering either.
+	if cells[1].Type != ValueFloat {
+		t.Errorf("a fractional NUMERIC crossed as type %d (%q), not a float",
+			cells[1].Type, cells[1].Text)
+	}
+	if cells[2].Type != ValueInt || cells[2].Int != 1 {
+		t.Errorf("COUNT(*) = %+v", cells[2])
+	}
+}

@@ -282,6 +282,35 @@ func scanCells(cells storage.Row, dest []any) error {
 	return nil
 }
 
+// mismatch names a cell that cannot become this destination.
+//
+// Its own function because the message is the useful part: the alternative was
+// a zero value, which reads as data.
+func mismatch(cell storage.Value, want string) error {
+	return fmt.Errorf("a %s cell cannot be scanned into %s; a zero here would "+
+		"read as data", cellTypeName(cell.Type), want)
+}
+
+func cellTypeName(kind uint8) string {
+	switch kind {
+	case 0:
+		return "NULL"
+	case 1:
+		return "text"
+	case 2:
+		return "integer"
+	case 3:
+		return "float"
+	case 4:
+		return "boolean"
+	case 5:
+		return "text-array"
+	case 6:
+		return "bytes"
+	}
+	return "unknown"
+}
+
 func scanCell(cell storage.Value, target any) error {
 	null := cell.Type == 0
 	switch typed := target.(type) {
@@ -289,10 +318,19 @@ func scanCell(cell storage.Value, target any) error {
 		if null {
 			return errors.New("NULL into *string; use **string or COALESCE")
 		}
+		// Checked, not assumed. Before this, a cell of any other type wrote the
+		// zero value of a field nobody set: the empty string here, 0 for the
+		// numeric destinations, and no error anywhere.
+		if cell.Type != storage.TypeText {
+			return mismatch(cell, "*string")
+		}
 		*typed = cell.Text
 	case *int64:
 		if null {
 			return errors.New("NULL into *int64; use **int64 or COALESCE")
+		}
+		if cell.Type != storage.TypeInt {
+			return mismatch(cell, "*int64")
 		}
 		*typed = cell.Int
 	case *int32:
@@ -302,6 +340,9 @@ func scanCell(cell storage.Value, target any) error {
 		if null {
 			return errors.New("NULL into *int32; use **int32 or COALESCE")
 		}
+		if cell.Type != storage.TypeInt {
+			return mismatch(cell, "*int32")
+		}
 		if cell.Int > math.MaxInt32 || cell.Int < math.MinInt32 {
 			return fmt.Errorf("%d does not fit in an int32", cell.Int)
 		}
@@ -309,6 +350,9 @@ func scanCell(cell storage.Value, target any) error {
 	case *int:
 		if null {
 			return errors.New("NULL into *int; use **int or COALESCE")
+		}
+		if cell.Type != storage.TypeInt {
+			return mismatch(cell, "*int")
 		}
 		// int is 64-bit everywhere this builds, but saying so in the type
 		// system costs nothing and the check is free if it is.
@@ -324,6 +368,9 @@ func scanCell(cell storage.Value, target any) error {
 		// wraps to 705032704, and the operation goes on to use it: well-formed,
 		// plausible, wrong, and silent. pgx refuses this; so does this now, or
 		// the two paths disagree exactly where it matters most.
+		if cell.Type != storage.TypeInt {
+			return mismatch(cell, "*uint32")
+		}
 		if cell.Int < 0 || cell.Int > math.MaxUint32 {
 			return fmt.Errorf("%d does not fit in a uint32", cell.Int)
 		}
@@ -331,6 +378,9 @@ func scanCell(cell storage.Value, target any) error {
 	case *uint64:
 		if null {
 			return errors.New("NULL into *uint64; use **uint64 or COALESCE")
+		}
+		if cell.Type != storage.TypeInt {
+			return mismatch(cell, "*uint64")
 		}
 		if cell.Int < 0 {
 			return fmt.Errorf("%d is negative and cannot be a uint64", cell.Int)
@@ -340,16 +390,33 @@ func scanCell(cell storage.Value, target any) error {
 		if null {
 			return errors.New("NULL into *float64; use **float64 or COALESCE")
 		}
+		// An integer widens into a float destination, which is what pgx does and
+		// what a caller scanning a count into a float means. The reverse is not
+		// widened: a float into an integer is a truncation decision, and making
+		// those silently is the thing this is here to stop.
+		if cell.Type == storage.TypeInt {
+			*typed = float64(cell.Int)
+			return nil
+		}
+		if cell.Type != storage.TypeFloat {
+			return mismatch(cell, "*float64")
+		}
 		*typed = cell.Float
 	case *bool:
 		if null {
 			return errors.New("NULL into *bool; use **bool or COALESCE")
+		}
+		if cell.Type != storage.TypeBool {
+			return mismatch(cell, "*bool")
 		}
 		*typed = cell.Bool
 	case *[]byte:
 		if null {
 			*typed = nil
 			return nil
+		}
+		if cell.Type != storage.TypeBytes {
+			return mismatch(cell, "*[]byte")
 		}
 		*typed = cell.Bytes
 	// Pointer-to-pointer destinations are how an operation says a column is
@@ -359,6 +426,9 @@ func scanCell(cell storage.Value, target any) error {
 			*typed = nil
 			return nil
 		}
+		if cell.Type != storage.TypeText {
+			return mismatch(cell, "**string")
+		}
 		v := cell.Text
 		*typed = &v
 	case **int64:
@@ -366,12 +436,18 @@ func scanCell(cell storage.Value, target any) error {
 			*typed = nil
 			return nil
 		}
+		if cell.Type != storage.TypeInt {
+			return mismatch(cell, "**int64")
+		}
 		v := cell.Int
 		*typed = &v
 	case **int32:
 		if null {
 			*typed = nil
 			return nil
+		}
+		if cell.Type != storage.TypeInt {
+			return mismatch(cell, "**int32")
 		}
 		if cell.Int > math.MaxInt32 || cell.Int < math.MinInt32 {
 			return fmt.Errorf("%d does not fit in an int32", cell.Int)
@@ -383,12 +459,23 @@ func scanCell(cell storage.Value, target any) error {
 			*typed = nil
 			return nil
 		}
+		if cell.Type == storage.TypeInt {
+			widened := float64(cell.Int)
+			*typed = &widened
+			return nil
+		}
+		if cell.Type != storage.TypeFloat {
+			return mismatch(cell, "**float64")
+		}
 		v := cell.Float
 		*typed = &v
 	case **bool:
 		if null {
 			*typed = nil
 			return nil
+		}
+		if cell.Type != storage.TypeBool {
+			return mismatch(cell, "**bool")
 		}
 		v := cell.Bool
 		*typed = &v

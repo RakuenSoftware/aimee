@@ -42,6 +42,20 @@ const (
 	typeBytes uint8 = 6
 )
 
+// Value.Type is exported and its values were not, which left a caller wanting
+// to know what a cell holds comparing against a literal. Scanning has to ask:
+// writing a float destination from a text cell yields a zero that reads as
+// data, so the check needs a name for what it is checking.
+const (
+	TypeNull  = typeNull
+	TypeText  = typeText
+	TypeInt   = typeInt
+	TypeFloat = typeFloat
+	TypeBool  = typeBool
+	TypeTexts = typeTexts
+	TypeBytes = typeBytes
+)
+
 // Statuses the module answers with.
 const (
 	statusOK              uint32 = 0

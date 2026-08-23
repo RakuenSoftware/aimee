@@ -12,6 +12,7 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // The storage stage: SQL on behalf of whichever module owns the tables.
@@ -145,6 +146,24 @@ func cell(raw any) Value {
 		return Value{Type: ValueFloat, Float: float64(typed)}
 	case float64:
 		return Value{Type: ValueFloat, Float: typed}
+	case pgtype.Numeric:
+		// SUM over a BIGINT is NUMERIC, so this is an ordinary result column and
+		// not an exotic one. Rendered rather than converted, it crossed as a
+		// struct dump and scanned into an integer as zero.
+		//
+		// Exact integers cross as integers, which is what a SUM of counts is and
+		// what its callers scan it into. Anything else that fits a float crosses
+		// as a float. A NUMERIC that is neither -- NaN, infinity, or wider than
+		// float64 -- keeps the rendered form, where the destination check now
+		// refuses it instead of writing a zero that reads as data.
+		if typed.Valid && !typed.NaN && typed.InfinityModifier == pgtype.Finite {
+			if whole, err := typed.Int64Value(); err == nil && whole.Valid {
+				return Value{Type: ValueInt, Int: whole.Int64}
+			}
+			if real, err := typed.Float64Value(); err == nil && real.Valid {
+				return Value{Type: ValueFloat, Float: real.Float64}
+			}
+		}
 	case time.Time:
 		// Stamps cross as the tree's canonical spelling rather than as a
 		// driver-formatted string, so a caller reading one back gets what it
