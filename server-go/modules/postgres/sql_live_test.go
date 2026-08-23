@@ -371,3 +371,56 @@ func TestLiveNumericCrossesAsANumberNotARendering(t *testing.T) {
 		t.Errorf("COUNT(*) = %+v", cells[2])
 	}
 }
+
+func TestLiveAColumnTheWireCannotCarryIsRefusedNotRendered(t *testing.T) {
+	// Rendering was the old answer, and it was chosen against DROPPING the
+	// column -- a real harm, since a silently narrower result set is worse than
+	// a loud failure. But a rendering lands on text, and text is what a real
+	// column produces, so a rendered value and a genuine TEXT column are the
+	// same answer to a caller scanning into a string.
+	//
+	// Refusing is neither option that comparison weighed: nothing is dropped and
+	// nothing is guessed at.
+	//
+	// Driven against a real driver rather than a fake, because the question is
+	// what pgx actually hands back for a type with no case here, and a fake
+	// would assert my guess about that instead.
+	h, invocation := liveHandler(t)
+
+	for _, c := range []struct {
+		name string
+		sql  string
+	}{
+		// An array. pgx answers a typed slice, and no operation selects one --
+		// which is a fact about today's operations, not about this codec.
+		{"an integer array", `SELECT ARRAY[1,2,3]`},
+		{"an interval", `SELECT INTERVAL '1 day'`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			status, _, message, _ := call(t, h, invocation,
+				statementRequest(OpQuery, "live_test", 0, c.sql))
+			if status == StatusOK {
+				t.Fatalf("%s crossed rather than being refused; a rendering is "+
+					"indistinguishable from a TEXT column at the far end", c.name)
+			}
+			if status != StatusUnsupported {
+				t.Errorf("status = %d (%s), want Unsupported: the statement ran and "+
+					"PostgreSQL answered, so this is the module's limit and not "+
+					"the caller's mistake", status, message)
+			}
+		})
+	}
+
+	// And the types that DO have cases still cross, so the refusal is specific
+	// rather than a wall.
+	cells := queryCells(t, h, invocation,
+		`SELECT 'text'::text, 42::bigint, 1.5::float8, true, '\x00ff'::bytea`)
+	if len(cells) != 5 {
+		t.Fatalf("cells = %d", len(cells))
+	}
+	for index, want := range []uint8{ValueText, ValueInt, ValueFloat, ValueBool, ValueBytes} {
+		if cells[index].Type != want {
+			t.Errorf("cell %d crossed as type %d, want %d", index, cells[index].Type, want)
+		}
+	}
+}

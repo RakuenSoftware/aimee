@@ -120,32 +120,44 @@ func bindAll(args []Value) ([]any, error) {
 	return out, nil
 }
 
-// cell converts one scanned column into a wire value.
+// cell converts one scanned column into a wire value, or refuses it.
 //
 // The type comes from what the driver produced, not from a guess at what the
 // column probably holds. That is the whole reason cells are typed: reading a
 // BOOLEAN as text and parsing it back is how the C came to report every mining
 // job disabled, because atoi("t") is 0.
-func cell(raw any) Value {
+//
+// An unrecognised driver type is REFUSED rather than rendered. Rendering was the
+// old answer and it was chosen against dropping the column, which is a real
+// harm -- a silently narrower result set. But a rendering lands on text, and
+// text is what a real column produces, so a rendered value and a genuine TEXT
+// column are the same answer to a caller scanning into a string. A default is
+// safe when it lands on what the other side would have written and unsafe the
+// moment it does not.
+//
+// Refusing is neither of the two options that comparison weighed: nothing is
+// dropped and nothing is guessed at, and the reply names the type that could not
+// cross, which an operation author can act on.
+func cell(raw any) (Value, error) {
 	switch typed := raw.(type) {
 	case nil:
-		return Value{Type: ValueNull}
+		return Value{Type: ValueNull}, nil
 	case string:
-		return Value{Type: ValueText, Text: typed}
+		return Value{Type: ValueText, Text: typed}, nil
 	case []byte:
-		return Value{Type: ValueBytes, Bytes: typed}
+		return Value{Type: ValueBytes, Bytes: typed}, nil
 	case bool:
-		return Value{Type: ValueBool, Bool: typed}
+		return Value{Type: ValueBool, Bool: typed}, nil
 	case int16:
-		return Value{Type: ValueInt, Int: int64(typed)}
+		return Value{Type: ValueInt, Int: int64(typed)}, nil
 	case int32:
-		return Value{Type: ValueInt, Int: int64(typed)}
+		return Value{Type: ValueInt, Int: int64(typed)}, nil
 	case int64:
-		return Value{Type: ValueInt, Int: typed}
+		return Value{Type: ValueInt, Int: typed}, nil
 	case float32:
-		return Value{Type: ValueFloat, Float: float64(typed)}
+		return Value{Type: ValueFloat, Float: float64(typed)}, nil
 	case float64:
-		return Value{Type: ValueFloat, Float: typed}
+		return Value{Type: ValueFloat, Float: typed}, nil
 	case pgtype.Numeric:
 		// SUM over a BIGINT is NUMERIC, so this is an ordinary result column and
 		// not an exotic one. Rendered rather than converted, it crossed as a
@@ -158,21 +170,20 @@ func cell(raw any) Value {
 		// refuses it instead of writing a zero that reads as data.
 		if typed.Valid && !typed.NaN && typed.InfinityModifier == pgtype.Finite {
 			if whole, err := typed.Int64Value(); err == nil && whole.Valid {
-				return Value{Type: ValueInt, Int: whole.Int64}
+				return Value{Type: ValueInt, Int: whole.Int64}, nil
 			}
 			if real, err := typed.Float64Value(); err == nil && real.Valid {
-				return Value{Type: ValueFloat, Float: real.Float64}
+				return Value{Type: ValueFloat, Float: real.Float64}, nil
 			}
 		}
 	case time.Time:
 		// Stamps cross as the tree's canonical spelling rather than as a
 		// driver-formatted string, so a caller reading one back gets what it
 		// would have read from a TEXT column.
-		return Value{Type: ValueText, Text: typed.UTC().Format("2006-01-02T15:04:05Z")}
+		return Value{Type: ValueText, Text: typed.UTC().Format("2006-01-02T15:04:05Z")}, nil
 	}
-	// Anything else is rendered rather than dropped: losing a column silently
-	// would make a result set quietly narrower than the statement asked for.
-	return Value{Type: ValueText, Text: fmt.Sprint(raw)}
+	return Value{}, fmt.Errorf("no wire type for a %T column; it would cross as "+
+		"text and read as one", raw)
 }
 
 // runner is whichever of the pool or an open transaction a statement runs on.
@@ -311,7 +322,15 @@ func collectReply(rows pgx.Rows) []byte {
 		}
 		row := make([]Value, 0, width)
 		for _, value := range raw {
-			row = append(row, cell(value))
+			converted, cellErr := cell(value)
+			if cellErr != nil {
+				// Unsupported rather than statement-failed: the statement ran
+				// and PostgreSQL answered. What cannot happen is carrying the
+				// answer, which is this module's limitation and not the
+				// caller's mistake.
+				return EncodeError(StatusUnsupported, "", cellErr.Error())
+			}
+			row = append(row, converted)
 		}
 		collected = append(collected, row)
 	}
