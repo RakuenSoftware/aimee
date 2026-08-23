@@ -173,9 +173,15 @@ const (
 	StatusNotMember     Status = 14
 	StatusChannelFull   Status = 15
 	// StatusUnavailable is a dependency that did not ANSWER, which is not the
-	// same as answering no. It is the one status here a caller should RETRY on:
-	// every other refusal is a fact about the request, this one is a fact about
-	// the moment.
+	// same as answering no. A fact about the moment rather than about the
+	// request, so a caller retries it unchanged.
+	//
+	// This comment used to say it was THE ONE status worth retrying, and that
+	// was false: inbox_full drains, timeout may be answered next time,
+	// channel_full and at_capacity both clear. A caller believing it would keep
+	// retrying an unreachable store and give up on an inbox that empties in
+	// seconds. See Retryable, which is the answer that comment was pretending to
+	// be.
 	StatusUnavailable Status = 16
 	// StatusUnclassified is an error the module could not name. It is NOT
 	// bad_request: telling a caller its request was malformed when the module
@@ -225,6 +231,49 @@ const (
 	// needed, and each is invisible to the others.
 	StatusCount = 21
 )
+
+// Retryable reports whether a caller should try the SAME request again.
+//
+// A peer asked which of a module's statuses a caller can actually NAME, and the
+// honest answer here was: all of them individually, and none of them as a class.
+// Twenty-one constants and a doc comment claiming one was retryable is not a
+// classification, it is a promise about one member of a set whose other members
+// cannot be named -- and that promise was wrong besides.
+//
+// The line is the one this module draws everywhere else. A decision about the
+// REQUEST is permanent: the same bytes will be refused the same way, and the
+// caller must change something or stop. A fact about the MOMENT is not: nothing
+// about the request is wrong and the world may differ next time.
+//
+// Deliberately EXHAUSTIVE rather than defaulting. A status added without landing
+// in one of these arms is caught by the test below, because "I do not recognise
+// this" must not silently mean either answer -- a caller looping on an
+// unrecognised permanent failure never stops, and one giving up on an
+// unrecognised transient failure loses work that would have succeeded.
+func (s Status) Retryable() bool {
+	switch s {
+	case StatusInboxFull, // the receiver drains it
+		StatusTimeout,     // the peer may answer next time
+		StatusChannelFull, // a member may leave
+		StatusUnavailable, // the dependency may recover
+		StatusAtCapacity,  // the table may free a slot
+		StatusShutdown:    // this process is going; its successor is not
+		return true
+	case StatusOK, // nothing failed, so there is nothing to retry
+		StatusNoPeer, StatusDenied, StatusHopLimit, StatusCycle, StatusSelf,
+		StatusTooLong, StatusLabelTaken, StatusUnknownSender, StatusBadRequest,
+		StatusNoChannel, StatusNotMember, StatusNoDirectory, StatusDirectoryRefused:
+		return false
+	case StatusUnclassified:
+		// An error the module could not name. Not retryable, because a failure
+		// nobody classified is not evidence that trying again is safe.
+		return false
+	default:
+		// Unrecognised: refuse to guess. Same reasoning as String() declining to
+		// borrow a real status name.
+		return false
+	}
+}
 
 // StatusFor maps a registry error onto its wire status.
 func StatusFor(err error) Status {

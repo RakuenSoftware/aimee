@@ -380,6 +380,54 @@ func TestSendOptionsWireCoverageIsDeliberate(t *testing.T) {
 // The refusal lives in a function so it can be PROVED. Demonstrating it through
 // EncodeRequest would need a four-gigabyte string, which is the practical reason
 // checks of this kind go untested, and therefore unwritten.
+// EVERY status is classified as retryable or not, by name.
+//
+// The claim a caller acts on is not "what does this status mean" but "do I try
+// again". That was answered by a doc comment on one constant, asserting the other
+// twenty were permanent -- and it was wrong for four of them. A caller believing
+// it would loop forever on an unreachable store and give up on an inbox that
+// drains in seconds.
+//
+// So the classification is code, and this is what keeps it complete. Retryable
+// has no meaningful default: a status it does not recognise returns false, which
+// is the safe direction for a caller but the WRONG answer for a transient
+// failure, silently dropping work that would have succeeded. The guard is that a
+// new status must be named here as well as there.
+func TestEveryStatusIsClassifiedForRetry(t *testing.T) {
+	// Written out rather than derived, for the reason the pinned list is: this is
+	// the transcription that can go stale, so the count is asserted against
+	// StatusCount and a status added without a decision fails.
+	classified := map[Status]bool{
+		StatusOK: false, StatusNoPeer: false, StatusDenied: false,
+		StatusInboxFull: true, StatusHopLimit: false, StatusCycle: false,
+		StatusTimeout: true, StatusSelf: false, StatusTooLong: false,
+		StatusLabelTaken: false, StatusUnknownSender: false, StatusBadRequest: false,
+		StatusShutdown: true, StatusNoChannel: false, StatusNotMember: false,
+		StatusChannelFull: true, StatusUnavailable: true, StatusUnclassified: false,
+		StatusAtCapacity: true, StatusNoDirectory: false, StatusDirectoryRefused: false,
+	}
+	if len(classified) != StatusCount {
+		t.Fatalf("%d statuses classified, the package declares %d. A status with no "+
+			"retry decision reaches a caller who has to guess, and the safe guess "+
+			"loses work whenever the failure was transient.", len(classified), StatusCount)
+	}
+	for status, want := range classified {
+		if got := status.Retryable(); got != want {
+			t.Errorf("%v.Retryable() = %v; want %v", status, got, want)
+		}
+	}
+
+	// The distinction this whole module exists to preserve, asserted directly:
+	// the two statuses that are easiest to confuse must not agree.
+	if StatusUnavailable.Retryable() == StatusNoDirectory.Retryable() {
+		t.Error("unavailable and no_directory agree about retrying; one is a fact " +
+			"about the moment and the other about how the module was built")
+	}
+	if StatusDirectoryRefused.Retryable() {
+		t.Error("a refusal is retryable; the directory will never accept that request")
+	}
+}
+
 // A corrupt cell must not decode as an unset one.
 //
 // Both decoders answered the ZERO VALUE for anything they could not parse, so

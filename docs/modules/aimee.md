@@ -287,6 +287,27 @@ admission tests fail without directory admission, and the sender remap fails
 separately from it, so "I do not know you" and "there is no such peer" are held
 apart by something rather than by coincidence.
 
+## A caller can name what to retry
+
+Twenty-one statuses cross this wire and every one of them is a named constant, so
+a caller can test for any single one. That is not the same as being able to
+classify them, and the question a caller actually has is not "what does this
+status mean" but "do I try again".
+
+That was answered by a doc comment on one constant claiming it was the only
+retryable status. The claim was false for four others -- an inbox drains, a
+timeout may be answered next time, a full channel loses a member, a full table
+frees a slot -- so a caller believing it would loop forever on an unreachable
+store and give up on an inbox that clears in seconds.
+
+`Status.Retryable()` is the answer that comment was pretending to be. The line is
+the one this module draws everywhere: a decision about the REQUEST is permanent
+and the caller must change something or stop; a fact about the MOMENT is not.
+It is exhaustive rather than defaulting, and a test asserts every declared status
+is classified, because an unrecognised status returning "do not retry" is safe
+for the caller and wrong for the work -- it silently drops what would have
+succeeded.
+
 ## A refusal is not an outage
 
 The directory has FOUR outcomes, not three, and the fourth was found on the last
