@@ -775,6 +775,35 @@ int db2_fork_conn_url(char *out, size_t cap)
    return 1;
 }
 
+/* Blank the value of any password= / PGPASSWORD= token in place.
+ *
+ * Belt and braces rather than a load-bearing guard: libpq's connection
+ * diagnostics report the host, port and role it tried and never echo conninfo
+ * values, so there should be nothing here to find. "Should be" is why this
+ * exists — a redacted message can be printed without anyone having to re-audit
+ * libpq's formatting before every release. Truncation cannot leak either: the
+ * scan is over what the buffer actually holds. */
+static void db2_redact_secrets(char *text, size_t length)
+{
+   static const char *const keys[] = {"password=", "PGPASSWORD="};
+   if (!text)
+      return;
+   for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
+   {
+      size_t klen = strlen(keys[k]);
+      for (char *at = strstr(text, keys[k]); at; at = strstr(at + klen, keys[k]))
+      {
+         char *value = at + klen;
+         /* A conninfo value ends at whitespace; a quoted one at its closing
+          * quote. Either way, stop before the end of the buffer. */
+         char stop = (*value == '\'' || *value == '"') ? *value++ : '\0';
+         while (*value && (size_t)(value - text) < length &&
+                (stop ? *value != stop : (*value != ' ' && *value != '\t')))
+            *value++ = '*';
+      }
+   }
+}
+
 int db2_init(const char *libpq_url)
 {
    char errbuf[256] = "";
@@ -794,6 +823,19 @@ int db2_init(const char *libpq_url)
    void *conn = aimee_pg_open(libpq_url, errbuf, sizeof(errbuf));
    if (!conn)
    {
+      /* Say WHY. The caller prints "database initialization failed", which is the
+       * same sentence for a refused connection, a wrong role, a missing database
+       * and a broken schema — four different things to go and fix, and no way to
+       * tell which one happened. A replay container listening on loopback only
+       * cost a day of reading this file, because the schema applied fine over the
+       * unix socket and the only symptom was that sentence.
+       *
+       * The libpq diagnostic is safe to show: PQerrorMessage reports the host,
+       * port and role it tried, never the conninfo values. The DSN itself still
+       * never appears here, since that one really can carry a password. */
+      db2_redact_secrets(errbuf, sizeof(errbuf));
+      fprintf(stderr, "aimee: db2_init: could not connect: %s\n",
+              errbuf[0] ? errbuf : "(no detail)");
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }

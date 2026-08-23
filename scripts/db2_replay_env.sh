@@ -80,14 +80,34 @@ unzip -p pgvs.zip 'pgvectorscale-postgresql-17_0.9.0-Linux_amd64.deb' > pgvs.deb
 dpkg -i pgvs.deb
 ls /usr/lib/postgresql/17/lib/vectorscale*.so
 PGVS
-   # Listen on the bridge and trust the local network: this container holds
-   # throwaway test data and is recreated whenever it goes missing.
-   on_host "pct exec $CT -- bash -lc \"sed -i \\\"s/^#listen_addresses.*/listen_addresses = '*'/\\\" \
-      /etc/postgresql/17/main/postgresql.conf; \
-      grep -q '192.168.0.0/23 trust' /etc/postgresql/17/main/pg_hba.conf || \
-      echo 'host all all 192.168.0.0/23 trust' >> /etc/postgresql/17/main/pg_hba.conf; \
-      systemctl restart postgresql\"" >/dev/null 2>&1
 fi
+
+# Listen on the bridge and trust the local network: this container holds
+# throwaway test data and is recreated whenever it goes missing.
+#
+# OUTSIDE the install branch, and checked rather than assumed. This ran only
+# when postgres was installed, so a container that already had postgres but had
+# lost its configuration kept a loopback-only server forever. The schema still
+# applies -- that goes over the unix socket -- and only the module's TCP connect
+# is refused, which surfaces as "db2: database initialization failed" and sends
+# whoever reads it into the C. Restart only when something actually changed, so
+# the common case costs two greps.
+cat <<'PGNET' | on_host "pct exec $CT -- bash -s" >/dev/null 2>&1
+set -eu
+conf=/etc/postgresql/17/main/postgresql.conf
+hba=/etc/postgresql/17/main/pg_hba.conf
+changed=0
+if ! grep -qE "^listen_addresses *= *'[*]'" "$conf"; then
+   sed -i "/^ *#\\?listen_addresses/d" "$conf"
+   printf "listen_addresses = '*'\\n" >> "$conf"
+   changed=1
+fi
+if ! grep -q '192.168.0.0/23 trust' "$hba"; then
+   printf 'host all all 192.168.0.0/23 trust\n' >> "$hba"
+   changed=1
+fi
+[ "$changed" = 0 ] || systemctl restart postgresql
+PGNET
 
 # Everything below runs SQL from a file inside the container. Sending it as
 # psql -c through ssh, pct exec and su means four levels of quoting, which is
