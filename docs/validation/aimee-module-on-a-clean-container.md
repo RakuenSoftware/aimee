@@ -137,6 +137,18 @@ the grant written by one probe invocation is still there for the next.
   200, db2 pool initialized against PostgreSQL 17 + pgvector 0.8.0, ingest
   workers and the curator index lane started.
 
+## What the evidence covers
+
+The run was captured at commit `ffb60ac`. A later commit (`c597394`) split the
+peer wire into its own package so the module can rebase onto the db1 absorption
+without a name collision. That restructuring changed no stage id, no event kind,
+no grant, and no wire byte, and the contract tests that pin all four still pass,
+so the run above still describes what ships.
+
+Stating it rather than assuming it: a refactor after the evidence was taken is
+exactly the kind of thing that quietly makes a recorded result describe a tree
+that no longer exists.
+
 ## Teardown
 
 Both containers were destroyed and their staging files removed when the run

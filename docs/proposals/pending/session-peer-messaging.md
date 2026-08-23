@@ -344,7 +344,7 @@ component at principal ref 31 in `src/modules/process-contracts.json`, the inven
 | D2 pull-based delivery, inbox lifetime | **done** |
 | D3 live announcement (`Notify` seam) | **done** in the registry; Runtime wiring to the presence-event stream outstanding |
 | D4 `Send` / `Ask` / `Reply` | **done** |
-| D4 channels | **done** — `peer/channel.go`, stage `peer-channel` |
+| D4 channels | **done** — `peer/channel.go`, stage `peer-channel`, per-recipient outcomes |
 | D5 envelope, provenance, grants | **done** |
 | D6 bus tap / `execution-policy` verdict | **not started** — attaches at the `Notify` seam |
 | D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** |
@@ -415,6 +415,14 @@ would make them invisible.
 - **P2 — Blocking ask.** `Ask`, the wait-for graph, `ErrCycle`, hop budget (D7). ✅
 - **P3 — Channels.** `Channel*`, membership.
 - **P4 — External agents and governance.** MCP/ACP mirroring (D8) and the bus tap (D6).
+
+  **Deliberately sequenced after the merge, not merely unfinished.** Mirroring the
+  verbs onto MCP means C call sites in the `protocols` module invoking these
+  stages, and the stages renumber from 12033-12036 to 11796-11799 when the db1
+  absorption lands. Building those call sites first means editing them twice, and
+  the second edit is the kind that leaves one constant behind. The precondition
+  that matters is already true: nothing on the peering path is vendor-aware, so
+  the work is wiring rather than design.
 - **P5 — Durability.** DB1-backed inboxes.
 
 ## Non-goals
