@@ -906,3 +906,64 @@ func TestAdmissionWithoutADirectoryReportsNoDirectory(t *testing.T) {
 		t.Error("reported as a verdict about the session; the module could not look it up at all")
 	}
 }
+
+// Shutting down RELEASES a blocked asker, rather than leaving it parked until
+// its own expiry.
+//
+// Close was at 0% coverage. A peer followed exactly that signal in their store
+// and found a production hang: their Close waits for leased connections, an open
+// transaction holds one, and the transaction table is only reaped from an
+// incoming call -- so once calls stop arriving nothing releases anything, and a
+// module told to stop never stops. It passed alone and deadlocked in company,
+// which is a fair description of production, where the company is a caller.
+//
+// This registry is built the other way, and this test is what says so. Close does
+// not wait: it sets the flag, clears the wait-for edges and broadcasts, and the
+// Ask loop re-checks r.closed before every cond.Wait. Correct by design, and
+// until now asserted nowhere -- which is the caller-bounded position, correct
+// until somebody reorders that loop or has Ask wait on a channel instead.
+//
+// TIMED rather than left to hang. A deadlock that arrives as a test timeout is a
+// failure nobody can attribute: the harness prints a stack dump and the reader
+// works out which goroutine mattered. Ten seconds and a sentence naming the cause
+// is worth the few lines.
+func TestCloseReleasesABlockedAsker(t *testing.T) {
+	r, _ := newTestRegistry(t, "A", "B")
+
+	done := make(chan error, 1)
+	go func() {
+		// No deadline of its own: if Close does not release this, the only thing
+		// that would is DefaultWaitExpiry, minutes from now.
+		_, _, err := r.Ask(context.Background(), "A", "B", "are you there?")
+		done <- err
+	}()
+
+	// Wait until the question has actually landed, so Close races a REAL blocked
+	// asker rather than a goroutine that has not started yet.
+	deadline := time.Now().Add(5 * time.Second)
+	for r.Len("B") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the question never reached B's inbox; the ask never blocked")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	r.Close()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrShutdown) {
+			t.Fatalf("blocked ask returned %v; want ErrShutdown", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not release a blocked asker within 10s. The ask is parked " +
+			"in cond.Wait and only its own expiry would free it, so a module told to " +
+			"stop keeps a caller waiting minutes after shutdown.")
+	}
+
+	// And a call arriving after shutdown is refused rather than blocking behind
+	// the same door.
+	if _, _, err := r.Ask(context.Background(), "A", "B", "still there?"); !errors.Is(err, ErrShutdown) {
+		t.Errorf("ask after Close = %v; want ErrShutdown", err)
+	}
+}
