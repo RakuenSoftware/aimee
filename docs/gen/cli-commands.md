@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 75
+Total commands: 76
 
 ## Core commands
 
@@ -579,6 +579,18 @@ Subcommands:
   show <job_id>    Alias for status
   logs <job_id>    Print the recorded delegate result/log body
   cancel <job_id>  Cooperatively cancel a queued or running delegate job
+```
+
+### `aimee learning`
+
+Learning-loop safety, regret, and negative knowledge.
+
+Subcommands:
+
+```
+  approaches "<goal>"
+                   Approaches that already failed against a similar goal
+                   (advisory recall for planning; never blocks)
 ```
 
 ### `aimee model`

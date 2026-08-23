@@ -10,6 +10,7 @@
 
 #include <aimee/learning/learning.h>
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -131,6 +132,41 @@ extern "C"
     * connection error. window_days must be > 0. */
    int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_signal_t *out,
                                             int max);
+
+   /* --- Post-commit fate (recursive-self-improvement S5) ---
+    *
+    * commit_ratio measures whether a proposal was ACCEPTED. It cannot see
+    * whether accepting it was right. These rows record what became of a
+    * committed proposal afterwards, so a detector that is repeatedly wrong can
+    * be told apart from one that is repeatedly agreed with. */
+
+#define DB2_LEARNING_FATE_LEN        16
+#define DB2_LEARNING_FATE_REASON_LEN 256
+
+   /* Record (or replace) the fate of one committed proposal. `fate` is one of
+    * the LEARNING_FATE_* names in aimee/learning/learning.h; the SQL layer does
+    * not police the vocabulary, the policy layer does. Returns 0 on success,
+    * -1 on bad args / SQL / connection error. */
+   int db2_learning_fate_record(int proposal_id, const char *fate, const char *reason);
+
+   /* The recorded fate of one proposal. Writes at most DB2_LEARNING_FATE_LEN
+    * bytes. Returns 1 when a row exists, 0 when none does, -1 on error. */
+   int db2_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len);
+
+   /* Committed-proposal counts by originating signal_type over |window_days|,
+    * split by whether a fate has been recorded and whether it was a regret.
+    * `regret_fates` is a comma-separated list of fate names that count as
+    * regret, supplied by the policy layer so the vocabulary lives in one
+    * place. Returns rows written (capped at max) or -1 on error. */
+   typedef struct
+   {
+      char signal_type[DB2_LEARNING_SIGNAL_TYPE_LEN];
+      int64_t committed; /* committed in the window */
+      int64_t settled;   /* of those, with a fate recorded */
+      int64_t regret;    /* of those settled, a regret fate */
+   } db2_learning_fate_count_t;
+   int db2_learning_fate_counts(int window_days, const char *regret_fates,
+                                db2_learning_fate_count_t *out, int max);
 
 #ifdef __cplusplus
 }

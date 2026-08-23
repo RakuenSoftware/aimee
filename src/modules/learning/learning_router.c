@@ -261,8 +261,15 @@ static int learning_commit_proposal(int id, learning_proposal_t *out)
 static int learning_queue_sink(int signal_id, const char *sink, const char *target_key,
                                int64_t target_memory_id, const char *action_json,
                                const char *evidence_refs, int high_confidence,
-                               learning_dispatch_result_t *out)
+                               const char *signal_type, learning_dispatch_result_t *out)
 {
+   /* S5: a detector whose commits keep failing to hold needs more agreement
+    * before the next one lands, and loses the fast path once half of them do
+    * not hold. Both only ever tighten. */
+   const int required = learning_detector_corroboration_required(signal_type);
+   if (high_confidence && !learning_detector_may_fast_commit(signal_type))
+      high_confidence = 0;
+
    int proposal_id = db2_learning_proposal_find_pending(sink, target_key, target_memory_id);
    if (proposal_id > 0)
    {
@@ -270,7 +277,8 @@ static int learning_queue_sink(int signal_id, const char *sink, const char *targ
       if (out && out->proposal_count < LEARNING_MAX_PROPOSAL_IDS)
          out->proposal_ids[out->proposal_count++] = proposal_id;
       learning_proposal_t proposal;
-      if (learning_get_proposal(proposal_id, &proposal) == 0 && proposal.corroboration_count >= 2)
+      if (learning_get_proposal(proposal_id, &proposal) == 0 &&
+          proposal.corroboration_count >= required)
       {
          if (learning_commit_proposal(proposal_id, &proposal) == 0 &&
              strcmp(proposal.state, "committed") == 0 && out &&
@@ -482,7 +490,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
                                         input.target_memory_id, input.evidence_refs_json, action,
                                         sizeof(action)) == 0)
          learning_queue_sink(signal_id, "reranker", input.target_key, input.target_memory_id,
-                             action, input.evidence_refs_json, 0, out);
+                             action, input.evidence_refs_json, 0, input.signal_type, out);
    }
    if (sink_mask & AIMEE_LEARNING_SINK_SUPERSEDE)
    {
@@ -491,7 +499,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
           learning_make_supersede_action(input.target_memory_id, input.correction_text, action,
                                          sizeof(action)) == 0)
          learning_queue_sink(signal_id, "supersede", input.target_key, input.target_memory_id,
-                             action, input.evidence_refs_json, 0, out);
+                             action, input.evidence_refs_json, 0, input.signal_type, out);
    }
    if (sink_mask & AIMEE_LEARNING_SINK_RULE)
    {
@@ -513,7 +521,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
          snprintf(reason, sizeof(reason), "Repeated correction captured by learning router");
          if (learning_make_rule_action(rule_text, reason, action, sizeof(action)) == 0)
             learning_queue_sink(signal_id, "rule", input.target_key, input.target_memory_id, action,
-                                input.evidence_refs_json, 0, out);
+                                input.evidence_refs_json, 0, input.signal_type, out);
       }
       else if (strcmp(input.signal_type, "preference_statement") == 0 ||
                strcmp(input.signal_type, "mark_rule") == 0)
@@ -524,10 +532,11 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
                   strcmp(input.signal_type, "mark_rule") == 0 ? "Explicit rule capture"
                                                               : "Explicit user preference");
          if (learning_make_rule_action(rule_text, reason, action, sizeof(action)) == 0)
-            learning_queue_sink(
-                signal_id, "rule", input.target_key, input.target_memory_id, action,
-                input.evidence_refs_json,
-                input.high_confidence || strcmp(input.signal_type, "mark_rule") == 0, out);
+            learning_queue_sink(signal_id, "rule", input.target_key, input.target_memory_id, action,
+                                input.evidence_refs_json,
+                                input.high_confidence ||
+                                    strcmp(input.signal_type, "mark_rule") == 0,
+                                input.signal_type, out);
       }
    }
    if ((sink_mask & AIMEE_LEARNING_SINK_WORKFLOW) && input.workflow_project[0] &&
@@ -537,7 +546,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
       if (learning_make_workflow_action(input.workflow_project, input.workflow_signal_type,
                                         input.description, action, sizeof(action)) == 0)
          learning_queue_sink(signal_id, "workflow", input.workflow_project, 0, action,
-                             input.evidence_refs_json, 0, out);
+                             input.evidence_refs_json, 0, input.signal_type, out);
    }
 
    clock_gettime(CLOCK_MONOTONIC, &t1);

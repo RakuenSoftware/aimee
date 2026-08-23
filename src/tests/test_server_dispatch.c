@@ -8,7 +8,8 @@
 #include "../db1/db.h"
 #include "../db1/eval.h"
 #include "../db1/server_sessions.h"
-#include "eval_synthesis.h"  /* the regression-candidate surface stubbed below */
+#include "eval_synthesis.h" /* the regression-candidate surface stubbed below */
+#include <aimee/learning/approach_memory.h>
 #include "kb_client.h"       /* kb_health_t for the stub below */
 #include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
@@ -428,6 +429,23 @@ int eval_synthesis_retire(const char *suite_dir, int retire_windows)
 {
    (void)retire_windows;
    return (suite_dir && suite_dir[0]) ? 0 : -1;
+}
+
+/* Approach recall reaches DB2, which this test deliberately does not link —
+ * it proves the dispatch table routes, not what the stores hold. */
+int learning_approach_recall(const char *goal, learning_approach_hit_t *out, int max)
+{
+   (void)goal;
+   (void)out;
+   return max > 0 ? 0 : -1;
+}
+
+int learning_approach_render(const char *goal, char *out, size_t out_len)
+{
+   (void)goal;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
 }
 
 int server_load_token(server_ctx_t *ctx)

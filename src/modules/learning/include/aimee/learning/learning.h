@@ -201,4 +201,65 @@ learning_gate_state_t learning_gate_check(learning_endogeneity_t *out);
 learning_gate_state_t learning_gate_check_with(int window_days, double min_exogenous_ratio,
                                                int min_sample, learning_endogeneity_t *out);
 
+/* --- Post-commit regret (recursive-self-improvement S5) ---
+ *
+ * commit_ratio answers "was it accepted?". These answer "was accepting it
+ * right?" — which is the only question that can tell a detector that is
+ * usually correct from one that is merely persuasive. A detector whose
+ * commits keep getting reverted earns a higher bar, automatically.
+ *
+ * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md */
+
+/* What became of a committed proposal. STANDING is the only non-regret
+ * outcome; the rest each mean the commit did not hold. */
+#define LEARNING_FATE_STANDING     "standing"
+#define LEARNING_FATE_SUPERSEDED   "superseded"
+#define LEARNING_FATE_CONTRADICTED "contradicted"
+#define LEARNING_FATE_REVERTED     "reverted"
+
+/* 1 when `fate` is a recognised fate name, 0 otherwise. Pure. */
+int learning_fate_is_valid(const char *fate);
+/* 1 when `fate` counts against the detector that produced it. Pure; an
+ * unrecognised fate is NOT counted as regret, because guessing would let a
+ * typo silently raise a detector's bar. */
+int learning_fate_is_regret(const char *fate);
+
+/* Record what became of a committed proposal. Returns 0 on success, -1 on bad
+ * args / unknown fate / storage error. */
+int learning_fate_record(int proposal_id, const char *fate, const char *reason);
+
+typedef struct
+{
+   char signal_type[32];
+   int64_t committed; /* committed in the window */
+   int64_t settled;   /* of those, with a fate recorded */
+   int64_t regret;    /* of those settled, a fate that did not hold */
+   double regret_rate; /* regret / max(1, settled); 0 when settled == 0 */
+} learning_detector_regret_t;
+
+/* Per-detector regret over `window_days` (<= 0 picks the default window),
+ * ordered by signal_type. Returns rows written (capped at max) or -1. */
+#define LEARNING_REGRET_MAX_DETECTORS 32
+int learning_metrics_regret(int window_days, learning_detector_regret_t *out, int max);
+
+/* Regret is only worth acting on once enough commits have settled; below this
+ * a detector keeps the default bar however its handful of commits went. */
+#define LEARNING_REGRET_MIN_SAMPLE     8
+#define LEARNING_REGRET_RAISE_BAR_RATE 0.34 /* a third of commits not holding */
+#define LEARNING_REGRET_NO_FAST_RATE   0.50 /* half not holding */
+#define LEARNING_CORROBORATION_DEFAULT 2
+#define LEARNING_CORROBORATION_RAISED  3
+
+/* How many independent corroborations this detector's proposals need before
+ * they commit. Returns LEARNING_CORROBORATION_DEFAULT for an unmeasured or
+ * well-behaved detector, and a raised bar for one whose commits keep failing
+ * to hold. Never lowers the bar below the default: evidence of being right is
+ * not a reason to ask for less. */
+int learning_detector_corroboration_required(const char *signal_type);
+
+/* Whether a high-confidence signal from this detector may still take the
+ * immediate-commit path. Returns 0 once the detector's observed regret says
+ * its confidence is not earned. */
+int learning_detector_may_fast_commit(const char *signal_type);
+
 #endif

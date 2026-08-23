@@ -1400,6 +1400,7 @@ static const struct
     {"dogfood.tag", marshal_dogfood_tag},
     {"eval.candidates", marshal_eval_candidates},
     {"eval.candidates-update", marshal_eval_candidates_update},
+    {"learning.approaches", marshal_learning_approaches},
     {"eval.results", marshal_eval_results},
     {"eval.run", marshal_eval_run},
     {"evidence.fidelity_retrieval_event", marshal_audit_fidelity},

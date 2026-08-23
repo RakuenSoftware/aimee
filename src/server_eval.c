@@ -38,6 +38,7 @@
 #include "model_registry.h"
 #include "db1.h"
 #include "eval_synthesis.h" /* synthesised regression candidates (S1) */
+#include <aimee/learning/approach_memory.h>
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -205,6 +206,49 @@ static cJSON *server_eval_candidate_json(const db1_eval_candidate_t *c)
    cJSON_AddStringToObject(obj, "created_at", c->created_at);
    cJSON_AddStringToObject(obj, "updated_at", c->updated_at);
    return obj;
+}
+
+/* --- Approach-level negative knowledge (recursive self-improvement S3) --- */
+
+int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *goal = server_eval_json_str(req, "goal");
+   if (!goal[0])
+      return server_send_error(conn, "learning.approaches requires goal", request_id);
+
+   learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
+   int n = learning_approach_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
+   if (n < 0)
+      return server_send_error(conn, "learning.approaches: could not recall", request_id);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "goal", goal);
+   cJSON *arr = cJSON_AddArrayToObject(resp, "approaches");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "approach", hits[i].approach_text);
+      cJSON_AddStringToObject(o, "failure_mode", hits[i].failure_mode);
+      cJSON_AddStringToObject(o, "goal", hits[i].goal_text);
+      cJSON_AddStringToObject(o, "source_ref", hits[i].source_ref);
+      cJSON_AddNumberToObject(o, "occurrences", (double)hits[i].occurrences);
+      cJSON_AddNumberToObject(o, "similarity", hits[i].similarity);
+      cJSON_AddItemToArray(arr, o);
+   }
+   /* The rendered advisory block, so a caller assembling a plan-time prompt
+    * does not have to re-derive the wording (and cannot turn it into an
+    * instruction by accident). */
+   char rendered[2048];
+   (void)learning_approach_render(goal, rendered, sizeof(rendered));
+   cJSON_AddStringToObject(resp, "advisory", rendered);
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
 }
 
 int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

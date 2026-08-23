@@ -8,6 +8,8 @@
 #include "eval.h"       /* db1_eval_candidate_* */
 #include "log.h"
 #include "modules/db2/c/db2_learning.h"
+
+#include <aimee/learning/approach_memory.h>
 #include "platform_path.h"
 
 #include <aimee/learning/learning.h>
@@ -119,6 +121,16 @@ static void eval_synthesis_scan_jobs(int window_days, const char *suite,
          stats->rejected_text++;
       else
          stats->skipped++;
+
+      /* S3: the same failure is also a dead end worth remembering. The job
+       * says what was asked (its prompt) and how it was attempted (the role,
+       * and the agent that took it), which is exactly the (goal, approach,
+       * failure) triple approach memory is keyed on. Best-effort: a failure to
+       * record negative knowledge must not cost us the regression candidate. */
+      char approach[160];
+      snprintf(approach, sizeof(approach), "%s via %s", jobs[i].role[0] ? jobs[i].role : "execute",
+               jobs[i].agent_name[0] ? jobs[i].agent_name : "the default agent");
+      (void)learning_approach_record_failure(prompt, approach, mode, "agent_job", ref);
    }
 
    for (int i = 0; i < n; i++)

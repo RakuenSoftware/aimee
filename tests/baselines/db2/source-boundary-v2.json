@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906",
+  "source_revision": "ba1cf0dd0df4b26687d9cecfea030ebd99d72419",
   "source_boundary": "src/modules/db2/c",
   "summary": {
-    "c_files": 138,
-    "headers": 138,
+    "c_files": 141,
+    "headers": 141,
     "sql_files": 6,
-    "consumer_files": 305,
-    "production_consumers": 151,
-    "test_consumers": 154,
-    "include_directives": 994,
-    "outbound_dependency_rows": 164,
-    "outbound_include_directives": 164
+    "consumer_files": 313,
+    "production_consumers": 155,
+    "test_consumers": 158,
+    "include_directives": 1040,
+    "outbound_dependency_rows": 172,
+    "outbound_include_directives": 172
   },
   "source_files": {
     "c": [
@@ -19,6 +19,7 @@
       "src/modules/db2/c/agent_hints.c",
       "src/modules/db2/c/agent_outcomes.c",
       "src/modules/db2/c/anti_patterns.c",
+      "src/modules/db2/c/approach_failures.c",
       "src/modules/db2/c/artifacts.c",
       "src/modules/db2/c/bandit.c",
       "src/modules/db2/c/calibration.c",
@@ -64,9 +65,11 @@
       "src/modules/db2/c/entity_profiles.c",
       "src/modules/db2/c/entity_registry.c",
       "src/modules/db2/c/epistemic_directives.c",
+      "src/modules/db2/c/evidence_lifecycle.c",
       "src/modules/db2/c/evidence_vectors.c",
       "src/modules/db2/c/fact_ingest.c",
       "src/modules/db2/c/fact_lifecycle.c",
+      "src/modules/db2/c/fact_mutation.c",
       "src/modules/db2/c/fact_recall.c",
       "src/modules/db2/c/failed_queries.c",
       "src/modules/db2/c/feature_rows.c",
@@ -159,6 +162,7 @@
       "src/modules/db2/c/agent_hints.h",
       "src/modules/db2/c/agent_outcomes.h",
       "src/modules/db2/c/anti_patterns.h",
+      "src/modules/db2/c/approach_failures.h",
       "src/modules/db2/c/artifacts.h",
       "src/modules/db2/c/bandit.h",
       "src/modules/db2/c/calibration.h",
@@ -207,9 +211,11 @@
       "src/modules/db2/c/entity_registry.h",
       "src/modules/db2/c/epistemic_directives.h",
       "src/modules/db2/c/eval_support.h",
+      "src/modules/db2/c/evidence_lifecycle.h",
       "src/modules/db2/c/evidence_vectors.h",
       "src/modules/db2/c/fact_ingest.h",
       "src/modules/db2/c/fact_lifecycle.h",
+      "src/modules/db2/c/fact_mutation.h",
       "src/modules/db2/c/fact_recall.h",
       "src/modules/db2/c/failed_queries.h",
       "src/modules/db2/c/feature_rows.h",
@@ -427,6 +433,16 @@
       ]
     },
     {
+      "path": "src/eval_synthesis.c",
+      "classification": "host-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2_learning.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/index.c",
       "classification": "host-generated-client",
       "includes": [
@@ -513,7 +529,15 @@
           "count": 1
         },
         {
+          "header": "modules/db2/c/entity_registry.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/fact_ingest.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/fact_lifecycle.h",
           "count": 1
         },
         {
@@ -770,6 +794,18 @@
       "path": "src/kb/http/kb_http_console.c",
       "classification": "kb-generated-client",
       "includes": [
+        {
+          "header": "modules/db2/c/entity_registry.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/evidence_lifecycle.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/fact_mutation.h",
+          "count": 1
+        },
         {
           "header": "modules/db2/c/kb_service_backend.h",
           "count": 1
@@ -1813,6 +1849,14 @@
           "count": 1
         },
         {
+          "header": "modules/db2/c/evidence_lifecycle.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/fact_mutation.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/fidelity.h",
           "count": 1
         },
@@ -1822,6 +1866,10 @@
         },
         {
           "header": "modules/db2/c/memory_payload.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_query.h",
           "count": 1
         },
         {
@@ -2337,6 +2385,16 @@
       ]
     },
     {
+      "path": "src/modules/learning/learning_approach_memory.c",
+      "classification": "module-kb-contract",
+      "includes": [
+        {
+          "header": "modules/db2/c/approach_failures.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/modules/learning/learning_bundle.c",
       "classification": "module-kb-contract",
       "includes": [
@@ -2403,6 +2461,16 @@
       ]
     },
     {
+      "path": "src/modules/learning/learning_regret.c",
+      "classification": "module-kb-contract",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2_learning.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/modules/learning/learning_router.c",
       "classification": "module-kb-contract",
       "includes": [
@@ -2422,7 +2490,7 @@
     },
     {
       "path": "src/modules/memory/memory_advanced.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/anti_patterns.h",
@@ -2464,7 +2532,7 @@
     },
     {
       "path": "src/modules/memory/memory_assemble.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/anti_patterns.h",
@@ -2498,7 +2566,7 @@
     },
     {
       "path": "src/modules/memory/memory_conflict.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/memory_conflicts.h",
@@ -2512,7 +2580,7 @@
     },
     {
       "path": "src/modules/memory/memory_context.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/memory_query.h",
@@ -2530,7 +2598,7 @@
     },
     {
       "path": "src/modules/memory/memory_core.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2584,7 +2652,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_crud.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2642,7 +2710,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_helpers.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2696,7 +2764,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_helpers_b.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2750,7 +2818,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_scope_embed.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2804,7 +2872,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_search.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2862,7 +2930,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_search_b.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2920,7 +2988,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_search_c.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -2978,7 +3046,7 @@
     },
     {
       "path": "src/modules/memory/memory_core_tiers.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -3032,7 +3100,7 @@
     },
     {
       "path": "src/modules/memory/memory_directives.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/epistemic_directives.h",
@@ -3046,7 +3114,7 @@
     },
     {
       "path": "src/modules/memory/memory_episodes.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -3068,7 +3136,7 @@
     },
     {
       "path": "src/modules/memory/memory_graph.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -3082,7 +3150,7 @@
     },
     {
       "path": "src/modules/memory/memory_graph_fusion.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/db2_internal.h",
@@ -3108,7 +3176,7 @@
     },
     {
       "path": "src/modules/memory/memory_graph_fusion.h",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -3118,8 +3186,12 @@
     },
     {
       "path": "src/modules/memory/memory_health.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
+        {
+          "header": "modules/db2/c/fact_lifecycle.h",
+          "count": 1
+        },
         {
           "header": "modules/db2/c/memory_health.h",
           "count": 1
@@ -3132,7 +3204,7 @@
     },
     {
       "path": "src/modules/memory/memory_improve.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -3158,7 +3230,7 @@
     },
     {
       "path": "src/modules/memory/memory_lifecycle.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/memory_lifecycle.h",
@@ -3168,7 +3240,7 @@
     },
     {
       "path": "src/modules/memory/memory_logic.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/artifacts.h",
@@ -3194,7 +3266,7 @@
     },
     {
       "path": "src/modules/memory/memory_maintenance.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/code_index_ops.h",
@@ -3212,7 +3284,7 @@
     },
     {
       "path": "src/modules/memory/memory_prospective.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/prospective_memories.h",
@@ -3222,7 +3294,7 @@
     },
     {
       "path": "src/modules/memory/memory_scan.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
@@ -3411,6 +3483,24 @@
       ]
     },
     {
+      "path": "src/tests/db2_test_template.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/lifecycle.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/tests/fuzz_memory_search.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -3449,6 +3539,14 @@
       "classification": "private-implementation-test",
       "includes": [
         {
+          "header": "modules/db2/c/entity_registry.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/evidence_lifecycle.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/management_identity_journal.h",
           "count": 1
         },
@@ -3477,11 +3575,41 @@
       ]
     },
     {
+      "path": "src/tests/test_approach_memory.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/anti_patterns.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/approach_failures.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/tests/test_artifacts.c",
       "classification": "private-implementation-test",
       "includes": [
         {
+          "header": "modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
           "count": 1
         }
       ]
@@ -3979,6 +4107,14 @@
           "count": 1
         },
         {
+          "header": "../modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
+          "header": "../modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
           "header": "../modules/db2/c/typed_facts.h",
           "count": 1
         },
@@ -4006,6 +4142,14 @@
         },
         {
           "header": "../modules/db2/c/css_render.h",
+          "count": 1
+        },
+        {
+          "header": "../modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
+          "header": "../modules/db2/c/db_postgres.h",
           "count": 1
         },
         {
@@ -4393,11 +4537,33 @@
       "classification": "private-implementation-test",
       "includes": [
         {
+          "header": "../modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
           "header": "../modules/db2/c/db2_test_shim.h",
           "count": 1
         },
         {
+          "header": "../modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
           "header": "../modules/db2/c/entity_registry.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_eval_candidates.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_test_shim.h",
           "count": 1
         }
       ]
@@ -4613,11 +4779,23 @@
           "count": 1
         },
         {
+          "header": "../modules/db2/c/fact_mutation.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/db2.h",
           "count": 1
         },
         {
+          "header": "modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
           "count": 1
         }
       ]
@@ -4937,7 +5115,15 @@
       "classification": "private-implementation-test",
       "includes": [
         {
+          "header": "modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
           "count": 1
         }
       ]
@@ -5098,6 +5284,24 @@
       "includes": [
         {
           "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_learning_regret.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_learning.h",
           "count": 1
         },
         {
@@ -5309,6 +5513,10 @@
           "count": 1
         },
         {
+          "header": "../modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
           "header": "../modules/db2/c/lifecycle.h",
           "count": 1
         },
@@ -5397,7 +5605,15 @@
           "count": 1
         },
         {
+          "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/memory_query.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_vectors.h",
           "count": 1
         }
       ]
@@ -5421,7 +5637,15 @@
       "classification": "private-implementation-test",
       "includes": [
         {
+          "header": "../modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
           "header": "../modules/db2/c/db2_test_shim.h",
+          "count": 1
+        },
+        {
+          "header": "../modules/db2/c/db_postgres.h",
           "count": 1
         },
         {
@@ -5606,6 +5830,10 @@
         },
         {
           "header": "../modules/db2/c/entity_registry.h",
+          "count": 1
+        },
+        {
+          "header": "../modules/db2/c/fact_lifecycle.h",
           "count": 1
         },
         {
@@ -6152,6 +6380,13 @@
     },
     {
       "source": "src/modules/db2/c/bandit.c",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/bandit.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
@@ -6537,6 +6772,13 @@
     },
     {
       "source": "src/modules/db2/c/db2_test_shim.c",
+      "header": "aimee/audit/audit_worm_chain.h",
+      "resolved": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
+      "classification": "module-public-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_test_shim.c",
       "header": "config_embedder_dims.h",
       "resolved": "src/headers/config_embedder_dims.h",
       "classification": "host-api",
@@ -6691,6 +6933,13 @@
     },
     {
       "source": "src/modules/db2/c/fact_ingest.c",
+      "header": "../headers/rel_types.h",
+      "resolved": "src/headers/rel_types.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_ingest.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
@@ -6729,6 +6978,34 @@
       "header": "modules/memory/memory_fact_gate.h",
       "resolved": "src/modules/memory/memory_fact_gate.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_mutation.c",
+      "header": "../headers/kb_identity.h",
+      "resolved": "src/headers/kb_identity.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_mutation.c",
+      "header": "../headers/kb_reqctx.h",
+      "resolved": "src/headers/kb_reqctx.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_mutation.c",
+      "header": "../headers/rel_types.h",
+      "resolved": "src/headers/rel_types.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_mutation.c",
+      "header": "platform_random.h",
+      "resolved": "src/headers/platform_random.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -7208,6 +7485,13 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/typed_facts.c",
+      "header": "modules/memory/memory_ontology.h",
+      "resolved": "src/modules/memory/memory_ontology.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/typed_facts.h",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -7271,5 +7555,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "9f2530cbaf454536776b4d2ba2e67abe1f393083d0336779a26b6f5355ec2c00"
+  "fingerprint": "a947472ebfc16ac7d356c918ad256d69bb11cbaffbcdb0d0daa42da4febe0b0a"
 }

@@ -390,6 +390,109 @@ int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_
    return count;
 }
 
+int db2_learning_fate_record(int proposal_id, const char *fate, const char *reason)
+{
+   if (proposal_id <= 0 || !fate || !fate[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* One fate per proposal: a later verdict replaces an earlier one, because
+    * the question is what became of it, not what we thought at each step. */
+   static const char *sql = "INSERT INTO learning_proposal_fate (proposal_id, fate, reason)"
+                            " VALUES (?1, ?2, ?3)"
+                            " ON CONFLICT (proposal_id) DO UPDATE SET fate = ?4, reason = ?5";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", proposal_id);
+   aimee_pg_bind_text(st, "?2", fate);
+   aimee_pg_bind_text(st, "?3", reason ? reason : "");
+   aimee_pg_bind_text(st, "?4", fate);
+   aimee_pg_bind_text(st, "?5", reason ? reason : "");
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
+}
+
+int db2_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len)
+{
+   if (proposal_id <= 0 || !fate_out || fate_out_len == 0)
+      return -1;
+   fate_out[0] = '\0';
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   static const char *sql = "SELECT fate FROM learning_proposal_fate WHERE proposal_id = ?1";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", proposal_id);
+   int found = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      lrn_copy_text(fate_out, fate_out_len, aimee_pg_column_text(st, 0), "");
+      found = 1;
+   }
+   aimee_pg_finalize(st);
+   return found;
+}
+
+int db2_learning_fate_counts(int window_days, const char *regret_fates,
+                             db2_learning_fate_count_t *out, int max)
+{
+   if (window_days <= 0 || !out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char window_expr[32];
+   snprintf(window_expr, sizeof(window_expr), "-%d days", window_days);
+   const char *fates = (regret_fates && regret_fates[0]) ? regret_fates : "";
+
+   /* The regret vocabulary arrives as a comma-separated list and is matched
+    * with a delimited LIKE, so a fate name cannot match a longer one by
+    * prefix (',superseded,' never matches ',superseded_by_operator,'). */
+   static const char *sql =
+       "SELECT s.signal_type,"
+       " COUNT(*),"
+       " SUM(CASE WHEN f.fate IS NULL THEN 0 ELSE 1 END),"
+       " SUM(CASE WHEN f.fate IS NOT NULL"
+       "          AND (',' || ?1 || ',') LIKE ('%,' || f.fate || ',%') THEN 1 ELSE 0 END)"
+       " FROM learning_proposals p"
+       " JOIN learning_signals s ON s.id = p.signal_id"
+       " LEFT JOIN learning_proposal_fate f ON f.proposal_id = p.id"
+       " WHERE p.state = 'committed'"
+       " AND COALESCE(p.committed_at, p.updated_at, p.created_at) >= pg_now_text(?2)"
+       " GROUP BY s.signal_type"
+       " ORDER BY s.signal_type";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", fates);
+   aimee_pg_bind_text(st, "?2", window_expr);
+
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[count], 0, sizeof(out[count]));
+      lrn_copy_text(out[count].signal_type, sizeof(out[count].signal_type),
+                    aimee_pg_column_text(st, 0), "");
+      out[count].committed = aimee_pg_column_int64(st, 1);
+      out[count].settled = aimee_pg_column_int64(st, 2);
+      out[count].regret = aimee_pg_column_int64(st, 3);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
 int db2_learning_proposal_list(const char *state, const char *sink, int limit,
                                learning_proposal_t *out, int max)
 {

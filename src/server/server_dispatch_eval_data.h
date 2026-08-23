@@ -11,3 +11,4 @@
 {"eval.run", handle_eval_run}, {"eval.results", handle_eval_results},
     {"eval.candidates", handle_eval_candidates},
     {"eval.candidates-update", handle_eval_candidates_update},
+    {"learning.approaches", handle_learning_approaches},

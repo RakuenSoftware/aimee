@@ -199,6 +199,11 @@
      "  list             List trigger runs\n"
      "  status           Show one trigger run\n"
      "  cancel           Cancel a queued trigger run\n"},
+    {"learning", "Learning-loop safety, regret, and negative knowledge",
+     AIMEE_CMD_TIER_ADVANCED, 0,
+     "  approaches \"<goal>\"\n"
+     "                   Approaches that already failed against a similar goal\n"
+     "                   (advisory recall for planning; never blocks)\n"},
     {"aux", "Auxiliary model routing", AIMEE_CMD_TIER_ADVANCED, 0,
      "  config           Show resolved aux task->provider/model mapping\n"
      "  test <task> \"<prompt>\"\n"
