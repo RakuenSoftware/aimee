@@ -362,7 +362,7 @@ and that is how this went unnoticed through a container validation.
 | D8 bus stages | **done** — 12033/12034/12035/12036 | advertised and routed; session stages answer `no_directory` |
 | D8 `/v1` routes | **done** and MOUNTED BY NOTHING — no caller constructs `Registry.Handler`, so no client can reach a route | no |
 | D8 MCP / ACP mirroring | not started (P4) | no |
-| Directory read from `db1` | **seam only** — `DirectorySource` is defined and unimplemented | no — and this is what gates every "no" above |
+| Directory read from `db1` | **blocked, and not on the absorption** — see below | no — and this is what gates every "no" above |
 | Durable inboxes | **not started** — needs the `postgres` generic storage wire | no |
 
 60 tests green under `-race`. Verified by mutation, not only by passing:
@@ -371,6 +371,43 @@ and that is how this went unnoticed through a container validation.
   wedge the check prevents);
 - un-advertising one declared stage fails three independent tests with the precise diagnostic
   "declares `peer-grant` (event 12035) … but never advertises it".
+
+### The directory is blocked on a distinction db1 does not make
+
+This was recorded for weeks as "waiting for the db1 absorption". That was wrong,
+and checking it rather than repeating it produced the real blocker.
+
+`db1-sessions` is already on the bus today at kind 11782, and the catalog fully
+describes `server_session_get` (family `sessions`, op 2): one request field, a
+ten-cell reply with `principal` at index 2. Nothing about the absorption is
+required to call it.
+
+What is missing is the outcome this design rests on. `db1_server_session_get`
+returns 0 only on `SQLITE_ROW` and -1 for everything else -- null argument, no
+connection, prepare failure, **and no row found** -- and the stage maps a
+non-zero rc to `STATUS_FAILED`. An absent session and an unreachable store
+arrive as one status.
+
+The catalog states this honestly: `server_session_get` lists results
+`["ok", "invalid", "failed"]`, with no `"missing"`. Sibling operations in the
+same family DO distinguish -- `primary_session_load`,
+`webchat_claude_session_get` and `webchat_live_get` all list `"missing"` -- so
+this is one operation's gap rather than a limit of the wire, and the contract was
+written down correctly. The false premise was in this design's own
+`DirectorySource` comment, which asserted the distinction from the shape of the
+family without checking the operation.
+
+**So the directory is deliberately still unwired**, and that is a choice rather
+than an omission. Wiring it against the current contract means picking one of two
+wrong answers: map `failed` to "absent" and a store outage reports every session
+as departed, which under the undeliverable rule is the direction that destroys
+mail; or map it to "unavailable" and every genuinely unknown session becomes a
+retry that never terminates. Today's `no_directory` is a true statement, and
+replacing a true statement with a plausible one is not progress.
+
+The fix is small and belongs to `db1`: have `server_session_get` separate
+no-row from error, and add `"missing"` to its catalog `results` beside the three
+siblings that already have it. Reported to the module's owner.
 
 **Known gaps, stated rather than implied.** The largest one was not stated at
 all until it was found by asking what CALLS this in production, rather than

@@ -28,10 +28,28 @@ type DirectorySource interface {
 	// Owner reports a session's owner principal, or why it cannot.
 	//
 	// Return peer.ErrNoPeer for a definite absence and any other error for "I
-	// could not answer". db1 distinguishes these (StatusMissing versus a
-	// failure) and the Go caller side preserves the status word, so collapsing
-	// them here would discard a distinction the store took care to make -- and
-	// would report a live session as gone whenever the store hiccups.
+	// could not answer".
+	//
+	// THIS COMMENT USED TO CLAIM db1 MAKES THAT DISTINCTION. It does not, for
+	// the operation a directory needs. `db1_server_session_get` returns 0 only
+	// on SQLITE_ROW and -1 for everything else -- null argument, no connection,
+	// prepare failure, AND no row found -- and its stage maps a non-zero rc to
+	// STATUS_FAILED. So an absent session and an unreachable store arrive as one
+	// status.
+	//
+	// The catalog says so honestly: server_session_get lists results
+	// ["ok", "invalid", "failed"], with no "missing". Sibling operations in the
+	// same family DO distinguish -- primary_session_load,
+	// webchat_claude_session_get and webchat_live_get all list "missing" -- so
+	// this is one operation's gap, not a limitation of the wire. The premise was
+	// mine, asserted from the shape of the family and never checked against the
+	// operation.
+	//
+	// Until that is fixed, an implementation over db1 CANNOT honour this
+	// contract, which is why nothing implements it yet and NoDirectory is the
+	// accurate description of the build. Mapping failed to ErrNoPeer would
+	// report every session as departed during a store outage, and under the
+	// undeliverable rule that is the direction that destroys mail.
 	Owner(sessionID string) (string, error)
 }
 
