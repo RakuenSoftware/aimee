@@ -2727,6 +2727,25 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "css_migration_rules_doc",
+			stage: db2contract.StageCssMigrationRulesDoc,
+			// Three counts in one statement, two of them FILTERed and one of
+			// those carrying a LIKE with an ESCAPE clause. Whether that shape
+			// runs is the question.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCssMigrationRulesDocRequest(liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				document, err := db2contract.DecodeCssMigrationRulesDocReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if !strings.Contains(document, "Indexed rules in exemplar") {
+					t.Fatalf("document = %q", document)
+				}
+			},
+		},
 	}
 }
 
@@ -4959,6 +4978,71 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "css_migration_enumerate",
+			stage: db2contract.StageCssMigrationEnumerate,
+			// Twice: the second run is the ON CONFLICT branch, which is the
+			// whole point of the operation -- a re-enumerate refreshes
+			// coverage rather than failing on what it wrote last time.
+			repeat: 2,
+			seed:   []string{liveProbeProject, liveProbeStyleGraph},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCssMigrationEnumerateRequest(liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				enumerated, err := db2contract.DecodeCssMigrationEnumerateReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if enumerated != 1 {
+					t.Fatalf("enumerated = %d, want the seeded unit", enumerated)
+				}
+			},
+		},
+		{
+			name:  "css_migration_assert_conventions",
+			stage: db2contract.StageCssMigrationAssertConventions,
+			// Twice, because the second call is the one that finds a prior
+			// fact: it takes it FOR UPDATE inside the CTE and skips the
+			// insert, and neither branch has ever run until it does.
+			repeat: 2,
+			seed:   []string{liveProbeProject, liveProbeStyleGraph},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCssMigrationAssertConventionsRequest(
+					liveProbeScopeProject, "2026-01-01T00:00:00Z")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				asserted, err := db2contract.DecodeCssMigrationAssertConventionsReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if asserted != 2 {
+					t.Fatalf("asserted = %d, want both conventions", asserted)
+				}
+			},
+		},
+		{
+			name:  "css_render_snapshot_store",
+			stage: db2contract.StageCssRenderSnapshotStore,
+			// Twice for the upsert branch that replaces the C's delete and
+			// insert.
+			repeat: 2,
+			seed:   []string{liveProbeProject},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCssRenderSnapshotStoreRequest(
+					liveProbeScopeProject, "src/app/button.css", "before",
+					`{"color":"rgb(0, 0, 0)"}`, "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeCssRenderSnapshotStoreReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the snapshot was not stored")
+				}
+			},
+		},
 	}
 }
 
@@ -4978,6 +5062,30 @@ const (
  (id, project, state, started_at) VALUES
  (900001, 'live-probe-project', 'pending', '2026-01-01 00:00:00')`
 )
+
+// A stylesheet the CSS probes can find: one component file in the project's
+// current generation, one rule whose selector carries BEM's delimiters, one
+// custom-property declaration, and one resolved class token.
+//
+// All four matter. Without the file the joins match nothing; without the
+// delimiters and the custom property the convention assert derives its two
+// findings from absences and never exercises the positive spellings; and
+// without the class token the enumerate has no unit to record.
+const liveProbeStyleGraph = `WITH styled_file AS (
+ INSERT INTO files (id, project_id, generation, path, scanned_at)
+ SELECT 900030, p.id, p.current_generation, 'src/app/button.css',
+ '2026-01-01 00:00:00'
+ FROM projects p WHERE p.name = 'live-probe-project' RETURNING id),
+ styled_rule AS (
+ INSERT INTO css_rules (id, file_id, selector)
+ SELECT 900031, styled_file.id, '.card__title--wide' FROM styled_file
+ RETURNING id),
+ token_declaration AS (
+ INSERT INTO css_declarations (id, rule_id, property, value)
+ SELECT 900032, styled_rule.id, '--brand', '#ffffff' FROM styled_rule
+ RETURNING id)
+ INSERT INTO css_component_styles (id, component_file_id, class_token, resolved)
+ SELECT 900033, styled_file.id, 'card__title', 1 FROM styled_file`
 
 // Seed rows for the learning-write probes. Fixed identifiers for the same
 // reason as the projection ones: a probe has to name what it acts on.
