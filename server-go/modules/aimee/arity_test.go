@@ -26,6 +26,23 @@ import (
 // remembering to add it -- which is the failure mode a list has and a range does
 // not. The legitimate shapes are pinned below; every other (stage, op, width)
 // must refuse.
+// SCOPE: this module's four stages, and not a template for other modules.
+//
+// The premise is that every operation has a FIXED field count, so any other
+// width is a defect. That holds here for all thirteen, and measured rather than
+// assumed, it holds for db1's 463 as well -- every one declares a fixed
+// request.fields list.
+//
+// It is known false elsewhere. db2's owner reports five variadic operations
+// there, where the dispatcher deliberately skips the width check and each
+// operation validates its own shape. Reported to me rather than measured by me,
+// and worth keeping those apart: widening this guard across modules would refuse
+// five legitimate operations, and I would be doing it on someone else's number.
+//
+// A peer reached "do not widen" for two of their guards for OPPOSITE reasons --
+// one would misfire on 406 of 442 files, the other would fire zero times and
+// still be wrong, because outside its directory the thing it checks against does
+// not exist. Zero hits is not a licence. The question is per guard.
 func TestEveryOperationChecksItsFieldCount(t *testing.T) {
 	// The arity table, made explicit. This is the same information as the
 	// scattered len(cells) checks, in one place where it can be compared

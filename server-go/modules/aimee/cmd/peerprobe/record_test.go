@@ -24,6 +24,25 @@ import (
 // probe it claims to describe. A check added here without a row is a run whose
 // evidence is incomplete, which is the direction that matters -- a record that
 // under-claims is how a passing check goes missing.
+// ONE record, deliberately, and this is the note that keeps it that way.
+//
+// Widening this to docs/validation/*.md looks like free coverage: eighty-eight
+// records sit there and this guard would happily read all of them. It must not,
+// and the reason is the PREMISE rather than the behaviour. This check assumes a
+// record describes a probe whose checks can be counted, and measured rather than
+// assumed, that is true of ONE of the eighty-eight -- exactly this pair.
+//
+// So widening buys nothing and costs one of two ways. Fail on the other
+// eighty-seven and the guard is wrong about legitimate records; skip them and it
+// passes having compared nothing, eighty-seven times, while its summary line
+// grows more reassuring.
+//
+// A peer reached the same verdict about two of their guards for OPPOSITE
+// reasons, which is the part worth carrying: one would have misfired on 406 of
+// 442 files, and the other would have fired zero times and still been wrong,
+// because outside its directory the thing it checks ownership against does not
+// exist. Zero hits is not a licence. The question has to be asked per guard, and
+// the answers do not generalise.
 var validationRecord = filepath.Join("..", "..", "..", "..", "..",
 	"docs", "validation", "aimee-module-on-a-clean-container.md")
 
