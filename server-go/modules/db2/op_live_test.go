@@ -1960,6 +1960,68 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_units_list",
+			stage: db2contract.StageMemoryUnitsList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryUnitsListRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryUnitsListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "task_edges",
+			stage: db2contract.StageTaskEdges,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTaskEdgesRequest(2147483000, 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeTaskEdgesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "anti_pattern_list",
+			stage:  db2contract.StageAntiPatternList,
+			encode: db2contract.EncodeAntiPatternListRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeAntiPatternListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "console_oidc_get",
+			stage:  db2contract.StageConsoleOidcGet,
+			encode: db2contract.EncodeConsoleOidcGetRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, _, _, err :=
+					db2contract.DecodeConsoleOidcGetReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "projection_generation_meta",
+			stage: db2contract.StageProjectionGenerationMeta,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectionGenerationMetaRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, err :=
+					db2contract.DecodeProjectionGenerationMetaReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a generation that does not exist answered as found")
+				}
+			},
+		},
 	}
 }
 
