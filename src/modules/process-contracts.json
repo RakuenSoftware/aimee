@@ -610,11 +610,28 @@
       ]
     },
     {
+      "id": "control-plane",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 32,
+      "placements": [
+        "kb"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "control-plane-health",
+          "event_kind": 12289
+        }
+      ]
+    },
+    {
       "id": "postgres",
       "execution": "process",
       "runtime": "go",
       "principal_ref": 28,
       "placements": [
+        "server",
         "kb"
       ],
       "stages": [
@@ -622,6 +639,11 @@
           "id": 1,
           "name": "postgres-health",
           "event_kind": 11265
+        },
+        {
+          "id": 2,
+          "name": "postgres-sql",
+          "event_kind": 11266
         }
       ]
     },

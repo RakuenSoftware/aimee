@@ -1,0 +1,22 @@
+{
+  "descriptor_version": 1,
+  "id": "control-plane",
+  "dependencies": [
+    "config",
+    "module-runtime"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "go_sources": [
+    "server-go/modules/control-plane/control_plane.go"
+  ],
+  "go_tests": [
+    "server-go/modules/control-plane/control_plane_test.go"
+  ],
+  "docs": [
+    "docs/modules/control-plane.md"
+  ]
+}

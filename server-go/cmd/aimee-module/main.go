@@ -14,9 +14,12 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db1"
+	db2contract "github.com/JBailes/aimee/server-go/db2"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
+	controlplane "github.com/JBailes/aimee/server-go/modules/control-plane"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
+	"github.com/JBailes/aimee/server-go/modules/db2"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	"github.com/JBailes/aimee/server-go/modules/economizer"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
@@ -302,11 +305,52 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// the module reduces without warming up.
 		config.Handler = economizer.NewHandlerWithStore(
 			economizerStore(ctx, moduleBusSocket))
+	case "control-plane":
+		config.ModuleName = name
+		config.PrincipalRef = 32
+		config.Stages = []bus.ModuleStage{
+			{EventKind: controlplane.EventHealth, StageID: controlplane.StageHealth},
+		}
+		config.Handler = controlplane.Handle
 	case "postgres":
 		config.ModuleName = name
 		config.PrincipalRef = 28
-		config.Stages = []bus.ModuleStage{{EventKind: postgres.EventHealth, StageID: postgres.StageHealth}}
-		config.Handler = postgres.Handle
+		// Health answers whether the database is usable; storage is the
+		// database itself, for whichever module owns the rows. Two stages
+		// rather than two modules: they share one pool, and a health probe
+		// that opened its own connection would be reporting on a pool nobody
+		// serves from.
+		config.Stages = []bus.ModuleStage{
+			{EventKind: postgres.EventHealth, StageID: postgres.StageHealth},
+			{EventKind: postgres.EventSQL, StageID: postgres.StageSQL},
+		}
+		storage := postgres.NewSQLHandler()
+		config.Handler = func(invocation bus.ModuleInvocation, body []byte) (
+			[]byte, bus.ModuleStatus,
+		) {
+			if invocation.StageID == postgres.StageSQL {
+				return storage.Handle(invocation, body)
+			}
+			return postgres.Handle(invocation, body)
+		}
+	case "db2":
+		config.ModuleName = name
+		config.PrincipalRef = 29
+		// One stage per family, which is what the wire calls a stage: the
+		// dispatcher keys on the (stage, operation) pair, and the operation
+		// travels in the envelope. Eight stages therefore serve all 445
+		// catalogued operations.
+		config.Stages = []bus.ModuleStage{
+			{EventKind: db2contract.EventLifecycle, StageID: db2contract.FamilyLifecycle},
+			{EventKind: db2contract.EventTenancy, StageID: db2contract.FamilyTenancy},
+			{EventKind: db2contract.EventMemory, StageID: db2contract.FamilyMemory},
+			{EventKind: db2contract.EventIndex, StageID: db2contract.FamilyIndex},
+			{EventKind: db2contract.EventLearning, StageID: db2contract.FamilyLearning},
+			{EventKind: db2contract.EventOrganization, StageID: db2contract.FamilyOrganization},
+			{EventKind: db2contract.EventCustody, StageID: db2contract.FamilyCustody},
+			{EventKind: db2contract.EventMaintenance, StageID: db2contract.FamilyMaintenance},
+		}
+		config.Handler = db2.NewLazyDispatchHandler()
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
@@ -331,6 +375,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	if config.ModuleName == "postgres" {
 		defer postgres.Close()
+	}
+	if config.ModuleName == "db2" {
+		defer db2.CloseProductionStore()
 	}
 	config.SocketPath = args[1]
 	return bus.RunModuleProcess(ctx, config)
