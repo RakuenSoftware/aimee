@@ -1958,10 +1958,27 @@ invalid — I reverted with `git checkout`, which restores HEAD, and HEAD alread
 contained the change I was trying to remove. The valid control had to come from
 `HEAD~1` explicitly.
 
-### The real defect: a master gate that defaulted off
+### The real defect: a master gate that could switch the layer off
+
+**Correction to the first version of this section.** I wrote that the gate
+"defaulted to off". That is wrong for the shipped product and I am leaving the
+correction visible rather than quietly editing it.
+
+The C side's `DB2_RUNTIME_CONFIG` is a zero-initialised static, so
+`config_typed_facts_enabled()` reads 0 in any process that never receives a
+config snapshot — which is exactly the unit-test binaries, and why they failed
+when run outside `make unit-tests`. But the external config module ships
+`"typed_facts_enabled": 1` in its `defaults.json`, so a real deployment reads
+ON. That is consistent with the live evidence gathered all through this branch:
+retraction demonstrably worked on every container before this change.
+
+So the accurate statement is: the layer was ON by default in production, and the
+gate was a switch an operator could use to turn a correctness feature into a
+silent no-op. That is still worth removing — but it is a smaller claim than the
+one I first made, and the difference matters.
 
 `config.typed_facts_enabled` gated the entire typed-fact layer — §4 retraction,
-§6 ingest, §7 recall, class keying — and **defaulted to off**. With it off:
+§6 ingest, §7 recall, class keying. With it off:
 
 - `db2_typed_fact_ingress()` returned 0 at its first line, so a turn asking to
   forget a fact completed normally with the fact still standing and nothing
@@ -1974,7 +1991,13 @@ contained the change I was trying to remove. The valid control had to come from
   injection.
 
 Every one of those is a silent no-op — the failure mode this whole branch exists
-to remove. A correctness feature behind a default-off switch is not a feature.
+to remove. A correctness feature that an operator can switch off, with no signal
+anywhere that it is off, is one setting away from not being a feature.
+
+The generated `docs/gen/configuration.md` describes the key as "master gate;
+default off", which disagrees with the module's own `defaults.json` (`1`). That
+description was already wrong before this change, and it is what I read first —
+a reminder that a generated doc is only as true as the metadata behind it.
 
 ### What was done
 
