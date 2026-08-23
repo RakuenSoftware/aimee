@@ -1581,6 +1581,22 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "calibration_surface_list",
+			stage: db2contract.StageCalibrationSurfaceList,
+			// A join, a four-column grouping, a HAVING over a repeated COUNT and
+			// an ORDER BY naming the alias that HAVING may not. Which of those
+			// PostgreSQL accepts where is the whole question, and no fake
+			// answers it.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCalibrationSurfaceListRequest(2)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeCalibrationSurfaceListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -3135,6 +3151,78 @@ func liveWrites() []liveRequest {
 			decoded: func(t *testing.T, body []byte) {
 				if _, err := db2contract.DecodeRecomputeBlockedSymbolsReply(body); err != nil {
 					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "rules_insert",
+			stage: db2contract.StageRulesInsert,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRulesInsertRequest(
+					"positive", "live probe rule", "live probe", 60)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeRulesInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the rule was not recorded")
+				}
+			},
+		},
+		{
+			name:  "rules_reinforce_directive",
+			stage: db2contract.StageRulesReinforceDirective,
+			seed:  []string{liveProbeRule},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRulesReinforceDirectiveRequest(
+					liveProbeRuleID, "hard", 1, 80)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeRulesReinforceDirectiveReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the reinforcement did not run")
+				}
+			},
+		},
+		{
+			name:  "demotion_profile_write",
+			stage: db2contract.StageDemotionProfileWrite,
+			// The payload column is JSONB and the parameter is text, so this is
+			// the probe that proves the cast is there: without it PostgreSQL
+			// refuses the insert outright.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDemotionProfileWriteRequest(
+					"episodic", "project", "live-probe-project", `{"half_life_days":30}`)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				profileID, err := db2contract.DecodeDemotionProfileWriteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if profileID == "" {
+					t.Fatal("no profile was written")
+				}
+			},
+		},
+		{
+			name:  "retrieval_attribution_write",
+			stage: db2contract.StageRetrievalAttributionWrite,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeRetrievalAttributionWriteRequest(
+					"live-probe-event", 4321, "accepted", 0.25)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeRetrievalAttributionWriteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the attribution was not recorded")
 				}
 			},
 		},
