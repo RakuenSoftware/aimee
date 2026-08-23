@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (87)
+## CLI-settable keys (86)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -105,7 +105,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `synthesis_model` | string | Synthesis model. On a *-llm image this selects the bundled model to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model label sent to the configured endpoint. |
 | `synthesis_thinking` | bool | Let the synthesis model think before answering (default on). It measured positive-to-neutral everywhere it was tried. Global rather than per-stage, and the operator's call: turn it off only for a model that reasons past its output budget without answering. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
-| `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cmd` | string | Command run after a delegated fix to verify it. |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
 | `verify_enabled` | bool | Master gate for `aimee git verify` (default off). |

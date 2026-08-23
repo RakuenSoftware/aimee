@@ -823,15 +823,17 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       return NULL;
    if (!query || !query[0])
       return NULL;
-   /* The envelope carries two independently-gated layers: the code/memory preview
-    * block (ingress_preinject_enabled, aimed at coding agents) and the typed-fact
-    * block. Typed facts are KB-OWNED (proposal §8): aimee-server does NOT read its
-    * own the decision — it asks the KB through kb_client_typed_facts_enabled(),
-    * which is now always 1 since the master gate is retired. Kept as a seam. The
-    * original note read: it asks the KB (cached capability) so the KB is the
-    * single source of truth. Build if EITHER layer is on. */
+   /* The envelope carries two layers: the code/memory preview block
+    * (ingress_preinject_enabled, aimed at coding agents) and the typed-fact
+    * block. Only the preview layer is gated now.
+    *
+    * Typed facts used to be KB-OWNED (proposal §8): aimee-server asked the KB
+    * through kb_client_typed_facts_enabled() rather than reading a config of its
+    * own. That gate is retired and the layer is unconditional, so the question
+    * had one answer and the seam is gone with it -- leaving a function that
+    * always returns 1 would keep the shape of an option that no longer exists.
+    * Facts now depend only on having an active scope. */
    int preview_configured = config_ingress_preinject_enabled();
-   int facts_configured = kb_client_typed_facts_enabled();
    char active_workspace[512] = "";
    char active_project[512] = "";
    int active_scope =
@@ -840,7 +842,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    /* Agent ingress is deliberately fail-closed without an active repository:
     * neither code nor memory may silently broaden to global recall. */
    int preview_on = preview_configured && active_scope;
-   int facts_on = facts_configured && active_scope;
+   int facts_on = active_scope;
 
    const char *mode_name = config_code_context_mode();
    int context_mode = 1; /* invalid/blank values fail safely to observe */

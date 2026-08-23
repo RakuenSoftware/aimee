@@ -594,26 +594,20 @@ char *kb_client_agent_surfaces_json(void)
    return projection;
 }
 
-/* The typed-fact layer is unconditional, so this is now a constant.
+/* kb_client_typed_facts_enabled() lived here and is gone.
  *
- * It used to fetch the KB's advertised `typed_facts_enabled` on a 15s TTL, since
- * the KB owned the master gate and was the single source of truth for it. That
- * gate is retired: there is nothing left to ask about, and the round trip only
- * had one possible answer.
+ * It fetched the KB's advertised `typed_facts_enabled` on a 15s TTL, because the
+ * KB owned the master gate and was the single source of truth for it. The gate
+ * is retired, so there was nothing left to ask: the round trip had one possible
+ * answer, and a function that always returns 1 keeps the SHAPE of an option that
+ * no longer exists -- something a later reader can gate on again.
  *
- * Removing it also removes a failure mode that mattered more than the fetch. The
+ * Deleting it also deletes a failure mode that mattered more than the fetch. The
  * cached read defaulted to OFF and kept the last-known value on transport
- * failure, so a briefly-unreachable KB — or a first turn before any successful
- * fetch — silently suppressed per-turn fact injection with nothing logged. The
- * comment called that "never spuriously injects"; the other side of it was
- * "sometimes silently stops injecting". Neither is possible now.
- *
- * The function stays rather than being deleted: it is the seam aimee-server asks
- * through, and several tests stub it. */
-int kb_client_typed_facts_enabled(void)
-{
-   return 1;
-}
+ * failure, so a briefly-unreachable KB -- or a first turn before any successful
+ * fetch -- silently suppressed per-turn fact injection with nothing logged. The
+ * old comment called that "never spuriously injects"; the other side of it was
+ * "sometimes silently stops injecting". */
 
 /* §2c: POST /v1/reembed {confirm, force, dry_run} — the dim-change reset. Returns
  * the raw response JSON (caller frees), or NULL on transport failure; *status_out
