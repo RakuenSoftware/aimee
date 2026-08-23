@@ -39,6 +39,7 @@
 #include "db1.h"
 #include "eval_synthesis.h" /* synthesised regression candidates (S1) */
 #include "approach_store.h"
+#include "kb_client.h"
 #include <aimee/learning/attribution.h>
 #include <aimee/learning/policy_arms.h>
 #include "curiosity_resolve.h"
@@ -334,9 +335,13 @@ int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "eval.candidates: could not read candidates", request_id);
 
    /* The endogeneity gate decides whether admission is even possible, so it
-    * belongs in the same view as the backlog it governs. */
-   learning_endogeneity_t endo;
-   learning_gate_state_t gate = learning_gate_check(&endo);
+    * belongs in the same view as the backlog it governs — and it must be the
+    * SAME gate the admission path enforces. Computing it locally reported
+    * "nothing observed" forever, because the ledger it reads is DB2 and this
+    * binary builds without it. */
+   char *gate_json = kb_client_learning_endogeneity_json(0);
+   cJSON *gate_doc = gate_json ? cJSON_Parse(gate_json) : NULL;
+   free(gate_json);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
@@ -346,14 +351,22 @@ int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *g = cJSON_AddObjectToObject(resp, "gate");
    if (g)
    {
+      const cJSON *state = gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "gate") : NULL;
+      const cJSON *ratio =
+          gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "exogenous_ratio") : NULL;
+      const cJSON *total =
+          gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "committed_total") : NULL;
+      const cJSON *window =
+          gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "window_days") : NULL;
+      /* No answer is reported as "unavailable", not as "open": an operator
+       * reading this must be able to tell a measured gate from an absent one. */
       cJSON_AddStringToObject(g, "state",
-                              gate == LEARNING_GATE_OPEN                ? "open"
-                              : gate == LEARNING_GATE_CLOSED_ENDOGENOUS ? "closed"
-                                                                        : "unavailable");
-      cJSON_AddNumberToObject(g, "exogenous_ratio", endo.exogenous_ratio);
-      cJSON_AddNumberToObject(g, "committed_total", (double)endo.committed_total);
-      cJSON_AddNumberToObject(g, "window_days", endo.window_days);
+                              cJSON_IsString(state) ? state->valuestring : "unavailable");
+      cJSON_AddNumberToObject(g, "exogenous_ratio", cJSON_IsNumber(ratio) ? ratio->valuedouble : 0);
+      cJSON_AddNumberToObject(g, "committed_total", cJSON_IsNumber(total) ? total->valuedouble : 0);
+      cJSON_AddNumberToObject(g, "window_days", cJSON_IsNumber(window) ? window->valuedouble : 0);
    }
+   cJSON_Delete(gate_doc);
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);

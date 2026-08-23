@@ -248,28 +248,33 @@ static int eval_synthesis_write_task(const char *suite_dir, const char *task_nam
  * returns 0, and says so in the log rather than silently proceeding. */
 static int eval_synthesis_gate_is_closed(void)
 {
+   /* The client never returns NULL on a transport failure — it returns an
+    * ERROR document. So "unreachable" is detected by the absence of a `gate`
+    * field, not by a null pointer. Getting that wrong would have made every
+    * failure look like a definite answer. */
    char *json = kb_client_learning_endogeneity_json(0);
-   if (!json)
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
    {
-      LOG_INFO("eval_synthesis",
-               "endogeneity gate not consulted: the knowledge service did not answer, so no"
-               " learning ledger is reachable to be self-referential");
+      LOG_INFO("eval_synthesis", "endogeneity gate not consulted: no parseable answer");
       return 0;
    }
 
    int closed = 0;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-   {
-      LOG_WARN("eval_synthesis", "endogeneity gate answer was not JSON; proceeding ungated");
-      return 0;
-   }
    const cJSON *gate = cJSON_GetObjectItemCaseSensitive(resp, "gate");
-   const cJSON *ratio = cJSON_GetObjectItemCaseSensitive(resp, "exogenous_ratio");
-   const cJSON *total = cJSON_GetObjectItemCaseSensitive(resp, "committed_total");
-   if (cJSON_IsString(gate) && strcmp(gate->valuestring, "closed") == 0)
+   if (!cJSON_IsString(gate))
    {
+      const cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      LOG_INFO("eval_synthesis",
+               "endogeneity gate not consulted: the knowledge service did not answer (%s), so no"
+               " learning ledger is reachable to be self-referential",
+               cJSON_IsString(msg) ? msg->valuestring : "no detail");
+   }
+   else if (strcmp(gate->valuestring, "closed") == 0)
+   {
+      const cJSON *ratio = cJSON_GetObjectItemCaseSensitive(resp, "exogenous_ratio");
+      const cJSON *total = cJSON_GetObjectItemCaseSensitive(resp, "committed_total");
       closed = 1;
       LOG_INFO("eval_synthesis",
                "admission held: endogeneity gate closed (exogenous %.2f of %.0f committed)",

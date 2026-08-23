@@ -472,6 +472,14 @@ int curiosity_resolve_pass(int budget, curiosity_resolve_stats_t *out)
    return 0;
 }
 
+/* The gate is answered by the knowledge service, which this test does not
+ * link; NULL is what an unreachable one looks like. */
+char *kb_client_learning_endogeneity_json(int window_days)
+{
+   (void)window_days;
+   return NULL;
+}
+
 int server_load_token(server_ctx_t *ctx)
 {
    (void)ctx;

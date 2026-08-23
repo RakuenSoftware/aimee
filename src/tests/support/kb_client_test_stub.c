@@ -83,3 +83,12 @@ char *kb_client_memory_lint_json(void)
 {
    return NULL;
 }
+
+/* The endogeneity gate is answered by the knowledge service. A test that does
+ * not link one gets NULL, which the caller reads as "no reachable ledger" —
+ * the same path a real deployment takes when the KB is down. */
+char *kb_client_learning_endogeneity_json(int window_days)
+{
+   (void)window_days;
+   return NULL;
+}

@@ -262,6 +262,8 @@ void pt_print_eval_candidates(const char *method, cJSON *resp)
       if (cJSON_IsNumber(total) && total->valuedouble > 0 && cJSON_IsNumber(ratio))
          printf(" (%.0f%% of %.0f committed proposals exogenous)", ratio->valuedouble * 100.0,
                 total->valuedouble);
+      else if (state && strcmp(state, "unavailable") == 0)
+         printf(" (the knowledge service did not answer, so this is not a measurement)");
       else
          printf(" (no settled proposals yet)");
       printf("\n\n");
