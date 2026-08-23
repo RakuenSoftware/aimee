@@ -25,6 +25,7 @@
   "go_tests": [
     "server-go/modules/aimee/module_test.go",
     "server-go/modules/aimee/db1directory_test.go",
+    "server-go/modules/aimee/arity_test.go",
     "server-go/modules/aimee/peerwire/wire_test.go",
     "server-go/modules/aimee/peer/peer_test.go",
     "server-go/modules/aimee/peer/channel_test.go",
