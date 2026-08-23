@@ -772,6 +772,7 @@ aimee_module_call_result_t aimee_db2_lifecycle_newly_superseded_call(
 
 aimee_module_call_result_t aimee_db2_lifecycle_unresolved_contradictions_call(
     aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+    uint32_t scope_flags, const char *workspace, const char *project,
     aimee_db2_lifecycle_unresolved_contradictions_row_t *rows, uint32_t capacity, uint32_t *count,
     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
@@ -787,8 +788,8 @@ aimee_module_call_result_t aimee_db2_lifecycle_unresolved_contradictions_call(
    const size_t response_capacity = AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_RESPONSE_MAX_LEN;
    uint32_t request_len = 0u;
    uint32_t response_len = 0u;
-   if (aimee_db2_lifecycle_unresolved_contradictions_request_encode(request, sizeof(request),
-                                                                    &request_len) != 0)
+   if (aimee_db2_lifecycle_unresolved_contradictions_request_encode(
+           scope_flags, workspace, project, request, sizeof(request), &request_len) != 0)
    {
       free(response);
       return AIMEE_MODULE_CALL_INVALID_ARGUMENT;

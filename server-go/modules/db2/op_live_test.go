@@ -2144,6 +2144,24 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "lifecycle_unresolved_contradictions",
+			stage: db2contract.StageLifecycleUnresolvedContradictions,
+			// Two scope filters and two scope ranks over one set of four
+			// placeholders, inside an ordering that compares the ranks. Whether
+			// PostgreSQL accepts a placeholder reused that many times in that
+			// many positions is exactly what a fake cannot say.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLifecycleUnresolvedContradictionsRequest(
+					liveProbeScopeFlags, liveProbeWorkspace, liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err :=
+					db2contract.DecodeLifecycleUnresolvedContradictionsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 

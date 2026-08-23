@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "877553890d12bfe43651afdccb292648179fb144fd3f7104430f0ed5944b3c77"
+#define AIMEE_DB2_CONTRACT_SHA256 "9e7ee16fe8a39037dd82c1bb963dc88052a119d780a346f56ccb96df2f0c4f0e"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -2416,8 +2416,14 @@
 #define AIMEE_DB2_EVENT_LIFECYCLE_UNRESOLVED_CONTRADICTIONS                           AIMEE_DB2_EVENT_MEMORY
 #define AIMEE_DB2_STAGE_LIFECYCLE_UNRESOLVED_CONTRADICTIONS                           AIMEE_DB2_FAMILY_MEMORY
 #define AIMEE_DB2_OPERATION_LIFECYCLE_UNRESOLVED_CONTRADICTIONS                       139u
-#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_REQUEST_MIN_LEN                 24u
-#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_REQUEST_MAX_LEN                 24u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_REQUEST_MIN_LEN                 36u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_REQUEST_MAX_LEN                 1058u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_SCOPE_FLAGS_MIN                 0u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_SCOPE_FLAGS_MAX                 3u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_WORKSPACE_MIN                   0u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_WORKSPACE_MAX                   511u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_PROJECT_MIN                     0u
+#define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_PROJECT_MAX                     511u
 #define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_CONFLICT_ID_MIN                 0ull
 #define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_CONFLICT_ID_MAX                 9223372036854775807ull
 #define AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_MEMORY_A_ID_MIN                 0ull
@@ -27050,17 +27056,35 @@ static inline int aimee_db2_lifecycle_newly_superseded_reply_decode(const uint8_
    return 0;
 }
 
-static inline int aimee_db2_lifecycle_unresolved_contradictions_request_encode(uint8_t *output, size_t capacity,
+static inline int aimee_db2_lifecycle_unresolved_contradictions_request_encode(uint32_t scope_flags, const char *workspace, const char *project,
+                                                   uint8_t *output, size_t capacity,
                                                    uint32_t *output_len)
 {
    if (output_len)
       *output_len = 0u;
-   if (!output || !output_len)
+   if (!workspace || !project || !output || !output_len)
       return -1;
-
+   size_t workspace_len = 0u;
+   while (workspace_len <= AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_WORKSPACE_MAX && workspace[workspace_len])
+      ++workspace_len;
+   size_t project_len = 0u;
+   while (project_len <= AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_PROJECT_MAX && project[project_len])
+      ++project_len;
+   if (scope_flags > AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_SCOPE_FLAGS_MAX ||
+       workspace_len > AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_WORKSPACE_MAX ||
+       project_len > AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_PROJECT_MAX)
+      return -1;
    uint8_t scratch[AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_REQUEST_MAX_LEN];
+   uint8_t *payload = scratch;
    uint32_t cursor = 0u;
-
+   aimee_db2_put_u32(payload + cursor, scope_flags);
+   cursor += 4u;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)workspace_len);
+   memcpy(payload + cursor + 4u, workspace, workspace_len);
+   cursor += 4u + (uint32_t)workspace_len;
+   aimee_db2_put_u32(payload + cursor, (uint32_t)project_len);
+   memcpy(payload + cursor + 4u, project, project_len);
+   cursor += 4u + (uint32_t)project_len;
    if (capacity < (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + cursor ||
        aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_LIFECYCLE_UNRESOLVED_CONTRADICTIONS, 0u, cursor, output,
                                        capacity) != 0)
@@ -27070,16 +27094,38 @@ static inline int aimee_db2_lifecycle_unresolved_contradictions_request_encode(u
    return 0;
 }
 
-static inline int aimee_db2_lifecycle_unresolved_contradictions_request_decode(const uint8_t *input, size_t input_len)
+static inline int aimee_db2_lifecycle_unresolved_contradictions_request_decode(const uint8_t *input, size_t input_len,
+                                                   uint32_t *scope_flags, char *workspace, size_t workspace_capacity, char *project, size_t project_capacity)
 {
+   if (scope_flags)
+      *scope_flags = 0u;
+   if (workspace && workspace_capacity)
+      workspace[0] = '\0';
+   if (project && project_capacity)
+      project[0] = '\0';
+   if (!scope_flags || !workspace || workspace_capacity < (size_t)AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_WORKSPACE_MAX + 1u || !project || project_capacity < (size_t)AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_PROJECT_MAX + 1u)
+      return -1;
    aimee_db2_request_header_t header = {0};
    if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
        header.operation != AIMEE_DB2_OPERATION_LIFECYCLE_UNRESOLVED_CONTRADICTIONS || header.flags != 0u ||
        input_len < AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_REQUEST_MIN_LEN ||
        input_len > AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_REQUEST_MAX_LEN)
       return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
    uint32_t payload_len = header.payload_len;
    uint32_t cursor = 0u;
+   if (cursor + 4u > payload_len)
+      return -1;
+   *scope_flags = aimee_db2_get_u32(payload + cursor);
+   cursor += 4u;
+   if (*scope_flags > AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_SCOPE_FLAGS_MAX)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, workspace,
+                                 AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_WORKSPACE_MAX) != 0)
+      return -1;
+   if (aimee_db2_memory_row_take(payload, payload_len, &cursor, project,
+                                 AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_PROJECT_MAX) != 0)
+      return -1;
    if (cursor != payload_len)
       return -1;
    return 0;

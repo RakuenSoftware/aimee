@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "877553890d12bfe43651afdccb292648179fb144fd3f7104430f0ed5944b3c77"
+const ContractSHA256 = "9e7ee16fe8a39037dd82c1bb963dc88052a119d780a346f56ccb96df2f0c4f0e"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -13340,10 +13340,30 @@ func DecodeLifecycleNewlySupersededReply(reply []byte) ([]LifecycleNewlySupersed
 const EventLifecycleUnresolvedContradictions = EventMemory
 const StageLifecycleUnresolvedContradictions = FamilyMemory
 const OperationLifecycleUnresolvedContradictions uint32 = 139
+const LifecycleUnresolvedContradictionsScopeFlagsMin uint32 = 0
+const LifecycleUnresolvedContradictionsScopeFlagsMax uint32 = 3
+const LifecycleUnresolvedContradictionsWorkspaceMin = 0
+const LifecycleUnresolvedContradictionsWorkspaceMax = 511
+const LifecycleUnresolvedContradictionsProjectMin = 0
+const LifecycleUnresolvedContradictionsProjectMax = 511
 
 // EncodeLifecycleUnresolvedContradictionsRequest writes the schema lifecycle_unresolved_contradictions declares, in order.
-func EncodeLifecycleUnresolvedContradictionsRequest() ([]byte, error) {
+func EncodeLifecycleUnresolvedContradictionsRequest(scopeFlags uint32, workspace string, project string) ([]byte, error) {
+	if scopeFlags < LifecycleUnresolvedContradictionsScopeFlagsMin || scopeFlags > LifecycleUnresolvedContradictionsScopeFlagsMax ||
+		len(workspace) < LifecycleUnresolvedContradictionsWorkspaceMin || len(workspace) > LifecycleUnresolvedContradictionsWorkspaceMax || hasNUL(workspace) ||
+		len(project) < LifecycleUnresolvedContradictionsProjectMin || len(project) > LifecycleUnresolvedContradictionsProjectMax || hasNUL(project) {
+		return nil, ErrMalformedEnvelope
+	}
 	var payload []byte
+	var scopeFlagsBytes [4]byte
+	binary.LittleEndian.PutUint32(scopeFlagsBytes[:], scopeFlags)
+	payload = append(payload, scopeFlagsBytes[:]...)
+	if err := putRowText(&payload, workspace, LifecycleUnresolvedContradictionsWorkspaceMax); err != nil {
+		return nil, err
+	}
+	if err := putRowText(&payload, project, LifecycleUnresolvedContradictionsProjectMax); err != nil {
+		return nil, err
+	}
 	header, err := EncodeRequestHeader(OperationLifecycleUnresolvedContradictions, 0, uint32(len(payload)))
 	if err != nil {
 		return nil, ErrMalformedEnvelope
@@ -13352,19 +13372,38 @@ func EncodeLifecycleUnresolvedContradictionsRequest() ([]byte, error) {
 }
 
 // DecodeLifecycleUnresolvedContradictionsRequest reads it back, checking each field against its own bound.
-func DecodeLifecycleUnresolvedContradictionsRequest(request []byte) error {
+func DecodeLifecycleUnresolvedContradictionsRequest(request []byte) (uint32, string, string, error) {
+	var scopeFlags uint32
+	var workspace string
+	var project string
 	var err error
 	header, err := DecodeRequestHeader(request)
 	if err != nil || header.Operation != OperationLifecycleUnresolvedContradictions || header.Flags != 0 ||
 		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
-		return ErrMalformedEnvelope
+		return 0, "", "", ErrMalformedEnvelope
 	}
 	payload := request[EnvelopeHeaderLen:]
 	cursor := 0
-	if cursor != len(payload) {
-		return ErrMalformedEnvelope
+	if cursor+4 > len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
 	}
-	return nil
+	scopeFlags = binary.LittleEndian.Uint32(payload[cursor:])
+	cursor += 4
+	if scopeFlags < LifecycleUnresolvedContradictionsScopeFlagsMin || scopeFlags > LifecycleUnresolvedContradictionsScopeFlagsMax {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if workspace, err = takeRowText(payload, &cursor, LifecycleUnresolvedContradictionsWorkspaceMax); err != nil ||
+		len(workspace) < LifecycleUnresolvedContradictionsWorkspaceMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if project, err = takeRowText(payload, &cursor, LifecycleUnresolvedContradictionsProjectMax); err != nil ||
+		len(project) < LifecycleUnresolvedContradictionsProjectMin {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	if cursor != len(payload) {
+		return 0, "", "", ErrMalformedEnvelope
+	}
+	return scopeFlags, workspace, project, nil
 }
 
 const LifecycleUnresolvedContradictionsConflictIDMin uint64 = 0

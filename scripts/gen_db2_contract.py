@@ -48,6 +48,14 @@ SCOPE_FILTER_MACRO = "DB2_MEMORY_SCOPE_FILTER_SQL"
 # followed by its parameter list, with no trailing semicolon so declarations in
 # headers do not match.
 BACKEND_DEFINITION = re.compile(r"^\w[\w \*]*?\b(db2_[a-z0-9_]+)\s*\([^;]*\)\s*$", re.M)
+# A file may wrap the scope macro in one of its own, to name the column the
+# filter applies to. Searching for the macro alone then finds only the #define
+# line -- which sits above every function -- and the statements that use the
+# alias read as unscoped. That is the defect this scan exists to catch, one
+# indirection away, and it hid a scope-filtered operation for as long as the
+# scan has existed.
+SCOPE_ALIAS_DEFINE = re.compile(
+    r"^#define\s+(\w+)\b[^\n]*\b" + SCOPE_FILTER_MACRO + r"\b", re.M)
 
 
 def _scan_scope_filtered(directory: Path) -> frozenset[str]:
@@ -57,7 +65,10 @@ def _scan_scope_filtered(directory: Path) -> frozenset[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         definitions = [(match.start(), match.group(1))
                        for match in BACKEND_DEFINITION.finditer(text)]
-        for use in re.finditer(SCOPE_FILTER_MACRO, text):
+        aliases = {match.group(1) for match in SCOPE_ALIAS_DEFINE.finditer(text)}
+        tokens = "|".join(re.escape(name)
+                          for name in (SCOPE_FILTER_MACRO, *sorted(aliases)))
+        for use in re.finditer(r"\b(?:" + tokens + r")\b", text):
             owner = None
             for offset, name in definitions:
                 if offset >= use.start():
@@ -13901,7 +13912,10 @@ DERIVED_OPERATIONS: dict[str, dict[str, object]] = {
         "key": ("memory", 139),
         "format": "db2-envelope-generic-v1",
         "symbol": "db2_memory_lifecycle_list_unresolved_contradictions",
-        "policy": {"reads": 200},
+        # Two policy notes rather than one: this read is scope-filtered on both
+        # sides of the conflict, and what happens to a conflict with one side
+        # out of scope is a decision a reader of the catalog needs.
+        "policy": {"reads": 200, "scope": 200},
     },
     "kb_doc_assets_list": {
         "key": ("maintenance", 56),

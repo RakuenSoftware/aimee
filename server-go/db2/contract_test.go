@@ -4967,15 +4967,18 @@ func TestLifecycleNewlySupersededMatchesEverySharedCVector(t *testing.T) {
 func TestLifecycleUnresolvedContradictionsMatchesEverySharedCVector(t *testing.T) {
 	operation := loadWireBaseline(t).Operations[operationIndex(t, "lifecycle_unresolved_contradictions")]
 
-	request, err := EncodeLifecycleUnresolvedContradictionsRequest()
+	request, err := EncodeLifecycleUnresolvedContradictionsRequest(operation.Request.ScopeFlags, operation.Request.Workspace, operation.Request.Project)
 	if err != nil || hex.EncodeToString(request) != operation.Request.Positive {
 		t.Fatalf("request encode: %v %x", err, request)
 	}
-	if err := DecodeLifecycleUnresolvedContradictionsRequest(request); err != nil {
+	scopeFlags, workspace, project, err := DecodeLifecycleUnresolvedContradictionsRequest(request)
+	if err != nil || scopeFlags != operation.Request.ScopeFlags ||
+		workspace != operation.Request.Workspace ||
+		project != operation.Request.Project {
 		t.Fatalf("request decode: %v", err)
 	}
 	for _, vector := range operation.Request.Negative {
-		if err := DecodeLifecycleUnresolvedContradictionsRequest(decodeHex(t, vector.Hex)); err == nil {
+		if _, _, _, err := DecodeLifecycleUnresolvedContradictionsRequest(decodeHex(t, vector.Hex)); err == nil {
 			t.Fatalf("request %s decoded", vector.Mutation)
 		}
 	}

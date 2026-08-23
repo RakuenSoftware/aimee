@@ -8915,7 +8915,7 @@
       "id": 139,
       "name": "lifecycle_unresolved_contradictions",
       "wire_format": "db2-envelope-generic-v1",
-      "scope": "none",
+      "scope": "session",
       "transaction": "single-statement",
       "idempotency": "safe",
       "results": [
@@ -8928,9 +8928,29 @@
       ],
       "request": {
         "policy": {
-          "reads": "unresolved contradictions joined to both memories' text"
+          "reads": "unresolved contradictions joined to both memories' text",
+          "scope": "both memories must be visible in the caller's scope; a conflict with one side out of scope is suppressed rather than leaking that side"
         },
-        "fields": []
+        "fields": [
+          {
+            "name": "scope_flags",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 3
+          },
+          {
+            "name": "workspace",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "project",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
       },
       "reply": {
         "row": {

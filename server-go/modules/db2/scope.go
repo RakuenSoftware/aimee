@@ -88,6 +88,19 @@ func (s Scope) filter(memoryID string, used int) (string, []any) {
 	}
 }
 
+// filterSharing is the predicate alone, for a statement that scopes two
+// memories against the same scope.
+//
+// Both sides read the same four placeholders, so the values are bound once. The
+// C gets this for free -- its four are reserved parameter numbers, reused by
+// every filter in a statement -- and here it has to be said out loud, because
+// calling filter twice would allocate a second set and bind the caller's own
+// arguments to it.
+func (s Scope) filterSharing(memoryID string, used int) string {
+	predicate, _ := s.filter(memoryID, used)
+	return predicate
+}
+
 // rankExpression is the same rank on its own, for the reads that order by it
 // rather than only filtering on it.
 func (s Scope) rankExpression(memoryID string, used int) string {

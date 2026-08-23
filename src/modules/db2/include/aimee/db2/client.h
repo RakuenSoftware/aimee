@@ -839,7 +839,7 @@ extern "C"
 
    aimee_module_call_result_t aimee_db2_lifecycle_unresolved_contradictions_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
-       aimee_db2_lifecycle_unresolved_contradictions_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+       uint32_t scope_flags, const char *workspace, const char *project, aimee_db2_lifecycle_unresolved_contradictions_row_t *rows, uint32_t capacity, uint32_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    aimee_module_call_result_t aimee_db2_memory_alias_insert_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,

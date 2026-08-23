@@ -5748,9 +5748,16 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          }
       }
       {
-         if (aimee_db2_lifecycle_unresolved_contradictions_request_decode(request_body,
-                                                                          request_len) == 0)
+         uint32_t scope_flags = 0u;
+         char scope_workspace[AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_WORKSPACE_MAX + 1];
+         char scope_project[AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_PROJECT_MAX + 1];
+         if (aimee_db2_lifecycle_unresolved_contradictions_request_decode(
+                 request_body, request_len, &scope_flags, scope_workspace, sizeof(scope_workspace),
+                 scope_project, sizeof(scope_project)) == 0)
          {
+            DB2_MEMORY_SCOPE_GUARD db2_memory_scope_guard_t scope_guard =
+                db2_memory_scope_guard_enter(scope_flags, scope_workspace, scope_project);
+            (void)scope_guard;
             if (response_capacity < AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_RESPONSE_MAX_LEN)
                return AIMEE_MODULE_STATUS_INVALID_REQUEST;
             if (!backend || !backend->lifecycle_unresolved_contradictions)

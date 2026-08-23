@@ -4008,7 +4008,8 @@ int main(int argc, char **argv)
            [AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_MAX_ROWS];
    uint32_t lifecycle_unresolved_contradictions_count = 99;
    assert(aimee_db2_lifecycle_unresolved_contradictions_call(
-              call_client, &client, 9519, 0, lifecycle_unresolved_contradictions_rows,
+              call_client, &client, 9519, 0, kReplayScopeFlags, kReplayScopeWorkspace,
+              kReplayScopeProject, lifecycle_unresolved_contradictions_rows,
               AIMEE_DB2_LIFECYCLE_UNRESOLVED_CONTRADICTIONS_MAX_ROWS,
               &lifecycle_unresolved_contradictions_count, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(lifecycle_unresolved_contradictions_count == 0);
