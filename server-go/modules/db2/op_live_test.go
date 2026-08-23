@@ -2162,6 +2162,30 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_dedupe_candidates",
+			stage: db2contract.StageMemoryDedupeCandidates,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryDedupeCandidatesRequest("fact")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryDedupeCandidatesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "anti_pattern_list_hot",
+			stage: db2contract.StageAntiPatternListHot,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeAntiPatternListHotRequest(5)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeAntiPatternListHotReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -4051,6 +4075,72 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_coref_audit_insert",
+			stage: db2contract.StageMemoryCorefAuditInsert,
+			// memory_id is a foreign key, so the memory has to exist.
+			seed: []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryCorefAuditInsertRequest(
+					liveProbeAliasMemoryID, "live-probe-session", "resolved",
+					"postgres", "exact", 0.8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryCorefAuditInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the audit row was not written")
+				}
+			},
+		},
+		{
+			name:  "cross_repo_set_trust",
+			stage: db2contract.StageCrossRepoSetTrust,
+			// The project and the meta row both have to exist: the first for
+			// the row lock to hold something, the second for the epoch. Twice,
+			// so the second call takes the no-op branch where the epoch is read
+			// but not bumped.
+			repeat: 2,
+			seed:   []string{liveProbeTrustProject, liveProbeCrossRepoMeta},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCrossRepoSetTrustRequest(
+					"live-probe-trust-project", "trusted", "live-probe", "req-1")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				result, _, _, err := db2contract.DecodeCrossRepoSetTrustReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if result != 0 {
+					t.Fatalf("the trust write answered %d", result)
+				}
+			},
+		},
+		{
+			name:  "enrollment_insert",
+			stage: db2contract.StageEnrollmentInsert,
+			// Twice, for the conflict path: the guard's three conditions only
+			// run there, and the second call is an idempotent re-enrolment,
+			// which must still answer a row.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEnrollmentInsertRequest(
+					"kb", "live-probe-fingerprint", "CN=live-probe", "01ab",
+					"2027-01-01T00:00:00Z", 0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, enrollmentID, err :=
+					db2contract.DecodeEnrollmentInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 || enrollmentID == 0 {
+					t.Fatal("the enrolment did not land")
+				}
+			},
+		},
 	}
 }
 
@@ -4288,6 +4378,14 @@ const (
  'live-probe-project', '{}')
  ON CONFLICT (id) DO NOTHING`
 )
+
+// A project for the trust probe to move. Trust is a column on projects, and
+// the write locks the row before deciding, so without a row there is nothing to
+// lock and nothing to change.
+const liveProbeTrustProject = `INSERT INTO projects
+ (id, name, root, scanned_at, lifecycle_state, current_generation, trust)
+ VALUES (900025, 'live-probe-trust-project', '/live-probe',
+ '2026-01-01T00:00:00Z', 'current', 1, 'untrusted')`
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
