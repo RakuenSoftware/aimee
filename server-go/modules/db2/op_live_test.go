@@ -1825,6 +1825,29 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "demotion_score",
+			stage: db2contract.StageDemotionScore,
+			// A data-modifying CTE whose UPDATE runs whether or not the outer
+			// query reads it, and an interval arithmetic expression over a text
+			// column cast to a timestamp. Neither is something a fake evaluates.
+			//
+			// It is a read entry despite stamping rows: the stamp is on
+			// artifacts the probe does not create, and against an empty window
+			// there is nothing to stamp.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDemotionScoreRequest(2147483000, 64, 30.0, 5)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				valid, _, err := db2contract.DecodeDemotionScoreReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if valid != 0 {
+					t.Fatal("a row with no attributions scored as though it had some")
+				}
+			},
+		},
 	}
 }
 
@@ -3553,6 +3576,61 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("the relation was not recorded")
+				}
+			},
+		},
+		{
+			name:  "anti_pattern_insert",
+			stage: db2contract.StageAntiPatternInsert,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeAntiPatternInsertRequest(
+					"live probe anti-pattern", "live probe", "review", "pr/1", 0.8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				patternID, err := db2contract.DecodeAntiPatternInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if patternID == 0 {
+					t.Fatal("no anti-pattern was written")
+				}
+			},
+		},
+		{
+			name:  "workflow_pattern_insert",
+			stage: db2contract.StageWorkflowPatternInsert,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeWorkflowPatternInsertRequest(
+					"live probe pattern", "live probe", "review", "pr/1", 0.8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				patternID, err := db2contract.DecodeWorkflowPatternInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if patternID == 0 {
+					t.Fatal("no workflow pattern was written")
+				}
+			},
+		},
+		{
+			name:  "feedback_record",
+			stage: db2contract.StageFeedbackRecord,
+			// Twice: the first call inserts and the second reinforces, and the
+			// reinforcement is the branch with the subselect and the LEAST in
+			// it. Both must report a rule, so the assertion covers both.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeFeedbackRecordRequest(
+					"positive", "live probe feedback", "live probe", 60)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				ruleID, _, err := db2contract.DecodeFeedbackRecordReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if ruleID == 0 {
+					t.Fatal("no rule was recorded")
 				}
 			},
 		},
