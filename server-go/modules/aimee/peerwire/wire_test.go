@@ -3,6 +3,7 @@ package peerwire
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -361,5 +362,44 @@ func TestSendOptionsWireCoverageIsDeliberate(t *testing.T) {
 		t.Fatalf("peer.SendOptions has %d fields; this test accounts for %d carried "+
 			"and %d deliberately excluded. A new field is silently dropped by the "+
 			"bus path until it is classified.", fields, carried, excluded)
+	}
+}
+
+// The encoder refuses what the frame cannot express, rather than wrapping.
+//
+// uint32(len(c)) does not fail on a cell of 2^32+8 bytes; it yields 8. The frame
+// then declares a length of 8 and appends all 2^32+8 bytes, so the decoder takes
+// eight of them as the cell and THE NEXT FOUR AS A LENGTH PREFIX. Cell content
+// becomes framing, and everything after the wrap is structure the sender chose.
+//
+// Nothing can reach this today: every cell that crosses is bounded far below it.
+// It is checked because "unreachable" is a fact about the CURRENT CALLERS, and
+// the encoder outlives them.
+//
+// The refusal lives in a function so it can be PROVED. Demonstrating it through
+// EncodeRequest would need a four-gigabyte string, which is the practical reason
+// checks of this kind go untested, and therefore unwritten.
+func TestEncoderRefusesLengthsTheFrameCannotHold(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		n    int
+		ok   bool
+	}{
+		{"empty", 0, true},
+		{"largest representable", math.MaxUint32, true},
+		{"one past the field", math.MaxUint32 + 1, false},
+		{"negative", -1, false},
+	} {
+		got, err := u32(tc.n)
+		if tc.ok {
+			if err != nil || uint64(got) != uint64(tc.n) {
+				t.Errorf("%s: u32(%d) = %d, %v; want it carried unchanged", tc.name, tc.n, got, err)
+			}
+			continue
+		}
+		if !errors.Is(err, ErrUnrepresentable) {
+			t.Errorf("%s: u32(%d) = %d, %v; want ErrUnrepresentable. A wrap here "+
+				"turns cell content into framing.", tc.name, tc.n, got, err)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package peerwire
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,20 @@ var (
 	// ErrNulInField is a field containing NUL. Values cross into C readers that
 	// treat them as NUL-terminated, where an embedded NUL truncates silently.
 	ErrNulInField = errors.New("aimee: field contains NUL")
+	// ErrUnrepresentable is a value the frame's own fields cannot express: a
+	// cell longer, or a cell count larger, than the u32 that carries it.
+	//
+	// The encoder REFUSES rather than converting, because the conversion does
+	// not fail -- it wraps. A cell of 2^32+8 bytes writes the length 8, then
+	// appends all 2^32+8 bytes, and the decoder reads eight of them as the cell
+	// and the NEXT FOUR AS A LENGTH PREFIX. That is not truncation, it is frame
+	// desynchronisation, and it turns cell CONTENT into framing: everything
+	// after the wrap is structure the sender chose.
+	//
+	// Nothing can reach this today -- every cell that crosses is bounded well
+	// below it -- and it is checked anyway, because "unreachable" is a property
+	// of the current callers and the encoder is the thing that outlives them.
+	ErrUnrepresentable = errors.New("aimee: value too large for its frame field")
 	// ErrRowCount is a list reply whose cell count is not a whole number of rows.
 	ErrRowCount = errors.New("aimee: reply is not a whole number of rows")
 )
@@ -307,13 +322,30 @@ func (s Status) String() string {
 
 // ---- framing -------------------------------------------------------------
 
+// u32 narrows a length or count to the field that carries it, refusing anything
+// the field cannot hold.
+//
+// Split out as a function so the refusal is testable: proving it by encoding a
+// four-gigabyte cell would need a four-gigabyte cell, which is why this kind of
+// check normally goes untested and therefore unwritten.
+func u32(n int) (uint32, error) {
+	if n < 0 || uint64(n) > math.MaxUint32 {
+		return 0, ErrUnrepresentable
+	}
+	return uint32(n), nil
+}
+
 func appendCells(frame []byte, cells []string) ([]byte, error) {
 	var scratch [4]byte
 	for _, c := range cells {
 		if strings.ContainsRune(c, 0) {
 			return nil, ErrNulInField
 		}
-		binary.LittleEndian.PutUint32(scratch[:], uint32(len(c)))
+		n, err := u32(len(c))
+		if err != nil {
+			return nil, err
+		}
+		binary.LittleEndian.PutUint32(scratch[:], n)
 		frame = append(frame, scratch[:]...)
 		frame = append(frame, c...)
 	}
@@ -337,7 +369,13 @@ func decodeCells(body []byte) (uint32, []string, error) {
 		}
 		n := binary.LittleEndian.Uint32(body[off:])
 		off += 4
-		if n > uint32(len(body)) || off+int(n) > len(body) {
+		// Compared in the WIDER type on both sides. The earlier form narrowed
+		// len(body) to a u32, which was safe only by accident: a body over 4GiB
+		// wraps to a small number, and the comparison then refuses almost
+		// everything. Fail-closed, so it was never a bug -- but it was correct
+		// for a reason no reader could see, and the second clause was doing the
+		// real work regardless.
+		if uint64(n) > uint64(len(body)-off) {
 			return 0, nil, ErrWire
 		}
 		cells = append(cells, string(body[off:off+int(n)]))
@@ -353,9 +391,13 @@ func decodeCells(body []byte) (uint32, []string, error) {
 
 // EncodeRequest builds a request frame for one operation.
 func EncodeRequest(op uint32, cells []string) ([]byte, error) {
+	count, err := u32(len(cells))
+	if err != nil {
+		return nil, err
+	}
 	frame := make([]byte, 8, 8+16*len(cells))
 	binary.LittleEndian.PutUint32(frame[0:], op)
-	binary.LittleEndian.PutUint32(frame[4:], uint32(len(cells)))
+	binary.LittleEndian.PutUint32(frame[4:], count)
 	return appendCells(frame, cells)
 }
 
@@ -365,8 +407,12 @@ func DecodeRequest(body []byte) (uint32, []string, error) { return decodeCells(b
 // EncodeResponse builds a response frame carrying a domain status.
 func EncodeResponse(status Status, cells []string) ([]byte, error) {
 	frame := make([]byte, 8, 8+16*len(cells))
+	count, err := u32(len(cells))
+	if err != nil {
+		return nil, err
+	}
 	binary.LittleEndian.PutUint32(frame[0:], uint32(status))
-	binary.LittleEndian.PutUint32(frame[4:], uint32(len(cells)))
+	binary.LittleEndian.PutUint32(frame[4:], count)
 	return appendCells(frame, cells)
 }
 
