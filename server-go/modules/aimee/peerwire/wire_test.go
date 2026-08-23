@@ -379,6 +379,72 @@ func TestSendOptionsWireCoverageIsDeliberate(t *testing.T) {
 // The refusal lives in a function so it can be PROVED. Demonstrating it through
 // EncodeRequest would need a four-gigabyte string, which is the practical reason
 // checks of this kind go untested, and therefore unwritten.
+// A corrupt cell must not decode as an unset one.
+//
+// Both decoders answered the ZERO VALUE for anything they could not parse, so
+// "false" and "that was not a bool" were one answer, and a damaged timestamp
+// arrived as "this message has no send time" -- which is exactly what the
+// encoder writes for a message that genuinely has none. Every row decoded
+// successfully no matter what those cells held.
+//
+// The empty string stays fine for both, deliberately: timeToText writes "" for a
+// zero time, so "" and the zero time agree by construction. What must not agree
+// is EMPTY and GARBAGE.
+func TestCorruptCellsAreRefusedNotZeroed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cell    string
+		wantErr bool
+		want    bool
+	}{
+		{name: "one", cell: "1", want: true},
+		{name: "true", cell: "true", want: true},
+		{name: "zero", cell: "0", want: false},
+		{name: "false", cell: "false", want: false},
+		{name: "empty means no", cell: "", want: false},
+		{name: "garbage is refused", cell: "yes please", wantErr: true},
+		{name: "a number that is not a flag", cell: "2", wantErr: true},
+	} {
+		got, err := Atob(tc.cell)
+		if tc.wantErr {
+			if !errors.Is(err, ErrWire) {
+				t.Errorf("%s: Atob(%q) = %v, %v; want ErrWire. A cell that is not a "+
+					"bool must not read as false.", tc.name, tc.cell, got, err)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("%s: Atob(%q) = %v, %v; want %v", tc.name, tc.cell, got, err, tc.want)
+		}
+	}
+
+	if ts, err := textToTime(""); err != nil || !ts.IsZero() {
+		t.Errorf(`textToTime("") = %v, %v; want the zero time, which is what timeToText writes`, ts, err)
+	}
+	if _, err := textToTime("not-a-timestamp"); !errors.Is(err, ErrWire) {
+		t.Errorf("textToTime(garbage) = %v; want ErrWire. A damaged SentAt must not "+
+			"arrive as a message that simply has no send time.", err)
+	}
+
+	// The row decoder must propagate both, rather than handing back a row whose
+	// fields quietly disagree with the bytes that produced it.
+	good := MessageCells(peer.Message{ID: "m1", SentAt: time.Unix(0, 1700000000123456789).UTC()})
+	for _, bad := range []struct {
+		name  string
+		index int
+		value string
+	}{
+		{"is_reply", 8, "maybe"},
+		{"sent_at", 9, "yesterday"},
+	} {
+		row := append([]string(nil), good...)
+		row[bad.index] = bad.value
+		if _, err := MessageRows(row); !errors.Is(err, ErrWire) {
+			t.Errorf("MessageRows with a corrupt %s = %v; want ErrWire", bad.name, err)
+		}
+	}
+}
+
 func TestEncoderRefusesLengthsTheFrameCannotHold(t *testing.T) {
 	for _, tc := range []struct {
 		name string

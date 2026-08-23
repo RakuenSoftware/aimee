@@ -222,10 +222,18 @@ func (c *PeerCapability) delivery(op uint32, cells []string) ([]byte, error) {
 		if err != nil {
 			return refuse(peerwire.StatusBadRequest)
 		}
+		// Refused rather than defaulted. This cell used to be read by an Atob
+		// that answered false for anything unrecognised, so a malformed flag and
+		// a deliberate "no" were one answer -- in the same frame whose integer
+		// cell two lines up was validated.
+		expectReply, err := peerwire.Atob(cells[5])
+		if err != nil {
+			return refuse(peerwire.StatusBadRequest)
+		}
 		msg, sendErr := c.registry.Send(cells[0], cells[1], cells[2], peer.SendOptions{
 			ConversationID: cells[3],
 			Hop:            hop,
-			ExpectReply:    peerwire.Atob(cells[5]),
+			ExpectReply:    expectReply,
 		})
 		if sendErr != nil {
 			return refuse(peerwire.StatusFor(sendErr))

@@ -455,8 +455,25 @@ func Atoi(s string) (int, error) {
 	return strconv.Atoi(s)
 }
 
-// Atob parses a wire bool.
-func Atob(s string) bool { return s == "1" || s == "true" }
+// Atob parses a wire bool, refusing anything that is not one.
+//
+// It used to answer plain `false` for an unrecognised cell, which made "false"
+// and "that was not a bool" the same answer -- while its sibling Atoi returned
+// an error that the capability turned into bad_request. The same frame had a
+// validated integer cell and an unvalidated boolean one.
+//
+// The empty string is a legitimate false: the encoder writes "0", but a caller
+// that omits an optional flag is saying no rather than saying nonsense.
+func Atob(s string) (bool, error) {
+	switch s {
+	case "1", "true":
+		return true, nil
+	case "0", "false", "":
+		return false, nil
+	default:
+		return false, ErrWire
+	}
+}
 
 func timeToText(t time.Time) string {
 	if t.IsZero() {
@@ -465,15 +482,22 @@ func timeToText(t time.Time) string {
 	return strconv.FormatInt(t.UnixNano(), 10)
 }
 
-func textToTime(s string) time.Time {
+// textToTime parses a wire timestamp, refusing a cell that is not one.
+//
+// The empty string IS a zero time -- that is what timeToText writes for one --
+// so those two agree. What must not agree is a CORRUPT cell and an unset one:
+// this used to map an unparseable timestamp to the zero time as well, so a
+// damaged SentAt arrived as "this message has no send time" and every message
+// row decoded successfully no matter what was in that cell.
+func textToTime(s string) (time.Time, error) {
 	if s == "" {
-		return time.Time{}
+		return time.Time{}, nil
 	}
 	ns, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, ErrWire
 	}
-	return time.Unix(0, ns).UTC()
+	return time.Unix(0, ns).UTC(), nil
 }
 
 // ---- message rows --------------------------------------------------------
@@ -558,6 +582,14 @@ func MessageRows(cells []string) ([]peer.Message, error) {
 		if err != nil {
 			return nil, ErrWire
 		}
+		isReply, err := Atob(row[8])
+		if err != nil {
+			return nil, ErrWire
+		}
+		sentAt, err := textToTime(row[9])
+		if err != nil {
+			return nil, ErrWire
+		}
 		out = append(out, peer.Message{
 			ID:             row[0],
 			CorrelationID:  row[1],
@@ -567,8 +599,8 @@ func MessageRows(cells []string) ([]peer.Message, error) {
 			FromLabel:      row[5],
 			OriginSession:  row[6],
 			Hop:            hop,
-			IsReply:        Atob(row[8]),
-			SentAt:         textToTime(row[9]),
+			IsReply:        isReply,
+			SentAt:         sentAt,
 			Text:           row[10],
 		})
 	}
