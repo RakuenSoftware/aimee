@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -207,6 +208,51 @@ func TestDB1DirectoryRefusesAnEmptyIDWithoutCalling(t *testing.T) {
 	}
 	if f.gotOp != 0 {
 		t.Error("the call went out anyway")
+	}
+}
+
+// db1's status word must never be read as this module's Status, and the type
+// system cannot say so.
+//
+// peerwire.DecodeResponse(reply) compiles perfectly here and returns a
+// peerwire.Status. db1's 1 is MISSING where this module's 1 is no_peer; its 4 is
+// FAILED where this module's 4 is hop_limit. So the wrong decoder yields a value
+// that reads as a sensible status, routes through a real case arm, and means
+// something else entirely -- with no wrong-looking step anywhere for a reviewer
+// to catch.
+//
+// The compiler stops the swap once the value is in hand, because uint32 and
+// peerwire.Status will not compare. What it cannot express is "do not call that
+// function from this file", which is the only move that produces the bad value
+// in the first place. Hence a source check rather than a type.
+//
+// Comments are stripped first: this file's own explanation of the hazard names
+// both, and a guard that fails on its own rationale teaches people to delete the
+// rationale.
+func TestDB1DirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
+	src, err := os.ReadFile("db1directory.go")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var code strings.Builder
+	for _, line := range strings.Split(string(src), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			continue
+		}
+		code.WriteString(line)
+		code.WriteString("\n")
+	}
+	for _, banned := range []string{"peerwire.DecodeResponse", "peerwire.Status"} {
+		if strings.Contains(code.String(), banned) {
+			t.Errorf("db1directory.go names %s outside a comment. db1's status enum "+
+				"is not this module's: read it raw with peerwire.DecodeReply, or the "+
+				"value reads as a sensible status and means something else.", banned)
+		}
+	}
+	// The check is worth nothing if the thing it requires is absent.
+	if !strings.Contains(code.String(), "peerwire.DecodeReply") {
+		t.Error("db1directory.go no longer calls peerwire.DecodeReply; this guard is " +
+			"now asserting the absence of something nothing needs")
 	}
 }
 
