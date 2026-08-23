@@ -27,7 +27,8 @@
     "server-go/modules/aimee/peer/peer_test.go",
     "server-go/modules/aimee/peer/channel_test.go",
     "server-go/modules/aimee/peer/http_test.go",
-    "server-go/modules/aimee/cmd/peerprobe/main_test.go"
+    "server-go/modules/aimee/cmd/peerprobe/main_test.go",
+    "server-go/modules/aimee/cmd/peerprobe/record_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"

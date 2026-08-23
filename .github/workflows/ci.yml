@@ -280,6 +280,41 @@ jobs:
           make -C src docs-gen-check
           git diff --check
 
+  # Go unit tests, which until now ran in NO job that a pull request into testing
+  # could reach.
+  #
+  # The only CI invocation of `go test` over server-go is in c-repository-pins,
+  # and that workflow says so plainly: "main ONLY, on both triggers... Nothing
+  # here runs for a branch or a PR targeting testing." The `go-unit-tests` make
+  # target exists and covers all three Go modules, but its only caller is
+  # `verify-local`, a developer target that no workflow runs. So every Go package
+  # in server-go, runtime-web and control-web -- the bus, every Go module, the
+  # storage wire -- was gated by nothing on the ordinary PR path, and passed only
+  # because people ran it by hand.
+  #
+  # It uses the make target rather than a list of packages here. A list is the
+  # failure this job exists to fix, one level up: c-repository-pins enumerates
+  # `./bus ./modules/... ./cmd/aimee-module`, so a new top-level Go package in
+  # server-go falls outside it silently. `go-unit-tests` discovers module dirs by
+  # wildcard and runs `./...` in each, so a new package is covered by
+  # construction rather than by somebody remembering.
+  go-unit-tests:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned from go.mod for the same reason the integration harness pins it:
+      # relying on whatever toolchain the runner image ships means the coverage
+      # can disappear with an image bump while the job stays green.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - name: Go unit tests
+        run: make -C src go-unit-tests
+
   build:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -681,7 +716,7 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -694,6 +729,7 @@ jobs:
           SHARDS_PG_RESULT: ${{ needs.unit-test-shards-pg.result }}
           DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
+          GO_RESULT: ${{ needs.go-unit-tests.result }}
         run: |
           if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
             echo "Documentation-only change: unit shards (sqlite and Postgres) and P1 gate skipped."
@@ -715,7 +751,15 @@ jobs:
             echo "DB2 process replay result: $DB2_REPLAY_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, and the P1 RLS gate passed."
+          # Folded in here rather than left as its own context so it BLOCKS.
+          # Branch protection requires this aggregate by name, so a job outside
+          # it runs, reports, and gates nothing -- which is the same as not
+          # running for anything that matters.
+          [ "$GO_RESULT" = success ] || {
+            echo "Go unit-test result: $GO_RESULT" >&2
+            exit 1
+          }
+          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, and the Go unit tests passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
