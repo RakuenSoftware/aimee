@@ -229,6 +229,18 @@ func TestDB1DirectoryRefusesAnEmptyIDWithoutCalling(t *testing.T) {
 // Comments are stripped first: this file's own explanation of the hazard names
 // both, and a guard that fails on its own rationale teaches people to delete the
 // rationale.
+//
+// THIS IS A SYNTAX CHECK AND IT IS SAFE ONLY BECAUSE OF ITS SCOPE. It bans two
+// identifiers by name, which cannot distinguish a correct use from a wrong one
+// -- and inside this ONE file there are no correct uses, so the two coincide.
+// Widen it to the package and that stops being true immediately: peerwire.Status
+// is the right type nearly everywhere else, and the check would report every
+// legitimate use as a defect.
+//
+// A peer described a defect by its punctuation rather than its direction,
+// scanned for it, and got 24 hits that were all correct usage. A scanner wrong
+// about every hit is the same object as a guard that passes having checked
+// nothing; it just fails loudly instead of quietly.
 func TestDB1DirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
 	src, err := os.ReadFile("db1directory.go")
 	if err != nil {
