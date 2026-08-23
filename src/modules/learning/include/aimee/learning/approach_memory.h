@@ -18,8 +18,10 @@
  * Overlap is weaker than an embedding at paraphrase and exactly as good at the
  * case that matters most — the same goal, worded slightly differently.
  *
- * The scoring half is pure and unit-testable; only the record/recall calls
- * touch storage. */
+ * This header is the PURE half: tokenisation, signatures, and overlap. The
+ * storage half lives in src/approach_store.c, because the rows are DB1 (this
+ * machine's observations about its own failed jobs) and a module may not reach
+ * a peer store directly. */
 #ifndef DEC_LEARNING_APPROACH_MEMORY_H
 #define DEC_LEARNING_APPROACH_MEMORY_H 1
 
@@ -55,13 +57,8 @@ extern "C"
     * a perfect match. Pure. */
    double learning_approach_overlap(const char *tokens_a, const char *tokens_b);
 
-   /* Record that `approach` failed against `goal`. Returns 0 on success, -1 on
-    * bad args / storage error. */
-   int learning_approach_record_failure(const char *goal, const char *approach,
-                                        const char *failure_mode, const char *source,
-                                        const char *source_ref);
-
-   /* One recalled dead end. */
+   /* One recalled dead end. Declared here because the scoring half produces
+    * the ranking; the storage half (src/approach_store.c) fills it from DB1. */
    typedef struct
    {
       char goal_text[512];
@@ -71,24 +68,6 @@ extern "C"
       long long occurrences;
       double similarity;
    } learning_approach_hit_t;
-
-   /* Approaches that already failed against a goal like this one, best match
-    * first, filtered to similarity >= APPROACH_MEM_MIN_SIMILARITY. Returns
-    * rows written (capped at max), 0 when nothing is similar enough, or -1 on
-    * bad args / storage error. */
-   int learning_approach_recall(const char *goal, learning_approach_hit_t *out, int max);
-
-   /* Render recalled dead ends as a short advisory block for a plan-time
-    * prompt, or write "" when there is nothing to say. Never blocks and never
-    * instructs — it reports what was tried and what happened.
-    *
-    * WHICH form is rendered is a measurable decision, not a constant: the
-    * LEARNING_POLICY_PLAN_ADVISORY arms decide between saying nothing, one
-    * line, or the full block (S6). `arm_out` receives the arm that was used
-    * (may be NULL). Returns the number of hits rendered — 0 when the chosen
-    * arm says nothing, which is a legitimate outcome and not a failure. */
-   int learning_approach_render(const char *goal, char *out, size_t out_len, char *arm_out,
-                                size_t arm_out_len);
 
 #ifdef __cplusplus
 }

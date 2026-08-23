@@ -9,7 +9,7 @@
 #include "log.h"
 #include "modules/db2/c/db2_learning.h"
 
-#include <aimee/learning/approach_memory.h>
+#include "approach_store.h"
 #include "platform_path.h"
 
 #include <aimee/learning/learning.h>
@@ -130,7 +130,7 @@ static void eval_synthesis_scan_jobs(int window_days, const char *suite,
       char approach[160];
       snprintf(approach, sizeof(approach), "%s via %s", jobs[i].role[0] ? jobs[i].role : "execute",
                jobs[i].agent_name[0] ? jobs[i].agent_name : "the default agent");
-      (void)learning_approach_record_failure(prompt, approach, mode, "agent_job", ref);
+      (void)approach_store_record(prompt, approach, mode, "agent_job", ref);
    }
 
    for (int i = 0; i < n; i++)

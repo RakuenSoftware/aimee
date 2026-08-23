@@ -16,6 +16,7 @@
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
+#include "approach_failures.h"
 #include "cost_fold.h"
 #include "diagnose.h"
 #include "eval.h"
@@ -2008,6 +2009,81 @@ int db1_eval_ablation_grid(const char *suite_or_null, db1_eval_ablation_cell_t *
    {
       out[wire_row].passed = (int)strtol(wire_scratch[wire_row * 2u + 0u], NULL, 10);
       out[wire_row].total = (int)strtol(wire_scratch[wire_row * 2u + 1u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_approach_failure_record(const char *goal_signature, const char *goal_text, const char *goal_tokens, const char *approach_signature, const char *approach_text, const char *failure_mode, const char *source, const char *source_ref)
+{
+   if (!goal_signature || !goal_signature[0] || !approach_signature || !approach_signature[0])
+      return -1;
+   const char *fields[] = {goal_signature, goal_text ? goal_text : "", goal_tokens ? goal_tokens : "", approach_signature, approach_text ? approach_text : "", failure_mode ? failure_mode : "", source ? source : "", source_ref ? source_ref : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_APPROACH_FAILURE_RECORD, fields, 8, NULL, NULL, 0, NULL));
+}
+
+int db1_approach_failure_candidates(const char *must_contain, db1_approach_failure_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {must_contain ? must_contain : "", arg1};
+   char **wire_values = malloc((size_t)max * 12u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 12u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 2u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 12u + 0u] = wire_scratch[wire_row * 2u + 0u];
+      wire_caps[wire_row * 12u + 0u] = sizeof wire_scratch[wire_row * 2u + 0u];
+      wire_values[wire_row * 12u + 1u] = out[wire_row].goal_signature;
+      wire_caps[wire_row * 12u + 1u] = sizeof out[wire_row].goal_signature;
+      wire_values[wire_row * 12u + 2u] = out[wire_row].goal_text;
+      wire_caps[wire_row * 12u + 2u] = sizeof out[wire_row].goal_text;
+      wire_values[wire_row * 12u + 3u] = out[wire_row].goal_tokens;
+      wire_caps[wire_row * 12u + 3u] = sizeof out[wire_row].goal_tokens;
+      wire_values[wire_row * 12u + 4u] = out[wire_row].approach_signature;
+      wire_caps[wire_row * 12u + 4u] = sizeof out[wire_row].approach_signature;
+      wire_values[wire_row * 12u + 5u] = out[wire_row].approach_text;
+      wire_caps[wire_row * 12u + 5u] = sizeof out[wire_row].approach_text;
+      wire_values[wire_row * 12u + 6u] = out[wire_row].failure_mode;
+      wire_caps[wire_row * 12u + 6u] = sizeof out[wire_row].failure_mode;
+      wire_values[wire_row * 12u + 7u] = out[wire_row].source;
+      wire_caps[wire_row * 12u + 7u] = sizeof out[wire_row].source;
+      wire_values[wire_row * 12u + 8u] = out[wire_row].source_ref;
+      wire_caps[wire_row * 12u + 8u] = sizeof out[wire_row].source_ref;
+      wire_values[wire_row * 12u + 9u] = wire_scratch[wire_row * 2u + 1u];
+      wire_caps[wire_row * 12u + 9u] = sizeof wire_scratch[wire_row * 2u + 1u];
+      wire_values[wire_row * 12u + 10u] = out[wire_row].created_at;
+      wire_caps[wire_row * 12u + 10u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 12u + 11u] = out[wire_row].updated_at;
+      wire_caps[wire_row * 12u + 11u] = sizeof out[wire_row].updated_at;
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_APPROACH_FAILURE_CANDIDATES, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 12), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 12u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 12u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 2u + 0u], NULL, 10);
+      out[wire_row].occurrences = (int)strtol(wire_scratch[wire_row * 2u + 1u], NULL, 10);
    }
    free(wire_scratch);
    return wire_rows;

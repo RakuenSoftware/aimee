@@ -38,7 +38,7 @@
 #include "model_registry.h"
 #include "db1.h"
 #include "eval_synthesis.h" /* synthesised regression candidates (S1) */
-#include <aimee/learning/approach_memory.h>
+#include "approach_store.h"
 #include <aimee/learning/attribution.h>
 #include <aimee/learning/policy_arms.h>
 #include "curiosity_resolve.h"
@@ -222,7 +222,7 @@ int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       return server_send_error(conn, "learning.approaches requires goal", request_id);
 
    learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
-   int n = learning_approach_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
+   int n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
    if (n < 0)
       return server_send_error(conn, "learning.approaches: could not recall", request_id);
 
@@ -246,7 +246,7 @@ int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
     * instruction by accident). */
    char rendered[2048];
    char arm[LEARNING_POLICY_ARM_LEN] = "";
-   (void)learning_approach_render(goal, rendered, sizeof(rendered), arm, sizeof(arm));
+   (void)approach_store_render(goal, rendered, sizeof(rendered), arm, sizeof(arm));
    cJSON_AddStringToObject(resp, "advisory", rendered);
    /* Which arm produced it: a caller measuring whether the block earns its
     * tokens needs to know which variant it is measuring. */

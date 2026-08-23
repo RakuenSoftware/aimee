@@ -17,6 +17,7 @@
 #include "modules/db2/c/db2_test_shim.h"
 
 #include <aimee/learning/approach_memory.h>
+#include "approach_store.h"
 #include <aimee/learning/learning.h>
 #include <aimee/learning/policy_arms.h>
 
@@ -166,22 +167,22 @@ static void test_promotion_is_gated_and_reversible(void)
 static void test_the_arm_changes_what_is_actually_said(void)
 {
    /* The registry is only worth anything if the arm reaches real output. */
-   assert(learning_approach_record_failure("Rebuild the search index for the docs project",
-                                           "drop and re-ingest every document", "ran out of disk",
-                                           "agent_job", "agent_job:7") == 0);
+   assert(approach_store_record("Rebuild the search index for the docs project",
+                                "drop and re-ingest every document", "ran out of disk", "agent_job",
+                                "agent_job:7") == 0);
    const char *goal = "rebuild the search index for the docs project";
    char out[2048];
    char arm[LEARNING_POLICY_ARM_LEN];
 
    learning_policy_reset();
-   int n = learning_approach_render(goal, out, sizeof(out), arm, sizeof(arm));
+   int n = approach_store_render(goal, out, sizeof(out), arm, sizeof(arm));
    assert(n == 1);
    assert(strcmp(arm, LEARNING_POLICY_ADVISORY_FULL) == 0);
    assert(strstr(out, "drop and re-ingest every document") != NULL);
 
    assert(learning_policy_promote(LEARNING_POLICY_PLAN_ADVISORY, LEARNING_POLICY_ADVISORY_BRIEF) ==
           0);
-   n = learning_approach_render(goal, out, sizeof(out), arm, sizeof(arm));
+   n = approach_store_render(goal, out, sizeof(out), arm, sizeof(arm));
    assert(n == 1);
    assert(strcmp(arm, LEARNING_POLICY_ADVISORY_BRIEF) == 0);
    /* One line, and crucially NOT the detail. */
@@ -192,7 +193,7 @@ static void test_the_arm_changes_what_is_actually_said(void)
     * cannot mistake silence for "nothing was known". */
    assert(learning_policy_promote(LEARNING_POLICY_PLAN_ADVISORY, LEARNING_POLICY_ADVISORY_OFF) ==
           0);
-   n = learning_approach_render(goal, out, sizeof(out), arm, sizeof(arm));
+   n = approach_store_render(goal, out, sizeof(out), arm, sizeof(arm));
    assert(n == 0);
    assert(out[0] == '\0');
    assert(strcmp(arm, LEARNING_POLICY_ADVISORY_OFF) == 0);

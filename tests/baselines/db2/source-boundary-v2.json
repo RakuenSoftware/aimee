@@ -2385,16 +2385,6 @@
       ]
     },
     {
-      "path": "src/modules/learning/learning_approach_memory.c",
-      "classification": "module-kb-contract",
-      "includes": [
-        {
-          "header": "modules/db2/c/approach_failures.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/modules/learning/learning_bundle.c",
       "classification": "module-kb-contract",
       "includes": [

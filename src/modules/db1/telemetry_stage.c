@@ -13,6 +13,7 @@
 #include "db1_stages.h"
 
 #include "db1_module_api.h"
+#include "approach_failures.h"
 #include "cost_fold.h"
 #include "diagnose.h"
 #include "eval.h"
@@ -2816,6 +2817,96 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
          }
          rows = cells;
          row_count = produced * 4u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_APPROACH_FAILURE_RECORD:
+      if (count != 8u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_approach_failure_record(field[0], field[1], field[2], field[3], field[4], field[5], field[6], field[7]);
+      break;
+   case AIMEE_DB1_OP_APPROACH_FAILURE_CANDIDATES:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 64)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_approach_failure_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_approach_failure_candidates(field[0][0] ? field[0] : NULL, found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 12u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 2u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 2u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            snprintf(numbers[row * 2u + 1u], 32,
+                     "%d", found[row].occurrences);
+            cells[row * 12u + 0u] = numbers[row * 2u + 0u];
+            cells[row * 12u + 1u] = found[row].goal_signature;
+            cells[row * 12u + 2u] = found[row].goal_text;
+            cells[row * 12u + 3u] = found[row].goal_tokens;
+            cells[row * 12u + 4u] = found[row].approach_signature;
+            cells[row * 12u + 5u] = found[row].approach_text;
+            cells[row * 12u + 6u] = found[row].failure_mode;
+            cells[row * 12u + 7u] = found[row].source;
+            cells[row * 12u + 8u] = found[row].source_ref;
+            cells[row * 12u + 9u] = numbers[row * 2u + 1u];
+            cells[row * 12u + 10u] = found[row].created_at;
+            cells[row * 12u + 11u] = found[row].updated_at;
+         }
+         rows = cells;
+         row_count = produced * 12u;
       }
       listed = 1;
       break;

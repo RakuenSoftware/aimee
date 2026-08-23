@@ -14,11 +14,21 @@
 #include "db.h"
 #include "db1.h"
 #include "modules/db2/c/anti_patterns.h"
-#include "modules/db2/c/approach_failures.h"
+#include "approach_failures.h"
+#include "approach_store.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 
 #include <aimee/learning/approach_memory.h>
+
+/* The store has no count helper (nothing in production needs one); the pool
+ * read answers the same question for the test. */
+static int approach_row_count(void)
+{
+   db1_approach_failure_t rows[64];
+   int n = db1_approach_failure_candidates("", rows, 64);
+   return n;
+}
 
 static void test_tokenisation(void)
 {
@@ -87,17 +97,15 @@ static void test_recall_surfaces_the_dead_end(void)
 {
    const char *goal = "Rebuild the search index for the docs project";
 
-   assert(learning_approach_record_failure(goal, "drop and re-ingest every document",
-                                           "ran out of disk partway", "agent_job",
-                                           "agent_job:41") == 0);
-   assert(learning_approach_record_failure("Roll out the new TLS certificate",
-                                           "restart every node at once", "quorum was lost",
-                                           "agent_job", "agent_job:42") == 0);
+   assert(approach_store_record(goal, "drop and re-ingest every document",
+                                "ran out of disk partway", "agent_job", "agent_job:41") == 0);
+   assert(approach_store_record("Roll out the new TLS certificate", "restart every node at once",
+                                "quorum was lost", "agent_job", "agent_job:42") == 0);
 
    /* The same goal, worded differently, finds the dead end. */
    learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
-   int n = learning_approach_recall("rebuild search index for docs project", hits,
-                                    APPROACH_MEM_MAX_RECALL);
+   int n = approach_store_recall("rebuild search index for docs project", hits,
+                                 APPROACH_MEM_MAX_RECALL);
    assert(n == 1);
    assert(strcmp(hits[0].approach_text, "drop and re-ingest every document") == 0);
    assert(strcmp(hits[0].failure_mode, "ran out of disk partway") == 0);
@@ -106,23 +114,22 @@ static void test_recall_surfaces_the_dead_end(void)
 
    /* An unrelated goal recalls nothing — silence is the common case and must
     * stay silent. */
-   assert(learning_approach_recall("write the quarterly board report", hits,
-                                   APPROACH_MEM_MAX_RECALL) == 0);
+   assert(approach_store_recall("write the quarterly board report", hits,
+                                APPROACH_MEM_MAX_RECALL) == 0);
 
    /* The same dead end again is more evidence for one row, not a second row. */
-   assert(learning_approach_record_failure(goal, "drop and re-ingest every document",
-                                           "ran out of disk again", "agent_job",
-                                           "agent_job:43") == 0);
-   n = learning_approach_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
+   assert(approach_store_record(goal, "drop and re-ingest every document", "ran out of disk again",
+                                "agent_job", "agent_job:43") == 0);
+   n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
    assert(n == 1);
    assert(hits[0].occurrences == 2);
-   assert(db2_approach_failure_count() == 2); /* two distinct goals, not three rows */
+   assert(approach_row_count() == 2); /* two distinct goals, not three rows */
 
    /* A second approach to the SAME goal is a distinct dead end, and both come
     * back ranked. */
-   assert(learning_approach_record_failure(goal, "rebuild in place while serving",
-                                           "queries timed out", "agent_job", "agent_job:44") == 0);
-   n = learning_approach_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
+   assert(approach_store_record(goal, "rebuild in place while serving", "queries timed out",
+                                "agent_job", "agent_job:44") == 0);
+   n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
    assert(n == 2);
    assert(hits[0].similarity >= hits[1].similarity);
 }
@@ -130,8 +137,8 @@ static void test_recall_surfaces_the_dead_end(void)
 static void test_render_reports_and_never_instructs(void)
 {
    char out[2048];
-   int n = learning_approach_render("Rebuild the search index for the docs project", out,
-                                    sizeof(out), NULL, 0);
+   int n = approach_store_render("Rebuild the search index for the docs project", out, sizeof(out),
+                                 NULL, 0);
    assert(n >= 1);
    assert(strstr(out, "drop and re-ingest every document") != NULL);
    assert(strstr(out, "ran out of disk") != NULL);
@@ -145,7 +152,7 @@ static void test_render_reports_and_never_instructs(void)
    assert(strstr(out, "never") == NULL);
 
    /* Nothing similar: nothing said, rather than an empty header. */
-   n = learning_approach_render("write the quarterly board report", out, sizeof(out), NULL, 0);
+   n = approach_store_render("write the quarterly board report", out, sizeof(out), NULL, 0);
    assert(n == 0);
    assert(out[0] == '\0');
 }
@@ -171,13 +178,14 @@ static void test_never_touches_the_blocking_path(void)
  * returning 0 rather than -1. */
 static void test_absent_store_means_nothing_known(void)
 {
-   db2_test_shim_close();
+   /* An empty store answers "nothing known" rather than failing. */
    learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
-   assert(learning_approach_recall("rebuild the search index", hits, APPROACH_MEM_MAX_RECALL) == 0);
+   assert(approach_store_recall("a goal nobody has ever attempted here", hits,
+                                APPROACH_MEM_MAX_RECALL) == 0);
    char out[512];
-   assert(learning_approach_render("rebuild the search index", out, sizeof(out), NULL, 0) == 0);
+   assert(approach_store_render("a goal nobody has ever attempted here", out, sizeof(out), NULL,
+                                0) == 0);
    assert(out[0] == '\0');
-   db2_test_shim_open();
 }
 
 int main(void)
@@ -196,14 +204,14 @@ int main(void)
    test_absent_store_means_nothing_known();
 
    /* Bad args are refused rather than guessed. */
-   assert(learning_approach_record_failure(NULL, "a", "m", "s", "r") == -1);
-   assert(learning_approach_record_failure("g", "", "m", "s", "r") == -1);
+   assert(approach_store_record(NULL, "a", "m", "s", "r") == -1);
+   assert(approach_store_record("g", "", "m", "s", "r") == -1);
    /* A goal with no topic words cannot be recalled against, so it is not stored. */
-   assert(learning_approach_record_failure("a to of", "approach", "m", "s", "r") == -1);
+   assert(approach_store_record("a to of", "approach", "m", "s", "r") == -1);
    {
       learning_approach_hit_t hits[2];
-      assert(learning_approach_recall(NULL, hits, 2) == -1);
-      assert(learning_approach_recall("goal", hits, 0) == -1);
+      assert(approach_store_recall(NULL, hits, 2) == -1);
+      assert(approach_store_recall("goal", hits, 0) == -1);
    }
 
    printf("ok\n");

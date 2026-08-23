@@ -198,8 +198,9 @@
    "active": true,
    "doc": "what the system spent and what it noticed: token and cost ledgers, guardrail and interaction events, eval results and diagnoses.",
    "client_doc": "",
-   "covers": "cost_fold, diagnose, eval, guardrail_events, interaction_events, token_audit",
+   "covers": "approach_failures, cost_fold, diagnose, eval, guardrail_events, interaction_events, token_audit",
    "sources": [
+    "approach_failures",
     "cost_fold",
     "diagnose",
     "eval",
@@ -208,6 +209,7 @@
     "token_audit"
    ],
    "retired_sources": [
+    "approach_failures.c",
     "cost_fold.c",
     "diagnose.c",
     "eval.c",
@@ -16063,6 +16065,173 @@
      {
       "name": "total",
       "type": "int"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 57,
+   "name": "approach_failure_record",
+   "c_name": "db1_approach_failure_record",
+   "c_params": [
+    "goal_signature",
+    "goal_text",
+    "goal_tokens",
+    "approach_signature",
+    "approach_text",
+    "failure_mode",
+    "source",
+    "source_ref"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "goal_signature",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "goal_text",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "goal_tokens",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "approach_signature",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "approach_text",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "failure_mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source_ref",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 58,
+   "name": "approach_failure_candidates",
+   "c_name": "db1_approach_failure_candidates",
+   "c_params": [
+    "must_contain",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "must_contain",
+      "type": "text",
+      "required": false,
+      "null_when_empty": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_approach_failure_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "goal_signature",
+      "type": "text"
+     },
+     {
+      "name": "goal_text",
+      "type": "text"
+     },
+     {
+      "name": "goal_tokens",
+      "type": "text"
+     },
+     {
+      "name": "approach_signature",
+      "type": "text"
+     },
+     {
+      "name": "approach_text",
+      "type": "text"
+     },
+     {
+      "name": "failure_mode",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "source_ref",
+      "type": "text"
+     },
+     {
+      "name": "occurrences",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
      }
     ],
     "max_bytes": 262144

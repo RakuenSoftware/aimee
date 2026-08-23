@@ -446,10 +446,6 @@
     },
     {
       "classification": "module-kb-contract",
-      "path": "src/modules/learning/learning_approach_memory.c"
-    },
-    {
-      "classification": "module-kb-contract",
       "path": "src/modules/learning/learning_bundle.c"
     },
     {
@@ -3261,64 +3257,6 @@
       "signature_sha256": "52ced0df22ff8dfff7b31924226177f864d827e9bcb6da2ef350128cfd8238e2",
       "status": "private-test-only",
       "symbol": "db2_apply_schema_sqlite_shim"
-    },
-    {
-      "consumers": [
-        "src/modules/learning/learning_approach_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/approach_failures.h",
-          "line": 77
-        }
-      ],
-      "signature": "int db2_approach_failure_candidates ( const char * must_contain , approach_failure_t * out , int max )",
-      "signature_sha256": "3ed5f00c5dd4756f2ecc1d2c10695467b1c732d6bb531c8eed6ea2571ee9afb0",
-      "status": "audit-pending",
-      "symbol": "db2_approach_failure_candidates"
-    },
-    {
-      "consumers": [
-        "src/tests/test_approach_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/approach_failures.h",
-          "line": 84
-        }
-      ],
-      "signature": "int64_t db2_approach_failure_count ( void )",
-      "signature_sha256": "2058a6d36a77053010c0832e3ac7f4f355dde9921948963e61cee4a275d81112",
-      "status": "private-test-only",
-      "symbol": "db2_approach_failure_count"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/approach_failures.h",
-          "line": 80
-        }
-      ],
-      "signature": "int db2_approach_failure_get ( const char * goal_signature , const char * approach_signature , approach_failure_t * out )",
-      "signature_sha256": "ec40a3a39ebec0898a2dd68ed5c4b92ca0c40705b231112e2429aa07fbd5e453",
-      "status": "internal-unconsumed",
-      "symbol": "db2_approach_failure_get"
-    },
-    {
-      "consumers": [
-        "src/modules/learning/learning_approach_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/approach_failures.h",
-          "line": 61
-        }
-      ],
-      "signature": "int db2_approach_failure_record ( const char * goal_signature , const char * goal_text , const char * goal_tokens , const char * approach_signature , const char * approach_text , const char * failure_mode , const char * source , const char * source_ref )",
-      "signature_sha256": "ad822c5351aeb9d3f2f90e708f22e8c3c8b56d037c59ba9010c8875f08502a06",
-      "status": "audit-pending",
-      "symbol": "db2_approach_failure_record"
     },
     {
       "consumers": [
@@ -22548,7 +22486,6 @@
       "consumers": [
         "src/tests/bench_perf.c",
         "src/tests/fuzz_memory_search.c",
-        "src/tests/test_approach_memory.c",
         "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
@@ -26665,15 +26602,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4eea849ac68dbe935e1756a56565dba3172bb6110adcf0bd56f5cb2aa606669c",
+  "fingerprint": "c747d2039bdb968ab6e20eb4718b55cff0fb0db98abda631afa97bd3d9cee825",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 701,
-    "declarations": 1447,
-    "headers": 141,
-    "internal_unconsumed": 163,
-    "private_test_only": 289,
+    "audit_pending": 699,
+    "declarations": 1443,
+    "headers": 140,
+    "internal_unconsumed": 162,
+    "private_test_only": 288,
     "reviewed": 294
   }
 }
