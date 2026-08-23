@@ -7,7 +7,43 @@
 # Usage: deploy-all.sh [CTID]
 set -u
 CT="${1:-9078}"
-p() { pct push "$CT" "$1" "$2"; }
+deploy_failures=0
+
+# PUSH, THEN PROVE IT LANDED.
+#
+# This was a bare `pct push`. A push that does not happen -- a source file that
+# was never staged on the host, a transfer that failed -- leaves the container
+# running the PREVIOUS copy, and every later result is about that copy.
+#
+# It cost real time: a probe was corrected, the corrected version appeared to be
+# deployed, and the old one kept running and kept failing. The corrected file had
+# never reached the host, and the scp that should have carried it had its output
+# redirected away, so a failed transfer and a successful one looked identical.
+# Three separate runs were spent on the fixed code before the checksum showed it
+# was not the code being run.
+#
+# Comparing checksums is cheap and turns "I pushed it" into "it is there".
+p() {
+  local src="$1" dst="$2" want have
+  if [ ! -e "$src" ]; then
+    echo "DEPLOY FAIL: $src does not exist on the host; $dst keeps its old contents" >&2
+    deploy_failures=$((deploy_failures + 1))
+    return 1
+  fi
+  if ! pct push "$CT" "$src" "$dst"; then
+    echo "DEPLOY FAIL: pct push $src -> $dst failed" >&2
+    deploy_failures=$((deploy_failures + 1))
+    return 1
+  fi
+  want="$(md5sum "$src" | cut -d' ' -f1)"
+  have="$(pct exec "$CT" -- md5sum "$dst" 2>/dev/null | cut -d' ' -f1)"
+  if [ "$want" != "$have" ]; then
+    echo "DEPLOY FAIL: $dst does not match $src after push (want $want, have $have)" >&2
+    deploy_failures=$((deploy_failures + 1))
+    return 1
+  fi
+  return 0
+}
 x() { pct exec "$CT" -- bash -lc "$1"; }
 
 x 'mkdir -p /root/.config/aimee /usr/local/libexec/aimee-modules /root/pgtests'
@@ -101,3 +137,12 @@ x 'bash /root/start-server.sh'               2>&1 | tail -1
 x 'bash /root/install-memory-module-server.sh' 2>&1 | grep -E 'state:'
 echo
 x 'echo "daemons: kb=$(pgrep -cf aimee-kb) server=$(pgrep -cf aimee-server) modules=$(pgrep -cf aimee-module-memory)"'
+
+# A deployment that did not fully land must not read as a deployment.
+if [ "$deploy_failures" -gt 0 ]; then
+  echo
+  echo "DEPLOY INCOMPLETE: $deploy_failures file(s) did not land (see DEPLOY FAIL above)."
+  echo "  The container is running some mixture of new and previous files, so any"
+  echo "  suite result from it is about that mixture and not about this build."
+  exit 1
+fi
