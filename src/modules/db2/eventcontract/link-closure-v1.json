@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "13d3f4b35e79d8b612c5b0f9d1a84ea1a0eb91d4",
-  "source_fingerprint": "1b2a9139c00cdb86cd60a9e26f0c3b5ff696af65f7082cf47536203eade4d5e2",
+  "source_revision": "60f7ba00126df97e70a67794d1c49dd0006055d5",
+  "source_fingerprint": "fb5bbc310542a94789e79164308831f124d400b3bc77d026572ad82696f75a4d",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2920,6 +2920,7 @@
         "src/modules/db2/c/cross_repo_deps.c",
         "src/modules/db2/c/cross_repo_identity.c",
         "src/modules/db2/c/cross_repo_resolver.c",
+        "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db2_reembed.c",
         "src/modules/db2/c/db2_tenant.c",
         "src/modules/db2/c/db2_witness_checkpoint.c",
@@ -3055,6 +3056,7 @@
         "src/modules/db2/c/cross_repo_build.c",
         "src/modules/db2/c/cross_repo_deps.c",
         "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/db_schema.c",
         "src/modules/db2/c/management_jwks_publication.c",
@@ -3190,5 +3192,5 @@
       "system-link": 139
     }
   },
-  "fingerprint": "ef74c6e06a77fcd4ff2147016c5d8a12857241ff50574a3a61fa253c6df3e5bf"
+  "fingerprint": "1d1ec383e5cef51b131fb6c9be30162b239a36b6ebbb1df5bc54f963833ebf08"
 }
