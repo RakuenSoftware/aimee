@@ -99,6 +99,77 @@ after the cause. 69 is validation-only and is not declared in
 `process-contracts.json`; its grant is written by hand into the container and
 never shipped.
 
+## Re-run against the current code
+
+The run recorded below was made at an earlier commit. Everything the module
+ANSWERS has changed since -- session-scoped stages now report `no_directory`
+rather than `unknown_sender` or `no_peer` -- so the record was re-made on a fresh
+container against the current tree. Same shape, different answers, and three new
+findings about the rig itself.
+
+**Result: sixteen checks, green, twice consecutively, `probe exit=0`.** The lines
+that matter, quoted from the run:
+
+```
+  PASS  delivery stage (kind 12033) reachable          err=<nil> status=no_directory
+  ....  module has NO session directory; peer messaging is inert here
+  PASS  module states whether it has a session directory wired=false
+  PASS  unknown sender refused as a SERVED call        status=no_directory
+  PASS  members of an absent channel answers OK with none status=no_directory cells=[]
+  PASS  grant is readable back (module holds state)    status=ok cells=[1]
+  PASS  malformed frame refused at the transport level err=module call failed with status 4
+```
+
+The channel row is the one worth reading twice. It previously answered `ok` with
+no members -- a successful, healthy-looking reply from a module where no channel
+can ever have a member, which is what made the inert module invisible. It now
+answers `no_directory` over a real bus, and the startup line
+
+```
+aimee module: no session directory configured; peer stages will answer
+no_directory until one is wired (grants still served)
+```
+
+appeared in the module's log, which is the first time that code has executed
+anywhere but a unit test.
+
+### What the re-run found about the rig
+
+- **A module that SERVES stages needs `serve=`, not `request=`.** The grants
+  written for the earlier run used `request=` for the module itself, which is
+  what a CLIENT of those kinds declares. Found by reading the config module's own
+  `grants/module.grant.in`, which carries `serve=4609`.
+- **`aimee-server` will not start without the config module.** It exits 1 after
+  `config_wait_ready(10000)` with "server startup rejected invalid
+  configuration", and logs to `$AIMEE_HOME/server.log` rather than stderr, so at
+  `--log-level=debug` on a bare console it is silent. `aimee-module-config` is a
+  separate program from an external repository and has to be built and started
+  first.
+- **The supervisor did not spawn the module in this hand-built rig**, because no
+  `server.modules` manifest was installed -- that manifest is what it spawns
+  from, and this rig seeded grants only. So the module was started directly, and
+  spawn ELIGIBILITY was checked separately and statically, by the same
+  computation `export_c_repositories.py` performs: `aimee` is in the canonical
+  inventory's `required` list, so `enabled` is true and it reaches
+  `server.modules`. That is the fix for the defect the earlier run found, and it
+  holds.
+
+One check is weaker than its name suggests: "unadvertised stage 9 is not served"
+passed with `module call deadline exceeded` rather than an explicit refusal. Not
+being served manifests as a timeout here, not as a clean no, and the check
+accepts any non-nil error.
+
+**Not exercised, again and for the same reason.** Peer-to-peer delivery between
+two live sessions. The module has no directory and nothing registers a session,
+so there is no configuration of this rig in which a message could be delivered.
+Every row above is consistent with that, which is the point of the row that now
+reports it explicitly.
+
+Cleanup: CT 9095 destroyed and verified absent, watchdog stopped, source tarball
+and logs removed, no processes left. Other sessions' containers untouched.
+
+---
+
 Sixteen checks, green on consecutive runs. The count and the rows are asserted
 against the probe by `TestValidationRecordMatchesTheProbe`, because this table
 was hand-transcribed from probe output and dropped a row: the run made fifteen
