@@ -61,6 +61,24 @@ jobs:
       - run: python3 -I scripts/tests/test_generate_c_embedded_header.py -v
       - run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
       - run: python3 -I scripts/check_go_module_runtime_bundle.py
+      # SCOPE, stated because the list reads like a Go gate and is not one.
+      # These are the Go pieces that ship in the module runtime bundle this
+      # workflow builds, tested here without cgo because that is how they are
+      # bundled. It is deliberately NOT complete coverage of server-go: eleven
+      # top-level packages (config, db1, db2, db3, delegate, internal/**,
+      # cmd/aimee-server) fall outside it, and a new top-level package falls
+      # outside it silently.
+      #
+      # That is not a coverage hole, but only because ci.yml's go-unit-tests job
+      # runs `./...` over every Go module and is unfiltered, so it triggers on
+      # pushes to main and PRs into main -- the same events as this workflow,
+      # and more. Before that job existed this list was the only `go test` in
+      # CI, and everything outside it was gated by nothing.
+      #
+      # So do not treat this step as the thing that proves Go is green. If it is
+      # ever the last one standing, replace it with `./...` rather than adding
+      # an entry: an enumerated gate needs its own completeness check, and this
+      # one has never had it.
       - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
       - name: Export standalone repositories
         run: python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
