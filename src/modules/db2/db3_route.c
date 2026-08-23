@@ -146,6 +146,69 @@ static int labels_size(const aimee_db3_apply_t *apply, size_t *size)
    return 0;
 }
 
+static int copy_scope(char *destination, size_t capacity, const char *value)
+{
+   if (!value || !value[0])
+   {
+      destination[0] = '\0';
+      return 0;
+   }
+   size_t length = strlen(value);
+   /* Refused rather than truncated: a workspace cut short is a different
+    * workspace, and it would filter to rows nobody asked for. */
+   if (length >= capacity)
+      return -1;
+   memcpy(destination, value, length + 1);
+   return 0;
+}
+
+int aimee_db3_search_filters_expressible(const aimee_db3_search_filters_t *filters)
+{
+   if (!filters)
+      return 0;
+   /* Every one of these is a filter DB3 v1 has no field for. Emptiness is the
+    * only acceptable value; anything else means the caller is asking for
+    * something this wire cannot ask. */
+   if (filters->exclude_project && filters->exclude_project[0])
+      return 0;
+   if (filters->kind_count > 0 || filters->kinds)
+      return 0;
+   if (filters->rank_column && filters->rank_column[0])
+      return 0;
+   if (filters->label_count > 0 || filters->label_keys || filters->label_values)
+      return 0;
+   return 1;
+}
+
+int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, uint64_t request_id,
+                                   uint64_t required_generation, const float *vector,
+                                   uint32_t dimension, uint32_t top_k,
+                                   aimee_db3_search_request_t *request)
+{
+   if (!filters || !request || !vector)
+      return -1;
+   /* Checked BEFORE anything is written, so a refusal leaves no half-built
+    * request for a caller to use by mistake. */
+   if (!aimee_db3_search_filters_expressible(filters))
+      return -1;
+
+   aimee_db3_search_request_t built = {0};
+   if (copy_scope(built.workspace, sizeof(built.workspace), filters->workspace) != 0 ||
+       copy_scope(built.project, sizeof(built.project), filters->project) != 0 ||
+       copy_scope(built.record_type, sizeof(built.record_type), filters->record_type) != 0)
+      return -1;
+
+   built.request_id = request_id;
+   built.required_generation = required_generation;
+   built.dimension = dimension;
+   built.top_k = top_k;
+   built.vector = vector;
+   if (aimee_db3_search_request_validate(&built) != 0)
+      return -1;
+   *request = built;
+   return 0;
+}
+
 int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
 {
    if (!request || request->request_id == 0 || request->required_generation == 0 ||

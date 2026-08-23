@@ -350,12 +350,86 @@ static void test_wire_codecs(void)
    assert(length == sizeof(expected_apply_v2) && memcmp(wire, expected_apply_v2, length) == 0);
 }
 
+static void test_a_filter_the_wire_cannot_carry_is_refused(void)
+{
+   /* The eight searches reclassified as needing a DB3 v2 all have this shape: a
+    * signature richer than the message. The adapter that drops the filter
+    * produces a WELL-FORMED request, which every provider answers happily and
+    * wrongly, so the refusal has to happen here -- at the build -- and not at
+    * any reader. */
+   float vec[3] = {0.25f, -0.5f, 0.75f};
+   const char *kinds[] = {"note", "fact"};
+   const char *label_keys[] = {"status"};
+   const char *label_values[] = {"open"};
+
+   aimee_db3_search_filters_t base = {
+       .workspace = "workspace-a", .project = "project-a", .record_type = "memory"};
+
+   /* What DB3 v1 can carry builds. */
+   aimee_db3_search_request_t request;
+   assert(aimee_db3_search_filters_expressible(&base) == 1);
+   assert(aimee_db3_search_request_build(&base, 91, 7, vec, 3, 3, &request) == 0);
+   assert(request.vector == vec && request.dimension == 3);
+   assert(strcmp(request.workspace, "workspace-a") == 0);
+   assert(strcmp(request.record_type, "memory") == 0);
+
+   /* And each thing it cannot carry is refused, with nothing built. */
+   struct
+   {
+      const char *what;
+      aimee_db3_search_filters_t filters;
+   } refused[] = {
+       /* pgvec_kb_search_scoped: negation. */
+       {"exclude_project", {.workspace = "workspace-a", .project = "project-a",
+                            .record_type = "memory", .exclude_project = "project-b"}},
+       /* pgvec_memory_vector_search_with_kinds: set membership. */
+       {"kinds", {.workspace = "workspace-a", .project = "project-a", .record_type = "memory",
+                  .kinds = kinds, .kind_count = 2}},
+       /* pgvec_curator_claim_search, pgvec_curator_code_unit_search: which_vec
+        * names the column to rank against, and search carries no collection. */
+       {"rank_column", {.workspace = "workspace-a", .project = "project-a",
+                        .record_type = "memory", .rank_column = "subj_attr"}},
+       /* The optional equality filters on the four curator searches: apply
+        * carries exact labels and search does not. */
+       {"labels", {.workspace = "workspace-a", .project = "project-a", .record_type = "memory",
+                   .label_keys = label_keys, .label_values = label_values, .label_count = 1}},
+   };
+   for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); ++i)
+   {
+      aimee_db3_search_request_t built;
+      memset(&built, 0xAB, sizeof(built));
+      assert(aimee_db3_search_filters_expressible(&refused[i].filters) == 0);
+      assert(aimee_db3_search_request_build(&refused[i].filters, 91, 7, vec, 3, 3, &built) != 0);
+      /* Nothing written. A half-built request is one a caller can use by
+       * mistake, which is the whole failure this exists to stop. */
+      assert(built.request_id != 91);
+   }
+
+   /* A scope too long for its field is refused rather than truncated: a
+    * workspace cut short is a different workspace, and would filter to rows
+    * nobody asked for. */
+   char oversized[AIMEE_DB3_MAX_SCOPE + 8];
+   memset(oversized, 'w', sizeof(oversized) - 1);
+   oversized[sizeof(oversized) - 1] = '\0';
+   aimee_db3_search_filters_t long_scope = base;
+   long_scope.workspace = oversized;
+   assert(aimee_db3_search_request_build(&long_scope, 91, 7, vec, 3, 3, &request) != 0);
+
+   /* And the builder refuses what validate refuses, rather than handing back a
+    * request that only fails later. */
+   aimee_db3_search_filters_t no_scope = {.record_type = "memory"};
+   assert(aimee_db3_search_request_build(&no_scope, 91, 7, vec, 3, 3, &request) != 0);
+   assert(aimee_db3_search_request_build(&base, 0, 7, vec, 3, 3, &request) != 0);
+   assert(aimee_db3_search_request_build(&base, 91, 7, vec, 0, 3, &request) != 0);
+}
+
 int main(void)
 {
    test_default_external_and_authorization();
    test_fail_closed_and_explicit_fallback();
    test_invalid_requests();
    test_wire_codecs();
+   test_a_filter_the_wire_cannot_carry_is_refused();
    puts("test_db3_route: routing, fallback, revalidation, and codecs passed");
    return 0;
 }

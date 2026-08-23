@@ -111,6 +111,63 @@ typedef struct
    aimee_db3_search_reply_t reply;
 } aimee_db3_search_outcome_t;
 
+/* The filters a DB2 search call actually has, as opposed to the three DB3 v1 can
+ * carry.
+ *
+ * This type exists so that a filter with nowhere to go is a COMPILE-TIME
+ * decision and a run-time refusal, rather than an argument someone forgot to
+ * pass on. Every field below that DB3 v1 cannot express must be empty; supplying
+ * one is refused, and the request is not built.
+ *
+ * The refusal matters more than it looks. A request built without a filter is
+ * well-formed: the provider answers it, scores it and ranks it, and the result
+ * is indistinguishable from a correct one. It returns MORE rows, all plausible.
+ * Nothing anywhere raises an error. That is why this is checked where the
+ * request is made and not where it is read. */
+typedef struct
+{
+   /* Carried by DB3 v1. */
+   const char *workspace;   /* NULL or "" for no filter */
+   const char *project;     /* NULL or "" for no filter */
+   const char *record_type; /* required */
+
+   /* NOT carried by DB3 v1. Each must be empty; each is refused if it is not.
+    *
+    * exclude_project is negation, and kinds is set membership: both are a filter
+    * language, which is more than this contract should answer at v1. rank_column
+    * names which of several vector columns on one row to rank against, and needs
+    * search to carry the collection that apply already names. labels need the
+    * exact-label filter apply already has and search does not, which is the same
+    * asymmetry. All four are named here so an adapter cannot quietly not have
+    * them. */
+   const char *exclude_project;
+   const char *const *kinds;
+   size_t kind_count;
+   const char *rank_column;
+   const char *const *label_keys;
+   const char *const *label_values;
+   size_t label_count;
+} aimee_db3_search_filters_t;
+
+/* Build a search request, or refuse.
+ *
+ * Returns 0 having filled `request` (its vector pointing at `vector`), or -1
+ * having filled nothing. -1 means either an invalid request or a filter DB3 v1
+ * cannot carry, and the caller must fall back to the built-in path rather than
+ * search without it.
+ *
+ * `vector` stays owned by the caller and must outlive the request. */
+int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, uint64_t request_id,
+                                   uint64_t required_generation, const float *vector,
+                                   uint32_t dimension, uint32_t top_k,
+                                   aimee_db3_search_request_t *request);
+
+/* Reports whether these filters can cross DB3 v1 at all, without building.
+ *
+ * For a caller deciding whether to route externally before it has a request to
+ * build. Same answer as the builder's, so the two cannot disagree. */
+int aimee_db3_search_filters_expressible(const aimee_db3_search_filters_t *filters);
+
 int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request);
 int aimee_db3_search_reply_validate(const aimee_db3_search_request_t *request,
                                     const aimee_db3_search_reply_t *reply);
