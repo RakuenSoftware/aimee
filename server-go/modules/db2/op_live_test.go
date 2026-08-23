@@ -2061,6 +2061,89 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:   "corpus_pipeline_status",
+			stage:  db2contract.StageCorpusPipelineStatus,
+			encode: db2contract.EncodeCorpusPipelineStatusRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, _, _, err :=
+					db2contract.DecodeCorpusPipelineStatusReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_project_status",
+			stage: db2contract.StageKBProjectStatus,
+			// Four counts from two tables in one statement, one of them a
+			// scalar subquery over a three-way join.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBProjectStatusRequest(liveProbeScopeProject)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, err := db2contract.DecodeKBProjectStatusReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 1 {
+					t.Fatal("the counts could not be read against a real schema")
+				}
+			},
+		},
+		{
+			name:   "kb_reembed_status",
+			stage:  db2contract.StageKBReembedStatus,
+			encode: db2contract.EncodeKBReembedStatusRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, _, _, err :=
+					db2contract.DecodeKBReembedStatusReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_release_read",
+			stage: db2contract.StageKBReleaseRead,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBReleaseReadRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, err := db2contract.DecodeKBReleaseReadReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a release that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "mining_job_get",
+			stage: db2contract.StageMiningJobGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMiningJobGetRequest("live-probe-job")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, _, err := db2contract.DecodeMiningJobGetReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_ingest_queue_recent",
+			stage: db2contract.StageKBIngestQueueRecent,
+			// A CASE in the ordering followed by a COALESCE with an explicit
+			// null placement, which is the shape PostgreSQL is particular
+			// about.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBIngestQueueRecentRequest(20)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeKBIngestQueueRecentReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
