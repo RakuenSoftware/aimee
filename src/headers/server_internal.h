@@ -15,6 +15,7 @@ void server_health_add_kb(cJSON *resp);
 #define EVAL_CANDIDATES_MAX_ROWS 100
 int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_attribution(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_eval_candidates_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_eval_results(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_eval_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

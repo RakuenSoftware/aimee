@@ -12,3 +12,4 @@
     {"eval.candidates", handle_eval_candidates},
     {"eval.candidates-update", handle_eval_candidates_update},
     {"learning.approaches", handle_learning_approaches},
+    {"learning.attribution", handle_learning_attribution},

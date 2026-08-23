@@ -134,6 +134,44 @@ void pt_print_learning_approaches(const char *method, cJSON *resp)
    }
 }
 
+cJSON *marshal_learning_attribution(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("learning.attribution");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "suite", opts.positional[0]);
+   return req;
+}
+
+void pt_print_learning_attribution(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "arms");
+   if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) == 0)
+   {
+      printf("No ablation arms recorded. Run `aimee eval run <suite> --ablation all` first.\n");
+      return;
+   }
+   printf("Baseline: %s (a capability needs %d paired tasks to carry a claim)\n\n",
+          json_str(resp, "baseline"), json_int(resp, "min_tasks", 0));
+   printf("%-14s %-7s %-8s %s\n", "REMOVED", "TASKS", "DELTA", "VERDICT");
+   cJSON *it = NULL;
+   cJSON_ArrayForEach(it, arr)
+   {
+      cJSON *tasks = cJSON_GetObjectItemCaseSensitive(it, "tasks_compared");
+      cJSON *delta = cJSON_GetObjectItemCaseSensitive(it, "delta");
+      int attributable = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "attributable"));
+      double d = cJSON_IsNumber(delta) ? delta->valuedouble : 0.0;
+      const char *verdict = !attributable ? "not enough paired runs"
+                            : d > 0.0     ? "removing it cost us"
+                            : d < 0.0     ? "runs were better without it"
+                                          : "no measured effect";
+      printf("%-14s %-7d %-+8.3f %s\n", json_str(it, "ablation"),
+             cJSON_IsNumber(tasks) ? tasks->valueint : 0, d, verdict);
+   }
+}
+
 static void print_eval_run(cJSON *resp)
 {
    cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "results");

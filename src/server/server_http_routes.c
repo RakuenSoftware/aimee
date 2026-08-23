@@ -2094,15 +2094,14 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/worktree/gc", NULL, RM_EXACT, "worktree.gc", 0, rh_dispatch_op},
     {"POST", "/v1/aux/test", NULL, RM_EXACT, "aux.test", 0, rh_dispatch_op},
     {"GET", "/v1/eval/results", NULL, RM_EXACT, "eval.results", 0, rh_dispatch_op},
-    /* Synthesised regression candidates. The read is a plain listing; the
-     * write sweeps the failure ledgers, admits, rejects, or retires — all
-     * bounded DB + filesystem work with no LLM step, so both stay on the
-     * synchronous bridge. */
+    /* Synthesised regression candidates: bounded DB + filesystem work with no
+     * LLM step, so both the read and the write stay on the synchronous bridge. */
     {"GET", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates", 0, rh_dispatch_op},
     {"POST", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates-update", 0, rh_dispatch_op},
-    /* Approach-level negative knowledge: a read of what already failed
-     * against a goal like this one. Advisory context, never a block. */
+    /* Advisory recall of what already failed against a similar goal. */
     {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", 0, rh_dispatch_op},
+    /* Measured per-capability credit; reads recorded rows, triggers no run. */
+    {"GET", "/v1/learning/attribution", NULL, RM_EXACT, "learning.attribution", 0, rh_dispatch_op},
     /* Roundtable authoring pipelines. Every one of these is a DB-backed state
      * machine (rtp_* accessors in server_pipeline.c) that returns the next action
      * for the caller to take -- none of them runs a panel or any other LLM work

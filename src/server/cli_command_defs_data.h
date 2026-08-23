@@ -203,7 +203,9 @@
      AIMEE_CMD_TIER_ADVANCED, 0,
      "  approaches \"<goal>\"\n"
      "                   Approaches that already failed against a similar goal\n"
-     "                   (advisory recall for planning; never blocks)\n"},
+     "                   (advisory recall for planning; never blocks)\n"
+     "  attribution [suite]\n"
+     "                   Measured per-capability contribution from the ablation grid\n"},
     {"aux", "Auxiliary model routing", AIMEE_CMD_TIER_ADVANCED, 0,
      "  config           Show resolved aux task->provider/model mapping\n"
      "  test <task> \"<prompt>\"\n"

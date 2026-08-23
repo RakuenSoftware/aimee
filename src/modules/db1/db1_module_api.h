@@ -379,6 +379,7 @@
 #define AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_REJECTED           53u
 #define AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_ARCHIVED           54u
 #define AIMEE_DB1_OP_EVAL_CANDIDATE_SET_PASSING_WINDOWS     55u
+#define AIMEE_DB1_OP_EVAL_ABLATION_GRID                     56u
 
 /* Family 9: per-session guardrail state: the hook's view of a session, stored
  * as a scalar row plus five child tables and read back as one nested struct. */

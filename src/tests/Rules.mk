@@ -685,6 +685,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
                $(TESTPREFIX)/unit-test-learning-regret \
                $(TESTPREFIX)/unit-test-approach-memory \
+               $(TESTPREFIX)/unit-test-learning-attribution \
                $(TESTPREFIX)/unit-test-eval-candidates \
                $(TESTPREFIX)/unit-test-memory-recall-pivot \
                $(TESTPREFIX)/unit-test-memory-filter \
@@ -6934,6 +6935,10 @@ $(TESTPREFIX)/unit-test-learning-metrics: $(OBJDIR)/tests/test_learning_metrics.
                      $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_regret.o $(OBJDIR)/modules/learning/learning_implicit.o \
                      $(OBJDIR)/modules/learning/learning_signal_policy.o \
                      $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-learning-attribution: $(OBJDIR)/tests/test_learning_attribution.o \
+                     $(OBJDIR)/modules/learning/learning_attribution.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-approach-memory: $(OBJDIR)/tests/test_approach_memory.o \

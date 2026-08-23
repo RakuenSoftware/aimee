@@ -16007,6 +16007,68 @@
    }
   },
   {
+   "family": "telemetry",
+   "id": 56,
+   "name": "eval_ablation_grid",
+   "c_name": "db1_eval_ablation_grid",
+   "c_params": [
+    "suite_or_null",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "suite_or_null",
+      "type": "text",
+      "required": false,
+      "null_when_empty": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_eval_ablation_cell_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 512
+    },
+    "fields": [
+     {
+      "name": "task_name",
+      "type": "text"
+     },
+     {
+      "name": "ablation",
+      "type": "text"
+     },
+     {
+      "name": "passed",
+      "type": "int"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
    "family": "guardrail_state",
    "id": 1,
    "name": "session_state_load",

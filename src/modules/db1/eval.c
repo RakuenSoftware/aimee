@@ -489,3 +489,37 @@ int db1_eval_candidate_set_passing_windows(int64_t id, int windows)
    sqlite3_finalize(stmt);
    return rc == SQLITE_DONE ? 0 : -1;
 }
+
+int db1_eval_ablation_grid(const char *suite_or_null, db1_eval_ablation_cell_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   const char *suite = (suite_or_null && suite_or_null[0]) ? suite_or_null : "";
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql =
+       "SELECT task_name, ablation, SUM(CASE WHEN success THEN 1 ELSE 0 END), COUNT(*)"
+       " FROM eval_results WHERE (? = '' OR suite = ?) AND task_name <> ''"
+       " GROUP BY task_name, ablation ORDER BY task_name, ablation LIMIT ?";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, suite, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 2, suite, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 3, max);
+
+   int n = 0;
+   while (n < max && sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      memset(&out[n], 0, sizeof(out[n]));
+      eval_cand_copy(out[n].task_name, sizeof(out[n].task_name), sqlite3_column_text(stmt, 0));
+      eval_cand_copy(out[n].ablation, sizeof(out[n].ablation), sqlite3_column_text(stmt, 1));
+      out[n].passed = sqlite3_column_int(stmt, 2);
+      out[n].total = sqlite3_column_int(stmt, 3);
+      n++;
+   }
+   sqlite3_finalize(stmt);
+   return n;
+}

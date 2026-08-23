@@ -3236,6 +3236,10 @@ paths:
       summary: Approaches that already failed against a similar goal
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Recalled dead ends, content: { application/json: { schema: { type: object } } } } }
+  /learning/attribution:
+    get:
+      summary: Measured per-capability contribution from the ablation grid
+      responses: { "200": { description: Attribution per ablation arm, content: { application/json: { schema: { type: object } } } } }
   /eval/candidates:
     get:
       summary: Synthesised regression candidates and the admission gate

@@ -1962,4 +1962,55 @@ int db1_eval_candidate_set_passing_windows(int64_t id, int windows)
    return write_result(call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_SET_PASSING_WINDOWS, fields, 2, NULL, NULL, 0, NULL));
 }
 
+int db1_eval_ablation_grid(const char *suite_or_null, db1_eval_ablation_cell_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 512)
+      max = 512;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {suite_or_null ? suite_or_null : "", arg1};
+   char **wire_values = malloc((size_t)max * 4u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 4u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 2u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 4u + 0u] = out[wire_row].task_name;
+      wire_caps[wire_row * 4u + 0u] = sizeof out[wire_row].task_name;
+      wire_values[wire_row * 4u + 1u] = out[wire_row].ablation;
+      wire_caps[wire_row * 4u + 1u] = sizeof out[wire_row].ablation;
+      wire_values[wire_row * 4u + 2u] = wire_scratch[wire_row * 2u + 0u];
+      wire_caps[wire_row * 4u + 2u] = sizeof wire_scratch[wire_row * 2u + 0u];
+      wire_values[wire_row * 4u + 3u] = wire_scratch[wire_row * 2u + 1u];
+      wire_caps[wire_row * 4u + 3u] = sizeof wire_scratch[wire_row * 2u + 1u];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_EVAL_ABLATION_GRID, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 4), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 4u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 4u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].passed = (int)strtol(wire_scratch[wire_row * 2u + 0u], NULL, 10);
+      out[wire_row].total = (int)strtol(wire_scratch[wire_row * 2u + 1u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
 /* clang-format on */

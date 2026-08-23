@@ -39,6 +39,7 @@
 #include "db1.h"
 #include "eval_synthesis.h" /* synthesised regression candidates (S1) */
 #include <aimee/learning/approach_memory.h>
+#include <aimee/learning/attribution.h>
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -244,6 +245,40 @@ int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    char rendered[2048];
    (void)learning_approach_render(goal, rendered, sizeof(rendered));
    cJSON_AddStringToObject(resp, "advisory", rendered);
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_learning_attribution(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *suite = server_eval_json_str(req, "suite");
+
+   learning_attribution_t arms[LEARNING_ATTRIBUTION_MAX_ARMS];
+   int n = eval_attribution_for_suite(suite[0] ? suite : NULL, arms, LEARNING_ATTRIBUTION_MAX_ARMS);
+   if (n < 0)
+      return server_send_error(conn, "learning.attribution: could not read the grid", request_id);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "baseline", LEARNING_ATTRIBUTION_BASELINE);
+   cJSON_AddNumberToObject(resp, "min_tasks", LEARNING_ATTRIBUTION_MIN_TASKS);
+   cJSON *arr = cJSON_AddArrayToObject(resp, "arms");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "ablation", arms[i].ablation);
+      cJSON_AddNumberToObject(o, "tasks_compared", arms[i].tasks_compared);
+      cJSON_AddNumberToObject(o, "baseline_passed", arms[i].baseline_passed);
+      cJSON_AddNumberToObject(o, "arm_passed", arms[i].arm_passed);
+      cJSON_AddNumberToObject(o, "delta", arms[i].delta);
+      cJSON_AddBoolToObject(o, "attributable", arms[i].attributable);
+      cJSON_AddItemToArray(arr, o);
+   }
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);

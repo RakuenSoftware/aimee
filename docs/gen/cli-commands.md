@@ -591,6 +591,8 @@ Subcommands:
   approaches "<goal>"
                    Approaches that already failed against a similar goal
                    (advisory recall for planning; never blocks)
+  attribution [suite]
+                   Measured per-capability contribution from the ablation grid
 ```
 
 ### `aimee model`

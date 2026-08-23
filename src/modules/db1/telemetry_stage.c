@@ -2756,6 +2756,70 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
       rc = db1_eval_candidate_set_passing_windows(parsed0, parsed1);
       break;
    }
+   case AIMEE_DB1_OP_EVAL_ABLATION_GRID:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 512)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_eval_ablation_cell_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_eval_ablation_grid(field[0][0] ? field[0] : NULL, found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 4u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 2u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 2u + 0u], 32,
+                     "%d", found[row].passed);
+            snprintf(numbers[row * 2u + 1u], 32,
+                     "%d", found[row].total);
+            cells[row * 4u + 0u] = found[row].task_name;
+            cells[row * 4u + 1u] = found[row].ablation;
+            cells[row * 4u + 2u] = numbers[row * 2u + 0u];
+            cells[row * 4u + 3u] = numbers[row * 2u + 1u];
+         }
+         rows = cells;
+         row_count = produced * 4u;
+      }
+      listed = 1;
+      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

@@ -10,6 +10,7 @@
 #include "../db1/server_sessions.h"
 #include "eval_synthesis.h" /* the regression-candidate surface stubbed below */
 #include <aimee/learning/approach_memory.h>
+#include <aimee/learning/attribution.h>
 #include "kb_client.h"       /* kb_health_t for the stub below */
 #include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
@@ -446,6 +447,13 @@ int learning_approach_render(const char *goal, char *out, size_t out_len)
    if (out && out_len)
       out[0] = '\0';
    return 0;
+}
+
+int eval_attribution_for_suite(const char *suite_or_null, learning_attribution_t *out, int max)
+{
+   (void)suite_or_null;
+   (void)out;
+   return max > 0 ? 0 : -1;
 }
 
 int server_load_token(server_ctx_t *ctx)

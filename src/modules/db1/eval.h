@@ -174,6 +174,28 @@ extern "C"
    /* Set the consecutive-passing-window counter on an admitted row. */
    int db1_eval_candidate_set_passing_windows(int64_t id, int windows);
 
+   /* --- Ablation grid (recursive-self-improvement S2) ---
+    *
+    * `aimee eval run --ablation all` already runs every task once per preset,
+    * each preset removing one capability, and records the outcome. That grid is
+    * a counterfactual the harness produces and nobody reads: same task, one
+    * thing changed, same success check. These cells are that grid. */
+
+#define DB1_EVAL_ABLATION_LEN 32
+
+   typedef struct
+   {
+      char task_name[DB1_EVAL_TASK_NAME];
+      char ablation[DB1_EVAL_ABLATION_LEN];
+      int passed;
+      int total;
+   } db1_eval_ablation_cell_t;
+
+   /* (task_name, ablation) cells with pass/total counts, optionally filtered by
+    * suite, ordered by task then ablation so a caller can walk them grouped.
+    * Returns rows written (capped at max) or -1 on error. */
+   int db1_eval_ablation_grid(const char *suite_or_null, db1_eval_ablation_cell_t *out, int max);
+
 #ifdef __cplusplus
 }
 #endif

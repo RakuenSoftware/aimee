@@ -14,6 +14,7 @@
 #ifndef DEC_EVAL_SYNTHESIS_H
 #define DEC_EVAL_SYNTHESIS_H 1
 
+#include <aimee/learning/attribution.h>
 #include <aimee/learning/eval_synthesis.h>
 
 #ifdef __cplusplus
@@ -98,6 +99,11 @@ extern "C"
     * lack of evidence). `retire_windows` <= 0 picks the default. Returns the
     * number retired (>= 0), or -1 on bad args. */
    int eval_synthesis_retire(const char *suite_dir, int retire_windows);
+
+   /* Read the ablation grid from DB1 and attribute it (S2). The policy is pure
+    * and lives in the learning module; this is the half that may reach the
+    * store. `suite_or_null` filters. Returns arms written or -1 on error. */
+   int eval_attribution_for_suite(const char *suite_or_null, learning_attribution_t *out, int max);
 
 #ifdef __cplusplus
 }

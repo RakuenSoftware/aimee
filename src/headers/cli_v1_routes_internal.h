@@ -39,6 +39,7 @@ cJSON *marshal_curator_contradictions(int argc, char **argv);
 /* The eval.* family lives in cli_v1_routes_f.c. */
 cJSON *marshal_eval_candidates(int argc, char **argv);
 cJSON *marshal_learning_approaches(int argc, char **argv);
+cJSON *marshal_learning_attribution(int argc, char **argv);
 cJSON *marshal_eval_candidates_update(int argc, char **argv);
 cJSON *marshal_eval_results(int argc, char **argv);
 cJSON *marshal_eval_run(int argc, char **argv);
@@ -176,6 +177,7 @@ void pt_print_dogfood_report(const char *method, cJSON *resp);
 void pt_print_dogfood_tag(const char *method, cJSON *resp);
 void pt_print_eval_candidates(const char *method, cJSON *resp);
 void pt_print_learning_approaches(const char *method, cJSON *resp);
+void pt_print_learning_attribution(const char *method, cJSON *resp);
 void pt_print_eval_candidates_update(const char *method, cJSON *resp);
 void pt_print_eval_results(const char *method, cJSON *resp);
 void pt_print_eval_run(const char *method, cJSON *resp);

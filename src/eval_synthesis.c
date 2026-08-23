@@ -359,3 +359,32 @@ int eval_synthesis_retire(const char *suite_dir, int retire_windows)
    }
    return retired;
 }
+
+/* --- Attribution (S2): read the grid, hand it to the pure policy --- */
+
+#define EVAL_ATTRIBUTION_MAX_CELLS 512
+
+int eval_attribution_for_suite(const char *suite_or_null, learning_attribution_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+
+   static db1_eval_ablation_cell_t rows[EVAL_ATTRIBUTION_MAX_CELLS];
+   int n = db1_eval_ablation_grid(suite_or_null, rows, EVAL_ATTRIBUTION_MAX_CELLS);
+   if (n < 0)
+      return -1;
+
+   /* Convert the store's row into the learning module's own cell: a module may
+    * only reach a peer over the bus, so the shapes are deliberately separate
+    * and this is the one place they meet. */
+   static learning_ablation_cell_t cells[EVAL_ATTRIBUTION_MAX_CELLS];
+   for (int i = 0; i < n; i++)
+   {
+      memset(&cells[i], 0, sizeof(cells[i]));
+      snprintf(cells[i].task_name, sizeof(cells[i].task_name), "%s", rows[i].task_name);
+      snprintf(cells[i].ablation, sizeof(cells[i].ablation), "%s", rows[i].ablation);
+      cells[i].passed = rows[i].passed;
+      cells[i].total = rows[i].total;
+   }
+   return learning_attribution_compute(cells, n, out, max);
+}
