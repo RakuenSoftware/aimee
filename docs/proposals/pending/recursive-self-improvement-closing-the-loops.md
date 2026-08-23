@@ -177,6 +177,15 @@ window, overall and per sink. `learning_gate_check()` returns closed when the ov
 share is below the configured floor. Every gated promotion consults it: ranker commit,
 S1 admission, S5 threshold changes.
 
+**The gate must be answered by the knowledge service, not by the daemon.** It
+reads the learning ledger, which is DB2, and the daemon builds with DB2
+compiled out — a daemon computing it locally always answers "nothing observed"
+however self-referential the ledger has become, which makes the gate inert
+exactly where it is enforced. It is served by `learning.endogeneity` on the KB
+and consulted through `kb_client`. A reachable service reporting a closed gate
+stops admission; an unreachable one does not, because no reachable ledger means
+nothing is being committed into one.
+
 **Why first.** It is cheap, it is the only slice that *constrains* the others, and it
 turns "is aimee learning, or hallucinating at itself?" into a number an operator can
 see.
@@ -370,9 +379,13 @@ measured (S5), and the recursion is bounded (S0).
 
 ## Delivery record — S2 to S6 (2026-08-23)
 
-Validated on a separate host, including against real PostgreSQL, a live server,
-and exploratory probing:
-[validation report](../../validation/recursive-self-improvement-s2-s6-2026-08-23.md).
+Validated on a separate host: the
+[S2–S6 report](../../validation/recursive-self-improvement-s2-s6-2026-08-23.md)
+covers the daemon-only run, and the
+[full-stack report](../../validation/recursive-self-improvement-full-stack-2026-08-23.md)
+covers `aimee-kb` on real PostgreSQL alongside `aimee-server` — which is where
+S0's gate was found to be inert in the daemon and was moved to the knowledge
+service.
 
 Each slice below was built, unit-tested, and landed with `make -j8 all`,
 `make unit-tests`, and `make lint` (63/63) clean. Three were narrowed against

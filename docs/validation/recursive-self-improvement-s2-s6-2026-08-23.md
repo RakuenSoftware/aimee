@@ -5,6 +5,12 @@ Proves the S2–S6 slices of
 S0 and S1 were validated separately in
 [the earlier report](recursive-self-improvement-s0-s1-2026-08-23.md).
 
+> **Superseded in part.** This report's live section was written with
+> `aimee-server` up but **not `aimee-kb`**. Running the full stack afterwards
+> found a third defect of the same class and changed what the gate reports; see
+> [the full-stack report](recursive-self-improvement-full-stack-2026-08-23.md).
+> Everything else here still stands.
+
 - **Commit:** `b8c090439d` — "fix: move approach memory to DB1, where the daemon
   can actually reach it", on `worktree-recursive-self-improvement`, branched
   from `origin/testing` at `a2fac47caa`.
