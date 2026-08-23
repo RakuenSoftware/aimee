@@ -337,34 +337,63 @@ component at principal ref 31 in `src/modules/process-contracts.json`, the inven
 `tests/baselines/modules/canonical-inventory.yaml`, the dispatch case in
 `server-go/cmd/aimee-module/main.go`, and `docs/modules/aimee.md`.
 
-| Slice | State |
-|---|---|
-| The `aimee` module itself — descriptor, contract, inventory, dispatch, docs | **done** |
-| D1 labels and lookup | **done** in-module; directory moves to `db1` (see below) |
-| D2 pull-based delivery, inbox lifetime | **done** |
-| D3 live announcement (`Notify` seam) | **done** in the registry; Runtime wiring to the presence-event stream outstanding |
-| D4 `Send` / `Ask` / `Reply` | **done** |
-| D4 channels | **done** — `peer/channel.go`, stage `peer-channel`, per-recipient outcomes |
-| D5 envelope, provenance, grants | **done** |
-| D6 bus tap / `execution-policy` verdict | **not started** — attaches at the `Notify` seam |
-| D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** |
-| D8 bus stages | **done** — 12033/12034/12035/12036 |
-| D8 `/v1` routes | **done** |
-| D8 MCP / ACP mirroring | not started (P4) |
-| Directory read from `db1` | **seam only** — `DirectorySource` is defined and unimplemented |
-| Durable inboxes | **not started** — needs the `postgres` generic storage wire |
+**"Done" below means BUILT AND TESTED, which is not the same as reachable.** The
+distinction is not pedantic here: as deployed, the module has no session
+directory and nothing registers a session, so no session can exist and every
+session-scoped stage answers `no_directory`. The registry, delivery, inboxes,
+channels and hop budget are all implemented and covered, and none of them can be
+exercised by a real caller yet. The `/v1` routes are further back still --
+mounted by nothing at all.
 
-29 tests green under `-race`. Verified by mutation, not only by passing:
+The third column says which, because the first two columns said "done" for both
+and that is how this went unnoticed through a container validation.
+
+| Slice | Built | Reachable as deployed |
+|---|---|---|
+| The `aimee` module itself — descriptor, contract, inventory, dispatch, docs | **done** | yes — the module runs and serves |
+| D1 labels and lookup | **done** in-module; directory moves to `db1` (see below) | no — needs a session to label |
+| D2 pull-based delivery, inbox lifetime | **done** | no — no session can exist |
+| D3 live announcement (`Notify` seam) | **done** in the registry; Runtime wiring outstanding | no — nothing to announce, and no subscriber |
+| D4 `Send` / `Ask` / `Reply` | **done** | no — no session can exist |
+| D4 channels | **done** — `peer/channel.go`, stage `peer-channel`, per-recipient outcomes | no — no session can join |
+| D5 envelope, provenance, grants | **done** | grants YES; envelope and provenance no |
+| D6 bus tap / `execution-policy` verdict | **not started** — attaches at the `Notify` seam | no |
+| D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** | no — no traffic to bound |
+| D8 bus stages | **done** — 12033/12034/12035/12036 | advertised and routed; session stages answer `no_directory` |
+| D8 `/v1` routes | **done** and MOUNTED BY NOTHING — no caller constructs `Registry.Handler`, so no client can reach a route | no |
+| D8 MCP / ACP mirroring | not started (P4) | no |
+| Directory read from `db1` | **seam only** — `DirectorySource` is defined and unimplemented | no — and this is what gates every "no" above |
+| Durable inboxes | **not started** — needs the `postgres` generic storage wire | no |
+
+60 tests green under `-race`. Verified by mutation, not only by passing:
 
 - removing the cycle walk makes both cycle tests fail (they hang to their deadlines — the exact
   wedge the check prevents);
 - un-advertising one declared stage fails three independent tests with the precise diagnostic
   "declares `peer-grant` (event 12035) … but never advertises it".
 
-**Known gaps, stated rather than implied.** The directory is still the module's in-memory map: the
-`DirectorySource` hook exists and `db1` is not yet called through it, so until that lands there are
-two answers to "which sessions exist". Inboxes do not survive a process restart. The governance tap
-is unwired, so peer sends are not yet in the audit chain and A9 is unmet.
+**Known gaps, stated rather than implied.** The largest one was not stated at
+all until it was found by asking what CALLS this in production, rather than
+whether the tests pass.
+
+As deployed, the module cannot have a session. `DirectorySource` is unimplemented,
+and nothing else populates the registry either -- `Register` has no caller outside
+tests, and no bus op reaches it. So peer messaging is INERT in the shipped
+artifact, and was inert throughout the container validation that reported fifteen
+green checks.
+
+Those checks could not have caught it. A module that correctly refuses an
+unregistered sender and a module that can never have a sender both answer
+`unknown_sender`. The channel row is worse than a refusal: "members of an absent
+channel answers OK with none" is a SUCCESS, and the same success a working module
+would print. The module now answers `no_directory` for session-scoped stages --
+a fact about the module rather than about the caller's session -- and the probe
+establishes which configuration it is talking to before asserting any refusal.
+
+The remaining gaps, unchanged: inboxes do not survive a process restart; the
+governance tap is unwired, so peer sends are not in the audit chain and A9 is
+unmet; and the `/v1` routes are built and tested but constructed by no caller, so
+no client can reach one.
 
 ## Merging with the db1 absorption
 
@@ -466,7 +495,20 @@ would make them invisible.
 
 ## Acceptance
 
-Marked ✅ where a test in `server-go/internal/peer` asserts it today.
+Marked ✅ where a test in `server-go/modules/aimee/` asserts it today.
+
+The path in this line used to read `server-go/internal/peer`, which has not
+existed since the code moved into the module. A citation to a directory that is
+gone is the cheapest kind of stale, and it survived because nothing reads a
+prose path.
+
+**✅ means A TEST ASSERTS IT IN PROCESS. It does not mean a real caller can do
+it.** As deployed the module has no session directory and nothing registers a
+session, so every criterion below involving two sessions is asserted against a
+registry the tests populate themselves and is NOT reachable in the shipped
+artifact. That is not a caveat on one row; it applies to A1 through A6, A12 and
+A13. A8 is the exception among the session-shaped ones -- grants are
+owner-to-owner and work without a directory.
 
 - **A1** ✅ Two sessions with the same owner discover each other by label, and a message appears with
   an envelope the receiver did not author and the sender could not forge.
