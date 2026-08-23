@@ -189,22 +189,22 @@ static void test_wire_codecs(void)
    assert(length == 36 + strlen(req.workspace) + strlen(req.project) + strlen(req.record_type) +
                         req.dimension * sizeof(float));
    assert(aimee_db3_search_request_decode(wire, length, &decoded_req, decoded_vec,
-                                        AIMEE_DB3_MAX_DIM) == 0);
+                                          AIMEE_DB3_MAX_DIM) == 0);
    assert(decoded_req.request_id == req.request_id && decoded_req.dimension == req.dimension);
    assert(memcmp(decoded_req.vector, req.vector, req.dimension * sizeof(float)) == 0);
    assert(aimee_db3_search_request_decode(wire, length - 1, &decoded_req, decoded_vec,
-                                        AIMEE_DB3_MAX_DIM) != 0);
+                                          AIMEE_DB3_MAX_DIM) != 0);
    memcpy(mutated, wire, length);
    mutated[34] = 1;
    assert(aimee_db3_search_request_decode(mutated, length, &decoded_req, decoded_vec,
-                                        AIMEE_DB3_MAX_DIM) != 0);
+                                          AIMEE_DB3_MAX_DIM) != 0);
    memcpy(mutated, wire, length);
    mutated[length - 1] = 0x7f;
    mutated[length - 2] = 0x80;
    mutated[length - 3] = 0;
    mutated[length - 4] = 0;
    assert(aimee_db3_search_request_decode(mutated, length, &decoded_req, decoded_vec,
-                                        AIMEE_DB3_MAX_DIM) != 0);
+                                          AIMEE_DB3_MAX_DIM) != 0);
 
    aimee_db3_search_reply_t reply = {.request_id = req.request_id,
                                      .generation = req.required_generation,
@@ -230,11 +230,11 @@ static void test_wire_codecs(void)
                               .vector = apply_vec};
    aimee_db3_apply_t decoded_apply;
    assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
-   assert(aimee_db3_apply_decode(wire, length, &decoded_apply, decoded_vec,
-                              AIMEE_DB3_MAX_DIM) == 0);
+   assert(aimee_db3_apply_decode(wire, length, &decoded_apply, decoded_vec, AIMEE_DB3_MAX_DIM) ==
+          0);
    assert(decoded_apply.operation_id == apply.operation_id && decoded_apply.dimension == 3);
    assert(aimee_db3_apply_decode(wire, length - 1, &decoded_apply, decoded_vec,
-                              AIMEE_DB3_MAX_DIM) != 0);
+                                 AIMEE_DB3_MAX_DIM) != 0);
    apply_vec[0] = NAN;
    assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) != 0);
    apply_vec[0] = 0.1f;
@@ -254,20 +254,20 @@ static void test_wire_codecs(void)
    strcpy(apply.labels[2].value, "workspace-a");
    assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
    assert(wire[4] == AIMEE_DB3_APPLY_V2_VERSION && wire[5] == 0);
-   assert(aimee_db3_apply_decode(wire, length, &decoded_apply, decoded_vec,
-                              AIMEE_DB3_MAX_DIM) == 0);
+   assert(aimee_db3_apply_decode(wire, length, &decoded_apply, decoded_vec, AIMEE_DB3_MAX_DIM) ==
+          0);
    assert(decoded_apply.label_count == 3);
    assert(strcmp(decoded_apply.labels[0].value, "project with space") == 0);
    assert(strcmp(decoded_apply.labels[2].key, "workspace") == 0);
    memcpy(mutated, wire, length);
    mutated[36] = 0;
    mutated[37] = 0;
-   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply, decoded_vec,
-                              AIMEE_DB3_MAX_DIM) != 0);
+   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply, decoded_vec, AIMEE_DB3_MAX_DIM) !=
+          0);
    memcpy(mutated, wire, length);
    mutated[38]++;
-   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply, decoded_vec,
-                              AIMEE_DB3_MAX_DIM) != 0);
+   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply, decoded_vec, AIMEE_DB3_MAX_DIM) !=
+          0);
    strcpy(apply.labels[1].key, "project");
    assert(aimee_db3_apply_validate(&apply) != 0);
    strcpy(apply.labels[1].key, "record_type");
@@ -380,19 +380,34 @@ static void test_a_filter_the_wire_cannot_carry_is_refused(void)
       aimee_db3_search_filters_t filters;
    } refused[] = {
        /* pgvec_kb_search_scoped: negation. */
-       {"exclude_project", {.workspace = "workspace-a", .project = "project-a",
-                            .record_type = "memory", .exclude_project = "project-b"}},
+       {"exclude_project",
+        {.workspace = "workspace-a",
+         .project = "project-a",
+         .record_type = "memory",
+         .exclude_project = "project-b"}},
        /* pgvec_memory_vector_search_with_kinds: set membership. */
-       {"kinds", {.workspace = "workspace-a", .project = "project-a", .record_type = "memory",
-                  .kinds = kinds, .kind_count = 2}},
+       {"kinds",
+        {.workspace = "workspace-a",
+         .project = "project-a",
+         .record_type = "memory",
+         .kinds = kinds,
+         .kind_count = 2}},
        /* pgvec_curator_claim_search, pgvec_curator_code_unit_search: which_vec
         * names the column to rank against, and search carries no collection. */
-       {"rank_column", {.workspace = "workspace-a", .project = "project-a",
-                        .record_type = "memory", .rank_column = "subj_attr"}},
+       {"rank_column",
+        {.workspace = "workspace-a",
+         .project = "project-a",
+         .record_type = "memory",
+         .rank_column = "subj_attr"}},
        /* The optional equality filters on the four curator searches: apply
         * carries exact labels and search does not. */
-       {"labels", {.workspace = "workspace-a", .project = "project-a", .record_type = "memory",
-                   .label_keys = label_keys, .label_values = label_values, .label_count = 1}},
+       {"labels",
+        {.workspace = "workspace-a",
+         .project = "project-a",
+         .record_type = "memory",
+         .label_keys = label_keys,
+         .label_values = label_values,
+         .label_count = 1}},
    };
    for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); ++i)
    {

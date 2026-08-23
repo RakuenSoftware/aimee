@@ -106,7 +106,14 @@ func runProvider(ctx context.Context, client providerWireClient, config Provider
 		return err
 	}
 	runCtx, stop := context.WithCancel(ctx)
-	capabilities, _ := EncodeCapabilities(config.Capabilities)
+	// Not discarded. A provider whose capabilities cannot be encoded announces
+	// an empty frame, is never selected by the route, and reports nothing about
+	// why -- which reads exactly like a provider nobody configured.
+	capabilities, err := EncodeCapabilities(config.Capabilities)
+	if err != nil {
+		stop()
+		return err
+	}
 	if err := providerPublish(runCtx, client, EventCapabilities, capabilities); err != nil {
 		stop()
 		return err
@@ -160,7 +167,14 @@ func runProvider(ctx context.Context, client providerWireClient, config Provider
 			if validateProviderCapabilities(update, config.Search, config.Apply) != nil {
 				return ErrProviderConfig
 			}
-			wire, _ := EncodeCapabilities(update)
+			wire, encodeErr := EncodeCapabilities(update)
+			if encodeErr != nil {
+				// The update was validated just above, so this cannot fail
+				// today. Publishing an empty capabilities frame would tell every
+				// caller this provider serves nothing, which is a much larger
+				// claim than "an update could not be encoded".
+				return encodeErr
+			}
 			if err := providerPublish(runCtx, client, EventCapabilities, wire); err != nil {
 				return err
 			}
@@ -170,16 +184,36 @@ func runProvider(ctx context.Context, client providerWireClient, config Provider
 				cancel()
 				delete(cancels, done.correlation)
 			}
-			var wire []byte
+			var (
+				wire      []byte
+				encodeErr error
+			)
 			if done.failure > SearchFailureInternal {
 				done.failure = SearchFailureInternal
 			}
-			if done.failure != 0 {
-				wire, _ = EncodeSearchFailure(SearchFailure{RequestID: done.request.RequestID, Code: done.failure})
-			} else if ValidateSearchReply(done.request, done.reply) != nil {
-				wire, _ = EncodeSearchFailure(SearchFailure{RequestID: done.request.RequestID, Code: SearchFailureInternal})
-			} else {
-				wire, _ = EncodeSearchReply(done.reply)
+			switch {
+			case done.failure != 0:
+				wire, encodeErr = EncodeSearchFailure(
+					SearchFailure{RequestID: done.request.RequestID, Code: done.failure})
+			case ValidateSearchReply(done.request, done.reply) != nil:
+				wire, encodeErr = EncodeSearchFailure(
+					SearchFailure{RequestID: done.request.RequestID, Code: SearchFailureInternal})
+			default:
+				wire, encodeErr = EncodeSearchReply(done.reply)
+				if encodeErr != nil {
+					// A reply that cannot be encoded is a reply that cannot be
+					// sent as itself, which is the case immediately above. Same
+					// answer, rather than an empty payload where a reply belongs.
+					wire, encodeErr = EncodeSearchFailure(
+						SearchFailure{RequestID: done.request.RequestID, Code: SearchFailureInternal})
+				}
+			}
+			if encodeErr != nil {
+				// Attempted once, never through the path that exists because
+				// encoding failed. If the refusal itself cannot be encoded there
+				// is nothing truthful left to send, and a provider that cannot
+				// say anything should not go on answering.
+				return encodeErr
 			}
 			if err := providerReply(runCtx, client, EventSearch, done.correlation, wire); err != nil {
 				return err
@@ -193,7 +227,14 @@ func runProvider(ctx context.Context, client providerWireClient, config Provider
 				applied = Applied{OperationID: done.apply.OperationID, Generation: done.apply.Generation,
 					Result: AppliedInternal}
 			}
-			wire, _ := EncodeApplied(applied)
+			wire, encodeErr := EncodeApplied(applied)
+			if encodeErr != nil {
+				// Applied already falls back to AppliedInternal when it does not
+				// validate, so this is the same decision one step further on.
+				// An empty acknowledgement would leave the writer unable to tell
+				// whether its generation landed.
+				return encodeErr
+			}
 			if err := providerPublish(runCtx, client, EventApplied, wire); err != nil {
 				return err
 			}
