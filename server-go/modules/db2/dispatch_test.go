@@ -206,12 +206,31 @@ func TestDispatchRefusesAnUnregisteredOperation(t *testing.T) {
 	// Capability-absent, matching what the C module answers for a backend it
 	// was not given -- an operation nobody has ported yet is exactly that, and
 	// it must not read as an internal fault.
+	//
+	// The pair is found rather than named. This test used to name a
+	// then-unported operation and started dispatching into a real one the day
+	// it was ported, which turned a status assertion into a nil-store panic.
+	// A valid envelope for one operation, sent to a family that does not
+	// register it, is unregistered for as long as the port lasts.
 	handler := NewDispatchHandler(&fakeStore{})
 	request, err := db2contract.EncodeProspectiveListArmedRequest()
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if _, status := handler(invocation(db2contract.StageProspectiveListArmed), request); status !=
+	stage := uint32(0)
+	for _, family := range []uint32{
+		db2contract.FamilyMaintenance, db2contract.FamilyCustody,
+		db2contract.FamilyIndex, db2contract.FamilyOrganization,
+	} {
+		if _, registered := lookup(family, db2contract.OperationProspectiveListArmed); !registered {
+			stage = family
+			break
+		}
+	}
+	if stage == 0 {
+		t.Fatal("every family registers this operation, so none is unregistered")
+	}
+	if _, status := handler(invocation(stage), request); status !=
 		bus.ModuleStatusCapabilityAbsent {
 		t.Fatalf("status = %v, want capability absent", status)
 	}

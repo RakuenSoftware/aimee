@@ -2415,6 +2415,69 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "prospective_list",
+			stage: db2contract.StageProspectiveList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProspectiveListRequest("armed", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProspectiveListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "prospective_list_armed",
+			stage:  db2contract.StageProspectiveListArmed,
+			encode: db2contract.EncodeProspectiveListArmedRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProspectiveListArmedReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "prospective_by_entity",
+			stage: db2contract.StageProspectiveByEntity,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProspectiveByEntityRequest("live-probe-entity", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProspectiveByEntityReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "prospective_by_file",
+			stage: db2contract.StageProspectiveByFile,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProspectiveByFileRequest("docs/live-probe.md", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProspectiveByFileReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "prospective_by_trigger_terms",
+			stage: db2contract.StageProspectiveByTriggerTerms,
+			// A tsquery built in Go and parsed by PostgreSQL. A term the
+			// builder emitted wrongly fails here and nowhere else, which is the
+			// whole reason this probe exists.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProspectiveByTriggerTermsRequest(
+					"we should rotate the live probe key", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err :=
+					db2contract.DecodeProspectiveByTriggerTermsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
