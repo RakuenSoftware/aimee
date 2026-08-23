@@ -190,6 +190,9 @@ func consoleOIDCGet(ctx context.Context, store Store, request []byte) (
 	configured := uint32(1)
 	if scanErr := store.QueryRow(ctx, consoleOIDCGetQuery).Scan(&issuer, &audience,
 		&jwksURL, &adminClaim, &adminValues, &updatedAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		configured = 0
 		issuer, audience, jwksURL = "", "", ""
 		adminClaim, adminValues, updatedAt = "", "", ""
@@ -228,6 +231,9 @@ func projectionGenerationMeta(ctx context.Context, store Store, request []byte) 
 	if scanErr := store.QueryRow(ctx, projectionGenerationMetaQuery,
 		int64(generationID)).Scan(&project, &state, &sourceHash,
 		&extractorVersion, &pipelineVersion); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found = 0
 		project, state, sourceHash = "", "", ""
 		extractorVersion, pipelineVersion = "", ""

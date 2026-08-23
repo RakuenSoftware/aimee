@@ -3578,9 +3578,23 @@ func liveWrites() []liveRequest {
 		{
 			name:  "prospective_set_state",
 			stage: db2contract.StageProspectiveSetState,
-			// Acknowledges whether or not a row matched, so an unseeded probe
-			// still proves the statement runs -- which is the half a fake
-			// cannot show.
+			// Seeded, because the operation acknowledges that a row MOVED and
+			// not merely that the statement ran: it answers changed > 0, since a
+			// caller arming or firing a prospective memory needs to know it
+			// addressed one.
+			//
+			// The comment here used to say the opposite -- that an unseeded
+			// probe still proves the statement runs -- and the probe passed
+			// anyway, on a row some earlier run had left in the shared database.
+			// When the replay recreated that database the row went with it and
+			// the probe started failing, which is the only reason anyone looked.
+			// A test that depends on ambient state is a test that passes for a
+			// reason it does not state.
+			seed: []string{
+				`INSERT INTO prospective_memories (id, trigger_text, action_text)
+				 VALUES (2147483000, 'probe-trigger', 'probe-action')
+				 ON CONFLICT (id) DO NOTHING`,
+			},
 			encode: func() ([]byte, error) {
 				return db2contract.EncodeProspectiveSetStateRequest(2147483000, "cancelled")
 			},

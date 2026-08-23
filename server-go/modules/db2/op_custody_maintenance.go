@@ -262,6 +262,9 @@ func enrollmentAuthorityResolve(ctx context.Context, store Store, request []byte
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, enrollmentAuthorityResolveQuery,
 		fingerprint, issuer, serial).Scan(&authorityID); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, authorityID = 0, ""
 	}
 	if len(authorityID) != enrollmentAuthorityResolveIDLen {

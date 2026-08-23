@@ -315,6 +315,9 @@ func learningProposalInsert(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, learningProposalInsertQuery,
 		int64(signalID), sink, targetKey, int64(targetMemoryID), action,
 		evidence, expiresAt).Scan(&proposalID); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		proposalID = 0
 	}
 	if proposalID < 0 {

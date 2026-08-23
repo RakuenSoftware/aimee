@@ -330,6 +330,9 @@ func banditArmStatsRead(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, banditArmStatsReadQuery,
 		decisionPoint, armID).Scan(&decisions, &rewards, &sumReward,
 		&alpha, &beta); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		decisions, rewards, sumReward = 0, 0, 0
 		alpha, beta = 1, 1
 	}

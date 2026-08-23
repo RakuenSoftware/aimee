@@ -115,6 +115,9 @@ func decisionLogGet(ctx context.Context, store Store, request []byte) (
 		store.QueryRow(ctx, decisionLogGetQuery, int64(decisionID)))
 	found := uint32(1)
 	if scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, row = 0, db2contract.DecisionLogListRow{}
 	}
 	reply, encodeErr := db2contract.EncodeDecisionLogGetReply(found,
@@ -204,6 +207,9 @@ func learningProposalGet(ctx context.Context, store Store, request []byte) (
 		int64(proposalID)).Scan(&signalID, &sink, &state, &targetKey,
 		&targetMemoryID, &action, &evidence, &corroboration, &expiresAt,
 		&committedAt, &archiveReason, &createdAt, &updatedAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, signalID, targetMemoryID, corroboration = 0, 0, 0, 0
 		sink, state, targetKey, action, evidence = "", "", "", "", ""
 		expiresAt, committedAt, archiveReason = "", "", ""

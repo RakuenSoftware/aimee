@@ -86,6 +86,9 @@ func entityNodeGet(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, entityNodeGetQuery, nodeKey).Scan(&nodeKind,
 		&project, &displayName, &fullKey, &filePath, &symbol, &origin,
 		&generation); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, nodeKind, generation = 0, 0, 0
 		project, displayName, fullKey = "", "", ""
 		filePath, symbol, origin = "", "", ""
@@ -251,6 +254,9 @@ func kbDocumentFetch(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, kbDocumentFetchQuery,
 		int64(documentID), project).Scan(&docProject, &filePath, &fileHash,
 		&headingPath, &lineStart, &lineEnd, &content, &docKind); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, lineStart, lineEnd = 0, 0, 0
 		docProject, filePath, fileHash = "", "", ""
 		headingPath, content, docKind = "", "", ""

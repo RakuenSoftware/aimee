@@ -52,6 +52,9 @@ func memoryStateFields(ctx context.Context, store Store, request []byte) (
 	hasValidUntil := uint32(0)
 	if scanErr := store.QueryRow(ctx, memoryStateFieldsQuery, int64(memoryID)).
 		Scan(&validUntil, &observations, &uses); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, observations, uses = 0, 0, 0
 	} else if text(validUntil) != "" {
 		hasValidUntil = 1
@@ -132,6 +135,9 @@ func memoryUnitActiveMeta(ctx context.Context, store Store, request []byte) (
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, memoryUnitActiveMetaQuery, int64(unitID)).
 		Scan(&weight, &unitType, &unitKind); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, weight, unitType, unitKind = 0, 0, "", ""
 	}
 	reply, encodeErr := db2contract.EncodeMemoryUnitActiveMetaReply(

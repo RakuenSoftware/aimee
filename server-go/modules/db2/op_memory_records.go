@@ -210,6 +210,9 @@ func memoryLookupByKey(ctx context.Context, store Store, request []byte) (
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, memoryLookupByKeyQuery, key).
 		Scan(&id, &content, &confidence, &tier); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, id, content, confidence, tier = 0, 0, "", 0, ""
 	}
 	reply, encodeErr := db2contract.EncodeMemoryLookupByKeyReply(

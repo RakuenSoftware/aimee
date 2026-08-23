@@ -187,6 +187,9 @@ func rulesFindByTitle(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, rulesFindByTitleQuery, title).Scan(&id,
 		&polarity, &description, &weight, &domain, &directiveType,
 		&expiresAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, id, weight = 0, 0, 0
 		polarity, description, domain, directiveType, expiresAt = "", "", "", "", ""
 	}
@@ -226,6 +229,9 @@ func taskGet(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, taskGetQuery, int64(taskID)).Scan(&id,
 		&parentID, &title, &state, &confidence, &sessionID, &createdAt,
 		&updatedAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, parentID, confidence = 0, 0, 0
 		title, state, sessionID, createdAt, updatedAt = "", "", "", "", ""
 	}

@@ -179,6 +179,9 @@ func directiveGet(ctx context.Context, store Store, request []byte) (
 		store.QueryRow(ctx, directiveGetQuery, int64(directiveID)))
 	found := uint32(1)
 	if scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, row = 0, db2contract.DirectiveListRow{}
 	}
 	reply, encodeErr := db2contract.EncodeDirectiveGetReply(found, row.Question,

@@ -93,6 +93,9 @@ func kbIngestQueueClaimNext(ctx context.Context, store Store, request []byte) (
 	claimed := uint32(1)
 	if scanErr := store.QueryRow(ctx, kbIngestQueueClaimNextQuery).Scan(
 		&jobID, &project, &rootPath, &workspace, &force); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		claimed, jobID, project, rootPath, workspace, force = 0, 0, "", "", "", 0
 	}
 	forceFlag := uint32(0)

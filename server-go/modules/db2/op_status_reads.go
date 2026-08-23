@@ -114,6 +114,9 @@ func kbProjectStatus(ctx context.Context, store Store, request []byte) (
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, kbProjectStatusQuery, project).
 		Scan(&chunks, &tokens, &files, &embeddings); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, chunks, tokens, files, embeddings = 0, 0, 0, 0, 0
 	}
 	reply, encodeErr := db2contract.EncodeKBProjectStatusReply(found, project,
@@ -148,6 +151,9 @@ func kbReembedStatus(ctx context.Context, store Store, request []byte) (
 	haveJob := uint32(1)
 	if scanErr := store.QueryRow(ctx, kbReembedStatusQuery).Scan(&targetVersion,
 		&lastID, &total, &done, &startedAt, &finishedAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		haveJob, lastID, total, done = 0, 0, 0, 0
 		targetVersion, startedAt, finishedAt = "", "", ""
 	}
@@ -179,6 +185,9 @@ func kbReleaseRead(ctx context.Context, store Store, request []byte) (
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, kbReleaseReadQuery, int64(releaseID)).
 		Scan(&name, &state, &promotedAt, &retiredAt, &createdAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found = 0
 		name, state, promotedAt, retiredAt, createdAt = "", "", "", "", ""
 	}
@@ -219,6 +228,9 @@ func miningJobGet(ctx context.Context, store Store, request []byte) (
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, miningJobGetQuery, jobID).Scan(&lastRunAt,
 		&highWater, &intervalSeconds, &enabled, &lastError); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, highWater, intervalSeconds, enabled = 0, 0, 0, false
 		lastRunAt, lastError = "", ""
 	}

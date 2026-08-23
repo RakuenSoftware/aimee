@@ -109,6 +109,9 @@ func toolRegistryLookup(ctx context.Context, store Store, request []byte) (
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, toolRegistryLookupQuery, name).
 		Scan(&inputSchema, &sideEffect, &enabled); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, inputSchema, sideEffect, enabled = 0, "", "", 0
 	}
 	enabledFlag := uint32(0)

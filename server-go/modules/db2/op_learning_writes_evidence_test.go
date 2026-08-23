@@ -2,6 +2,7 @@ package db2
 
 import (
 	"errors"
+	"github.com/jackc/pgx/v5"
 	"strings"
 	"testing"
 
@@ -272,8 +273,9 @@ func TestProposalsStartPendingAndCorroboratedOnce(t *testing.T) {
 	}
 }
 
-func TestProposalFailureAnswersZero(t *testing.T) {
-	store := &fakeStore{row: &fakeRow{err: errors.New("connection lost")}}
+func TestAProposalThatWasNotCreatedAnswersZero(t *testing.T) {
+	// The guard refused it: no row came back, and zero says so.
+	store := &fakeStore{row: &fakeRow{err: pgx.ErrNoRows}}
 	handler := NewDispatchHandler(store)
 	request, err := db2contract.EncodeLearningProposalInsertRequest(
 		7, "rules", "", 0, "{}", "", "")
@@ -287,5 +289,25 @@ func TestProposalFailureAnswersZero(t *testing.T) {
 	proposalID, decodeErr := db2contract.DecodeLearningProposalInsertReply(body)
 	if decodeErr != nil || proposalID != 0 {
 		t.Fatalf("proposal = %d, want 0", proposalID)
+	}
+}
+
+func TestAProposalTheDatabaseCouldNotAnswerIsNotZero(t *testing.T) {
+	// This test previously asserted the opposite, under the name
+	// TestProposalFailureAnswersZero: a lost connection answered zero, and the
+	// caller could not tell "the guard refused your proposal" from "the database
+	// did not answer". The first is a decision about the request; the second is
+	// an outage, and a caller that reads it as a refusal stops retrying and
+	// records a proposal that was never considered.
+	store := &fakeStore{row: &fakeRow{err: errors.New("connection lost")}}
+	handler := NewDispatchHandler(store)
+	request, err := db2contract.EncodeLearningProposalInsertRequest(
+		7, "rules", "", 0, "{}", "", "")
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if _, status := handler(invocation(db2contract.StageLearningProposalInsert),
+		request); status == bus.ModuleStatusOK {
+		t.Fatal("a failed scan answered OK; zero is indistinguishable from a refusal")
 	}
 }

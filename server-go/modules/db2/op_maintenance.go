@@ -2,6 +2,8 @@ package db2
 
 import (
 	"context"
+	"errors"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	db2contract "github.com/JBailes/aimee/server-go/db2"
@@ -83,6 +85,20 @@ func curatorInvalidationsSince(ctx context.Context, store Store, request []byte)
 // an identity column will not produce and a corrupted row might -- becomes
 // zero rather than a value near 2^64 that a caller would read as an enormous
 // identifier.
+// rowAbsent reports whether a scan error means the row is not there.
+//
+// pgx.ErrNoRows is the only error that means absence. Every other scan failure
+// means the statement or the connection did not answer, and reporting those as
+// "no such row" tells a caller a fact about the data when the truth is a fact
+// about the database.
+//
+// kb_project_status proved what that costs. A NUMERIC crossing as text made its
+// scan fail, the failure became found=0, and every live probe passed -- because
+// a probe asserts the reply decodes and that a row was found, both of which are
+// true of a zero. The wrong answer was indistinguishable from a right one for
+// as long as it existed.
+func rowAbsent(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
 func clampToU64(value int64) uint64 {
 	if value <= 0 {
 		return 0

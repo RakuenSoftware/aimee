@@ -82,6 +82,9 @@ func kbDocRead(ctx context.Context, store Store, request []byte) (
 	row, scanErr := scanDoc(store.QueryRow(ctx, kbDocReadQuery, int64(docID)))
 	found := uint32(1)
 	if scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, row = 0, db2contract.KBDocListReviewRow{}
 	}
 	reply, encodeErr := db2contract.EncodeKBDocReadReply(found, row.ContentHash,
@@ -233,6 +236,9 @@ func kbAsyncJobGet(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, kbAsyncJobGetQuery, int64(jobID)).
 		Scan(&documentID, &kind, &project, &status, &attempts, &lastError,
 			&claimedBy, &claimedAt, &createdAt, &updatedAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, documentID, attempts = 0, 0, 0
 		kind, project, status, lastError = "", "", "", ""
 		claimedBy, claimedAt, createdAt, updatedAt = "", "", "", ""
@@ -289,6 +295,9 @@ func enrollmentRevoke(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, enrollmentRevokeQuery, int64(enrollmentID)).
 		Scan(&scope, &fingerprint, &serialNorm, &state, &issuedAt, &lastSeenAt,
 			&expiresAt, &revokedAt, &authorityID, &legacy); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		revoked, legacy = 0, 0
 		scope, fingerprint, serialNorm, state = "", "", "", ""
 		issuedAt, lastSeenAt, expiresAt, revokedAt, authorityID = "", "", "", "", ""

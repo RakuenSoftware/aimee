@@ -1,7 +1,6 @@
 package db2
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -245,7 +244,12 @@ func TestEnrollmentAnswersWhatItWrote(t *testing.T) {
 func TestEnrollmentThatFailsTheGuardIsNotAcknowledged(t *testing.T) {
 	// A conflict failing the guard updates nothing and returns no row. The
 	// caller must not believe it now owns the enrolment.
-	store := &fakeStore{row: &fakeRow{err: errors.New("no rows")}}
+	// pgx.ErrNoRows, not an error that merely says so. The operation now
+	// distinguishes "the row is not there" from "the scan failed", and a fake
+	// standing in for absence has to be the thing absence actually looks like --
+	// otherwise the test asserts the guard behaviour while exercising the
+	// failure path.
+	store := &fakeStore{row: &fakeRow{err: pgx.ErrNoRows}}
 	handler := NewDispatchHandler(store)
 	request, err := db2contract.EncodeEnrollmentInsertRequest(
 		"kb", "fingerprint", "CN=issuer", "01ab", "", 0)

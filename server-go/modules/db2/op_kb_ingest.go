@@ -164,6 +164,9 @@ func kbFileIndexGet(ctx context.Context, store Store, request []byte) (
 	found := uint32(1)
 	if scanErr := store.QueryRow(ctx, kbFileIndexGetQuery, project, filePath).
 		Scan(&fileHash, &ingestedAt); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		found, fileHash, ingestedAt = 0, nil, nil
 	}
 	reply, encodeErr := db2contract.EncodeKBFileIndexGetReply(

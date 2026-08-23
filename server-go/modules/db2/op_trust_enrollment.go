@@ -351,6 +351,9 @@ func enrollmentInsert(ctx context.Context, store Store, request []byte) (
 	if scanErr := store.QueryRow(ctx, enrollmentInsertQuery, scope, fingerprint,
 		serialNorm, expiresAt, legacyFlag, authorityID, issuer, serialNorm).
 		Scan(&enrollmentID); scanErr != nil {
+		if !rowAbsent(scanErr) {
+			return nil, bus.ModuleStatusInternal
+		}
 		acknowledged, enrollmentID = false, 0
 	}
 	if enrollmentID < 0 {
