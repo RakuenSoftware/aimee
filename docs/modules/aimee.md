@@ -271,7 +271,16 @@ No handler here blocks, specifically so that ceiling is never reached by waiting
 ## Compatibility
 
 Message rows are a fixed width and new cells **append**, so a reader built
-against an older width never has its field numbering shift underneath it. A list
+against an older width never has its field numbering shift underneath it.
+
+The ENCODER is pinned against the struct, because that side has no wire to be
+strict about: a decoder cannot object to a field the encoder never wrote, so a
+field added to `peer.Message` and not carried would arrive zero-valued and look
+exactly like one the sender left empty. A test asserts the field count matches
+the row width. `SendOptions` is deliberately richer than the wire (`WaitExpiry`
+is not carried, since bus callers take the default) and that exclusion is
+asserted by name rather than assumed, so the next field added has to be
+classified rather than silently dropped. A list
 reply carries no row count: the caller divides by the row width and refuses a
 remainder rather than accepting a short final row.
 

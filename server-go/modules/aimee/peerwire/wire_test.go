@@ -3,6 +3,7 @@ package peerwire
 import (
 	"encoding/binary"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -314,5 +315,49 @@ func TestEverySentinelErrorHasItsOwnStatus(t *testing.T) {
 		if got := StatusFor(err); got != StatusAtCapacity {
 			t.Errorf("a full table reported %v; want at_capacity", got)
 		}
+	}
+}
+
+// A struct richer than the message it is turned into loses the difference
+// SILENTLY, and the loss is on the ENCODING side where there is no wire to be
+// strict about: the decoder cannot object to a field the encoder never wrote.
+//
+// So the encoder is pinned against the struct. Add a field to peer.Message and
+// this fails until MessageCells carries it, rather than the field simply not
+// travelling and arriving zero-valued at the far end, indistinguishable from a
+// sender who left it empty.
+//
+// The round-trip test does not cover this: it compares a literal the author
+// wrote, so a field added and not set in that literal is zero on both sides and
+// passes.
+func TestMessageEncoderCarriesEveryField(t *testing.T) {
+	fields := reflect.TypeOf(peer.Message{}).NumField()
+	if fields != MessageWidth {
+		t.Fatalf("peer.Message has %d fields, MessageWidth is %d. A field the encoder "+
+			"does not carry arrives zero-valued and looks like one the sender left "+
+			"empty.", fields, MessageWidth)
+	}
+	if got := len(MessageCells(peer.Message{})); got != MessageWidth {
+		t.Errorf("MessageCells emitted %d cells; want %d", got, MessageWidth)
+	}
+}
+
+// SendOptions is the case where the struct is DELIBERATELY richer than the
+// wire, so the exclusion is named rather than assumed.
+//
+// WaitExpiry is not carried: the bus path never sets it, and the wait-for edge
+// uses DefaultWaitExpiry. That is a decision, and writing it down is what makes
+// the next field a decision too -- adding one fails here until somebody says
+// which side of the line it falls on.
+func TestSendOptionsWireCoverageIsDeliberate(t *testing.T) {
+	const (
+		carried  = 3 // ConversationID, Hop, ExpectReply
+		excluded = 1 // WaitExpiry: bus callers take DefaultWaitExpiry
+	)
+	fields := reflect.TypeOf(peer.SendOptions{}).NumField()
+	if fields != carried+excluded {
+		t.Fatalf("peer.SendOptions has %d fields; this test accounts for %d carried "+
+			"and %d deliberately excluded. A new field is silently dropped by the "+
+			"bus path until it is classified.", fields, carried, excluded)
 	}
 }
