@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"syscall"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -76,12 +75,26 @@ func classifyFailure(err error) (uint32, string, string) {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return StatusStatementFailed, sqlStateQueryCanceled, err.Error()
 	}
-	var connErr *pgconn.ConnectError
+	// Three clauses, each measured against REAL values to catch something the
+	// others do not.
+	//
+	// It was seven, and four were doing nothing. net.ErrClosed,
+	// syscall.ECONNRESET and syscall.EPIPE all satisfy net.Error already --
+	// syscall.Errno has Timeout and Temporary, so a bare errno is one. And every
+	// *pgconn.ConnectError pgx actually produces wraps a net error: a refused
+	// dial and a DNS failure both answer true to errors.As(err, &netErr).
+	//
+	// MEASURED WITH REAL VALUES, because measuring with a constructed one gave
+	// the opposite answer. A hand-built ConnectError is not a net.Error, so the
+	// first probe said that clause was load-bearing -- and that value is not
+	// something the library can produce; its Error method panics on a zero
+	// Config. The fake asserted a guess.
+	//
+	// io.EOF and io.ErrUnexpectedEOF are neither net.Errors nor wrapped in one,
+	// which is why they stay.
 	var netErr net.Error
-	if errors.As(err, &connErr) || errors.As(err, &netErr) ||
-		errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) ||
-		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, syscall.EPIPE) {
+	if errors.As(err, &netErr) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
 		return StatusUnavailable, sqlStateConnectionFailure, err.Error()
 	}
 	return StatusStatementFailed, "", err.Error()

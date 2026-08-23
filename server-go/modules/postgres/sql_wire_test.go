@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -318,6 +319,14 @@ func TestAFailureIsClassifiedByWhatActuallyHappened(t *testing.T) {
 			wantState:  sqlStateConnectionFailure,
 		},
 		{
+			// Neither is io.EOF, and it is the ordinary way a peer closing
+			// mid-read arrives.
+			name:       "the stream ended cleanly mid-conversation",
+			err:        io.EOF,
+			wantStatus: StatusUnavailable,
+			wantState:  sqlStateConnectionFailure,
+		},
+		{
 			// Deliberately unchanged. Guessing "unavailable" for an error we
 			// cannot name would be the same collapse pointing the other way, so
 			// an unfamiliar client-side error keeps the status it had and says
@@ -337,6 +346,35 @@ func TestAFailureIsClassifiedByWhatActuallyHappened(t *testing.T) {
 				t.Error("the detail was dropped; the caller is left with a number")
 			}
 		})
+	}
+
+	// A REAL refused connection, end to end through pgconn.
+	//
+	// Two lessons in eight lines. A hand-built ConnectError panics in its own
+	// Error method on a zero Config, so the value I first constructed to stand
+	// for a connection failure was not something the library can produce. And
+	// measuring with that value gave the wrong answer: it said a ConnectError is
+	// not a net.Error and therefore needed a clause of its own, while every real
+	// one -- a refused dial, a DNS failure -- wraps a net error and is caught by
+	// the net.Error clause.
+	//
+	// So this asserts the CLASSIFICATION, which is what a caller acts on, rather
+	// than which clause performs it.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, connectErr := pgconn.Connect(ctx, "host=127.0.0.1 port=1 user=nobody dbname=nothing")
+	if connectErr == nil {
+		t.Skip("something is listening on port 1; no ConnectError to classify")
+	}
+	var typed *pgconn.ConnectError
+	if !errors.As(connectErr, &typed) {
+		t.Skipf("pgconn did not answer a ConnectError: %T", connectErr)
+	}
+	status, state, _ := classifyFailure(connectErr)
+	if status != StatusUnavailable || state != sqlStateConnectionFailure {
+		t.Errorf("a refused connection classified as %d/%q, want Unavailable/%s -- "+
+			"a database that was never reached is not a statement that failed",
+			status, state, sqlStateConnectionFailure)
 	}
 }
 
