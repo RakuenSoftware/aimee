@@ -37,6 +37,7 @@
 #include "model_provider.h"
 #include "model_registry.h"
 #include "db1.h"
+#include "eval_synthesis.h" /* synthesised regression candidates (S1) */
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -174,6 +175,157 @@ int handle_eval_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *arr = cJSON_AddArrayToObject(resp, "results");
    for (int i = 0; i < rows; i++)
       cJSON_AddItemToArray(arr, server_eval_result_json(&results[i]));
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* --- Synthesised regression candidates (recursive self-improvement S1) --- */
+
+static cJSON *server_eval_candidate_json(const db1_eval_candidate_t *c)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return NULL;
+   cJSON_AddNumberToObject(obj, "id", (double)c->id);
+   cJSON_AddStringToObject(obj, "signature", c->signature);
+   cJSON_AddStringToObject(obj, "state", c->state);
+   cJSON_AddStringToObject(obj, "suite", c->suite);
+   cJSON_AddStringToObject(obj, "task_name", c->task_name);
+   cJSON_AddStringToObject(obj, "origin", c->origin);
+   cJSON_AddStringToObject(obj, "origin_ref", c->origin_ref);
+   cJSON_AddNumberToObject(obj, "occurrences", c->occurrences);
+   cJSON_AddNumberToObject(obj, "distinct_sessions", c->distinct_sessions);
+   cJSON_AddStringToObject(obj, "admitted_by", c->admitted_by);
+   cJSON_AddStringToObject(obj, "admitted_path", c->admitted_path);
+   cJSON_AddStringToObject(obj, "reject_reason", c->reject_reason);
+   cJSON_AddNumberToObject(obj, "passing_windows", c->passing_windows);
+   cJSON_AddStringToObject(obj, "created_at", c->created_at);
+   cJSON_AddStringToObject(obj, "updated_at", c->updated_at);
+   return obj;
+}
+
+int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *state = server_eval_json_str(req, "state");
+   int limit = server_eval_json_int(req, "limit", 50);
+   if (limit <= 0 || limit > EVAL_CANDIDATES_MAX_ROWS)
+      limit = EVAL_CANDIDATES_MAX_ROWS;
+
+   db1_eval_candidate_t rows[EVAL_CANDIDATES_MAX_ROWS];
+   int n = db1_eval_candidate_list(state, rows, limit);
+   if (n < 0)
+      return server_send_error(conn, "eval.candidates: could not read candidates", request_id);
+
+   /* The endogeneity gate decides whether admission is even possible, so it
+    * belongs in the same view as the backlog it governs. */
+   learning_endogeneity_t endo;
+   learning_gate_state_t gate = learning_gate_check(&endo);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON *arr = cJSON_AddArrayToObject(resp, "candidates");
+   for (int i = 0; i < n; i++)
+      cJSON_AddItemToArray(arr, server_eval_candidate_json(&rows[i]));
+   cJSON *g = cJSON_AddObjectToObject(resp, "gate");
+   if (g)
+   {
+      cJSON_AddStringToObject(g, "state",
+                              gate == LEARNING_GATE_OPEN                ? "open"
+                              : gate == LEARNING_GATE_CLOSED_ENDOGENOUS ? "closed"
+                                                                        : "unavailable");
+      cJSON_AddNumberToObject(g, "exogenous_ratio", endo.exogenous_ratio);
+      cJSON_AddNumberToObject(g, "committed_total", (double)endo.committed_total);
+      cJSON_AddNumberToObject(g, "window_days", endo.window_days);
+   }
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_eval_candidates_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *op = server_eval_json_str(req, "op");
+   if (!op[0])
+      return server_send_error(
+          conn, "eval.candidates-update requires op (scan|admit|reject|retire)", request_id);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "op", op);
+
+   if (strcmp(op, "scan") == 0)
+   {
+      eval_synthesis_scan_stats_t stats;
+      int observed = eval_synthesis_scan_failures(server_eval_json_int(req, "window_days", 0),
+                                                  server_eval_json_str(req, "suite"), &stats);
+      if (observed < 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update scan failed", request_id);
+      }
+      cJSON_AddNumberToObject(resp, "observed", observed);
+      cJSON_AddNumberToObject(resp, "jobs_seen", stats.jobs_seen);
+      cJSON_AddNumberToObject(resp, "signals_seen", stats.signals_seen);
+      cJSON_AddNumberToObject(resp, "rejected_text", stats.rejected_text);
+      cJSON_AddNumberToObject(resp, "skipped", stats.skipped);
+   }
+   else if (strcmp(op, "admit") == 0 || strcmp(op, "retire") == 0)
+   {
+      const char *dir = server_eval_json_str(req, "suite_dir");
+      if (!dir[0])
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update admit/retire requires suite_dir",
+                                  request_id);
+      }
+      char suite_path[MAX_PATH_LEN];
+      server_eval_resolve_suite_path(server_eval_json_str(req, "cwd"), dir, suite_path,
+                                     sizeof(suite_path));
+      cJSON_AddStringToObject(resp, "suite_dir", suite_path);
+
+      int n =
+          strcmp(op, "admit") == 0
+              ? eval_synthesis_admit_pending(suite_path, server_eval_json_str(req, "by"),
+                                             server_eval_json_int(req, "min_occurrences", 0))
+              : eval_synthesis_retire(suite_path, server_eval_json_int(req, "retire_windows", 0));
+      if (n < 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update failed", request_id);
+      }
+      cJSON_AddNumberToObject(resp, strcmp(op, "admit") == 0 ? "admitted" : "retired", n);
+   }
+   else if (strcmp(op, "reject") == 0)
+   {
+      int id = server_eval_json_int(req, "id", 0);
+      if (id <= 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update reject requires id", request_id);
+      }
+      const char *reason = server_eval_json_str(req, "reason");
+      if (db1_eval_candidate_mark_rejected((int64_t)id, reason) != 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update: no such candidate", request_id);
+      }
+      cJSON_AddNumberToObject(resp, "rejected", id);
+   }
+   else
+   {
+      cJSON_Delete(resp);
+      return server_send_error(conn, "eval.candidates-update unknown op", request_id);
+   }
+
+   cJSON_AddStringToObject(resp, "status", "ok");
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);

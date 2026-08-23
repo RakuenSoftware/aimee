@@ -247,6 +247,8 @@
     {"dogfood", "report", "dogfood.report", NULL, NULL, 300000},
     {"eval", "run", "eval.run", NULL, NULL, 900000},
     {"eval", "results", "eval.results", NULL, NULL, 0},
+    {"eval", "candidates", "eval.candidates", NULL, NULL, 0},
+    {"eval", "candidates-update", "eval.candidates-update", NULL, NULL, 120000},
     {"identity", "show", "identity.show", NULL, NULL, 0},
     {"identity", "snapshot", "identity.snapshot", NULL, NULL, 0},
     {"identity", "diff", "identity.diff", NULL, NULL, 0},

@@ -124,4 +124,81 @@ void learning_router_detection_metrics_reset(void);
 /* Called by learning_implicit.c to record a detection-pass timing. */
 void learning_router_record_detection_ms(double ms);
 
+/* --- Endogeneity accounting (recursive-self-improvement S0) ---
+ *
+ * A learning loop that feeds on its own output drifts into an echo chamber:
+ * it keeps committing proposals whose only evidence is something it inferred
+ * earlier. commit_ratio cannot see that — it measures acceptance, not where
+ * the evidence came from. These functions classify committed proposals by the
+ * provenance of the signal that raised them and expose the exogenous share as
+ * a gate.
+ *
+ * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md */
+
+typedef enum
+{
+   /* Rooted in something outside the system's own reasoning: a human acting
+    * through the feedback surface, a test/verify exit status, a grader, a git
+    * outcome, an operator accept. */
+   LEARNING_EVIDENCE_EXOGENOUS = 0,
+   /* Rooted in the system's own output: an implicit detector reading aimee's
+    * own transcript, a lesson derived from a lesson, a self-generated eval
+    * result. Unknown provenance classifies here — the conservative side. */
+   LEARNING_EVIDENCE_ENDOGENOUS = 1,
+} learning_evidence_origin_t;
+
+/* Classify a signal's provenance from its (source, signal_type) pair. Pure;
+ * no DB access. `signal_type` overrides `source` for the implicit-detector
+ * types, because the signal-capture API defaults an unset source to
+ * "explicit" — without that override a caller could launder a self-derived
+ * signal into the exogenous count by simply omitting the field. NULL or empty
+ * arguments classify as endogenous. */
+learning_evidence_origin_t learning_evidence_classify(const char *source, const char *signal_type);
+
+/* Exogenous share of committed proposals over a window. `exogenous_ratio` is
+ * meaningful only when `committed_total` > 0; it is 0.0 for an empty window,
+ * which means "nothing observed", NOT "wholly endogenous" — read
+ * committed_total before acting on the ratio. */
+typedef struct
+{
+   int64_t committed_total;      /* committed proposals in the window */
+   int64_t committed_exogenous;  /* of those, exogenously rooted */
+   int64_t committed_endogenous; /* of those, endogenously rooted */
+   double exogenous_ratio;       /* exogenous / max(1, total); 0 when total == 0 */
+   int window_days;
+} learning_endogeneity_t;
+
+/* Overall (sink == NULL / "") or per-sink endogeneity over `window_days`
+ * (values <= 0 pick LEARNING_METRICS_DEFAULT_WINDOW_DAYS). Returns 0 on
+ * success, -1 on bad args / SQL / connection error. */
+int learning_metrics_endogeneity(int window_days, learning_endogeneity_t *out);
+int learning_metrics_endogeneity_for_sink(int window_days, const char *sink,
+                                          learning_endogeneity_t *out);
+
+/* Floor below which self-generated signal is judged to dominate, and the
+ * sample size below which the ratio is not yet worth acting on. A fresh
+ * installation has committed nothing, so the gate must not be closed by an
+ * empty window — that would make it impossible to ever bootstrap. */
+#define LEARNING_ENDOGENEITY_MIN_EXOGENOUS_RATIO 0.25
+#define LEARNING_ENDOGENEITY_MIN_SAMPLE          20
+
+typedef enum
+{
+   LEARNING_GATE_OPEN = 0,
+   /* Observed a large enough sample and the exogenous share is under the
+    * floor: the loop is feeding on itself. Gated promotions must refuse. */
+   LEARNING_GATE_CLOSED_ENDOGENOUS = 1,
+   /* The share could not be computed (DB2 configured but erroring). Distinct
+    * from CLOSED so the caller can decide; a build with DB2 compiled out
+    * reports OPEN instead, since no learning is being persisted there. */
+   LEARNING_GATE_UNAVAILABLE = 2,
+} learning_gate_state_t;
+
+/* Gate state over the window. `out` may be NULL. learning_gate_check() uses
+ * the defaults above; the _with() form takes explicit bounds so a caller (and
+ * the tests) can supply their own without a config round trip. */
+learning_gate_state_t learning_gate_check(learning_endogeneity_t *out);
+learning_gate_state_t learning_gate_check_with(int window_days, double min_exogenous_ratio,
+                                               int min_sample, learning_endogeneity_t *out);
+
 #endif

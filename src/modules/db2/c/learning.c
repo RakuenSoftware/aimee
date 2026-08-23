@@ -301,6 +301,95 @@ int db2_learning_proposals_settled_counts(int window_days, int64_t *committed, i
    return rc;
 }
 
+int db2_learning_committed_source_counts(int window_days, const char *sink_or_null,
+                                         db2_learning_source_count_t *out, int max)
+{
+   if (window_days <= 0 || !out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char window_expr[32];
+   snprintf(window_expr, sizeof(window_expr), "-%d days", window_days);
+   const char *sink = (sink_or_null && sink_or_null[0]) ? sink_or_null : "";
+
+   static const char *sql =
+       "SELECT s.source, s.signal_type, COUNT(*)"
+       " FROM learning_proposals p"
+       " JOIN learning_signals s ON s.id = p.signal_id"
+       " WHERE p.state = 'committed'"
+       " AND COALESCE(p.committed_at, p.updated_at, p.created_at) >= pg_now_text(?1)"
+       " AND (?2 = '' OR p.sink = ?3)"
+       " GROUP BY s.source, s.signal_type"
+       " ORDER BY s.source, s.signal_type";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", window_expr);
+   aimee_pg_bind_text(st, "?2", sink);
+   aimee_pg_bind_text(st, "?3", sink);
+
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[count], 0, sizeof(out[count]));
+      lrn_copy_text(out[count].source, sizeof(out[count].source), aimee_pg_column_text(st, 0), "");
+      lrn_copy_text(out[count].signal_type, sizeof(out[count].signal_type),
+                    aimee_pg_column_text(st, 1), "");
+      out[count].count = aimee_pg_column_int64(st, 2);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
+int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_signal_t *out,
+                                         int max)
+{
+   if (window_days <= 0 || !out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char window_expr[32];
+   snprintf(window_expr, sizeof(window_expr), "-%d days", window_days);
+
+   static const char *sql = "SELECT id, signal_type, source, title, description, correction_text,"
+                            " source_session"
+                            " FROM learning_signals"
+                            " WHERE polarity = 'negative' AND correction_text <> ''"
+                            " AND created_at >= pg_now_text(?1)"
+                            " ORDER BY id DESC LIMIT ?2";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", window_expr);
+   aimee_pg_bind_int(st, "?2", max);
+
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      db2_learning_negative_signal_t *row = &out[count];
+      memset(row, 0, sizeof(*row));
+      row->id = aimee_pg_column_int64(st, 0);
+      lrn_copy_text(row->signal_type, sizeof(row->signal_type), aimee_pg_column_text(st, 1), "");
+      lrn_copy_text(row->source, sizeof(row->source), aimee_pg_column_text(st, 2), "");
+      lrn_copy_text(row->title, sizeof(row->title), aimee_pg_column_text(st, 3), "");
+      lrn_copy_text(row->description, sizeof(row->description), aimee_pg_column_text(st, 4), "");
+      lrn_copy_text(row->correction_text, sizeof(row->correction_text), aimee_pg_column_text(st, 5),
+                    "");
+      lrn_copy_text(row->source_session, sizeof(row->source_session), aimee_pg_column_text(st, 6),
+                    "");
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
 int db2_learning_proposal_list(const char *state, const char *sink, int limit,
                                learning_proposal_t *out, int max)
 {

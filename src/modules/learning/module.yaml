@@ -13,6 +13,8 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/learning/learning_bundle.c",
+    "src/modules/learning/learning_endogeneity.c",
+    "src/modules/learning/learning_eval_synthesis.c",
     "src/modules/learning/learning_evidence.c",
     "src/modules/learning/learning_implicit.c",
     "src/modules/learning/learning_router.c",
@@ -26,6 +28,7 @@
     "server-go/modules/learning/learning_test.go"
   ],
   "public_headers": [
+    "src/modules/learning/include/aimee/learning/eval_synthesis.h",
     "src/modules/learning/include/aimee/learning/learning.h",
     "src/modules/learning/include/aimee/learning/module_api.h"
   ],

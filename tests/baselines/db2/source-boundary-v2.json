@@ -2347,6 +2347,16 @@
       ]
     },
     {
+      "path": "src/modules/learning/learning_endogeneity.c",
+      "classification": "module-kb-contract",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2_learning.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/modules/learning/learning_evidence.c",
       "classification": "module-kb-contract",
       "includes": [

@@ -3231,6 +3231,14 @@ paths:
     get:
       summary: Evaluation results
       responses: { "200": { description: Eval results, content: { application/json: { schema: { type: object } } } } }
+  /eval/candidates:
+    get:
+      summary: Synthesised regression candidates and the admission gate
+      responses: { "200": { description: Candidate list, content: { application/json: { schema: { type: object } } } } }
+    post:
+      summary: Scan, admit, reject, or retire regression candidates
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Update result, content: { application/json: { schema: { type: object } } } } }
   /pipeline/list:
     get:
       summary: List roundtable authoring pipelines

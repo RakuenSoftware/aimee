@@ -74,6 +74,7 @@ DB1_ONLY_TABLES = {
     "diagnoses",
     "diagnosis_items",
     "env_capabilities",
+    "eval_candidates",
     "eval_results",
     "execution_plans",
     "execution_trace",

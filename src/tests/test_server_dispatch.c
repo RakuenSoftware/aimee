@@ -8,6 +8,7 @@
 #include "../db1/db.h"
 #include "../db1/eval.h"
 #include "../db1/server_sessions.h"
+#include "eval_synthesis.h"  /* the regression-candidate surface stubbed below */
 #include "kb_client.h"       /* kb_health_t for the stub below */
 #include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
@@ -380,6 +381,53 @@ int db1_eval_results_list(const char *suite_or_null, db1_eval_display_row_t *out
    out[0].latency_ms = 11;
    snprintf(out[0].created_at, sizeof(out[0].created_at), "2026-05-25T00:00:00Z");
    return 1;
+}
+
+/* The eval.candidates surface reaches DB1 and the endogeneity gate. Neither is
+ * what this test exercises — it proves the dispatch table routes — so both are
+ * stubbed to a quiet, empty installation. */
+int db1_eval_candidate_list(const char *state_or_null, db1_eval_candidate_t *out, int max)
+{
+   (void)state_or_null;
+   (void)out;
+   return max > 0 ? 0 : -1;
+}
+
+int db1_eval_candidate_mark_rejected(int64_t id, const char *reason)
+{
+   (void)reason;
+   return id > 0 ? 0 : -1;
+}
+
+learning_gate_state_t learning_gate_check(learning_endogeneity_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return LEARNING_GATE_OPEN;
+}
+
+int eval_synthesis_scan_failures(int window_days, const char *suite,
+                                 eval_synthesis_scan_stats_t *out)
+{
+   (void)window_days;
+   (void)suite;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int eval_synthesis_admit_pending(const char *suite_dir, const char *admitted_by,
+                                 int min_occurrences)
+{
+   (void)admitted_by;
+   (void)min_occurrences;
+   return (suite_dir && suite_dir[0]) ? 0 : -1;
+}
+
+int eval_synthesis_retire(const char *suite_dir, int retire_windows)
+{
+   (void)retire_windows;
+   return (suite_dir && suite_dir[0]) ? 0 : -1;
 }
 
 int server_load_token(server_ctx_t *ctx)

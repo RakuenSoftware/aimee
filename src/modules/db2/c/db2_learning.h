@@ -84,6 +84,54 @@ extern "C"
    int db2_learning_proposals_settled_counts(int window_days, int64_t *committed,
                                              int64_t *terminal);
 
+#define DB2_LEARNING_SOURCE_LEN      16
+#define DB2_LEARNING_SIGNAL_TYPE_LEN 32
+
+   /* One (source, signal_type) group with its committed-proposal count. */
+   typedef struct
+   {
+      char source[DB2_LEARNING_SOURCE_LEN];
+      char signal_type[DB2_LEARNING_SIGNAL_TYPE_LEN];
+      int64_t count;
+   } db2_learning_source_count_t;
+
+   /* Committed proposals within |window_days|, grouped by the originating
+    * signal's (source, signal_type). Rows are the raw provenance groups; the
+    * exogenous/endogenous judgement is policy and belongs to the learning
+    * module, not to SQL. `sink_or_null` filters to one sink when non-empty.
+    * Uses COALESCE(committed_at, updated_at, created_at) for the timestamp,
+    * matching db2_learning_proposals_settled_counts.
+    * Returns rows written (>=0, capped at max), or -1 on bad args / SQL /
+    * connection error. window_days must be > 0. */
+   int db2_learning_committed_source_counts(int window_days, const char *sink_or_null,
+                                            db2_learning_source_count_t *out, int max);
+
+#define DB2_LEARNING_NEG_TITLE_LEN      256
+#define DB2_LEARNING_NEG_DESC_LEN       1024
+#define DB2_LEARNING_NEG_CORRECTION_LEN 1024
+#define DB2_LEARNING_NEG_SESSION_LEN    64
+
+   /* One negative signal that carried a correction. */
+   typedef struct
+   {
+      int64_t id;
+      char signal_type[DB2_LEARNING_SIGNAL_TYPE_LEN];
+      char source[DB2_LEARNING_SOURCE_LEN];
+      char title[DB2_LEARNING_NEG_TITLE_LEN];
+      char description[DB2_LEARNING_NEG_DESC_LEN];
+      char correction_text[DB2_LEARNING_NEG_CORRECTION_LEN];
+      char source_session[DB2_LEARNING_NEG_SESSION_LEN];
+   } db2_learning_negative_signal_t;
+
+   /* Negative-polarity signals from the last |window_days| that carry a
+    * non-empty correction_text, newest first. These are the only signal rows
+    * that state BOTH what was asked and what should have been said, which is
+    * what makes them synthesisable into a regression check.
+    * Returns rows written (>=0, capped at max), or -1 on bad args / SQL /
+    * connection error. window_days must be > 0. */
+   int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_signal_t *out,
+                                            int max);
+
 #ifdef __cplusplus
 }
 #endif

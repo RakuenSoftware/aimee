@@ -372,6 +372,13 @@
 #define AIMEE_DB1_OP_DIAGNOSE_CONCLUDE                      43u
 #define AIMEE_DB1_OP_DIAGNOSE_ABANDON                       44u
 #define AIMEE_DB1_OP_DIAGNOSE_SUGGEST_PROBES                48u
+#define AIMEE_DB1_OP_EVAL_CANDIDATE_OBSERVE                 49u
+#define AIMEE_DB1_OP_EVAL_CANDIDATE_GET_BY_SIGNATURE        50u
+#define AIMEE_DB1_OP_EVAL_CANDIDATE_LIST                    51u
+#define AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_ADMITTED           52u
+#define AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_REJECTED           53u
+#define AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_ARCHIVED           54u
+#define AIMEE_DB1_OP_EVAL_CANDIDATE_SET_PASSING_WINDOWS     55u
 
 /* Family 9: per-session guardrail state: the hook's view of a session, stored
  * as a scalar row plus five child tables and read back as one nested struct. */

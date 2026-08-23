@@ -170,6 +170,8 @@ static const struct
     {"dogfood.report", pt_print_dogfood_report},
     {"eval.run", pt_print_eval_run},
     {"eval.results", pt_print_eval_results},
+    {"eval.candidates", pt_print_eval_candidates},
+    {"eval.candidates-update", pt_print_eval_candidates_update},
     {"identity.show", pt_print_identity_show},
     {"api.status", pt_print_api_status},
     {"api.enable", pt_print_api_status},

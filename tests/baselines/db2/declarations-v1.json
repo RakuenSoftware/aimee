@@ -446,6 +446,10 @@
     },
     {
       "classification": "module-kb-contract",
+      "path": "src/modules/learning/learning_endogeneity.c"
+    },
+    {
+      "classification": "module-kb-contract",
       "path": "src/modules/learning/learning_evidence.c"
     },
     {
@@ -14190,6 +14194,34 @@
     },
     {
       "consumers": [
+        "src/modules/learning/learning_endogeneity.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 106
+        }
+      ],
+      "signature": "int db2_learning_committed_source_counts ( int window_days , const char * sink_or_null , db2_learning_source_count_t * out , int max )",
+      "signature_sha256": "2702965d486ba020c5f1a996a9c52beea128febbe065561f4d0469b45da5c599",
+      "status": "audit-pending",
+      "symbol": "db2_learning_committed_source_counts"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 132
+        }
+      ],
+      "signature": "int db2_learning_negative_signals_recent ( int window_days , db2_learning_negative_signal_t * out , int max )",
+      "signature_sha256": "f20d525c3f19752f1dcffcd74d2c7614e6654e8b5e653e99a19d279cd2bd3bff",
+      "status": "internal-unconsumed",
+      "symbol": "db2_learning_negative_signals_recent"
+    },
+    {
+      "consumers": [
         "src/modules/learning/learning_router.c"
       ],
       "locations": [
@@ -26486,14 +26518,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9db131969f66a499e4a0a4a4a0d356aaa8102fcc2798bcf49c3b76be1119f8a4",
+  "fingerprint": "1462348147336ebe56c57a1f05c1e07e0bd6e3cf65302a39c715cd146b250734",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 695,
-    "declarations": 1438,
+    "audit_pending": 696,
+    "declarations": 1440,
     "headers": 140,
-    "internal_unconsumed": 162,
+    "internal_unconsumed": 163,
     "private_test_only": 287,
     "reviewed": 294
   }
