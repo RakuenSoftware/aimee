@@ -140,3 +140,74 @@ func TestModuleRegistryRejectsUnknownAndBadArguments(t *testing.T) {
 		t.Fatal("unknown module executable was accepted")
 	}
 }
+
+func TestNoStageIsAdvertisedWithoutBeingDeclared(t *testing.T) {
+	// The other direction of the correspondence above. That test catches a stage
+	// declared and never registered, which fails as CAPABILITY_ABSENT. This one
+	// catches a stage registered and never declared, which fails more quietly: a
+	// client must list the kinds it calls, and the contract validator refuses a
+	// request naming a kind no module declares -- so the stage is served by a
+	// running module and cannot legitimately be addressed by anybody.
+	//
+	// Scoped to components declared runtime "go", which is the population rather
+	// than an exemption: the image installs the Go binary only for those ids. A
+	// switch case for a component declared "c" is a prepared replacement that
+	// will never advertise -- db2 is exactly that, with eight operation stages
+	// registered here and the deployed aimee-module-db2 being the C build.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "modules",
+		"process-contracts.json"))
+	if err != nil {
+		t.Fatalf("read process-contracts.json: %v", err)
+	}
+	var contracts struct {
+		Components []struct {
+			ID        string `json:"id"`
+			Execution string `json:"execution"`
+			Runtime   string `json:"runtime"`
+			HostedBy  string `json:"hosted_by"`
+			Stages    []struct {
+				EventKind uint32 `json:"event_kind"`
+				Name      string `json:"name"`
+			} `json:"stages"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &contracts); err != nil {
+		t.Fatalf("parse process-contracts.json: %v", err)
+	}
+
+	checked := 0
+	for _, declared := range contracts.Components {
+		// runtime "go" AND not hosted: exactly the population the image installs
+		// a binary for. A hosted component runs inside another process -- the
+		// bus denies a live duplicate of its principal -- so it has no binary of
+		// its own and no switch case to have. workflows is hosted by the WFE,
+		// and my first version of this check called that a defect.
+		if declared.Execution != "process" || declared.Runtime != "go" ||
+			declared.HostedBy != "" {
+			continue
+		}
+		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + declared.ID)
+		if !ok {
+			t.Errorf("%s is declared a Go process and this binary has no case for it; "+
+				"the image would install a binary that exits on its own name", declared.ID)
+			continue
+		}
+		checked++
+		declaredKinds := map[uint32]bool{}
+		for _, s := range declared.Stages {
+			declaredKinds[s.EventKind] = true
+		}
+		for _, s := range config.Stages {
+			if !declaredKinds[s.EventKind] {
+				t.Errorf("%s advertises event %d, which process-contracts.json does not "+
+					"declare: no client may request a kind no module declares, so the "+
+					"stage runs and nothing can address it", declared.ID, s.EventKind)
+			}
+		}
+	}
+	// Guard the guard, the same way its neighbour does: a loop that compared
+	// nothing passes for the wrong reason.
+	if checked == 0 {
+		t.Fatal("no Go module was actually compared against the contract")
+	}
+}
