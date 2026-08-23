@@ -2022,6 +2022,45 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "projection_edges",
+			stage: db2contract.StageProjectionEdges,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectionEdgesRequest(liveProbeScopeProject, 64)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeProjectionEdgesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "projection_edges_for_generation",
+			stage: db2contract.StageProjectionEdgesForGeneration,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectionEdgesForGenerationRequest(2147483000, 64)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err :=
+					db2contract.DecodeProjectionEdgesForGenerationReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "bandit_arm_stats_read",
+			stage: db2contract.StageBanditArmStatsRead,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditArmStatsReadRequest(
+					"live-probe-decision", "live-probe-arm")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, err :=
+					db2contract.DecodeBanditArmStatsReadReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -3865,6 +3904,49 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("the rejection did not land")
+				}
+			},
+		},
+		{
+			name:  "code_index_op_record",
+			stage: db2contract.StageCodeIndexOpRecord,
+			// Twice, for the conflict branch where the attempt count grows.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCodeIndexOpRecordRequest(
+					900024, liveProbeScopeProject, "node:live-probe",
+					"src/live-probe.c", 1, "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				recorded, err := db2contract.DecodeCodeIndexOpRecordReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if recorded != 1 {
+					t.Fatal("the index operation was not recorded")
+				}
+			},
+		},
+		{
+			name:  "kb_audit_append",
+			stage: db2contract.StageKBAuditAppend,
+			// Twice, because the second append is the one that reads a tail
+			// rather than starting from genesis -- and the table's WORM
+			// triggers refuse anything but an insert, so a wrong sequence
+			// number fails rather than overwriting.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBAuditAppendRequest(
+					"admin", "live-probe", "reject", "live-probe-artifact",
+					"denied", "live probe")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeKBAuditAppendReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the audit row was not appended")
 				}
 			},
 		},
