@@ -5043,6 +5043,54 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "code_project_upsert",
+			stage: db2contract.StageCodeProjectUpsert,
+			// Twice: the first call creates the project, the second takes the
+			// existing-row branch -- the locked read, the alias retirement
+			// test and the generation upsert's conflict clause, none of which
+			// the first call reaches.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCodeProjectUpsertRequest(
+					"live-probe-upsert-project", "/live-probe-upsert")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				projectID, err := db2contract.DecodeCodeProjectUpsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if projectID == 0 {
+					t.Fatal("no project identifier came back")
+				}
+			},
+		},
+		{
+			name:  "projection_sync_project",
+			stage: db2contract.StageProjectionSyncProject,
+			// Twice, because the second run is the one that conflicts: every
+			// edge it writes is already in entity_edges and in the ledger, and
+			// the preserve-what-was-observed clause has never run until then.
+			repeat: 2,
+			seed: []string{
+				liveProbeProject, liveProbePendingGeneration,
+				liveProbeStyleGraph, liveProbeIndexedSymbols,
+			},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeProjectionSyncProjectRequest(
+					liveProbeScopeProject, liveProbePendingGenerationID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				edgeCount, err := db2contract.DecodeProjectionSyncProjectReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				// contains, defines, exports, imports, routes, styles, calls.
+				if edgeCount != 7 {
+					t.Fatalf("edges = %d, want one of each class", edgeCount)
+				}
+			},
+		},
 	}
 }
 
@@ -5086,6 +5134,27 @@ const liveProbeStyleGraph = `WITH styled_file AS (
  RETURNING id)
  INSERT INTO css_component_styles (id, component_file_id, class_token, resolved)
  SELECT 900033, styled_file.id, 'card__title', 1 FROM styled_file`
+
+// One of everything the projection reads, hung off the file the style-graph
+// seed creates: a definition, an export, an import, a route and a call.
+//
+// One of each because the sync's six reads are six different joins, and a probe
+// that seeded only symbols would prove five of them parse and nothing about
+// whether they match.
+const liveProbeIndexedSymbols = `WITH definition AS (
+ INSERT INTO terms (id, file_id, name, kind)
+ VALUES (900040, 900030, 'renderButton', 'function') RETURNING id),
+ route AS (
+ INSERT INTO terms (id, file_id, name, kind)
+ VALUES (900041, 900030, '/buttons', 'route') RETURNING id),
+ exported AS (
+ INSERT INTO file_exports (id, file_id, name)
+ VALUES (900042, 900030, 'Button') RETURNING id),
+ imported AS (
+ INSERT INTO file_imports (id, file_id, name)
+ VALUES (900043, 900030, 'react') RETURNING id)
+ INSERT INTO code_calls (id, file_id, caller, callee)
+ VALUES (900044, 900030, 'renderButton', 'paint')`
 
 // Seed rows for the learning-write probes. Fixed identifiers for the same
 // reason as the projection ones: a probe has to name what it acts on.
