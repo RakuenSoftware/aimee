@@ -151,9 +151,28 @@ def module_declared_go_files(root: Path) -> dict[str, list[str]]:
     return declared
 
 
-def go_files_outside_modules(root: Path) -> list[str]:
-    """Non-test .go files under server-go/ that are not in a module tree."""
+def go_files_outside_modules(root: Path) -> tuple[list[str], int]:
+    """Non-test .go files under server-go/ that are not in a module tree.
+
+    Returns the files AND how many were skipped as fixtures, because a summary
+    that reports only what it covered gets quieter as its exclusions grow. The
+    covered count and the total shrink together when a skip rule widens, so
+    neither number moves in a way a reader would question -- the figure stays
+    honest and the omission does the lying.
+
+    The denominator is for the READER. What actually defends this check is
+    structural and was verified by planting a widened skip rule rather than by
+    reasoning: every file in scope is either named in UNOWNED_PACKAGES or has no
+    home at all, so removing a directory from the walk either strands an
+    exemption -- which the stale-entry arm reports -- or drops a file that would
+    have errored as undeclared. A skip cannot quietly shrink this set.
+
+    That is worth stating because it is the difference between sound by
+    construction and sound by luck, and the summary line alone cannot tell you
+    which one you have.
+    """
     found: list[str] = []
+    skipped = 0
     base = root / "server-go"
     if not base.is_dir():
         raise SystemExit(f"{NAME}: error: {base}: no server-go tree")
@@ -163,17 +182,20 @@ def go_files_outside_modules(root: Path) -> list[str]:
         if rel_dir == MODULES_TREE or rel_dir.startswith(MODULES_TREE + "/"):
             continue
         if any(marker in "/" + rel_dir + "/" for marker in FIXTURE_MARKERS):
+            skipped += sum(
+                1 for f in filenames if f.endswith(".go") and not f.endswith("_test.go")
+            )
             continue
         for filename in sorted(filenames):
             if not filename.endswith(".go") or filename.endswith("_test.go"):
                 continue
             found.append(f"{rel_dir}/{filename}")
-    return sorted(found)
+    return sorted(found), skipped
 
 
 def run(root: Path) -> str:
     declared = module_declared_go_files(root)
-    files = go_files_outside_modules(root)
+    files, skipped = go_files_outside_modules(root)
 
     # A check that compared NOTHING must not report ok.
     #
@@ -253,7 +275,8 @@ def run(root: Path) -> str:
 
     debts = sum(1 for kind, _ in UNOWNED_PACKAGES.values() if kind == "debt")
     return (
-        f"{NAME}: ok ({covered} file(s) outside {MODULES_TREE}/ accounted for; "
+        f"{NAME}: ok ({covered} of {len(files)} file(s) outside {MODULES_TREE}/ "
+        f"accounted for, {skipped} skipped as fixtures; "
         f"{len(UNOWNED_PACKAGES)} named non-module package(s), {debts} of them debt)"
     )
 
