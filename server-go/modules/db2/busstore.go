@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	storage "github.com/JBailes/aimee/server-go/postgres"
@@ -283,19 +284,45 @@ func scanCell(cell storage.Value, target any) error {
 			return errors.New("NULL into *int64; use **int64 or COALESCE")
 		}
 		*typed = cell.Int
+	case *int32:
+		// Five operations scan a priority or a count into this, and there was
+		// no case for it: they failed over the wire and passed against a pool,
+		// which is the whole disagreement the parity run exists to find.
+		if null {
+			return errors.New("NULL into *int32; use **int32 or COALESCE")
+		}
+		if cell.Int > math.MaxInt32 || cell.Int < math.MinInt32 {
+			return fmt.Errorf("%d does not fit in an int32", cell.Int)
+		}
+		*typed = int32(cell.Int)
 	case *int:
 		if null {
 			return errors.New("NULL into *int; use **int or COALESCE")
+		}
+		// int is 64-bit everywhere this builds, but saying so in the type
+		// system costs nothing and the check is free if it is.
+		if cell.Int > math.MaxInt || cell.Int < math.MinInt {
+			return fmt.Errorf("%d does not fit in an int", cell.Int)
 		}
 		*typed = int(cell.Int)
 	case *uint32:
 		if null {
 			return errors.New("NULL into *uint32; use **uint32 or COALESCE")
 		}
+		// Checked rather than converted. A BIGINT of 5000000000 into a uint32
+		// wraps to 705032704, and the operation goes on to use it: well-formed,
+		// plausible, wrong, and silent. pgx refuses this; so does this now, or
+		// the two paths disagree exactly where it matters most.
+		if cell.Int < 0 || cell.Int > math.MaxUint32 {
+			return fmt.Errorf("%d does not fit in a uint32", cell.Int)
+		}
 		*typed = uint32(cell.Int)
 	case *uint64:
 		if null {
 			return errors.New("NULL into *uint64; use **uint64 or COALESCE")
+		}
+		if cell.Int < 0 {
+			return fmt.Errorf("%d is negative and cannot be a uint64", cell.Int)
 		}
 		*typed = uint64(cell.Int)
 	case *float64:
@@ -329,6 +356,16 @@ func scanCell(cell storage.Value, target any) error {
 			return nil
 		}
 		v := cell.Int
+		*typed = &v
+	case **int32:
+		if null {
+			*typed = nil
+			return nil
+		}
+		if cell.Int > math.MaxInt32 || cell.Int < math.MinInt32 {
+			return fmt.Errorf("%d does not fit in an int32", cell.Int)
+		}
+		v := int32(cell.Int)
 		*typed = &v
 	case **float64:
 		if null {

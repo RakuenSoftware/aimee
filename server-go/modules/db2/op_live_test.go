@@ -48,12 +48,19 @@ func liveStore(t *testing.T) (Store, func()) {
 	if dsn == "" {
 		t.Skip("AIMEE_DB2_URL is unset; this test needs a real database")
 	}
-	if os.Getenv("AIMEE_DB2_STORE") == "bus" {
+	switch store := os.Getenv("AIMEE_DB2_STORE"); store {
+	case "bus":
 		// The same operations, reaching the database through the postgres
 		// module rather than a pool of their own. Whether the two paths agree
 		// is exactly what the parity harness can answer, so it is offered as a
 		// switch rather than asserted in a comment.
 		return liveBusBackedStore(t)
+	case "", "pool":
+	default:
+		// Refused rather than treated as the default. A misspelling silently
+		// selects the pool, and then every operation passes and the run reads
+		// as a completed parity comparison against a path it never touched.
+		t.Fatalf("AIMEE_DB2_STORE=%q is not a store; use \"bus\" or leave it unset", store)
 	}
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
