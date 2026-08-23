@@ -5091,6 +5091,38 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "corpus_pipeline_drain",
+			stage: db2contract.StageCorpusPipelineDrain,
+			// The one operation here that runs other operations: five stage
+			// handlers, each with its own statements, plus the claim, the
+			// event log and the job advance. The seeded document is walked
+			// far enough to run all five -- classify, section, reference,
+			// term and gap -- which is the only way any of them is ever run
+			// against a real schema.
+			seed: []string{liveProbeCorpusDoc},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCorpusPipelineDrainRequest(14)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				drained, total, _, _, _, _, processed, skipped, err :=
+					db2contract.DecodeCorpusPipelineDrainReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if drained != 1 {
+					t.Fatal("the drain did not run")
+				}
+				if total == 0 {
+					t.Fatal("the seeded job was not counted")
+				}
+				// Fourteen stages from ingested to complete, of which the
+				// nine with no local handler are skips.
+				if processed != 14 || skipped != 9 {
+					t.Fatalf("processed = %d, skipped = %d", processed, skipped)
+				}
+			},
+		},
 	}
 }
 
@@ -5155,6 +5187,22 @@ const liveProbeIndexedSymbols = `WITH definition AS (
  VALUES (900043, 900030, 'react') RETURNING id)
  INSERT INTO code_calls (id, file_id, caller, callee)
  VALUES (900044, 900030, 'renderButton', 'paint')`
+
+// A document with something for every stage handler to find: a heading to
+// section on, a link and a bare mention to resolve, a quoted term to propose,
+// and a job row parked at the start of the pipeline.
+//
+// The reference deliberately points at nothing, so the gap stage has a dangling
+// reference to raise -- which is the only way that half of it runs.
+const liveProbeCorpusDoc = `WITH document AS (
+ INSERT INTO docs (id, filename, content_hash, normalized_text)
+ VALUES (900050, 'live-probe-doc.md', 'live-probe-hash',
+ E'# Heading\nthe ` + "`" + `ScopeGuard` + "`" + ` helper, see missing-doc.md and [a link](other-doc.md).\n')
+ RETURNING id)
+ INSERT INTO corpus_processing_jobs
+ (doc_id, content_hash, stage, stage_status, updated_at)
+ SELECT document.id, 'live-probe-hash', 'ingested', 'pending',
+ '2026-01-01 00:00:00' FROM document`
 
 // Seed rows for the learning-write probes. Fixed identifiers for the same
 // reason as the projection ones: a probe has to name what it acts on.
