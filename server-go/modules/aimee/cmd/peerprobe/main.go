@@ -21,6 +21,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
 
 const (
@@ -71,16 +72,16 @@ func main() {
 	}
 	fmt.Printf("attached to %s as principal %d/%d\n\n", socket, principalClass, principalRef)
 
-	call := func(stage, op uint32, cells []string) (aimee.Status, []string, error) {
-		frame, err := aimee.EncodeRequest(op, cells)
+	call := func(stage, op uint32, cells []string) (peerwire.Status, []string, error) {
+		frame, err := peerwire.EncodeRequest(op, cells)
 		if err != nil {
 			return 0, nil, err
 		}
-		reply, err := caller.Call(ctx, aimee.EventKind(stage), stage, 0, callDeadline, frame)
+		reply, err := caller.Call(ctx, peerwire.EventKind(aimee.PrincipalRef, stage), stage, 0, callDeadline, frame)
 		if err != nil {
 			return 0, nil, err
 		}
-		return aimee.DecodeResponse(reply)
+		return peerwire.DecodeResponse(reply)
 	}
 
 	// The module has no directory source, so sessions must register through the
@@ -90,18 +91,18 @@ func main() {
 	fmt.Println("stage reachability and domain refusals over the bus:")
 
 	var cells []string
-	status, _, err := call(aimee.StageDelivery, aimee.OpSend,
+	status, _, err := call(peerwire.StageDelivery, peerwire.OpSend,
 		[]string{"probe-A", "probe-B", "hello over the bus", "", "0", "0"})
-	check(fmt.Sprintf("delivery stage (kind %d) reachable", aimee.EventDelivery), err == nil,
+	check(fmt.Sprintf("delivery stage (kind %d) reachable", peerwire.EventKind(aimee.PrincipalRef, peerwire.StageDelivery)), err == nil,
 		fmt.Sprintf("err=%v status=%v", err, status))
-	check("unknown sender refused as a SERVED call", err == nil && status == aimee.StatusUnknownSender,
+	check("unknown sender refused as a SERVED call", err == nil && status == peerwire.StatusUnknownSender,
 		fmt.Sprintf("status=%v (want unknown_sender, and no transport error)", status))
 
-	status, cells, err = call(aimee.StageInbox, aimee.OpInboxLen, []string{"probe-B"})
-	check(fmt.Sprintf("inbox stage (kind %d) reachable", aimee.EventInbox), err == nil,
+	status, cells, err = call(peerwire.StageInbox, peerwire.OpInboxLen, []string{"probe-B"})
+	check(fmt.Sprintf("inbox stage (kind %d) reachable", peerwire.EventKind(aimee.PrincipalRef, peerwire.StageInbox)), err == nil,
 		fmt.Sprintf("err=%v", err))
 	check("unknown session refused, not reported empty",
-		err == nil && status == aimee.StatusNoPeer,
+		err == nil && status == peerwire.StatusNoPeer,
 		fmt.Sprintf("status=%v cells=%v (want no_peer)", status, cells))
 
 	// Owners are unique per run. The module is a long-lived process that holds
@@ -112,55 +113,55 @@ func main() {
 	from := fmt.Sprintf("uid:probe-%d-a", os.Getpid())
 	to := fmt.Sprintf("uid:probe-%d-b", os.Getpid())
 
-	status, cells, err = call(aimee.StageGrant, aimee.OpGrantExists, []string{from, to})
-	check(fmt.Sprintf("grant stage (kind %d) reachable", aimee.EventGrant), err == nil,
+	status, cells, err = call(peerwire.StageGrant, peerwire.OpGrantExists, []string{from, to})
+	check(fmt.Sprintf("grant stage (kind %d) reachable", peerwire.EventKind(aimee.PrincipalRef, peerwire.StageGrant)), err == nil,
 		fmt.Sprintf("err=%v", err))
 	check("absent grant answers OK with a false value",
-		err == nil && status == aimee.StatusOK && len(cells) == 1 && cells[0] == "0",
+		err == nil && status == peerwire.StatusOK && len(cells) == 1 && cells[0] == "0",
 		fmt.Sprintf("status=%v cells=%v", status, cells))
 
 	// A grant is directed and survives the round trip.
-	status, _, err = call(aimee.StageGrant, aimee.OpGrant, []string{from, to})
-	check("grant write accepted", err == nil && status == aimee.StatusOK,
+	status, _, err = call(peerwire.StageGrant, peerwire.OpGrant, []string{from, to})
+	check("grant write accepted", err == nil && status == peerwire.StatusOK,
 		fmt.Sprintf("status=%v err=%v", status, err))
-	status, cells, err = call(aimee.StageGrant, aimee.OpGrantExists, []string{from, to})
+	status, cells, err = call(peerwire.StageGrant, peerwire.OpGrantExists, []string{from, to})
 	check("grant is readable back (module holds state)",
-		err == nil && status == aimee.StatusOK && len(cells) == 1 && cells[0] == "1",
+		err == nil && status == peerwire.StatusOK && len(cells) == 1 && cells[0] == "1",
 		fmt.Sprintf("status=%v cells=%v", status, cells))
-	status, cells, err = call(aimee.StageGrant, aimee.OpGrantExists, []string{to, from})
+	status, cells, err = call(peerwire.StageGrant, peerwire.OpGrantExists, []string{to, from})
 	check("grant did NOT leak in the reverse direction",
-		err == nil && status == aimee.StatusOK && len(cells) == 1 && cells[0] == "0",
+		err == nil && status == peerwire.StatusOK && len(cells) == 1 && cells[0] == "0",
 		fmt.Sprintf("status=%v cells=%v", status, cells))
 
 	// A drain reply leads with how many remain, so a caller can tell a complete
 	// drain from a capped one without a second call.
-	status, cells, err = call(aimee.StageInbox, aimee.OpInboxTake, []string{"probe-A", "1"})
-	check("take on an unknown session is refused", err == nil && status == aimee.StatusNoPeer,
+	status, cells, err = call(peerwire.StageInbox, peerwire.OpInboxTake, []string{"probe-A", "1"})
+	check("take on an unknown session is refused", err == nil && status == peerwire.StatusNoPeer,
 		fmt.Sprintf("status=%v (want no_peer)", status))
 
 	// Channel stage: reachable, and refusing a non-member rather than fanning
 	// out to sessions that never agreed to hear from the sender.
-	status, _, err = call(aimee.StageChannel, aimee.OpChannelSend,
+	status, _, err = call(peerwire.StageChannel, peerwire.OpChannelSend,
 		[]string{"probe-A", "nosuch", "hello channel", "", "0"})
-	check(fmt.Sprintf("channel stage (kind %d) reachable", aimee.EventChannel), err == nil,
+	check(fmt.Sprintf("channel stage (kind %d) reachable", peerwire.EventKind(aimee.PrincipalRef, peerwire.StageChannel)), err == nil,
 		fmt.Sprintf("err=%v", err))
 	check("channel send by an unknown sender is refused",
-		err == nil && status == aimee.StatusUnknownSender,
+		err == nil && status == peerwire.StatusUnknownSender,
 		fmt.Sprintf("status=%v (want unknown_sender)", status))
 
-	status, cells, err = call(aimee.StageChannel, aimee.OpChannelMembers, []string{"nosuch"})
+	status, cells, err = call(peerwire.StageChannel, peerwire.OpChannelMembers, []string{"nosuch"})
 	check("members of an absent channel answers OK with none",
-		err == nil && status == aimee.StatusOK && len(cells) == 0,
+		err == nil && status == peerwire.StatusOK && len(cells) == 0,
 		fmt.Sprintf("status=%v cells=%v", status, cells))
 
 	// A malformed frame is a TRANSPORT-level refusal, distinct from a domain one.
-	_, err = caller.Call(ctx, aimee.EventDelivery, aimee.StageDelivery, 0, callDeadline,
+	_, err = caller.Call(ctx, peerwire.EventKind(aimee.PrincipalRef, peerwire.StageDelivery), peerwire.StageDelivery, 0, callDeadline,
 		[]byte("not a fields-v2 frame"))
 	check("malformed frame refused at the transport level", err != nil,
 		fmt.Sprintf("err=%v (want a non-nil transport error)", err))
 
 	// An unadvertised stage under this module's principal must not be served.
-	_, err = caller.Call(ctx, aimee.EventKind(9), 9, 0, callDeadline, mustFrame())
+	_, err = caller.Call(ctx, peerwire.EventKind(aimee.PrincipalRef, 9), 9, 0, callDeadline, mustFrame())
 	check("unadvertised stage 9 is not served", err != nil,
 		fmt.Sprintf("err=%v (want refusal)", err))
 
@@ -173,6 +174,6 @@ func main() {
 }
 
 func mustFrame() []byte {
-	f, _ := aimee.EncodeRequest(aimee.OpInboxLen, []string{"x"})
+	f, _ := peerwire.EncodeRequest(peerwire.OpInboxLen, []string{"x"})
 	return f
 }

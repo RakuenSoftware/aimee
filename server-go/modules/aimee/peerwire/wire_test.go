@@ -1,4 +1,4 @@
-package aimee
+package peerwire
 
 import (
 	"encoding/binary"
@@ -15,9 +15,10 @@ import (
 // declaring another; deriving them makes that impossible in this file, and this
 // test pins the derivation itself.
 func TestEventKindsFollowTheBusFormula(t *testing.T) {
-	if PrincipalRef != 31 {
-		t.Fatalf("PrincipalRef = %d; the inventory declares 31", PrincipalRef)
-	}
+	// The ref is supplied by the module, not held here. These are the values at
+	// ref 31; at ref 30 the same four stages give 11796-11799, and the formula
+	// is what makes that a renumber rather than a rewrite.
+	const ref uint32 = 31
 	for _, tc := range []struct {
 		stage uint32
 		want  uint32
@@ -25,13 +26,18 @@ func TestEventKindsFollowTheBusFormula(t *testing.T) {
 		{StageDelivery, 12033},
 		{StageInbox, 12034},
 		{StageGrant, 12035},
+		{StageChannel, 12036},
 	} {
-		if got := EventKind(tc.stage); got != tc.want {
-			t.Errorf("EventKind(%d) = %d; want %d", tc.stage, got, tc.want)
+		if got := EventKind(ref, tc.stage); got != tc.want {
+			t.Errorf("EventKind(%d, %d) = %d; want %d", ref, tc.stage, got, tc.want)
 		}
-		if got := 4096 + PrincipalRef*256 + tc.stage; got != tc.want {
+		if got := 4096 + ref*256 + tc.stage; got != tc.want {
 			t.Errorf("formula for stage %d = %d; want %d", tc.stage, got, tc.want)
 		}
+	}
+	// Stage ids are stable across a ref change; only the kinds move.
+	if StageDelivery != 1 || StageInbox != 2 || StageGrant != 3 || StageChannel != 4 {
+		t.Error("stage ids moved; the merge renumbers them deliberately, not incidentally")
 	}
 }
 
@@ -145,8 +151,8 @@ func TestMessageRowRoundTrip(t *testing.T) {
 		Text: "body with unicode: ✓ and a quote \"",
 	}
 	cells := MessageCells(m)
-	if len(cells) != messageWidth {
-		t.Fatalf("row width = %d; want %d", len(cells), messageWidth)
+	if len(cells) != MessageWidth {
+		t.Fatalf("row width = %d; want %d", len(cells), MessageWidth)
 	}
 	got, err := MessageRows(cells)
 	if err != nil || len(got) != 1 {
@@ -161,7 +167,7 @@ func TestMessageRowRoundTrip(t *testing.T) {
 // remainder rather than hand back a short final row.
 func TestMessageRowsRefusesRemainder(t *testing.T) {
 	cells := MessageCells(peer.Message{ID: "x"})
-	if _, err := MessageRows(cells[:messageWidth-1]); !errors.Is(err, ErrRowCount) {
+	if _, err := MessageRows(cells[:MessageWidth-1]); !errors.Is(err, ErrRowCount) {
 		t.Fatalf("short row: err = %v; want ErrRowCount", err)
 	}
 	two := append(MessageCells(peer.Message{ID: "a"}), MessageCells(peer.Message{ID: "b"})...)

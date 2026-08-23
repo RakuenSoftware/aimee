@@ -793,9 +793,9 @@ func TestExistsAsksTheDirectoryForSessionsItHasNotSeen(t *testing.T) {
 	}
 
 	var asked []string
-	r.SetSessionExists(func(id string) bool {
+	r.SetSessionOwner(func(id string) (string, bool) {
 		asked = append(asked, id)
-		return id == "known-to-db1"
+		return "uid:1000", id == "known-to-db1"
 	})
 
 	// The directory knows it, so it exists and its inbox is merely EMPTY.
@@ -820,8 +820,22 @@ func TestExistsAsksTheDirectoryForSessionsItHasNotSeen(t *testing.T) {
 		t.Errorf("directory consulted for a session already held locally: %v", asked)
 	}
 
-	r.SetSessionExists(nil)
+	// Owner comes from the same hook, so a label lookup is scoped against the
+	// principal the DIRECTORY reports rather than a local copy of it.
+	if owner, ok := r.Owner("known-to-db1"); !ok || owner != "uid:1000" {
+		t.Errorf("Owner = %q,%v; want uid:1000,true", owner, ok)
+	}
+	// The directory denying a session outranks a local entry: holding mail for a
+	// session that no longer exists is undeliverable, not addressable.
+	if _, ok := r.Owner("seen"); ok {
+		t.Error("a locally-held session the directory denies was reported addressable")
+	}
+
+	r.SetSessionOwner(nil)
 	if r.Exists("known-to-db1") {
 		t.Error("clearing the hook did not restore the fallback")
+	}
+	if owner, ok := r.Owner("seen"); !ok || owner != "uid:1000" {
+		t.Errorf("fallback Owner = %q,%v; want uid:1000,true", owner, ok)
 	}
 }

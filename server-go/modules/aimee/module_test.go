@@ -9,6 +9,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
 
 func newModule(t *testing.T, ids ...string) *Module {
@@ -39,12 +40,12 @@ func moduleOver(t *testing.T, r *peer.Registry) *Module {
 // peerRegistry reaches the registry behind the module's peer capability, for
 // tests that need to drive it directly.
 func (m *Module) peerRegistry() *peer.Registry {
-	return m.byStage[StageDelivery].(*PeerCapability).registry
+	return m.byStage[peerwire.StageDelivery].(*PeerCapability).registry
 }
 
-func call(t *testing.T, m *Module, stage, op uint32, cells []string) (Status, []string) {
+func call(t *testing.T, m *Module, stage, op uint32, cells []string) (peerwire.Status, []string) {
 	t.Helper()
-	frame, err := EncodeRequest(op, cells)
+	frame, err := peerwire.EncodeRequest(op, cells)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
@@ -52,7 +53,7 @@ func call(t *testing.T, m *Module, stage, op uint32, cells []string) (Status, []
 	if st != bus.ModuleStatusOK {
 		t.Fatalf("transport status = %v; want OK (a domain refusal is still a served call)", st)
 	}
-	status, out, err := DecodeResponse(body)
+	status, out, err := peerwire.DecodeResponse(body)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestAdvertisedStagesMatchTheContract(t *testing.T) {
 		if stage != s.ID {
 			t.Errorf("%s: advertises stage %d, contract says %d", s.Name, stage, s.ID)
 		}
-		if want := EventKind(s.ID); want != s.EventKind {
+		if want := peerwire.EventKind(PrincipalRef, s.ID); want != s.EventKind {
 			t.Errorf("%s: contract kind %d breaks the bus formula (want %d)", s.Name, s.EventKind, want)
 		}
 	}
@@ -135,11 +136,11 @@ func TestAdvertisedStagesMatchTheContract(t *testing.T) {
 func TestDeliveryStageSendAndInbox(t *testing.T) {
 	m := newModule(t, "A", "B")
 
-	status, cells := call(t, m, StageDelivery, OpSend, []string{"A", "B", "hello", "", "0", "0"})
-	if status != StatusOK {
+	status, cells := call(t, m, peerwire.StageDelivery, peerwire.OpSend, []string{"A", "B", "hello", "", "0", "0"})
+	if status != peerwire.StatusOK {
 		t.Fatalf("send status = %v", status)
 	}
-	sent, err := MessageRows(cells)
+	sent, err := peerwire.MessageRows(cells)
 	if err != nil || len(sent) != 1 {
 		t.Fatalf("send reply: %v (%d rows)", err, len(sent))
 	}
@@ -148,30 +149,30 @@ func TestDeliveryStageSendAndInbox(t *testing.T) {
 		t.Errorf("provenance = %+v", sent[0])
 	}
 
-	status, cells = call(t, m, StageInbox, OpInboxLen, []string{"B"})
-	if status != StatusOK || len(cells) != 2 || cells[0] != "1" || cells[1] != "0" {
+	status, cells = call(t, m, peerwire.StageInbox, peerwire.OpInboxLen, []string{"B"})
+	if status != peerwire.StatusOK || len(cells) != 2 || cells[0] != "1" || cells[1] != "0" {
 		t.Fatalf("inbox len = %v %q", status, cells)
 	}
 
 	// Peek must not consume.
-	if _, cells = call(t, m, StageInbox, OpInboxPeek, []string{"B"}); len(cells) != messageWidth {
+	if _, cells = call(t, m, peerwire.StageInbox, peerwire.OpInboxPeek, []string{"B"}); len(cells) != peerwire.MessageWidth {
 		t.Fatalf("peek cells = %d", len(cells))
 	}
-	if _, cells = call(t, m, StageInbox, OpInboxLen, []string{"B"}); cells[0] != "1" {
+	if _, cells = call(t, m, peerwire.StageInbox, peerwire.OpInboxLen, []string{"B"}); cells[0] != "1" {
 		t.Error("peek consumed the inbox; it must only read")
 	}
 
 	// Take removes what it returns, and says how many are left behind so a
 	// caller can tell a complete drain from a capped one.
-	_, cells = call(t, m, StageInbox, OpInboxTake, []string{"B", "10"})
-	remaining, got, err := TakeReply(cells)
+	_, cells = call(t, m, peerwire.StageInbox, peerwire.OpInboxTake, []string{"B", "10"})
+	remaining, got, err := peerwire.TakeReply(cells)
 	if err != nil || len(got) != 1 || got[0].Text != "hello" {
 		t.Fatalf("take = %v %+v", err, got)
 	}
 	if remaining != 0 {
 		t.Errorf("remaining = %d; want 0 (that was the whole inbox)", remaining)
 	}
-	if _, cells = call(t, m, StageInbox, OpInboxLen, []string{"B"}); cells[0] != "0" {
+	if _, cells = call(t, m, peerwire.StageInbox, peerwire.OpInboxLen, []string{"B"}); cells[0] != "0" {
 		t.Error("take did not remove what it returned")
 	}
 }
@@ -184,14 +185,14 @@ func TestRefusalsAreServedNotTransportErrors(t *testing.T) {
 
 	for name, tc := range map[string]struct {
 		cells []string
-		want  Status
+		want  peerwire.Status
 	}{
-		"unknown peer": {[]string{"A", "ghost", "hi", "", "0", "0"}, StatusNoPeer},
-		"self":         {[]string{"A", "A", "hi", "", "0", "0"}, StatusSelf},
-		"empty body":   {[]string{"A", "B", "   ", "", "0", "0"}, StatusBadRequest},
+		"unknown peer": {[]string{"A", "ghost", "hi", "", "0", "0"}, peerwire.StatusNoPeer},
+		"self":         {[]string{"A", "A", "hi", "", "0", "0"}, peerwire.StatusSelf},
+		"empty body":   {[]string{"A", "B", "   ", "", "0", "0"}, peerwire.StatusBadRequest},
 	} {
 		// call() already fails the test if the transport status is not OK.
-		if status, _ := call(t, m, StageDelivery, OpSend, tc.cells); status != tc.want {
+		if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend, tc.cells); status != tc.want {
 			t.Errorf("%s: status = %v; want %v", name, status, tc.want)
 		}
 	}
@@ -202,26 +203,26 @@ func TestRefusalsAreServedNotTransportErrors(t *testing.T) {
 func TestExpectReplyRecordsTheEdgeWithoutBlocking(t *testing.T) {
 	m := newModule(t, "A", "B")
 
-	if status, _ := call(t, m, StageDelivery, OpSend,
-		[]string{"A", "B", "you first", "", "0", "1"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"A", "B", "you first", "", "0", "1"}); status != peerwire.StatusOK {
 		t.Fatalf("expecting send = %v", status)
 	}
 	// B asking back closes A→B→A.
-	if status, _ := call(t, m, StageDelivery, OpSend,
-		[]string{"B", "A", "no, you", "", "1", "1"}); status != StatusCycle {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"B", "A", "no, you", "", "1", "1"}); status != peerwire.StatusCycle {
 		t.Fatalf("counter-ask = %v; want cycle", status)
 	}
 	// The non-blocking fallback still works: a plain send is not an ask.
-	if status, _ := call(t, m, StageDelivery, OpSend,
-		[]string{"B", "A", "fallback", "", "1", "0"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"B", "A", "fallback", "", "1", "0"}); status != peerwire.StatusOK {
 		t.Errorf("fallback send = %v", status)
 	}
 	// Cancelling the edge makes the path askable again.
-	if status, _ := call(t, m, StageDelivery, OpCancelWait, []string{"A"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpCancelWait, []string{"A"}); status != peerwire.StatusOK {
 		t.Fatalf("cancel = %v", status)
 	}
-	if status, _ := call(t, m, StageDelivery, OpSend,
-		[]string{"B", "A", "now?", "", "1", "1"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"B", "A", "now?", "", "1", "1"}); status != peerwire.StatusOK {
 		t.Errorf("after cancel = %v; want the cycle to be gone", status)
 	}
 }
@@ -236,24 +237,24 @@ func TestGrantStage(t *testing.T) {
 	}
 	m := moduleOver(t, r)
 
-	if status, _ := call(t, m, StageDelivery, OpSend,
-		[]string{"A", "X", "hi", "", "0", "0"}); status != StatusDenied {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"A", "X", "hi", "", "0", "0"}); status != peerwire.StatusDenied {
 		t.Fatalf("ungranted = %v; want denied", status)
 	}
-	if status, _ := call(t, m, StageGrant, OpGrant, []string{"uid:1000", "uid:2000"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageGrant, peerwire.OpGrant, []string{"uid:1000", "uid:2000"}); status != peerwire.StatusOK {
 		t.Fatal("grant refused")
 	}
-	if status, _ := call(t, m, StageDelivery, OpSend,
-		[]string{"A", "X", "hi", "", "0", "0"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"A", "X", "hi", "", "0", "0"}); status != peerwire.StatusOK {
 		t.Fatal("granted send refused")
 	}
-	// Directed: the reverse is a separate grant. Note this answers StatusOK with
+	// Directed: the reverse is a separate grant. Note this answers peerwire.StatusOK with
 	// a false value rather than refusing — see TestThreeOutcomeLevelsStayDistinct.
-	_, cells := call(t, m, StageGrant, OpGrantExists, []string{"uid:2000", "uid:1000"})
+	_, cells := call(t, m, peerwire.StageGrant, peerwire.OpGrantExists, []string{"uid:2000", "uid:1000"})
 	if len(cells) != 1 || cells[0] != "0" {
 		t.Errorf("reverse grant = %q; a grant must be directed", cells)
 	}
-	_, cells = call(t, m, StageGrant, OpRevoke, []string{"uid:1000", "uid:2000"})
+	_, cells = call(t, m, peerwire.StageGrant, peerwire.OpRevoke, []string{"uid:1000", "uid:2000"})
 	if len(cells) != 1 || cells[0] != "1" {
 		t.Errorf("revoke = %q", cells)
 	}
@@ -268,24 +269,24 @@ func TestMalformedInputIsInvalidRequest(t *testing.T) {
 		"garbage":   []byte("not a frame"),
 		"truncated": {1, 0, 0, 0},
 	} {
-		if _, st := m.Handle(bus.ModuleInvocation{StageID: StageDelivery}, req); st != bus.ModuleStatusInvalidRequest {
+		if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageDelivery}, req); st != bus.ModuleStatusInvalidRequest {
 			t.Errorf("%s: status = %v; want InvalidRequest", name, st)
 		}
 	}
 
 	// Wrong cell count for the operation.
-	frame, _ := EncodeRequest(OpSend, []string{"A"})
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: StageDelivery}, frame); st != bus.ModuleStatusInvalidRequest {
+	frame, _ := peerwire.EncodeRequest(peerwire.OpSend, []string{"A"})
+	if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageDelivery}, frame); st != bus.ModuleStatusInvalidRequest {
 		t.Errorf("short cells: status = %v; want InvalidRequest", st)
 	}
 	// Unknown stage.
-	frame, _ = EncodeRequest(OpSend, []string{"A", "B", "x", "", "0", "0"})
+	frame, _ = peerwire.EncodeRequest(peerwire.OpSend, []string{"A", "B", "x", "", "0", "0"})
 	if _, st := m.Handle(bus.ModuleInvocation{StageID: 99}, frame); st != bus.ModuleStatusInvalidRequest {
 		t.Errorf("unknown stage: status = %v; want InvalidRequest", st)
 	}
 	// Unknown op within a known stage.
-	frame, _ = EncodeRequest(99, []string{"A"})
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: StageInbox}, frame); st != bus.ModuleStatusInvalidRequest {
+	frame, _ = peerwire.EncodeRequest(99, []string{"A"})
+	if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageInbox}, frame); st != bus.ModuleStatusInvalidRequest {
 		t.Errorf("unknown op: status = %v; want InvalidRequest", st)
 	}
 }
@@ -296,15 +297,15 @@ func TestMalformedInputIsInvalidRequest(t *testing.T) {
 //
 //	ModuleStatus non-OK       could not understand the question
 //	domain status non-OK      understood, and refuses
-//	StatusOK + outcome value  understood, and the answer is no
+//	peerwire.StatusOK + outcome value  understood, and the answer is no
 func TestThreeOutcomeLevelsStayDistinct(t *testing.T) {
 	m := newModule(t, "A", "B")
 
 	// "the answer is no" -- a grant that does not exist is not a refusal. Asking
 	// is a legitimate question with a legitimate negative answer, and it is
 	// itself the audit event that records someone asking.
-	status, cells := call(t, m, StageGrant, OpGrantExists, []string{"uid:1000", "uid:9999"})
-	if status != StatusOK {
+	status, cells := call(t, m, peerwire.StageGrant, peerwire.OpGrantExists, []string{"uid:1000", "uid:9999"})
+	if status != peerwire.StatusOK {
 		t.Errorf("absent grant: status = %v; want ok with a false value", status)
 	}
 	if len(cells) != 1 || cells[0] != "0" {
@@ -313,21 +314,21 @@ func TestThreeOutcomeLevelsStayDistinct(t *testing.T) {
 
 	// "the answer is none" -- an empty inbox on a live session is not a refusal.
 	// The reply still leads with a remaining count, which is zero.
-	if status, cells = call(t, m, StageInbox, OpInboxTake, []string{"B", "10"}); status != StatusOK {
+	if status, cells = call(t, m, peerwire.StageInbox, peerwire.OpInboxTake, []string{"B", "10"}); status != peerwire.StatusOK {
 		t.Errorf("empty inbox: status = %v; want ok", status)
-	} else if remaining, msgs, err := TakeReply(cells); err != nil || remaining != 0 || len(msgs) != 0 {
+	} else if remaining, msgs, err := peerwire.TakeReply(cells); err != nil || remaining != 0 || len(msgs) != 0 {
 		t.Errorf("empty inbox = remaining %d, %d msgs, err %v; want 0/0/nil", remaining, len(msgs), err)
 	}
 
 	// "I refuse" -- a send that did not happen, where the caller must do
 	// something differently to make it happen.
-	if status, _ = call(t, m, StageDelivery, OpSend,
-		[]string{"A", "ghost", "hi", "", "0", "0"}); status != StatusNoPeer {
+	if status, _ = call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"A", "ghost", "hi", "", "0", "0"}); status != peerwire.StatusNoPeer {
 		t.Errorf("send to unknown peer: status = %v; want a refusal", status)
 	}
 
 	// "could not understand" -- transport level, never a domain status.
-	if _, st := m.Handle(bus.ModuleInvocation{StageID: StageInbox}, []byte("garbage")); st == bus.ModuleStatusOK {
+	if _, st := m.Handle(bus.ModuleInvocation{StageID: peerwire.StageInbox}, []byte("garbage")); st == bus.ModuleStatusOK {
 		t.Error("an undecodable frame answered OK; it must fail at the transport level")
 	}
 }
@@ -344,29 +345,29 @@ func TestUnknownSessionIsNotAnEmptyInbox(t *testing.T) {
 		op    uint32
 		cells []string
 	}{
-		{"len", OpInboxLen, []string{"ghost"}},
-		{"peek", OpInboxPeek, []string{"ghost"}},
-		{"take", OpInboxTake, []string{"ghost", "10"}},
+		{"len", peerwire.OpInboxLen, []string{"ghost"}},
+		{"peek", peerwire.OpInboxPeek, []string{"ghost"}},
+		{"take", peerwire.OpInboxTake, []string{"ghost", "10"}},
 	} {
-		if status, _ := call(t, m, StageInbox, tc.op, tc.cells); status != StatusNoPeer {
+		if status, _ := call(t, m, peerwire.StageInbox, tc.op, tc.cells); status != peerwire.StatusNoPeer {
 			t.Errorf("%s on unknown session: status = %v; want no_peer", tc.name, status)
 		}
 	}
 
 	// A live session with an empty inbox still answers OK, so the refusal above
 	// is about existence and not about emptiness.
-	if status, cells := call(t, m, StageInbox, OpInboxLen, []string{"B"}); status != StatusOK ||
+	if status, cells := call(t, m, peerwire.StageInbox, peerwire.OpInboxLen, []string{"B"}); status != peerwire.StatusOK ||
 		len(cells) != 2 || cells[0] != "0" {
 		t.Errorf("live empty inbox = %v %q; want ok with a zero count", status, cells)
 	}
 
 	// The case that motivates all of this: a session torn down mid-poll must
 	// become distinguishable from one that simply has no mail.
-	if status, _ := call(t, m, StageInbox, OpInboxLen, []string{"A"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageInbox, peerwire.OpInboxLen, []string{"A"}); status != peerwire.StatusOK {
 		t.Fatalf("precondition: A should be live, got %v", status)
 	}
 	m.peerRegistry().Unregister("A")
-	if status, _ := call(t, m, StageInbox, OpInboxLen, []string{"A"}); status != StatusNoPeer {
+	if status, _ := call(t, m, peerwire.StageInbox, peerwire.OpInboxLen, []string{"A"}); status != peerwire.StatusNoPeer {
 		t.Errorf("after teardown: status = %v; a poller must learn its session is gone", status)
 	}
 }
@@ -385,7 +386,7 @@ func (f fakeCapability) Handle(bus.ModuleInvocation, []byte) ([]byte, bus.Module
 // That is worse than CAPABILITY_ABSENT, which at least fails visibly.
 func TestStageConflictRefusedAtConstruction(t *testing.T) {
 	clash := fakeCapability{stages: []bus.ModuleStage{
-		{EventKind: EventInbox, StageID: StageInbox},
+		{EventKind: peerwire.EventKind(PrincipalRef, peerwire.StageInbox), StageID: peerwire.StageInbox},
 	}}
 	_, err := New(NewPeer(newRegistry(t), nil), clash)
 	if !errors.Is(err, ErrStageConflict) {
@@ -410,7 +411,7 @@ func TestStageWithOffFormulaKindRefused(t *testing.T) {
 // second capability is a New() argument.
 func TestModuleHostsMultipleCapabilities(t *testing.T) {
 	second := fakeCapability{stages: []bus.ModuleStage{
-		{EventKind: EventKind(9), StageID: 9},
+		{EventKind: peerwire.EventKind(PrincipalRef, 9), StageID: 9},
 	}}
 	m, err := New(NewPeer(newRegistry(t, "A", "B"), nil), second)
 	if err != nil {
@@ -428,8 +429,8 @@ func TestModuleHostsMultipleCapabilities(t *testing.T) {
 		t.Errorf("second capability stage = %v; want OK", st)
 	}
 	// And peer messaging still works alongside it.
-	if status, _ := call(t, m, StageDelivery, OpSend,
-		[]string{"A", "B", "still here", "", "0", "0"}); status != StatusOK {
+	if status, _ := call(t, m, peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"A", "B", "still here", "", "0", "0"}); status != peerwire.StatusOK {
 		t.Errorf("peer send alongside a second capability = %v", status)
 	}
 	// A nil capability is ignored rather than panicking, so a caller can pass

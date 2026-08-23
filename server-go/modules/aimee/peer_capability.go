@@ -3,6 +3,7 @@ package aimee
 import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
 
 // DirectorySource resolves peer directory questions against their owner — db1
@@ -34,9 +35,12 @@ type DirectorySource interface {
 //
 // It owns inboxes and cross-owner grants and nothing else — notably not the
 // session directory, which is db1's (see DirectorySource).
+// The directory is deliberately NOT held as a field. It is bound into the
+// registry by NewPeer, and the registry is the only way to reach it: a
+// capability holding its own reference is how a second access path reappears
+// after the first one was removed.
 type PeerCapability struct {
 	registry *peer.Registry
-	dir      DirectorySource
 }
 
 // NewPeer builds the peer-messaging capability. dir may be nil, in which case
@@ -50,28 +54,31 @@ type PeerCapability struct {
 func NewPeer(registry *peer.Registry, dir DirectorySource) *PeerCapability {
 	if dir != nil && registry != nil {
 		registry.SetResolver(dir.Resolve)
-		registry.SetSessionExists(func(sessionID string) bool {
-			_, ok := dir.Owner(sessionID)
-			return ok
-		})
+		registry.SetSessionOwner(dir.Owner)
 	}
-	return &PeerCapability{registry: registry, dir: dir}
+	return &PeerCapability{registry: registry}
 }
 
 // Stages are the peer stages. Event kinds are derived from the bus formula
 // rather than written out, so identity and advertisement cannot drift.
 func (c *PeerCapability) Stages() []bus.ModuleStage {
-	return []bus.ModuleStage{
-		{EventKind: EventDelivery, StageID: StageDelivery},
-		{EventKind: EventInbox, StageID: StageInbox},
-		{EventKind: EventGrant, StageID: StageGrant},
-		{EventKind: EventChannel, StageID: StageChannel},
+	stages := []uint32{
+		peerwire.StageDelivery, peerwire.StageInbox,
+		peerwire.StageGrant, peerwire.StageChannel,
 	}
+	out := make([]bus.ModuleStage, 0, len(stages))
+	for _, stage := range stages {
+		out = append(out, bus.ModuleStage{
+			EventKind: peerwire.EventKind(PrincipalRef, stage),
+			StageID:   stage,
+		})
+	}
+	return out
 }
 
 // Handle serves one peer invocation.
 func (c *PeerCapability) Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-	op, cells, err := DecodeRequest(request)
+	op, cells, err := peerwire.DecodeRequest(request)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -79,13 +86,13 @@ func (c *PeerCapability) Handle(invocation bus.ModuleInvocation, request []byte)
 	var body []byte
 	var encErr error
 	switch invocation.StageID {
-	case StageDelivery:
+	case peerwire.StageDelivery:
 		body, encErr = c.delivery(op, cells)
-	case StageInbox:
+	case peerwire.StageInbox:
 		body, encErr = c.inbox(op, cells)
-	case StageGrant:
+	case peerwire.StageGrant:
 		body, encErr = c.grant(op, cells)
-	case StageChannel:
+	case peerwire.StageChannel:
 		body, encErr = c.channel(op, cells)
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
@@ -101,39 +108,39 @@ func (c *PeerCapability) Handle(invocation bus.ModuleInvocation, request []byte)
 
 // refuse builds a domain refusal. It is a SUCCESSFUL invocation: the module was
 // asked a well-formed question and answered "no".
-func refuse(status Status) ([]byte, error) { return EncodeResponse(status, nil) }
+func refuse(status peerwire.Status) ([]byte, error) { return peerwire.EncodeResponse(status, nil) }
 
 // ---- stage: delivery -----------------------------------------------------
 
 func (c *PeerCapability) delivery(op uint32, cells []string) ([]byte, error) {
 	switch op {
-	case OpSend:
+	case peerwire.OpSend:
 		// from, to, text, conversation_id, hop, expect_reply
 		if len(cells) != 6 {
 			return nil, nil
 		}
-		hop, err := atoi(cells[4])
+		hop, err := peerwire.Atoi(cells[4])
 		if err != nil {
-			return refuse(StatusBadRequest)
+			return refuse(peerwire.StatusBadRequest)
 		}
 		msg, sendErr := c.registry.Send(cells[0], cells[1], cells[2], peer.SendOptions{
 			ConversationID: cells[3],
 			Hop:            hop,
-			ExpectReply:    atob(cells[5]),
+			ExpectReply:    peerwire.Atob(cells[5]),
 		})
 		if sendErr != nil {
-			return refuse(StatusFor(sendErr))
+			return refuse(peerwire.StatusFor(sendErr))
 		}
-		return EncodeResponse(StatusOK, MessageCells(msg))
+		return peerwire.EncodeResponse(peerwire.StatusOK, peerwire.MessageCells(msg))
 
-	case OpReply:
+	case peerwire.OpReply:
 		// from, and the message being answered as a full row
-		if len(cells) != 1+messageWidth {
+		if len(cells) != 1+peerwire.MessageWidth {
 			return nil, nil
 		}
-		answered, err := MessageRows(cells[1:])
+		answered, err := peerwire.MessageRows(cells[1:])
 		if err != nil || len(answered) != 1 {
-			return refuse(StatusBadRequest)
+			return refuse(peerwire.StatusBadRequest)
 		}
 		// The reply's own text rides in the answered row's text cell — the
 		// caller sends what it is replying to plus what it is saying, and the
@@ -141,16 +148,16 @@ func (c *PeerCapability) delivery(op uint32, cells []string) ([]byte, error) {
 		// impersonate anyone.
 		msg, replyErr := c.registry.Reply(cells[0], answered[0], answered[0].Text)
 		if replyErr != nil {
-			return refuse(StatusFor(replyErr))
+			return refuse(peerwire.StatusFor(replyErr))
 		}
-		return EncodeResponse(StatusOK, MessageCells(msg))
+		return peerwire.EncodeResponse(peerwire.StatusOK, peerwire.MessageCells(msg))
 
-	case OpCancelWait:
+	case peerwire.OpCancelWait:
 		if len(cells) != 1 {
 			return nil, nil
 		}
 		c.registry.CancelWait(cells[0])
-		return EncodeResponse(StatusOK, nil)
+		return peerwire.EncodeResponse(peerwire.StatusOK, nil)
 	}
 	return nil, nil
 }
@@ -166,33 +173,33 @@ func (c *PeerCapability) inbox(op uint32, cells []string) ([]byte, error) {
 	// polling for a reply waits forever on a session that no longer exists —
 	// reading zero and going round again instead of failing fast. Every read
 	// below is otherwise "I understood, and the answer is none", which is a
-	// legitimate StatusOK.
+	// legitimate peerwire.StatusOK.
 	if !c.registry.Exists(cells[0]) {
-		return refuse(StatusNoPeer)
+		return refuse(peerwire.StatusNoPeer)
 	}
 	switch op {
-	case OpInboxLen:
+	case peerwire.OpInboxLen:
 		if len(cells) != 1 {
 			return nil, nil
 		}
-		return EncodeResponse(StatusOK, []string{
-			itoa(c.registry.Len(cells[0])),
-			itoa(int(c.registry.Dropped(cells[0]))),
+		return peerwire.EncodeResponse(peerwire.StatusOK, []string{
+			peerwire.Itoa(c.registry.Len(cells[0])),
+			peerwire.Itoa(int(c.registry.Dropped(cells[0]))),
 		})
 
-	case OpInboxPeek:
+	case peerwire.OpInboxPeek:
 		if len(cells) != 1 {
 			return nil, nil
 		}
-		return EncodeResponse(StatusOK, rows(c.registry.Inbox(cells[0])))
+		return peerwire.EncodeResponse(peerwire.StatusOK, rows(c.registry.Inbox(cells[0])))
 
-	case OpInboxTake:
+	case peerwire.OpInboxTake:
 		if len(cells) != 2 {
 			return nil, nil
 		}
-		max, err := atoi(cells[1])
+		max, err := peerwire.Atoi(cells[1])
 		if err != nil {
-			return refuse(StatusBadRequest)
+			return refuse(peerwire.StatusBadRequest)
 		}
 		if max <= 0 {
 			max = peer.InboxMax
@@ -203,8 +210,8 @@ func (c *PeerCapability) inbox(op uint32, cells []string) ([]byte, error) {
 		// stops asking. Complete and capped are two facts; one length carries
 		// only one of them.
 		taken, remaining := c.registry.Drain(cells[0], max)
-		out := append([]string{itoa(remaining)}, rows(taken)...)
-		return EncodeResponse(StatusOK, out)
+		out := append([]string{peerwire.Itoa(remaining)}, rows(taken)...)
+		return peerwire.EncodeResponse(peerwire.StatusOK, out)
 	}
 	return nil, nil
 }
@@ -213,9 +220,9 @@ func (c *PeerCapability) inbox(op uint32, cells []string) ([]byte, error) {
 // caller divides by the row width, which is why the width must never change
 // except by appending.
 func rows(msgs []peer.Message) []string {
-	out := make([]string, 0, len(msgs)*messageWidth)
+	out := make([]string, 0, len(msgs)*peerwire.MessageWidth)
 	for _, m := range msgs {
-		out = append(out, MessageCells(m)...)
+		out = append(out, peerwire.MessageCells(m)...)
 	}
 	return out
 }
@@ -227,15 +234,15 @@ func (c *PeerCapability) grant(op uint32, cells []string) ([]byte, error) {
 		return nil, nil
 	}
 	switch op {
-	case OpGrant:
+	case peerwire.OpGrant:
 		if err := c.registry.Grant(cells[0], cells[1]); err != nil {
-			return refuse(StatusFor(err))
+			return refuse(peerwire.StatusFor(err))
 		}
-		return EncodeResponse(StatusOK, nil)
-	case OpRevoke:
-		return EncodeResponse(StatusOK, []string{btoa(c.registry.Revoke(cells[0], cells[1]))})
-	case OpGrantExists:
-		return EncodeResponse(StatusOK, []string{btoa(c.registry.GrantExists(cells[0], cells[1]))})
+		return peerwire.EncodeResponse(peerwire.StatusOK, nil)
+	case peerwire.OpRevoke:
+		return peerwire.EncodeResponse(peerwire.StatusOK, []string{peerwire.Btoa(c.registry.Revoke(cells[0], cells[1]))})
+	case peerwire.OpGrantExists:
+		return peerwire.EncodeResponse(peerwire.StatusOK, []string{peerwire.Btoa(c.registry.GrantExists(cells[0], cells[1]))})
 	}
 	return nil, nil
 }
@@ -244,51 +251,51 @@ func (c *PeerCapability) grant(op uint32, cells []string) ([]byte, error) {
 
 func (c *PeerCapability) channel(op uint32, cells []string) ([]byte, error) {
 	switch op {
-	case OpChannelJoin:
+	case peerwire.OpChannelJoin:
 		if len(cells) != 2 {
 			return nil, nil
 		}
 		if err := c.registry.ChannelJoin(cells[0], cells[1]); err != nil {
-			return refuse(StatusFor(err))
+			return refuse(peerwire.StatusFor(err))
 		}
-		return EncodeResponse(StatusOK, nil)
+		return peerwire.EncodeResponse(peerwire.StatusOK, nil)
 
-	case OpChannelLeave:
+	case peerwire.OpChannelLeave:
 		if len(cells) != 2 {
 			return nil, nil
 		}
-		return EncodeResponse(StatusOK, []string{btoa(c.registry.ChannelLeave(cells[0], cells[1]))})
+		return peerwire.EncodeResponse(peerwire.StatusOK, []string{peerwire.Btoa(c.registry.ChannelLeave(cells[0], cells[1]))})
 
-	case OpChannelMembers:
+	case peerwire.OpChannelMembers:
 		if len(cells) != 1 {
 			return nil, nil
 		}
-		return EncodeResponse(StatusOK, c.registry.ChannelMembers(cells[0]))
+		return peerwire.EncodeResponse(peerwire.StatusOK, c.registry.ChannelMembers(cells[0]))
 
-	case OpChannelSend:
+	case peerwire.OpChannelSend:
 		// from, channel, text, conversation_id, hop
 		if len(cells) != 5 {
 			return nil, nil
 		}
-		hop, err := atoi(cells[4])
+		hop, err := peerwire.Atoi(cells[4])
 		if err != nil {
-			return refuse(StatusBadRequest)
+			return refuse(peerwire.StatusBadRequest)
 		}
 		deliveries, sendErr := c.registry.ChannelSend(cells[0], cells[1], cells[2], peer.SendOptions{
 			ConversationID: cells[3],
 			Hop:            hop,
 		})
 		if sendErr != nil {
-			return refuse(StatusFor(sendErr))
+			return refuse(peerwire.StatusFor(sendErr))
 		}
-		// StatusOK here means the FAN-OUT was performed, not that every
+		// peerwire.StatusOK here means the FAN-OUT was performed, not that every
 		// recipient received it. Per-recipient outcomes ride in the rows, so a
 		// partial delivery is visible rather than collapsed into one word.
-		out := make([]string, 0, len(deliveries)*deliveryWidth)
+		out := make([]string, 0, len(deliveries)*peerwire.DeliveryWidth)
 		for _, d := range deliveries {
-			out = append(out, DeliveryCells(d)...)
+			out = append(out, peerwire.DeliveryCells(d)...)
 		}
-		return EncodeResponse(StatusOK, out)
+		return peerwire.EncodeResponse(peerwire.StatusOK, out)
 	}
 	return nil, nil
 }

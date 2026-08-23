@@ -134,13 +134,10 @@ func (h *httpAPI) resolveTarget(from string, req sendRequest) (string, bool) {
 	if req.ToLabel == "" {
 		return "", false
 	}
-	h.reg.mu.Lock()
-	s, ok := h.reg.sessions[from]
-	owner := ""
-	if ok {
-		owner = s.owner
-	}
-	h.reg.mu.Unlock()
+	// Ask the registry rather than reaching into its map: the owner must come
+	// from whoever owns the directory, and scoping a label lookup against a
+	// local copy scopes it against the wrong thing.
+	owner, ok := h.reg.Owner(from)
 	if !ok {
 		return "", false
 	}

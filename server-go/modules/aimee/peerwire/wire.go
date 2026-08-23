@@ -1,4 +1,4 @@
-package aimee
+package peerwire
 
 import (
 	"encoding/binary"
@@ -33,14 +33,14 @@ const (
 	// FieldsMax bounds a decoded frame so a corrupt count cannot make either
 	// side allocate without limit before the count is checked.
 	FieldsMax = 1 << 16
-	// messageWidth is the number of cells one peer message occupies. New cells
+	// MessageWidth is the number of cells one peer message occupies. New cells
 	// APPEND, so a reader built against an older width never has its existing
 	// field numbering shift underneath it.
-	messageWidth = 11
-	// deliveryWidth is one channel fan-out outcome: session, status, message id.
-	// Fixed width for the same reason messageWidth is -- a list reply carries no
+	MessageWidth = 11
+	// DeliveryWidth is one channel fan-out outcome: session, status, message id.
+	// Fixed width for the same reason MessageWidth is -- a list reply carries no
 	// row count and the caller divides.
-	deliveryWidth = 3
+	DeliveryWidth = 3
 )
 
 var (
@@ -59,31 +59,23 @@ var (
 // module's identity and the kinds it answers on are one fact. Deriving them
 // here means the two cannot drift.
 const (
-	PrincipalRef uint32 = 31
-
 	StageDelivery uint32 = 1
 	StageInbox    uint32 = 2
 	StageGrant    uint32 = 3
 	StageChannel  uint32 = 4
 )
 
-// EventKind returns the bus event kind for one of this module's stages.
-func EventKind(stage uint32) uint32 { return 4096 + PrincipalRef*256 + stage }
+// EventKind returns the bus event kind for a stage under a principal ref.
+//
+// The ref is a PARAMETER rather than a constant here. A module has exactly one
+// principal, and after the db1 absorption that ref belongs to the store rather
+// than to peer messaging -- so the wire must not carry its own copy to disagree
+// with. Kinds stay derived, which is what keeps identity and advertisement from
+// drifting apart.
+func EventKind(ref, stage uint32) uint32 { return 4096 + ref*256 + stage }
 
-// The kinds this module advertises. A stage declared in process-contracts.json
-// but never advertised here is never available: calls return CAPABILITY_ABSENT
-// while the module is plainly running.
-// Values are DERIVED, so the trailing numbers below are informational only and
-// follow PrincipalRef automatically. They are provisional: peer messaging is
-// agreed to fold into ref 30 as stages 20/21/22, which makes them
-// 11796/11797/11798. See "Merging with the db1 absorption" in the proposal.
-var (
-	EventDelivery = EventKind(StageDelivery) // ref 31 -> 12033
-	EventInbox    = EventKind(StageInbox)    // ref 31 -> 12034
-	EventGrant    = EventKind(StageGrant)    // ref 31 -> 12035
-	EventChannel  = EventKind(StageChannel)  // ref 31 -> 12036
-)
-
+// Kinds are derived from the ref at the call site rather than held as package
+// vars, since the ref is not this package's to know.
 // Operations, numbered within their stage.
 const (
 	// StageDelivery
@@ -311,23 +303,27 @@ func DecodeResponse(body []byte) (Status, []string, error) {
 
 // ---- scalars as text -----------------------------------------------------
 
-func itoa(v int) string { return strconv.Itoa(v) }
+// Itoa renders an integer as the decimal text the wire carries.
+func Itoa(v int) string { return strconv.Itoa(v) }
 
-func btoa(v bool) string {
+// Btoa renders a bool as the wire's "1"/"0".
+func Btoa(v bool) string {
 	if v {
 		return "1"
 	}
 	return "0"
 }
 
-func atoi(s string) (int, error) {
+// Atoi parses a decimal text cell, treating empty as zero.
+func Atoi(s string) (int, error) {
 	if s == "" {
 		return 0, nil
 	}
 	return strconv.Atoi(s)
 }
 
-func atob(s string) bool { return s == "1" || s == "true" }
+// Atob parses a wire bool.
+func Atob(s string) bool { return s == "1" || s == "true" }
 
 func timeToText(t time.Time) string {
 	if t.IsZero() {
@@ -359,8 +355,8 @@ func MessageCells(m peer.Message) []string {
 		m.FromOwner,
 		m.FromLabel,
 		m.OriginSession,
-		itoa(m.Hop),
-		btoa(m.IsReply),
+		Itoa(m.Hop),
+		Btoa(m.IsReply),
 		timeToText(m.SentAt),
 		m.Text,
 	}
@@ -373,17 +369,17 @@ func DeliveryCells(d peer.Delivery) []string {
 	if d.Err == nil {
 		id = d.Message.ID
 	}
-	return []string{d.Session, itoa(int(StatusFor(d.Err))), id}
+	return []string{d.Session, Itoa(int(StatusFor(d.Err))), id}
 }
 
 // DeliveryRows divides a fan-out reply into outcomes, refusing a remainder.
 func DeliveryRows(cells []string) ([]peer.Delivery, error) {
-	if len(cells)%deliveryWidth != 0 {
+	if len(cells)%DeliveryWidth != 0 {
 		return nil, ErrRowCount
 	}
-	out := make([]peer.Delivery, 0, len(cells)/deliveryWidth)
-	for i := 0; i < len(cells); i += deliveryWidth {
-		code, err := atoi(cells[i+1])
+	out := make([]peer.Delivery, 0, len(cells)/DeliveryWidth)
+	for i := 0; i < len(cells); i += DeliveryWidth {
+		code, err := Atoi(cells[i+1])
 		if err != nil {
 			return nil, ErrWire
 		}
@@ -405,7 +401,7 @@ func TakeReply(cells []string) (int, []peer.Message, error) {
 	if len(cells) == 0 {
 		return 0, nil, ErrWire
 	}
-	remaining, err := atoi(cells[0])
+	remaining, err := Atoi(cells[0])
 	if err != nil {
 		return 0, nil, ErrWire
 	}
@@ -419,13 +415,13 @@ func TakeReply(cells []string) (int, []peer.Message, error) {
 // MessageRows divides a list reply into messages, refusing a remainder rather
 // than returning a short final row.
 func MessageRows(cells []string) ([]peer.Message, error) {
-	if len(cells)%messageWidth != 0 {
+	if len(cells)%MessageWidth != 0 {
 		return nil, ErrRowCount
 	}
-	out := make([]peer.Message, 0, len(cells)/messageWidth)
-	for i := 0; i < len(cells); i += messageWidth {
-		row := cells[i : i+messageWidth]
-		hop, err := atoi(row[7])
+	out := make([]peer.Message, 0, len(cells)/MessageWidth)
+	for i := 0; i < len(cells); i += MessageWidth {
+		row := cells[i : i+MessageWidth]
+		hop, err := Atoi(row[7])
 		if err != nil {
 			return nil, ErrWire
 		}
@@ -438,7 +434,7 @@ func MessageRows(cells []string) ([]peer.Message, error) {
 			FromLabel:      row[5],
 			OriginSession:  row[6],
 			Hop:            hop,
-			IsReply:        atob(row[8]),
+			IsReply:        Atob(row[8]),
 			SentAt:         textToTime(row[9]),
 			Text:           row[10],
 		})

@@ -31,7 +31,17 @@ import (
 	"sort"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
+
+// PrincipalRef is this module's identity on the bus, and the ref every stage
+// kind derives from.
+//
+// It lives here rather than beside the peer wire because a module has exactly
+// one principal. When db1 absorbs into this module the ref becomes 30 and this
+// declaration is replaced by the store's, while the peer stages renumber to
+// 20..23 -- kinds follow automatically because nothing transcribes them.
+const PrincipalRef uint32 = 31
 
 // Capability is one unit of aimee-server functionality this module serves.
 //
@@ -75,7 +85,7 @@ func New(capabilities ...Capability) (*Module, error) {
 				return nil, fmt.Errorf("%w: stage %d (event %d)",
 					ErrStageConflict, stage.StageID, stage.EventKind)
 			}
-			if want := EventKind(stage.StageID); want != stage.EventKind {
+			if want := peerwire.EventKind(PrincipalRef, stage.StageID); want != stage.EventKind {
 				return nil, fmt.Errorf(
 					"aimee: stage %d advertises event %d, but the bus formula gives %d",
 					stage.StageID, stage.EventKind, want)

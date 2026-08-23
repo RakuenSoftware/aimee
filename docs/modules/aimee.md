@@ -17,7 +17,7 @@ addresses another as a peer rather than as a delegate or a client.
 
 Non-goals: it does not own the session directory (`db1` does), it does not own
 turn arbitration (the C presence registry does), and it is not a general
-pub/sub bus — the module event bus is the event substrate.
+pub/sub bus: the module event bus is the event substrate.
 
 ## Public contracts
 
@@ -52,7 +52,7 @@ address aimee sessions.
 
 The module is ready as soon as its stages are advertised: `Stages()` is static
 and its handlers hold no external connection. `DirectorySource` is the one
-optional provider — when absent the registry falls back to its own in-memory
+optional provider: when absent the registry falls back to its own in-memory
 view, which exists for tests and for bringing a process up before `db1` is
 reachable, and is never a second source of truth in production.
 
@@ -112,7 +112,7 @@ is switched off.
 
 Inboxes and grants are the module's own state. Durable storage arrives through
 the `postgres` module's generic wire under owner `aimee`, with `peer_inbox`
-numbered version 1 and `peer_grants` version 2 — explicit numbers rather than
+numbered version 1 and `peer_grants` version 2: explicit numbers rather than
 values derived from sorted filenames, so a file whose name later sorts into the
 middle cannot renumber the history and invalidate every recorded checksum.
 
@@ -120,7 +120,7 @@ middle cannot renumber the history and invalidate every recorded checksum.
 `length()` counts characters and a byte buffer holds bytes; at the same number
 they disagree the moment a value is non-ASCII, and the check passes while the
 buffer overflows. `text`, `from_owner` and `from_label` are all candidates, and
-`text` most of all — a peer message body is the most likely thing in this system
+`text` most of all: a peer message body is the most likely thing in this system
 to carry multi-byte characters. The cheap detection rule needs no C header and
 no wire declaration: a `length()`-checked `TEXT` column with no ASCII-restricting
 regex is suspect on its own.
@@ -131,7 +131,7 @@ string at a byte offset splits whatever character straddles it and puts invalid
 UTF-8 into a live notification.
 
 **A test database must be created UTF8 with `TEMPLATE template0`.** Under
-`SQL_ASCII` — which is what `initdb` gives you by default in a bare container —
+`SQL_ASCII`: which is what `initdb` gives you by default in a bare container -
 `char_length()` and `octet_length()` are the same function, so an assertion
 about the difference between them passes whether or not the schema is right.
 That is unfalsifiable on precisely the property it exists to prove. Check the
@@ -178,12 +178,12 @@ division and status mapping; `peer/peer_test.go` and `peer/http_test.go` cover
 the registry and the HTTP edge under `-race`.
 
 Failure behavior distinguishes three levels deliberately. A malformed frame is
-`ModuleStatusInvalidRequest` — the module could not understand the question. A
+`ModuleStatusInvalidRequest`: the module could not understand the question. A
 refusal (`hop_limit`, `cycle`, `denied`, `inbox_full`, `no_peer`) is a
 **successful** invocation carrying a domain status, because collapsing those two
 would leave the tap unable to tell "the module is broken" from "the module said
-no". And a question whose truthful answer is negative — does this grant exist,
-is there mail — answers `StatusOK` with the "no" in a field, because a tap
+no". And a question whose truthful answer is negative: does this grant exist,
+is there mail: answers `StatusOK` with the "no" in a field, because a tap
 seeing a steady rate of non-OK cannot tell working-as-designed from broken.
 
 The test for which of the last two applies is whether the caller must do
@@ -224,8 +224,8 @@ every call to it returns `CAPABILITY_ABSENT` while the module runs normally.
 ## Extension and removal
 
 New capabilities join as new stages with the next free stage id, appended to both
-`Stages()` and the component's `stages` in `process-contracts.json` — the two
-are compared by test, so neither can drift. New Go files must be added to
+`Stages()` and the component's `stages` in `process-contracts.json`: the two are
+compared by test, so neither can drift. New Go files must be added to
 `go_sources` in `src/modules/aimee/module.yaml`; an undeclared file owning state
 is the defect this module's own history illustrates.
 

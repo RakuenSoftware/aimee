@@ -218,17 +218,18 @@ type Options struct {
 	// fallback exists for tests and for bringing a process up before db1 is
 	// reachable; production sets this.
 	Resolve func(owner, label string) (string, bool)
-	// SessionExists reports whether a session exists at all, against the
-	// directory's owner. Set it for the same reason as Resolve, and it is the
-	// more dangerous of the two to leave unset.
+	// SessionOwner reports a session's owner principal, and by returning false
+	// reports that it does not exist. One hook rather than two, because that is
+	// the shape the directory actually has: db1 answers both from one row.
 	//
-	// This registry only holds an entry for a session it has SEEN -- one that
-	// registered in process, or that someone has messaged. A session db1 knows
-	// about but nobody has yet written to has no entry here, and answering
-	// "no such session" for it inverts the very distinction the inbox stage
-	// exists to make: the truthful answer is "no mail", an empty inbox, not a
-	// missing peer. A caller told the latter stops asking.
-	SessionExists func(sessionID string) bool
+	// Set it for the same reason as Resolve, and it is the more dangerous of the
+	// two to leave unset. This registry only holds an entry for a session it has
+	// SEEN -- one that registered in process, or that someone has messaged. A
+	// session db1 knows about but nobody has yet written to has no entry here,
+	// and answering "no such session" for it inverts the very distinction the
+	// inbox stage exists to make: the truthful answer is "no mail", an empty
+	// inbox, not a missing peer. A caller told the latter stops asking.
+	SessionOwner func(sessionID string) (string, bool)
 	// MaxHops overrides DefaultMaxHops when > 0.
 	MaxHops int
 	// now is injectable for tests.
@@ -408,13 +409,38 @@ func (r *Registry) SetResolver(resolve func(owner, label string) (string, bool))
 	r.opts.Resolve = resolve
 }
 
-// SetSessionExists binds the authoritative existence check, for the same reason
-// and at the same moment as SetResolver. Passing nil restores the in-memory
+// SetSessionOwner binds the authoritative owner lookup, for the same reason and
+// at the same moment as SetResolver. Passing nil restores the in-memory
 // fallback.
-func (r *Registry) SetSessionExists(exists func(sessionID string) bool) {
+func (r *Registry) SetSessionOwner(owner func(sessionID string) (string, bool)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.opts.SessionExists = exists
+	r.opts.SessionOwner = owner
+}
+
+// Owner reports a session's owner principal, preferring the directory that owns
+// it. A caller needs this to scope a label lookup to the right principal, and
+// reading it from the local map would scope against a copy.
+func (r *Registry) Owner(sessionID string) (string, bool) {
+	r.mu.Lock()
+	lookup := r.opts.SessionOwner
+	s, local := r.sessions[sessionID]
+	var localOwner string
+	if local {
+		localOwner = s.owner
+	}
+	r.mu.Unlock()
+
+	if lookup != nil {
+		if owner, ok := lookup(sessionID); ok {
+			return owner, true
+		}
+		// The directory denies it. A local entry means we hold mail for a
+		// session that no longer exists, which is undeliverable rather than
+		// addressable.
+		return "", false
+	}
+	return localOwner, local
 }
 
 // Lookup resolves (owner, label) to a session id. An empty owner searches every
@@ -978,18 +1004,19 @@ func (r *Registry) Exists(sessionID string) bool {
 	// Read the hook under the lock, call it outside: it crosses a process
 	// boundary and must never run while this mutex is held.
 	r.mu.Lock()
-	exists := r.opts.SessionExists
+	lookup := r.opts.SessionOwner
 	_, local := r.sessions[sessionID]
 	r.mu.Unlock()
 
-	// A local entry settles it either way: holding mail for a session is proof
-	// enough that it is addressable, and it saves a call across the boundary on
-	// the common path.
+	// A local entry settles it: holding mail for a session is proof enough that
+	// it is addressable, and it saves a call across the boundary on the common
+	// path.
 	if local {
 		return true
 	}
-	if exists != nil {
-		return exists(sessionID)
+	if lookup != nil {
+		_, ok := lookup(sessionID)
+		return ok
 	}
 	return false
 }
