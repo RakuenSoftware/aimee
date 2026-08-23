@@ -1434,6 +1434,59 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "document_hash_exists",
+			stage: db2contract.StageDocumentHashExists,
+			// A UNION over two tables, both joined to projects for the
+			// generation. The generation pinning is the part a fake cannot
+			// check.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDocumentHashExistsRequest(
+					liveProbeScopeProject, "live-probe-hash")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, err := db2contract.DecodeDocumentHashExistsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_summaries_list",
+			stage: db2contract.StageMemorySummariesList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySummariesListRequest(900012, 8)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemorySummariesListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_l1_session_clusters",
+			stage: db2contract.StageMemoryL1SessionClusters,
+			// GROUP BY with a HAVING over the same COUNT(*), which is the shape
+			// PostgreSQL is particular about.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryL1SessionClustersRequest(
+					"live-probe-session", 3)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryL1SessionClustersReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "memory_artifact_hashed_list",
+			stage:  db2contract.StageMemoryArtifactHashedList,
+			encode: db2contract.EncodeMemoryArtifactHashedListRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeMemoryArtifactHashedListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -2799,6 +2852,47 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "purge_fence_heartbeat",
+			stage: db2contract.StagePurgeFenceHeartbeat,
+			// Twice, because the second heartbeat is the one that takes the
+			// ON CONFLICT branch -- the first inserts the timestamp row.
+			repeat: 2,
+			seed:   []string{liveProbeFence},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodePurgeFenceHeartbeatRequest(
+					liveProbeFenceProject, liveProbeFenceGeneration, liveProbeFencePurgeID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				applied, err := db2contract.DecodePurgeFenceHeartbeatReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if applied != 1 {
+					t.Fatal("the fence this purge holds was not refreshed")
+				}
+			},
+		},
+		{
+			name:  "purge_fence_clear",
+			stage: db2contract.StagePurgeFenceClear,
+			// Not repeated: the second clear correctly finds no fence, and a
+			// probe that asserted it applied would be asserting the wrong thing.
+			seed: []string{liveProbeFence},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodePurgeFenceClearRequest(
+					liveProbeFenceProject, liveProbeFenceGeneration, liveProbeFencePurgeID)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				applied, err := db2contract.DecodePurgeFenceClearReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if applied != 1 {
+					t.Fatal("the fence this purge holds was not released")
+				}
+			},
+		},
 	}
 }
 
@@ -2971,6 +3065,19 @@ const (
  (id, tier, kind, key, content, created_at, updated_at)
  VALUES (900016, 'L2', 'fact', 'live-probe-link-target', 'live probe',
  '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+)
+
+// A fence this purge holds, so the heartbeat and clear probes take the matched
+// branch rather than the "not ours" one. The value is the identity the fence
+// stores: the generation and the purge identifier, space separated.
+const (
+	liveProbeFenceProject    = "live-probe-purge-project"
+	liveProbeFenceGeneration = "live-probe-generation"
+	liveProbeFencePurgeID    = "live-probe-purge"
+	liveProbeFence           = `INSERT INTO kb_runtime_state (state_key, state_value)
+ VALUES ('project_purging:live-probe-purge-project',
+ 'live-probe-generation live-probe-purge')
+ ON CONFLICT (state_key) DO UPDATE SET state_value = EXCLUDED.state_value`
 )
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
