@@ -3,7 +3,9 @@ package db3
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -430,5 +432,39 @@ func TestProviderCancellationStopsSearchWithoutReply(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNoEncodeErrorIsDiscarded(t *testing.T) {
+	// Six sites did `wire, _ := Encode...(x)`, so a failed encode left wire nil
+	// and the next line sent it: an empty payload where a reply, a capabilities
+	// announcement or an acknowledgement belongs. They are fixed, and a seventh
+	// written the same way would bypass the fix.
+	//
+	// The population is "every call to an encoder", which every future call site
+	// joins by being written. Nothing structural prevents the unchecked
+	// spelling, so this reads the package and refuses it.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for number, line := range strings.Split(string(source), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.Contains(trimmed, ", _ = Encode") ||
+				strings.Contains(trimmed, ", _ := Encode") {
+				t.Errorf("%s:%d discards an encode error:\n\t%s\n"+
+					"a failed encode leaves the frame nil and the next line sends it",
+					name, number+1, trimmed)
+			}
+		}
 	}
 }

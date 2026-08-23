@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"testing"
 )
@@ -370,5 +371,19 @@ func TestALengthPastTheFieldIsRefusedNotWrapped(t *testing.T) {
 				t.Fatalf("wrote %d bytes for a length field", len(w.buf))
 			}
 		})
+	}
+}
+
+func TestNoLengthBypassesTheFieldCheck(t *testing.T) {
+	// The client half of the same population problem. See the module side.
+	source, err := os.ReadFile("client.go")
+	if err != nil {
+		t.Fatalf("read client.go: %v", err)
+	}
+	for number, line := range strings.Split(string(source), "\n") {
+		if strings.Contains(line, "uint32(len(") {
+			t.Errorf("client.go:%d writes a length without the field check:\n\t%s",
+				number+1, strings.TrimSpace(line))
+		}
 	}
 }

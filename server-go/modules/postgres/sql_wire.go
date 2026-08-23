@@ -62,8 +62,14 @@ const (
 	MaxCellBytes        = 1 << 20
 	MaxStatementIDBytes = 64
 	MaxReplyRows        = 4096
-	MaxOwnerBytes       = 64
-	MaxMigrationCount   = 4096
+	// PostgreSQL itself stops a table at 1664 columns, so this is headroom
+	// rather than a constraint anyone meets. It exists because the width is
+	// narrowed to the wire's four-byte field, and a bound with a reason beats a
+	// bound at the type's edge: 4 billion columns is not a number anybody should
+	// have to think about to know this is safe.
+	MaxReplyColumns   = 4096
+	MaxOwnerBytes     = 64
+	MaxMigrationCount = 4096
 )
 
 // Reply statuses. A refusal says which kind it is, because a caller retries a

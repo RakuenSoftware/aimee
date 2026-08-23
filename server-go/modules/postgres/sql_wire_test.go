@@ -9,6 +9,8 @@ import (
 	"io"
 	"math"
 	"net"
+	"os"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -385,5 +387,29 @@ func TestALengthPastTheFieldIsRefusedNotWrapped(t *testing.T) {
 	framed := w.frame()
 	if status := binary.LittleEndian.Uint32(framed[0:4]); status != StatusLimitExceeded {
 		t.Fatalf("a reply that could not be framed answered status %d", status)
+	}
+}
+
+func TestNoLengthBypassesTheFieldCheck(t *testing.T) {
+	// u32len ranges over the lengths that go through u32len, which is a
+	// population every future call site decides to join. A new field written as
+	// w.u32(uint32(len(x))) skips the check, and nothing anywhere says so --
+	// the same enumeration bug as a gate that lists its packages.
+	//
+	// Structural enforcement is not available here: Go has no way to make the
+	// unchecked spelling unavailable inside a package. A completeness check is
+	// what is left, and it fails on the edit rather than on the incident.
+	for _, name := range []string{"sql_wire.go", "sql.go", "sql_tx.go", "schema.go"} {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for number, line := range strings.Split(string(source), "\n") {
+			if strings.Contains(line, "uint32(len(") {
+				t.Errorf("%s:%d writes a length without the field check:\n\t%s\n"+
+					"use w.u32len(len(x)) -- a wrapped length prefix turns the "+
+					"payload into framing", name, number+1, strings.TrimSpace(line))
+			}
+		}
 	}
 }

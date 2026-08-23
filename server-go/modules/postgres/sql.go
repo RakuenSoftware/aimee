@@ -253,7 +253,16 @@ func (h *SQLHandler) statement(ctx context.Context, invocation bus.ModuleInvocat
 	}
 	defer rows.Close()
 
-	width := uint32(len(rows.FieldDescriptions()))
+	columns := len(rows.FieldDescriptions())
+	if columns > MaxReplyColumns {
+		// Refused rather than narrowed. The width crosses as a four-byte field,
+		// and a width that wrapped would tell the reader to size every row wrong
+		// -- which is not a bad number, it is a misparse of everything after it.
+		return EncodeError(StatusLimitExceeded, sqlStateResultTooLarge,
+				fmt.Sprintf("result has %d columns, over %d", columns, MaxReplyColumns)),
+			bus.ModuleStatusOK
+	}
+	width := uint32(columns)
 	collected := make([][]Value, 0, 64)
 	for rows.Next() {
 		raw, valueErr := rows.Values()
