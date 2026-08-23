@@ -1718,6 +1718,20 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:   "entity_top_triples",
+			stage:  db2contract.StageEntityTopTriples,
+			encode: db2contract.EncodeEntityTopTriplesRequest,
+			// SELECT DISTINCT ordered by a selected column. Two statements in
+			// this port ordered by an unselected one and PostgreSQL refused
+			// both outright, so this is the probe that says this one is not a
+			// third.
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeEntityTopTriplesReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -3347,6 +3361,48 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "entity_profile_upsert",
+			stage: db2contract.StageEntityProfileUpsert,
+			// Twice, because the second call is the one that takes the conflict
+			// branch -- and the branch is where the column list matters.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityProfileUpsertRequest(
+					"entity:live-probe", "Live Probe", 12, `{"kind":"tool"}`)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeEntityProfileUpsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the profile was not written")
+				}
+			},
+		},
+		{
+			name:  "entity_node_alias_upsert",
+			stage: db2contract.StageEntityNodeAliasUpsert,
+			// node_key is a foreign key into entity_nodes, so the node has to
+			// exist. Twice again, for the conflict branch.
+			repeat: 2,
+			seed:   []string{liveProbeEntityNode},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEntityNodeAliasUpsertRequest(
+					"live-probe-alias", "node:live-probe", "abbreviation",
+					liveProbeScopeProject, 7)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeEntityNodeAliasUpsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the alias was not written")
+				}
+			},
+		},
 	}
 }
 
@@ -3563,6 +3619,13 @@ const (
 	liveProbeCrossRepoMeta = `INSERT INTO cross_repo_meta (id) VALUES (1)
  ON CONFLICT (id) DO NOTHING`
 )
+
+// The node an alias points at. Aliases carry a foreign key into entity_nodes,
+// so without it the insert fails and the probe would be proving that a broken
+// write is reported as broken.
+const liveProbeEntityNode = `INSERT INTO entity_nodes (node_key, display_name)
+ VALUES ('node:live-probe', 'live probe')
+ ON CONFLICT (node_key) DO NOTHING`
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
