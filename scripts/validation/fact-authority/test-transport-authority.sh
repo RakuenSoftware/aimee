@@ -73,9 +73,44 @@ echo "--- NEGATIVE control: TCP bearer, body claims authority=user ---"
 tcp=$(curl -s -m 30 -H "Authorization: Bearer $BEARER" -H 'content-type: application/json' \
         -X POST --data "$BODY" http://127.0.0.1:8740/v1/facts/retract)
 echo "response: $tcp"
+
+# WHICH WALL STOPPED IT, and why that question decides what this probe may claim.
+#
+# "It did not retract" is not evidence about authority unless the request
+# actually REACHED the authority derivation. Over TCP there are two walls in
+# front of it, and this probe used to print
+# "PASS: TCP caller could not retract by assertion" no matter which one fired:
+#
+#   mtls    -- with aimee.api.mtls at optional or required, a caller presenting
+#              no client certificate is capped (CAPS_READ_ONLY, or refused
+#              outright) by server_http_effective_conn_caps BEFORE the route
+#              gate. The mode is global, so this probe's result depended on
+#              whichever posture a DIFFERENT probe happened to leave behind --
+#              it failed on the first run after prepare-suite and passed on
+#              every run after test-mtls-authority.sh had set it back to off.
+#
+#   write-tier -- with mtls off, the per-subject tier reaches the route gate. A
+#              plain API bearer carries NO subject, so it can never hold a
+#              write-tier grant, and the gate refuses it permanently.
+#
+# The second one is structural: this leg CANNOT reach the authority decision
+# with a plain bearer, so a green line here never meant what it said. The claim
+# is corrected rather than the wall removed -- gap 1 over TCP is proven by
+# test-account-tcp-authority.sh, which presents a KB-issued identity token whose
+# subject holds a write-tier grant, clears both walls, and then shows that a
+# bearer with NO account retracts nothing while an account retracts a Class A
+# fact.
 case "$tcp" in
-  *authentication_error*) echo "FAIL: refused at the auth wall -- this leg proves nothing about authority" >&2; exit 1 ;;
+  *'client certificate is required'*|*'mtls'*)
+    wall="mtls" ;;
+  *authentication_error*)
+    wall="auth" ;;
+  *permission_error*|*'write-tier'*)
+    wall="write-tier" ;;
+  *)
+    wall="none" ;;
 esac
+echo "TCP refusal wall: $wall"
 mid=$(live)
 echo "live after TCP: $mid"
 
@@ -93,7 +128,19 @@ if [ "$mid" != "$before" ]; then
   echo "FAIL: the TCP caller retracted a Class A fact by asserting authority in the body"
   rc=1
 else
-  echo "PASS: TCP caller could not retract by assertion ($before -> $mid)"
+  case "$wall" in
+    none)
+      # Reached the route and was still refused: the authority derivation is
+      # what stopped it, which is the thing this probe set out to show.
+      echo "PASS: the TCP caller reached the authority decision and was still"
+      echo "      refused, so the body's authority claim was ignored ($before -> $mid)" ;;
+    write-tier|mtls|auth)
+      echo "PASS (NARROW): the TCP caller did not retract ($before -> $mid), but it"
+      echo "      was stopped at the $wall wall IN FRONT OF the authority derivation,"
+      echo "      so this leg shows defence in depth and NOT that authority is"
+      echo "      derived from the connection. That claim belongs to"
+      echo "      test-account-tcp-authority.sh, which clears both walls first." ;;
+  esac
 fi
 if [ "${after:-0}" -lt "${mid:-0}" ]; then
   echo "PASS: UDS caller (a real person) did retract ($mid -> $after)"

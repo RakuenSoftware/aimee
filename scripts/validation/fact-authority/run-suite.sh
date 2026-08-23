@@ -117,10 +117,47 @@ bring_up_server() {
   bash /root/start-server.sh >/dev/null 2>&1
   bash /root/imms.sh >/dev/null 2>&1
   sleep 2
+
+  # THE SERVER CAN WIN A RACE IT SHOULD LOSE.
+  #
+  # imms.sh attaches the modules AFTER start-server.sh, so aimee-server may run
+  # server_coord_dispatcher_init() before the db1 module is on the bus. That
+  # init calls db1_runtime_state_set(), is called exactly once from server.c,
+  # and has NO retry -- so when it loses, the coord dispatcher is down for the
+  # whole process lifetime and the only evidence is one line:
+  #
+  #   ERROR coord_dispatcher: failed to persist boot claim owner
+  #
+  # Verified as an ordering artifact rather than a product defect: with the
+  # modules already attached the dispatcher starts every time
+  # (test-coord-dispatcher-boot.sh). But a suite that runs against a deployment
+  # with a subsystem silently down is measuring the wrong box, so it is
+  # detected and corrected here instead of being left to chance.
+  if grep -aq 'failed to persist boot claim owner' /root/server.log 2>/dev/null; then
+    echo "  NOTE: coord dispatcher lost the module-attach race; restarting the server"
+    bash /root/start-server.sh >/dev/null 2>&1
+    bash /root/imms.sh >/dev/null 2>&1
+    sleep 3
+    if grep -aq 'failed to persist boot claim owner' /root/server.log 2>/dev/null; then
+      echo "  WARNING: the coord dispatcher is still down after a restart with modules"
+      echo "           attached -- that is no longer an ordering artifact."
+      coord_down=1
+    fi
+  fi
   rebaseline_caps
 }
+coord_down=0
 
 hdr "bringing the stack up"
+# NORMALISE THE mTLS POSTURE FIRST. aimee.api.mtls is global, and two probes
+# need opposite settings, so whichever ran last used to decide the posture every
+# EARLIER probe in the next run would inherit. That is how "same body, both
+# transports" failed on the first run after prepare-suite (which leaves mTLS on,
+# walling the TCP leg at 401 "a valid client certificate is required") and
+# passed on every run afterwards, once test-mtls-authority.sh had set it back to
+# off. A suite whose result depends on what the previous suite left behind is
+# not measuring the system, so the posture is set here rather than inherited.
+bash /root/set-mtls-mode.sh off >/dev/null 2>&1
 bring_up_kb
 bring_up_server
 echo "  daemons: kb=$(pgrep -cf /usr/local/bin/aimee-kb) server=$(pgrep -cf /usr/local/bin/aimee-server)"
@@ -222,6 +259,12 @@ fi
 # Same reasoning as the capability_absent counter above: a probe that ran
 # against an unseeded store proves nothing, so a failed seed cannot be allowed
 # to leave a green summary behind it.
+if [ "${coord_down:-0}" -gt 0 ]; then
+  echo "  WARNING: the coord dispatcher never started, so this run measured a"
+  echo "      deployment with a subsystem down."
+  fail=$((fail + 1))
+  failed_names="$failed_names coord-dispatcher"
+fi
 if [ "${seed_failures:-0}" -gt 0 ]; then
   echo "  WARNING: $seed_failures seed(s) failed, so the probes after them ran"
   echo "      against a store that did not hold the facts they act on."

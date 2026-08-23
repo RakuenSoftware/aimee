@@ -162,9 +162,36 @@ int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *
    else if (is_retraction && has_attr)
    {
       fact_actor_t actor;
-      if (db2_fact_actor_from_request(0, &actor) != 0 &&
-          db2_fact_actor_internal(
-              authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
+      /* THE DECLARED AUTHORITY CAPS THE ACTOR; it is not a fallback for it.
+       *
+       * This used to try db2_fact_actor_from_request() FIRST and only fall back
+       * to |authority| when that failed. But that function returns
+       * FACT_ACTOR_USER for ANY authenticated principal, so whenever a request
+       * context existed it silently overrode the authority the caller had
+       * deliberately passed. kb_handle_memory_context_block() passes
+       * FACT_AUTHORITY_MODEL precisely because get_context_block's `query` is
+       * composed by the MODEL inside an authenticated human's turn -- and that
+       * is exactly the case where a request context DOES exist, so the
+       * structural MODEL was discarded every single time.
+       *
+       * Measured before the fix: a Class-A row at authority_rank 30 went
+       * lifecycle_state persistent -> invalidated from the agent's own
+       * "please forget my email". That is gap 1, in the path this layer's own
+       * comment calls the sharpest form of it.
+       *
+       * Same reasoning, and same shape, as db2_fact_actor_capture_memory(): a
+       * turn composed at MODEL authority is model-composed text whoever was
+       * authenticated while it ran, so the request identity must not raise its
+       * rank. Under FACT_ACTOR_MODEL, db2_fact_mutation_invalidate skips Class-A
+       * rows and refuses an immutable relation, which is what a model-issued
+       * correction should do. */
+      if (authority != FACT_AUTHORITY_USER)
+      {
+         if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0)
+            return 0;
+      }
+      else if (db2_fact_actor_from_request(0, &actor) != 0 &&
+               db2_fact_actor_internal(FACT_ACTOR_USER, &actor) != 0)
          return 0;
       (void)db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
    }

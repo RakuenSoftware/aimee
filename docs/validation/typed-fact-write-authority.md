@@ -1608,3 +1608,222 @@ stopword-promotion process, which are features, not repairs.
 
 So: one instance of the shape, found and fixed. The scan is recorded because
 "I checked" is a claim, and a claim of that kind should carry its method.
+
+## Re-run on request: a false PASS in my own suite
+
+Asked to run the full e2e again, I redeployed from a clean build (binaries
+hash-verified identical on both containers, so "is the box running what I built"
+is answered rather than assumed) and ran the whole sequence. `same body, both
+transports` failed. Chasing it properly overturned an earlier diagnosis of mine
+and then found something worse than the failure.
+
+### The earlier diagnosis was wrong
+
+I had previously seen this probe fail once, attributed it to a failed seed, and
+added a seed-failure detector. This time the detector did not fire — so the seed
+was fine and that explanation had been wrong. It was a guess that fitted the one
+data point I had.
+
+### What was actually happening
+
+`aimee.api.mtls` is **global**, and two probes need opposite postures:
+`test-mtls-authority.sh` needs `optional`, `test-account-tcp-authority.sh` needs
+`off`. `same body, both transports` runs BEFORE either of them and simply
+inherited whatever the last thing to touch the setting had left.
+
+    prepare-suite leaves mTLS on  -> TCP leg gets 401 "a valid client
+                                     certificate is required"  -> FAIL
+    a previous suite left it off  -> TCP leg gets as far as the write-tier
+                                     gate                      -> PASS
+
+So the probe's result depended on what the *previous run* left behind. That is
+not measuring the system. `run-suite.sh` now normalises the posture at bring-up
+instead of inheriting it.
+
+### The worse finding: the PASS was false
+
+Fixing the ordering exposed the real problem. "It did not retract" is only
+evidence about authority if the request actually REACHED the authority
+derivation, and over TCP there are two walls in front of it:
+
+- **mTLS** — in `optional`/`required` mode a caller with no client certificate is
+  capped by `server_http_effective_conn_caps` before the route gate.
+- **write-tier** — with mTLS off, the per-subject tier reaches the gate. A plain
+  API bearer carries **no subject**, so it can never hold a write-tier grant, and
+  the gate refuses it permanently.
+
+The second is structural: this leg **cannot** reach the authority decision with a
+plain bearer. Measured directly, the refusal is `permission_error` naming the
+write-tier grant — the request never got near the authority code. Yet the probe
+printed:
+
+    PASS: TCP caller could not retract by assertion
+
+which is true as a sentence and false as evidence. It is exactly the failure
+class this suite exists to catch, in the suite itself.
+
+The probe now classifies WHICH wall stopped it and reports accordingly:
+
+    TCP refusal wall: write-tier
+    PASS (NARROW): the TCP caller did not retract, but it was stopped at the
+          write-tier wall IN FRONT OF the authority derivation, so this leg
+          shows defence in depth and NOT that authority is derived from the
+          connection.
+
+### Gap 1 over TCP is still proven — by the probe that clears the walls
+
+The claim is not lost, it just belongs somewhere else.
+`test-account-tcp-authority.sh` presents a KB-issued identity token whose subject
+holds a write-tier grant, so it clears both walls and reaches the decision.
+Re-verified this run:
+
+    PASS: a bearer with no account retracted nothing
+    PASS: a token for another audience was refused
+    PASS: the account retracted a Class-A fact OVER TCP
+    PASS: the Class-B control retracted, so the endpoint is working
+
+The third line is what proves the request reaches the authority derivation over
+TCP; the first is the gap-1 negative with a working endpoint behind it. That is a
+real proof, and it is why the overall conclusion is unchanged even though one
+probe was overstating what it showed.
+
+### A subsystem that was silently down
+
+The sweep also turned up a line that had not appeared before:
+
+    ERROR coord_dispatcher: failed to persist boot claim owner; dispatcher not started
+
+`server_coord_dispatcher_init()` is called once from `server.c`, calls
+`db1_runtime_state_set()`, and has **no retry** — so when it fails the dispatcher
+is down for the whole process lifetime behind that single line.
+
+Tested rather than assumed (`test-coord-dispatcher-boot.sh`): restarting with the
+modules already attached starts the dispatcher every time. It is a race in MY
+bring-up — `imms.sh` attaches modules after `start-server.sh`, so the server can
+initialise before the db1 module is on the bus — and not a product defect. But a
+suite that runs against a deployment with a subsystem silently down is measuring
+the wrong box, so `run-suite.sh` now detects the line, restarts once with modules
+attached, and fails the run if it persists.
+
+### An observation error worth recording
+
+Two SSH invocations hit their own client timeout while the suite was still
+running. The runs did not die with the connections: several orphaned
+`run-suite.sh` processes piled up, each restarting daemons under the others,
+leaving duplicate `aimee-server` and `aimee-kb` processes on the container. The
+observing side corrupted the thing being observed.
+
+`run-suite-detached.sh` now starts the run with `setsid` writing to
+`/root/suite.out`, and refuses to start if one is already in progress, so a
+timeout on the caller can no longer damage the run.
+
+A related trap, recorded because it produced a wrong reading for a minute:
+`pgrep -cf /usr/local/bin/aimee-server` counts the shell running the pgrep when
+that pattern appears in its own command line, so a clean container reported
+"2 servers". Confirming with `pgrep -af` showed one real daemon and the counting
+shell.
+
+## The re-run found an unfixed gap 1, hidden by my own probe
+
+The most important thing this re-run produced: **gap 1 was still open in the
+get_context_block path**, and the probe named "agent query must not retract" had
+been reporting PASS over it on every previous run.
+
+### How it stayed hidden
+
+`test-context-block.sh` seeds a Class-A row at `authority_rank 30` (a genuine
+user fact), has the agent issue a model-composed query "please forget my email",
+and prints the state before and after. Its ONLY assertion was that the retraction
+scan had fired:
+
+    PASS: the scan answered, so the surviving facts reflect an authority decision
+
+It never asserted that the user's fact survived. So its own output read
+
+    user-stated (Class A) before: A current
+    after the agent's query:      A gone
+
+and it still exited 0. The probe written to catch the sharpest form of gap 1 was
+blind to gap 1 happening in front of it.
+
+### The defect
+
+Measured directly by row id, to rule out a formatted-string misreading:
+
+    before:  871 A rank=30 life=persistent   inval=no
+    after:   871 A rank=30 life=invalidated  inval=YES
+
+`kb_handle_memory_context_block()` passes `FACT_AUTHORITY_MODEL` **structurally**,
+with a comment explaining exactly why: `get_context_block` is an MCP tool, so
+`query` is composed by the MODEL even though the request carries the human's
+authenticated identity. That part was right. The authority was then discarded one
+layer down, in `db2_typed_fact_ingress()`:
+
+    if (db2_fact_actor_from_request(0, &actor) != 0 &&
+        db2_fact_actor_internal(
+            authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
+
+`db2_fact_actor_from_request()` is tried FIRST, and it returns `FACT_ACTOR_USER`
+for ANY authenticated principal. The declared `authority` was only a fallback for
+when that failed — so whenever a request context existed, the deliberate MODEL was
+overridden. And a request context always exists here: the call is an MCP tool
+invocation inside an authenticated human's turn. The parameter was passed
+correctly and honoured never.
+
+### The fix
+
+The declared authority now CAPS the actor rather than serving as a fallback for
+it: under anything but `FACT_AUTHORITY_USER`, the actor is built internally at
+`FACT_ACTOR_MODEL` and the request context is not consulted at all.
+
+This is the same shape, and the same reasoning, as the already-fixed
+`db2_fact_actor_capture_memory()` sitting a few lines away in `fact_mutation.c`:
+"a note stored at MODEL authority is model-composed text, whoever was
+authenticated when it was stored". That principle had been applied to the
+memory-write path and not to the retraction path — the defect repeating at a
+sibling call site, which is exactly where this class of bug hides.
+
+Verified after the fix, same measurement:
+
+    before:  872 A rank=30 life=persistent  inval=no
+    after:   872 A rank=30 life=persistent  inval=no
+
+### Scope check
+
+Every other caller of `db2_fact_actor_from_request()` was examined. The
+`ontology_evolution.c` (×3) and `kb_http_console.c` (×5) sites pass
+`require_operator=1` and REFUSE when it fails — they demand an operator rather
+than accepting a declared authority, a materially different contract.
+`kb_service_memory.c:63` gates a read-only diagnostic trace and mutates nothing.
+`db2_fact_ingest_text_with_evidence()` uses only the declared authority and never
+consults the request context. One instance, fixed.
+
+### The probe now asserts the outcome
+
+`test-context-block.sh` asserts both directions, because either alone is
+explainable by the path being dead:
+
+    PASS: the user's Class-A fact SURVIVED the agent's query
+    PASS: the model-authored Class-B fact was withdrawn, so the retraction
+          path is live and the Class-A survival above means something
+
+### A guard that was broken in the healthy case
+
+While fixing it, the scan-fired guard turned out to be broken too:
+
+    scans="$(grep -ac '...' /root/kb.log 2>/dev/null || echo 0)"
+
+`grep -c` PRINTS 0 and EXITS 1 when there are no matches, so `|| echo 0` appended
+a second line and this captured `"0\n0"`. The comparison below then died with
+"integer expression expected" and the `if` fell through to PASS. The guard whose
+job was to catch a false positive was itself broken in exactly the healthy case
+where the log holds no such lines. Same bug I had already fixed in
+`run-suite.sh`; `head -1` now applied here too.
+
+### What this changes about the earlier conclusion
+
+The earlier report that "both charter gaps are fixed" was correct for the paths
+measured, but one path that this suite explicitly claimed to cover was not
+actually being measured. Gap 1 in `get_context_block` was open until this run.
+It is now fixed and verified with a positive control, and the probe can no longer
+pass without checking the thing it exists to check.

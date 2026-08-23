@@ -55,7 +55,13 @@ state() { $P "select confidence_class || ' ' || case when superseded_at='' and i
 # ever reaching the authority decision -- so both facts survive and this test
 # passes while proving nothing. That is the same false-positive shape as a probe
 # refused at an auth wall, so it is checked rather than assumed.
-scans="$(grep -ac 'retraction scan gave no answer' /root/kb.log 2>/dev/null || echo 0)"
+# `grep -c` PRINTS 0 and EXITS 1 when there are no matches, so the old
+# `|| echo 0` appended a SECOND line and this captured "0\n0". The comparison
+# below then died with "integer expression expected" and the `if` fell through
+# to PASS -- meaning this guard, whose whole job is to catch a false positive,
+# was itself broken in exactly the healthy case where the log has no such lines.
+# head -1 keeps one number.
+scans="$(grep -ac 'retraction scan gave no answer' /root/kb.log 2>/dev/null | head -1)"; scans="${scans:-0}"
 
 ask_forget() {
   curl -s -m 20 -H "Authorization: Bearer ${B}" -H 'content-type: application/json' \
@@ -66,21 +72,61 @@ ask_forget() {
 echo "=== the agent's own query says \"please forget my email\" ==="
 echo
 seed A 1.0
-echo "  user-stated (Class A) before: $(state)"
+a_before="$(state)"
+echo "  user-stated (Class A) before: $a_before"
 ask_forget
-echo "  after the agent's query:      $(state)"
+a_after="$(state)"
+echo "  after the agent's query:      $a_after"
 echo
 seed B 0.6
-echo "  model-authored (Class B) before: $(state)"
+b_before="$(state)"
+echo "  model-authored (Class B) before: $b_before"
 ask_forget
-echo "  after the same query:            $(state)"
+b_after="$(state)"
+echo "  after the same query:            $b_after"
 
 echo
-after="$(grep -ac 'retraction scan gave no answer' /root/kb.log 2>/dev/null || echo 0)"
+rc=0
+after="$(grep -ac 'retraction scan gave no answer' /root/kb.log 2>/dev/null | head -1)"; after="${after:-0}"
 if [ "${after:-0}" -gt "${scans:-0}" ]; then
   echo "FAIL: the retraction scan gave no answer during this run ($scans -> $after)."
   echo "      Both facts survived because the scan never fired, NOT because"
   echo "      authority was withheld. This run proves nothing about gap 1."
   exit 1
 fi
-echo "PASS: the scan answered, so the surviving facts reflect an authority decision"
+echo "  (the scan answered, so what follows reflects an authority decision)"
+
+# ASSERT THE OUTCOME, not just that the machinery ran.
+#
+# This script used to stop at the line above: its ONLY assertion was that the
+# retraction scan had fired, and it never checked what happened to the facts. So
+# it printed PASS while the Class-A row went "current" -> "gone" -- reporting
+# success for the very defect it was written to catch. The header calls this
+# path the sharpest form of gap 1, and the probe was blind to it.
+#
+# The real defect it was hiding: db2_typed_fact_ingress() tried
+# db2_fact_actor_from_request() FIRST and used the declared authority only as a
+# fallback. That function returns FACT_ACTOR_USER for any authenticated
+# principal, so the FACT_AUTHORITY_MODEL that kb_handle_memory_context_block()
+# passes on purpose was discarded whenever a request context existed -- which is
+# always, for an MCP tool call inside a human's authenticated turn.
+case "$a_after" in
+  *current*)
+    echo "PASS: the user's Class-A fact SURVIVED the agent's query" ;;
+  *)
+    echo "FAIL: the agent's own model-composed query retracted a user-stated"
+    echo "      Class-A fact ($a_before -> $a_after). That is gap 1."
+    rc=1 ;;
+esac
+# The Class-B row MUST still be withdrawn, or "the Class-A fact survived" is
+# equally explained by the retraction path being dead.
+case "$b_after" in
+  *gone*)
+    echo "PASS: the model-authored Class-B fact was withdrawn, so the retraction"
+    echo "      path is live and the Class-A survival above means something" ;;
+  *)
+    echo "FAIL: the Class-B fact was NOT withdrawn ($b_before -> $b_after), so the"
+    echo "      retraction path is not doing anything and this run proves nothing."
+    rc=1 ;;
+esac
+exit $rc
