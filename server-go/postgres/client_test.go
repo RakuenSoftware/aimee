@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -342,5 +343,32 @@ func TestARetryableFailureIsDistinguishableFromARejectedOne(t *testing.T) {
 	// Wrapped, since callers rarely hold the error bare.
 	if !IsUnavailable(fmt.Errorf("loading grants: %w", unavailable)) {
 		t.Error("wrapping hid the outage")
+	}
+}
+
+func TestALengthPastTheFieldIsRefusedNotWrapped(t *testing.T) {
+	// The client's half of the same wire, and the same reasoning: see the module
+	// side. Both encoders exist, so both need the check -- a request whose length
+	// prefix wrapped would let the module read the caller's content as framing.
+	for _, c := range []struct {
+		name    string
+		length  int
+		refused bool
+	}{
+		{"ordinary", 4096, false},
+		{"the largest that fits", math.MaxUint32, false},
+		{"one past the field", math.MaxUint32 + 1, true},
+		{"negative", -1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := &writer{}
+			w.u32len(c.length)
+			if refused := w.err != nil; refused != c.refused {
+				t.Fatalf("length %d: refused = %v, want %v", c.length, refused, c.refused)
+			}
+			if len(w.buf) != 4 {
+				t.Fatalf("wrote %d bytes for a length field", len(w.buf))
+			}
+		})
 	}
 }

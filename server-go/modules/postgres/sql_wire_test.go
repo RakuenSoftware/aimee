@@ -336,3 +336,54 @@ func TestAFailureIsClassifiedByWhatActuallyHappened(t *testing.T) {
 		})
 	}
 }
+
+func TestALengthPastTheFieldIsRefusedNotWrapped(t *testing.T) {
+	// The conversion does not fail, it wraps -- and on a length-prefixed wire a
+	// wrapped length is not a wrong number. A value of 2^32+8 bytes writes the
+	// length 0 and then appends all of them, so the reader takes the next four
+	// bytes of CONTENT as the next length prefix. Everything after that point is
+	// framing the sender chose.
+	//
+	// Nothing reaches this today: statements and cells stop at 1 MiB, rows and
+	// arguments at 4096, a PostgreSQL value at 1 GB. Every one of those bounds
+	// was added by somebody, and the encoder outlives all of them.
+	//
+	// Tested here rather than through EncodeQueryReply because the honest
+	// end-to-end version needs a four-gigabyte string. A check whose test cannot
+	// be written is a check that does not get written.
+	for _, c := range []struct {
+		name    string
+		length  int
+		refused bool
+	}{
+		{"empty", 0, false},
+		{"ordinary", 4096, false},
+		{"the largest that fits", math.MaxUint32, false},
+		{"one past the field", math.MaxUint32 + 1, true},
+		{"far past it", math.MaxUint32 * 3, true},
+		{"negative", -1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := &writer{}
+			w.u32len(c.length)
+			if refused := w.err != nil; refused != c.refused {
+				t.Fatalf("length %d: refused = %v, want %v (err = %v)",
+					c.length, refused, c.refused, w.err)
+			}
+			// Four bytes either way: a refusal must not also desynchronise the
+			// buffer it was recording a problem about.
+			if len(w.buf) != 4 {
+				t.Fatalf("wrote %d bytes for a length field", len(w.buf))
+			}
+		})
+	}
+
+	// And a recorded refusal becomes a status the caller understands rather than
+	// a message whose structure the payload picked.
+	w := &writer{}
+	w.u32len(math.MaxUint32 + 1)
+	framed := w.frame()
+	if status := binary.LittleEndian.Uint32(framed[0:4]); status != StatusLimitExceeded {
+		t.Fatalf("a reply that could not be framed answered status %d", status)
+	}
+}

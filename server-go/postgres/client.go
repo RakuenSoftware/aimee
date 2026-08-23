@@ -183,11 +183,27 @@ type Client struct {
 
 func New(call Caller) *Client { return &Client{call: call} }
 
-type writer struct{ buf []byte }
+type writer struct {
+	buf []byte
+	err error
+}
 
 func (w *writer) u32(v uint32) { w.buf = binary.LittleEndian.AppendUint32(w.buf, v) }
 func (w *writer) u64(v uint64) { w.buf = binary.LittleEndian.AppendUint64(w.buf, v) }
-func (w *writer) str(v string) { w.u32(uint32(len(v))); w.buf = append(w.buf, v...) }
+
+// u32len narrows a length into the wire's four-byte field, or records a
+// refusal. See the module side: the conversion wraps rather than failing, and a
+// wrapped length on a length-prefixed wire turns content into framing.
+func (w *writer) u32len(n int) {
+	if n < 0 || int64(n) > math.MaxUint32 {
+		w.err = fmt.Errorf("postgres: one past the field: u32(%d) = %d", n, uint32(n))
+		w.u32(0)
+		return
+	}
+	w.u32(uint32(n))
+}
+
+func (w *writer) str(v string) { w.u32len(len(v)); w.buf = append(w.buf, v...) }
 
 func (w *writer) value(v Value) error {
 	w.buf = append(w.buf, v.Type)
@@ -214,10 +230,10 @@ func (w *writer) value(v Value) error {
 			return fmt.Errorf("postgres: byte cell is %d bytes, over %d",
 				len(v.Bytes), MaxCellBytes)
 		}
-		w.u32(uint32(len(v.Bytes)))
+		w.u32len(len(v.Bytes))
 		w.buf = append(w.buf, v.Bytes...)
 	case typeTexts:
-		w.u32(uint32(len(v.Texts)))
+		w.u32len(len(v.Texts))
 		for _, text := range v.Texts {
 			w.str(text)
 		}
@@ -249,11 +265,14 @@ func statement(op uint32, statementID string, handle uint64, sql string,
 	w.str(statementID)
 	w.u64(handle)
 	w.str(sql)
-	w.u32(uint32(len(args)))
+	w.u32len(len(args))
 	for _, arg := range args {
 		if err := w.value(arg); err != nil {
 			return nil, err
 		}
+	}
+	if w.err != nil {
+		return nil, w.err
 	}
 	return w.buf, nil
 }
@@ -286,7 +305,11 @@ func (r *reader) str() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if r.at+int(length) > len(r.buf) {
+	// Summed in the wider type on both sides. This is correct today because int
+	// is 64 bits here, which is a fact about the platform rather than about the
+	// arithmetic -- and a bound that is right for a reason the reader cannot see
+	// is one an edit can quietly take away.
+	if int64(r.at)+int64(length) > int64(len(r.buf)) {
 		return "", errors.New("postgres: truncated reply")
 	}
 	v := string(r.buf[r.at : r.at+int(length)])
@@ -324,7 +347,7 @@ func (r *reader) value() (Value, error) {
 		if err != nil {
 			return Value{}, err
 		}
-		if r.at+int(length) > len(r.buf) {
+		if int64(r.at)+int64(length) > int64(len(r.buf)) {
 			return Value{}, errors.New("postgres: truncated reply")
 		}
 		out := make([]byte, length)

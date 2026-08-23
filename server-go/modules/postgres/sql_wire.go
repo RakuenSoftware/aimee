@@ -3,6 +3,7 @@ package postgres
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 )
 
@@ -162,7 +163,7 @@ func (r *reader) str(maximum int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if int(length) > maximum || r.at+int(length) > len(r.buf) {
+	if int64(length) > int64(maximum) || int64(r.at)+int64(length) > int64(len(r.buf)) {
 		return "", errMalformed
 	}
 	value := string(r.buf[r.at : r.at+int(length)])
@@ -203,7 +204,8 @@ func (r *reader) value() (Value, error) {
 		if err != nil {
 			return Value{}, err
 		}
-		if int(length) > MaxCellBytes || r.at+int(length) > len(r.buf) {
+		if int64(length) > int64(MaxCellBytes) ||
+			int64(r.at)+int64(length) > int64(len(r.buf)) {
 			return Value{}, errMalformed
 		}
 		// Copied rather than aliased: the caller's buffer is reused for the
@@ -311,7 +313,10 @@ func DecodeRequest(body []byte) (Request, error) {
 	return request, nil
 }
 
-type writer struct{ buf []byte }
+type writer struct {
+	buf []byte
+	err error
+}
 
 func (w *writer) u32(value uint32) {
 	var raw [4]byte
@@ -325,8 +330,45 @@ func (w *writer) u64(value uint64) {
 	w.buf = append(w.buf, raw[:]...)
 }
 
+// u32len narrows a length into the wire's four-byte field, or records a
+// refusal.
+//
+// The conversion does not fail, it WRAPS, and on a length-prefixed wire that is
+// not a wrong number: a value of 2^32+8 bytes writes the length 0 and then
+// appends all of them, so the reader takes the next four bytes of content as the
+// next length prefix. Everything after the wrap is framing the sender chose.
+//
+// Nothing reaches this today -- statements and cells are bounded at 1 MiB, rows
+// and arguments at 4096, and a PostgreSQL value stops at 1 GB. That is a fact
+// about the current callers, not about this function, and the encoder outlives
+// them.
+func (w *writer) u32len(n int) {
+	if n < 0 || int64(n) > math.MaxUint32 {
+		// Recorded rather than returned: every encoder here answers []byte, and
+		// frame() turns a recorded refusal into a status the caller understands
+		// instead of a message whose structure the payload picked.
+		w.err = fmt.Errorf("one past the field: u32(%d) = %d", n, uint32(n))
+		w.u32(0)
+		return
+	}
+	w.u32(uint32(n))
+}
+
+// frame hands out the encoded bytes, or a refusal if anything could not be
+// framed.
+//
+// Deliberately builds the refusal directly rather than through frame() again:
+// this must not be able to recurse on the path that exists because encoding
+// went wrong.
+func (w *writer) frame() []byte {
+	if w.err != nil {
+		return EncodeError(StatusLimitExceeded, sqlStateResultTooLarge, w.err.Error())
+	}
+	return w.buf
+}
+
 func (w *writer) str(value string) {
-	w.u32(uint32(len(value)))
+	w.u32len(len(value))
 	w.buf = append(w.buf, value...)
 }
 
@@ -346,10 +388,10 @@ func (w *writer) value(value Value) {
 			w.buf = append(w.buf, 0)
 		}
 	case ValueBytes:
-		w.u32(uint32(len(value.Bytes)))
+		w.u32len(len(value.Bytes))
 		w.buf = append(w.buf, value.Bytes...)
 	case ValueTexts:
-		w.u32(uint32(len(value.Texts)))
+		w.u32len(len(value.Texts))
 		for _, text := range value.Texts {
 			w.str(text)
 		}
@@ -385,13 +427,13 @@ func EncodeExecReply(rowsAffected uint64) []byte {
 func EncodeQueryReply(width uint32, rows [][]Value) []byte {
 	w := replyHeader(StatusOK, "", "")
 	w.u32(width)
-	w.u32(uint32(len(rows)))
+	w.u32len(len(rows))
 	for _, row := range rows {
 		for _, cell := range row {
 			w.value(cell)
 		}
 	}
-	return w.buf
+	return w.frame()
 }
 
 // EncodeBeginReply answers the handle the caller puts on every statement in the
