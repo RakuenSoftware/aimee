@@ -380,8 +380,27 @@ measured (S5), and the recursion is bounded (S0).
 | Observation + admission | `src/eval_synthesis.c`, `src/headers/eval_synthesis.h` |
 | Tests | `src/tests/test_learning_eval_synthesis.c` (pure policy), `src/tests/test_eval_candidates.c` (ledger + end-to-end admission) |
 
+**Operator surface.** `aimee eval candidates [--state S] [--limit N]` reads the
+backlog and the gate; `aimee eval candidates-update <scan|admit|reject|retire>`
+drives it. Both are ordinary `/v1` routes (`GET`/`POST /v1/eval/candidates`).
+Nothing schedules itself.
+
+**Wiring — where the failures come from.** `scan` sweeps two ledgers, and the
+boundary between them and everything else is a finding worth stating: a
+synthesisable regression needs a **replayable prompt**. Failed `agent_jobs`
+carry one and become tasks whose bar is "this must now succeed"; negative
+signals carrying a correction carry both a prompt and what should have been
+said, so they become `contains` checks. `agent_outcomes` (role/reason only) and
+`eval_results` (which names an *existing* suite task, and so feeds retirement)
+carry neither, and are deliberately not synthesis sources — manufacturing a
+prompt for them would be fabrication. Observation is idempotent per session, so
+re-running a sweep cannot manufacture its own reproduction.
+
 Verified: `make -j8 all`, `make unit-tests` (all pass), `make lint` (63/63),
-`make docs-gen-check` — all clean.
+`make docs-gen-check`, `make integration-tests` (115/115) — clean on the
+development machine and on a separate host, plus a live end-to-end run against a
+real server. See
+[the validation report](../../validation/recursive-self-improvement-s0-s1-2026-08-23.md).
 
 **Three design decisions taken during implementation, recorded here rather than
 left implicit:**
@@ -423,17 +442,16 @@ left implicit:**
   every policy function takes explicit bounds (`learning_gate_check_with`) so
   wiring the field descriptors is mechanical. Adding config fields touches the
   generated accessor set and its drift check, which is its own change.
-- **Call sites.** Nothing yet calls `eval_synthesis_observe()` in production.
-  Until the failure sources (`db1_eval_failed_tasks_recent`,
-  `db2_agent_outcome_recent_failures`, negative-polarity `learning_signals`, the
-  dogfood autolabel bridge, the verify gate) are wired to it and
-  `aimee eval candidates` exists, **this is substrate with no production
-  consumer** — precisely the shape
-  [`feature-liveness-and-background-curator-removal.md`](../done/feature-liveness-and-background-curator-removal.md)
-  forbids retaining. It is landed as tested, inert substrate on that
-  understanding: the next slice wires the consumers, and the feature is not
-  retention-eligible until it does.
-- **Retirement pass.** `passing_windows` is stored and
-  `db1_eval_candidate_mark_archived` works, but nothing yet counts passing
-  windows; retirement is operator-driven until the counting pass lands with the
-  call sites.
+- **The dogfood-autolabel and mechanical-verify sources.** Both are named in S1
+  as failure sources and neither is wired. The reason is the same finding above:
+  the dogfood ledger is JSONL keyed on retrieval moments and the verify gate
+  reports a command's exit status — neither carries a replayable prompt today,
+  so wiring them means first deciding what prompt a synthesised task would
+  replay. That is a design question, not plumbing, and it belongs with S2's work
+  on trajectories rather than being guessed at here.
+- **Config keys.** `min_exogenous_ratio`, `min_sample`, `min_occurrences`, and
+  `retire_windows` are compile-time defaults, overridable per invocation through
+  the CLI (`--min-occurrences`, `--retire-windows`, `--window-days`). Every
+  policy function already takes explicit bounds (`learning_gate_check_with`), so
+  promoting them to config fields is mechanical — but it touches the generated
+  accessor set and its drift check, which is its own change.
