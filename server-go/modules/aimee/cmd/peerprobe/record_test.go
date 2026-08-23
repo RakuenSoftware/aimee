@@ -70,7 +70,11 @@ func TestValidationRecordMatchesTheProbe(t *testing.T) {
 
 	if got := len(names) + formatted; got != rows {
 		t.Errorf("probe makes %d checks; the record lists %d rows. A check with no "+
-			"row is a passing result missing from the evidence.", got, rows)
+			"row is a passing result missing from the evidence.\n"+
+			"DO NOT add a row to make these agree. That records a result for a check "+
+			"that never ran, against a container that no longer exists. Re-run the "+
+			"probe and record what the NEW run reported, or mark the record "+
+			"historical and start a fresh one.", got, rows)
 	}
 
 	// Matched against THE ROWS ONLY, not the whole document.
@@ -104,7 +108,10 @@ func TestValidationRecordMatchesTheProbe(t *testing.T) {
 		}
 		if !strings.Contains(table, strings.ToLower(head)) {
 			t.Errorf("probe check %q has no ROW in the validation record. Prose "+
-				"quoting the check does not count: the table is the evidence.", n[1])
+				"quoting the check does not count: the table is the evidence.\n"+
+				"The row must come from a run that actually made this check, not "+
+				"from reading the probe's source and writing down what it would "+
+				"have said.", n[1])
 		}
 	}
 }
