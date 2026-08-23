@@ -33,16 +33,26 @@ seed() { # $1 = confidence_class  $2 = confidence
   local rank=10
   [ "$1" = "A" ] && rank=30
   $P "delete from entity_edges where source='user' and relation='email'" >/dev/null
-  $P "insert into entity_edges
+  # RETURNING id, not max(id) afterwards.
+  #
+  # max(id) was a second race on top of the one state() already fixes: the drain
+  # runs continuously now and can insert its own ('user','email') row between
+  # this INSERT and the follow-up query, so the "id of the row we just wrote"
+  # came back as the drain's row instead. The probe then watched a Class-A row it
+  # did not create and reported "B current -> A current" -- a failure message
+  # describing two different rows. Taking the id from the insert itself cannot
+  # pick up anyone else's write.
+  local id
+  id="$($P "insert into entity_edges
         (source, relation, target, weight, relation_id, subject_kind, object_kind,
          edge_class, confidence_class, confidence, authority_rank, lifecycle_state,
          asserted_at, invalidated_at, superseded_at, suppressed)
       values ('user','email','theo@example.com', 1, ${RID}, 1, 11, 'semantic', '$1', $2,
          ${rank}, 'persistent',
-         to_char(now() at time zone 'UTC','YYYY-MM-DD HH24:MI:SS'), '', '', 0)" >/dev/null
+         to_char(now() at time zone 'UTC','YYYY-MM-DD HH24:MI:SS'), '', '', 0)
+      returning id")"
   $P "ALTER TABLE entity_edges ENABLE TRIGGER USER" >/dev/null
-  # Hand back the id of the row we just wrote. See state() for why.
-  $P "select max(id) from entity_edges where source='user' and relation='email'"
+  printf '%s' "$id"
 }
 
 # A retired fact is lifecycle_state='invalidated' + invalidated_at; only a
