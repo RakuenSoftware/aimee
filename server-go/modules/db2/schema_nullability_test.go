@@ -28,11 +28,24 @@ var knownNullableColumns = map[string][]string{
 	"audit_events":                {"after_snapshot", "before_snapshot"},
 	"curator_invalidation_events": {},
 	"decision_log":                {"outcome", "task_id"},
+	"docs":                        {},
 	"entity_edges":                {"object_kind", "relation_id", "subject_kind", "window_id"},
+	"kb_documents":                {"kb_fts_tsv", "next_chunk_id", "page_end", "page_start", "prev_chunk_id"},
 	"kb_enrollments":              {},
-	"memory_entities":             {},
-	"projects":                    {"kb_project"},
-	"prospective_memories":        {"prospective_memories_fts_tsv"},
+	"kb_file_index":               {"content"},
+	"kb_ingest_queue":             {"completed_at", "error_message", "started_at"},
+	"kb_runtime_state":            {},
+	"memories": {
+		"artifact_hash", "artifact_ref", "artifact_type", "effectiveness",
+		"last_used_at", "memories_code_fts_text", "memories_fts_tsv",
+		"memory_negation_fts_tsv", "source_session", "valid_from", "valid_until",
+	},
+	"memory_entities":      {},
+	"memory_summaries":     {},
+	"memory_temporal_refs": {},
+	"memory_units":         {"memory_units_fts_tsv"},
+	"projects":             {"kb_project"},
+	"prospective_memories": {"prospective_memories_fts_tsv"},
 }
 
 func TestLiveNullableColumnsAreTheOnesThePortExpects(t *testing.T) {

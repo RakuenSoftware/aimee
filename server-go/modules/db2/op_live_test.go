@@ -1516,6 +1516,59 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "memory_state_fields",
+			stage: db2contract.StageMemoryStateFields,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryStateFieldsRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, err := db2contract.DecodeMemoryStateFieldsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "memory_provenance_by_id",
+			stage: db2contract.StageMemoryProvenanceByID,
+			// The absent answer, which has to come back as absent rather than as
+			// failed -- and pgx.ErrNoRows is what separates them, so only a real
+			// database says which one this is.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryProvenanceByIDRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				result, _, _, _, err := db2contract.DecodeMemoryProvenanceByIDReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if result != provenanceAbsent {
+					t.Fatalf("a memory that does not exist answered %d, want absent", result)
+				}
+			},
+		},
+		{
+			name:  "memory_unit_active_meta",
+			stage: db2contract.StageMemoryUnitActiveMeta,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryUnitActiveMetaRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, err := db2contract.DecodeMemoryUnitActiveMetaReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:   "lifecycle_counts",
+			stage:  db2contract.StageLifecycleCounts,
+			encode: db2contract.EncodeLifecycleCountsRequest,
+			decoded: func(t *testing.T, body []byte) {
+				if _, _, _, _, _, err := db2contract.DecodeLifecycleCountsReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -2957,6 +3010,66 @@ func liveWrites() []liveRequest {
 				}
 				if acknowledged != 1 {
 					t.Fatal("the state change did not run")
+				}
+			},
+		},
+		{
+			name:  "memory_set_artifact",
+			stage: db2contract.StageMemorySetArtifact,
+			// A memory to point at, because the reply is the changed-row count:
+			// against an empty schema this would answer zero and prove nothing.
+			seed: []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemorySetArtifactRequest(
+					liveProbeAliasMemoryID, "file", "docs/live-probe.md", "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				changed, err := db2contract.DecodeMemorySetArtifactReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if changed != 1 {
+					t.Fatal("the artifact was not attached")
+				}
+			},
+		},
+		{
+			name:  "memory_entity_insert",
+			stage: db2contract.StageMemoryEntityInsert,
+			// Twice, for the ON CONFLICT branch -- which needs a real unique
+			// constraint to take, and there is no fake for that.
+			repeat: 2,
+			seed:   []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryEntityInsertRequest(
+					liveProbeAliasMemoryID, "postgres", "mention", 0.5)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryEntityInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the entity insert did not run")
+				}
+			},
+		},
+		{
+			name:   "memory_temporal_insert",
+			stage:  db2contract.StageMemoryTemporalInsert,
+			repeat: 2,
+			seed:   []string{liveProbeAliasMemory},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeMemoryTemporalInsertRequest(
+					liveProbeAliasMemoryID, "last tuesday", "date_phrase", 0.5)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeMemoryTemporalInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the temporal insert did not run")
 				}
 			},
 		},
