@@ -84,6 +84,10 @@ static int text_valid(const char *text, size_t capacity, int allow_empty)
 
 static int vectors_valid(const float *vector, uint32_t dimension)
 {
+   /* A vector the caller never supplied is not a vector of zeroes. Now that the
+    * memory is theirs, a missing one has to be refused here rather than read. */
+   if (dimension > 0 && !vector)
+      return 0;
    for (uint32_t i = 0; i < dimension; ++i)
       if (!isfinite(vector[i]))
          return 0;
@@ -257,9 +261,10 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
 }
 
 int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
-                                    aimee_db3_search_request_t *request)
+                                    aimee_db3_search_request_t *request, float *vector_out,
+                                    size_t vector_capacity)
 {
-   if (!input || !request || length < SEARCH_REQUEST_HEADER ||
+   if (!input || !request || !vector_out || length < SEARCH_REQUEST_HEADER ||
        get_u32(input) != SEARCH_REQUEST_MAGIC || get_u16(input + 4) != WIRE_VERSION ||
        get_u16(input + 6) != SEARCH_REQUEST_HEADER || get_u16(input + 34) != 0)
       return -1;
@@ -268,7 +273,8 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
    uint16_t top_k = get_u16(input + 32);
    if (workspace_len >= AIMEE_DB3_MAX_SCOPE || project_len >= AIMEE_DB3_MAX_SCOPE ||
        record_len == 0 || record_len >= AIMEE_DB3_MAX_RECORD_TYPE || dimension == 0 ||
-       dimension > AIMEE_DB3_MAX_DIM || top_k == 0 || top_k > AIMEE_DB3_MAX_TOP_K)
+       dimension > AIMEE_DB3_MAX_DIM || dimension > vector_capacity || top_k == 0 ||
+       top_k > AIMEE_DB3_MAX_TOP_K)
       return -1;
    size_t total = 0;
    if (checked_total(SEARCH_REQUEST_HEADER, workspace_len, project_len, record_len, sizeof(float),
@@ -290,9 +296,10 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
    for (uint32_t i = 0; i < dimension; ++i)
    {
       uint32_t bits = get_u32(input + offset);
-      memcpy(&request->vector[i], &bits, sizeof(bits));
+      memcpy(&vector_out[i], &bits, sizeof(bits));
       offset += sizeof(bits);
    }
+   request->vector = vector_out;
    return aimee_db3_search_request_validate(request);
 }
 
@@ -423,7 +430,8 @@ int aimee_db3_apply_encode(const aimee_db3_apply_t *apply, uint8_t *output, size
    return 0;
 }
 
-int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_t *apply)
+int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_t *apply,
+                           float *vector_out, size_t vector_capacity)
 {
    if (!input || !apply || length < APPLY_HEADER || get_u32(input) != APPLY_MAGIC || input[7] != 0)
       return -1;
@@ -445,7 +453,7 @@ int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_
       return -1;
    uint16_t collection_len = get_u16(input + 32), dimension = get_u16(input + 34);
    if (collection_len == 0 || collection_len >= AIMEE_DB3_MAX_COLLECTION ||
-       dimension > AIMEE_DB3_MAX_DIM ||
+       dimension > AIMEE_DB3_MAX_DIM || (dimension > 0 && (!vector_out || dimension > vector_capacity)) ||
        length != header + (size_t)collection_len + (size_t)dimension * sizeof(float) + label_bytes)
       return -1;
    memset(apply, 0, sizeof(*apply));
@@ -464,9 +472,10 @@ int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_
    for (uint32_t i = 0; i < dimension; ++i)
    {
       uint32_t bits = get_u32(input + offset);
-      memcpy(&apply->vector[i], &bits, sizeof(bits));
+      memcpy(&vector_out[i], &bits, sizeof(bits));
       offset += sizeof(bits);
    }
+   apply->vector = dimension ? vector_out : NULL;
    size_t labels_end = offset + label_bytes;
    for (uint32_t i = 0; i < label_count; ++i)
    {

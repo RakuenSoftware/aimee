@@ -63,7 +63,10 @@ static int authorize(void *context, const char *workspace, const char *project, 
    return point_id != state->reject_id;
 }
 
-static aimee_db3_search_request_t request(void)
+/* The caller owns the vector now, so the fixture is handed the buffer it should
+ * point at rather than carrying one of its own. Every real caller makes the same
+ * change; the tests should not be exempt from it. */
+static aimee_db3_search_request_t request(float *vector)
 {
    aimee_db3_search_request_t value = {0};
    value.request_id = 91;
@@ -73,9 +76,10 @@ static aimee_db3_search_request_t request(void)
    strcpy(value.record_type, "memory");
    value.dimension = 3;
    value.top_k = 3;
-   value.vector[0] = 0.25f;
-   value.vector[1] = -0.5f;
-   value.vector[2] = 0.75f;
+   vector[0] = 0.25f;
+   vector[1] = -0.5f;
+   vector[2] = 0.75f;
+   value.vector = vector;
    return value;
 }
 
@@ -85,7 +89,8 @@ static void test_default_external_and_authorization(void)
    auth_state_t auth = {.reject_id = 11};
    aimee_db3_route_t route;
    assert(aimee_db3_route_init(&route, search, &internal, authorize, &auth) == 0);
-   aimee_db3_search_request_t req = request();
+   float vec[3];
+   aimee_db3_search_request_t req = request(vec);
    aimee_db3_search_outcome_t out;
 
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_OK);
@@ -110,7 +115,8 @@ static void test_fail_closed_and_explicit_fallback(void)
    search_state_t internal = {.first_id = 10}, external = {.first_id = 20, .mode = 1};
    auth_state_t auth = {.reject_id = -1};
    aimee_db3_route_t route;
-   aimee_db3_search_request_t req = request();
+   float vec[3];
+   aimee_db3_search_request_t req = request(vec);
    aimee_db3_search_outcome_t out;
    assert(aimee_db3_route_init(&route, search, &internal, authorize, &auth) == 0);
 
@@ -155,18 +161,19 @@ static void test_invalid_requests(void)
    aimee_db3_route_t route;
    aimee_db3_search_outcome_t out;
    assert(aimee_db3_route_init(&route, search, &internal, authorize, &auth) == 0);
-   aimee_db3_search_request_t req = request();
+   float vec[3];
+   aimee_db3_search_request_t req = request(vec);
 
-   req.vector[1] = INFINITY;
+   vec[1] = INFINITY;
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_INVALID_REQUEST);
-   req = request();
+   req = request(vec);
    req.top_k = 0;
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_INVALID_REQUEST);
-   req = request();
+   req = request(vec);
    req.workspace[0] = '\0';
    req.project[0] = '\0';
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_INVALID_REQUEST);
-   req = request();
+   req = request(vec);
    memset(req.record_type, 'x', sizeof(req.record_type));
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_INVALID_REQUEST);
    assert(internal.calls == 0);
@@ -176,23 +183,28 @@ static void test_wire_codecs(void)
 {
    uint8_t wire[512], mutated[512];
    size_t length = 0;
-   aimee_db3_search_request_t req = request(), decoded_req;
+   float vec[3], decoded_vec[AIMEE_DB3_MAX_DIM];
+   aimee_db3_search_request_t req = request(vec), decoded_req;
    assert(aimee_db3_search_request_encode(&req, wire, sizeof(wire), &length) == 0);
    assert(length == 36 + strlen(req.workspace) + strlen(req.project) + strlen(req.record_type) +
                         req.dimension * sizeof(float));
-   assert(aimee_db3_search_request_decode(wire, length, &decoded_req) == 0);
+   assert(aimee_db3_search_request_decode(wire, length, &decoded_req, decoded_vec,
+                                        AIMEE_DB3_MAX_DIM) == 0);
    assert(decoded_req.request_id == req.request_id && decoded_req.dimension == req.dimension);
    assert(memcmp(decoded_req.vector, req.vector, req.dimension * sizeof(float)) == 0);
-   assert(aimee_db3_search_request_decode(wire, length - 1, &decoded_req) != 0);
+   assert(aimee_db3_search_request_decode(wire, length - 1, &decoded_req, decoded_vec,
+                                        AIMEE_DB3_MAX_DIM) != 0);
    memcpy(mutated, wire, length);
    mutated[34] = 1;
-   assert(aimee_db3_search_request_decode(mutated, length, &decoded_req) != 0);
+   assert(aimee_db3_search_request_decode(mutated, length, &decoded_req, decoded_vec,
+                                        AIMEE_DB3_MAX_DIM) != 0);
    memcpy(mutated, wire, length);
    mutated[length - 1] = 0x7f;
    mutated[length - 2] = 0x80;
    mutated[length - 3] = 0;
    mutated[length - 4] = 0;
-   assert(aimee_db3_search_request_decode(mutated, length, &decoded_req) != 0);
+   assert(aimee_db3_search_request_decode(mutated, length, &decoded_req, decoded_vec,
+                                        AIMEE_DB3_MAX_DIM) != 0);
 
    aimee_db3_search_reply_t reply = {.request_id = req.request_id,
                                      .generation = req.required_generation,
@@ -208,21 +220,24 @@ static void test_wire_codecs(void)
    assert(aimee_db3_search_reply_validate(&req, &decoded_reply) != 0);
    assert(aimee_db3_search_reply_encode(&decoded_reply, wire, sizeof(wire), &length) != 0);
 
+   float apply_vec[3] = {0.1f, 0.2f, 0.3f};
    aimee_db3_apply_t apply = {.operation_id = 1001,
                               .generation = 7,
                               .point_id = 101,
                               .kind = AIMEE_DB3_APPLY_UPSERT,
                               .collection = "memory",
                               .dimension = 3,
-                              .vector = {0.1f, 0.2f, 0.3f}};
+                              .vector = apply_vec};
    aimee_db3_apply_t decoded_apply;
    assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
-   assert(aimee_db3_apply_decode(wire, length, &decoded_apply) == 0);
+   assert(aimee_db3_apply_decode(wire, length, &decoded_apply, decoded_vec,
+                              AIMEE_DB3_MAX_DIM) == 0);
    assert(decoded_apply.operation_id == apply.operation_id && decoded_apply.dimension == 3);
-   assert(aimee_db3_apply_decode(wire, length - 1, &decoded_apply) != 0);
-   apply.vector[0] = NAN;
+   assert(aimee_db3_apply_decode(wire, length - 1, &decoded_apply, decoded_vec,
+                              AIMEE_DB3_MAX_DIM) != 0);
+   apply_vec[0] = NAN;
    assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) != 0);
-   apply.vector[0] = 0.1f;
+   apply_vec[0] = 0.1f;
    apply.kind = AIMEE_DB3_APPLY_DELETE;
    assert(aimee_db3_apply_validate(&apply) != 0);
    apply.dimension = 0;
@@ -239,17 +254,20 @@ static void test_wire_codecs(void)
    strcpy(apply.labels[2].value, "workspace-a");
    assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
    assert(wire[4] == AIMEE_DB3_APPLY_V2_VERSION && wire[5] == 0);
-   assert(aimee_db3_apply_decode(wire, length, &decoded_apply) == 0);
+   assert(aimee_db3_apply_decode(wire, length, &decoded_apply, decoded_vec,
+                              AIMEE_DB3_MAX_DIM) == 0);
    assert(decoded_apply.label_count == 3);
    assert(strcmp(decoded_apply.labels[0].value, "project with space") == 0);
    assert(strcmp(decoded_apply.labels[2].key, "workspace") == 0);
    memcpy(mutated, wire, length);
    mutated[36] = 0;
    mutated[37] = 0;
-   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply) != 0);
+   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply, decoded_vec,
+                              AIMEE_DB3_MAX_DIM) != 0);
    memcpy(mutated, wire, length);
    mutated[38]++;
-   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply) != 0);
+   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply, decoded_vec,
+                              AIMEE_DB3_MAX_DIM) != 0);
    strcpy(apply.labels[1].key, "project");
    assert(aimee_db3_apply_validate(&apply) != 0);
    strcpy(apply.labels[1].key, "record_type");
@@ -289,6 +307,7 @@ static void test_wire_codecs(void)
        0x63, 0x6f, 0x72, 0x64, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x6d, 0x65, 0x6d, 0x6f, 0x72,
        0x79, 0x09, 0x00, 0x0b, 0x00, 0x77, 0x6f, 0x72, 0x6b, 0x73, 0x70, 0x61, 0x63, 0x65,
        0x77, 0x6f, 0x72, 0x6b, 0x73, 0x70, 0x61, 0x63, 0x65, 0x2d, 0x61};
+   float fixture_request_vec[3] = {0.3f, 0.2f, 0.1f};
    aimee_db3_search_request_t fixture_request = {.request_id = 77,
                                                  .required_generation = 7,
                                                  .workspace = "workspace-a",
@@ -296,29 +315,31 @@ static void test_wire_codecs(void)
                                                  .record_type = "memory",
                                                  .dimension = 3,
                                                  .top_k = 2,
-                                                 .vector = {0.3f, 0.2f, 0.1f}};
+                                                 .vector = fixture_request_vec};
    assert(aimee_db3_search_request_encode(&fixture_request, wire, sizeof(wire), &length) == 0);
    assert(length == sizeof(expected_request) && memcmp(wire, expected_request, length) == 0);
    aimee_db3_search_reply_t fixture_reply = {
        .request_id = 77, .generation = 7, .count = 2, .candidates = {{41, 0.95}, {42, 0.75}}};
    assert(aimee_db3_search_reply_encode(&fixture_reply, wire, sizeof(wire), &length) == 0);
    assert(length == sizeof(expected_reply) && memcmp(wire, expected_reply, length) == 0);
+   float fixture_apply_vec[3] = {0.1f, 0.2f, 0.3f};
    aimee_db3_apply_t fixture_apply = {.operation_id = 1001,
                                       .generation = 7,
                                       .point_id = 41,
                                       .kind = AIMEE_DB3_APPLY_UPSERT,
                                       .collection = "memory",
                                       .dimension = 3,
-                                      .vector = {0.1f, 0.2f, 0.3f}};
+                                      .vector = fixture_apply_vec};
    assert(aimee_db3_apply_encode(&fixture_apply, wire, sizeof(wire), &length) == 0);
    assert(length == sizeof(expected_apply) && memcmp(wire, expected_apply, length) == 0);
+   float fixture_apply_v2_vec[3] = {0.3f, 0.2f, 0.1f};
    aimee_db3_apply_t fixture_apply_v2 = {.operation_id = 1002,
                                          .generation = 7,
                                          .point_id = 42,
                                          .kind = AIMEE_DB3_APPLY_UPSERT,
                                          .collection = "memory",
                                          .dimension = 3,
-                                         .vector = {0.3f, 0.2f, 0.1f},
+                                         .vector = fixture_apply_v2_vec,
                                          .label_count = 3,
                                          .labels = {
                                              {.key = "project", .value = "project-a"},

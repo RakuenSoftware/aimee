@@ -77,7 +77,9 @@ static void receive_apply(bus_client_t *client, fake_provider_t *state, uint64_t
    assert(bus_client_poll(client, &event) == BUS_CLIENT_OK);
    assert(event.frame.event_kind == AIMEE_DB3_EVENT_APPLY && event.frame.seq == expected_seq);
    aimee_db3_apply_t apply;
-   assert(aimee_db3_apply_decode(event.payload, event.payload_len, &apply) == 0);
+   float apply_out[AIMEE_DB3_MAX_DIM];
+   assert(aimee_db3_apply_decode(event.payload, event.payload_len, &apply, apply_out,
+                                 AIMEE_DB3_MAX_DIM) == 0);
    if (state->operation_id == apply.operation_id && state->generation == apply.generation)
       state->duplicates++;
    else
@@ -164,13 +166,14 @@ int main(void)
           BUS_HOST_OK);
    pthread_mutex_unlock(&lock);
 
+   float apply_vec[3] = {0.1f, 0.2f, 0.3f};
    aimee_db3_apply_t apply = {.operation_id = 1001,
                               .generation = 7,
                               .point_id = 41,
                               .kind = AIMEE_DB3_APPLY_UPSERT,
                               .collection = "memory",
                               .dimension = 3,
-                              .vector = {0.1f, 0.2f, 0.3f}};
+                              .vector = apply_vec};
    uint8_t wire[256];
    size_t length = 0;
    assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
@@ -188,6 +191,7 @@ int main(void)
    assert(state_a.effects == 1 && state_b.effects == 1);
    assert(state_a.duplicates == 1 && state_b.duplicates == 1);
 
+   float request_vec[3] = {0.3f, 0.2f, 0.1f};
    aimee_db3_search_request_t request = {.request_id = 77,
                                          .required_generation = 7,
                                          .workspace = "workspace-a",
@@ -195,7 +199,7 @@ int main(void)
                                          .record_type = "memory",
                                          .dimension = 3,
                                          .top_k = 2,
-                                         .vector = {0.3f, 0.2f, 0.1f}};
+                                         .vector = request_vec};
    assert(aimee_db3_search_request_encode(&request, wire, sizeof(wire), &length) == 0);
    assert(bus_client_request(&db2, AIMEE_DB3_EVENT_SEARCH, 9001, wire, (uint32_t)length) ==
           BUS_CLIENT_OK);
@@ -207,7 +211,9 @@ int main(void)
           event.frame.event_kind == AIMEE_DB3_EVENT_SEARCH);
    uint64_t server_correlation = event.frame.correlation_id;
    aimee_db3_search_request_t decoded_request;
-   assert(aimee_db3_search_request_decode(event.payload, event.payload_len, &decoded_request) == 0);
+   float decoded_vec[AIMEE_DB3_MAX_DIM];
+   assert(aimee_db3_search_request_decode(event.payload, event.payload_len, &decoded_request,
+                                          decoded_vec, AIMEE_DB3_MAX_DIM) == 0);
    assert(decoded_request.request_id == request.request_id);
    assert(bus_client_poll(&provider_b, &event) == BUS_CLIENT_EMPTY);
 

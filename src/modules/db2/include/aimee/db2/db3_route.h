@@ -45,7 +45,14 @@ typedef struct
    char record_type[AIMEE_DB3_MAX_RECORD_TYPE];
    uint32_t dimension;
    uint32_t top_k;
-   float vector[AIMEE_DB3_MAX_DIM];
+   /* `dimension` floats, owned by the caller.
+    *
+    * A pointer rather than an array: an embedded vector makes the struct's SIZE
+    * the dimension ceiling, so supporting the 16k and 32k dimensions this
+    * contract exists for would make every one of these 64 KB and 128 KB. The
+    * codec allocates nothing -- encode reads through this, and decode writes
+    * into a buffer the caller supplies. */
+   const float *vector;
 } aimee_db3_search_request_t;
 
 typedef struct
@@ -70,7 +77,9 @@ typedef struct
    aimee_db3_apply_kind_t kind;
    char collection[AIMEE_DB3_MAX_COLLECTION];
    uint32_t dimension;
-   float vector[AIMEE_DB3_MAX_DIM];
+   /* `dimension` floats, owned by the caller. See the search request above.
+    * NULL is correct for a delete or a tombstone, which carry no vector. */
+   const float *vector;
    uint32_t label_count;
    aimee_db3_exact_label_t labels[AIMEE_DB3_MAX_LABELS];
 } aimee_db3_apply_t;
@@ -109,15 +118,27 @@ int aimee_db3_apply_validate(const aimee_db3_apply_t *apply);
 
 int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, uint8_t *output,
                                     size_t capacity, size_t *length);
+/* Decode into `request`, writing the vector into `vector_out`.
+ *
+ * The buffer is the caller's because the struct no longer carries one, and
+ * because a codec that allocates is a codec whose failures are somebody else's
+ * to free. `vector_capacity` counts floats; a request whose dimension exceeds
+ * it is REFUSED rather than truncated -- a short read here would be a vector
+ * silently missing its tail, which scores as a perfectly ordinary result. */
 int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
-                                    aimee_db3_search_request_t *request);
+                                    aimee_db3_search_request_t *request, float *vector_out,
+                                    size_t vector_capacity);
 int aimee_db3_search_reply_encode(const aimee_db3_search_reply_t *reply, uint8_t *output,
                                   size_t capacity, size_t *length);
 int aimee_db3_search_reply_decode(const uint8_t *input, size_t length,
                                   aimee_db3_search_reply_t *reply);
 int aimee_db3_apply_encode(const aimee_db3_apply_t *apply, uint8_t *output, size_t capacity,
                            size_t *length);
-int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_t *apply);
+/* Decode into `apply`, writing the vector into `vector_out`. See the search
+ * request decode above. A delete or a tombstone carries no vector, so a NULL
+ * buffer is accepted for those and refused for an upsert. */
+int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_t *apply,
+                           float *vector_out, size_t vector_capacity);
 
 int aimee_db3_route_init(aimee_db3_route_t *route, aimee_db3_search_fn internal_pgvector_search,
                          void *internal_context,
