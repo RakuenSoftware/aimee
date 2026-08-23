@@ -57,13 +57,63 @@ psql -h 127.0.0.1 -U aimee -d postgres -q -tAc \
   psql -h 127.0.0.1 -U aimee -d postgres -q -c "create database aimee_test_tpl" 2>&1 | tail -1
 
 echo "== building the template schema =="
-/root/pgtests/db2-test-template "$TPL" /root/pgtests/db2_test_reset.sql 2>&1 | tail -3
+# A FAILED TEMPLATE BUILD MUST STOP THE RUN.
+#
+# This piped the builder's output through `tail -3` and carried on regardless.
+# When db2_test_reset.sql had not been staged, the builder printed "cannot read
+# ..." -- and then every test ran against an unmigrated template and reported
+#
+#   db2_init: hardened schema verification failed: schema is not migrated
+#
+# as seven separate FAILs. They look exactly like product failures; they were a
+# missing file. One test (entity-nodes) even PASSED against the broken template,
+# which is worse: a green line next to six red ones, all meaningless.
+#
+# The exit status is what decides now, and the reason is printed rather than
+# tailed away.
+if [ ! -s /root/pgtests/db2_test_reset.sql ]; then
+  echo "FAIL: /root/pgtests/db2_test_reset.sql is missing or empty."
+  echo "      The template cannot be built, so nothing below would be a result"
+  echo "      about the product. Stage it from src/tests/db2_test_reset.sql."
+  exit 1
+fi
+if ! tpl_out="$(/root/pgtests/db2-test-template "$TPL" /root/pgtests/db2_test_reset.sql 2>&1)"; then
+  echo "FAIL: the template build failed, so the tests below would all fail"
+  echo "      against an unmigrated schema for that reason and no other:"
+  printf '%s\n' "$tpl_out" | tail -6 | sed 's/^/      /'
+  exit 1
+fi
+printf '%s\n' "$tpl_out" | tail -3
 
 echo
 echo "== typed-fact tests, real postgres =="
 rc=0
-for t in unit-test-fact-lifecycle unit-test-fact-ingest; do
-  printf '%-28s ' "$t"
+# THE WHOLE TYPED-FACT LAYER, not two of its tests.
+#
+# This ran only fact-lifecycle and fact-ingest, which is a thin slice of the
+# thing this branch changes. unit-test-typed-facts was not run at all, and
+# neither were the recall, entity and ontology tests -- and those are exactly
+# where a shim/libpq difference would hide, because they are the ones whose
+# assertions rest on DB2's SQL rather than on C logic.
+#
+# A missing binary is reported, not skipped: "the file was not staged" and "the
+# test passed" must not look the same in this output.
+TESTS="unit-test-fact-lifecycle
+unit-test-fact-ingest
+unit-test-fact-recall
+unit-test-typed-facts
+unit-test-entity-nodes
+unit-test-entity-registry
+unit-test-ontology-evolution
+unit-test-rel-types-store"
+
+for t in $TESTS; do
+  printf '%-30s ' "$t"
+  if [ ! -x "/root/pgtests/$t" ]; then
+    echo "MISSING (not staged; nothing is claimed for it)"
+    rc=1
+    continue
+  fi
   if out="$(/root/pgtests/$t 2>&1)"; then
     echo "PASS"
   else
