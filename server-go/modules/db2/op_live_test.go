@@ -2478,6 +2478,75 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "directive_get",
+			stage: db2contract.StageDirectiveGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveGetRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeDirectiveGetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a directive that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "directive_list",
+			stage: db2contract.StageDirectiveList,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveListRequest("open", "", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDirectiveListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "directive_by_entity",
+			stage: db2contract.StageDirectiveByEntity,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveByEntityRequest("live-probe-entity", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDirectiveByEntityReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "directive_by_file",
+			stage: db2contract.StageDirectiveByFile,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveByFileRequest("docs/live-probe.md", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDirectiveByFileReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "directive_by_lexical",
+			stage: db2contract.StageDirectiveByLexical,
+			// The statement is built at request time with one placeholder per
+			// surviving term, so the placeholder numbering is only checkable
+			// against a real parser.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeDirectiveByLexicalRequest(
+					`"vault" OR "rotation" OR "probe"`, 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeDirectiveByLexicalReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
