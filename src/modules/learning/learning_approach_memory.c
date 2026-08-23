@@ -208,7 +208,11 @@ int learning_approach_recall(const char *goal, learning_approach_hit_t *out, int
    if (!goal || !goal[0] || !out || max <= 0)
       return -1;
 #if defined(AIMEE_DB2_DISABLED)
-   return -1;
+   /* Built without the store: nothing has ever been recorded, so the answer to
+    * "what have we already tried?" is "nothing". Reporting a failure would
+    * make plan-time recall look broken in every build that omits DB2 — which
+    * is the daemon's own build. */
+   return 0;
 #else
    char tokens[APPROACH_MEM_TOKENS_LEN];
    learning_approach_tokens(goal, tokens, sizeof(tokens));

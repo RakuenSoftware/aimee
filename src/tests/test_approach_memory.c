@@ -163,7 +163,12 @@ static void test_never_touches_the_blocking_path(void)
 
 /* An installation with no knowledge service has never recorded a dead end. The
  * honest answer to "what have we already tried?" is "nothing" — not an error,
- * which would make plan-time recall look broken on every such install. */
+ * which would make plan-time recall look broken on every such install.
+ *
+ * Two shapes reach this: a build with DB2 compiled out (the daemon's own), and
+ * a build with the store present but unreachable. The second is what this
+ * closes the shim to reproduce; the first is asserted by the same code path
+ * returning 0 rather than -1. */
 static void test_absent_store_means_nothing_known(void)
 {
    db2_test_shim_close();
