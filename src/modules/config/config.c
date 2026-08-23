@@ -1025,8 +1025,6 @@ static void config_set_defaults(config_t *cfg)
     * returning no route), so enabling it cannot cost an operator a route they
     * had. Set model_meta.capability_routing=false to restore cost-tier-only. */
    cfg->model_meta_capability_routing = 1;
-   snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "auto");
-   cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
    cfg->roundtable_max_rounds = 1;
@@ -1714,7 +1712,6 @@ int config_load_file(config_t *cfg)
    config_parse_model_meta_section(cfg, root);
    /* Vector index strategy ([db2.vector]) */
    {
-      config_parse_db2_section(cfg, root);
    }
    config_parse_ensemble_section(cfg, root);
    config_parse_roundtable_section(cfg, root);

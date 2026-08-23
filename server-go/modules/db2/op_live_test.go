@@ -3989,7 +3989,7 @@ func liveWrites() []liveRequest {
 			name:  "evidence_store_vector",
 			stage: db2contract.StageEvidenceStoreVector,
 			// evidence_vectors carries a foreign key into artifacts, and
-			// embedding is halfvec(384) -- so the literal has to parse AND
+			// embedding is vector(384) -- so the literal has to parse AND
 			// carry the right number of dimensions, neither of which a fake
 			// checks. The first draft of this probe sent "[]" and failed here,
 			// which is how the dimension requirement got written down.

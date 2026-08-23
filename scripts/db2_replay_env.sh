@@ -50,10 +50,28 @@ if [ "$(on_host "pct status $CT" 2>/dev/null)" != "status: running" ]; then
 fi
 
 if ! on_host "pct exec $CT -- test -x /usr/lib/postgresql/17/bin/postgres" 2>/dev/null; then
-   say "installing postgres and pgvector"
+   say "installing postgres, pgvector and pgvectorscale"
    on_host "pct exec $CT -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; \
       apt-get -qq update && apt-get -qq -y install postgresql postgresql-17-pgvector'" \
       >/dev/null 2>&1 || { say "install failed"; exit 1; }
+   # pgvectorscale, pinned to the release the image uses. The schema requires it
+   # -- diskann is the only index method over the embedding columns -- so an
+   # environment without it cannot apply the schema, never mind compare
+   # anything. Upstream ships a built .deb per (version, pg major, arch); the
+   # container's postgres is 17.
+   say "installing pgvectorscale 0.9.0"
+   cat <<'PGVS' | on_host "pct exec $CT -- bash -s" >/dev/null 2>&1 || { say "pgvectorscale install failed"; exit 1; }
+set -eu
+if ls /usr/lib/postgresql/17/lib/vectorscale*.so >/dev/null 2>&1; then exit 0; fi
+export DEBIAN_FRONTEND=noninteractive
+apt-get -qq -y install unzip >/dev/null
+cd /tmp
+curl -fsSL -o pgvs.zip \
+  https://github.com/timescale/pgvectorscale/releases/download/0.9.0/pgvectorscale-0.9.0-pg17-amd64.zip
+unzip -p pgvs.zip 'pgvectorscale-postgresql-17_0.9.0-Linux_amd64.deb' > pgvs.deb
+dpkg -i pgvs.deb
+ls /usr/lib/postgresql/17/lib/vectorscale*.so
+PGVS
    # Listen on the bridge and trust the local network: this container holds
    # throwaway test data and is recreated whenever it goes missing.
    on_host "pct exec $CT -- bash -lc \"sed -i \\\"s/^#listen_addresses.*/listen_addresses = '*'/\\\" \
@@ -96,7 +114,7 @@ run_sql postgres "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null ||
    { say "could not drop $DB"; exit 1; }
 run_sql postgres "CREATE DATABASE $DB OWNER aimee" >/dev/null ||
    { say "could not create $DB"; exit 1; }
-run_sql "$DB" "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" \
+run_sql "$DB" "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS vectorscale; CREATE EXTENSION IF NOT EXISTS pg_trgm" \
    >/dev/null || { say "could not create the extensions $DB needs"; exit 1; }
 
 cd "$(dirname "$0")/.." || exit 1
@@ -111,7 +129,7 @@ run_file() {
    # schema.sql carries the __EMBED_DIM__ placeholder that db_schema.c fills in
    # at runtime, so it is not valid SQL until the dimension is substituted. The
    # value has to match the EMBEDDER_DIMS the replay runs with, or the module
-   # would find a halfvec of the wrong width already there.
+   # would find a vector of the wrong width already there.
    sed "s/__EMBED_DIM__/$EMBED_DIM/g" "$path" |
       on_host "pct exec $CT -- bash -c 'cat > /tmp/db2-replay-file.sql'" || return 1
    on_host "pct exec $CT -- su postgres -c 'psql -XAt -v ON_ERROR_STOP=1 -d $database \

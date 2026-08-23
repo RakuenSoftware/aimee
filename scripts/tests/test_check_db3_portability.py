@@ -38,11 +38,11 @@ class PortabilityTests(unittest.TestCase):
 
     def test_production_audit_covers_every_pgvector_declaration(self) -> None:
         summary = checker.run(REPO_ROOT)
-        self.assertEqual(sum(summary.values()), 76)
+        self.assertEqual(sum(summary.values()), 74)
         self.assertEqual(summary, {
             "portable-search": 14,
             "committed-mutation": 32,
-            "provider-control": 15,
+            "provider-control": 13,
             "db2-authority": 12,
             "portable-analytics": 3,
         })
@@ -178,7 +178,7 @@ class PortabilityTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("total=76", result.stdout)
+            self.assertIn("total=74", result.stdout)
             fingerprint = subprocess.run(
                 [sys.executable, "-I", "-S", str(CHECKER), "--root", str(root),
                  "--print-source-fingerprint"],
@@ -190,7 +190,7 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(fingerprint.returncode, 0, fingerprint.stderr)
             self.assertEqual(
                 fingerprint.stdout.strip(),
-                f"{self.audit()['source_symbols_sha256']}  pgvec-symbols=76",
+                f"{self.audit()['source_symbols_sha256']}  pgvec-symbols=74",
             )
 
 

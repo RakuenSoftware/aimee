@@ -56,11 +56,11 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
            "/module-runtime/bin/aimee-module-$module_id"; \
        done < /module-runtime/go.modules
 
-# pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
-# and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
-# probes pg_extension and falls back to HNSW with a warning when it is absent
-# (src/modules/db2/c/pgvec_transport.c). Gating it at build time would defeat that and make
-# the index type a property of which image you happened to pull.
+# pgvectorscale (StreamingDiskANN). Required, not optional: diskann is the only
+# index method over the embedding columns, and the kb entrypoint refuses to
+# start without it. There is no runtime probe and no HNSW fallback any more --
+# the fallback was what let an image missing this layer come up, answer every
+# vector query by sequential scan, and look healthy.
 #
 # Upstream ships the built extension as a .deb per (version, pg major, arch), so
 # this stage FETCHES it rather than compiling it. It used to build the crate from
@@ -189,6 +189,12 @@ RUN set -eux; \
 # drags LLVM into the runtime image. PGDG carries PostgreSQL 18 (the current
 # stable major) with pgvector 0.8.5 depending only on the server and libc.
 # PostgreSQL 18 is also the version pgvectorscale builds against.
+#
+# pgvector is installed because pgvectorscale requires it -- vectorscale.control
+# declares `requires = 'vector'`, and the extension defines no types of its own,
+# only the diskann access method and operator classes over pgvector's `vector`.
+# Nothing in the tree selects pgvector's own index methods; it is here as
+# pgvectorscale's dependency.
 ARG PG_MAJOR=18
 # The PGDG key fetch is retried: it is a single point of build failure on a
 # network hiccup and this layer runs on every kb build. Seen failing CI with

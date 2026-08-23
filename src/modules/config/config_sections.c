@@ -1413,23 +1413,6 @@ void config_parse_model_meta_section(config_t *cfg, cJSON *root)
          cfg->prefer_local_agents = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
-void config_parse_db2_section(config_t *cfg, cJSON *root)
-{
-   cJSON *item = NULL;
-   cJSON *db2_obj = cJSON_GetObjectItemCaseSensitive(root, "db2");
-   cJSON *db2_vec =
-       cJSON_IsObject(db2_obj) ? cJSON_GetObjectItemCaseSensitive(db2_obj, "vector") : NULL;
-   if (cJSON_IsObject(db2_vec))
-   {
-      item = cJSON_GetObjectItemCaseSensitive(db2_vec, "corpus_index");
-      if (cJSON_IsString(item) && item->valuestring[0])
-         snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "%s",
-                  item->valuestring);
-      item = cJSON_GetObjectItemCaseSensitive(db2_vec, "corpus_diskann_threshold");
-      if (cJSON_IsNumber(item) && item->valuedouble > 0)
-         cfg->db2_vector_corpus_diskann_threshold = (int64_t)item->valuedouble;
-   }
-}
 void config_parse_ensemble_section(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;

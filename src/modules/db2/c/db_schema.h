@@ -24,7 +24,7 @@ extern "C"
     * connection (PGconn *, passed as void * so this header stays libpq-free).
     * |embed_dim| is the deployment's embedding width — from config, the single
     * place it is declared (config_embedder_dims_effective) — and the schema's
-    * halfvec embedding columns are created at that dimension.
+    * vector embedding columns are created at that dimension.
     *
     * A value <= 0 or > EMBED_MAX_DIM is an ERROR, not a fallback: this layer holds
     * no width of its own, and substituting one would size a corpus for an embedder
@@ -33,7 +33,7 @@ extern "C"
    int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen);
 
    /* embedder-runtime-fetch-autodim §2: record schema_embedding_dim in kb_meta on
-    * first apply; on a later apply with a different dim, REFUSE (the halfvec
+    * first apply; on a later apply with a different dim, REFUSE (the vector
     * columns are already sized at the recorded dim — serving at another silently
     * breaks vector search). Returns 0 (recorded/matches), -1 (mismatch/DB error,
     * errbuf set). aimee_pg_*-based so it runs on Postgres and the sqlite shim.

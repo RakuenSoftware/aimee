@@ -4,7 +4,7 @@
  * the row ("expected N dimensions, not M") and memory_embeddings stays empty.
  *
  * This reproduces the .254 failure where the reembed path fell back to the
- * builtin 384-dim embedder against a halfvec(1024) column: every insert failed
+ * builtin 384-dim embedder against a vector(1024) column: every insert failed
  * but was counted as a successful embed. Covered for both shipping dims:
  *   1024 -> pplx-embed-v1-0.6b
  *   2560 -> pplx-embed-v1-4b

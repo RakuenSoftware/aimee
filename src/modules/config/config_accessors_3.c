@@ -513,15 +513,6 @@ const char *config_aux_default_model(void)
    return buf;
 }
 
-const char *config_db2_vector_corpus_index(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, db2_vector_corpus_index), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
 const char *config_ensemble_aggregator(void)
 {
    static _Thread_local char buf[128];

@@ -304,17 +304,6 @@ size_t config_aux_default_model_copy(char *out, size_t n)
    return sizeof(buf);
 }
 
-size_t config_db2_vector_corpus_index_copy(char *out, size_t n)
-{
-   char buf[16];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, db2_vector_corpus_index), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
 size_t config_ensemble_aggregator_copy(char *out, size_t n)
 {
    char buf[128];

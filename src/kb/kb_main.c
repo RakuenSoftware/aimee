@@ -1847,7 +1847,7 @@ int main(int argc, char **argv)
 
    /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
     * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
-    * halfvec embedding columns are created at the right size. EMBEDDER_DIMS
+    * vector embedding columns are created at the right size. EMBEDDER_DIMS
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
    db2_set_embedding_dim_default(config_embedder_dims_default());

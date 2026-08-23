@@ -669,7 +669,7 @@ int memory_rebuild_vector_index_for_version(const char *version, int *failed_out
    clock_gettime(CLOCK_MONOTONIC, &t_start);
 
    /* Recreate the memory vector collection at the deployment's embedding
-    * dimension (the runtime dim the halfvec memory_embeddings column uses:
+    * dimension (the runtime dim the vector memory_embeddings column uses:
     * 2560 GPU / 1024 CPU / external cap 4000), not a hardcoded 384 that would
     * never match the column and leave every upsert failing. */
    int mem_embed_dim = db2_embedding_dim();

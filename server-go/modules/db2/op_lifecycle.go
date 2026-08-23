@@ -84,7 +84,7 @@ func health(ctx context.Context, store Store, request []byte) (
 // The C reads a process global set at startup; this reads the same value from
 // the runtime configuration, falling back to what the schema recorded. Reading
 // the schema is the better answer of the two: the recorded dimension is what
-// the halfvec columns were actually created at, and a process configured
+// the vector columns were actually created at, and a process configured
 // differently from its own store is exactly the mismatch this is asked about.
 const recordedEmbeddingDimensionQuery = `SELECT value
  FROM kb_meta WHERE key = 'schema_embedding_dim'`
@@ -98,7 +98,7 @@ func embeddingDimension(ctx context.Context, store Store, request []byte) (
 	dimension := configuredEmbeddingDimension()
 	if dimension == 0 {
 		// Nothing configured: fall back to what the schema recorded, which is
-		// the width the halfvec columns were actually created at. The C falls
+		// the width the vector columns were actually created at. The C falls
 		// back to a process default here; the recorded value is the better
 		// answer, because it describes the store rather than the process.
 		dimension = recordedEmbeddingDimension(ctx, store)
@@ -435,7 +435,7 @@ func embedderServingID(ctx context.Context, store Store, request []byte) (
 	return reply, bus.ModuleStatusOK
 }
 
-// The halfvec tables a dimension change would have to rebuild, and how much is
+// The vector tables a dimension change would have to rebuild, and how much is
 // in them.
 //
 // Discovered rather than listed, as the C discovers them: a table added later
@@ -450,13 +450,13 @@ const dimensionResetPlanQuery = `SELECT
  JOIN pg_namespace n ON n.oid = c.relnamespace
  JOIN pg_type t ON t.oid = a.atttypid
  WHERE n.nspname = current_schema() AND c.relkind = 'r'
-   AND t.typname = 'halfvec' AND a.attnum > 0 AND NOT a.attisdropped
+   AND t.typname = 'vector' AND a.attnum > 0 AND NOT a.attisdropped
  GROUP BY c.relname
  ORDER BY c.relname`
 
 // dimensionReset plans a change of embedding width, and refuses to perform one.
 //
-// The plan is real: it discovers every halfvec table and counts what would be
+// The plan is real: it discovers every vector table and counts what would be
 // cleared, which is what a caller needs before deciding. Performing it is not
 // done here, and the reason is specific rather than an omission.
 //

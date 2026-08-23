@@ -1515,22 +1515,6 @@ int config_set_aux_default_model(const char *value)
    return rc;
 }
 
-int config_set_db2_vector_corpus_index(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_ensemble_aggregator(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));

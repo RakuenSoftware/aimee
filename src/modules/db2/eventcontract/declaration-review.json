@@ -4425,7 +4425,7 @@
       "disposition": "wire-operation",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy — tier, kinds, confidence floor, use count, and settling window — so callers cannot promote rows into the slow-changing tier on terms of their own."
+      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
     },
     {
       "symbol": "db2_memory_promotion_reclassify_directives",
@@ -5620,14 +5620,6 @@
       "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
     },
     {
-      "symbol": "pgvec_corpus_index_type",
-      "signature_sha256": "7ecc94728f86fc9bb9c116d10929abb21cdf83629884aaf754a18fba2fb410b3",
-      "disposition": "private-db2",
-      "family": "index",
-      "db3_placement": "retained-db2",
-      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
-    },
-    {
       "symbol": "pgvec_curator_claim_delete",
       "signature_sha256": "441a4660428ae9d9c743ec2fb8a0d4f550aacfb41f129048b713dc0a6c37eace",
       "disposition": "private-db2",
@@ -5741,11 +5733,11 @@
     },
     {
       "symbol": "pgvec_ensure_corpus_index",
-      "signature_sha256": "e24a6ead508f2190db0bf01446560587a2d5698f66e67ace9bef27a63bf06416",
+      "signature_sha256": "e4669ab93d918fb4cc5d6564d2beb80d7b055150f5670bf770f946edb8b30db9",
       "disposition": "private-db2",
       "family": "index",
       "db3_placement": "retained-db2",
-      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+      "reason": "Provider-specific pgvectorscale symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
     },
     {
       "symbol": "pgvec_kb_delete",

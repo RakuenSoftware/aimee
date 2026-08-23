@@ -22,17 +22,18 @@
     "db1"
   ],
   "optional": [
-    "governance",
-    "workflows",
-    "roundtable",
-    "kb-synthesis",
-    "runtime-web",
-    "control-web",
     "benchmarks",
-    "sandbox",
+    "control-plane",
+    "control-web",
+    "db2",
     "economizer",
+    "governance",
+    "kb-synthesis",
     "postgres",
-    "db2"
+    "roundtable",
+    "runtime-web",
+    "sandbox",
+    "workflows"
   ],
   "principal_refs": {
     "module-runtime": 1,
@@ -64,7 +65,8 @@
     "economizer": 27,
     "postgres": 28,
     "db2": 29,
-    "db1": 30
+    "db1": 30,
+    "control-plane": 32
   },
   "retired_principal_refs": []
 }

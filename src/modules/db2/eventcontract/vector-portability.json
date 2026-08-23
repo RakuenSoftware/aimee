@@ -2,7 +2,7 @@
   "schema_version": 1,
   "module": "db3",
   "source": "tests/baselines/db2/declarations-v1.json",
-  "source_symbols_sha256": "8933df59106a753dd9d1ce4ab8e0ffebf863b32fc792f83e165419699cf5c034",
+  "source_symbols_sha256": "19bcee569917149aae81ecf98e10a83e4b62addb42514fa002da73149e4e72b3",
   "classifications": [
     {
       "id": "portable-search",
@@ -72,7 +72,6 @@
       "db3_operation_family": "provider-control",
       "rationale": "Index layout, collection naming, implementation health, statistics, and tuning are provider-local concerns exposed only through bounded DB3 capabilities and readiness evidence.",
       "symbols": [
-        "pgvec_corpus_index_type",
         "pgvec_ensure_corpus_index",
         "pgvec_ensure_index",
         "pgvec_kb_service_ensure_code_collection",
@@ -85,8 +84,7 @@
         "pgvec_memory_vector_ensure_payload_indexes",
         "pgvec_point_count",
         "pgvec_search_latency_snapshot",
-        "pgvec_table_ready",
-        "pgvec_vectorscale_available"
+        "pgvec_table_ready"
       ]
     },
     {

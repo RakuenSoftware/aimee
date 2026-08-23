@@ -334,17 +334,31 @@ if [ "$external_db" -eq 0 ]; then
         --tuples-only --command="SELECT 1 FROM pg_database WHERE datname='$DB'" | grep -q 1; then
         "$PGBIN/createdb" --host="$PGSOCK" "$DB"
     fi
+    # pgvector supplies the column type; pgvectorscale supplies the diskann
+    # index method and the operator classes over that type. Both are required,
+    # and the container refuses to start without them.
+    #
+    # This used to enable vectorscale only when its library happened to be
+    # present, treating pgvector alone as a supported fallback. It is not one:
+    # every embedding column is indexed by diskann and pgvector's own HNSW
+    # cannot index them (it has no operator class for the diskann method, and
+    # the columns are sized past HNSW's 2000-dimension ceiling in the
+    # deployments that matter). An image without vectorscale would come up,
+    # answer queries by sequential scan, and look healthy.
     "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
         --command="CREATE EXTENSION IF NOT EXISTS vector" >/dev/null
-    # Enable pgvectorscale when its extension library is present. pgvector alone
-    # remains a supported fallback for images built without the optional layer.
-    # pgrx installs the library version-stamped (vectorscale-0.9.0.so), so match a
-    # glob -- testing for a bare vectorscale.so silently never enables it. Resolved
-    # in a subshell because $@ still carries the kb's own arguments.
+    # pgrx installs the library version-stamped (vectorscale-0.9.0.so), so match
+    # a glob -- testing for a bare vectorscale.so silently never matches.
     vectorscale_lib=$(ls "/usr/lib/postgresql/$PGMAJOR/lib/vectorscale"*.so 2>/dev/null | head -1)
-    if [ -n "$vectorscale_lib" ]; then
-        "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
-            --command="CREATE EXTENSION IF NOT EXISTS vectorscale" >/dev/null
+    if [ -z "$vectorscale_lib" ]; then
+        echo "aimee-kb: pgvectorscale is missing from this image (no vectorscale*.so in /usr/lib/postgresql/$PGMAJOR/lib)." >&2
+        echo "aimee-kb: every embedding column is indexed by diskann, which pgvectorscale provides. Refusing to start." >&2
+        exit 1
+    fi
+    if ! "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
+        --command="CREATE EXTENSION IF NOT EXISTS vectorscale" >/dev/null; then
+        echo "aimee-kb: CREATE EXTENSION vectorscale failed. Refusing to start." >&2
+        exit 1
     fi
 
     # libpq reads a directory-valued host as a socket path. Even this local,

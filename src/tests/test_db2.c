@@ -329,7 +329,7 @@ static void test_recorded_dim_precedence(void)
    g_recorded_dim = 2560;       /* populated DB recorded 2560 */
    assert(db2_init("postgres://db2.test/aimee") == 0);
    assert(g_schema_dim == 2560);        /* effective dim, not the 1024 default */
-   assert(db2_embedding_dim() == 2560); /* global re-set so halfvec + readers agree */
+   assert(db2_embedding_dim() == 2560); /* global re-set so vector + readers agree */
 
    /* Pinned: the operator value is authoritative; the recorded dim is ignored. */
    reset_mocks();

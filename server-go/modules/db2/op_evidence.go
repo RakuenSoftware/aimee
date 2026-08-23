@@ -59,7 +59,7 @@ func evidenceStoreVector(ctx context.Context, store Store, request []byte) (
 	// A vector row with no collection would not be found by the reads that
 	// filter on one, so defaulting it matters.
 	//
-	// The empty-embedding default does not help: embedding is halfvec(384), and
+	// The empty-embedding default does not help: embedding is vector(384), and
 	// "[]" has no dimensions, so the insert fails either way. It is kept because
 	// failing is the right answer -- storing a zero vector would put a row in
 	// the index that matches nothing and looks embedded -- and because the

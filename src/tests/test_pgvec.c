@@ -265,53 +265,16 @@ static void test_public_api_symbols(void)
    printf("pgvec: all public API symbols resolve OK\n");
 }
 
-static void test_corpus_index_type_hnsw_default(void)
-{
-   /* auto + no vectorscale + below threshold → hnsw */
-   const char *t = pgvec_corpus_index_type("auto", 0, 0, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* explicit hnsw → always hnsw regardless of scale or extension */
-   t = pgvec_corpus_index_type("hnsw", 999999999, 1, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* NULL/empty configured → hnsw */
-   t = pgvec_corpus_index_type(NULL, 0, 1, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type default hnsw OK\n");
-}
-
-static void test_corpus_index_type_diskann(void)
-{
-   /* diskann forced + vectorscale present → diskann */
-   const char *t = pgvec_corpus_index_type("diskann", 0, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* diskann forced + vectorscale absent → hnsw fallback */
-   t = pgvec_corpus_index_type("diskann", 0, 0, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* auto + above threshold + vectorscale present → diskann */
-   t = pgvec_corpus_index_type("auto", 2000000, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* auto + at threshold + vectorscale present → diskann */
-   t = pgvec_corpus_index_type("auto", 1000000, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* auto + above threshold + vectorscale absent → hnsw */
-   t = pgvec_corpus_index_type("auto", 2000000, 0, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* auto + below threshold + vectorscale present → hnsw */
-   t = pgvec_corpus_index_type("auto", 999999, 1, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type diskann selection OK\n");
-}
-
 static void test_corpus_ensure_index_graceful(void)
 {
    /* Under the sqlite shim, pgvec SQL fails gracefully — must not crash */
-   int rc = pgvec_ensure_corpus_index("corpus_section_vectors", "hnsw", 0);
+   int rc = pgvec_ensure_corpus_index("corpus_section_vectors", 0);
    (void)rc;
-   rc = pgvec_ensure_corpus_index("corpus_section_vectors", "diskann", 0);
+   rc = pgvec_ensure_corpus_index("corpus_section_vectors", 1);
    (void)rc;
-   rc = pgvec_ensure_corpus_index("corpus_section_vectors", "hnsw", 1);
-   (void)rc;
-   rc = pgvec_ensure_corpus_index(NULL, "hnsw", 0);
+   /* A table nobody named cannot be indexed, and saying so is the only answer
+    * that does not build an index on something arbitrary. */
+   rc = pgvec_ensure_corpus_index(NULL, 0);
    assert(rc == -1);
    printf("pgvec: corpus ensure_index graceful OK\n");
 }
@@ -332,8 +295,6 @@ int main(void)
    test_memory_scope_sql_uses_canonical_owner_scope();
    test_latency_snapshot();
    test_public_api_symbols();
-   test_corpus_index_type_hnsw_default();
-   test_corpus_index_type_diskann();
    test_corpus_ensure_index_graceful();
 
    db2_test_shim_close();

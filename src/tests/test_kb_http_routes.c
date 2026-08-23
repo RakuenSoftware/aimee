@@ -1258,7 +1258,7 @@ int pgvec_kb_service_ensure_kb_collection(int dim)
 {
    /* The route now sizes the collection at the deployment's runtime embedding
     * dim (db2_embedding_dim(), i.e. g_test_embedding_dim here), not a hardcoded
-    * 384, so it matches the halfvec(__EMBED_DIM__) column. */
+    * 384, so it matches the vector(__EMBED_DIM__) column. */
    assert(dim == g_test_embedding_dim);
    return g_pgvec_ensure_rc;
 }

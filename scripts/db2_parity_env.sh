@@ -84,6 +84,24 @@ apt-get -qq -y install postgresql postgresql-17-pgvector build-essential \
    ca-certificates libpq-dev libsqlite3-dev libssl-dev libzstd-dev pkg-config \
    python3 zlib1g-dev git rsync curl jq openssl procps
 PKGS
+   # pgvectorscale, pinned to the release the image uses. The schema requires it
+   # -- diskann is the only index method over the embedding columns -- so an
+   # environment without it cannot apply the schema, never mind compare
+   # anything. Upstream ships a built .deb per (version, pg major, arch); the
+   # container's postgres is 17.
+   say "installing pgvectorscale 0.9.0"
+   cat <<'PGVS' | in_ct >/dev/null 2>&1 || { say "pgvectorscale install failed"; exit 1; }
+set -eu
+if ls /usr/lib/postgresql/17/lib/vectorscale*.so >/dev/null 2>&1; then exit 0; fi
+export DEBIAN_FRONTEND=noninteractive
+apt-get -qq -y install unzip >/dev/null
+cd /tmp
+curl -fsSL -o pgvs.zip \
+  https://github.com/timescale/pgvectorscale/releases/download/0.9.0/pgvectorscale-0.9.0-pg17-amd64.zip
+unzip -p pgvs.zip 'pgvectorscale-postgresql-17_0.9.0-Linux_amd64.deb' > pgvs.deb
+dpkg -i pgvs.deb
+ls /usr/lib/postgresql/17/lib/vectorscale*.so
+PGVS
    # Listen on the bridge and trust the local network: this container holds
    # throwaway comparison data and is rebuilt whenever it goes missing.
    cat <<'PGCONF' | in_ct >/dev/null 2>&1
@@ -143,6 +161,7 @@ for db in $DB_C $DB_GO; do
   su postgres -c "psql -XAt -c \"DROP DATABASE IF EXISTS \$db WITH (FORCE)\""
   su postgres -c "psql -XAt -c \"CREATE DATABASE \$db OWNER aimee\""
   su postgres -c "psql -XAt -d \$db -c 'CREATE EXTENSION IF NOT EXISTS vector'"
+  su postgres -c "psql -XAt -d \$db -c 'CREATE EXTENSION IF NOT EXISTS vectorscale'"
   su postgres -c "psql -XAt -d \$db -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'"
 done
 SETUP

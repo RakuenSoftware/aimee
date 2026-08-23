@@ -121,10 +121,21 @@ int pgvec_table_ready(const char *table)
    if (!pg)
       return -1;
 
-   char sql[256];
+   /* Ask which access method indexes the table, not what the index is called.
+    * This used to match indexname LIKE '%_hnsw', which made readiness a
+    * property of a naming convention: renaming the index, or building it with a
+    * different method, reported the table as unready forever while it was in
+    * fact indexed. It also had to be edited when the method changed, and an
+    * index-name test that has to be edited when the method changes is a test of
+    * the wrong thing. */
+   char sql[512];
    char errbuf[256];
    snprintf(sql, sizeof(sql),
-            "SELECT 1 FROM pg_indexes WHERE tablename = :tbl AND indexname LIKE '%%_hnsw'");
+            "SELECT 1 FROM pg_class i"
+            " JOIN pg_am am ON am.oid = i.relam"
+            " JOIN pg_index x ON x.indexrelid = i.oid"
+            " JOIN pg_class t ON t.oid = x.indrelid"
+            " WHERE t.relname = :tbl AND am.amname = 'diskann' LIMIT 1");
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
    if (!stmt)
       return -1;
@@ -176,20 +187,20 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
          LOG_WARN("pgvec", "truncate %s failed: %s", table, errbuf);
          return -1;
       }
-      /* index name is idx_<table>_hnsw */
-      snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_hnsw", table);
+      /* index name is idx_<table>_diskann */
+      snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_diskann", table);
       if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
-         LOG_WARN("pgvec", "drop index idx_%s_hnsw failed: %s", table, errbuf);
+         LOG_WARN("pgvec", "drop index idx_%s_diskann failed: %s", table, errbuf);
    }
 
    char sql[256];
    snprintf(sql, sizeof(sql),
-            "CREATE INDEX IF NOT EXISTS idx_%s_hnsw "
-            "ON %s USING hnsw (embedding halfvec_cosine_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_%s_diskann "
+            "ON %s USING diskann (embedding vector_cosine_ops)",
             table, table);
    if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
    {
-      LOG_WARN("pgvec", "create hnsw index on %s failed: %s", table, errbuf);
+      LOG_WARN("pgvec", "create diskann index on %s failed: %s", table, errbuf);
       return -1;
    }
    return 0;
@@ -199,35 +210,20 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
  * Corpus index helpers
  * ---------------------------------------------------------------------- */
 
-int pgvec_vectorscale_available(void)
-{
-   void *pg = db2_conn();
-   if (!pg)
-      return 0;
-   char errbuf[256];
-   const char *sql = "SELECT 1 FROM pg_extension WHERE extname = 'vectorscale' LIMIT 1";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-      return 0;
-   int found = (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW);
-   aimee_pg_finalize(stmt);
-   return found;
-}
-
-const char *pgvec_corpus_index_type(const char *configured, int64_t corpus_rows,
-                                    int vectorscale_available, int64_t diskann_threshold)
-{
-   if (!configured || !configured[0] || strcmp(configured, "hnsw") == 0)
-      return "hnsw";
-   if (strcmp(configured, "diskann") == 0)
-      return vectorscale_available ? "diskann" : "hnsw";
-   /* auto: pick diskann only when extension present and corpus exceeds threshold */
-   if (vectorscale_available && corpus_rows >= diskann_threshold)
-      return "diskann";
-   return "hnsw";
-}
-
-int pgvec_ensure_corpus_index(const char *table, const char *index_type, int recreate)
+/* Build the corpus table's vector index.
+ *
+ * One method, and no argument selecting it. diskann is what indexes a vector
+ * column here; there is nothing for a caller to choose and nothing to fall back
+ * to. The version this replaces took an index_type, consulted the extension,
+ * and dropped to hnsw when it was absent -- and its diskann branch named
+ * halfvec_cosine_ops, an operator class pgvectorscale does not define, so that
+ * branch could never build an index at all. It failed, logged a warning, and
+ * left the table unindexed with every search behind a sequential scan.
+ *
+ * A failure here is returned rather than swallowed. The caller decides what an
+ * unindexed corpus means; this cannot decide it by logging.
+ */
+int pgvec_ensure_corpus_index(const char *table, int recreate)
 {
    if (!table || !table[0])
       return -1;
@@ -235,42 +231,25 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
    if (!pg)
       return -1;
 
-   const char *use_type = index_type;
-   if (use_type && strcmp(use_type, "diskann") == 0 && !pgvec_vectorscale_available())
-   {
-      LOG_WARN("pgvec", "pgvectorscale unavailable; corpus table %s falls back to HNSW", table);
-      use_type = "hnsw";
-   }
-
    char errbuf[256];
+   char sql[512];
    if (recreate)
    {
-      char sql[512];
-      snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_hnsw", table);
-      aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf));
       snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_diskann", table);
-      aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf));
+      if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
+         LOG_WARN("pgvec", "drop corpus index idx_%s_diskann failed: %s", table, errbuf);
    }
 
-   char sql[512];
-   if (use_type && strcmp(use_type, "diskann") == 0)
-      snprintf(sql, sizeof(sql),
-               "CREATE INDEX IF NOT EXISTS idx_%s_diskann "
-               "ON %s USING diskann (embedding halfvec_cosine_ops)",
-               table, table);
-   else
-      snprintf(sql, sizeof(sql),
-               "CREATE INDEX IF NOT EXISTS idx_%s_hnsw "
-               "ON %s USING hnsw (embedding halfvec_cosine_ops)",
-               table, table);
-
+   snprintf(sql, sizeof(sql),
+            "CREATE INDEX IF NOT EXISTS idx_%s_diskann "
+            "ON %s USING diskann (embedding vector_cosine_ops)",
+            table, table);
    if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
    {
-      LOG_WARN("pgvec", "create %s index on corpus table %s failed: %s",
-               use_type ? use_type : "hnsw", table, errbuf);
+      LOG_WARN("pgvec", "create diskann index on corpus table %s failed: %s", table, errbuf);
       return -1;
    }
-   LOG_INFO("pgvec", "corpus index type=%s table=%s", use_type ? use_type : "hnsw", table);
+   LOG_INFO("pgvec", "corpus index built table=%s", table);
    return 0;
 }
 
@@ -282,7 +261,7 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
 {
    if (!vec || dim <= 0)
       return 0;
-   /* Dimension guard: the embedding column is halfvec(N) where N is the active
+   /* Dimension guard: the embedding column is vector(N) where N is the active
     * configured dim (db2_embedding_dim). A vector of a different dim (e.g. the
     * 384-dim builtin fallback against a 1024/2560 column) is rejected by
     * Postgres with "expected N dimensions, not M" — but that error was being
@@ -336,7 +315,7 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
                             "  (point_id, embedding, record_type, primary_scope, workspace, "
                             "project, kind, payload_json) "
                             "VALUES "
-                            "  (:point_id, :embedding::halfvec, :record_type, :primary_scope, "
+                            "  (:point_id, :embedding::vector, :record_type, :primary_scope, "
                             ":workspace, :project, :kind, :payload) "
                             "ON CONFLICT (point_id) DO UPDATE SET "
                             "  embedding = EXCLUDED.embedding, "
@@ -394,7 +373,7 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
    if (!vec || dim <= 0)
       return 0;
    /* Same dim guard as pgvec_memory_upsert: never ship a vector whose dim does
-    * not match the configured halfvec(N) column. */
+    * not match the configured vector(N) column. */
    int expect = db2_embedding_dim();
    if (expect > 0 && dim != expect)
    {
@@ -425,7 +404,7 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
    static const char *sql = "INSERT INTO kb_embeddings "
                             "  (point_id, embedding, project, payload_json) "
                             "VALUES "
-                            "  (:point_id, :embedding::halfvec, :project, :payload) "
+                            "  (:point_id, :embedding::vector, :project, :payload) "
                             "ON CONFLICT (point_id) DO UPDATE SET "
                             "  embedding = EXCLUDED.embedding, "
                             "  project = EXCLUDED.project, "
@@ -651,9 +630,9 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    char sql[8192];
    const char *scope_order = scope_ctx.active ? PGVEC_MEMORY_SCOPE_RANK_SQL " DESC, " : "";
    int sql_len = snprintf(sql, sizeof(sql),
-                          "SELECT e.point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+                          "SELECT e.point_id, 1.0 - (embedding <=> :qvec::vector) AS score "
                           "FROM memory_embeddings e %s%s "
-                          "ORDER BY %sembedding <=> :qvec::halfvec "
+                          "ORDER BY %sembedding <=> :qvec::vector "
                           "LIMIT :lim",
                           where, kinds_clause, scope_order);
    if (sql_len < 0 || (size_t)sql_len >= sizeof(sql))
@@ -734,26 +713,26 @@ int pgvec_kb_search_scoped(const char *project, const char *exclude_project, con
    int has_project = (project && project[0]);
    int exclude = !has_project && exclude_project && exclude_project[0];
    const char *sql =
-       has_project ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+       has_project ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::vector) AS score "
                      "FROM kb_embeddings e JOIN kb_documents d ON d.id=e.point_id "
                      "JOIN projects p ON p.name=d.project "
                      "WHERE e.project = :project AND d.project=e.project "
                      "AND p.lifecycle_state='current' AND d.generation=p.current_generation "
-                     "ORDER BY e.embedding <=> :qvec::halfvec "
+                     "ORDER BY e.embedding <=> :qvec::vector "
                      "LIMIT :lim"
-       : exclude   ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+       : exclude   ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::vector) AS score "
                      "FROM kb_embeddings e JOIN kb_documents d ON d.id=e.point_id "
                      "JOIN projects p ON p.name=d.project "
                      "WHERE e.project <> :exclude_project AND d.project=e.project "
                      "AND p.lifecycle_state='current' AND d.generation=p.current_generation "
-                     "ORDER BY e.embedding <=> :qvec::halfvec "
+                     "ORDER BY e.embedding <=> :qvec::vector "
                      "LIMIT :lim"
-                   : "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                   : "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::vector) AS score "
                      "FROM kb_embeddings e JOIN kb_documents d ON d.id=e.point_id "
                      "JOIN projects p ON p.name=d.project "
                      "WHERE d.project=e.project AND p.lifecycle_state='current' "
                      "AND d.generation=p.current_generation "
-                     "ORDER BY e.embedding <=> :qvec::halfvec "
+                     "ORDER BY e.embedding <=> :qvec::vector "
                      "LIMIT :lim";
 
    char errbuf[256];
@@ -834,7 +813,7 @@ int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *
    static const char *sql = "INSERT INTO kb_pdf_embeddings "
                             "  (point_id, embedding, project, payload_json) "
                             "VALUES "
-                            "  (:point_id, :embedding::halfvec, :project, :payload) "
+                            "  (:point_id, :embedding::vector, :project, :payload) "
                             "ON CONFLICT (point_id) DO UPDATE SET "
                             "  embedding = EXCLUDED.embedding, "
                             "  project = EXCLUDED.project, "
@@ -910,19 +889,19 @@ int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit
 
    int has_project = (project && project[0]);
    const char *sql = has_project
-                         ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                         ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::vector) AS score "
                            "FROM kb_pdf_embeddings e JOIN kb_documents d ON d.id=e.point_id "
                            "JOIN projects p ON p.name=d.project "
                            "WHERE e.project = :project AND d.project=e.project "
                            "AND p.lifecycle_state='current' AND d.generation=p.current_generation "
-                           "ORDER BY e.embedding <=> :qvec::halfvec "
+                           "ORDER BY e.embedding <=> :qvec::vector "
                            "LIMIT :lim"
-                         : "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                         : "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::vector) AS score "
                            "FROM kb_pdf_embeddings e JOIN kb_documents d ON d.id=e.point_id "
                            "JOIN projects p ON p.name=d.project "
                            "WHERE d.project=e.project AND p.lifecycle_state='current' "
                            "AND d.generation=p.current_generation "
-                           "ORDER BY e.embedding <=> :qvec::halfvec "
+                           "ORDER BY e.embedding <=> :qvec::vector "
                            "LIMIT :lim";
 
    char errbuf[256];
@@ -970,7 +949,7 @@ int pgvec_curator_entity_upsert(int64_t point_id, const float *vec, int dim, con
        "INSERT INTO curator_entity_vectors "
        "  (point_id, embedding, scope_kind, scope_id, canonical_name, artifact_id, payload_json) "
        "VALUES "
-       "  (:point_id, :embedding::halfvec, :scope_kind, :scope_id, :canonical_name, :artifact_id, "
+       "  (:point_id, :embedding::vector, :scope_kind, :scope_id, :canonical_name, :artifact_id, "
        "   :payload) "
        "ON CONFLICT (point_id) DO UPDATE SET "
        "  embedding = EXCLUDED.embedding, "
@@ -1096,10 +1075,10 @@ int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, co
       return -1;
    }
    snprintf(sql, sql_len,
-            "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+            "SELECT point_id, 1.0 - (embedding <=> :qvec::vector) AS score "
             "FROM curator_entity_vectors "
             "%s "
-            "ORDER BY embedding <=> :qvec::halfvec "
+            "ORDER BY embedding <=> :qvec::vector "
             "LIMIT :lim",
             where_sql);
 
@@ -1156,7 +1135,7 @@ int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
        "INSERT INTO curator_narrative_vectors "
        "  (point_id, embedding, artifact_id, kind, doc_id, status, priority, payload_json) "
        "VALUES "
-       "  (:point_id, :embedding::halfvec, :artifact_id, :kind, :doc_id, :status, :priority, "
+       "  (:point_id, :embedding::vector, :artifact_id, :kind, :doc_id, :status, :priority, "
        ":payload) "
        "ON CONFLICT (point_id) DO UPDATE SET "
        "  embedding = EXCLUDED.embedding, "
@@ -1257,10 +1236,10 @@ int pgvec_curator_narrative_search(const char *kind, const char *status, const c
       return -1;
    }
    snprintf(sql, sql_len,
-            "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+            "SELECT point_id, 1.0 - (embedding <=> :qvec::vector) AS score "
             "FROM curator_narrative_vectors "
             "%s "
-            "ORDER BY embedding <=> :qvec::halfvec "
+            "ORDER BY embedding <=> :qvec::vector "
             "LIMIT :lim",
             where_sql);
 
@@ -1325,7 +1304,7 @@ int pgvec_curator_claim_upsert(int64_t point_id, const float *subj_attr_vec, con
        "  (point_id, subj_attr_vec, value_vec, artifact_id, subject, attribute, value, "
        "   claim_kind, payload_json) "
        "VALUES "
-       "  (:point_id, :subj_attr::halfvec, :value::halfvec, :artifact_id, :subject, :attribute, "
+       "  (:point_id, :subj_attr::vector, :value::vector, :artifact_id, :subject, :attribute, "
        "   :value_col, :claim_kind, :payload) "
        "ON CONFLICT (point_id) DO UPDATE SET "
        "  subj_attr_vec = EXCLUDED.subj_attr_vec, "
@@ -1411,10 +1390,10 @@ int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, co
       return -1;
    }
    snprintf(sql, sql_len,
-            "SELECT point_id, 1.0 - (%s <=> :qvec::halfvec) AS score "
+            "SELECT point_id, 1.0 - (%s <=> :qvec::vector) AS score "
             "FROM curator_claim_vectors "
             "%s "
-            "ORDER BY %s <=> :qvec::halfvec "
+            "ORDER BY %s <=> :qvec::vector "
             "LIMIT :lim",
             col_name, have_kind ? "WHERE claim_kind = :claim_kind" : "", col_name);
 
@@ -1481,7 +1460,7 @@ int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
        "  (point_id, intent_vec, signature_vec, body_vec, artifact_id, file_path, "
        "   def_kind, signature, body_hash, payload_json) "
        "VALUES "
-       "  (:point_id, :intent::halfvec, :signature_v::halfvec, :body::halfvec, :artifact_id, "
+       "  (:point_id, :intent::vector, :signature_v::vector, :body::vector, :artifact_id, "
        "   :file_path, :def_kind, :sig_col, :body_hash, :payload) "
        "ON CONFLICT (point_id) DO UPDATE SET "
        "  intent_vec    = EXCLUDED.intent_vec, "
@@ -1600,10 +1579,10 @@ int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, 
       return -1;
    }
    snprintf(sql, sql_len,
-            "SELECT point_id, 1.0 - (%s <=> :qvec::halfvec) AS score "
+            "SELECT point_id, 1.0 - (%s <=> :qvec::vector) AS score "
             "FROM curator_code_unit_vectors "
             "%s "
-            "ORDER BY %s <=> :qvec::halfvec "
+            "ORDER BY %s <=> :qvec::vector "
             "LIMIT :lim",
             col_name, have_kind ? "WHERE def_kind = :def_kind" : "", col_name);
 
@@ -1665,7 +1644,7 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
        "   content_hash, body_hash, source_hash, payload_json,"
        "   updated_at)"
        " VALUES"
-       "  (:point_id, :embedding::halfvec, :project,"
+       "  (:point_id, :embedding::vector, :project,"
        "   (SELECT current_generation FROM projects"
        "     WHERE name = :project AND lifecycle_state = 'current'),"
        "   :node_key, :file_path, :symbol,"
@@ -1758,16 +1737,16 @@ int pgvec_code_search(const char *project, const float *vec, int dim, int limit,
 
    const char *sql;
    if (project && *project)
-      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::vector) AS score"
             " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
             " WHERE ce.project = :project AND p.lifecycle_state = 'current'"
             "   AND ce.generation = p.current_generation"
-            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
+            " ORDER BY ce.embedding <=> :qvec::vector LIMIT :lim";
    else
-      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::vector) AS score"
             " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
             " WHERE p.lifecycle_state = 'current' AND ce.generation = p.current_generation"
-            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
+            " ORDER BY ce.embedding <=> :qvec::vector LIMIT :lim";
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -1826,17 +1805,17 @@ int pgvec_code_search_paths(const char *project, const float *vec, int dim, int 
 
    const char *sql;
    if (project && *project)
-      sql = "SELECT ce.file_path, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+      sql = "SELECT ce.file_path, 1.0 - (ce.embedding <=> :qvec::vector) AS score"
             " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
             " WHERE ce.project = :project AND ce.file_path <> ''"
             "   AND p.lifecycle_state = 'current' AND ce.generation = p.current_generation"
-            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
+            " ORDER BY ce.embedding <=> :qvec::vector LIMIT :lim";
    else
-      sql = "SELECT ce.file_path, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+      sql = "SELECT ce.file_path, 1.0 - (ce.embedding <=> :qvec::vector) AS score"
             " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
             " WHERE ce.file_path <> '' AND p.lifecycle_state = 'current'"
             "   AND ce.generation = p.current_generation"
-            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
+            " ORDER BY ce.embedding <=> :qvec::vector LIMIT :lim";
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));

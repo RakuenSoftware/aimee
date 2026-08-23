@@ -197,8 +197,8 @@ psqlq -c "ALTER ROLE aimee_kb_migrate LOGIN PASSWORD '$migpw'" >/dev/null 2>&1 \
 # THE DEFINING DIFFERENCE FROM THE DEV RIG: the schema is applied here, out of band, as the
 # migrate role, over TLS — not by kb at boot. Objects end up owned by aimee_kb_owner (migrate
 # is a member of owner), and kb will connect as a role that owns none of them.
-# schema.sql IS A TEMPLATE, not a script: it declares its halfvec columns as
-# halfvec(__EMBED_DIM__) so a deployment can pick an embedder, and db_schema.c calls itself
+# schema.sql IS A TEMPLATE, not a script: it declares its vector columns as
+# vector(__EMBED_DIM__) so a deployment can pick an embedder, and db_schema.c calls itself
 # "the one place the schema is applied to Postgres" because on the dev path it is. On the
 # HARDENED path it is not — the migrate step applies the schema out of band, so the migrate
 # tooling has to do the substitution kb would have done, and handing schema.sql straight to
@@ -250,8 +250,8 @@ step "The applied vector width matches the dimension kb will be configured with"
 applied_dim=$(psqlt -c "SELECT atttypmod FROM pg_attribute
                           WHERE attrelid='memory_embeddings'::regclass AND attname='embedding'")
 [ "$applied_dim" = "$EMBED_DIM" ] \
-  || fail "memory_embeddings.embedding is halfvec($applied_dim) but kb is pinned to $EMBED_DIM"
-echo "  halfvec($applied_dim) == pinned embedding_dim $EMBED_DIM"
+  || fail "memory_embeddings.embedding is vector($applied_dim) but kb is pinned to $EMBED_DIM"
+echo "  vector($applied_dim) == pinned embedding_dim $EMBED_DIM"
 
 step "Confirming the grant machinery is owned by the owner role, not the runtime role"
 # These three are the SECURITY DEFINER functions; the exact-lookup path reads the

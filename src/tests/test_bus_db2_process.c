@@ -4322,7 +4322,7 @@ int main(int argc, char **argv)
    assert(aimee_db2_evidence_store_vector_call(
               call_client, &client, 9543, 0, "replay-artifact-w", "evidence", "[0.1,0.2]",
               &evidence_store_vector_acknowledged, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   /* Refused: the embedding column declares its dimension -- halfvec(384) on this
+   /* Refused: the embedding column declares its dimension -- vector(384) on this
     * schema -- so a two-element vector is rejected by the database rather than
     * stored. Nothing in the declaration says that number, so a caller learns it
     * by being refused. */

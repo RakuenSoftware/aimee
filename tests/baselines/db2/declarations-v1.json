@@ -26845,7 +26845,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 201
+          "line": 197
         }
       ],
       "signature": "int pgvec_code_delete ( int64_t point_id )",
@@ -26861,7 +26861,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 202
+          "line": 198
         }
       ],
       "review": {
@@ -26880,7 +26880,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 211
+          "line": 207
         }
       ],
       "signature": "int pgvec_code_exists_by_hash ( const char * project , const char * node_key , const char * content_hash , const char * body_hash )",
@@ -26895,7 +26895,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 227
+          "line": 223
         }
       ],
       "review": {
@@ -26914,7 +26914,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 203
+          "line": 199
         }
       ],
       "signature": "int pgvec_code_search ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
@@ -26930,7 +26930,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 207
+          "line": 203
         }
       ],
       "review": {
@@ -26952,7 +26952,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 222
+          "line": 218
         }
       ],
       "review": {
@@ -26971,7 +26971,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 197
+          "line": 193
         }
       ],
       "signature": "int pgvec_code_upsert ( int64_t point_id , const float * vec , int dim , const char * project , const char * node_key , const char * file_path , const char * symbol , const char * content_hash , const char * body_hash , const char * source_hash , const char * payload_json )",
@@ -26986,28 +26986,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 37
-        }
-      ],
-      "review": {
-        "db3_placement": "retained-db2",
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
-      },
-      "signature": "const char * pgvec_corpus_index_type ( const char * configured , int64_t corpus_rows , int vectorscale_available , int64_t diskann_threshold )",
-      "signature_sha256": "7ecc94728f86fc9bb9c116d10929abb21cdf83629884aaf754a18fba2fb410b3",
-      "status": "reviewed",
-      "symbol": "pgvec_corpus_index_type"
-    },
-    {
-      "consumers": [
-        "src/tests/test_pgvec.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 153
+          "line": 149
         }
       ],
       "review": {
@@ -27028,7 +27007,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 160
+          "line": 156
         }
       ],
       "review": {
@@ -27051,7 +27030,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 147
+          "line": 143
         }
       ],
       "review": {
@@ -27072,7 +27051,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 175
+          "line": 171
         }
       ],
       "review": {
@@ -27094,7 +27073,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 182
+          "line": 178
         }
       ],
       "review": {
@@ -27115,7 +27094,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 189
+          "line": 185
         }
       ],
       "review": {
@@ -27139,7 +27118,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 168
+          "line": 164
         }
       ],
       "review": {
@@ -27160,7 +27139,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 117
+          "line": 113
         }
       ],
       "review": {
@@ -27185,7 +27164,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 113
+          "line": 109
         }
       ],
       "review": {
@@ -27211,7 +27190,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 122
+          "line": 118
         }
       ],
       "review": {
@@ -27235,7 +27214,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 104
+          "line": 100
         }
       ],
       "review": {
@@ -27256,7 +27235,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 134
+          "line": 130
         }
       ],
       "review": {
@@ -27277,7 +27256,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 139
+          "line": 135
         }
       ],
       "review": {
@@ -27300,7 +27279,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 128
+          "line": 124
         }
       ],
       "review": {
@@ -27321,17 +27300,17 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 44
+          "line": 40
         }
       ],
       "review": {
         "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvectorscale symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
       },
-      "signature": "int pgvec_ensure_corpus_index ( const char * table , const char * index_type , int recreate )",
-      "signature_sha256": "e24a6ead508f2190db0bf01446560587a2d5698f66e67ace9bef27a63bf06416",
+      "signature": "int pgvec_ensure_corpus_index ( const char * table , int recreate )",
+      "signature_sha256": "e4669ab93d918fb4cc5d6564d2beb80d7b055150f5670bf770f946edb8b30db9",
       "status": "reviewed",
       "symbol": "pgvec_ensure_corpus_index"
     },
@@ -27355,7 +27334,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 61
+          "line": 57
         }
       ],
       "review": {
@@ -27374,7 +27353,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 65
+          "line": 61
         }
       ],
       "signature": "int pgvec_kb_delete_current_project ( const char * project )",
@@ -27387,7 +27366,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 64
+          "line": 60
         }
       ],
       "signature": "int pgvec_kb_delete_project ( const char * project )",
@@ -27402,7 +27381,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 95
+          "line": 91
         }
       ],
       "review": {
@@ -27421,7 +27400,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 97
+          "line": 93
         }
       ],
       "signature": "int pgvec_kb_search_scoped ( const char * project , const char * exclude_project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
@@ -27610,7 +27589,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 54
+          "line": 50
         }
       ],
       "review": {
@@ -27629,7 +27608,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 57
+          "line": 53
         }
       ],
       "signature": "int pgvec_kb_upsert_batch ( const int64_t * ids , const float * vecs , int dim , const char * const * payloads , int count )",
@@ -27827,7 +27806,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 71
+          "line": 67
         }
       ],
       "signature": "int pgvec_kbpdf_delete ( int64_t point_id )",
@@ -27843,7 +27822,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 72
+          "line": 68
         }
       ],
       "review": {
@@ -27862,7 +27841,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 73
+          "line": 69
         }
       ],
       "signature": "int pgvec_kbpdf_search ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
@@ -27875,7 +27854,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 70
+          "line": 66
         }
       ],
       "signature": "int pgvec_kbpdf_upsert ( int64_t point_id , const float * vec , int dim , const char * payload_json )",
@@ -27890,7 +27869,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 51
+          "line": 47
         }
       ],
       "review": {
@@ -27911,7 +27890,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 89
+          "line": 85
         }
       ],
       "review": {
@@ -27932,7 +27911,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 48
+          "line": 44
         }
       ],
       "review": {
@@ -28263,7 +28242,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 81
+          "line": 77
         }
       ],
       "review": {
@@ -28284,7 +28263,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 194
+          "line": 190
         }
       ],
       "review": {
@@ -28331,19 +28310,6 @@
       "signature_sha256": "6f6e2d213226a72f8e8a1252f95f3140a7af7c5b7b91a4b7e818d0f2b5c8926f",
       "status": "reviewed",
       "symbol": "pgvec_vector_status_json"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 31
-        }
-      ],
-      "signature": "int pgvec_vectorscale_available ( void )",
-      "signature_sha256": "9ef5d448c3cc74a0d751ad40930db78ad4a3a3595bdf416c7db9372ff7a1c6d9",
-      "status": "internal-unconsumed",
-      "symbol": "pgvec_vectorscale_available"
     },
     {
       "consumers": [
@@ -28603,15 +28569,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "67ed5aa5356802c2d68ed6171f0c5654d59e76a03140fea7051ecde2bf01b5e9",
+  "fingerprint": "fe4a10ee3859eb1ee1b556e8a3a0c34f9367c50597f6b5a249e6fe4db57b1d91",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 199,
-    "declarations": 1397,
+    "declarations": 1395,
     "headers": 138,
-    "internal_unconsumed": 152,
+    "internal_unconsumed": 151,
     "private_test_only": 286,
-    "reviewed": 760
+    "reviewed": 759
   }
 }

@@ -872,7 +872,7 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
  * chunk left unembedded never gets a second chance — this covers the cases that
  * leaves behind: a partial ingest, an embedder that was unavailable at ingest
  * time (embedding_command added later), or a vector-store reset that drops the
- * halfvec columns while the chunk text survives (e.g. an embedding-dim change).
+ * vector columns while the chunk text survives (e.g. an embedding-dim change).
  * Re-embeds in place (no re-chunk), bounded per call. Returns chunks embedded. */
 int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int max_chunks)
 {

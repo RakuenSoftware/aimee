@@ -2136,11 +2136,6 @@ typedef struct config
    int model_meta_refresh_minutes;
    int model_meta_capability_routing;
 
-   /* Vector index strategy (db2.vector.*).
-    * corpus_index: "auto"|"hnsw"|"diskann" — default "auto" (behaves as hnsw until threshold).
-    * corpus_diskann_threshold: row count per corpus table where auto picks diskann (default 1M). */
-   char db2_vector_corpus_index[16];
-   int64_t db2_vector_corpus_diskann_threshold;
    /* Mixture-of-Agents ensemble compatibility representation (ensemble.*).
     * ensemble_reference_models: exact seats overlaid from the acquired saved
     * roundtable. When no preset is acquired, runtime discards this legacy list

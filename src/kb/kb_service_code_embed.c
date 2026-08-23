@@ -24,7 +24,7 @@
 #define CE_ERRBUF   256
 #define CE_TEXT_CAP 4096
 /* Upper bound on the embedding dimension we will buffer. Tied to the global
- * EMBED_MAX_DIM (4000 — the pgvector halfvec index ceiling) so the code-embed
+ * EMBED_MAX_DIM (4000 — the buffered embedder maximum) so the code-embed
  * buffer + cap track the embed ladder (0.6B=1024 / 4B=2560 / 8B-trunc=4000) and
  * never silently reject or overflow a larger-dim model. */
 #define CE_EMBED_MAX_DIM        EMBED_MAX_DIM
@@ -594,8 +594,8 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
 
    /* Embed each code unit with the configured embedder (pipeline stage 2 — the
     * 0.6B model by default) at the deployment's embedding dimension, the same
-    * dimension as the halfvec code_embeddings column. The earlier hardcoded
-    * 384-dim deterministic hash never matched the 1024-d halfvec column, so every
+    * dimension as the vector code_embeddings column. The earlier hardcoded
+    * 384-dim deterministic hash never matched the 1024-d vector column, so every
     * upsert failed and no code vectors were ever stored. */
    const char *embed_command = config_embedder_command_current(NULL);
    int embed_dim = db2_embedding_dim();

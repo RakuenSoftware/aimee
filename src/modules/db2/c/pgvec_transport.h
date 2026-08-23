@@ -17,31 +17,27 @@
 #define PGVEC_CURATOR_CODE_UNIT_TABLE "curator_code_unit_vectors"
 
 /* Check whether the embedding table has the HNSW index (i.e. is "ready").
- * Returns 1 if ready, 0 if table exists but no HNSW index, -1 on error. */
+ * Returns 1 if ready, 0 if the table carries no diskann index, -1 on error. */
 int pgvec_table_ready(const char *table);
 
 /* Return the number of rows in the embedding table. Returns -1 on error. */
 int64_t pgvec_point_count(const char *table);
 
-/* Create (or re-create) the HNSW index on an embedding table.
+/* Create (or re-create) the diskann index on an embedding table.
  * recreate=1 truncates the table and drops the old index first. */
 int pgvec_ensure_index(const char *table, int dim, int recreate);
 
-/* Returns 1 if the pgvectorscale extension is installed in the connected database, 0 otherwise. */
-int pgvec_vectorscale_available(void);
-
-/* Resolve corpus index type from config policy.
- * configured: "auto"|"hnsw"|"diskann".  Returns "hnsw" or "diskann".
- * "diskann" is only returned when vectorscale_available=1 AND (configured="diskann" OR
- * configured="auto" with corpus_rows >= diskann_threshold). */
-const char *pgvec_corpus_index_type(const char *configured, int64_t corpus_rows,
-                                    int vectorscale_available, int64_t diskann_threshold);
-
-/* Create (or re-create) a corpus vector index of the given type ("hnsw" or "diskann").
- * Falls back to HNSW with a LOG_WARN if diskann is requested but vectorscale is absent.
- * recreate=1 drops existing corpus indexes first (no table truncate).
- * Returns 0 on success, -1 on error. */
-int pgvec_ensure_corpus_index(const char *table, const char *index_type, int recreate);
+/* Create (or re-create) a corpus table's diskann index.
+ * recreate=1 drops the existing index first (no table truncate).
+ * Returns 0 on success, -1 on error.
+ *
+ * There is no index_type and no availability probe. pgvectorscale is required
+ * -- the schema apply fails without it -- so there is nothing to detect, and
+ * diskann is the only method that indexes these columns, so there is nothing to
+ * select. What this replaces took a type, probed for the extension, and fell
+ * back to hnsw; its diskann branch asked for halfvec_cosine_ops, which
+ * pgvectorscale does not define, so it could never build an index at all. */
+int pgvec_ensure_corpus_index(const char *table, int recreate);
 
 /* Upsert a single memory embedding row.  Extracts record_type, primary_scope,
  * workspace, project, kind from payload_json. */

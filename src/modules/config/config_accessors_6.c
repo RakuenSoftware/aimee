@@ -1863,21 +1863,6 @@ int config_set_model_meta_capability_routing(int value)
    return rc;
 }
 
-int config_set_db2_vector_corpus_diskann_threshold(int64_t value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->db2_vector_corpus_diskann_threshold = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_ensemble_reference_count(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));

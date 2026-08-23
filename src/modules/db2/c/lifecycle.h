@@ -25,7 +25,7 @@ extern "C"
    void db2_set_schema_readonly(int on);
    int db2_init(const char *libpq_url);
 
-   /* Set the embedding dimension used to create the DB2 halfvec embedding
+   /* Set the embedding dimension used to create the DB2 vector embedding
     * columns (one embedder per deployment). Call from startup — with
     * config_resolve_embedder_dims() — BEFORE db2_init() applies the schema, so
     * this layer stays config-free. Unset/<=0 means "nothing pinned", which lets
@@ -122,7 +122,7 @@ extern "C"
    {
       int recorded_dim;    /* current schema_embedding_dim (or 0/absent) */
       int target_dim;      /* the dim to reset to */
-      int n_tables;        /* halfvec vector tables discovered */
+      int n_tables;        /* vector vector tables discovered */
       char tables[16][64]; /* their names */
       int n_dropped;       /* tables dropped+recreated this run */
       long long rows_cleared;
@@ -133,7 +133,7 @@ extern "C"
    /* Plan (dry_run=1: report only, no changes) or EXECUTE a dim-change reset to
     * target_dim. force=1 allows DROP ... CASCADE when an inbound FK exists. Returns
     * 0 = ok (incl. a no-op when recorded==target — see plan->recorded_dim/target_dim);
-    * -1 = error; -2 = an UNKNOWN halfvec table exists (refuse, don't guess); -3 = an
+    * -1 = error; -2 = an UNKNOWN vector table exists (refuse, don't guess); -3 = an
     * inbound FK needs --force. *out (optional) carries the report + counts. */
    int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_plan_t *out);
    /* The reembed_in_progress maintenance marker the kb's health + search consult. */

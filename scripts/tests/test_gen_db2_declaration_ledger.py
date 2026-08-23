@@ -46,10 +46,10 @@ class DeclarationLedgerTests(unittest.TestCase):
         value = ledger.build(REPO_ROOT)
         self.assertEqual(value["summary"], {
             "headers": 138,
-            "declarations": 1397,
-            "reviewed": 760,
+            "declarations": 1395,
+            "reviewed": 759,
             "audit_pending": 199,
-            "internal_unconsumed": 152,
+            "internal_unconsumed": 151,
             "private_test_only": 286,
         })
         self.assertFalse(value["declarations_complete"])
@@ -59,7 +59,7 @@ class DeclarationLedgerTests(unittest.TestCase):
         )
         pgvector = [row for row in value["declarations"] if row["symbol"].startswith("pgvec_")
                     and row["status"] == "reviewed"]
-        self.assertEqual(len(pgvector), 61)
+        self.assertEqual(len(pgvector), 60)
         self.assertTrue(all(row["review"]["disposition"] == "private-db2" and
                             row["review"]["db3_placement"] == "retained-db2"
                             for row in pgvector))

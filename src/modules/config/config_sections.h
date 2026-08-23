@@ -44,7 +44,6 @@ void config_parse_transport_section(config_t *cfg, cJSON *root);
 void config_parse_guardrails_section(config_t *cfg, cJSON *root);
 void config_parse_auxiliary_section(config_t *cfg, cJSON *root);
 void config_parse_model_meta_section(config_t *cfg, cJSON *root);
-void config_parse_db2_section(config_t *cfg, cJSON *root);
 void config_parse_ensemble_section(config_t *cfg, cJSON *root);
 void config_parse_roundtable_section(config_t *cfg, cJSON *root);
 

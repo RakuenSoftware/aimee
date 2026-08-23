@@ -543,13 +543,6 @@ int config_model_meta_capability_routing(void)
    return v;
 }
 
-int64_t config_db2_vector_corpus_diskann_threshold(void)
-{
-   int64_t v = 0;
-   config_field_read(offsetof(config_t, db2_vector_corpus_diskann_threshold), sizeof(v), &v);
-   return v;
-}
-
 int config_ensemble_reference_count(void)
 {
    int v = 0;

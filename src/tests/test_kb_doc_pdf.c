@@ -476,7 +476,7 @@ static void test_pdf_evidence_tools(void)
 /* Phase A: embed_pdf enqueue gating (the access-control core — pending docs are NOT
  * vector-embedded) + the per-query answerability judgment. Hermetic config via a temp
  * AIMEE_HOME/aimee.yaml that flips kb_pdf_vector_enabled on; the sqlite shim has no
- * halfvec so the vector leg yields no rows (search degrades to lexical) — exactly the
+ * vector so the vector leg yields no rows (search degrades to lexical) — exactly the
  * embedder-absent degradation path. */
 static void write_vector_config(const char *home, int enabled)
 {

@@ -21,7 +21,7 @@
   that effective dimension plus a bounded PostgreSQL pool snapshot through post-bootstrap envelope
   operations. This is
   explicitly not the S4 ownership cutover or
-  the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
+  the S6 pure-Go DB2 port: production remains on direct calls, the vector path remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
@@ -327,11 +327,19 @@ The migration lands in independently testable slices, but activation remains ato
 4. **S4 — atomic C activation.** Start DB2 before consumers, move the DSN and every caller to generated
    bus clients, remove DB2/libpq from the KB link, and make failed DB2 readiness fail closed. Exit:
    only `aimee-module-db2` owns DB2 in the image.
-5. **S5 — DB3 contract and providers.** Connect the provider-neutral reference contract to the
-   pgvector default adapter, deterministic selection/fallback, committed outbox fan-out, and real DB2
-   candidate revalidation; run conformance tests for fake and optional external providers. Exit: one
-   selected external provider can replace every eligible operation without moving retained
-   PostgreSQL-coupled work.
+5. **S5 — DB3 contract and third-party vector modules.** DB3 is the contract an
+   external vector database module implements. It is NOT an abstraction over this module's own
+   vector path: the postgres module executes its vector operations natively on pgvectorscale, and
+   wrapping that in a provider interface would add a wire hop to the default configuration for no
+   one's benefit. What S5 builds is the other half — capability detection, deterministic selection
+   and fallback, committed outbox fan-out, and DB2 revalidation of candidates a third party
+   returned. When no external module is attached, nothing changes and nothing is routed. Exit: an
+   attached external module serves every eligible operation, the retained PostgreSQL-coupled work
+   stays where it is, and detaching it returns service to the native path.
+
+   The eligible set is not a judgement call: `vector-portability.json` classifies all 74 pgvec_
+   symbols — 14 portable-now searches, 32 portable-after-commit mutations, 13 provider-local, 12
+   retained by DB2 authority, 3 deferred analytics.
 6. **S6 — pure-Go parity.** Implement the frozen DB2 catalog in `server-go/modules/db2`, embed the same
    SQL, and pass C-vs-Go replay, schema, tenant, concurrency, vector, DB3, durability, and performance
    gates. Exit: a descriptor/runtime switch selects Go without caller or wire changes.

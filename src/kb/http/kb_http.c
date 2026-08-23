@@ -1151,7 +1151,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          free(s);
          cJSON_Delete(o);
       }
-      /* -2 unknown halfvec table (409), -3 FK needs --force (412), other err 500. */
+      /* -2 unknown vector table (409), -3 FK needs --force (412), other err 500. */
       return rc == 0 ? 200 : rc == -2 ? 409 : rc == -3 ? 412 : 500;
    }
 

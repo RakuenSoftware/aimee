@@ -94,10 +94,21 @@
  * EMBED_MAX_DIM is the largest embedder output we buffer for: 4000 covers the
  * Qwen3-Embedding ladder (0.6b=1024, 4b=2560, 8b truncated 4096->4000) as well
  * as the legacy pplx-embed (0.6b=1024 / 4b=2560). A deployment runs ONE embedder;
- * config.embedder_dims selects which, and the DB2 halfvec columns are created at
- * that dimension (see db2/schema.sql). 4000 is the pgvector halfvec INDEX ceiling
- * (inclusive) — native 4096 would be unindexable, so the 8b tier truncates to
- * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
+ * config.embedder_dims selects which, and the DB2 vector columns are created at
+ * that dimension (see db2/schema.sql).
+ *
+ * 4000 is NO LONGER AN INDEX LIMIT. It was one while pgvector's HNSW indexed
+ * these columns: HNSW refuses halfvec above 4000 and vector above 2000, which
+ * is why the 8b tier truncates 4096->4000 in the embedding proxy. The columns
+ * are now `vector` indexed by pgvectorscale's diskann, which indexes to the
+ * type's own 16000-dimension ceiling — measured: 1024, 4096, 8192 and 16000 all
+ * build, and an 8192-dim row round-trips through a cosine query.
+ *
+ * What holds the number at 4000 now is this constant's other job: it sizes ~25
+ * stack arrays of float[EMBED_MAX_DIM], 16 KB each at this width and one frame
+ * holding three of them. Raising it means moving those to the heap first, and
+ * dropping the proxy's truncation. Until then this is a buffer budget, not a
+ * statement about what the database can index. */
 #define EMBED_MAX_DIM 4000
 
 /* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly
