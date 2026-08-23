@@ -172,6 +172,18 @@ const (
 	// request. Reported as bad_request, a caller goes on correcting arguments
 	// that were never wrong; reported as capacity, it waits or stops creating.
 	StatusAtCapacity Status = 18
+
+	// StatusCount is one past the highest status, and the pinning test asserts
+	// against it.
+	//
+	// Without it the pinned list is a transcription that does not know a status
+	// was added, which is not hypothetical: StatusUnclassified and
+	// StatusAtCapacity were both declared, given String() arms, used on the wire,
+	// and never pinned -- and every guard stayed green. The compiler catches an
+	// insert that duplicates a case; the pinned values catch a renumber into a
+	// gap; only this catches an addition that never joined the list. All three are
+	// needed, and each is invisible to the others.
+	StatusCount = 19
 )
 
 // StatusFor maps a registry error onto its wire status.

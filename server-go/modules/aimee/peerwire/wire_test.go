@@ -215,7 +215,7 @@ func TestStatusForCoversEveryRefusal(t *testing.T) {
 // append-do-not-insert rule the message cells follow, applied to the enum that
 // was still using iota.
 func TestStatusIntegersArePinned(t *testing.T) {
-	for want, status := range map[int]Status{
+	pinned := map[int]Status{
 		0:  StatusOK,
 		1:  StatusNoPeer,
 		2:  StatusDenied,
@@ -233,7 +233,17 @@ func TestStatusIntegersArePinned(t *testing.T) {
 		14: StatusNotMember,
 		15: StatusChannelFull,
 		16: StatusUnavailable,
-	} {
+		17: StatusUnclassified,
+		18: StatusAtCapacity,
+	}
+	// The count is what catches an ADDITION. A status declared, given a String()
+	// arm and used on the wire but never added here passes every other guard --
+	// which is exactly what StatusUnclassified and StatusAtCapacity did.
+	if len(pinned) != StatusCount {
+		t.Fatalf("pinned %d statuses, package declares %d. A status added without "+
+			"being pinned travels on the wire unchecked.", len(pinned), StatusCount)
+	}
+	for want, status := range pinned {
 		if int(status) != want {
 			t.Errorf("%s = %d; want %d. A status inserted in the middle renumbers "+
 				"every one after it and the wire carries the integer.",
@@ -245,7 +255,7 @@ func TestStatusIntegersArePinned(t *testing.T) {
 	// is the same collapse in the other direction, where an operator cannot tell
 	// which refusal they got.
 	seen := map[string]Status{}
-	for i := 0; i <= int(StatusAtCapacity); i++ {
+	for i := 0; i < StatusCount; i++ {
 		name := Status(i).String()
 		if prev, dup := seen[name]; dup {
 			t.Errorf("status %d and %d both name themselves %q", int(prev), i, name)
