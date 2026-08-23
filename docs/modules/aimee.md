@@ -270,6 +270,23 @@ No handler here blocks, specifically so that ceiling is never reached by waiting
 
 ## Compatibility
 
+## Every guard here has been made to fail
+
+Each check in this module was mutation-verified: the property it asserts was
+broken deliberately and the guard watched to fire. That is recorded because a
+guard nobody has seen fail is a guard nobody has evidence for, and this module
+found three of its own that could not have failed -- a probe that could not
+detect an inert module, a record satisfied by prose quoting it, and an
+experiment that passed because nothing reached the function it was testing.
+
+Two of them were audited late, after a peer found a test of their own passing for
+a reason it did not state. Their credential-stripping test passed with the strip
+DELETED, because an unrelated path rule dropped the credential anyway. So the
+audit here was not "did I write a mutation" but "does each CLAUSE matter": the
+admission tests fail without directory admission, and the sender remap fails
+separately from it, so "I do not know you" and "there is no such peer" are held
+apart by something rather than by coincidence.
+
 ## The module as deployed has no session directory
 
 `aimee-module` builds the capability with `NoDirectory{}`, and that is accurate
