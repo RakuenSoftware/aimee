@@ -2,22 +2,72 @@
 
 ## Purpose and non-goals
 
-`postgres` is the KB-local process boundary for PostgreSQL operations as they move
-out of the C data layer. The first bounded stage owns generic store health and
-capability evidence: connectivity, the current-schema `memories` table, and the
-`pg_trgm` extension. The second bounded slice adds catalog evidence that both KB
-runtime tables (`kb_documents` and `kb_async_jobs`) exist, replacing the remaining
-duplicate C query in the daemon health path. It does not own content authorization,
-identity resolution, team membership, schema bootstrap, migrations, or arbitrary
-SQL dispatch.
+`postgres` owns PostgreSQL, for whichever module owns the rows.
+
+Two stages. Health answers whether the store is usable: connectivity, the
+current-schema `memories` table, the `pg_trgm` extension, and the KB runtime
+tables. Storage is the database itself -- statements, transactions with an
+owner, and versioned schema migration -- on behalf of a caller that brings its
+own SQL and its own meaning.
+
+Two stages rather than two modules because they share one pool. A health probe
+that opened its own connection would be reporting on a pool nobody serves from.
+
+It owns no domain. There is nothing in it about memories, documents, grants,
+corpora or sessions, and there must not be: a module that knew what a row meant
+would be two modules. Content authorization, identity resolution and team
+membership belong to whoever owns the tables.
 
 ## Public contracts
 
-The Go process serves principal 28/event `11265` on the KB bus. Its fixed-size
-health request contains only a magic and version; its response contains only
-schema, extension, and KB-table readiness bits. SQL, connection URLs, credentials,
-subjects, and content never cross the bus. Malformed requests fail closed and query
-failures return a typed module failure without a response body.
+Principal ref 28. Event kinds follow the registry rule,
+`4097 + 256 * ref + (stage - 1)`.
+
+| stage | name | event kind |
+|---|---|---|
+| 1 | `postgres-health` | 11265 |
+| 2 | `postgres-sql` | 11266 |
+
+**Health** takes a magic and a version and answers readiness bits. No SQL,
+connection URL, credential, subject or content crosses it.
+
+**Storage** takes a statement and answers rows. Seven operations: `EXEC`,
+`QUERY`, `BEGIN`, `COMMIT`, `ROLLBACK`, `MIGRATE`, `CURRENT_VERSION`.
+
+Values are typed rather than rendered -- null, text, int, float, bool, text
+array, bytes -- because a column set to NULL and a column set to empty are
+different facts, and reading a `BOOLEAN` back as text is how every mining job
+came to report itself disabled.
+
+Statuses are integers on the wire and pinned by tests on both ends: OK 0,
+InvalidRequest 1, Unsupported 2, LimitExceeded 3, StatementFailed 4,
+Unavailable 5, MigrationFailed 6. Failures carry the SQLSTATE, because a caller
+cannot retry sensibly without it: a unique violation is often an expected
+answer, a foreign key violation is a caller error, and a lost connection is an
+outage.
+
+A statement PostgreSQL rejected and a statement it never received are different
+answers. If the server rejected it, it sent an ErrorResponse and the reply
+carries that SQLSTATE. No SQLSTATE means nothing was rejected, so a caller-side
+deadline reports 57014 and a failed connection reports 08006 with
+`Unavailable` -- the one failure worth retrying unchanged.
+
+Every bound refuses rather than truncates: 1 MiB statements and cells, 4096
+arguments, 4096 reply rows, 4096 reply columns, 64-byte statement ids. A caller
+handed exactly the ceiling cannot tell a complete answer from a capped one.
+
+**Transactions are owned.** A handle is minted from crypto/rand rather than a
+counter, is bound to the principal and attachment that opened it, and is refused
+for anyone else: the handle names a transaction, it does not confer the right to
+drive one. Idle transactions are reclaimed, and the caller learns on its next
+statement rather than at a commit that loses its writes.
+
+**Migrations are namespaced by owner**, not by module. DB1 at version 7 while
+DB2 is at 31 is a normal state. An owner is chosen once and never changed:
+renaming one orphans its history, since the rows stay under the old name and the
+next migration applies against a database that already has its tables. One
+module may own several namespaces, and a namespace outlives the module that
+created it.
 
 ## Dependencies and consumers
 
@@ -25,16 +75,29 @@ failures return a typed module failure without a response body.
 - `module-runtime` authenticates the exact executable, UID, principal, and
   event-kind grant on the KB-local bus.
 
-The consumer is the KB health response, including its `db2_kb_tables_ok` field.
-Bootstrap and the local CLI doctor
-keep their existing C probe because they execute before the module boundary is
-available; later slices can move operations only after their startup ordering and
-state ownership are explicit.
+The health stage's consumer is the KB health response, including its
+`db2_kb_tables_ok` field. Bootstrap and the local CLI doctor keep their existing
+C probe because they run before the module boundary exists.
+
+**Nothing in production reaches PostgreSQL through the storage stage yet, and
+this section says so because a commit message is not a deployment.** The
+deployed `aimee-module-db2` is the C build: `db2` declares runtime `c` in
+process-contracts.json, and the C data layer is linked into the KB and connects
+through libpq directly. The Go `db2` module implements all 445 catalogued
+operations over this wire and is proven at parity against a real schema -- 193
+operation probes answering identically through a pool and through this module,
+with the codec proven to have carried them -- but it is not the deployed `db2`.
+
+Flipping that is a one-line contract change with a blast radius across the whole KB, and
+the thing that would make it safe is a test running both processes against one
+database. That does not exist yet.
 
 ## Providers and readiness
 
 The physical provider is `aimee-module-postgres`, a separately supervised Go
-process placed with `aimee-kb`. Readiness requires a successful bounded query.
+process placed with both `aimee-server` and `aimee-kb` -- one module, two
+deployments, because DB1 and DB2 hold different schemas on different machines
+and neither should own a second opinion about PostgreSQL. Readiness requires a successful bounded query.
 The result independently reports whether the base `memories` table, `pg_trgm`
 extension, and both KB runtime tables exist, so a reachable but incomplete store
 is not reported as ready.
@@ -123,7 +186,27 @@ of that health-path verdict.
 
 ## Extension and removal
 
-Future slices should add typed, bounded operations with explicit wire contracts
-and move each C caller in the same change. A generic SQL-over-bus stage is not an
-extension point. The remaining `db2_health_probe` can be removed only after every
-pre-module bootstrap and doctor consumer has an equivalent ordered boundary.
+**This document previously said a generic SQL-over-bus stage is not an extension
+point, and stage 2 is exactly that.** The reversal is recorded rather than
+quietly made, because the original reasoning was sound and someone will wonder
+what happened to it.
+
+The original position was that each operation should be typed and bounded with
+its own wire contract, and each C caller moved in the same change. That is right
+when the module owns a domain. It is wrong when the module owns a database: a
+typed operation per statement would put every caller's meaning into this module,
+which is the thing it must not know. Four hundred and forty-five typed
+operations for one caller's schema, and a second set for the next caller's, is
+two modules wearing one name.
+
+So the generic stage is the boundary, and the discipline moved rather than
+disappeared. The caller names its operation (`statement_id`) so this module can
+say what a caller was doing without parsing SQL. Every bound is enforced here
+rather than trusted from the sender. Transactions have owners. Migrations have
+namespaces. What is refused is refused by this module, not by convention.
+
+The remaining `db2_health_probe` can be removed only after every pre-module
+bootstrap and doctor consumer has an equivalent ordered boundary.
+
+Related: [vectordb](vectordb.md) is the optional contract for an external vector
+store; [control-plane](control-plane.md) owns what is specific to aimee-kb.
