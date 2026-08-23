@@ -2186,6 +2186,22 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "calibration_conformal_window",
+			stage: db2contract.StageCalibrationConformalWindow,
+			// The scope predicates are two OR chains over the same parameter,
+			// which is where one statement replaces the C's three.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCalibrationConformalWindowRequest(
+					"recall", "synthesis", "project", liveProbeScopeProject, 128)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err :=
+					db2contract.DecodeCalibrationConformalWindowReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -4141,6 +4157,106 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "artifact_write_evidence",
+			stage: db2contract.StageArtifactWriteEvidence,
+			// Twice, because the second call is the one that finds the first by
+			// its content hash and collapses onto it.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeArtifactWriteEvidenceRequest(
+					"session_evidence", "project", liveProbeScopeProject,
+					"live-probe", "live-probe-hash", `{"turns":4}`)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				artifactID, err := db2contract.DecodeArtifactWriteEvidenceReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if artifactID == "" {
+					t.Fatal("no evidence artifact was written")
+				}
+			},
+		},
+		{
+			name:  "bandit_decision_insert",
+			stage: db2contract.StageBanditDecisionInsert,
+			// A boolean parameter where the C binds a double, so this is the
+			// probe that says the column accepts what pgx sends.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeBanditDecisionInsertRequest(
+					"live-probe-decision", "recall", "arm-a", "ctx", 0.25, 1)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeBanditDecisionInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the decision was not recorded")
+				}
+			},
+		},
+		{
+			name:  "calibration_profile_write",
+			stage: db2contract.StageCalibrationProfileWrite,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeCalibrationProfileWriteRequest(
+					"recall", "synthesis", "project", liveProbeScopeProject,
+					"v3", `{"bins":10}`)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				artifactID, err := db2contract.DecodeCalibrationProfileWriteReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if artifactID == "" {
+					t.Fatal("no calibration profile was written")
+				}
+			},
+		},
+		{
+			name:  "feature_row_upsert",
+			stage: db2contract.StageFeatureRowUpsert,
+			// Twice, for the conflict branch: the compound conflict target is
+			// only exercised there, and it names three columns.
+			repeat: 2,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeFeatureRowUpsertRequest(
+					"memory:900012", "memory", "project", liveProbeScopeProject,
+					"v3", `{"uses":9}`, "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				acknowledged, err := db2contract.DecodeFeatureRowUpsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if acknowledged != 1 {
+					t.Fatal("the feature row was not written")
+				}
+			},
+		},
+		{
+			name:  "learning_proposal_insert",
+			stage: db2contract.StageLearningProposalInsert,
+			// signal_id is a foreign key into learning_signals, so the signal
+			// has to exist for the proposal to land.
+			seed: []string{liveProbeLearningSignal},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeLearningProposalInsertRequest(
+					900026, "rules", "build-state", 0, `{"op":"reinforce"}`, "", "")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				proposalID, err := db2contract.DecodeLearningProposalInsertReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if proposalID == 0 {
+					t.Fatal("no proposal was written")
+				}
+			},
+		},
 	}
 }
 
@@ -4386,6 +4502,11 @@ const liveProbeTrustProject = `INSERT INTO projects
  (id, name, root, scanned_at, lifecycle_state, current_generation, trust)
  VALUES (900025, 'live-probe-trust-project', '/live-probe',
  '2026-01-01T00:00:00Z', 'current', 1, 'untrusted')`
+
+// A learning signal for the proposal probe's foreign key.
+const liveProbeLearningSignal = `INSERT INTO learning_signals
+ (id, signal_type, created_at)
+ VALUES (900026, 'live-probe', '2026-01-01T00:00:00Z')`
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
