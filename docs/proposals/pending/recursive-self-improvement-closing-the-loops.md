@@ -1,6 +1,6 @@
 # Proposal: Recursive self-improvement — closing the loops aimee opens but never finishes
 
-- **State:** 🟡 **PENDING — S0 and S1 implemented and wired; S2–S6 not started.** Net-new design over
+- **State:** 🟡 **PENDING — all six slices implemented and wired; three narrowed with stated reasons.** Net-new design over
   existing substrate. It does **not** re-propose the learning-signals router, the
   learning-to-rank fitter, `kb_bandit`, the retrieval-outcome ledger, or the memory
   maintenance passes — it adds the loops those systems leave open.
@@ -360,13 +360,95 @@ measured (S5), and the recursion is bounded (S0).
 
 | Slice | Depends on | Status |
 | --- | --- | --- |
-| S0 endogeneity + gate | — | substrate landed |
-| S1 eval synthesis + admission | S0 | substrate landed; call sites + CLI outstanding |
-| S2 counterfactual replay | S1 | not started |
-| S3 approach anti-patterns | S1 | not started |
-| S4 operator-invoked resolution | — | not started |
-| S5 regret + fitted gates | S2 | not started |
-| S6 policy arms | S1, S2, S5 | not started |
+| S0 endogeneity + gate | — | implemented and wired |
+| S1 eval synthesis + admission | S0 | implemented and wired |
+| S2 counterfactual attribution | S1 | implemented; narrowed (below) |
+| S3 approach negative knowledge | S1 | implemented; narrowed (below) |
+| S4 backlog resolution | — | implemented; narrowed (below) |
+| S5 regret + detector controls | S2 | implemented; cap-fitting deferred |
+| S6 policy arms | S1, S2, S5 | implemented and wired |
+
+## Delivery record — S2 to S6 (2026-08-23)
+
+Each slice below was built, unit-tested, and landed with `make -j8 all`,
+`make unit-tests`, and `make lint` (63/63) clean. Three were narrowed against
+the design above; each narrowing and its reason is stated, because a slice
+quietly delivered smaller than promised is the failure mode this record exists
+to prevent.
+
+### S2 — narrowed from live replay to attribution over the ablation grid
+
+The design says "re-runs a recorded trajectory with exactly one decision
+changed". Re-running needs a model and a configured provider, which a test host
+does not have and a gate cannot depend on.
+
+The counterfactual did not need inventing. `eval run --ablation all` already
+runs every task once per preset, each removing exactly one capability, and
+records the outcome: same task, one thing changed, same success check. That
+grid was never read. `learning_attribution_*` reads it, PAIRED — only tasks
+where both the baseline and the arm ran — because comparing marginal pass rates
+across a different task mix measures the mix, not the capability.
+
+**Still open:** perturbing an arbitrary registered bandit decision point on a
+recorded trajectory. That remains the live-replay work, and it needs a provider.
+
+S2 also removed the success-direction reinforcement in `eval_feedback_loop()`.
+It bumped a rule for overlapping a FAILED task and, separately, for overlapping
+a PASSED one — a pure ratchet toward weight 100. A per-rule counterfactual does
+not exist yet, so the honest move was to stop manufacturing the signal rather
+than keep a wrong one.
+
+### S3 — narrowed from "extend anti_patterns" to a sibling store, and from embeddings to token overlap
+
+Two changes from the design, both deliberate:
+
+- `approach_failures` is a **sibling** of `anti_patterns`, not an extension.
+  That table's hot rows drive a BLOCKING escalation path; putting fuzzy
+  goal-similarity rows into it would place approximate matches on a path that
+  refuses work. A test asserts recording an approach failure creates no
+  anti-pattern row and fires no blocking match.
+- Similarity is **token overlap, not an embedding**. The embedder lives behind
+  the knowledge service, and plan-time recall has to work on an installation
+  with no KB reachable. Overlap is weaker at paraphrase and exactly as good at
+  the case that matters — the same goal, worded differently. Upgrading is a
+  follow-up that must first give the recall site a route to the embedder.
+
+### S4 — narrowed to the curiosity backlog; graph-audit verification deferred
+
+Curiosity resolution ships: operator-invoked, budgeted, with an INSTALLED
+evidence probe rather than an assumed one. With no probe the pass closes
+nothing and says why — emptying a backlog by assertion is worse than leaving it
+full. Only `unverified_assumption` and `weak_coverage` are touched;
+`contradiction` and `stale_fact` ask which of two claims is right, and a
+coverage probe answering that would silently pick a winner.
+
+**Deferred:** verifying the graph audit's unverified inferred edges. That needs
+the extractor and LSP inside the knowledge service, not a probe the server can
+install. Faking it would produce confident verdicts about edges nobody checked.
+
+### S5 — regret and detector controls ship; cap-fitting deferred
+
+Committed proposals carry a fate; per-detector regret feeds two controls that
+only ever tighten: required corroboration, and whether a high-confidence signal
+may still commit on sight. An unmeasured detector behaves exactly as before.
+
+**Deferred:** per-sink weekly caps as bandit arms. `kb_bandit` lives in the
+knowledge-service binary, so fitting caps from it is a KB-side change; the
+regret signal it would consume now exists.
+
+### S6 — implemented against a fragment that exists
+
+Rather than inventing prompt variants to measure, S6 registers the one fragment
+this work already added: S3's plan-time advisory block, with `off` / `brief` /
+`full` arms. The `off` arm is mandatory — without a control there is nothing to
+measure against. Selection uses an installed sampler when one exists and the
+declared default otherwise, so an installation with no knowledge service sees
+no behaviour change. A sampler's out-of-range answer is treated as declining,
+never as authority to inject an undeclared fragment; sampling never moves the
+default; and promotion consults S0's gate.
+
+**Not done, deliberately:** authoring new prompt text. A loop that writes its
+own instructions is a different and much larger proposal.
 
 ## Delivery record — S0 and S1 substrate (2026-08-23)
 
