@@ -2618,6 +2618,81 @@ func liveReads() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "kb_doc_read",
+			stage: db2contract.StageKBDocRead,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocReadRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeKBDocReadReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a document that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "kb_doc_list_review",
+			stage: db2contract.StageKBDocListReview,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocListReviewRequest(16, 0)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeKBDocListReviewReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_doc_assets_list",
+			stage: db2contract.StageKBDocAssetsList,
+			// A DISTINCT over ten columns joined to a correlated subquery for
+			// the generation. Nothing but a real planner accepts or refuses it.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBDocAssetsListRequest(
+					liveProbeScopeProject, "docs/live-probe.pdf")
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeKBDocAssetsListReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
+		{
+			name:  "kb_async_job_get",
+			stage: db2contract.StageKBAsyncJobGet,
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeKBAsyncJobGetRequest(2147483000)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				found, _, _, _, _, _, _, _, _, _, _, err :=
+					db2contract.DecodeKBAsyncJobGetReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if found != 0 {
+					t.Fatal("a job that does not exist answered as found")
+				}
+			},
+		},
+		{
+			name:  "typed_fact_recall",
+			stage: db2contract.StageTypedFactRecall,
+			// The ordering is a CASE over the filter parameter, which is where
+			// one statement replaces the C's two.
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeTypedFactRecallRequest("live-probe-subject", "", 16)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				if _, err := db2contract.DecodeTypedFactRecallReply(body); err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+			},
+		},
 	}
 }
 
@@ -4785,6 +4860,28 @@ func liveWrites() []liveRequest {
 				}
 			},
 		},
+		{
+			name:  "enrollment_revoke",
+			stage: db2contract.StageEnrollmentRevoke,
+			// Twice, because the second revocation is the one that must not move
+			// the stamp the first set -- and only a real NULLIF over a real row
+			// shows that.
+			repeat: 2,
+			seed:   []string{liveProbeEnrollment},
+			encode: func() ([]byte, error) {
+				return db2contract.EncodeEnrollmentRevokeRequest(900028)
+			},
+			decoded: func(t *testing.T, body []byte) {
+				revoked, _, _, _, state, _, _, _, revokedAt, _, _, err :=
+					db2contract.DecodeEnrollmentRevokeReply(body)
+				if err != nil {
+					t.Fatalf("decode reply: %v", err)
+				}
+				if revoked != 1 || state != "revoked" || revokedAt == "" {
+					t.Fatalf("revoked = %d, state = %q, at = %q", revoked, state, revokedAt)
+				}
+			},
+		},
 	}
 }
 
@@ -5047,6 +5144,14 @@ const (
  (artifact_id, source_kind, source_id, span_start, span_end)
  VALUES ('live-probe-artifact', 'kb_document', '900027', 0, 0)`
 )
+
+// An active enrolment for the revoke probe. Revoking nothing answers not-found,
+// which would prove only that the statement parses.
+const liveProbeEnrollment = `INSERT INTO kb_enrollments
+ (id, scope, fingerprint, serial, cert_issuer, cert_serial_norm, state,
+ authority_id)
+ VALUES (900028, 'kb', 'live-probe-revoke-fingerprint', '01ab',
+ 'CN=live-probe', '01ab', 'active', '00112233445566778899aabbccddeeff')`
 
 func TestLiveWritesRunAndLeaveNothingBehind(t *testing.T) {
 	store, closeStore := liveStore(t)
