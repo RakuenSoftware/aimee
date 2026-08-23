@@ -116,6 +116,20 @@ numbered version 1 and `peer_grants` version 2: explicit numbers rather than
 values derived from sorted filenames, so a file whose name later sorts into the
 middle cannot renumber the history and invalidate every recorded checksum.
 
+**A migration owner is a schema namespace, not a module, and `aimee` is chosen
+here permanently.** Nothing keyed on it may be renamed: a recorded migration is
+a fact about a database ("these statements ran, with this checksum, at this
+time"), and that fact does not stop being true because the module that applied
+it was reorganised. Renaming an owner does not move its history, it orphans it,
+and the cost grows with every version.
+
+So this module will legitimately own **two** namespaces once the db1 absorption
+lands: `db1`, carrying the store's existing 21 versions, and `aimee`, carrying
+these two. That is not a tidy-up waiting to happen. Collapsing them would
+re-run 21 migrations against a database that already has them, and the first
+`CREATE TABLE` would fail. The engine keys version, gap checks, checksums and
+the advisory lock on the owner, so the two sequences advance independently.
+
 **Length checks on these tables must use `octet_length`, never `length`.**
 `length()` counts characters and a byte buffer holds bytes; at the same number
 they disagree the moment a value is non-ASCII, and the check passes while the
@@ -144,6 +158,16 @@ undeliverable, not delivered.** The message was never drained, so recording it
 as delivered would put a falsehood in the audit trail. The sweep runs after
 `server_session_delete_expired` rather than on a timer of its own, so it cannot
 race ahead of the lifecycle that creates the orphans.
+
+**The sweep must be one transaction, and it must not read a closed one as an
+ordinary refusal.** It deletes the orphaned rows and records each as
+undeliverable, and those two are the same fact told twice: mail that went
+nowhere, and the record saying so. SQLSTATE `25P01` means the transaction is
+already gone and everything written through that handle with it, which is a
+different thing from a constraint failure leaving the transaction live with one
+statement wrong. Code that collapses them logs "could not record that one,
+carrying on" and then commits nothing: rows deleted, nothing recorded, no error
+raised. Mail destroyed while the audit trail says it was accounted for.
 
 ## Security and privacy
 
