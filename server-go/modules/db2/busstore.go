@@ -15,11 +15,22 @@ import (
 // A Store that reaches PostgreSQL through the postgres module rather than
 // through a pool of its own.
 //
-// This is the architecture rather than an option: the postgres module owns
-// PostgreSQL, and a second module holding its own pool would mean two owners of
-// one database, two transaction lifetimes, and two opinions about how many
-// connections exist. The operations above are unchanged -- they are written
-// against Store, and this is a Store.
+// This is the architecture the tree is moving to, and saying so in the present
+// tense would be false today. ProductionStore still opens a pool, and the
+// DEPLOYED db2 is the C build -- db2 declares runtime "c" in
+// process-contracts.json, and that library is linked into the KB and connects
+// through libpq. Nothing in production reaches PostgreSQL through this type;
+// AIMEE_DB2_STORE=bus selects it, and the parity suites are what run it.
+//
+// Why it is the direction: a second module holding its own pool means two owners
+// of one database, two transaction lifetimes, and two opinions about how many
+// connections exist. The operations above are unchanged either way -- they are
+// written against Store, and this is a Store, which is the whole reason the
+// switch is one line rather than a rewrite.
+//
+// What gates the move is not this type. 168 files outside the module call db2_*
+// in-process, and db2 calls back into the KB through registered providers, so
+// the callers have to move to the bus before the runtime can.
 //
 // The pgx types in Store's signature are kept rather than refactored away. 445
 // operations scan into them, and changing the interface would be a change to
