@@ -1,8 +1,8 @@
 # Temporal Assertion and Learning Loop: Validation Report
 
 Closes the implementation acceptance criteria in the corresponding completed proposal. The
-feature remains default-off; this report validates implementation readiness, not a production
-activation decision.
+feature is now default-on after review of the representative benchmark evidence recorded here.
+Explicit ingress, assembler, and per-channel opt-outs remain available for rollback.
 
 ## Scope
 

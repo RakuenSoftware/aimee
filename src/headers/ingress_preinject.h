@@ -8,7 +8,7 @@
  * turn — it reasons over the already-loaded context and, when it needs more,
  * explores THROUGH Aimee's MCP tools rather than raw grep.
  *
- * Opt-in: gated by config `ingress_preinject_enabled` (default off) and a
+ * Default-on: gated by config `ingress_preinject_enabled` and a
  * per-request disable (the `x-aimee-preinject: 0` header, surfaced by the
  * caller as request_disabled) so the A/B bench harness can toggle it live.
  *
@@ -34,10 +34,11 @@
  * added here because today's envelope already emits a typed-facts group. */
 typedef enum
 {
-   ING_SRC_CODE,   /* a code-search hit          */
-   ING_SRC_MEMORY, /* a memory preview           */
-   ING_SRC_FACTS,  /* the typed-facts block      */
-   ING_SRC_AUDIT,  /* the audit-context block    */
+   ING_SRC_CODE,     /* a code-search hit          */
+   ING_SRC_MEMORY,   /* a memory preview           */
+   ING_SRC_FACTS,    /* the typed-facts block      */
+   ING_SRC_TEMPORAL, /* temporal assertions/observations/reviewed procedures */
+   ING_SRC_AUDIT,    /* the audit-context block    */
 } ingress_source_kind_t;
 
 /* Which fold produced the resident form — one value per lossiness class, reserved
