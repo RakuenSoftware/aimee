@@ -99,8 +99,16 @@ enforcing itself, end to end, against a real ledger.
 | `make -C src -j8 unit-tests` | 734 tests; 1 failure — `unit-test-mcp-git`, pre-existing (proven earlier on this host against the base tree) |
 | `make -C src lint` | `lint: all 63 checks passed` |
 | `make -C src docs-gen-check` | ok |
+| `make -C src integration-tests` | `integration: 115/115 passed` |
 | live end-to-end (daemon only) | all checks passed |
 | exploratory probing | nothing broke |
+| Postgres SQL check | all statements behave |
+| full stack (aimee-kb + aimee-server) | all checks passed |
+
+Every row above was re-run on the **final commit** (`f899a9808f`) from a clean
+build in a freshly stood-up environment, including a fresh `aimee_shared`
+database. `integration-tests` in particular had previously only been run
+*before* the three gate-fix commits; that gap is now closed.
 
 One intermediate run reported two extra failures (`unit-test-cli-server-compat`,
 `unit-test-server-compute`). Those were an artefact of copying a stale build
