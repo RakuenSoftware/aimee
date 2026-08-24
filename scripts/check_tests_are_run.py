@@ -66,6 +66,13 @@ UNBUILT_SOURCES = {
 # live Postgres; a -live target needs a running service. Both are covered by
 # their own CI jobs, which is why they are exempt here rather than missing.
 INFRASTRUCTURE = {
+    # Not a test: the emitter half of unit-test-bus-guardrail-durability, which
+    # the shell half runs. It cannot check its own work -- it stops the bus, and
+    # the store is reached over that bus -- so the verification is SQL, run
+    # after this exits. Listed here rather than added to a run list, because
+    # running it alone would emit events and assert nothing about the store.
+    "unit-test-bus-guardrail-durability-emit":
+        "the emitter half; unit-test-bus-guardrail-durability runs it and verifies in SQL",
     "unit-test-bus-db2-process": "needs Postgres and the packaged DB2 executable",
     "unit-test-content-scope-pg": "needs Postgres",
     "unit-test-kb-audit-worm-pg": "needs Postgres",

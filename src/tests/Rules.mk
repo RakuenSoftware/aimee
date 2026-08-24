@@ -306,6 +306,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails \
+               $(TESTPREFIX)/unit-test-bus-guardrail-durability \
                $(TESTPREFIX)/unit-test-mcp-git \
                $(TESTPREFIX)/unit-test-agent \
                $(TESTPREFIX)/unit-test-memory-advanced \
@@ -4220,6 +4221,30 @@ $(TESTPREFIX)/unit-test-wire-fence: \
                                   $(OBJDIR)/tests/test_wire_fence.o \
                                   $(OBJDIR)/wire_fence.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The guardrail event's durability across the bus, in two halves.
+#
+# The emitter emits, stops the bus, and reports what the bus counted. It cannot
+# check its own work: stopping the bus IS half the property, and the store is
+# reached over that bus, so after the stop there is no transport to ask through.
+#
+# The shell half does the read-back straight out of PostgreSQL, after the
+# emitter has exited and its modules with it. The rows outlive both, which is
+# the only place a verification of "it reached the store" can honestly live once
+# the store is a separate process.
+$(TESTPREFIX)/unit-test-bus-guardrail-durability-emit: \
+                            $(OBJDIR)/tests/test_bus_guardrail_durability.o \
+                            $(OBJDIR)/tests/support/store_module_fixture.o \
+                            $(OBJDIR)/server/obs_bus_adapter.o \
+                            $(DB1_CLIENT_OBJS) \
+                            $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-bus-guardrail-durability: tests/test_bus_guardrail_durability.sh \
+                            $(TESTPREFIX)/unit-test-bus-guardrail-durability-emit
+	@mkdir -p $(dir $@)
+	cp $< $@
+	chmod +x $@
 
 $(TESTPREFIX)/unit-test-economizer-live-surface: tests/test_economizer_live_surface.sh
 	@mkdir -p $(dir $@)

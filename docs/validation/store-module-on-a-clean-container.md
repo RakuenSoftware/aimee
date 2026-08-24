@@ -912,3 +912,76 @@ accepts reaches the store exactly once, and a graceful stop drains those in
 flight. It needs a test against the Go sink that does not depend on the bus it
 is verifying, and `test_bus_shutdown_race` cannot host it for the same reason.
 Recorded here and at both sites rather than left to be rediscovered.
+
+---
+
+# The guardrail durability property, and what writing its test found
+
+The gap this document has carried since the retirement — *every guardrail event
+the bus accepts reaches the store exactly once, and a graceful stop drains those
+in flight* — now has a test. Writing it found three defects, two fixed and one
+open.
+
+## The test is in two halves, and has to be
+
+`test_bus_guardrail_durability.c` emits N events with unique identities, stops
+the bus, and reports what the bus counted. **It cannot check its own work**:
+stopping the bus is half the property, and the store is reached *over* that bus,
+so after the stop there is no transport to ask through. Restarting the host does
+not recover it — the module does not re-attach, measured with a ten-second poll.
+
+`test_bus_guardrail_durability.sh` does the read-back straight out of
+PostgreSQL, after the emitter has exited and its modules with it. It checks the
+count against what the bus accepted, that no identity appears twice (a loss and
+a duplicate netting to the same total passes a count and fails this), and that
+`overall_risk`, `final_action` and `dry_run` round-tripped as double, text and
+boolean.
+
+## Fixed: `obs_bus_module_available()` deadlocked shutdown
+
+It took `start_lock`. `obs_bus_stop()` holds `start_lock` while waiting for
+callers to drain and joining the consumer — and the consumer, inside
+`persist_guardrail`, asks whether the kind is served *first*. Both threads
+parked in futex waits, forever.
+
+Impossible while the store was in-process SQLite: that sink made no bus call, so
+the probe was never on its path. `obs_bus_adapter.c` still says the sink is
+"safe to call from the bus consumer thread", which was true when written and
+became false without either file being edited.
+
+Now registers in `module_callers` and reads the atomic instead — the discipline
+`obs_bus_module_call` already used, for the same reason.
+
+## Fixed: the final drain could not reach the store
+
+`obs_bus_stop()` cleared `accepting_calls` and stopped the runtime listener
+*before* joining the consumer. So the drain processed every queued event and
+every sink call was refused: `emitted 3, written 0, dropped 3`. A shutdown
+discarded whatever was still queued.
+
+Both moved after the join. The drain now runs with the call path open, which is
+what "a graceful stop drains those in flight" requires.
+
+## OPEN: a store call from the bus consumer thread does not complete
+
+With both fixes in, the events still do not arrive — `DEADLINE_EXCEEDED`, and
+**zero rows reach PostgreSQL**. It is not the stop: setting a settle window puts
+the failure squarely inside it, with the bus fully running.
+
+The contrast that locates it: every store-backed suite listed above passes
+against the same PostgreSQL, and `unit-test-server-mgmt-status` does a
+*transactional* nonce consume. Those call the store from the **main** thread.
+This calls it from the obs_bus **consumer** thread — which is what routes peer
+traffic, so while it blocks waiting for the store's reply, the store's own call
+to the postgres module has nobody to route it.
+
+That is architectural: the guardrail sink cannot make a blocking module call
+from the thread that routes the bus. Fixing it means handing the write to
+another thread, which is a change to obs_bus's threading model and is not
+something to make unverified at the end of a session.
+
+**The test is committed and registered.** Without `AIMEE_STORE_URL` it skips, so
+`make unit-tests` is green; with one it fails, which is the truth. That is the
+opposite of the state this property was in before — a retired test and a note in
+a Makefile — and it is why the defect is now a failing assertion rather than a
+paragraph.
