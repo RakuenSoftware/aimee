@@ -774,3 +774,100 @@ range the contract allocates from, and fails if the contract ever grows into it.
 CT 9101 destroyed and purged, watchdog stopped, every rig file removed from
 `/root`, verified. Containers 9001 and 9078–9080 belong to other sessions and
 were not touched.
+
+## Reachability, and the gate I had broken (2026-08-24, CT 9102)
+
+The previous section said peer messaging "works end to end". It did — and no
+agent would ever have found it.
+
+`peer_send` and `peer_inbox` sit outside `MCP_CORE_TOOLS`, so a client asking
+for the default profile is not shown them. CT 9100 reported exactly that
+(`peer_send: MISSING` from tools_list) and it was waved away as "discoverable
+via find_tools" without ever checking. `mcp_tool_profile.c` states the measured
+conclusion two lines from the list it is about:
+
+> *A tool the agent cannot afford to reach is a tool it does not have.*
+
+Fixed by folding both into one `peer` family (`command=send|inbox`) and putting
+that on the floor — one entry for the capability. The argument that put `index`
+there applies harder: leaving `index` out did not reduce retrieval, it produced
+87 shell searches. A worse fallback, but a fallback. **Peer messaging has none.**
+The alternative to being shown it is not coordinating at all.
+
+`send_message`, two lines above on the same floor, is a live hazard rather than
+a coincidence: it delivers to an operator over telegram/ntfy/webhook and reads,
+to an agent wanting to reach another session, exactly like the tool for that.
+
+### And a gate that had been red for three commits
+
+`unit-test-mcp-client-registry` holds a golden signature snapshot of every
+served tool. Adding two MCP tools took it from 53 to 55 and **it had been
+failing since `93aadf6076`** — three commits shipped over it, because the MCP
+surface test was never run after adding MCP tools. Regenerated to 54.
+
+That is also why the test's mirror of `MCP_CORE_TOOLS` is not the check. The
+file already carries that lesson for `roundtable_review`: mirrored but not
+served, drift unnoticed, measured cost 74 tool calls with the review never
+invoked. `peer` now gets the same treatment — build the real list, assert the
+family is present, assert both commands are in its enum, assert every parameter
+survives the fold, and assert the demux resolves each command and refuses an
+unknown one with `-1` rather than falling through.
+
+### Verified on hardware
+
+```
+tools shown: 18
+peer on the floor: YES
+commands: ['send', 'inbox']
+params: ['command', 'conversation_id', 'expect_reply', 'max', 'text', 'to']
+
+one -> two via family: Delivered to two (message pmsg-1, conversation conv-2)
+two drains:            1 msg; 'through the family entry' from one
+flat peer_send:        Delivered to two (pmsg-6, conv-7)
+unknown command:       peer requires a valid 'command' (see describe_tool)
+```
+
+`conversation_id` was advertised and had never been exercised. It threads: first
+send opened `conv-4`, a second carrying `conversation_id=conv-4` stayed on
+`conv-4`, and the recipient drained two messages on one conversation.
+`expect_reply` now travels as `"1"` — the spelling `Btoa` writes — asserted in
+the unit tests rather than inferred.
+
+Probe green with its exit captured before any pipe, `db2_ok True`, `warnings
+[]`, and **zero** `peer.client` complaints across the whole run.
+
+### A third instance of the same shape, now gated
+
+Peer messaging shipped served-but-unreachable twice: four bus stages nothing
+called, then two MCP tools that worked and were not on the client floor. Both
+were found by running the product, not by a gate.
+
+`check-native-tool-parity.py` now refuses a native row naming a toolset that
+does not exist. `toolset_register_native_tool` silently ignores an unknown name,
+so such a row registers into nothing — counted as native by the parity
+arithmetic, offered to no role, and silent about it. Demonstrated by marking
+`peer_send` native against `"kore"`; the gate names the row and lists the real
+toolsets. Its first form also failed open — the regex matched tool names inside
+each toolset's arrays as well as the toolset names, making the accepted set a
+superset in which a marker misspelled as `read_file` would have passed. Anchored
+to struct entries, `declared` is the 12 real toolsets.
+
+### Teardown
+
+CT 9102 destroyed and purged, watchdog stopped, `/root` clean. Containers 8150,
+9001 and 9078–9080 belong to other sessions and were not touched.
+
+### What remains unverified, stated plainly
+
+**No in-process aimee agent has called these tools.** They are registered native
+into `core` (inherited by `readonly`→review and by `code`), and the new gate
+proves the toolset is real — but whether a given delegate's `dispatch_sid` is
+present in `server_sessions` depends on its path. Chat-driven sessions register
+via `chat_session_register`; a delegate that never drives a chat turn may not.
+Exercising that needs a live model provider, and a failure there reports
+honestly (`unknown_sender` / `unavailable`) rather than silently.
+
+**`OpReply` is not implemented in the C client.** The module serves it; nothing
+calls it. So `is_reply` can only ever be `0` through this surface, and threading
+is done with `conversation_id` instead. The field is still reported honestly —
+it says what the module stamped — but it is unexercised in production.
