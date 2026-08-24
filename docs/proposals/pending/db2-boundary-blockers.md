@@ -218,18 +218,60 @@ One published operation still matches: `db2_dim_change_reset` reaches
 it opens a maintenance context from a worker and a project it supplies itself,
 not from a caller's identity, so it needs no principal from the request.
 
-Two ways out, and neither belongs to a migration working one symbol at a time.
-The envelope could carry an authenticated principal and team, which the module
-sets on its connection for the life of the request -- a wire-format change, and
-a decision about whether the module may be told who the caller is or must
-establish it. Or the scope stays inside DB2 and each unit of tenant work
-becomes one composite operation that opens the scope, does the work and
-commits, which means enumerating those units rather than the functions they
-call.
+### Most of this was answered the day after it was written
 
-Until one of those exists the 70 stay unreviewed, and the count is worth
-watching: it is roughly one in three of what is left, not one in seven as the
-undercounting scan suggested.
+The paragraph that used to sit here said there were two ways out and neither
+belonged to a migration working one symbol at a time: the envelope could carry
+an authenticated principal and team, which is a wire-format change and a
+decision about whether the module may be TOLD who the caller is or must
+establish it; or the scope stays inside DB2 and each unit of tenant work becomes
+one composite operation.
+
+Read `db2_tenant_scope_begin()` and it needs exactly three things. An
+authenticated principal, refused if `p->authenticated` is unset. The whole unit
+on one connection -- `db2_lease_begin()` is commented "eager lease so the whole
+unit rides one connection". And an identity key plus team, which it puts on the
+connection with `SELECT set_tenant_context(?1, ?2)`.
+
+Two of those three are now shipped machinery, and this section was last edited
+on 2026-08-22, one day before the first of them landed.
+
+* **Who is asking.** `38c9665c2f` gives a module handler `Frame.PrincipalRef`
+  and `Frame.SrcHandle`. The bus daemon stamps both from the admitted slot;
+  `bus_route.c` is explicit that a client-supplied src/principal is never
+  authority. So the identity is host-authenticated, which settles the question
+  the old paragraph could not: the module is told, by the bus, not by the sender.
+  It is not a wire-format change and it is not a self-assertion to verify.
+* **One connection for the whole unit.** The postgres module already keys open
+  transactions to `(PrincipalRef, SrcHandle)` -- `sql.go` refuses
+  `PrincipalRef == 0`, claims a transaction against both, and caps them per
+  principal. `sql_live_test.go` runs an intruder principal against another's
+  handle to prove the claim holds. A transaction that outlives one request,
+  owned by whoever opened it, is solved and tested.
+
+What is genuinely left is the third thing, and it is one question rather than an
+architecture: `set_tenant_context` wants the identity KEY that
+`db2_tenant_identity_key()` derives from a whole `kb_principal_t`, and the bus
+carries a numeric principal ref. Something has to resolve one to the other
+inside the module, and whatever does is the authority for every RLS policy in
+the schema -- so it cannot be a lookup the caller can influence. The shape that
+fits what already exists is per-principal attachment: the KB verifies once
+(`kb_principal_from_verify`, which is the only thing that sets `authenticated`)
+and attaches as that principal, making the ref-to-identity binding a property of
+the admitted slot rather than of any request.
+
+That is a decision worth taking deliberately, and it is a much smaller one than
+this section used to describe. Until it is taken the 70 stay unreviewed. The
+count is still worth watching -- roughly one in three of what is left, not one
+in seven as the undercounting scan suggested -- but the obstacle in front of it
+is no longer two architectures.
+
+**The replay still cannot check any of it.** That objection is untouched by the
+above and is the one to keep: the replay connects as a superuser, RLS is
+bypassed, and a tenancy operation replayed there returns everything and looks
+correct where a production role would return nothing. Whatever resolves the
+identity key has to be proven under a role that RLS applies to, or it will pass
+the same way the three withdrawn operations passed.
 
 ## Thirty-three declarations run whatever the host process installed into them
 
