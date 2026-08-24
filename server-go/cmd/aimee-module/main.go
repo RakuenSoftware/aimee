@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db1"
@@ -37,6 +38,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
 	"github.com/JBailes/aimee/server-go/modules/workspace"
+	storage "github.com/JBailes/aimee/server-go/postgres"
 )
 
 var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
@@ -51,6 +53,12 @@ const roundtableDelegatePrincipalRef uint32 = 65
 // serving grant requests nothing, so reaching another module's stage needs a
 // second principal that is granted exactly that request and nothing else.
 const economizerStorePrincipalRef uint32 = 66
+
+// controlPlaneStorePrincipalRef is the control-plane module's OUTBOUND identity,
+// for the same reason: its serving grant requests nothing, so reaching the
+// postgres module's storage stage needs a second principal granted exactly that
+// one request.
+const controlPlaneStorePrincipalRef uint32 = 69
 
 // economizerStore seats the economizer's reducer state on DB1.
 //
@@ -77,6 +85,70 @@ func economizerStore(ctx context.Context, moduleBusSocket string) economizer.Sta
 		return nil
 	}
 	return store
+}
+
+// controlPlaneStore seats the control-plane module's storage on the postgres
+// module, and applies its schema.
+//
+// THE FIRST THING IN THIS TREE THAT REACHES POSTGRESQL THROUGH THE MODULE IN A
+// RUNNING DEPLOYMENT. The storage stage was built, registered, declared for
+// both placements and proven at parity, and nothing consumed it: the deployed
+// aimee-module-db2 is the C build, and the Go db2 module that does reach
+// PostgreSQL this way is not the deployed db2. So the architecture was true of a
+// test path and false of the product.
+//
+// A failure here is not fatal. postgres is in the KB's optional module list, so
+// an operator can turn it off; the module then reports storage unreachable and
+// keeps serving health, which is the truthful answer. Refusing to start would
+// turn an operator's choice into an outage.
+func controlPlaneStore(ctx context.Context, moduleBusSocket string) {
+	if ctx == nil || moduleBusSocket == "" {
+		return
+	}
+	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, controlPlaneStorePrincipalRef)
+	if err != nil {
+		log.Printf("control-plane: no storage bus (%v); serving health without it", err)
+		return
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	if err != nil {
+		busClient.Detach()
+		log.Printf("control-plane: no storage caller (%v); serving health without it", err)
+		return
+	}
+	client := storage.New(func(callCtx context.Context, body []byte) ([]byte, error) {
+		return caller.Call(callCtx, postgres.EventSQL, postgres.StageSQL, 0,
+			controlPlaneStoreDeadline, body)
+	})
+	controlplane.UseStore(client)
+
+	// The schema, and a row proving the round trip, on the way up. Logged rather
+	// than fatal for the reason above -- and logged on success too, because
+	// "storage is reachable" is the fact this commit exists to make true and an
+	// operator should be able to see it in the journal rather than infer it.
+	startCtx, cancel := context.WithTimeout(ctx, controlPlaneStoreDeadline)
+	defer cancel()
+	if err := controlplane.RecordStart(startCtx, time.Now().UTC().Format(time.RFC3339),
+		aimeeVersion()); err != nil {
+		log.Printf("control-plane: storage unreachable at start (%v); health will say so", err)
+		return
+	}
+	log.Printf("control-plane: schema %s applied through the postgres module",
+		controlplane.SchemaOwner)
+}
+
+// How long the control-plane module waits on a storage call. Generous compared
+// with a health probe because a migration runs DDL, and mean compared with a
+// startup that hangs: a module that never finishes starting is worse than one
+// that reports storage unreachable and serves.
+const controlPlaneStoreDeadline = 10 * time.Second
+
+// aimeeVersion is what this build calls itself, for the recorded row.
+func aimeeVersion() string {
+	if version := os.Getenv("AIMEE_VERSION"); version != "" {
+		return version
+	}
+	return "unknown"
 }
 
 func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtable.PanelReviewer, error) {
@@ -311,6 +383,10 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		config.Stages = []bus.ModuleStage{
 			{EventKind: controlplane.EventHealth, StageID: controlplane.StageHealth},
 		}
+		// Storage first, so the schema is applied before anything is served and
+		// the first health call answers from a database rather than from a
+		// not-yet-tried one.
+		controlPlaneStore(ctx, moduleBusSocket)
 		config.Handler = controlplane.Handle
 	case "postgres":
 		config.ModuleName = name

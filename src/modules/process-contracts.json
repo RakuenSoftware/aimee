@@ -751,6 +751,17 @@
       "request": [
         11777
       ]
+    },
+    {
+      "id": "control-plane-postgres",
+      "principal_ref": 69,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-control-plane",
+      "placements": [
+        "kb"
+      ],
+      "request": [
+        11266
+      ]
     }
   ]
 }

@@ -16,10 +16,20 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
+
+// How long a health probe may spend reaching storage. Short, because a health
+// answer that arrives after the caller gave up is not an answer.
+const probeTimeout = 400 * time.Millisecond
+
+// ErrMalformedReply reports a reply this module did not write.
+var ErrMalformedReply = errors.New("control-plane: malformed health reply")
 
 const (
 	// Stage 1. The kind follows the registry's rule, 4097 + 256*ref +
@@ -33,6 +43,15 @@ const (
 
 	requestLen  = 8
 	responseLen = 12
+
+	// The flag word. StorageReachable says the postgres module ANSWERED and this
+	// module's own schema is recorded -- evidence rather than a guess, set from a
+	// migration and a version read, both over the bus.
+	//
+	// It deliberately does not say the database is healthy. That is the postgres
+	// module's question and it already answers it, and two modules with an
+	// opinion about one fact eventually disagree.
+	flagStorageReachable = uint32(1 << 0)
 )
 
 // Ready reports whether this module can do its job.
@@ -45,6 +64,17 @@ type Ready struct {
 	// StorageReachable is whether the postgres module answered, not whether the
 	// database is healthy. A caller that needs the latter asks postgres.
 	StorageReachable bool
+}
+
+// DecodeHealthReply reads what the stage answered.
+func DecodeHealthReply(reply []byte) (Ready, error) {
+	if len(reply) != responseLen ||
+		binary.LittleEndian.Uint32(reply[0:4]) != responseMagic ||
+		binary.LittleEndian.Uint32(reply[4:8]) != wireVersion {
+		return Ready{}, ErrMalformedReply
+	}
+	flags := binary.LittleEndian.Uint32(reply[8:12])
+	return Ready{StorageReachable: flags&flagStorageReachable != 0}, nil
 }
 
 // Handle serves the health stage.
@@ -63,13 +93,25 @@ func Handle(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleSta
 		return nil, bus.ModuleStatusCancelled
 	}
 
+	// Bounded by the caller's deadline: reaching storage is a bus round trip,
+	// and a probe that outlives the call asking for it holds a connection for an
+	// answer nobody is waiting for.
+	ctx := context.Background()
+	if remaining := invocation.Remaining(probeTimeout); remaining > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, remaining)
+		defer cancel()
+	}
+	reachable, _ := storageEvidence(ctx)
+
 	reply := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(reply[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(reply[4:8], wireVersion)
-	// No capabilities are served yet, so the flag word is zero. It is present
-	// from the first commit rather than added later, because a reply that grows
-	// a field is a wire change and this one will grow as capabilities move in.
-	binary.LittleEndian.PutUint32(reply[8:12], 0)
+	var flags uint32
+	if reachable {
+		flags |= flagStorageReachable
+	}
+	binary.LittleEndian.PutUint32(reply[8:12], flags)
 	return reply, bus.ModuleStatusOK
 }
 
