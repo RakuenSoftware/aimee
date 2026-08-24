@@ -319,7 +319,62 @@ process because in process there is no transport to distinguish it from.
 `aimee-module-aimee` is a supervised long-lived process holding its own state:
 the grant written by one probe invocation is still there for the next.
 
-## Both services up
+## Both services up (2026-08-24, current tree)
+
+Three re-runs of this validation stood up `aimee-server` and never `aimee-kb`,
+while the server's own log said `knowledge service unreachable` each time and I
+read past it. Both are up here, on one container, and the numbers are what the
+run printed rather than what it was expected to print.
+
+```
+server=1 kb=1 db1=1 aimee=1 config=2
+/run/aimee/bus.sock      the server's module bus
+/run/aimee/kb-bus.sock   the KB's own module bus
+
+aimee-kb      LISTEN 127.0.0.1:8790,  GET /v1/health -> 200
+aimee-server  /v1/health -> 200 over /var/lib/aimee/aimee-http.sock
+PostgreSQL 17 + pgvector 0.8.0, 253 tables in public
+```
+
+**The KB reports itself DEGRADED, and that is the honest headline.** Its health
+body:
+
+```
+"status":"degraded"
+"db2_ok":false, "db2_kb_tables_ok":false, "pgvec_ok":true
+"warnings":["DB2 schema not ready"]
+"blockers":["store unavailable: the KB database schema is not ready ...",
+            "no embedder configured ..."]
+```
+
+The embedder blocker is expected and already a stated non-goal here. The schema
+one is not: `--bootstrap-db2` had just reported `{"status":"ok",
+"knowledge_ready":true}` and created those 253 tables, and they are in `public`,
+which is `current_schema()`, and they include `kb_async_jobs`, `kb_doc_assets`
+and the rest of the `kb_*` set. So the KB's bootstrap and the KB's health check
+disagree about the same database on the same connection string.
+
+Not diagnosed further. One hypothesis worth someone's time rather than mine at
+this point: the bootstrap reported `"config_saved":false`, so the URL was never
+persisted, and a health check reading it from config rather than the environment
+would be checking nothing. That is a hypothesis, not a finding -- it is written
+down as one so nobody later reads it as the second.
+
+**The server never reached the KB**, and said so with the KB up and answering:
+`knowledge service unreachable (transport /v1/health)`. This rig never told the
+server where the KB is. The earlier run below had them in two containers with an
+address between them; one container with two loopback listeners is not the same
+arrangement, and the KB client resolves an endpoint that was not configured here.
+
+**Peer messaging is unaffected and green throughout**: 25 checks, twice
+consecutively, `probe exit=0`, with both services running. The feature does not
+touch the KB, which is why it is unaffected -- stated because "green while the KB
+was degraded" would otherwise read as coverage it is not.
+
+### The earlier run, at commit `ffb60ac`
+
+Kept because it is the only run where the two services were in SEPARATE
+containers, which is the arrangement the KB client expects.
 
 - **aimee-server** (CT 9090): 14 module processes attached including `aimee`;
   `/v1` on 127.0.0.1:8740 answering 401 without a bearer, which is the listener
@@ -386,6 +441,13 @@ longer the clean room the evidence claims it was.
 - **Retrieval quality on the kb.** The embedder is a stub returning hash-derived
   vectors with no semantic content. It proves the service starts and the wire
   works; any relevance measured against it is noise.
+- **The server reaching the KB.** Both services ran and answered `/v1/health`
+  independently, and the server still reported `knowledge service unreachable`
+  because nothing configured a KB endpoint for it. So "both services up" is
+  true and "the two are integrated" is not, and only the first was tested.
+- **The KB's store.** It reports `status: degraded` with `DB2 schema not ready`
+  while 253 tables sit in the schema it uses. Its bootstrap and its health check
+  disagree, and which of them is right was not established.
 - **The in-image PostgreSQL.** The kb was pointed at the container's stock
   cluster via `AIMEE_DB2_URL` because the internal one refuses to run as root,
   which is PostgreSQL's rule rather than aimee's.
