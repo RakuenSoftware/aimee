@@ -97,21 +97,6 @@ TOKEN_KEY="$work/token.pem"
 pg_indb()     { pg_db -c "$1"; }
 pg_indb_val() { pg_val "$1"; }
 
-# --- the management trust chain -------------------------------------------
-# Seeded BEFORE the server starts, into the store both this rig and the server
-# reach over the bus, because the server reads the envelope at request time and
-# an absent one denies every token as INVALID — which looks identical to a
-# forged token and would make this rig "pass" for the wrong reason.
-#
-# This used to name a SQLite file ($AIMEE_HOME/aimee.db) that the server would
-# open directly. The store is a Go module now, so the store module must be
-# running and pointed at its database before this step.
-step "Provisioning the JWKS trust chain (real envelope, real signature)"
-kid=$(./write-tier-enforce-live provision \
-        --bundle "$BUNDLE" --key "$TOKEN_KEY") \
-  || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
-echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
-
 # --- kb --------------------------------------------------------------------
 # The boot recipe (config shape, TCP DSN, health poll) is the shared one; only the
 # trust chain above is this rig's own.
@@ -124,6 +109,37 @@ live_env_start_kb
 # nothing to do with the token.
 export AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE="$BUNDLE"
 live_env_start_server
+
+# --- the management trust chain -------------------------------------------
+# AFTER the server, which is what changed. This used to be seeded before it,
+# into a SQLite file ($AIMEE_HOME/aimee.db) the server would later open
+# directly. The store is a Go module now and is reached over the bus, and the
+# bus socket is the SERVER's -- so the store cannot be running until the server
+# is, and this step cannot run before either of them. Seeding it earlier is what
+# produced "DB1 mgmt jwks is unreachable" followed by "the store refused the
+# signed JWKS envelope": nothing had refused anything, there was no store yet.
+#
+# Still before the first token is minted, which is the ordering that actually
+# matters. The server reads the envelope at REQUEST time, so what must hold is
+# that it is stored before a request needs it -- an absent one denies every
+# token as INVALID, which looks identical to a forged token and would make this
+# rig "pass" for the wrong reason.
+#
+# The server logs one startup error about the trust bundle being unreadable,
+# and it is accurate: the file does not exist yet, and provision writes it a
+# second later. Nothing consumes the bundle until a request does, and the
+# management surface validates only the SHAPE of the path at startup.
+#
+# One provision call, not two. cmd_provision generates a fresh RSA authority key
+# every time it runs, so splitting it into "write the bundle" and "seed the
+# store" would leave the bundle pinning a key the stored envelope does not
+# carry.
+step "Provisioning the JWKS trust chain (real envelope, real signature)"
+kid=$(./write-tier-enforce-live provision \
+        --bundle "$BUNDLE" --key "$TOKEN_KEY") \
+  || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
+echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
+
 
 # --- helpers ---------------------------------------------------------------
 # A FRESH jti per call, from entropy rather than a counter. `t=$(mint data)` runs
