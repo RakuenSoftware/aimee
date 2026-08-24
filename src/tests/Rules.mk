@@ -985,6 +985,7 @@ $(TESTPREFIX)/unit-test-css-insights: \
 $(TESTPREFIX)/unit-test-typed-facts: \
                                        $(OBJDIR)/tests/test_typed_facts.o \
                                        $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/db2/memory_scope_query.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/db2/rel_types_store.o \
                                        $(OBJDIR)/db2/fact_recall.o \

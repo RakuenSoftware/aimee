@@ -95,9 +95,8 @@ int db2_fact_retract(const char *source, const char *relation, const char *targe
       return FACT_RETRACT_IMMUTABLE;
 
    fact_actor_t actor;
-   if (db2_fact_actor_internal(authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER
-                                                                : FACT_ACTOR_MODEL,
-                               &actor) != 0)
+   if (db2_fact_actor_internal(
+           authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
       return -1;
    return db2_fact_mutation_invalidate(&actor, source, norm, target, NULL);
 }

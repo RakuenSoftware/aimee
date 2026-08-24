@@ -17,11 +17,11 @@
  * the C canonicalization), and (b) an INDEPENDENT recomputation in C of the SQL row's
  * hash (audit_worm_row_hash over its stored fields + stored prev_hash) equals the row
  * hash the SQL function stored — direct byte-identity, not merely self-consistency. */
-#include <aimee/audit/audit_worm_chain.h> /* audit_worm_row_hash, AUDIT_WORM_GENESIS_PREV */
-#include "db2.h"                          /* db2_init / db2_shutdown */
-#include "db2/db2_internal.h"             /* db2_conn */
-#include "db2/db_postgres.h"              /* aimee_pg_* */
-#include "kb_audit_worm.h"                /* db2_kb_audit_append / verify / count */
+#include <aimee/audit/audit_worm_chain.h>        /* audit_worm_row_hash, AUDIT_WORM_GENESIS_PREV */
+#include "db2.h"                                 /* db2_init / db2_shutdown */
+#include "db2/db2_internal.h"                    /* db2_conn */
+#include "db2/db_postgres.h"                     /* aimee_pg_* */
+#include "kb_audit_worm.h"                       /* db2_kb_audit_append / verify / count */
 #include "modules/config/config_embedding_dim.h" /* deployment test width */
 
 #include <assert.h>

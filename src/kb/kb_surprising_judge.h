@@ -11,7 +11,6 @@
 
 #include <stddef.h>
 
-#include "config.h"               /* config_t */
 #include "kb/kb_graph_analytics.h" /* kb_graph_surprising_t */
 
 typedef struct

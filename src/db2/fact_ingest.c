@@ -13,9 +13,8 @@
 #define FI_MAX_TRIPLES 16
 
 int db2_fact_ingest_text_as_actor(const char *text, const fact_actor_t *actor, int enabled,
-                                  const fact_evidence_input_t *evidence,
-                                  const char *assertion_kind, const char *valid_from,
-                                  const char *valid_until)
+                                  const fact_evidence_input_t *evidence, const char *assertion_kind,
+                                  const char *valid_from, const char *valid_until)
 {
    if (!text)
       return -1;
@@ -48,18 +47,17 @@ int db2_fact_ingest_text_with_evidence(const char *text, fact_authority_t author
                                        const char *valid_until)
 {
    fact_actor_t actor;
-   if (db2_fact_actor_internal(authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER
-                                                                : FACT_ACTOR_MODEL,
-                               &actor) != 0)
+   if (db2_fact_actor_internal(
+           authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
       return -1;
-   return db2_fact_ingest_text_as_actor(text, &actor, enabled, evidence, assertion_kind,
-                                        valid_from, valid_until);
+   return db2_fact_ingest_text_as_actor(text, &actor, enabled, evidence, assertion_kind, valid_from,
+                                        valid_until);
 }
 
 int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabled)
 {
    return db2_fact_ingest_text_with_evidence(text, authority, enabled, NULL, FACT_KIND_WORLD_FACT,
-                                              NULL, NULL);
+                                             NULL, NULL);
 }
 
 int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)

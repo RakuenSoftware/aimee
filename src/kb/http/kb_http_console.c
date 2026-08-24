@@ -518,8 +518,7 @@ static int console_typed_facts_entity(const char *body, char *out_buf, int out_c
                   "{\"error\":\"entities are not both active or merge would be invalid\"}");
          return 409;
       }
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+      snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
                (long long)mid, cid);
       return 200;
    }
@@ -539,8 +538,7 @@ static int console_typed_facts_entity(const char *body, char *out_buf, int out_c
                "{\"error\":\"merge is unknown, already undone, or no longer current\"}");
       return 409;
    }
-   snprintf(out_buf, (size_t)out_cap,
-            "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+   snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
             (long long)mid, cid);
    return 200;
 }

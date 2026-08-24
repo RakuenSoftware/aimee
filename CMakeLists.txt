@@ -433,6 +433,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/admin_grant.c
     ${AIMEE_SRC_DIR}/db2/oidc_jwks.c
     ${AIMEE_SRC_DIR}/db2/entity_edges.c
+    ${AIMEE_SRC_DIR}/db2/fact_mutation.c
     ${AIMEE_SRC_DIR}/db2/entity_profiles.c
     ${AIMEE_SRC_DIR}/db2/epistemic_directives.c
     ${AIMEE_SRC_DIR}/db2/failed_queries.c
@@ -450,6 +451,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/kb_service_backend.c
     ${AIMEE_SRC_DIR}/db2/kb_service_backend_ingest.c
     ${AIMEE_SRC_DIR}/db2/kb_service_backend_agent.c
+    ${AIMEE_SRC_DIR}/db2/kb_service_backend_context.c
     ${AIMEE_SRC_DIR}/db2/kb_service_backend_memory.c
     ${AIMEE_SRC_DIR}/db2/memory_briefing.c
     ${AIMEE_SRC_DIR}/db2/memory_conflicts.c
