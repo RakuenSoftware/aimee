@@ -550,60 +550,82 @@ static void test_osv_offline_cache_miss_allows(void)
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
 #define MCP_TOOLS_GOLDEN_COUNT 54
-#define MCP_TOOLS_GOLDEN                                                                                                                                                                                                                                                           \
-   "ask_user {choices,question} req:question\n"                                                                                                                                                                                                                                    \
-   "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                                                                                                                                                                                                        \
-   "attempt {approach,command,filter,lesson,outcome,task_context} req:command\n"                                                                                                                                                                                                   \
-   "autopilot {action,job_id,pipeline_id,plan_depth,plan_id,task} req:action\n"                                                                                                                                                                                                    \
-   "background {action,command,cwd,id,tail_lines} req:action\n"                                                                                                                                                                                                                    \
-   "call_tool {arguments,name} req:arguments,name\n"                                                                                                                                                                                                                               \
-   "clarify {answer,command,description,session_id} req:command\n"                                                                                                                                                                                                                 \
-   "dashboard_metrics {} req:\n"                                                                                                                                                                                                                                                   \
-   "delegate {branch,cwd,handoff_json,persona,prompt,role,scope,tools,via} req:persona,prompt,role\n"                                                                                                                                                                              \
-   "delegate_reply {content,delegation_id} req:content,delegation_id\n"                                                                                                                                                                                                            \
-   "delegate_status {job_id} req:job_id\n"                                                                                                                                                                                                                                         \
-   "describe_tool {name} req:name\n"                                                                                                                                                                                                                                               \
-   "diagnose {command,content,diagnosis_id,hypothesis_id,rank,source,stance,symptom} req:command\n"                                                                                                                                                                                \
-   "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} req:command\n"                                                                                                                                                                                 \
-   "epistemic_directive {anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_id,state,suppress,topic,valid_until} req:command\n"                                                                                                             \
-   "find_symbol {identifier,identifiers,project,scope} req:\n"                                                                                                                                                                                                                     \
-   "find_tools {limit,query} req:\n"                                                                                                                                                                                                                                               \
-   "get_help {topic} req:\n"                                                                                                                                                                                                                                                       \
-   "get_identity {} req:\n"                                                                                                                                                                                                                                                        \
-   "git {abort_on_conflict,action,all,async,auto,base,body,branch,command,count,depth,diff_stat,expected_head_sha,files,force,index,job_id,merge_method,message,mirror,mode,name,number,path,prune,rebase,ref,remote,source,staged,stat_only,state,title,url,wait} req:command\n"  \
-   "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"                                                                                                                                                                                      \
-   "host {command,name} req:command\n"                                                                                                                                                                                                                                             \
-   "index {command,fallback,file_path,file_paths,include_code,judge,line_end,line_start,max_results,node,paths,project,queries,query,scope,spans,symbol,symbols} req:command\n"                                                                                                    \
-   "job {command,job_id,max_concurrent,plan_id} req:command\n"                                                                                                                                                                                                                     \
-   "learning {command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,target_key,target_memory_id,title,workflow_project,workflow_signal_type} req:command\n"                                                                                      \
-   "list_curiosity_items {limit,state} req:\n"                                                                                                                                                                                                                                     \
-   "lsp {col,command,file,line,workspace} req:command\n"                                                                                                                                                                                                                           \
-   "memory {as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,project,query,reason,scope,tier,verb,workspace} req:command\n"                                                                                                                   \
-   "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"                                                                                                                                                                                       \
-   "note {command,content,limit,query,tag,tags,title} req:command\n"                                                                                                                                                                                                               \
-   "payload_rewrite_status {} req:\n"                                                                                                                                                                                                                                              \
-   "pdf_inspect_structure {document_key,project} req:document_key,project\n"                                                                                                                                                                                                       \
-   "pdf_list_assets {document_key,project} req:document_key,project\n"                                                                                                                                                                                                             \
-   "pdf_lookup_table {document_key,page_no,project} req:document_key,project\n"                                                                                                                                                                                                    \
-   "pdf_open_asset {asset_id,project} req:asset_id,project\n"                                                                                                                                                                                                                      \
-   "pdf_open_neighbors {chunk_id,project} req:chunk_id,project\n"                                                                                                                                                                                                                  \
-   "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n"                                                                                                                                                                                               \
-   "pdf_search_chunks {max_results,project,query} req:project,query\n"                                                                                                                                                                                                             \
-   "peer {command,conversation_id,expect_reply,max,text,to} req:command\n"                                                                                                                                                                                                         \
-   "pipeline {artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,pipeline_id,questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"                                                                                            \
-   "preview_blast_radius {paths,project,scope} req:paths\n"                                                                                                                                                                                                                        \
-   "prospective_memory {action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_until} req:command\n"                                                                                                                                           \
-   "recall {block_type,command,cwd,limit,limit_tokens,project,query,scope,since,workspace} req:command\n"                                                                                                                                                                          \
-   "roadmap {command,roadmap_id} req:command\n"                                                                                                                                                                                                                                    \
-   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff,original_request\n"                                                                                                                                                                 \
-   "rules {command,reason,text} req:command\n"                                                                                                                                                                                                                                     \
-   "search_docs {cwd,max_results,project,query,scope} req:query\n"                                                                                                                                                                                                                 \
-   "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                                                                                                                                                                                                          \
-   "send_message {target,text} req:target,text\n"                                                                                                                                                                                                                                  \
-   "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} req:command\n"                                                                                                                                                                      \
-   "skill_manage {absorbed_into,action,content,cwd,file_path,name,new_string,old_string,replace_all} req:action,name\n"                                                                                                                                                            \
-   "store_workflow {project,rule,signal_type} req:rule,signal_type\n"                                                                                                                                                                                                              \
-   "task_list {limit,session_id,state} req:\n"                                                                                                                                                                                                                                     \
+#define MCP_TOOLS_GOLDEN                                                                           \
+   "ask_user {choices,question} req:question\n"                                                    \
+   "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
+   "attempt {approach,command,filter,lesson,outcome,task_context} req:command\n"                   \
+   "autopilot {action,job_id,pipeline_id,plan_depth,plan_id,task} req:action\n"                    \
+   "background {action,command,cwd,id,tail_lines} req:action\n"                                    \
+   "call_tool {arguments,name} req:arguments,name\n"                                               \
+   "clarify {answer,command,description,session_id} req:command\n"                                 \
+   "dashboard_metrics {} req:\n"                                                                   \
+   "delegate {branch,cwd,handoff_json,persona,prompt,role,scope,tools,via} "                       \
+   "req:persona,prompt,role\n"                                                                     \
+   "delegate_reply {content,delegation_id} req:content,delegation_id\n"                            \
+   "delegate_status {job_id} req:job_id\n"                                                         \
+   "describe_tool {name} req:name\n"                                                               \
+   "diagnose {command,content,diagnosis_id,hypothesis_id,rank,source,stance,symptom} "             \
+   "req:command\n"                                                                                 \
+   "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} req:command\n" \
+   "epistemic_directive "                                                                          \
+   "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
+   "id,state,suppress,topic,valid_until} req:command\n"                                            \
+   "find_symbol {identifier,identifiers,project,scope} req:\n"                                     \
+   "find_tools {limit,query} req:\n"                                                               \
+   "get_help {topic} req:\n"                                                                       \
+   "get_identity {} req:\n"                                                                        \
+   "git "                                                                                          \
+   "{abort_on_conflict,action,all,async,auto,base,body,branch,command,count,depth,diff_stat,"      \
+   "expected_head_sha,files,force,index,job_id,merge_method,message,mirror,mode,name,number,path," \
+   "prune,rebase,ref,remote,source,staged,stat_only,state,title,url,wait} req:command\n"           \
+   "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
+   "host {command,name} req:command\n"                                                             \
+   "index "                                                                                        \
+   "{command,fallback,file_path,file_paths,include_code,judge,line_end,line_start,max_results,"    \
+   "node,paths,project,queries,query,scope,spans,symbol,symbols} req:command\n"                    \
+   "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
+   "learning "                                                                                     \
+   "{command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,"     \
+   "target_key,target_memory_id,title,workflow_project,workflow_signal_type} req:command\n"        \
+   "list_curiosity_items {limit,state} req:\n"                                                     \
+   "lsp {col,command,file,line,workspace} req:command\n"                                           \
+   "memory "                                                                                       \
+   "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
+   "project,query,reason,scope,tier,verb,workspace} req:command\n"                                 \
+   "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
+   "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
+   "payload_rewrite_status {} req:\n"                                                              \
+   "pdf_inspect_structure {document_key,project} req:document_key,project\n"                       \
+   "pdf_list_assets {document_key,project} req:document_key,project\n"                             \
+   "pdf_lookup_table {document_key,page_no,project} req:document_key,project\n"                    \
+   "pdf_open_asset {asset_id,project} req:asset_id,project\n"                                      \
+   "pdf_open_neighbors {chunk_id,project} req:chunk_id,project\n"                                  \
+   "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n"               \
+   "pdf_search_chunks {max_results,project,query} req:project,query\n"                             \
+   "peer {command,conversation_id,expect_reply,max,text,to} req:command\n"                         \
+   "pipeline "                                                                                     \
+   "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,pipeline_id," \
+   "questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"                  \
+   "preview_blast_radius {paths,project,scope} req:paths\n"                                        \
+   "prospective_memory "                                                                           \
+   "{action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_"  \
+   "until} req:command\n"                                                                          \
+   "recall {block_type,command,cwd,limit,limit_tokens,project,query,scope,since,workspace} "       \
+   "req:command\n"                                                                                 \
+   "roadmap {command,roadmap_id} req:command\n"                                                    \
+   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} "            \
+   "req:diff,original_request\n"                                                                   \
+   "rules {command,reason,text} req:command\n"                                                     \
+   "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
+   "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \
+   "send_message {target,text} req:target,text\n"                                                  \
+   "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
+   "req:command\n"                                                                                 \
+   "skill_manage "                                                                                 \
+   "{absorbed_into,action,content,cwd,file_path,name,new_string,old_string,replace_all} "          \
+   "req:action,name\n"                                                                             \
+   "store_workflow {project,rule,signal_type} req:rule,signal_type\n"                              \
+   "task_list {limit,session_id,state} req:\n"                                                     \
    "workflow_run {proposal_md,repo,workflow} req:proposal_md\n"
 
 /* --- mcp_build_tools_list surface net ---

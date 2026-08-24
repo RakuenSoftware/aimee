@@ -95,10 +95,10 @@ extern "C"
     * NULL) receives the module's re-stamped envelope -- its provenance, not the
     * caller's claim about it -- and the caller frees it with
     * peer_client_message_free. On PEER_CLIENT_REFUSED, *status names the no. */
-   peer_client_result_t
-   peer_client_send(const char *from, const char *to, const char *text,
-                    const char *conversation_id, int expect_reply,
-                    peer_client_message_t *stamped, uint32_t *status, int *transport);
+   peer_client_result_t peer_client_send(const char *from, const char *to, const char *text,
+                                         const char *conversation_id, int expect_reply,
+                                         peer_client_message_t *stamped, uint32_t *status,
+                                         int *transport);
 
    /* PEER_CLIENT_INBOX_TAKE_MAX bounds ONE drain, not an inbox.
     *

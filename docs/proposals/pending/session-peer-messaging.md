@@ -17,8 +17,8 @@
   language-ownership decision and its non-negotiable contracts; the unified-presence registry
   (`src/headers/presence.h`, still C-owned) for turn arbitration, attachments, and the
   presence-event stream, **read only**, over `/v1`; the module event bus and its governance/audit
-  tap ([`event-bus-wire-spec.md`](event-bus-wire-spec.md),
-  [`event-bus-governance-and-capture.md`](event-bus-governance-and-capture.md)) via the Go bus
+  tap (`event-bus-wire-spec.md`,
+  `event-bus-governance-and-capture.md`) via the Go bus
   client in `server-go/bus`; the thin-client↔Runtime mTLS transport
   ([`tiered-llm-p8-thinclient-mtls.md`](../done/tiered-llm-p8-thinclient-mtls.md)); the MCP/ACP
   protocol surfaces (`src/modules/protocols/`).
@@ -82,7 +82,7 @@ notification is labelled an excerpt and is never the artifact; the inbox always 
 ## Topology: the Runtime is the sole broker
 
 Sessions live server-side. Per
-[`remote-first-session-start.md`](remote-first-session-start.md), aimee runs as a thin client
+`remote-first-session-start.md`, aimee runs as a thin client
 against a remote aimee-server and *there is never a co-located server*; session state is
 Runtime state, and a client is an **attachment** to it.
 

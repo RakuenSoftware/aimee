@@ -145,14 +145,21 @@ func TestCClientPinsTheMessageWidth(t *testing.T) {
 // the caller it reads as the far side failing rather than as a grammar this
 // side got wrong.
 func TestCClientSpeaksTheSameBooleanGrammar(t *testing.T) {
-	body := cImplText(t)
+	// Whitespace-collapsed before matching. This guard reads SOURCE TEXT, and
+	// clang-format is free to rewrap any line in it -- so a pin written against
+	// the exact spelling is one reformat away from failing for a reason that has
+	// nothing to do with the wire. Worse than a false alarm: whoever hits it
+	// "fixes" the pin, and the fix is to loosen the thing that was catching a
+	// real defect. Collapsing runs of whitespace makes the guard depend on the
+	// code and not on its layout.
+	body := collapseSpace(cImplText(t))
 
 	// Whatever Btoa can WRITE, the C side must be able to READ. Asserted against
 	// Btoa's real output rather than a hand-copied list, so a change to Btoa
 	// fails here instead of quietly leaving the C reader behind.
 	for _, v := range []bool{true, false} {
 		lit := `"` + Btoa(v) + `"`
-		if !strings.Contains(body, "strcmp(cells[8], "+lit+")") {
+		if !strings.Contains(body, collapseSpace("strcmp(cells[8], "+lit+")")) {
 			t.Errorf("peerwire.Btoa(%v) writes %s and the C client never compares against it, "+
 				"so every row carrying that value is rejected as malformed", v, lit)
 		}
@@ -161,7 +168,7 @@ func TestCClientSpeaksTheSameBooleanGrammar(t *testing.T) {
 	// And whatever the C side WRITES for a bool, Atob must accept -- otherwise
 	// the module refuses the request and the caller is told its own well-formed
 	// call was wrong.
-	if !strings.Contains(body, `expect_reply ? "1" : "0"`) {
+	if !strings.Contains(body, collapseSpace(`expect_reply ? "1" : "0"`)) {
 		t.Error(`the C client no longer writes expect_reply as "1"/"0"; if the spelling ` +
 			`changed, check peerwire.Atob still accepts what it now writes`)
 	}
@@ -170,4 +177,10 @@ func TestCClientSpeaksTheSameBooleanGrammar(t *testing.T) {
 			t.Errorf("Atob rejects %q, which the C client writes for a bool: %v", spelled, err)
 		}
 	}
+}
+
+// collapseSpace reduces every run of whitespace to one space, so a guard that
+// reads source text is not also a guard on how that source is wrapped.
+func collapseSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }

@@ -45,8 +45,9 @@ the same shape with a leading `status(u32)` for responses.
 - `module-runtime`: process lifecycle, admission, and the stage table.
 
 Consumers are the session/turn layer when a model invokes a peer verb, the `/v1`
-surface for thin clients, and `protocols` for MCP/ACP once external agents can
-address aimee sessions.
+surface for thin clients, and `protocols` for MCP -- which is no longer future
+work: `peer_send` and `peer_inbox` ship in the MCP tool table, and an external
+agent addresses another aimee session through them.
 
 ## Providers and readiness
 
@@ -109,6 +110,27 @@ Both refuse at the ceiling rather than evicting, since evicting would discard an
 inbox somebody is waiting on and choose the victim by map order.
 
 ## Surfaces
+
+**The MCP tools are the surface that matters, and this section used to omit
+them.** They are how a model reaches another session; everything below is how
+other processes do.
+
+`peer_send` and `peer_inbox` live in the server's MCP table (`peer_client` in
+`src/peer_client` speaks db1-fields-v2 to this module's stages) and are folded
+into one `peer` family, `command=send|inbox`, which sits in `MCP_CORE_TOOLS`.
+
+The floor placement is load-bearing rather than a nicety. Tools outside it are
+hidden from the initial `tools/list` and reachable only through
+`find_tools` -> `describe_tool` -> `call_tool`, and these shipped that way once:
+served, working, and never shown to a client. Every other capability withheld
+from the floor has a fallback an agent reaches for instead; this one has none.
+There is no clumsier way for a session to reach another, so the alternative to
+being shown the tool is not coordinating at all.
+
+The sender is the CALLING session, taken from the call rather than accepted as
+an argument. A `from` parameter would let any caller claim to be any session,
+putting the forgery a layer above the provenance stamping that exists to stop
+exactly that.
 
 Bus stages are the module's interface to other modules. A `/v1` HTTP edge in
 `peer/http.go` serves thin clients directly: `GET /v1/sessions/peers`,

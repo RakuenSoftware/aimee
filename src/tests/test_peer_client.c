@@ -126,8 +126,9 @@ static const char *seen_cell(uint32_t want, char *buf, size_t cap)
    cannot come off the wire. A fixture written from the same misreading as the
    code under test confirms the misreading. */
 static const char *ROW[PEER_CLIENT_MESSAGE_WIDTH] = {
-    "msg-1", "corr-1", "conv-1", "sess-a", "uid:1000", "alpha", "sess-a", "0", "0",
-    "1787554800000000000", "hello from a"};
+    "msg-1",       "corr-1", "conv-1", "sess-a", "uid:1000",
+    "alpha",       "sess-a", "0",      "0",      "1787554800000000000",
+    "hello from a"};
 
 static int checks;
 static void ok(int cond, const char *what)
@@ -359,7 +360,8 @@ static void test_inbox(void)
       const char *cells[1] = {"0"};
       reply_set(PEER_CLIENT_STATUS_OK, cells, 1);
    }
-   ok(peer_client_inbox_take("sess-b", 0, &msgs, &count, &remaining, &status, NULL) == PEER_CLIENT_OK,
+   ok(peer_client_inbox_take("sess-b", 0, &msgs, &count, &remaining, &status, NULL) ==
+          PEER_CLIENT_OK,
       "an empty inbox is a success, not a failure");
    ok(count == 0 && remaining == 0 && msgs == NULL, "and it reports nothing taken, none waiting");
 
@@ -373,7 +375,8 @@ static void test_inbox(void)
          cells[1 + i] = ROW[i];
       reply_set(PEER_CLIENT_STATUS_OK, cells, 1 + PEER_CLIENT_MESSAGE_WIDTH);
    }
-   ok(peer_client_inbox_take("sess-b", 4, &msgs, &count, &remaining, &status, NULL) == PEER_CLIENT_OK,
+   ok(peer_client_inbox_take("sess-b", 4, &msgs, &count, &remaining, &status, NULL) ==
+          PEER_CLIENT_OK,
       "a take with rows succeeds");
    ok(count == 1, "one row decodes to one message");
    ok(remaining == 5, "and REMAINING is reported, so a caller knows to ask again");
@@ -416,7 +419,8 @@ static void test_inbox(void)
    /* An unknown session is a refusal from the module, and must arrive as one. */
    reset();
    reply_set(PEER_CLIENT_STATUS_NO_PEER, NULL, 0);
-   ok(peer_client_inbox_take("gone", 4, &msgs, &count, &remaining, &status, NULL) == PEER_CLIENT_REFUSED,
+   ok(peer_client_inbox_take("gone", 4, &msgs, &count, &remaining, &status, NULL) ==
+          PEER_CLIENT_REFUSED,
       "an unknown session refuses rather than reporting an empty inbox");
    ok(status == PEER_CLIENT_STATUS_NO_PEER, "and says which no");
 
@@ -522,7 +526,8 @@ static void test_transport_names(void)
    int distinct = 1;
    for (size_t i = 0; i < sizeof codes / sizeof codes[0]; i++)
       for (size_t j = i + 1; j < sizeof codes / sizeof codes[0]; j++)
-         if (strcmp(peer_client_transport_name(codes[i]), peer_client_transport_name(codes[j])) == 0)
+         if (strcmp(peer_client_transport_name(codes[i]), peer_client_transport_name(codes[j])) ==
+             0)
             distinct = 0;
    ok(distinct, "every transport code this client reports has its OWN name");
    ok(strcmp(peer_client_transport_name(-1), "unknown") == 0,

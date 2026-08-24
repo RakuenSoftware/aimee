@@ -28,14 +28,14 @@
  * A module's identity and the kinds it answers on are ONE fact, and writing
  * 12033 here would be a second copy of it free to drift when the aimee module
  * is folded into db1's ref. Derived, the renumber lands in one place. */
-#define PEER_PRINCIPAL_REF 31u
+#define PEER_PRINCIPAL_REF     31u
 #define PEER_EVENT_KIND(stage) (4096u + PEER_PRINCIPAL_REF * 256u + (uint32_t)(stage))
 
 #define PEER_STAGE_DELIVERY 1u
-#define PEER_STAGE_INBOX 2u
+#define PEER_STAGE_INBOX    2u
 
-#define PEER_OP_SEND 1u
-#define PEER_OP_INBOX_LEN 1u
+#define PEER_OP_SEND       1u
+#define PEER_OP_INBOX_LEN  1u
 #define PEER_OP_INBOX_TAKE 3u
 
 #define PEER_CALL_TIMEOUT_MS 5000
@@ -49,7 +49,7 @@
  * answer, because a reply it could not receive is not a refusal. */
 #define PEER_TEXT_MAX 8192u
 #define PEER_CELL_MAX 1024u
-#define PEER_ROW_BYTES \
+#define PEER_ROW_BYTES                                                                             \
    ((uint32_t)(PEER_CLIENT_MESSAGE_WIDTH - 1) * (4u + PEER_CELL_MAX) + 4u + PEER_TEXT_MAX)
 /* header + the leading `remaining` cell + the rows one take may return */
 #define PEER_RESPONSE_MAX (8u + 4u + 32u + (uint32_t)PEER_CLIENT_INBOX_TAKE_MAX * PEER_ROW_BYTES)
@@ -65,18 +65,30 @@ static const char *call_result_name(int rc)
 {
    switch (rc)
    {
-   case AIMEE_MODULE_CALL_OK: return "ok";
-   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT: return "capability_absent";
-   case AIMEE_MODULE_CALL_CAPABILITY_DENIED: return "capability_denied";
-   case AIMEE_MODULE_CALL_CANCELLED: return "cancelled";
-   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED: return "deadline_exceeded";
-   case AIMEE_MODULE_CALL_INVALID_REQUEST: return "invalid_request";
-   case AIMEE_MODULE_CALL_INTERNAL: return "internal";
-   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE: return "response_too_large";
-   case AIMEE_MODULE_CALL_TRANSPORT: return "transport";
-   case AIMEE_MODULE_CALL_PROTOCOL: return "protocol";
-   case AIMEE_MODULE_CALL_INVALID_ARGUMENT: return "invalid_argument";
-   default: return "unknown";
+   case AIMEE_MODULE_CALL_OK:
+      return "ok";
+   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT:
+      return "capability_absent";
+   case AIMEE_MODULE_CALL_CAPABILITY_DENIED:
+      return "capability_denied";
+   case AIMEE_MODULE_CALL_CANCELLED:
+      return "cancelled";
+   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED:
+      return "deadline_exceeded";
+   case AIMEE_MODULE_CALL_INVALID_REQUEST:
+      return "invalid_request";
+   case AIMEE_MODULE_CALL_INTERNAL:
+      return "internal";
+   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE:
+      return "response_too_large";
+   case AIMEE_MODULE_CALL_TRANSPORT:
+      return "transport";
+   case AIMEE_MODULE_CALL_PROTOCOL:
+      return "protocol";
+   case AIMEE_MODULE_CALL_INVALID_ARGUMENT:
+      return "invalid_argument";
+   default:
+      return "unknown";
    }
 }
 
@@ -103,36 +115,64 @@ static void warn_unreachable(int reason)
             reason);
 }
 
-const char *peer_client_transport_name(int transport) { return call_result_name(transport); }
+const char *peer_client_transport_name(int transport)
+{
+   return call_result_name(transport);
+}
 
-int peer_client_available(void) { return obs_bus_module_available(PEER_EVENT_KIND(PEER_STAGE_DELIVERY)); }
+int peer_client_available(void)
+{
+   return obs_bus_module_available(PEER_EVENT_KIND(PEER_STAGE_DELIVERY));
+}
 
 const char *peer_client_status_name(uint32_t status)
 {
    switch (status)
    {
-   case PEER_CLIENT_STATUS_OK: return "ok";
-   case PEER_CLIENT_STATUS_NO_PEER: return "no_peer";
-   case PEER_CLIENT_STATUS_DENIED: return "denied";
-   case PEER_CLIENT_STATUS_INBOX_FULL: return "inbox_full";
-   case PEER_CLIENT_STATUS_HOP_LIMIT: return "hop_limit";
-   case PEER_CLIENT_STATUS_CYCLE: return "cycle";
-   case PEER_CLIENT_STATUS_TIMEOUT: return "timeout";
-   case PEER_CLIENT_STATUS_SELF: return "self";
-   case PEER_CLIENT_STATUS_TOO_LONG: return "too_long";
-   case PEER_CLIENT_STATUS_LABEL_TAKEN: return "label_taken";
-   case PEER_CLIENT_STATUS_UNKNOWN_SENDER: return "unknown_sender";
-   case PEER_CLIENT_STATUS_BAD_REQUEST: return "bad_request";
-   case PEER_CLIENT_STATUS_SHUTDOWN: return "shutdown";
-   case PEER_CLIENT_STATUS_NO_CHANNEL: return "no_channel";
-   case PEER_CLIENT_STATUS_NOT_MEMBER: return "not_member";
-   case PEER_CLIENT_STATUS_CHANNEL_FULL: return "channel_full";
-   case PEER_CLIENT_STATUS_UNAVAILABLE: return "unavailable";
-   case PEER_CLIENT_STATUS_UNCLASSIFIED: return "unclassified";
-   case PEER_CLIENT_STATUS_AT_CAPACITY: return "at_capacity";
-   case PEER_CLIENT_STATUS_NO_DIRECTORY: return "no_directory";
-   case PEER_CLIENT_STATUS_DIRECTORY_REFUSED: return "directory_refused";
-   default: return "unknown";
+   case PEER_CLIENT_STATUS_OK:
+      return "ok";
+   case PEER_CLIENT_STATUS_NO_PEER:
+      return "no_peer";
+   case PEER_CLIENT_STATUS_DENIED:
+      return "denied";
+   case PEER_CLIENT_STATUS_INBOX_FULL:
+      return "inbox_full";
+   case PEER_CLIENT_STATUS_HOP_LIMIT:
+      return "hop_limit";
+   case PEER_CLIENT_STATUS_CYCLE:
+      return "cycle";
+   case PEER_CLIENT_STATUS_TIMEOUT:
+      return "timeout";
+   case PEER_CLIENT_STATUS_SELF:
+      return "self";
+   case PEER_CLIENT_STATUS_TOO_LONG:
+      return "too_long";
+   case PEER_CLIENT_STATUS_LABEL_TAKEN:
+      return "label_taken";
+   case PEER_CLIENT_STATUS_UNKNOWN_SENDER:
+      return "unknown_sender";
+   case PEER_CLIENT_STATUS_BAD_REQUEST:
+      return "bad_request";
+   case PEER_CLIENT_STATUS_SHUTDOWN:
+      return "shutdown";
+   case PEER_CLIENT_STATUS_NO_CHANNEL:
+      return "no_channel";
+   case PEER_CLIENT_STATUS_NOT_MEMBER:
+      return "not_member";
+   case PEER_CLIENT_STATUS_CHANNEL_FULL:
+      return "channel_full";
+   case PEER_CLIENT_STATUS_UNAVAILABLE:
+      return "unavailable";
+   case PEER_CLIENT_STATUS_UNCLASSIFIED:
+      return "unclassified";
+   case PEER_CLIENT_STATUS_AT_CAPACITY:
+      return "at_capacity";
+   case PEER_CLIENT_STATUS_NO_DIRECTORY:
+      return "no_directory";
+   case PEER_CLIENT_STATUS_DIRECTORY_REFUSED:
+      return "directory_refused";
+   default:
+      return "unknown";
    }
 }
 
@@ -215,8 +255,7 @@ static void warn_protocol(const char *what, uint32_t got, uint32_t want)
          return;
    if (count < sizeof(seen) / sizeof(seen[0]))
       seen[count++] = what;
-   LOG_WARN("peer.client", "aimee peer reply is unreadable: %s (got %u, want %u)", what, got,
-            want);
+   LOG_WARN("peer.client", "aimee peer reply is unreadable: %s (got %u, want %u)", what, got, want);
 }
 
 /* Returns 0 when the whole frame parsed, -1 otherwise. A partial parse is NOT
@@ -453,10 +492,11 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
       too, so this cell worked either way -- and that is precisely why writing
       the other spelling was not caught: one lenient reader kept a second
       grammar alive on the wire until the strict direction met it. */
-   const char *fields[6] = {from, to, text, conversation_id ? conversation_id : "", "0",
-                            expect_reply ? "1" : "0"};
+   const char *fields[6] = {
+       from, to, text, conversation_id ? conversation_id : "", "0", expect_reply ? "1" : "0"};
    struct reply r;
-   peer_client_result_t rc = call_stage(PEER_STAGE_DELIVERY, PEER_OP_SEND, fields, 6, &r, transport);
+   peer_client_result_t rc =
+       call_stage(PEER_STAGE_DELIVERY, PEER_OP_SEND, fields, 6, &r, transport);
    if (rc == PEER_CLIENT_REFUSED && status)
       *status = r.status;
    if (rc != PEER_CLIENT_OK)
