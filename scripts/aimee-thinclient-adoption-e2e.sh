@@ -99,31 +99,32 @@ fi
 sed "s|^executable=.*|executable=$DB1_MODULE|" "$DB1_GRANT" \
   >"$SERVER_HOME/modules.d/server/aimee.grant"
 install -m0755 "$DB1_MODULE_BUILT" "$PG_MODULE"
-# 11265 is the postgres module's health stage, 11266 its SQL stage.
-cat >"$SERVER_HOME/modules.d/server/aimee-postgres.grant" <<PGGRANT
-version=1
-principal_class=1
-principal_ref=28
-uid=self
-executable=$PG_MODULE
-publish=
-subscribe=
-request=
-serve=11265,11266
-PGGRANT
-# The store's OUTBOUND principal: a serve grant admits what a module answers,
-# not what it asks for, and the store asks for the SQL stage above.
-cat >"$SERVER_HOME/modules.d/server/aimee-store-client.grant" <<CLIENTGRANT
-version=1
-principal_class=1
-principal_ref=68
-uid=self
-executable=$DB1_MODULE
-publish=
-subscribe=
-request=11266
-serve=
-CLIENTGRANT
+# Both grants come from the SAME generated bundle the store's grant above
+# does, rather than being written out here: the refs and kinds are derived from
+# src/modules/process-contracts.json, and a copy transcribed into this file
+# goes stale silently. The store's outbound ref moved from 68 to 69 in a merge;
+# a heredoc here would still say 68 while every other site said 69.
+#
+# The postgres module serves the SQL stage the store calls; the store's OUTBOUND
+# principal is what is allowed to call it. A serve grant admits what a module
+# answers, not what it asks for, so the second is not implied by the first --
+# without it the store attaches and then finds no backend, which reads exactly
+# like a broken store.
+BUNDLE_GRANTS="$REPO/src/build/obj/module-bundle/grants/server"
+for grant_name in postgres aimee-postgres; do
+  if [[ "$grant_name" == postgres ]]; then
+    grant_exe="$PG_MODULE"
+  else
+    grant_exe="$DB1_MODULE"
+  fi
+  if [[ ! -r "$BUNDLE_GRANTS/$grant_name.grant" ]]; then
+    red "no generated $grant_name grant at $BUNDLE_GRANTS/$grant_name.grant"
+    exit 1
+  fi
+  sed "s|^executable=.*|executable=$grant_exe|" \
+    "$BUNDLE_GRANTS/$grant_name.grant" \
+    >"$SERVER_HOME/modules.d/server/$grant_name.grant"
+done
 CONFIG_GRANT="$REPO/src/build/obj/module-bundle/grants/server/config.grant"
 if [[ ! -r "$CONFIG_GRANT" ]]; then
   red "no generated config grant at $CONFIG_GRANT"

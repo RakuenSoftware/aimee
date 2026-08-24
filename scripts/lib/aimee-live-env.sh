@@ -605,30 +605,25 @@ live_env_start_module() {
    mkdir -p "$AIMEE_HOME/modules.d/server"
    sed "s|^executable=.*|executable=$PWD/$module|" "$grant" \
       >"$AIMEE_HOME/modules.d/server/aimee.grant"
-   # 11265 is the postgres module's health stage, 11266 its SQL stage.
-   cat >"$AIMEE_HOME/modules.d/server/aimee-postgres.grant" <<PGGRANT
-version=1
-principal_class=1
-principal_ref=28
-uid=self
-executable=$PWD/$pgmodule
-publish=
-subscribe=
-request=
-serve=11265,11266
-PGGRANT
-   # A module's serve grant admits what it answers, not what it asks for.
-   cat >"$AIMEE_HOME/modules.d/server/aimee-store-client.grant" <<CLIENTGRANT
-version=1
-principal_class=1
-principal_ref=68
-uid=self
-executable=$PWD/$module
-publish=
-subscribe=
-request=11266
-serve=
-CLIENTGRANT
+   # Both grants come from the SAME generated bundle the store's own grant
+   # does, rather than being written out here: the refs and kinds are derived
+   # from src/modules/process-contracts.json, and a copy transcribed into this
+   # file goes stale silently. The store's outbound ref moved from 68 to 69 in
+   # a merge; a heredoc here would still say 68 while every other site said 69.
+   local gname gexe
+   for gname in postgres aimee-postgres; do
+      case "$gname" in
+      postgres) gexe="$PWD/$pgmodule" ;;
+      *) gexe="$PWD/$module" ;;
+      esac
+      [ -r "src/build/obj/module-bundle/grants/server/$gname.grant" ] || {
+         echo "$LIVE_NAME: no generated $gname grant" >&2
+         exit 2
+      }
+      sed "s|^executable=.*|executable=$gexe|" \
+         "src/build/obj/module-bundle/grants/server/$gname.grant" \
+         >"$AIMEE_HOME/modules.d/server/$gname.grant"
+   done
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
       src/build/obj/module-bundle/grants/server/config.grant \
       >"$AIMEE_HOME/modules.d/server/config.grant"

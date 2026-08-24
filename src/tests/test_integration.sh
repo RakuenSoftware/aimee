@@ -158,32 +158,34 @@ install_db1_module() {
     chmod 0755 "$PG_MODULE"
     mkdir -p "$MODULE_POLICY_DIR"
 
-    # The postgres module: kind 11265 is its health stage, 11266 its SQL stage.
-    cat >"$MODULE_POLICY_DIR/aimee-postgres.grant" <<PGGRANT
-version=1
-principal_class=1
-principal_ref=28
-uid=self
-executable=$PG_MODULE
-publish=
-subscribe=
-request=
-serve=11265,11266
-PGGRANT
+    # Both extra grants come from the SAME generated bundle the store's own
+    # grant does, rather than being written out here. The refs and kinds in
+    # them are derived from src/modules/process-contracts.json, and a copy
+    # transcribed into this file is a copy that goes stale silently: the
+    # store's outbound ref moved from 68 to 69 in a merge, and a hand-written
+    # heredoc would still have said 68 while every other site said 69.
+    install_generated_grant() {
+        local name="$1" exe="$2"
+        local src="$REPO_ROOT/src/build/obj/module-bundle/grants/server/$name.grant"
+        if [ ! -r "$src" ]; then
+            python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+                --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+        fi
+        if [ ! -r "$src" ]; then
+            echo "no generated $name grant at $src" >&2
+            return 1
+        fi
+        sed "s|^executable=.*|executable=$exe|" "$src" \
+            >"$MODULE_POLICY_DIR/$name.grant"
+    }
+    # The postgres module serves the SQL stage the store calls; the store's
+    # OUTBOUND principal is what is allowed to call it. A serve grant admits
+    # what a module answers, not what it asks for, so the second is not
+    # implied by the first -- without it the store attaches and then finds no
+    # backend, which reads exactly like a broken store.
+    install_generated_grant postgres "$PG_MODULE" || exit 1
+    install_generated_grant aimee-postgres "$DB1_MODULE" || exit 1
 
-    # The store's OUTBOUND principal. Its serve grant admits what it answers,
-    # not what it asks for, and what it asks for is the SQL stage above.
-    cat >"$MODULE_POLICY_DIR/aimee-store-client.grant" <<CLIENTGRANT
-version=1
-principal_class=1
-principal_ref=68
-uid=self
-executable=$DB1_MODULE
-publish=
-subscribe=
-request=11266
-serve=
-CLIENTGRANT
     # The serve list comes from the grant the exporter generates, so it cannot
     # drift from what the module actually serves. It is a build artifact, so
     # generate it when it is not there rather than guessing: the guess this

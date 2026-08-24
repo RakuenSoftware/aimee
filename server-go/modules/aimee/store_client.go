@@ -35,13 +35,14 @@ import (
 //
 //   * postgres gains stage 2 (postgres-sql, kind 11266) in
 //     src/modules/process-contracts.json
-//   * aimee-postgres joins its clients at principal ref 68, requesting that
+//   * aimee-postgres joins its clients at principal ref 69, requesting that
 //     kind and serving nothing, because a serving grant requests nothing
 //
-// Ref 68 rather than 67: 67 was claimed by the session building peer messaging,
-// which could land its descriptor immediately while this one waits on the
-// postgres module's SQL stage to exist in the same tree. Two clients on one ref
-// are two callers the bus cannot tell apart.
+// Ref 69, having been 67 and then 68 in turn. Both were taken by the session
+// building peer messaging -- 67 for its directory client, 68 for the server's
+// own peer client -- and it landed first. Two clients on one ref are two
+// callers the bus cannot tell apart, and that surfaces long after the merge
+// that caused it rather than at it.
 //
 // Until then this module has a store client and no store, which is the honest
 // state and the one the daemon reports.

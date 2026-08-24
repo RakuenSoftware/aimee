@@ -25,7 +25,7 @@
  * lost its stage, which the Go contract test catches before this ever runs. */
 #define STORE_PRINCIPAL_REF 30u
 /* The store's OUTBOUND principal, and the postgres module it calls. */
-#define STORE_CLIENT_REF 68u
+#define STORE_CLIENT_REF 69u
 #define PG_PRINCIPAL_REF 28u
 #define PG_KIND_HEALTH   11265u
 #define PG_KIND_SQL      11266u
@@ -39,7 +39,7 @@
 static pid_t g_module = -1;
 /* The postgres module, which the store calls to reach the database. Two
  * processes, because they are two principals: the store serves aimee's
- * nineteen kinds at ref 30 and asks for SQL as ref 68, and postgres serves
+ * nineteen kinds at ref 30 and asks for SQL as ref 69, and postgres serves
  * health and SQL at ref 28. Running them as one process would collapse a
  * boundary the grants exist to hold. */
 static pid_t g_postgres = -1;
@@ -194,7 +194,7 @@ void store_module_fixture_start(void)
       die("write the grant manifest");
 
    /* THE STORE'S OUTBOUND GRANT, separate from the one above and easy to
-    * forget. The store serves at ref 30 and CALLS at ref 68, and the bus judges
+    * forget. The store serves at ref 30 and CALLS at ref 69, and the bus judges
     * each attachment on its own: without this the module serves its nineteen
     * kinds and is refused the moment it asks postgres for SQL, which reads as
     * the database being unreachable rather than as a missing grant.

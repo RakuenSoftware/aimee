@@ -40,24 +40,13 @@ rm -rf "$HOME_DIR"
 mkdir -p "$HOME_DIR/modules.d/server"
 cp /opt/aimee/module-grants/server/*.grant "$HOME_DIR/modules.d/server/"
 chmod 0700 "$HOME_DIR/modules.d" "$HOME_DIR/modules.d/server"
-# The store module's OUTBOUND identity, which the generated bundle cannot carry
-# yet: the registry entry for it needs the postgres module to serve stage 2 in
-# the same tree, and the validator refuses a client requesting a kind nobody
-# serves. Written by hand here so the run can show exactly where the module
-# stops, and seeded BEFORE the daemon starts -- the grant policy is read once at
-# startup, so a grant added afterwards is not seen and the module is denied for
-# a reason that has nothing to do with the grant's contents.
-cat >"$HOME_DIR/modules.d/server/aimee-postgres.grant" <<'GRANT'
-version=1
-principal_class=1
-principal_ref=68
-uid=self
-executable=/usr/local/libexec/aimee-modules/aimee-module-aimee
-publish=
-subscribe=
-request=11266
-serve=
-GRANT
+# The store module's OUTBOUND identity is now part of the generated bundle
+# copied above, as aimee-postgres.grant: the registry entry landed once the
+# postgres module served its SQL stage in the same tree, and the validator that
+# refuses a client requesting a kind nobody serves is satisfied. It used to be
+# written out here by hand, which is how it came to name ref 68 after the ref
+# had moved to 69 -- a transcribed grant goes stale without saying so, and the
+# module is then denied for a reason that looks nothing like a stale grant.
 chmod 0600 "$HOME_DIR/modules.d/server/"*.grant
 
 # A fresh store, so "the module created these tables" means this run.
@@ -120,7 +109,7 @@ elif grep -q "the postgres module is not answering" "$HOME_DIR/supervisor.log"; 
    echo "BLOCKED  the store module attached and stopped at its one missing"
    echo "         dependency, which is the expected state in this tree:"
    grep -m1 "postgres module is not answering" "$HOME_DIR/supervisor.log" | sed 's/^/           /'
-   echo "         (it holds principal ref 68 outbound, requests kind 11266,"
+   echo "         (it holds principal ref 69 outbound, requests kind 11266,"
    echo "          and nothing serves that stage until the postgres module lands)"
 else
    echo "FAIL  the store module is not running, and not for the known reason:"

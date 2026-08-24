@@ -16,8 +16,10 @@
 # exactly the unlanded stage and nothing else. If it fails some other way, that
 # is a real defect and this finds it.
 #
-# The hand-written grant is NOT how this ships. It exists to isolate the
-# blocker, and it names ref 68 because 67 was taken by peer messaging.
+# The grant is taken from the INSTALLED BUNDLE rather than written here. It
+# used to be a heredoc naming ref 68, which is how it kept saying 68 after the
+# ref moved to 69: a transcribed grant goes stale in silence, and what that
+# produces is a module denied for a reason that looks nothing like the grant.
 set -u
 
 HOME_DIR=/var/lib/aimee-full
@@ -26,19 +28,12 @@ BUS_SOCK="$HOME_DIR/server-module-bus.sock"
 
 [ -d "$GRANTS" ] || { echo "store-probe: run e2e-252-full.sh first"; exit 2; }
 
-cat >"$GRANTS/aimee-postgres.grant" <<'GRANT'
-version=1
-principal_class=1
-principal_ref=68
-uid=self
-executable=/usr/local/libexec/aimee-modules/aimee-module-aimee
-publish=
-subscribe=
-request=11266
-serve=
-GRANT
+BUNDLED=/opt/aimee/module-grants/server/aimee-postgres.grant
+[ -r "$BUNDLED" ] || { echo "store-probe: no $BUNDLED in the install"; exit 2; }
+cp "$BUNDLED" "$GRANTS/aimee-postgres.grant"
 chmod 0600 "$GRANTS/aimee-postgres.grant"
-echo "== granted the outbound identity (ref 68, requesting 11266) =="
+echo "== granted the outbound identity: $(sed -n 's/^principal_ref=/ref /p' \
+   "$GRANTS/aimee-postgres.grant"), requesting 11266 =="
 
 echo
 echo "== restarting the store module against the live bus =="
