@@ -330,6 +330,28 @@ registry's own wrapping was reasonable. Only running the two together shows what
 a caller receives, which is the argument for testing across a seam rather than on
 both sides of it.
 
+### A daemon-originated send wedges the module (open, CT 9100)
+
+`peer_send` reached this module from aimee-server for the first time on
+2026-08-24, and the handler ENTERS and never returns. Instrumented to log every
+invocation, a server-originated send logs its arrival and then nothing: no
+success, no refusal, no encode error. It is wedged inside `Registry.Send`, whose
+first act is the nested db1 lookup that resolves the sender.
+
+The control that makes it specific: `aimee-peerprobe`, an external bus client,
+ran the same operation against the same module process in the same second and
+delivered. Ruled out by measurement: the deadline (raised 5s to 30s, still fails
+in about a second), the frame (logged at the declared arity), availability (the
+module logged the arrival), and grant admission (`self` and `too_long` refusals
+cross the same grant and stage).
+
+`peer_inbox`, one nested lookup, succeeds until the first send hangs, after
+which later lookups hang or return `unavailable`. So the wedge appears to poison
+the directory path rather than failing in isolation.
+
+The mechanism belongs to the bus host rather than to peer messaging, and is not
+yet established. See docs/validation/aimee-module-on-a-clean-container.md.
+
 ### The module as deployed has no session directory
 
 `aimee-module` builds the capability with `NoDirectory{}`, and that is accurate

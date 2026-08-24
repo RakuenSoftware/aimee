@@ -555,3 +555,107 @@ CT 9099 destroyed and purged, its watchdog stopped, and every rig file removed
 from `/root`. Verified afterwards: CTs 9095–9098 and 9099 all gone, no rig
 files remaining. The containers left on the host (9001, 9078–9080) belong to
 other sessions and were not touched.
+
+## The surface, and the defect it exposed (2026-08-24, CT 9100)
+
+Every run before this one tested the ENGINE. A probe binary written for the
+purpose spoke to the module over the bus and messages moved, which proved the
+module and not the feature: nothing in the product called it, so no session
+could. `peer_send` and `peer_inbox` in the MCP tool table are that missing
+surface, and CT 9100 is the first run where the product itself is the caller.
+
+The result is that the surface works and the feature does not, for a reason
+nothing before could have found.
+
+### What was proved
+
+- **The grants ship from the contract.** `server-peer` (ref 68) and `aimee-db1`
+  (ref 67) were generated into the deployed bundle by
+  `export_c_repositories.py` from `process-contracts.json` and installed
+  unmodified. Binaries were placed at the paths those grants name, so the test
+  exercised the shipped wiring rather than a hand-edited fixture.
+- **Real sessions register themselves.** `mcp_session_register` runs before tool
+  dispatch, so a session becomes addressable by making its first MCP call. db1
+  held `('peer-alpha','mcp','uid:0')` and `('peer-beta','mcp','uid:0')` after
+  two `/v1/mcp/call` requests carrying those session ids. No fixture wrote them.
+- **The client's frames are correct.** With the module instrumented to log every
+  arrival, every server-originated call landed as `stage=1 op=1 cells=6` (send)
+  or `stage=2 op=3 cells=2` (take) — exactly the declared arities.
+- **The refusals arrive, and differ.** `self`, `too_long`, and `no_directory`
+  all came back as named domain refusals through the MCP surface.
+- **The three-outcome discipline earned itself.** Every failure below reported
+  as "the peer-messaging module did not answer ... This is not a refusal", which
+  is what made it instantly separable from a domain no. Had the client collapsed
+  the two, this would have read as the module rejecting the messages.
+
+### The defect
+
+**A `peer_send` originated by aimee-server enters the module's handler and never
+returns.** With the module logging every invocation, a server-originated send
+logged its arrival and then nothing at all: no success, no refusal, no encode
+error. The handler is wedged inside `Registry.Send`, whose first act is a nested
+bus call to db1 to resolve the sender.
+
+What it is NOT, each ruled out by measurement rather than by argument:
+
+| ruled out | how |
+|---|---|
+| a timeout | the client deadline was raised 5s → 30s and rebuilt; five sends still failed, and returned in about a second between them |
+| a malformed frame | the module logged `cells=6`, the declared arity, on every call |
+| module unavailability | the module logged the arrivals, so the bus routed them |
+| grant admission | `self` and `too_long` refusals crossed the same grant, same stage |
+| my client's decoding | the failures are on paths where the module never replied at all |
+
+And the control that makes it specific: **`aimee-peerprobe`, an external bus
+client, ran the same operation against the same module process at the same
+instant and delivered successfully every time** — including `DELIVERED: the
+recipient drains the sender's exact text`. Same module, same db1, same second.
+The variable is which process originated the call.
+
+One further observation, from the ordering in the logs: `peer_inbox`, which
+makes ONE nested directory lookup, succeeded repeatedly — until the first
+`peer_send` hung, after which later lookups either hung too or returned
+`unavailable` fast. So the first wedge appears to poison the module's directory
+path for subsequent calls rather than failing in isolation.
+
+**The mechanism is not established.** Why a nested module call behaves
+differently when the daemon is the originator is a question about the bus host
+(`src/modules/audit/obs_bus.c` and the core event bus), not about peer
+messaging, and it is not answered here. Worth noting that the pool comment in
+`obs_bus.c` already describes this class of fault in a different guise — "the
+review waits on its own callback and nothing moves until something times out" —
+which was addressed by giving each concurrent call its own client. This looks
+like the next instance of the same shape, one level deeper, and the earlier fix
+does not cover it.
+
+### What this costs
+
+Peer messaging between two real sessions does not work through the product
+today. The module is correct, the client is correct, the wiring is correct, and
+the path from the daemon into a module that must itself call another module is
+not. Nothing in this repository could have found that before the surface
+existed, which is the argument for having built it.
+
+### Rig faults, recorded because they nearly became findings
+
+- The first build **reported COMPLETE while `aimee-server` and `aimee-kb` did
+  not exist** — the make steps piped through `tail` and carried no `|| exit 1`.
+  The rebuild checks every step by exit code and stops on the first failure.
+- The grant check used `realpath`, which SUCCEEDS on a path that does not exist.
+  It printed "ALL GRANT EXECUTABLES RESOLVE" while five were missing, and the
+  bus then refused the entire policy directory. `[ -x ]` is the test.
+- `pgrep -fc "aimee-module-db1"` matched **its own command line**, inflating
+  every fleet count by one and briefly suggesting duplicate modules. The
+  `[/]`-bracket form was on the server and kb patterns and not the module ones.
+- `pkill -f aimee-module-aimee` matched its own `pct exec` shell and killed it
+  (exit 143) — the third instance of the same self-match this session.
+- Two frames refused as `ModuleStatusInvalidRequest` were **the probe's own
+  deliberate malformed-frame check**, not a client fault. Nearly attributed to
+  `peer_client` before the timestamps were lined up against the probe's run.
+
+### Teardown
+
+CT 9100 destroyed and purged, watchdog stopped, every rig file removed from
+`/root`, verified afterwards. The containers left on the host (9001, 9078–9080)
+belong to other sessions and were not touched. The 30s-deadline edit and the
+module's DIAG logging existed only inside the container and are not in the tree.
