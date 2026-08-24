@@ -19,7 +19,6 @@ pointer. Any daemon that builds that file must register the provider in its own
 adapter -- or record here why the code is unreachable in that daemon, with the
 evidence. An entry cannot outlive its reason: a stale one is reported.
 """
-import json
 import pathlib
 import re
 import sys
@@ -90,30 +89,42 @@ def expand(name, seen=None):
     return files
 
 
-def main() -> int:
-    built = {d: set().union(*(expand(l) for l in lists)) for d, lists in SOURCE_LISTS.items()}
+def analyse(root, cmake_text, adapters, source_lists, unreachable):
+    """Returns (exit_code, [messages]). Pure over its inputs so it can be tested."""
+    def expand_in(name, seen=None):
+        seen = seen or set()
+        if name in seen:
+            return set()
+        seen.add(name)
+        match = re.search(r"^set\(" + name + r"\b(.*?)^\)", cmake_text, re.S | re.M)
+        if not match:
+            return set()
+        body = match.group(1)
+        files = set(re.findall(r"\$\{AIMEE_SRC_DIR\}/(\S+\.c)", body))
+        for ref in re.findall(r"\$\{([A-Z0-9_]+)\}", body):
+            files |= expand_in(ref, seen)
+        return files
+
+    built = {d: set().union(*(expand_in(l) for l in lists)) for d, lists in source_lists.items()}
     for daemon, files in built.items():
         if not files:
-            print(f"check-provider-registration: no sources resolved for '{daemon}'; "
-                  "the CMake list names have moved", file=sys.stderr)
-            return 2
+            return 2, [f"no sources resolved for '{daemon}'; the CMake list names have moved"]
 
     registered = {}
-    for daemon, path in ADAPTERS.items():
+    for daemon, path in adapters.items():
         if not path.exists():
-            print(f"check-provider-registration: missing {path}", file=sys.stderr)
-            return 2
+            return 2, [f"missing {path}"]
         registered[daemon] = set(REGISTRAR_CALL.findall(path.read_text(encoding="utf-8")))
 
     # Where each registrar is defined -- that file owns the function pointer, and
     # whatever else lives in it is the consumer that goes null without it.
     owner = {}
-    for source in ROOT.glob("src/**/*.c"):
-        if source in ADAPTERS.values():
+    for source in (root / "src").glob("**/*.c"):
+        if source in adapters.values():
             continue
         text = source.read_text(encoding="utf-8", errors="replace")
         for name in REGISTRAR_DEF.findall(text):
-            owner.setdefault(name, set()).add(str(source.relative_to(ROOT / "src")))
+            owner.setdefault(name, set()).add(str(source.relative_to(root / "src")))
 
     # Only module-stage providers are in scope: the ones some daemon registers
     # through its adapter. A registrar no adapter mentions is an ordinary
@@ -132,34 +143,42 @@ def main() -> int:
             checked += 1
             if registrar in registered[daemon]:
                 continue
-            if (daemon, registrar) in UNREACHABLE:
+            if (daemon, registrar) in unreachable:
                 seen_exempt.add((daemon, registrar))
                 continue
             failures.append(
                 f"  {daemon} builds {sorted(owners & files)[0]}, which owns {registrar}, "
-                f"but {ADAPTERS[daemon].relative_to(ROOT)} never registers it")
+                f"but {adapters[daemon]} never registers it")
 
     if failures:
-        print("check-provider-registration: a daemon builds a provider's consumer and never "
-              "registers the provider.", file=sys.stderr)
-        print("The pointer stays null, the path fails closed, and no test notices because every "
-              "test registers its own.", file=sys.stderr)
-        print("Register it in that daemon's adapter, or record in UNREACHABLE why the code cannot "
-              "run there.", file=sys.stderr)
-        print("\n".join(failures), file=sys.stderr)
-        return 1
+        return 1, ["a daemon builds a provider's consumer and never registers the provider.",
+                   "The pointer stays null, the path fails closed, and no test notices because "
+                   "every test registers its own.",
+                   "Register it in that daemon's adapter, or record in UNREACHABLE why the code "
+                   "cannot run there."] + failures
 
-    stale = set(UNREACHABLE) - seen_exempt
+    stale = set(unreachable) - seen_exempt
     if stale:
-        print("check-provider-registration: UNREACHABLE lists entries that no longer apply; "
-              "remove them:", file=sys.stderr)
-        for daemon, registrar in sorted(stale):
-            print(f"  {daemon} {registrar}", file=sys.stderr)
-        return 1
+        return 1, ["UNREACHABLE lists entries that no longer apply; remove them:"] + [
+            f"  {daemon} {registrar}" for daemon, registrar in sorted(stale)]
 
-    print(f"check-provider-registration: ok ({len(ADAPTERS)} daemons, {checked} provider/daemon "
-          f"pairs, {len(UNREACHABLE)} recorded unreachable)")
-    return 0
+    # A gate that cannot see anything must not report success. If no provider
+    # pair resolved at all, the parse has drifted away from the tree and this
+    # check has quietly stopped checking.
+    if checked == 0:
+        return 2, ["no provider/daemon pairs resolved at all; the adapters or the registrar "
+                   "spelling have moved and this gate is no longer checking anything"]
+
+    return 0, [f"ok ({len(adapters)} daemons, {checked} provider/daemon pairs, "
+               f"{len(unreachable)} recorded unreachable)"]
+
+
+def main() -> int:
+    code, messages = analyse(ROOT, CMAKE, ADAPTERS, SOURCE_LISTS, UNREACHABLE)
+    stream = sys.stdout if code == 0 else sys.stderr
+    for line in messages:
+        print(f"check-provider-registration: {line}" if line is messages[0] else line, file=stream)
+    return code
 
 
 if __name__ == "__main__":

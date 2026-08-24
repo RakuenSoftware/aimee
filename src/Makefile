@@ -2082,7 +2082,10 @@ module-placement-check:
 # provider its code path needs. The pointer stays null, the path fails closed,
 # and no test notices -- every test registers its own. That is how KB signal
 # capture came to refuse every signal with one WARN and a 200 carrying an error.
+# Its own unit tests run here too, so the gate cannot pass vacuously -- which
+# matters more than usual for a check whose whole subject is silent failure.
 provider-registration-check:
+	@python3 -m unittest discover -s ../scripts/tests -p test_check_provider_registration.py
 	@python3 -I -S ../scripts/check_provider_registration.py
 
 db2-contract-check:
