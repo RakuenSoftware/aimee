@@ -45,7 +45,6 @@ IR_SHARED_TYPE = {
 PENDING_BUS_MIGRATION = {
     ("src/modules/delegates/delegate_openai.c", "aimee/tools/agent_tools.h"),
     ("src/modules/delegates/delegate_run_phases.c", "aimee/workspace/workspace.h"),
-    ("src/modules/execution-policy/execution_policy.c", "aimee/protocols/mcp/mcp_client_registry.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_action.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_worm.h"),
     ("src/modules/guardrails/guardrails_orchestrator.c", "aimee/skills/skill.h"),
@@ -100,7 +99,8 @@ PRIVATE_HEADER_REACH = {
 }
 # Reaches into a module the build links into core rather than supervising as a bus
 # peer (`execution: core` in the repository lock): config, vault, audit,
-# execution-policy, gateway, ir, module-runtime, protocols, translation.
+# gateway, ir, module-runtime, protocols, translation. Execution-policy left
+# this exception when its decision engine moved to a supervised Go process.
 #
 # These are the invariant's real exception, and the point of listing them is that
 # it stops being unstated. A credential store cannot be a bus peer -- git_cred_inject
@@ -140,7 +140,6 @@ FLAT_ROOT_REACH = {
     ("src/modules/delegates/delegate_launch.c", "db1/db1.h"),
     ("src/modules/delegates/include/aimee/delegates/delegate_economics.h", "db1/coord_jobs.h"),
     ("src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h", "db1/coord_jobs.h"),
-    ("src/modules/execution-policy/execution_policy.c", "db1/db1.h"),
     ("src/modules/learning/learning_router.c", "db1/db1.h"),
     ("src/modules/memory/memory_advanced.c", "db1/db1.h"),
     ("src/modules/protocols/mcp/mcp_client_registry.c", "db1/mcp_osv_cache.h"),
@@ -169,7 +168,6 @@ FLAT_ROOT_REACH = {
     ("src/modules/delegates/delegate_sandbox_image.c", "guardrails/guardrails.h"),
     ("src/modules/delegates/delegate_sandbox_image.c", "sandbox/sandbox_learned.h"),
     ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "roundtable/roundtable_types.h"),
-    ("src/modules/execution-policy/execution_policy.c", "kb_client/kb_client.h"),
     ("src/modules/git/git_ssh_agent.c", "webuser/webuser_runtime.h"),
     ("src/modules/git/git_verify_ops.c", "guardrails/guardrails.h"),
     ("src/modules/git/mcp_git_pr.c", "guardrails/guardrails.h"),

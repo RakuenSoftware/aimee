@@ -14,7 +14,7 @@ CONTRACTS = ROOT / "src/modules/process-contracts.json"
 INVENTORY = ROOT / "tests/baselines/modules/canonical-inventory.yaml"
 CORE = {
     "module-runtime", "ir", "translation", "protocols", "gateway",
-    "vault", "execution-policy", "audit",
+    "vault", "audit",
 }
 PROCESS_REQUIRED = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
@@ -30,6 +30,7 @@ PROCESS_REQUIRED = {
     # enabled_by_default false is declared and never spawned, which is how peer
     # messaging came to be green in every test and absent from server.modules.
     "aimee",
+    "execution-policy",
 }
 GO_PROCESSES = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
@@ -38,6 +39,7 @@ GO_PROCESSES = {
     # aimee is Go-only from the start: it was created after the Go-first ruling
     # in docs/dev/GO_REWRITE.md, so it never had a C implementation to migrate.
     "aimee",
+    "execution-policy",
 }
 # Executables that host a process other than the module runtime's multicall binary.
 HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}
@@ -65,9 +67,9 @@ def validate() -> dict[str, dict[str, object]]:
         raise ContractError("canonical inventory is not a string array")
     contract = load(CONTRACTS)
     if set(contract) != {"schema_version", "principal_class", "components", "clients"}:
-        raise ContractError("top-level keys differ from v3")
-    if contract["schema_version"] != 3 or contract["principal_class"] != 1:
-        raise ContractError("schema_version must equal 3 and principal_class must equal 1")
+        raise ContractError("top-level keys differ from v4")
+    if contract["schema_version"] != 4 or contract["principal_class"] != 1:
+        raise ContractError("schema_version must equal 4 and principal_class must equal 1")
     components = contract["components"]
     if not isinstance(components, list) or len(components) != len(ordered):
         raise ContractError("component count differs from canonical inventory")
@@ -83,6 +85,7 @@ def validate() -> dict[str, dict[str, object]]:
     result: dict[str, dict[str, object]] = {}
     refs: set[int] = set()
     kinds: set[int] = set()
+    durability_kinds: set[int] = set()
     stage_names: set[str] = set()
     optional = set(inventory.get("optional", []))
     # The principal ref is DECLARED, not derived from position. It is a module's
@@ -135,9 +138,9 @@ def validate() -> dict[str, dict[str, object]]:
             if "c_build" in descriptor:
                 raise ContractError(f"{component_id}: core component must not declare c_build")
         else:
-            keys = set(raw) - {"hosted_by"}
+            keys = set(raw) - {"hosted_by", "durability_declarations"}
             if keys != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
-                raise ContractError(f"{component_id}: process keys differ from v2")
+                raise ContractError(f"{component_id}: process keys differ from v4")
             # Most processes are multicall binaries the module runtime spawns and
             # pins by path. A process that is an already-supervised program instead
             # says so, because its grant must pin THAT executable and the runtime
@@ -169,9 +172,32 @@ def validate() -> dict[str, dict[str, object]]:
                 raise ContractError(
                     f"{component_id}: process exceeds its {MAX_MODULE_STAGES}-stage carve")
             for stage_ordinal, stage in enumerate(stages, start=1):
-                if not isinstance(stage, dict) or set(stage) != {"id", "name", "event_kind"}:
+                base_stage_keys = {
+                    "id", "name", "event_kind", "durability", "durability_reason"
+                }
+                durability = stage.get("durability") if isinstance(stage, dict) else None
+                expected_stage_keys = base_stage_keys | (
+                    {"emitter", "sample_rate"} if durability == "sampled" else
+                    {"emitter"} if durability == "ledger" else set())
+                if not isinstance(stage, dict) or set(stage) != expected_stage_keys:
                     raise ContractError(f"{component_id}: invalid stage shape")
                 name, stage_id, kind = stage["name"], stage["id"], stage["event_kind"]
+                reason = stage["durability_reason"]
+                if durability not in {"ledger", "capture", "sampled"}:
+                    raise ContractError(f"{component_id}/{name}: invalid durability class")
+                if not isinstance(reason, str) or not reason.strip():
+                    raise ContractError(f"{component_id}/{name}: durability reason is required")
+                if durability in {"ledger", "sampled"} and \
+                        stage["emitter"] != "obs_bus_emit_durable_event":
+                    raise ContractError(f"{component_id}/{name}: invalid durability emitter")
+                if durability == "sampled":
+                    rate = stage["sample_rate"]
+                    if (not isinstance(rate, (int, float)) or isinstance(rate, bool) or
+                            not 0 < rate <= 1):
+                        raise ContractError(f"{component_id}/{name}: invalid sample_rate")
+                    if round(float(rate) * 1_000_000) != float(rate) * 1_000_000:
+                        raise ContractError(
+                            f"{component_id}/{name}: sample_rate must use ppm precision")
                 # Carved from the DECLARED ref, so a module's event kinds move only
                 # when its identity does -- which is never.
                 expected_kind = 4096 + principal_ref * 256 + stage_ordinal
@@ -182,10 +208,67 @@ def validate() -> dict[str, dict[str, object]]:
                     raise ContractError(f"{component_id}: stage IDs must be dense from one")
                 if not isinstance(name, str) or not STAGE_RE.fullmatch(name) or name in stage_names:
                     raise ContractError(f"{component_id}: invalid or duplicate stage name {name!r}")
-                if type(kind) is not int or kind != expected_kind or kind in kinds:
+                if type(kind) is not int or kind != expected_kind or kind in durability_kinds:
                     raise ContractError(f"{component_id}/{name}: event_kind must equal {expected_kind}")
                 stage_names.add(name)
                 kinds.add(kind)
+                durability_kinds.add(kind)
+            declarations = raw.get("durability_declarations", [])
+            if not isinstance(declarations, list):
+                raise ContractError(
+                    f"{component_id}: durability_declarations must be an array")
+            for declaration in declarations:
+                base_stage_keys = {
+                    "id", "name", "event_kind", "durability", "durability_reason"
+                }
+                durability = declaration.get("durability") \
+                    if isinstance(declaration, dict) else None
+                expected_stage_keys = base_stage_keys | (
+                    {"emitter", "sample_rate"} if durability == "sampled" else
+                    {"emitter"} if durability == "ledger" else set())
+                if not isinstance(declaration, dict) or \
+                        set(declaration) != expected_stage_keys:
+                    raise ContractError(
+                        f"{component_id}: invalid durability declaration shape")
+                name = declaration["name"]
+                stage_id = declaration["id"]
+                kind = declaration["event_kind"]
+                reason = declaration["durability_reason"]
+                if durability not in {"ledger", "capture", "sampled"}:
+                    raise ContractError(f"{component_id}/{name}: invalid durability class")
+                if not isinstance(reason, str) or not reason.strip():
+                    raise ContractError(
+                        f"{component_id}/{name}: durability reason is required")
+                if durability in {"ledger", "sampled"} and \
+                        declaration["emitter"] != "obs_bus_emit_durable_event":
+                    raise ContractError(
+                        f"{component_id}/{name}: invalid durability emitter")
+                if durability == "sampled":
+                    rate = declaration["sample_rate"]
+                    if (not isinstance(rate, (int, float)) or isinstance(rate, bool) or
+                            not 0 < rate <= 1):
+                        raise ContractError(
+                            f"{component_id}/{name}: invalid sample_rate")
+                    if round(float(rate) * 1_000_000) != float(rate) * 1_000_000:
+                        raise ContractError(
+                            f"{component_id}/{name}: sample_rate must use ppm precision")
+                if type(stage_id) is not int or \
+                        not len(stages) < stage_id <= MAX_MODULE_STAGES:
+                    raise ContractError(
+                        f"{component_id}: reserved declaration IDs must follow active stages")
+                expected_kind = 4096 + principal_ref * 256 + stage_id
+                if expected_kind >= PROTOCOL_KIND_FLAG:
+                    raise ContractError(
+                        f"{component_id}/{name}: module stage enters protocol event namespace")
+                if not isinstance(name, str) or not STAGE_RE.fullmatch(name) or \
+                        name in stage_names:
+                    raise ContractError(
+                        f"{component_id}: invalid or duplicate stage name {name!r}")
+                if type(kind) is not int or kind != expected_kind or kind in durability_kinds:
+                    raise ContractError(
+                        f"{component_id}/{name}: event_kind must equal {expected_kind}")
+                stage_names.add(name)
+                durability_kinds.add(kind)
             if component_id not in optional and component_id not in PROCESS_REQUIRED:
                 raise ContractError(f"{component_id}: unexpected required process")
         result[component_id] = raw

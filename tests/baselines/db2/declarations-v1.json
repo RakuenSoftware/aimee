@@ -381,10 +381,6 @@
       "path": "src/modules/benchmarks/agent_eval_benchmarks.c"
     },
     {
-      "classification": "kb-generated-client",
-      "path": "src/modules/execution-policy/execution_policy.c"
-    },
-    {
       "classification": "module-placement-audit",
       "path": "src/modules/guardrails/guardrails_semantic.c"
     },
@@ -26873,7 +26869,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "14f262636d7c2f48824bb61b4a20df83a7b5a067e3cc14fb2fe0c03d0978d435",
+  "fingerprint": "305d9acee36ce394d183cc048060493a76a1ac9acec9d93442b81be0a8ade0c1",
   "module": "db2",
   "schema_version": 1,
   "summary": {

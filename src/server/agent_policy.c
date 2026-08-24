@@ -22,7 +22,6 @@
 #include "platform_path.h"
 #include "cJSON.h"
 #include "modules/git/git_verify.h"
-#include "headers/agent_policy_intercept.h"
 #include <ctype.h>
 #include <errno.h>
 #include <sys/stat.h>

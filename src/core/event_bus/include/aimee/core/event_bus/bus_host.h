@@ -51,6 +51,14 @@ typedef struct
 typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
                            uint32_t payload_len);
 
+/* Rare loss-only observer. Unlike the full-stream tap this is never called for
+ * ordinary traffic: only BUS_KIND_OVERFLOW and BUS_KIND_PRODUCER_REAPED reach
+ * it. Daemons use it to escape loss evidence into a durable audit sink without
+ * putting durability work (or even a capture-enabled branch) on dispatch's hot
+ * path. */
+typedef void (*bus_loss_fn)(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+                            uint32_t payload_len);
+
 typedef struct
 {
    int in_use;
@@ -113,6 +121,16 @@ typedef struct
    uint32_t dst_slot;
 } bus_overflow_t;
 
+/* The block-held event discarded when its producer departs. The old control
+ * event had no payload, so it proved that *something* was reaped but did not
+ * name the event the comment promised to name. */
+typedef struct
+{
+   uint64_t lost_seq;
+   uint32_t lost_kind;
+   uint32_t src_slot;
+} bus_producer_reaped_t;
+
 /* An outstanding request, so a reply can be routed back to its requester.
  *
  * Correlation ids are chosen by each client for itself, so they are unique only
@@ -168,6 +186,8 @@ typedef struct bus_host
 
    bus_tap_fn tap;
    void *tap_ctx;
+   bus_loss_fn loss;
+   void *loss_ctx;
 } bus_host_t;
 
 typedef enum
@@ -235,6 +255,9 @@ const char *bus_attach_status_name(bus_attach_status_t s);
 
 /* Set the governance/audit tap. Pass NULL to clear. */
 void bus_host_set_tap(bus_host_t *h, bus_tap_fn fn, void *ctx);
+
+/* Set the rare loss observer. Pass NULL to clear. */
+void bus_host_set_loss_sink(bus_host_t *h, bus_loss_fn fn, void *ctx);
 
 /* Register `slot` as an authorized observer of `event_kind` (its notifications).
  * Subscription is the authorization: a client never receives a kind it did not

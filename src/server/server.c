@@ -14,7 +14,7 @@
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 #include "kb_client.h"           /* request-local memory scope context */
-
+#include <aimee/audit/obs_bus.h>
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "modules/git/git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
 #include "modules/git/mcp_git.h" /* mcp_git_run_tool — the native surface's git-write impl */
@@ -367,18 +367,20 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
-
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
-   /* Probed, not inferred: module availability is registry state that survives
-    * the module's death for ~37s, and this endpoint exists to be believed at
-    * the start of an outage. See db1_store_probe.c. */
+   /* Probe DB1 directly; module registry state survives death for about 37s. */
    cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   obs_bus_capture_health_t capture;
+   obs_bus_capture_health(&capture);
+   cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
+   cJSON_AddStringToObject(resp, "capture_reason", capture.reason);
+   cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
+   cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
    server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
 }
-
 /* worktree.gc: remove abandoned session worktrees under the operator's git_root.
  * Server-side because the GC primitive lives in workspace.c (already linked into
  * the daemon); the CLI just sends client_cwd and renders the report. */

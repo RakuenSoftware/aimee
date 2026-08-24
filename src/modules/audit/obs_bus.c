@@ -30,12 +30,13 @@
 #include <aimee/core/event_bus/bus_runtime.h>
 #include <aimee/core/event_bus/module_client.h>
 #include <errno.h>
-#include "config.h"     /* config_default_dir */
+#include "config.h" /* config_default_dir */
 #include "log.h"
 #include "headers/aimee_sha256.h" /* aimee_sha256_raw — obs_bus_key_fingerprint */
 
-#define KIND_AUDIT_ACTION    OBS_BUS_KIND_ACTION
-#define KIND_GUARDRAIL_EVENT OBS_BUS_KIND_GUARDRAIL
+#define KIND_AUDIT_ACTION     OBS_BUS_KIND_ACTION
+#define KIND_GUARDRAIL_EVENT  OBS_BUS_KIND_GUARDRAIL
+#define KIND_DURABILITY_EVENT OBS_BUS_KIND_DURABILITY
 
 /* Per-field caps for the wire form. Generous vs the emitter's inputs (args_hash
  * 68, command preview 288, the rest short) so nothing a caller passes is clipped
@@ -47,6 +48,33 @@
 #define AB_MODE    64
 #define AB_REASON  128
 #define AB_VERDICT 32
+
+#define AB_DUR_ACTION  128
+#define AB_DUR_SUBJECT 192
+#define AB_DUR_DETAIL  768
+
+typedef enum
+{
+   CAPTURE_NOT_STARTED = 0,
+   CAPTURE_OK,
+   CAPTURE_NO_HOME,
+   CAPTURE_OPEN_FAILED,
+   CAPTURE_WRITE_FAILED,
+   CAPTURE_SINK_BROKEN
+} capture_state_t;
+
+typedef struct durable_pending
+{
+   char action[AB_DUR_ACTION];
+   char subject[AB_DUR_SUBJECT];
+   char verdict[AB_VERDICT];
+   char detail[AB_DUR_DETAIL];
+   struct durable_pending *next;
+} durable_pending_t;
+
+/* PostgreSQL can be unavailable during KB startup. Retain audit rows for retry,
+ * but never let a broken durable sink turn into unbounded daemon memory. */
+#define AB_DUR_PENDING_MAX 4096u
 
 /* Publish retry cap on backpressure. At ~200us backoff this is ~5s of retry
  * before a row is treated as undeliverable — long past any transient burst, so
@@ -79,16 +107,16 @@ static struct
    } module_clients[OBS_BUS_MODULE_CLIENTS];
    pthread_mutex_t module_client_lock;
    pthread_cond_t module_client_free;
-   int module_in_flight;   /* calls currently holding a client */
+   int module_in_flight;      /* calls currently holding a client */
    int module_peak_in_flight; /* high-water mark, for diagnosing serialization */
    pthread_t thread;
-   pthread_mutex_t pub_lock; /* serializes the single producer ring */
+   pthread_mutex_t pub_lock;  /* serializes the single producer ring */
    pthread_mutex_t host_lock; /* serializes pump/reap with external admission */
    bus_runtime_t *runtime;
    bus_runtime_policy_t *runtime_policy;
-   atomic_int emitting;      /* 1 while accepting emits */
-   atomic_int stop;          /* 1 tells the consumer to final-drain and exit */
-   atomic_int publishers;    /* # producers inside the emit window (see enter_emit) */
+   atomic_int emitting;        /* 1 while accepting emits */
+   atomic_int stop;            /* 1 tells the consumer to final-drain and exit */
+   atomic_int publishers;      /* # producers inside the emit window (see enter_emit) */
    atomic_int accepting_calls; /* module RPC admission during daemon lifetime */
    atomic_int module_stop;     /* cancels an in-flight module RPC on shutdown */
    atomic_int module_callers;  /* calls using module_client during teardown */
@@ -103,6 +131,13 @@ static struct
     * lock guards it. */
    bus_capture_t capture;
    int cap_fd; /* -1 when capture is off (no writable home / open failed) */
+   atomic_int capture_state;
+   atomic_uint_least64_t capture_last_seq; /* last seq successfully flushed to disk */
+   char capture_session[128];
+   durable_pending_t *durable_head;
+   durable_pending_t *durable_tail;
+   uint32_t durable_pending_count;
+   uint64_t durable_retry_after_ns;
    int started;
    int terminated; /* set by stop; blocks lazy resurrection after shutdown */
 } g;
@@ -118,8 +153,11 @@ static struct
 {
    obs_bus_guardrail_sink_fn guardrail;
    void *guardrail_ctx;
+   obs_bus_durable_sink_fn durable;
+   void *durable_ctx;
    char module_socket[108];
    char module_policy_dir[4096];
+   char capture_fault[24]; /* deterministic unit-test seam; empty in production */
 } sinks;
 
 /* ---------------------------------------------------------- wire form ---- */
@@ -279,6 +317,126 @@ static int write_guardrail(const uint8_t *p, uint32_t len)
    return 1;
 }
 
+/* ---- generic WORM durability event ------------------------------------- */
+
+static uint32_t serialize_durable(uint8_t *buf, uint32_t cap, const char *action,
+                                  const char *subject, const char *verdict, const char *detail)
+{
+   uint32_t off = 0;
+   if (!(off = put_str(buf, off, cap, action, AB_DUR_ACTION)) ||
+       !(off = put_str(buf, off, cap, subject, AB_DUR_SUBJECT)) ||
+       !(off = put_str(buf, off, cap, verdict, AB_VERDICT)) ||
+       !(off = put_str(buf, off, cap, detail, AB_DUR_DETAIL)))
+      return 0;
+   return off;
+}
+
+static int persist_durable(const char *action, const char *subject, const char *verdict,
+                           const char *detail)
+{
+   return sinks.durable ? sinks.durable("system", "event-bus", action, subject, verdict, detail,
+                                        sinks.durable_ctx) == 0
+                        : 0;
+}
+
+static int queue_durable(const char *action, const char *subject, const char *verdict,
+                         const char *detail)
+{
+   if (g.durable_pending_count >= AB_DUR_PENDING_MAX)
+      return 0;
+   durable_pending_t *p = calloc(1, sizeof *p);
+   if (!p)
+      return 0;
+   snprintf(p->action, sizeof p->action, "%s", action ? action : "");
+   snprintf(p->subject, sizeof p->subject, "%s", subject ? subject : "");
+   snprintf(p->verdict, sizeof p->verdict, "%s", verdict ? verdict : "");
+   snprintf(p->detail, sizeof p->detail, "%s", detail ? detail : "");
+   if (g.durable_tail)
+      g.durable_tail->next = p;
+   else
+      g.durable_head = p;
+   g.durable_tail = p;
+   g.durable_pending_count++;
+   return 1;
+}
+
+/* Runs on the consumer thread, except during capture_open before that thread is
+ * spawned. A startup marker that reaches aimee-kb before PostgreSQL is ready is
+ * retained and retried; it never turns into a transient WARN and disappears. */
+static int persist_or_queue_durable(const char *action, const char *subject, const char *verdict,
+                                    const char *detail)
+{
+   /* Standalone binaries and legacy unit tests can use the diagnostic bus
+    * without owning a WORM store. Production daemons install this sink before
+    * start; without one there is nowhere honest to claim the row is durable. */
+   if (!sinks.durable)
+      return 0;
+   if (persist_durable(action, subject, verdict, detail))
+      return 1;
+   if (queue_durable(action, subject, verdict, detail))
+      return -1;
+   atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+   aimee_log(LOG_ERROR, "obs_bus", "durable record could not be persisted or queued: %s",
+             action ? action : "");
+   return 0;
+}
+
+static void discard_pending_durable(void)
+{
+   while (g.durable_head)
+   {
+      durable_pending_t *next = g.durable_head->next;
+      free(g.durable_head);
+      g.durable_head = next;
+   }
+   g.durable_tail = NULL;
+   g.durable_pending_count = 0;
+}
+
+static uint32_t flush_pending_durable(void)
+{
+   uint64_t now = bus_runtime_monotonic_ns();
+   if (g.durable_head && now < g.durable_retry_after_ns)
+      return 0;
+   uint32_t n = 0;
+   while (g.durable_head)
+   {
+      durable_pending_t *p = g.durable_head;
+      if (!persist_durable(p->action, p->subject, p->verdict, p->detail))
+      {
+         /* PostgreSQL may not be ready when the KB daemon starts. Retry the
+          * retained row without turning the audit sink into a 5 kHz poller. */
+         g.durable_retry_after_ns = now + 1000000000ull;
+         break;
+      }
+      g.durable_head = p->next;
+      if (!g.durable_head)
+         g.durable_tail = NULL;
+      g.durable_pending_count--;
+      free(p);
+      atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+      n++;
+   }
+   if (!g.durable_head)
+      g.durable_retry_after_ns = 0;
+   return n;
+}
+
+static int write_durable(const uint8_t *p, uint32_t len)
+{
+   char action[AB_DUR_ACTION], subject[AB_DUR_SUBJECT], verdict[AB_VERDICT], detail[AB_DUR_DETAIL];
+   uint32_t off = 0;
+   if (!(off = get_str(p, off, len, action, sizeof action)) ||
+       !(off = get_str(p, off, len, subject, sizeof subject)) ||
+       !(off = get_str(p, off, len, verdict, sizeof verdict)) ||
+       !(off = get_str(p, off, len, detail, sizeof detail)))
+   {
+      aimee_log(LOG_WARN, "obs_bus", "dropping malformed durability event (len=%u)", len);
+      return 0;
+   }
+   return persist_or_queue_durable(action, subject, verdict, detail);
+}
+
 /* ---------------------------------------------------------- consumer ----- */
 
 static uint32_t drain(void)
@@ -293,13 +451,17 @@ static uint32_t drain(void)
          wrote = write_row(ev.payload, ev.payload_len);
       else if (ev.frame.event_kind == KIND_GUARDRAIL_EVENT)
          wrote = write_guardrail(ev.payload, ev.payload_len);
+      else if (ev.frame.event_kind == KIND_DURABILITY_EVENT)
+         wrote = write_durable(ev.payload, ev.payload_len);
       else
          continue;
-      if (wrote)
+      if (wrote > 0)
       {
          atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
          n++;
       }
+      else if (wrote < 0)
+         n++; /* accepted into the durable retry queue */
    }
    return n;
 }
@@ -310,6 +472,44 @@ static uint32_t drain(void)
  * memory stays bounded during a burst instead of growing with the whole stream. */
 #define AB_CAP_FLUSH_AT (32u * 1024u)
 
+static const char *capture_state_name(capture_state_t state)
+{
+   switch (state)
+   {
+   case CAPTURE_OK:
+      return "ok";
+   case CAPTURE_NO_HOME:
+      return "no_home";
+   case CAPTURE_OPEN_FAILED:
+      return "open_failed";
+   case CAPTURE_WRITE_FAILED:
+      return "write_failed";
+   case CAPTURE_SINK_BROKEN:
+      return "sink_broken";
+   case CAPTURE_NOT_STARTED:
+   default:
+      return "not_started";
+   }
+}
+
+static void capture_mark_gap(capture_state_t state)
+{
+   capture_state_t old =
+       (capture_state_t)atomic_exchange_explicit(&g.capture_state, state, memory_order_acq_rel);
+   if (old == state)
+      return;
+   uint64_t last = atomic_load_explicit(&g.capture_last_seq, memory_order_acquire);
+   time_t wall = time(NULL);
+   char detail[AB_DUR_DETAIL];
+   snprintf(detail, sizeof detail,
+            "{\"session_id\":\"%s\",\"last_seq\":%llu,\"reason\":\"%s\","
+            "\"wall_time\":%lld}",
+            g.capture_session, (unsigned long long)last, capture_state_name(state),
+            (long long)wall);
+   (void)persist_or_queue_durable("bus.capture.gap", g.capture_session, capture_state_name(state),
+                                  detail);
+}
+
 /* Append the sink's bytes to the capture file and reset it to empty WITHOUT
  * re-emitting the file header (header_written stays set), so the file remains one
  * valid, seq-contiguous stream across many flushes. Runs only on the consumer
@@ -318,29 +518,36 @@ static uint32_t drain(void)
  * replay layer on top, so losing it degrades replay, never the audit itself. */
 static void capture_flush(void)
 {
-   if (g.cap_fd < 0 || g.capture.len == 0)
+   if (g.cap_fd < 0)
       return;
    if (g.capture.broken)
    {
       aimee_log(LOG_WARN, "obs_bus", "capture sink broke (alloc); replay stream abandoned");
       close(g.cap_fd);
       g.cap_fd = -1;
+      capture_mark_gap(CAPTURE_SINK_BROKEN);
       return;
    }
+   if (g.capture.len == 0)
+      return;
    size_t off = 0;
    while (off < g.capture.len)
    {
-      ssize_t w = write(g.cap_fd, g.capture.buf + off, g.capture.len - off);
+      ssize_t w = strcmp(sinks.capture_fault, "write_failed") == 0
+                      ? -1
+                      : write(g.cap_fd, g.capture.buf + off, g.capture.len - off);
       if (w <= 0)
       {
          aimee_log(LOG_WARN, "obs_bus", "capture file write failed; replay stream abandoned");
          close(g.cap_fd);
          g.cap_fd = -1;
          g.capture.broken = 1; /* stop the tap appending to a sink we can no longer drain */
+         capture_mark_gap(CAPTURE_WRITE_FAILED);
          return;
       }
       off += (size_t)w;
    }
+   atomic_store_explicit(&g.capture_last_seq, g.capture.last_seq, memory_order_release);
    g.capture.len = 0; /* keep header_written/first_seq: the header is already on disk */
 }
 
@@ -390,7 +597,13 @@ static void capture_prune(const char *dir, int keep)
    {
       char path[4096];
       snprintf(path, sizeof path, "%s/%s", dir, names[i]);
-      unlink(path);
+      if (unlink(path) == 0)
+      {
+         char detail[AB_DUR_DETAIL];
+         snprintf(detail, sizeof detail, "{\"session_id\":\"%s\",\"wall_time\":%lld}", names[i],
+                  (long long)time(NULL));
+         (void)persist_or_queue_durable("bus.capture.pruned", names[i], "pruned", detail);
+      }
    }
    for (int i = 0; i < n; i++)
       free(names[i]);
@@ -406,29 +619,78 @@ static void capture_open(void)
    g.cap_fd = -1;
    bus_capture_init(&g.capture, 1, 1, bus_control_epoch(g.host.control));
 
-   const char *dir = config_default_dir();
-   if (!dir || !dir[0])
+   static unsigned session_seq = 0;
+   snprintf(g.capture_session, sizeof g.capture_session, "%s%010lld-%d-%03u%s", AB_CAP_PREFIX,
+            (long long)time(NULL), (int)getpid(), session_seq++, AB_CAP_SUFFIX);
+
+   /* Capture may live on a dedicated diagnostic volume. Keeping that path
+    * separate from AIMEE_HOME also lets an operator make the losable layer
+    * read-only without disabling the daemon or its durable WORM store. */
+   const char *capture_dir = getenv("AIMEE_CAPTURE_DIR");
+   const char *dir = (capture_dir && capture_dir[0]) ? capture_dir : config_default_dir();
+   if (!dir || !dir[0] || strcmp(sinks.capture_fault, "no_home") == 0)
    {
       aimee_log(LOG_WARN, "obs_bus", "no home dir; audit capture/replay stream disabled");
+      capture_mark_gap(CAPTURE_NO_HOME);
       return;
    }
    /* time+pid identifies the process/session; a per-process counter breaks ties
     * so restarting the bus twice within one second (same pid) cannot collide and
     * truncate the earlier file. capture_open runs under start_lock, so the counter
     * needs no atomic. */
-   static unsigned session_seq = 0;
    char path[4096];
-   snprintf(path, sizeof path, "%s/%s%010lld-%d-%03u%s", dir, AB_CAP_PREFIX, (long long)time(NULL),
-            (int)getpid(), session_seq++, AB_CAP_SUFFIX);
-   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+   snprintf(path, sizeof path, "%s/%s", dir, g.capture_session);
+   int fd = strcmp(sinks.capture_fault, "open_failed") == 0
+                ? -1
+                : open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
    if (fd < 0)
    {
       aimee_log(LOG_WARN, "obs_bus", "cannot open audit capture file; replay stream disabled");
+      capture_mark_gap(CAPTURE_OPEN_FAILED);
       return;
    }
    g.cap_fd = fd;
+   atomic_store_explicit(&g.capture_state, CAPTURE_OK, memory_order_release);
    bus_host_set_tap(&g.host, bus_capture_tap, &g.capture);
+   if (strcmp(sinks.capture_fault, "sink_broken") == 0)
+      g.capture.broken = 1;
    capture_prune(dir, AB_CAP_KEEP); /* retain the newest sessions, prune older */
+}
+
+/* Loss evidence is independent of capture. bus_route calls this only for the
+ * two rare loss controls, so a disabled capture does not put a callback on the
+ * ordinary route path and cannot suppress the WORM row. */
+void obs_bus_record_loss(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+                         uint32_t payload_len)
+{
+   (void)ctx;
+   char subject[AB_DUR_SUBJECT];
+   char detail[AB_DUR_DETAIL];
+   if (frame->event_kind == BUS_KIND_OVERFLOW && payload_len == sizeof(bus_overflow_t))
+   {
+      bus_overflow_t loss;
+      memcpy(&loss, payload, sizeof loss);
+      snprintf(subject, sizeof subject, "seq:%llu", (unsigned long long)loss.shed_seq);
+      snprintf(detail, sizeof detail,
+               "{\"lost_seq\":%llu,\"event_kind\":%u,\"dst_slot\":%u,"
+               "\"control_seq\":%llu,\"wall_time\":%lld}",
+               (unsigned long long)loss.shed_seq, loss.shed_kind, loss.dst_slot,
+               (unsigned long long)frame->seq, (long long)time(NULL));
+      (void)persist_or_queue_durable("bus.overflow", subject, "dropped", detail);
+   }
+   else if (frame->event_kind == BUS_KIND_PRODUCER_REAPED &&
+            payload_len == sizeof(bus_producer_reaped_t))
+   {
+      bus_producer_reaped_t loss;
+      memcpy(&loss, payload, sizeof loss);
+      snprintf(subject, sizeof subject, "seq:%llu", (unsigned long long)loss.lost_seq);
+      snprintf(detail, sizeof detail,
+               "{\"lost_seq\":%llu,\"event_kind\":%u,\"src_slot\":%u,"
+               "\"control_seq\":%llu,\"wall_time\":%lld}",
+               (unsigned long long)loss.lost_seq, loss.lost_kind, loss.src_slot,
+               (unsigned long long)frame->seq, (long long)time(NULL));
+      (void)persist_or_queue_durable("bus.producer_reaped", subject, "dropped", detail);
+   }
 }
 
 static void *consumer_main(void *arg)
@@ -452,10 +714,11 @@ static void *consumer_main(void *arg)
       bus_host_pump(&g.host); /* the tap records each routed event into g.capture */
       pthread_mutex_unlock(&g.host_lock);
       uint32_t n = drain();
+      n += flush_pending_durable();
       /* Flush the capture stream on the threshold (bound memory during a burst)
        * or when the flow goes idle (so a recorded row is not stranded in memory
        * waiting for more traffic). */
-      if (g.capture.len >= AB_CAP_FLUSH_AT || (n == 0 && g.capture.len > 0))
+      if (g.capture.broken || g.capture.len >= AB_CAP_FLUSH_AT || (n == 0 && g.capture.len > 0))
          capture_flush();
       if (n == 0)
          nanosleep(&nap, NULL);
@@ -470,7 +733,9 @@ static void *consumer_main(void *arg)
       pthread_mutex_unlock(&g.host_lock);
       empty = (drain() == 0) ? empty + 1 : 0;
    }
-   capture_flush(); /* persist whatever the final drain recorded */
+   capture_flush();              /* persist whatever the final drain recorded */
+   g.durable_retry_after_ns = 0; /* make one final attempt regardless of cadence */
+   (void)flush_pending_durable();
    return NULL;
 }
 
@@ -595,7 +860,7 @@ static int start_locked(void)
 
    bus_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
-   cfg.max_slots = 64; /* three internal clients plus separately shipped modules */
+   cfg.max_slots = 64;   /* three internal clients plus separately shipped modules */
    cfg.slot_size = 2048; /* an audit row (7 short strings + an int) fits inline */
    cfg.inline_budget = 1900;
    cfg.queue_capacity = 1024; /* absorb bursts between drain ticks */
@@ -608,6 +873,7 @@ static int start_locked(void)
       pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
+   bus_host_set_loss_sink(&g.host, obs_bus_record_loss, NULL);
    int module_clients_ready = 1;
    for (int i = 0; i < OBS_BUS_MODULE_CLIENTS && module_clients_ready; ++i)
    {
@@ -631,6 +897,7 @@ static int start_locked(void)
    bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
    if (sinks.guardrail)
       bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
+   bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_DURABILITY_EVENT);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
@@ -645,8 +912,7 @@ static int start_locked(void)
          goto start_fail;
       }
       size_t grant_count = 0;
-      const bus_runtime_grant_t *grants =
-          bus_runtime_policy_grants(g.runtime_policy, &grant_count);
+      const bus_runtime_grant_t *grants = bus_runtime_policy_grants(g.runtime_policy, &grant_count);
       bus_runtime_config_t runtime_cfg = {.socket_path = sinks.module_socket,
                                           .socket_mode = 0600,
                                           .backlog = 32,
@@ -682,6 +948,7 @@ start_fail:
    bus_client_detach(&g.consumer);
    module_clients_destroy();
    bus_host_destroy(&g.host);
+   discard_pending_durable();
    pthread_mutex_destroy(&g.host_lock);
    pthread_mutex_destroy(&g.pub_lock);
    return -1;
@@ -758,11 +1025,141 @@ static void obs_bus_log_module_call_failure(uint32_t event_kind, uint32_t stage_
              event_kind, stage_id, module_call_result_str(rc));
 }
 
-aimee_module_call_result_t obs_bus_module_call(
-    uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
-    const void *request_body, uint32_t request_len, void *response_body,
-    uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
-    void *cancel_context)
+/* C2's runtime half. The lint gate requires every ledger declaration in
+ * process-contracts.json to appear here, and every entry here to remain
+ * declared. Keeping the table beside the sole production C->module call seam
+ * makes the emitter path mechanically checkable. */
+static const struct
+{
+   uint32_t kind;
+   const char *name;
+} LEDGER_EVENT_KINDS[] = {
+    {4609u, "config.config-store"},
+    {5889u, "memory.structured-extraction-indexing"},
+    {5890u, "memory.memory-write"},
+    {5892u, "memory.candidate-retrieval"},
+    {5893u, "memory.reranking"},
+    {6145u, "learning.learning-observation"},
+    {6401u, "routing.route-selection"},
+    {6657u, "delegates.delegate-invocation"},
+    {6658u, "delegates.delegate-capability-inference"},
+    {6659u, "delegates.delegate-chain-depth"},
+    {6660u, "delegates.delegate-named-paths"},
+    {6661u, "delegates.delegate-handoff-validation"},
+    {6662u, "delegates.delegate-tool-call-rescue"},
+    {6663u, "delegates.delegate-verify-outcome"},
+    {6664u, "delegates.delegate-economics-report"},
+    {6665u, "delegates.delegate-patch-coordination"},
+    {6666u, "delegates.delegate-role-policy"},
+    {6667u, "delegates.delegate-worktree-plan"},
+    {6668u, "delegates.delegate-launch-args"},
+    {6669u, "delegates.delegate-image-spec"},
+    {6670u, "delegates.delegate-isolation-verdict"},
+    {6671u, "delegates.delegate-permissions"},
+    {6672u, "delegates.delegate-image-gc"},
+    {6673u, "delegates.delegate-route-filter"},
+    {6674u, "delegates.delegate-noop-write"},
+    {6675u, "delegates.delegate-launch-plan"},
+    {6676u, "delegates.delegate-review-evidence"},
+    {6677u, "delegates.delegate-named-file-drift"},
+    {6678u, "delegates.delegate-group-plan"},
+    {6913u, "tools.tool-dispatch"},
+    {7169u, "workspace.workspace-access"},
+    {7170u, "workspace.workspace-runner"},
+    {7171u, "workspace.workspace-runner-io"},
+    {7425u, "git.git-operation"},
+    {7426u, "git.git-ref-validation"},
+    {7427u, "git.git-ci-grade"},
+    {7428u, "git.git-forge-request"},
+    {7429u, "git.git-credential-resolve"},
+    {7430u, "git.git-verify-run"},
+    {7682u, "skills.skill-trigger-match"},
+    {8449u, "execution-policy.tool-policy-decision"},
+    {8961u, "governance.governance-evaluation"},
+    {9217u, "workflows.workflow-advance-decision"},
+    {9218u, "workflows.workflow-control"},
+    {9219u, "workflows.workflow-gate-decision"},
+    {9220u, "workflows.workflow-autonomous-route"},
+    {9475u, "roundtable.roundtable-chunk-plan"},
+    {9729u, "kb-synthesis.kb-grounding-decision"},
+    {10241u, "control-web.proxy-route-authorization"},
+    {10753u, "sandbox.sandbox-learned-observe"},
+    {10754u, "sandbox.sandbox-learned-load"},
+    {10755u, "sandbox.sandbox-proxy-request-policy"},
+    {10756u, "sandbox.sandbox-proxy-address-policy"},
+    {11521u, "db2.db2-lifecycle"},
+    {11522u, "db2.db2-tenancy"},
+    {11523u, "db2.db2-memory"},
+    {11524u, "db2.db2-index"},
+    {11525u, "db2.db2-learning"},
+    {11526u, "db2.db2-organization"},
+    {11527u, "db2.db2-custody"},
+    {11528u, "db2.db2-maintenance"},
+    {11777u, "db1.db1-economizer-state"},
+    {11778u, "db1.db1-git-ownership"},
+    {11779u, "db1.db1-conversation"},
+    {11780u, "db1.db1-agent-work"},
+    {11781u, "db1.db1-delegation"},
+    {11782u, "db1.db1-sessions"},
+    {11783u, "db1.db1-runtime"},
+    {11784u, "db1.db1-telemetry"},
+    {11785u, "db1.db1-guardrail-state"},
+    {11786u, "db1.db1-ensemble"},
+    {11787u, "db1.db1-workflow"},
+    {11788u, "db1.db1-roundtable"},
+    {11789u, "db1.db1-identity"},
+    {11790u, "db1.db1-checkpoints"},
+    {11791u, "db1.db1-jti-replay"},
+    {11792u, "db1.db1-lifecycle"},
+    {11793u, "db1.db1-mgmt-jwks"},
+    {11794u, "db1.db1-mgmt-nonce"},
+    {11795u, "db1.db1-pki"},
+    {12033u, "aimee.peer-delivery"},
+    {12034u, "aimee.peer-inbox"},
+    {12035u, "aimee.peer-grant"},
+    {12036u, "aimee.peer-channel"},
+};
+
+/* Sampled declarations use integer parts-per-million so the checked contract
+ * has no floating-point ambiguity. The sentinel keeps this valid ISO C while
+ * the initial catalog has no sampled kinds; lint requires future declarations
+ * to add an exact row here. */
+static const struct
+{
+   uint32_t kind;
+   const char *name;
+   uint32_t parts_per_million;
+} SAMPLED_EVENT_KINDS[] = {{0u, NULL, 0u}};
+
+static int sampled_event_selected(uint32_t kind, uint32_t parts_per_million)
+{
+   static atomic_uint_least64_t occurrence = 0;
+   uint64_t x = atomic_fetch_add_explicit(&occurrence, 1, memory_order_relaxed) +
+                ((uint64_t)kind << 32) + 0x9e3779b97f4a7c15ULL;
+   /* SplitMix64: stable, cheap distribution without global random state. */
+   x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+   x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+   x ^= x >> 31;
+   return x % 1000000u < parts_per_million;
+}
+
+static const char *durable_event_name(uint32_t kind)
+{
+   for (size_t i = 0; i < sizeof LEDGER_EVENT_KINDS / sizeof LEDGER_EVENT_KINDS[0]; ++i)
+      if (LEDGER_EVENT_KINDS[i].kind == kind)
+         return LEDGER_EVENT_KINDS[i].name;
+   for (size_t i = 0; i < sizeof SAMPLED_EVENT_KINDS / sizeof SAMPLED_EVENT_KINDS[0]; ++i)
+      if (SAMPLED_EVENT_KINDS[i].kind == kind &&
+          sampled_event_selected(kind, SAMPLED_EVENT_KINDS[i].parts_per_million))
+         return SAMPLED_EVENT_KINDS[i].name;
+   return NULL;
+}
+
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (response_len)
       *response_len = 0;
@@ -784,9 +1181,36 @@ aimee_module_call_result_t obs_bus_module_call(
       return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
    }
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
+   const char *durable_name = sinks.durable ? durable_event_name(event_kind) : NULL;
+   if (durable_name)
+   {
+      char subject[AB_DUR_SUBJECT], detail[AB_DUR_DETAIL];
+      snprintf(subject, sizeof subject, "%s:%u", durable_name, stage_id);
+      snprintf(detail, sizeof detail,
+               "{\"event_kind\":%u,\"stage_id\":%u,\"trace_id\":%llu,"
+               "\"request_len\":%u}",
+               event_kind, stage_id, (unsigned long long)trace_id, request_len);
+      obs_bus_emit_durable_event("bus.module.request", subject, "intent", detail);
+   }
    aimee_module_call_result_t result = aimee_module_client_call(
        &g.module_clients[slot].client, event_kind, stage_id, trace_id, deadline_ns, request_body,
        request_len, response_body, response_capacity, response_len, module_call_cancelled, &state);
+   if (durable_name)
+   {
+      char subject[AB_DUR_SUBJECT], detail[AB_DUR_DETAIL];
+      char response_digest[65] = "";
+      uint32_t actual_response_len = response_len ? *response_len : 0;
+      if (result == AIMEE_MODULE_CALL_OK && response_body && actual_response_len > 0)
+         (void)aimee_sha256_hex(response_body, actual_response_len, response_digest);
+      snprintf(subject, sizeof subject, "%s:%u", durable_name, stage_id);
+      snprintf(detail, sizeof detail,
+               "{\"event_kind\":%u,\"stage_id\":%u,\"trace_id\":%llu,"
+               "\"response_len\":%u,\"response_sha256\":\"%s\"}",
+               event_kind, stage_id, (unsigned long long)trace_id, actual_response_len,
+               response_digest);
+      obs_bus_emit_durable_event("bus.module.reply", subject, aimee_module_call_result_name(result),
+                                 detail);
+   }
    module_client_release(slot);
    atomic_fetch_sub(&g.module_callers, 1);
    if (result != AIMEE_MODULE_CALL_OK)
@@ -830,6 +1254,42 @@ int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx)
    return 0;
 }
 
+int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
+{
+   pthread_mutex_lock(&start_lock);
+   if (g.started)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   sinks.durable = sink;
+   sinks.durable_ctx = sink ? ctx : NULL;
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+int obs_bus_test_capture_fault(const char *reason)
+{
+   static const char *const allowed[] = {"", "no_home", "open_failed", "write_failed",
+                                         "sink_broken"};
+   const char *value = reason ? reason : "";
+   int valid = 0;
+   for (size_t i = 0; i < sizeof allowed / sizeof allowed[0]; ++i)
+      if (strcmp(value, allowed[i]) == 0)
+         valid = 1;
+   if (!valid || strlen(value) >= sizeof sinks.capture_fault)
+      return -1;
+   pthread_mutex_lock(&start_lock);
+   if (g.started)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   snprintf(sinks.capture_fault, sizeof sinks.capture_fault, "%s", value);
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
 int obs_bus_configure_module_runtime(const char *socket_path, const char *policy_dir)
 {
    if (!socket_path || socket_path[0] != '/' || !policy_dir || policy_dir[0] != '/' ||
@@ -848,8 +1308,7 @@ int obs_bus_configure_module_runtime(const char *socket_path, const char *policy
    return 0;
 }
 
-int obs_bus_configure_daemon_module_runtime(const char *daemon_name,
-                                            const char *config_directory)
+int obs_bus_configure_daemon_module_runtime(const char *daemon_name, const char *config_directory)
 {
    if (!daemon_name || !daemon_name[0] || strchr(daemon_name, '/') || !config_directory ||
        config_directory[0] != '/')
@@ -857,16 +1316,14 @@ int obs_bus_configure_daemon_module_runtime(const char *daemon_name,
    const char *socket_override = getenv("AIMEE_MODULE_BUS_SOCKET");
    const char *policy_override = getenv("AIMEE_MODULE_POLICY_DIR");
    char socket_path[108], policy_dir[4096];
-   int socket_length =
-       socket_override && socket_override[0]
-           ? snprintf(socket_path, sizeof(socket_path), "%s", socket_override)
-           : snprintf(socket_path, sizeof(socket_path), "%s/%s-module-bus.sock", config_directory,
-                      daemon_name);
-   int policy_length =
-       policy_override && policy_override[0]
-           ? snprintf(policy_dir, sizeof(policy_dir), "%s", policy_override)
-           : snprintf(policy_dir, sizeof(policy_dir), "%s/modules.d/%s", config_directory,
-                      daemon_name);
+   int socket_length = socket_override && socket_override[0]
+                           ? snprintf(socket_path, sizeof(socket_path), "%s", socket_override)
+                           : snprintf(socket_path, sizeof(socket_path), "%s/%s-module-bus.sock",
+                                      config_directory, daemon_name);
+   int policy_length = policy_override && policy_override[0]
+                           ? snprintf(policy_dir, sizeof(policy_dir), "%s", policy_override)
+                           : snprintf(policy_dir, sizeof(policy_dir), "%s/modules.d/%s",
+                                      config_directory, daemon_name);
    if (socket_length <= 0 || (size_t)socket_length >= sizeof(socket_path) || policy_length <= 0 ||
        (size_t)policy_length >= sizeof(policy_dir))
       return -1;
@@ -1012,6 +1469,47 @@ void obs_bus_emit_guardrail(const guardrail_event_t *e)
    leave_emit();
 }
 
+void obs_bus_emit_durable_event(const char *action, const char *subject, const char *verdict,
+                                const char *detail)
+{
+   if (!sinks.durable)
+   {
+      aimee_log(LOG_WARN, "obs_bus", "durability event has no configured WORM sink: %s",
+                action ? action : "");
+      return;
+   }
+   if (!enter_emit())
+   {
+      aimee_log(LOG_WARN, "obs_bus", "audit bus unavailable; durability event not recorded");
+      return;
+   }
+   uint8_t buf[2048];
+   uint32_t len = serialize_durable(buf, sizeof buf, action, subject, verdict, detail);
+   if (len == 0)
+   {
+      atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+      aimee_log(LOG_WARN, "obs_bus", "durability event too large to serialize; not recorded");
+   }
+   else
+      publish(KIND_DURABILITY_EVENT, buf, len);
+   leave_emit();
+}
+
+void obs_bus_capture_health(obs_bus_capture_health_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof *out);
+   capture_state_t state =
+       (capture_state_t)atomic_load_explicit(&g.capture_state, memory_order_acquire);
+   out->capture_ok = state == CAPTURE_OK;
+   out->reason = capture_state_name(state);
+   out->last_seq = atomic_load_explicit(&g.capture_last_seq, memory_order_acquire);
+   pthread_mutex_lock(&start_lock);
+   snprintf(out->session_id, sizeof out->session_id, "%s", g.capture_session);
+   pthread_mutex_unlock(&start_lock);
+}
+
 void obs_bus_stop(void)
 {
    pthread_mutex_lock(&start_lock);
@@ -1030,7 +1528,7 @@ void obs_bus_stop(void)
     * inside publish(). The consumer is still running, so any producer mid-publish
     * still drains and completes. Bounded: a producer waits at most AB_PUB_MAX
     * backoffs. */
-   atomic_store(&g.emitting, 0);                                    /* seq_cst */
+   atomic_store(&g.emitting, 0);        /* seq_cst */
    atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
    atomic_store_explicit(&g.module_stop, 1, memory_order_release);
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000}; /* 50 us */
@@ -1058,6 +1556,14 @@ void obs_bus_stop(void)
    module_clients_destroy();
    bus_host_destroy(&g.host);
    bus_runtime_policy_free(&g.runtime_policy);
+   if (g.durable_head)
+   {
+      uint64_t pending = g.durable_pending_count;
+      atomic_fetch_add_explicit(&g.dropped, pending, memory_order_relaxed);
+      aimee_log(LOG_ERROR, "obs_bus", "%llu durable records remained unwritten at shutdown",
+                (unsigned long long)pending);
+      discard_pending_durable();
+   }
    pthread_mutex_destroy(&g.host_lock);
    pthread_mutex_destroy(&g.pub_lock);
    g.started = 0;

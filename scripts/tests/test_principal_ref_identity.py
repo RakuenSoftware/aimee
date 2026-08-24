@@ -55,7 +55,7 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
                 continue
             ref = refs[component["id"]]
             self.assertEqual(component["principal_ref"], ref)
-            for stage in component["stages"]:
+            for stage in component["stages"] + component.get("durability_declarations", []):
                 self.assertLess(stage["event_kind"], 0x80000000)
                 self.assertEqual(
                     stage["event_kind"],

@@ -25,6 +25,7 @@
 #   AIMEE_SRC      the source tree, for build/obj                (default $AIMEE_ROOT/src)
 #   WORKDIR        scratch for HOMEs and logs                    (default /tmp/module-liveness)
 #   AIMEE_DB2_URL  libpq URL for a throwaway database
+#   PGDB            optional psql read-back DSN (default $AIMEE_DB2_URL)
 #   KB_PORT        TCP port for aimee-kb                         (default 18744)
 #
 # Every assertion prints PASS or FAIL; the script exits non-zero if any failed.
@@ -36,6 +37,7 @@ AIMEE_SRC="${AIMEE_SRC:-$AIMEE_ROOT/src}"
 WORKDIR="${WORKDIR:-/tmp/module-liveness}"
 KB_PORT="${KB_PORT:-18744}"
 export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgres:///aimee_shared?host=/var/run/postgresql}"
+PGDB="${PGDB:-$AIMEE_DB2_URL}"
 OBJ="$AIMEE_SRC/build/obj"
 KBHOME="$WORKDIR/kbhome"
 SRVHOME="$WORKDIR/srvhome"
@@ -100,7 +102,7 @@ done
 printf '        deployed:%s\n' "$KB_DEPLOYED"
 
 KBBUS="$KBHOME/.config/aimee/kb-module-bus.sock"
-env HOME="$KBHOME" AIMEE_HOME="$KBHOME/.config/aimee" \
+env HOME="$KBHOME" AIMEE_HOME="$KBHOME/.config/aimee" AIMEE_CAPTURE_DIR=/proc \
     "$AIMEE_ROOT/aimee-kb" --http-port="$KB_PORT" > "$WORKDIR/kb.log" 2>&1 &
 KB_PID=$!
 for _ in $(seq 1 300); do [ -S "$KBBUS" ] && break; sleep 0.1; done
@@ -116,6 +118,34 @@ done
 if [ "$kb_up" = 1 ]; then ok "aimee-kb is serving on $KB_URL"
 else bad "aimee-kb never answered"; tail -15 "$WORKDIR/kb.log"; fi
 
+section "0a capture disabled, durable completeness evidence remains"
+# /proc is a real read-only target for ordinary capture files. This drives the
+# production open failure path, not the unit-test fault seam, while the KB keeps
+# its normal writable home and PostgreSQL connection.
+KH=$(curl -sS --max-time 10 "$KB_URL/v1/health")
+CAPTURE_OK=$(printf '%s' "$KH" | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+print("true" if d.get("capture_ok") else "false")' 2>/dev/null)
+CAPTURE_REASON=$(printf '%s' "$KH" | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+print(d.get("capture_reason", "missing"))' 2>/dev/null)
+check 'a "the capture record is complete" assertion turns red' "false" "${CAPTURE_OK:-missing}"
+check "health names the production capture failure" "open_failed" "${CAPTURE_REASON:-missing}"
+
+GAP_ROWS=0
+for _ in $(seq 1 30); do
+    GAP_ROWS=$(psql -d "$PGDB" -tA -c \
+        "SELECT count(*) FROM kb_audit_event WHERE action='bus.capture.gap' AND verdict='open_failed'" \
+        2>/dev/null)
+    [ "${GAP_ROWS:-0}" -gt 0 ] && break
+    sleep 1
+done
+if [ "${GAP_ROWS:-0}" -gt 0 ]; then
+    ok "PostgreSQL WORM ledger names the missing capture period"
+else
+    bad "capture failed but PostgreSQL has no durable bus.capture.gap row"
+fi
+
 # A module that exits on attach is a rejected grant, and the daemon carries on
 # without it in silence. That silence is the whole subject of this suite.
 alive=0; dead=0
@@ -127,7 +157,7 @@ printf '        %d attached\n' "$alive"
 
 section "1  aimee-server, with every module it is granted"
 SRV_MODULES="config db1 learning memory routing delegates tools workspace git skills
-             response-composition governance roundtable runtime-web sandbox economizer benchmarks"
+             response-composition execution-policy governance roundtable runtime-web sandbox economizer benchmarks aimee"
 SRV_DEPLOYED=""
 for m in $SRV_MODULES; do
     deploy server "$m" "$SRVHOME" && SRV_DEPLOYED="$SRV_DEPLOYED $m"
@@ -180,7 +210,7 @@ section "3  signal capture, the path that was dead"
 # Count first. A bare "is there a superseded row?" passes on a row left by an
 # earlier run, which is how this assertion once reported PASS in a run where
 # every capture was refused and nothing was written at all.
-BEFORE=$(psql -d "${PGDB:-aimee_shared}" -tA \
+BEFORE=$(psql -d "$PGDB" -tA \
          -c "SELECT count(*) FROM learning_proposal_fate WHERE fate='superseded'" 2>/dev/null)
 BEFORE="${BEFORE:-0}"
 for i in 1 2; do
@@ -193,7 +223,7 @@ for i in 1 2; do
 done
 # Read the effect back through psql, not from the process that wrote it, and
 # judge the DELTA this run produced rather than the state it inherited.
-AFTER=$(psql -d "${PGDB:-aimee_shared}" -tA \
+AFTER=$(psql -d "$PGDB" -tA \
         -c "SELECT count(*) FROM learning_proposal_fate WHERE fate='superseded'" 2>/dev/null)
 AFTER="${AFTER:-0}"
 if [ "$AFTER" -gt "$BEFORE" ]; then ok "the router recorded a supersession unasked"

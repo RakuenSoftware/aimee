@@ -95,6 +95,14 @@ void bus_host_set_tap(bus_host_t *h, bus_tap_fn fn, void *ctx)
    h->tap_ctx = ctx;
 }
 
+void bus_host_set_loss_sink(bus_host_t *h, bus_loss_fn fn, void *ctx)
+{
+   if (!h)
+      return;
+   h->loss = fn;
+   h->loss_ctx = ctx;
+}
+
 bus_host_result_t bus_host_subscribe(bus_host_t *h, uint32_t slot, uint32_t event_kind)
 {
    if (!h || slot >= h->cfg.max_slots || !h->slots[slot].in_use)
@@ -233,6 +241,8 @@ static void emit_control(bus_host_t *h, int dst, uint32_t kind, uint64_t corr, c
    f.dst_handle = dst < 0 ? 0 : (uint32_t)dst;
    if (h->tap)
       h->tap(h->tap_ctx, &f, (const uint8_t *)payload, plen);
+   if (h->loss && (kind == BUS_KIND_OVERFLOW || kind == BUS_KIND_PRODUCER_REAPED))
+      h->loss(h->loss_ctx, &f, (const uint8_t *)payload, plen);
    if (dst < 0)
       return; /* tap-only */
    bus_slot_t *d = &h->slots[dst];
@@ -256,7 +266,15 @@ void bus_route_forget_slot(bus_host_t *h, uint32_t slot)
    /* If the slot had a block-held event in flight, it is discarded now: name its
     * seq to the tap as producer_reaped so the loss is recorded, not silent. */
    if (h->slots[slot].blocked)
-      emit_control(h, -1, BUS_KIND_PRODUCER_REAPED, 0, NULL, 0);
+   {
+      bus_producer_reaped_t reaped = {
+          .lost_seq = h->slots[slot].blocked_seq, .lost_kind = 0, .src_slot = slot};
+      const uint8_t *head = bus_ring_consume_begin(&h->slots[slot].qpair.outbound);
+      bus_frame_t lost;
+      if (head && bus_wire_decode(head, h->cfg.slot_size, &lost) == BUS_WIRE_OK)
+         reaped.lost_kind = lost.event_kind;
+      emit_control(h, -1, BUS_KIND_PRODUCER_REAPED, 0, &reaped, (uint32_t)sizeof reaped);
+   }
 
    for (uint32_t i = 0; i < BUS_HOST_MAX_KINDS; i++)
    {

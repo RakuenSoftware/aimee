@@ -486,9 +486,10 @@ AUDIT_REPLAY_OBJ = $(OBJDIR)/modules/audit/audit_replay.o
 $(OBJDIR)/core/event_bus/%.o: C_FLAGS += -Icore/event_bus/include
 $(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Icore/event_bus/include
 $(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Icore/event_bus/include
+$(OBJDIR)/server/execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/include
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
-AGENT_SRCS = agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c modules/execution-policy/execution_policy.c server/agent_policy_intercept.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c modules/benchmarks/agent_eval_benchmarks.c server/agent_coord.c \
+AGENT_SRCS = agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c modules/benchmarks/agent_eval_benchmarks.c server/agent_coord.c \
              server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
              server/web_search.c server/web_search_fuse.c server/web_search_breaker.c server/token_tracker.c server/token_tracker_registry.c server/token_tracker_db1.c server/middleware.c server/agent_pipeline.c \
              server/process_mgr.c server/agent_loop.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/provider_cli_adapter.c server/cli_claude.c  server/cli_mistral.c server/cli_acp.c server/session_compact.c server/rounds_to_resume.c server/compact_prune.c server/context_engine.c \
@@ -620,6 +621,7 @@ SERVER_KB_CLIENT_OBJS = $(KB_CLIENT_OBJS)
 
 # --- KB Service ---
 KB_SRCS = kb/kb_main.c kb/kb_module_stage_adapters.c kb/kb_vault_policy.c kb/kb_witness_cadence.c kb/kb_witness_gate_state.c kb/kb_background.c kb/kb_service.c kb/kb_service_workers.c kb/kb_ingest_workers.c kb/kb_service_kb.c kb/kb_service_memory.c kb/kb_service_css.c kb/kb_service_agent.c kb/kb_service_graph.c kb/kb_graph_analytics.c kb/lessons_cite_tracker.c kb/lessons_capture.c kb/lessons_reflect.c kb/lessons_actuate.c kb/lessons_session_capture.c kb/prompt_sanitizer.c kb/kb_surprising_judge.c kb/kb_service_artifacts.c kb/kb_service_roadmap.c kb/kb_intel_payload.c kb/kb_bandit_registry.c kb/kb_reflection.c curiosity_resolve.c kb/kb_evidence_embed.c kb/kb_learning_synth.c kb/kb_learning_version.c kb/kb_mining.c kb/http/kb_http.c kb/http/kb_http_json.c kb/http/kb_http_listener.c kb/http/kb_http_client.c kb/http/kb_tls.c kb/http/kb_tls_serve.c kb/http/kb_http_conn.c kb/http/kb_http_ws.c kb/http/kb_http_search.c kb/http/kb_route_acl.c kb/http/kb_ingress.c kb/http/kb_http_team.c kb/http/kb_http_models.c kb/http/kb_models_validate.c kb/http/kb_http_insights.c kb/http/kb_insights_util.c kb/http/kb_http_budget.c kb/http/kb_http_rate.c kb/http/kb_http_telemetry.c kb/http/kb_http_console.c kb/http/kb_http_accounts.c kb/http/kb_http_bootstrap.c kb/http/kb_http_identity_login.c kb/http/kb_http_grants.c kb/http/kb_http_governance.c kb/kb_scope.c kb/kb_identity_resolve.c kb/kb_oidc_jwks_fleet.c kb/kb_reqctx.c kb/http/kb_http_code.c kb/http/kb_http_code_graphfb.c kb/http/kb_http_pdf.c kb/http/kb_http_ingest.c kb/http/kb_http_jobs.c kb/kb_doc_hash.c kb/kb_doc_pdf.c kb/kb_tsr_sidecar.c kb/kb_blob_store.c kb/kb_blob_reconcile.c kb/kb_ocr_sidecar.c kb/http/kb_http_releases.c kb/http/kb_http_reflections.c kb/kb_ingest_normalize.c kb/kb_service_code_embed.c kb/kb_memory_embed.c kb/kb_memory_facts.c kb/fact_grounding.c kb/memory_rewrite_llm.c kb/enroll.c kb/verifier.c kb/auth_oidc.c kb/kb_oidc_login.c kb/kb_oidc_login_store.c kb/kb_oidc_token_exchange.c kb/kb_oidc_token_exchange_post.c kb/pki.c kb/kb_sidecar_identity.c modules/aws/aws_sigv4.c modules/aws/aws_sts.c modules/aws/bedrock_policy.c modules/aws/sts_cache.c modules/aws/aws_eventstream.c
+KB_SRCS += kb/kb_obs_bus_adapter.c
 KB_SRCS += modules/db2/client/generated.c
 $(OBJDIR)/kb/kb_module_stage_adapters.o $(OBJDIR)/modules/db2/client/generated.o: C_FLAGS += \
     -Imodules/db2/include
@@ -2027,6 +2029,9 @@ lint:
 	fi; \
 	echo "lint: all $$n checks passed"
 
+# Appended separately to keep the already-wide canonical check list readable.
+LINT_CHECKS += event-durability-check
+
 background-skill-curator-absence-check:
 	@python3 -I -S ../scripts/check_background_skill_curator_absence.py
 
@@ -2114,6 +2119,13 @@ provider-seams-check:
 provider-registration-check:
 	@python3 -m unittest discover -s ../scripts/tests -p test_check_provider_registration.py
 	@python3 -I -S ../scripts/check_provider_registration.py
+
+# Every registered bus kind declares whether it reaches WORM, capture, or a
+# bounded sample. Its tests run in the same target so parser drift cannot turn
+# a zero-kind scan into a vacuous green build.
+event-durability-check:
+	@python3 -m unittest discover -s ../scripts/tests -p test_check_event_durability.py
+	@python3 -I -S ../scripts/check_event_durability.py
 
 db2-contract-check:
 	@cd .. && python3 -I -S scripts/gen_db2_contract.py
