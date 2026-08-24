@@ -35,6 +35,17 @@ static long now_ns(void)
    return (long)ts.tv_sec * 1000000000L + ts.tv_nsec;
 }
 
+/* THIS THREAD's own CPU time. Wall clock measures the machine; this measures
+ * what the calling thread was actually charged for, which is the claim under
+ * test -- "the request thread does not pay for the write". Another process
+ * stealing the CPU inflates wall time and leaves this untouched. */
+static long thread_cpu_ns(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+   return (long)ts.tv_sec * 1000000000L + ts.tv_nsec;
+}
+
 static int count_source(const char *src)
 {
    sqlite3_stmt *st = NULL;
@@ -137,21 +148,25 @@ static void test_async_nonblocking_no_drops(void)
     * rounds converges on the real cost from above and the comparison stops
     * depending on what else the machine was doing. */
    long best_sync = -1, best_enqueue = -1;
+   long best_sync_cpu = -1, best_enqueue_cpu = -1;
    for (int r = 0; r < ASYNC_ROUNDS; r++)
    {
-      long s0 = now_ns();
+      long s0 = now_ns(), sc0 = thread_cpu_ns();
       for (int i = 0; i < ASYNC_N; i++)
       {
          row.source = "sync-baseline";
          assert(db1_token_audit_insert(&row) == 0);
       }
       long sync_ns = now_ns() - s0;
+      long sync_cpu = thread_cpu_ns() - sc0;
       if (best_sync < 0 || sync_ns < best_sync)
          best_sync = sync_ns;
+      if (best_sync_cpu < 0 || sync_cpu < best_sync_cpu)
+         best_sync_cpu = sync_cpu;
 
       /* Async: hand the rows to the background writer. The enqueue is what the
        * request thread pays; it must be cheaper than the synchronous insert. */
-      long a0 = now_ns();
+      long a0 = now_ns(), ac0 = thread_cpu_ns();
       for (int i = 0; i < ASYNC_N; i++)
       {
          row.source = "async-load";
@@ -159,21 +174,35 @@ static void test_async_nonblocking_no_drops(void)
             (void)db1_token_audit_insert(&row); /* ring full -> inline, never dropped */
       }
       long enqueue_ns = now_ns() - a0;
+      long enqueue_cpu = thread_cpu_ns() - ac0;
       if (best_enqueue < 0 || enqueue_ns < best_enqueue)
          best_enqueue = enqueue_ns;
+      if (best_enqueue_cpu < 0 || enqueue_cpu < best_enqueue_cpu)
+         best_enqueue_cpu = enqueue_cpu;
 
       agent_audit_async_flush(); /* wait for the writer to drain */
    }
 
    int landed = count_source("async-load");
-   printf("  async: enqueue %d rows in %ld us vs sync insert %ld us (best of %d); drops=%d\n",
-          ASYNC_N, best_enqueue / 1000, best_sync / 1000, ASYNC_ROUNDS,
-          ASYNC_N * ASYNC_ROUNDS - landed);
+   printf("  async: enqueue %d rows in %ld us cpu %ld us vs sync insert %ld us cpu %ld us"
+          " (best of %d); drops=%d\n",
+          ASYNC_N, best_enqueue / 1000, best_enqueue_cpu / 1000, best_sync / 1000,
+          best_sync_cpu / 1000, ASYNC_ROUNDS, ASYNC_N * ASYNC_ROUNDS - landed);
+   fflush(stdout); /* abort() below would otherwise discard the numbers that explain it */
    /* Acceptance: every enqueued row lands (drop rate 0)... */
    assert(landed == ASYNC_N * ASYNC_ROUNDS);
-   /* ...and the request thread is not blocked on the DB — enqueuing is cheaper
-    * than synchronously inserting the same batch. */
-   assert(best_enqueue < best_sync);
+   /* ...and the request thread is not charged for the write: enqueuing costs it
+    * far less CPU than synchronously inserting the same batch.
+    *
+    * The comparison is on THREAD CPU, not wall clock. Wall clock measures the
+    * machine, and this suite runs its binaries in parallel: a 100us enqueue
+    * window preempted by a busy neighbour reads as 866us of wall time while
+    * costing the thread 117us, which is a fact about the scheduler and not
+    * about the writer. Measured under deliberate 3x CPU oversubscription, the
+    * wall-clock form flipped outright; thread CPU held a 12x margin in every
+    * sample (enqueue 77-127us against sync 1497-3236us). Both numbers are
+    * printed above so a future failure can be read rather than guessed at. */
+   assert(best_enqueue_cpu < best_sync_cpu);
 }
 
 /* ── Real ingress-writer concurrency ─────────────────────────────────────────
