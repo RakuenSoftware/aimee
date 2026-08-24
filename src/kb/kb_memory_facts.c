@@ -53,10 +53,10 @@
 #define MF_SYSTEM_PROMPT_TMPL                                                                      \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
-   "\"confidence\":0.0,\"source_start\":0,\"source_end\":1}]}. source_start and "              \
-   "source_end are exact zero-based UTF-8 byte offsets into the note, with source_end "             \
+   "\"confidence\":0.0,\"source_start\":0,\"source_end\":1}]}. source_start and "                  \
+   "source_end are exact zero-based UTF-8 byte offsets into the note, with source_end "            \
    "exclusive, covering the smallest passage that directly supports that fact. Every fact "        \
-   "is a stable subject-relation-object triple "                                                    \
+   "is a stable subject-relation-object triple "                                                   \
    "grounded strictly in the note. For relation, choose the single nearest fit "                   \
    "from these canonical predicates when one reasonably applies: %s. If NONE fits, "               \
    "emit a concise snake_case predicate of your own (e.g. drives, founded, "                       \
@@ -65,7 +65,7 @@
    "(use \"user\" for the note's author when it is first-person). "                                \
    "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
    "state, feelings, plans, and one-off events. If the note asserts no durable "                   \
-   "fact, return an empty list. Omit any fact whose exact supporting span cannot be identified. "    \
+   "fact, return an empty list. Omit any fact whose exact supporting span cannot be identified. "  \
    "No prose, no markdown."
 
 /* Build the extraction system prompt, binding the model to the canonical relation
@@ -142,11 +142,11 @@ static void mf_mark_done(int64_t job_id)
    if (!conn)
       return;
    char err[MF_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "UPDATE kb_async_jobs SET status='done', last_error='', next_attempt_at='',"
-       " claimed_by='', claimed_at='', updated_at=pg_now_text() WHERE id=?1",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE kb_async_jobs SET status='done', last_error='', next_attempt_at='',"
+                        " claimed_by='', claimed_at='', updated_at=pg_now_text() WHERE id=?1",
+                        err, sizeof(err));
    if (!st)
       return;
    aimee_pg_bind_int64(st, "?1", job_id);
@@ -351,7 +351,7 @@ static int mf_commit_facts(const char *llm_json, const char *source_content,
    return committed;
 }
 
-static int mf_process_one(const config_t *cfg, const mf_job_t *job)
+static int mf_process_one(const mf_job_t *job)
 {
    memory_t mem;
    memset(&mem, 0, sizeof(mem));
@@ -416,8 +416,8 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    db2_lease_release_idle();
 
    char err[MF_ERRBUF] = "";
-   char *resp = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json,
-                                   NULL, "", MF_LLM_OUT_CAP, err, sizeof(err));
+   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json, NULL,
+                                   "", MF_LLM_OUT_CAP, err, sizeof(err));
    free(request_json);
    if (!resp)
    {
@@ -434,9 +434,9 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    return n;
 }
 
-int kb_memory_facts_drain(const config_t *cfg, int batch)
+int kb_memory_facts_drain(int batch)
 {
-   if (!cfg || !config_typed_facts_enabled() || batch <= 0)
+   if (!config_typed_facts_enabled() || batch <= 0)
       return 0;
    if (!db2_conn())
       return 0;
@@ -452,7 +452,7 @@ int kb_memory_facts_drain(const config_t *cfg, int batch)
       memset(&job, 0, sizeof(job));
       if (!mf_claim_job(&job))
          break;
-      (void)mf_process_one(cfg, &job);
+      (void)mf_process_one(&job);
       processed++;
    }
    return processed;
