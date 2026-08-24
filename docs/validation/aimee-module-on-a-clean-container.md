@@ -445,9 +445,15 @@ longer the clean room the evidence claims it was.
   independently, and the server still reported `knowledge service unreachable`
   because nothing configured a KB endpoint for it. So "both services up" is
   true and "the two are integrated" is not, and only the first was tested.
+  RESOLVED on CT 9099 -- see "The two loose ends closed" below. It was a rig
+  gap: `AIMEE_KB_API_URL` was never set, and the server had not been told where
+  the KB was.
 - **The KB's store.** It reports `status: degraded` with `DB2 schema not ready`
   while 253 tables sit in the schema it uses. Its bootstrap and its health check
   disagree, and which of them is right was not established.
+  RESOLVED on CT 9099 -- see below. Also a rig gap, and the premise here was
+  wrong: they do not disagree. The health check is a bus call to the postgres
+  module, which was not running; bootstrap goes straight through libpq.
 - **The in-image PostgreSQL.** The kb was pointed at the container's stock
   cluster via `AIMEE_DB2_URL` because the internal one refuses to run as root,
   which is PostgreSQL's rule rather than aimee's.
@@ -472,3 +478,80 @@ longer the clean room the evidence claims it was.
   tables, and nothing would refuse. The
   mechanism is proved; those numbers are not final and the run must be repeated
   after the renumber.
+
+## The two loose ends closed (2026-08-24, CT 9099)
+
+The section above listed two things the run left unexplained: the KB reporting
+`DB2 schema not ready` over a schema holding 253 tables, and the server
+reporting `knowledge service unreachable` while the KB answered on 8790.
+
+Both were read out of the source rather than guessed at, and **neither was a
+code defect. Both were gaps in the rig** — things that run never did.
+
+**`db2_ok: false`.** `kb_module_postgres_health_probe`
+(`src/kb/kb_module_stage_adapters.c:581`) is a `call_module` to
+`AIMEE_POSTGRES_EVENT_HEALTH` — a *bus call to the postgres module*
+(`runtime: go`, ref 28, kind 11265, `placements: ["kb"]`). No postgres module
+was running on the KB's bus, so the probe had nobody to ask. The KB's *pool*
+connects directly through libpq, which is exactly why bootstrap succeeded and
+253 tables exist. Bootstrap and health check were not disagreeing; they take
+different paths, and only one of them had been stood up.
+
+**`knowledge service unreachable`.** `kb_client_v1_base_url`
+(`src/modules/kb_client/kb_client.c:1502`) reads `AIMEE_KB_API_URL` and returns
+`NULL` when it is unset or empty. The rig never set it. The server was not
+failing to reach the KB; it had never been told where the KB was.
+
+CT 9099 was built with both closed — the postgres module started on the KB's
+own bus (daemon `"kb"`, its own grant directory and its own config module), and
+`AIMEE_KB_API_URL=http://127.0.0.1:8790` in the server's environment.
+
+| | CT 9098 | CT 9099 |
+|---|---|---|
+| `db2_ok` | false | **true** |
+| `db2_kb_tables_ok` | false | **true** |
+| `pgvec_ok` | true | true |
+| `warnings` | `["DB2 schema not ready"]` | **`[]`** |
+| `knowledge service unreachable` lines | ≥1 | **0** |
+
+`FLEET: server=1 kb=1 postgres=1 db1=1 aimee=1 config=2`, and peerprobe passed
+all checks with exit 0 on two consecutive runs against that fleet.
+
+### The zero was confirmed positively, not by absence
+
+A count of zero unreachable lines is the weakest possible evidence: a server
+that never probes at all produces the same zero. So the same container ran both
+arms, one process at a time, identical in every respect but the URL:
+
+| `AIMEE_KB_API_URL` | `knowledge service unreachable` lines |
+|---|---|
+| `http://127.0.0.1:9999` (nothing listening) | **1** |
+| `http://127.0.0.1:8790` (the real KB) | **0** |
+
+The dead-URL arm establishes that the check *can* fail and *does* speak up, so
+the zero in the other arm is a result rather than a silence. After the restore,
+the peer modules were brought back and peerprobe was run once more against the
+restored server: all checks passed, including `DELIVERED: the recipient drains
+the sender's exact text`.
+
+The first attempt at this control **failed and still printed something that
+looked like an answer** — it backgrounded the restarts inside a single
+`pct exec`, which killed them when the call returned. The server was down, so
+"no unreachable lines" was true for entirely the wrong reason. That is the
+session's own recurring defect shape turned on its own instrument: a
+measurement that broke and whose output was still shaped like a verdict. It was
+caught by checking that the server was actually running before reading the
+count, which is why `server up:` appears beside every count in the table above.
+
+### What is still not covered
+
+`embed_ok` remains false and the KB still reports `status: degraded`, on one
+blocker: `no embedder configured: set embedder_model (or EMBEDDER_URL)`. That
+is the documented non-goal for this work, not a finding.
+
+### Teardown
+
+CT 9099 destroyed and purged, its watchdog stopped, and every rig file removed
+from `/root`. Verified afterwards: CTs 9095–9098 and 9099 all gone, no rig
+files remaining. The containers left on the host (9001, 9078–9080) belong to
+other sessions and were not touched.
