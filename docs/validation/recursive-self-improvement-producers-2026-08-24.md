@@ -196,11 +196,16 @@ Both were run on a real stack (`root@192.168.1.252`, both services, PostgreSQL
 failed** respectively. `module-liveness` is additionally proved against the bug
 — deleting the KB registration turns it red on four assertions.
 
-Two exploratory areas the lost harnesses covered have **not** been reconstructed
-and are named here rather than left implied: the malformed-argument sweep across
-the learning CLI surfaces, and the direct-SQL checks of the fate ledger's
-delimited `LIKE` and one-row-per-proposal behaviour. Both are covered by unit
-tests; neither is covered end to end any more.
+The two areas an earlier draft of this section listed as *not* reconstructed --
+the malformed-argument sweep across the learning CLI, and the direct-SQL checks
+of the fate ledger -- are now sections 6 and 7 of `learning-loops-pg-e2e.sh`.
+Listing them as follow-up was the wrong call; they are covered.
+
+Section 7 also pinned a contract that had been printing as a surprise:
+`--budget 0` is not "do nothing". `curiosity_resolve_pass` treats any budget
+`<= 0` as unset and substitutes its default, so an operator asking for none
+still gets a full pass. That is deliberate, and the suite now asserts it rather
+than letting the output read as a command ignoring its argument.
 
 ## Limits of this run
 

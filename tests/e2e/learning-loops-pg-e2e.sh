@@ -230,7 +230,99 @@ printf '%s' "$SEL" | grep -qE '"arm":"(off|brief|full)"' \
     && ok "the service samples and answers with a declared arm" \
     || bad "policy_select gave no arm this build declares"
 
-section "6  neither service reported a missing provider, and neither crashed"
+section "6  the fate ledger's SQL, executed by real Postgres"
+# These statements run on the sqlite shim in `make unit-tests`, and sqlite
+# accepts SQL that Postgres rejects. They are exercised here for the same reason
+# the typed-fact suite exists next door.
+q "DELETE FROM learning_proposal_fate; DELETE FROM learning_proposals; DELETE FROM learning_signals;" >/dev/null
+q "INSERT INTO learning_signals (id, signal_type, source, title, target_key) VALUES
+     (7001,'mark_rule','explicit','a','t1'),
+     (7002,'repeat_question','implicit','b','t2'),
+     (7003,'mark_rule','explicit','c','t3');
+   INSERT INTO learning_proposals (id, signal_id, sink, state, target_key, committed_at) VALUES
+     (7001,7001,'rule','committed','t1',pg_now_text()),
+     (7002,7002,'rule','committed','t2',pg_now_text()),
+     (7003,7003,'rule','committed','t3',pg_now_text());" >/dev/null
+
+# One verdict per proposal: recording twice replaces, it does not accumulate.
+q "INSERT INTO learning_proposal_fate (proposal_id, fate) VALUES (7001,'standing')
+     ON CONFLICT (proposal_id) DO UPDATE SET fate = EXCLUDED.fate;" >/dev/null
+q "INSERT INTO learning_proposal_fate (proposal_id, fate) VALUES (7001,'reverted')
+     ON CONFLICT (proposal_id) DO UPDATE SET fate = EXCLUDED.fate;" >/dev/null
+check "one fate row per proposal" "1" "$(q "SELECT count(*) FROM learning_proposal_fate WHERE proposal_id=7001")"
+check "the later verdict wins" "reverted" "$(q "SELECT fate FROM learning_proposal_fate WHERE proposal_id=7001")"
+
+# The delimited LIKE: a fate must not be counted as regret because a LONGER
+# regret name starts with it. Give 7002 a fate that a naive prefix match would
+# wrongly catch, and 7003 one that genuinely is in the vocabulary.
+q "INSERT INTO learning_proposal_fate (proposal_id, fate) VALUES (7002,'reverted_by_operator')
+     ON CONFLICT (proposal_id) DO UPDATE SET fate = EXCLUDED.fate;
+   INSERT INTO learning_proposal_fate (proposal_id, fate) VALUES (7003,'contradicted')
+     ON CONFLICT (proposal_id) DO UPDATE SET fate = EXCLUDED.fate;" >/dev/null
+REGRET=$(q "SELECT SUM(CASE WHEN f.fate IS NOT NULL
+              AND (',' || 'reverted,contradicted' || ',') LIKE ('%,' || f.fate || ',%')
+              THEN 1 ELSE 0 END)
+            FROM learning_proposals p
+            JOIN learning_signals s ON s.id = p.signal_id
+            LEFT JOIN learning_proposal_fate f ON f.proposal_id = p.id
+            WHERE p.state='committed'")
+check "a longer fate name is not counted by prefix" "2" "$REGRET"
+check "and the excluded row is the prefix one" "reverted_by_operator" \
+      "$(q "SELECT fate FROM learning_proposal_fate WHERE proposal_id=7002")"
+
+# Provenance grouping, which is what the S0 gate counts.
+check "committed proposals group by signal type" "mark_rule:2 repeat_question:1" \
+      "$(q "SELECT string_agg(t, ' ' ORDER BY t) FROM (
+              SELECT s.signal_type || ':' || count(*) AS t
+              FROM learning_proposals p JOIN learning_signals s ON s.id = p.signal_id
+              WHERE p.state='committed' GROUP BY s.signal_type) x")"
+
+section "7  the surfaces refuse bad input instead of breaking on it"
+# The exploratory pass. None of these should crash a service or answer as though
+# the request made sense; the assertion at the end of this section is that both
+# daemons are still standing and nothing below section 8 went silent.
+probe() { # probe <label> <argv...>
+    local label="$1"; shift
+    local out
+    out=$("$@" 2>&1 | head -1)
+    printf '        %-30s %s\n' "$label" "$(printf '%s' "$out" | cut -c1-64)"
+}
+probe "negative limit"        "$A" eval candidates --limit -5
+probe "limit past any cap"    "$A" eval candidates --limit 99999999
+probe "unknown state filter"  "$A" eval candidates --state not-a-state
+probe "fate, no id"           "$A" learning fate
+probe "fate, unknown id"      "$A" learning fate 424242 contradicted
+probe "fate, bad verdict"     "$A" learning fate 7001 not-a-verdict
+probe "resolve, huge budget"  "$A" learning resolve --budget 100000
+# --budget 0 is NOT "do nothing": curiosity_resolve_pass treats any budget <= 0
+# as unset and substitutes its default, so an operator asking for none still
+# gets a full pass. That is deliberate and worth pinning down, because the
+# output otherwise reads as the command ignoring its argument.
+ZERO=$("$A" learning resolve --budget 0 2>&1 | head -1)
+printf '        %-30s %s\n' "resolve, zero budget" "$(printf '%s' "$ZERO" | cut -c1-64)"
+printf '%s' "$ZERO" | grep -qE 'budget (25|[1-9][0-9]*)\)' \
+    && ok "a zero budget means unset, and the default pass runs" \
+    || bad "a zero budget did something other than fall back to the default"
+probe "approaches, empty goal" "$A" learning approaches ""
+probe "attribution, no suite" "$A" learning attribution
+probe "admit, missing dir"    "$A" eval candidates-update admit --suite-dir /nonexistent/nowhere
+probe "unknown op"            "$A" eval candidates-update not-an-op
+# A malformed body must not be answered as if it parsed.
+BAD=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json' -d '{"signal_type":' \
+      "$KB_URL/v1/actions/learning.propose_signal" 2>&1 | head -c 100)
+printf '        %-30s %s\n' "malformed JSON body" "$BAD"
+printf '%s' "$BAD" | grep -q '"status":"ok"' \
+    && bad "a malformed body was accepted" \
+    || ok "a malformed body is not accepted"
+# An empty signal_type is the field the router refuses on; it must say so.
+EMPTY=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json' -d '{"signal_type":""}' \
+        "$KB_URL/v1/actions/learning.propose_signal" 2>&1 | head -c 100)
+printf '        %-30s %s\n' "empty signal_type" "$EMPTY"
+printf '%s' "$EMPTY" | grep -q '"status":"ok"' \
+    && bad "an empty signal_type was accepted" \
+    || ok "an empty signal_type is refused"
+
+section "8  neither service reported a missing provider, and neither crashed"
 PATTERNS='classification unavailable|provider (is )?(not registered|unavailable|missing)|no provider|verdict=TRANSPORT|module call failed'
 for log in "$WORKDIR/kb.log" "$WORKDIR/server.log"; do
     n=$(grep -iE "$PATTERNS" "$log" 2>/dev/null | grep -vc 'NOTICE:')

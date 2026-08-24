@@ -1,7 +1,9 @@
 # Postgres end-to-end suite
 
-Two suites live here: `typed-facts-pg-e2e.sh` (below) and
-`module-liveness-pg-e2e.sh` (at the end).
+Three suites live here, each with its own section below:
+`typed-facts-pg-e2e.sh`, `module-liveness-pg-e2e.sh`, and
+`learning-loops-pg-e2e.sh`. All three need a throwaway box with real Postgres;
+none of them run under `make unit-tests`, which is the point.
 
 `make unit-tests` runs every C test against the in-memory sqlite shim
 (`db2_test_shim_open`). Production is Postgres via libpq, and sqlite accepts SQL
@@ -139,3 +141,55 @@ Section 3 judges the **delta** a run produces, not the state it inherits. The
 first version asked "is there a superseded row?", which passed on a row left by
 an earlier run -- and did exactly that in a run where every capture was refused
 and nothing was written.
+
+# The recursive self-improvement loops
+
+`learning-loops-pg-e2e.sh` covers the learning loops themselves, and exists for
+two failures that unit tests could not have caught.
+
+**The producing halves shipped absent.** Nothing wrote a fate, so regret was
+permanently zero and the detector bar never moved. No evidence probe was
+installed, so the backlog drain refused to run. No sampler was registered, so
+arm selection always fell back to its default. Every slice passed its unit tests
+throughout, because a unit test can prove a consumer reads a row correctly
+without ever asking whether anything writes one.
+
+**The endogeneity gate could not see its own evidence.** It is a DB2 reader, and
+DB2 lives in the KB; an earlier version ran in `aimee-server`, which builds with
+`-DAIMEE_DB2_DISABLED`, so it reported "open" by never having consulted a ledger
+at all.
+
+## Running it
+
+```
+# throwaway box, Postgres up, an empty aimee_shared database
+cd src && make -j$(nproc) all
+make build/obj/aimee-module build/obj/aimee-module-config build/obj/aimee-module-db1
+
+AIMEE_ROOT=/path/to/aimee AIMEE_SRC=/path/to/aimee/src \
+  tests/e2e/learning-loops-pg-e2e.sh
+```
+
+It **deletes** the learning and curiosity tables it seeds.
+
+## What it covers
+
+| Section | Behaviour |
+| --- | --- |
+| 0 | Both services up, with the modules these loops need |
+| 1 | An empty ledger leaves the gate open; a wholly self-referential one closes it; the daemon reports what the KB enforces |
+| 2 | A closed gate admits nothing *and writes no task file*; real outside evidence reopens it |
+| 3 | A later commit supersedes the earlier one unasked; an operator verdict reaches the ledger and counts as regret |
+| 4 | The drain runs a real probe, and leaves an uncovered gap **open** rather than closing it by assertion |
+| 5 | The policy layer answers with an arm this build declares |
+| 6 | The fate ledger's SQL on real Postgres: one row per proposal, latest verdict wins, and the delimited `LIKE` refusing to count `reverted_by_operator` as `reverted` |
+| 7 | Malformed and hostile input is refused rather than answered as though it parsed |
+| 8 | Neither log reports a missing provider; neither service crashed |
+
+Section 6 matters for the same reason the typed-fact suite does: those
+statements run against the sqlite shim under `make unit-tests`, and sqlite
+accepts SQL that Postgres rejects.
+
+Section 7 pins one contract that otherwise reads as a bug: `--budget 0` is not
+"do nothing". `curiosity_resolve_pass` treats any budget `<= 0` as unset and
+substitutes its default, so an operator asking for none still gets a full pass.

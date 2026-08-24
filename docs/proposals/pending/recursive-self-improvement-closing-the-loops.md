@@ -608,7 +608,7 @@ from the process that wrote it. See
 
 That verification is now committed rather than living in scratch, as
 [`tests/e2e/learning-loops-pg-e2e.sh`](../../../tests/e2e/learning-loops-pg-e2e.sh)
-— 20 assertions covering the S0 gate closing on a self-referential ledger and
+— 28 assertions covering the S0 gate closing on a self-referential ledger and
 reopening, a closed gate admitting nothing and writing nothing, the S4 probe
 leaving an uncovered gap open rather than closing it by assertion, S5
 supersession and the operator verdict, and S6 answering with a declared arm —
