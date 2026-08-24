@@ -62,25 +62,25 @@ const (
 	// always produces a row.
 	tokenAuditSessionSplitSQL = `SELECT
 	        COUNT(*)                          FILTER (WHERE delegation_id = ''),
-	        COALESCE(SUM(prompt_tokens)       FILTER (WHERE delegation_id = ''), 0),
-	        COALESCE(SUM(completion_tokens)   FILTER (WHERE delegation_id = ''), 0),
-	        COALESCE(SUM(cache_write_tokens)  FILTER (WHERE delegation_id = ''), 0),
-	        COALESCE(SUM(cache_read_tokens)   FILTER (WHERE delegation_id = ''), 0),
+	        COALESCE(SUM(prompt_tokens)::bigint       FILTER (WHERE delegation_id = ''), 0),
+	        COALESCE(SUM(completion_tokens)::bigint   FILTER (WHERE delegation_id = ''), 0),
+	        COALESCE(SUM(cache_write_tokens)::bigint  FILTER (WHERE delegation_id = ''), 0),
+	        COALESCE(SUM(cache_read_tokens)::bigint   FILTER (WHERE delegation_id = ''), 0),
 	        COALESCE(SUM(estimated_cost_usd)  FILTER (WHERE delegation_id = ''), 0),
 	        COUNT(*)                          FILTER (WHERE delegation_id <> ''),
-	        COALESCE(SUM(prompt_tokens)       FILTER (WHERE delegation_id <> ''), 0),
-	        COALESCE(SUM(completion_tokens)   FILTER (WHERE delegation_id <> ''), 0),
-	        COALESCE(SUM(cache_write_tokens)  FILTER (WHERE delegation_id <> ''), 0),
-	        COALESCE(SUM(cache_read_tokens)   FILTER (WHERE delegation_id <> ''), 0),
+	        COALESCE(SUM(prompt_tokens)::bigint       FILTER (WHERE delegation_id <> ''), 0),
+	        COALESCE(SUM(completion_tokens)::bigint   FILTER (WHERE delegation_id <> ''), 0),
+	        COALESCE(SUM(cache_write_tokens)::bigint  FILTER (WHERE delegation_id <> ''), 0),
+	        COALESCE(SUM(cache_read_tokens)::bigint   FILTER (WHERE delegation_id <> ''), 0),
 	        COALESCE(SUM(estimated_cost_usd)  FILTER (WHERE delegation_id <> ''), 0)
 	      FROM token_audit
 	     WHERE session_id = $1 AND ` + realizedFilter
 
 	tokenAuditTotalsSQL = `SELECT COUNT(*),
-	                              COALESCE(SUM(prompt_tokens), 0),
-	                              COALESCE(SUM(completion_tokens), 0),
-	                              COALESCE(SUM(cache_write_tokens), 0),
-	                              COALESCE(SUM(cache_read_tokens), 0),
+	                              COALESCE(SUM(prompt_tokens)::bigint, 0),
+	                              COALESCE(SUM(completion_tokens)::bigint, 0),
+	                              COALESCE(SUM(cache_write_tokens)::bigint, 0),
+	                              COALESCE(SUM(cache_read_tokens)::bigint, 0),
 	                              COALESCE(SUM(estimated_cost_usd), 0)
 	                         FROM token_audit
 	                        WHERE ` + realizedFilter + ` AND ` + sinceFilter
@@ -106,10 +106,10 @@ const (
 
 	// The dashboard is an AGGREGATE by tool and role, not a list of calls.
 	tokenAuditListDashboardSQL = `SELECT tool_name, role,
-	                                     COALESCE(SUM(prompt_tokens), 0),
-	                                     COALESCE(SUM(completion_tokens), 0),
-	                                     COALESCE(SUM(cache_write_tokens), 0),
-	                                     COALESCE(SUM(cache_read_tokens), 0),
+	                                     COALESCE(SUM(prompt_tokens)::bigint, 0),
+	                                     COALESCE(SUM(completion_tokens)::bigint, 0),
+	                                     COALESCE(SUM(cache_write_tokens)::bigint, 0),
+	                                     COALESCE(SUM(cache_read_tokens)::bigint, 0),
 	                                     COALESCE(SUM(estimated_cost_usd), 0),
 	                                     COUNT(*),
 	                                     COALESCE(to_char(MAX(created_at) AT TIME ZONE 'utc',
@@ -130,14 +130,14 @@ const (
 // supplied.
 func groupedSpendSQL(column string) string {
 	return `SELECT ` + column + `, COUNT(*),
-	               COALESCE(SUM(prompt_tokens), 0),
-	               COALESCE(SUM(completion_tokens), 0),
+	               COALESCE(SUM(prompt_tokens)::bigint, 0),
+	               COALESCE(SUM(completion_tokens)::bigint, 0),
 	               COALESCE(SUM(estimated_cost_usd), 0)
 	          FROM token_audit
 	         WHERE ` + realizedFilter + ` AND ` + sinceFilter + `
 	         GROUP BY 1
-	         ORDER BY COALESCE(SUM(prompt_tokens), 0) +
-	                  COALESCE(SUM(completion_tokens), 0) DESC, 1
+	         ORDER BY COALESCE(SUM(prompt_tokens)::bigint, 0) +
+	                  COALESCE(SUM(completion_tokens)::bigint, 0) DESC, 1
 	         LIMIT $2`
 }
 

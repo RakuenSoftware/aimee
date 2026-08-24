@@ -1057,13 +1057,17 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module $(OBJDIR)/ai
 	  done; \
 	else \
 	  if ! printf '%s\0' $(UNIT_TEST_TARGETS) | \
-	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; "./$$t" >"$$log" 2>&1; rc="$$?"; cat "$$log"; rm -f "$$log"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
+	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; s0=$$(date +%s); "./$$t" >"$$log" 2>&1; rc="$$?"; s1=$$(date +%s); cat "$$log"; rm -f "$$log"; printf "%s %s\\n" "$$((s1-s0))" "$$t" >>"$$AIMEE_TEST_FAILURE_DIR/timings"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
 	    echo "Unit test failures:" >&2; \
 	    if ! cat "$$fd"/failure.* >&2 2>/dev/null; then \
 	      echo "  (no marker written: a test was killed by a signal before it could" >&2; \
 	      echo "   record itself, or xargs itself failed - re-run with TEST_RUN_JOBS=1)" >&2; \
 	    fi; \
 	    exit 1; \
+	  fi; \
+	  if [ -s "$$fd/timings" ]; then \
+	    echo "slowest in this shard (seconds):"; \
+	    sort -rn "$$fd/timings" | head -5 | sed 's/^/  /'; \
 	  fi; \
 	fi
 	@for t in $(UNIT_TEST_AUX_TARGETS); do \
@@ -4543,6 +4547,15 @@ $(TESTPREFIX)/unit-test-anthropic-shape: $(OBJDIR)/tests/test_anthropic_shape.o 
 
 
 
+
+$(TESTPREFIX)/unit-test-token-audit-load: $(OBJDIR)/tests/test_token_audit_load.o \
+                              $(DB1_CLIENT_OBJS) $(OBJDIR)/module_json_call.o \
+                              $(OBJDIR)/tests/support/store_module_fixture.o \
+                              $(OBJDIR)/tests/support/db1_init_mock.o \
+                              $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+unit-test-token-audit-load: $(TESTPREFIX)/unit-test-token-audit-load
 
 $(TESTPREFIX)/unit-test-tool-prompts: $(OBJDIR)/tests/test_tool_prompts.o \
                               $(OBJDIR)/server/agent_policy.o $(OBJDIR)/dstr.o \

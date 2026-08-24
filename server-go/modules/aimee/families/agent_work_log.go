@@ -247,10 +247,10 @@ const (
 	agentLogHUDSummarySQL = `SELECT COUNT(*),
 	                                COUNT(*) FILTER (WHERE success),
 	                                COUNT(*) FILTER (WHERE NOT success),
-	                                COALESCE(SUM(prompt_tokens), 0),
-	                                COALESCE(SUM(completion_tokens), 0),
-	                                COALESCE(SUM(turns), 0),
-	                                COALESCE(SUM(tool_calls), 0),
+	                                COALESCE(SUM(prompt_tokens)::bigint, 0),
+	                                COALESCE(SUM(completion_tokens)::bigint, 0),
+	                                COALESCE(SUM(turns)::bigint, 0),
+	                                COALESCE(SUM(tool_calls)::bigint, 0),
 	                                COALESCE(AVG(latency_ms), 0),
 	                                COUNT(*) FILTER (
 	                                    WHERE created_at > now()
@@ -265,20 +265,20 @@ const (
 
 	agentLogPrometheusSQL = `SELECT agent_name, role, COUNT(*),
 	                                COUNT(*) FILTER (WHERE success),
-	                                COALESCE(SUM(prompt_tokens), 0),
-	                                COALESCE(SUM(completion_tokens), 0),
+	                                COALESCE(SUM(prompt_tokens)::bigint, 0),
+	                                COALESCE(SUM(completion_tokens)::bigint, 0),
 	                                COALESCE(AVG(latency_ms), 0),
-	                                COALESCE(SUM(tool_calls), 0)
+	                                COALESCE(SUM(tool_calls)::bigint, 0)
 	                           FROM agent_log
 	                          GROUP BY agent_name, role
 	                          ORDER BY COUNT(*) DESC, agent_name, role
 	                          LIMIT $1`
 
 	agentLogStatsSQL = `SELECT COUNT(*),
-	                           COALESCE(SUM(turns), 0),
-	                           COALESCE(SUM(tool_calls), 0),
-	                           COALESCE(SUM(prompt_tokens), 0),
-	                           COALESCE(SUM(completion_tokens), 0),
+	                           COALESCE(SUM(turns)::bigint, 0),
+	                           COALESCE(SUM(tool_calls)::bigint, 0),
+	                           COALESCE(SUM(prompt_tokens)::bigint, 0),
+	                           COALESCE(SUM(completion_tokens)::bigint, 0),
 	                           COUNT(*) FILTER (WHERE success)
 	                      FROM agent_log WHERE ` + sinceSecsFilter
 )

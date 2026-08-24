@@ -34,6 +34,7 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -794,6 +795,21 @@ func (w *writer) value(v any) error {
 		w.buf = append(w.buf, valBytes)
 		w.u32(uint32(len(t)))
 		w.buf = append(w.buf, t...)
+	case pgtype.Numeric:
+		// NUMERIC arrives for money columns and for SUM() over them. The wire
+		// has no decimal type, and every consumer of these columns reads them
+		// into a double, so the conversion to float64 happens somewhere
+		// regardless -- here, where it can be seen, rather than silently.
+		if !t.Valid {
+			w.buf = append(w.buf, valNull)
+			return nil
+		}
+		f, err := t.Float64Value()
+		if err != nil {
+			return fmt.Errorf("the store cannot represent a NUMERIC as a float: %w", err)
+		}
+		w.buf = append(w.buf, valFloat)
+		w.u64(math.Float64bits(f.Float64))
 	case time.Time:
 		// AS TEXT, in RFC3339 with nanoseconds, because the wire has no time
 		// type and inventing one would need agreement from the other side. The
