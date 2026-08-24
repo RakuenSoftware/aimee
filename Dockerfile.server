@@ -113,7 +113,8 @@ WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
 COPY server-go/ ./
-RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-wfe ./cmd/aimee-server
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-wfe ./cmd/aimee-server \
+    && CGO_ENABLED=0 go build -trimpath -o /out/aimee-delegate-egress ./cmd/aimee-delegate-egress
 
 # Collect webchat artifacts into a uniform /runtime-web layout. The "1" variant pulls
 # from the frontend + Go builds above (only in the build graph when
@@ -381,6 +382,7 @@ COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
 COPY --from=build /module-runtime/grants/server/ /opt/aimee/module-grants/server/
 COPY --from=build /module-runtime/server.modules /opt/aimee/module-grants/server.modules
 COPY --from=wfe-build /out/aimee-wfe /usr/local/bin/aimee-wfe
+COPY --from=wfe-build /out/aimee-delegate-egress /usr/local/bin/aimee-delegate-egress
 # Static TCP<->UDS bridge; aimee-server docker-cp's it into a proxy-mode delegate sandbox.
 COPY --from=build /src/aimee-forwarder /usr/local/bin/aimee-forwarder
 # See the build stage: delegates reach aimee THROUGH this binary (`aimee mcp serve`

@@ -3100,14 +3100,9 @@ static cJSON *sci_drive_delegate(cJSON *req)
    return out;
 }
 
-/* A background delegate on a DETACHED (client-served) workspace has no live client
- * by the time its worker runs, so its shell is redirected into a server-side
- * ephemeral workspace that holds no checkout. Its FILE tools still resolve the
- * registered workspace, so a write-capable delegate there can edit the tree and
- * cannot build, test, or diff what it edited -- observed as a delegate truncating
- * a 2157-line file and reporting no error. That combination is refused; a
- * read-only delegate in the same position is not, because inspection with no
- * checkout is useless rather than destructive. */
+/* A background delegate on a detached client workspace has no complete
+ * server-side tree to mount. Writers and reviewers both refuse unless a mirror
+ * reconstruction exists; neither gets an empty checkout or host fallback. */
 static void bg_detached_delegate_case(const char *role, const char *prompt, int expect_refusal,
                                       int with_mirror_inputs)
 {
@@ -3194,16 +3189,14 @@ static void bg_detached_delegate_case(const char *role, const char *prompt, int 
    db1_agent_job_t job;
    assert(delegate_current_job(&job) == 0);
    const char *result = job.result ? job.result : "";
-   int refused = strstr(result, "which contains no checkout") != NULL;
+   int refused = strstr(result, "could not be given a sandboxed container") != NULL;
    if (refused != expect_refusal)
       fprintf(stderr, "  role=%s expected_refusal=%d got=%d status=%s result=[%s]\n", role,
               expect_refusal, refused, job.status, result);
    assert(refused == expect_refusal);
    if (expect_refusal)
    {
-      /* The refusal must be actionable: name the ephemeral workspace and both
-       * ways out, not merely decline. */
-      assert(strstr(result, "delegate-ws") != NULL);
+      /* The refusal must name both ways out, not merely decline. */
       assert(strstr(result, "aimee workspace serve") != NULL);
       /* and the server-side route that works without a client at all */
       assert(strstr(result, "--provider mirror") != NULL);
@@ -3239,19 +3232,11 @@ static void test_bg_detached_write_delegate_uses_mirror_when_synced(void)
    printf("  PASS: test_bg_detached_write_delegate_uses_mirror_when_synced\n");
 }
 
-static void test_bg_detached_readonly_delegate_still_runs(void)
+static void test_bg_detached_readonly_delegate_is_refused(void)
 {
    bg_detached_delegate_case("validate",
-                             "read-only: review the current diff for correctness and report", 0, 0);
-   /* This delegate runs where the two roots genuinely DO diverge and that is
-    * allowed: its shell is in a repo-less scratch dir while its file tools point
-    * at the client workspace. Reading in the wrong place is useless rather than
-    * destructive, so it is not refused -- but it must be told, in both respects,
-    * rather than left to conclude the repository is empty. */
-   assert(strstr(g_last_root_notice, "WARNING") != NULL);
-   assert(strstr(g_last_root_notice, "ephemeral scratch directory") != NULL);
-   assert(strstr(g_last_root_notice, "do not reconstruct it from memory") != NULL);
-   printf("  PASS: test_bg_detached_readonly_delegate_still_runs\n");
+                             "read-only: review the current diff for correctness and report", 1, 0);
+   printf("  PASS: test_bg_detached_readonly_delegate_is_refused\n");
 }
 
 /* ONE ROOT PER DELEGATE TURN.
@@ -3949,6 +3934,7 @@ static int compute_test_launch_plan(const uint8_t *request, size_t request_len, 
 int main(void)
 {
    register_test_workspace_root();
+   workspace_turn_set_default_workspace_for_test(platform_tmpdir());
    delegate_permissions_stub_install();
    delegate_register_launch_plan_provider(compute_test_launch_plan);
    delegate_register_route_filter_provider(compute_test_route_filter);
@@ -4016,7 +4002,7 @@ int main(void)
    test_delegate_worker_sets_session_override_during_run();
    test_create_compute_ctx_threads_vault_identity();
    test_bg_detached_write_delegate_is_refused();
-   test_bg_detached_readonly_delegate_still_runs();
+   test_bg_detached_readonly_delegate_is_refused();
    test_delegate_shell_and_file_roots_agree();
    test_bg_detached_mirror_delegate_roots_agree();
    test_bg_detached_write_delegate_uses_mirror_when_synced();

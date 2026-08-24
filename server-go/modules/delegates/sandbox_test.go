@@ -13,8 +13,8 @@ func writeReq() SandboxRequest {
 		Worktree:           "/srv/repo/.aimee/worktrees/w1/main",
 		GitDir:             "/srv/repo/.git/worktrees/w1",
 		IsGitCheckout:      true,
-		ParentSocketHost:   "/run/aimee/server.sock",
-		ParentSocketTarget: "/run/aimee.sock",
+		ParentSocketHost:   "/run/aimee/aimee-http.sock",
+		ParentSocketTarget: "/run/aimee/aimee-http.sock",
 		EgressProxy:        "http://egress:3128",
 	}
 }
@@ -25,8 +25,8 @@ func readReq() SandboxRequest {
 		RepoRoot:           "/srv/repo",
 		Worktree:           "/srv/repo",
 		IsGitCheckout:      true,
-		ParentSocketHost:   "/run/aimee/server.sock",
-		ParentSocketTarget: "/run/aimee.sock",
+		ParentSocketHost:   "/run/aimee/aimee-http.sock",
+		ParentSocketTarget: "/run/aimee/aimee-http.sock",
 	}
 }
 
@@ -100,7 +100,7 @@ func TestSandboxControlSocketStaysWritableForAReadOnlyRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	sock, ok := findMount(spec, "/run/aimee.sock")
+	sock, ok := findMount(spec, "/run/aimee/aimee-http.sock")
 	if !ok {
 		t.Fatal("no control socket mount")
 	}
@@ -234,6 +234,7 @@ func TestValidateRejectsHandBuiltViolations(t *testing.T) {
 func TestPlainCheckoutGetsOneWritableMount(t *testing.T) {
 	spec, err := BuildSandboxSpec(SandboxRequest{
 		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo", IsGitCheckout: true,
+		ParentSocketHost: "/run/aimee/aimee-http.sock", ParentSocketTarget: ControlSocketTarget,
 	})
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -261,6 +262,7 @@ func TestLinkedWorktreeKeepsTheReadOnlyRepoBeneath(t *testing.T) {
 	spec, err := BuildSandboxSpec(SandboxRequest{
 		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo/.aimee/worktrees/d1",
 		GitDir: "/repo/.git/worktrees/d1", IsGitCheckout: true,
+		ParentSocketHost: "/run/aimee/aimee-http.sock", ParentSocketTarget: ControlSocketTarget,
 	})
 	if err != nil {
 		t.Fatalf("err = %v", err)

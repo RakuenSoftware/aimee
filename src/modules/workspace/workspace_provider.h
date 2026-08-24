@@ -3,6 +3,11 @@
 
 #include <stddef.h>
 
+#define DELEGATE_DETACHED_CHANNEL_DOWN_JSON                                                        \
+   "{\"stdout\":\"\",\"stderr\":\"detached workspace reverse-channel unavailable: the serving "    \
+   "client is not connected -- a background/durable delegate cannot run shell tools against a "    \
+   "client-served (detached) workspace\",\"exit_code\":-1}"
+
 /* Resource provider behind a workspace handle (workspace-resource-plane
  * proposal, Phase 1).
  *

@@ -1208,11 +1208,7 @@ char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
              "mirror-sync`, so it may be behind what the caller currently has. If what you find "
              "contradicts the task description, suspect the tree is stale before concluding the "
              "task is wrong.\n"
-       : kind == DELEGATE_ROOT_EPHEMERAL
-           ? "This is an ephemeral scratch directory with NO repository in it. There is nothing "
-             "to build, test, or diff here. If the task needs the caller's code, say that you "
-             "could not reach it -- do not reconstruct it from memory.\n"
-           : NULL; /* the caller's own workspace: nothing surprising to declare */
+       : NULL; /* the caller's own workspace: nothing surprising to declare */
    if (what)
    {
       w = snprintf(buf + pos, (size_t)rem, "%s", what);

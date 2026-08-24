@@ -270,20 +270,15 @@ CFG_KEY_DESC = {
     "aimee-server where the forge credential stays in-process; delegates are also spawned "
     "without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed "
     "SSH to any host) and neuters the global/system git config (default on).",
-    "delegate_sandbox_package_access": "Runtime package-access policy for a `--network none` "
-    "delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside "
-    "socket); this selects how much: `proxy` (default) proxies package-manager fetches to any "
-    "host through aimee for out-of-the-box functionality; `off` no runtime proxy "
-    "(build-time installs + learned pre-bake only); `gated` host-allowlisted registries, "
-    "off-allowlist requires human approval; `governance` allowlist from a governance provider, "
-    "off-allowlist refused.",
-    "delegate_sandbox_require_isolation": "Fail-closed guard for the `--network none` delegate "
-    "sandbox (default off). aimee always passes "
-    "`--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the "
-    "package-access proxy. After the container starts aimee asks the host daemon whether a network "
-    "with an IP is attached and always logs an error on a breach; when this is set, sandboxing is "
-    "mandatory. A delegate always runs in its own container -- there is no in-process host path to "
-    "fall back to -- and this additionally refuses on a breach or an unverifiable probe.",
+    "delegate_sandbox_package_access": "Runtime package access for a `--network none` delegate. "
+    "The delegate has no outside socket: the Go egress module proxies only its immutable package "
+    "registry allowlist, pins the validated numeric destination, and logs the transfer. `proxy` "
+    "(default) enables that narrow path; `off` permits only build-time/pre-baked packages. Legacy "
+    "`gated` and `governance` values cannot widen the live proxy allowlist.",
+    "delegate_sandbox_require_isolation": "Deprecated compatibility key. Its value is ignored: "
+    "every delegate is created with no network, its complete network/mount/environment posture is "
+    "verified after every start or resume, and any breach or unverifiable fact destroys the "
+    "container and refuses the delegation. There is no host fallback.",
     "delegate_sandbox_learn_packages": "Learned toolchain for delegate sandboxes (default on). "
     "aimee captures the apt packages a delegate installs inside its `--network none` sandbox, "
     "records them per project (git root), and pre-bakes the learned set into that project's next "

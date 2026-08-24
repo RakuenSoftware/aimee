@@ -11,16 +11,12 @@ image at build time. Rather than make every project author a toolchain spec, aim
 learns the set: when a delegate runs `apt-get install <pkgs>` inside its sandbox, the
 package names are captured and unioned into that project's set.
 
-It does not build images, choose base images, open sockets, resolve hosts, or forward
-bytes. It parses commands, owns a store, classifies proxy requests, applies the registry
-allowlist, and rejects non-public addresses. The C server remains the connectivity seam
-that resolves and dials the exact address approved by the module.
-
-The boundary is mechanical rather than topical: C owns `getaddrinfo`, the exact
-`sockaddr` selected for a dial, socket creation, `connect`, polling, and byte I/O. The Go
-module owns side-effect-free decisions about whether that mechanism may be used. Proxy
-policy does not open a connection and cannot substitute a different address after C's
-per-result check.
+It does not build images or choose base images. The Go package parses commands, owns the
+learned store and immutable registry allowlist, resolves every destination once, rejects
+non-public addresses, dials the validated numeric address, strips credential/hop headers,
+and forwards bounded bytes. The C server only transfers an accepted AF_UNIX fd and the
+already-read request bytes to `aimee-delegate-egress`; it opens no outbound socket and
+makes no destination decision.
 
 ## Public contracts
 
@@ -50,8 +46,8 @@ content-hash image tag, is stable regardless of insertion order.
 
 Consumers are `tools`, whose `agent_tools.c` and `agent_tools_dispatch.c` capture the
 command a delegate ran; `delegates`, whose `delegate_sandbox_image.c` calls
-`sandbox_learned_load` to pre-bake the learned set into the next image; and the C
-package-proxy transport, which asks stages 3 and 4 before forwarding any connection.
+`sandbox_learned_load` to pre-bake the learned set into the next image; and the Go
+`aimee-delegate-egress` transport, which directly uses the same package policy.
 
 ## Providers and readiness
 
@@ -79,10 +75,9 @@ module running but the gate off, nothing is recorded.
 
 ## Surfaces
 
-There is no HTTP route, CLI command, or console page. The module's entire surface is the
-four bus stages above. C keeps `sandbox_learned_observe`, `sandbox_learned_load`, and
-`sandbox_pkg_proxy_serve` as bus/connectivity adapters; it no longer contains the
-package-proxy decision rules.
+There is no public HTTP route, CLI command, or console page. The four bus stages remain
+for module consumers. Live proxy traffic enters only through the server's UDS demux and
+is handed to the Go helper; C retains only the learned-package bus adapter.
 
 The operator-visible surface is indirect: the packages that appear in a generated
 sandbox Dockerfile, and the resulting content-hash image tag.
@@ -117,13 +112,12 @@ text, no delegate output, and no credential material.
 
 The proxy policy accepts only HTTP/1.0 or HTTP/1.1 CONNECT/absolute-form requests,
 ports 80 and 443, and an exact-or-label-bounded registry allowlist. Every resolved
-address is checked separately. IPv4 private, loopback, link-local, CGNAT,
+address is checked before the validated numeric IP is dialed. IPv4 private, loopback, link-local, CGNAT,
 documentation, multicast, and reserved ranges are blocked, as are IPv6 unspecified,
 loopback, unique-local, link-local, multicast, IPv4-mapped, NAT64, and 6to4 encodings
 of blocked IPv4 space. Invalid policy responses and an unavailable module both fail
-closed in C. For allowed absolute-form HTTP, the module also rewrites the request to
-origin form and removes hop-by-hop and credential-bearing headers before C writes it
-upstream.
+closed in Go. For allowed absolute-form HTTP, the module also rewrites the request to
+origin form and removes hop-by-hop and credential-bearing headers before writing it upstream.
 
 ## Supported journeys
 
@@ -139,13 +133,12 @@ after deciding a project's toolchain should be pinned by hand instead.
 ## Tests and failure behavior
 
 `server-go/modules/sandbox/sandbox_test.go` covers the learned-toolchain parser,
-package-name grammar, store, and stages. `proxy_policy_test.go` ports every IPv4, IPv6,
-port, allowlist, and request-classification vector from the former C test one-for-one,
-then adds handler and header-rewrite checks. `test_sandbox_pkg_proxy_adapter.c` controls
-policy replies and exercises public-listener refusal, unavailable/malformed policy,
-denial, blocked resolved addresses, and sanitized forwarding through a loopback socket.
-The bus conformance suite also exercises the shipped C-host/Go-module boundary for all
-four stages.
+package-name grammar, store, and stages. `proxy_policy_test.go` covers IPv4, IPv6,
+ports, the immutable package allowlist, and request classification. `proxy_test.go`
+covers DNS pinning, blocked addresses, request sanitization, byte/deadline bounds, and
+HTTP/CONNECT forwarding. `test_delegate_egress_adapter.c` proves that the legacy server
+rejects non-Unix clients and hands the Go helper the exact request bytes and inherited
+Unix fd. The bus conformance suite exercises the other shipped C-host/Go-module stages.
 
 Learning is best-effort and must never fail a delegate turn. A missing, oversized
 (> 1 MiB), or unparseable store reads as empty rather than as an error, and an
