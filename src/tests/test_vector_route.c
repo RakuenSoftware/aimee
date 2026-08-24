@@ -505,6 +505,7 @@ static void test_wire_codecs(void)
    mutated[38]++;
    assert(aimee_vector_apply_decode(mutated, length, &decoded_apply, decoded_vec,
                                     AIMEE_VECTOR_MAX_DIM) != 0);
+   /* Out of order by key. */
    strcpy(apply.labels[1].key, "project");
    assert(aimee_vector_apply_validate(&apply) != 0);
    strcpy(apply.labels[1].key, "record_type");
@@ -512,6 +513,59 @@ static void test_wire_codecs(void)
    apply.labels[1].value[1] = '\0';
    assert(aimee_vector_apply_validate(&apply) != 0);
    strcpy(apply.labels[1].value, "memory");
+
+   /* ------------------------------------------------- multi-valued labels
+    *
+    * One key carrying several values is the whole reason search version 2 needs
+    * no OR: scope visibility is a four-way disjunction in SQL -- active project,
+    * active workspace, global, shared, and the ABSENCE of any scope row meaning
+    * legacy-untagged -- and it becomes ONE set-membership predicate only if a
+    * point can say every scope it belongs to under one key.
+    *
+    * Ordering by key alone made that malformed. It is now (key, value), still
+    * strict. */
+   apply.kind = AIMEE_VECTOR_APPLY_UPSERT;
+   apply.dimension = 3;
+   apply.label_count = 4;
+   strcpy(apply.labels[0].key, "record_type");
+   strcpy(apply.labels[0].value, "memory");
+   strcpy(apply.labels[1].key, "visibility");
+   strcpy(apply.labels[1].value, "global");
+   strcpy(apply.labels[2].key, "visibility");
+   strcpy(apply.labels[2].value, "project:widgets");
+   strcpy(apply.labels[3].key, "visibility");
+   strcpy(apply.labels[3].value, "workspace:acme");
+   assert(aimee_vector_apply_validate(&apply) == 0);
+   assert(aimee_vector_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
+   assert(aimee_vector_apply_decode(wire, length, &decoded_apply, decoded_vec,
+                                    AIMEE_VECTOR_MAX_DIM) == 0);
+   /* Four labels, three of them one key: the repeated key survives the round
+    * trip rather than the last value winning, which is what a map would do. */
+   assert(decoded_apply.label_count == 4);
+   assert(strcmp(decoded_apply.labels[1].key, decoded_apply.labels[3].key) == 0);
+   assert(strcmp(decoded_apply.labels[1].value, "global") == 0);
+   assert(strcmp(decoded_apply.labels[2].value, "project:widgets") == 0);
+   assert(strcmp(decoded_apply.labels[3].value, "workspace:acme") == 0);
+
+   /* Values under one key must ascend too. Descending is malformed... */
+   strcpy(apply.labels[2].value, "zzz");
+   strcpy(apply.labels[3].value, "aaa");
+   assert(aimee_vector_apply_validate(&apply) != 0);
+   /* ...and so is the same pair twice: a duplicate carries no information, and
+    * two encodings of one point defeat comparing them. */
+   strcpy(apply.labels[2].value, "project:widgets");
+   strcpy(apply.labels[3].value, "project:widgets");
+   assert(aimee_vector_apply_validate(&apply) != 0);
+   strcpy(apply.labels[3].value, "workspace:acme");
+   assert(aimee_vector_apply_validate(&apply) == 0);
+
+   apply.label_count = 3;
+   strcpy(apply.labels[0].key, "project");
+   strcpy(apply.labels[0].value, "project with space");
+   strcpy(apply.labels[1].key, "record_type");
+   strcpy(apply.labels[1].value, "memory");
+   strcpy(apply.labels[2].key, "workspace");
+   strcpy(apply.labels[2].value, "workspace-a");
    apply.kind = AIMEE_VECTOR_APPLY_DELETE;
    apply.dimension = 0;
    assert(aimee_vector_apply_validate(&apply) != 0);

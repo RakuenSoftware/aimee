@@ -1109,14 +1109,43 @@ CREATE TABLE IF NOT EXISTS db3_backfill (
     PRIMARY KEY(principal,projection_id)
 );
 
+-- One label's (key,value) pairs, whichever form the label holds.
+--
+-- A label value is a string, or an ARRAY of strings for a multi-valued label.
+-- The array form exists because scope visibility is a four-way disjunction --
+-- active project, active workspace, global, shared, and the ABSENCE of any scope
+-- row meaning legacy-untagged -- and a JSONB object cannot hold one key twice.
+-- Denormalised into several values of one key it becomes a single set-membership
+-- predicate on the wire, which is why DB3 v1 needs no OR.
+--
+-- Everything downstream counts and bounds PAIRS, not keys: a key with four
+-- values is four labels' worth of wire, and bounding the keys would have let one
+-- key carry an unbounded label block.
+CREATE OR REPLACE FUNCTION db3_label_pairs(p_labels JSONB)
+RETURNS TABLE(key TEXT,value TEXT)
+LANGUAGE sql IMMUTABLE STRICT SET search_path=pg_catalog,public,pg_temp AS $$
+    SELECT label.key,
+           CASE WHEN jsonb_typeof(label.value)='array' THEN element.value
+                ELSE label.value #>> '{}' END
+      FROM jsonb_each(p_labels) AS label(key,value)
+      LEFT JOIN LATERAL jsonb_array_elements_text(
+             CASE WHEN jsonb_typeof(label.value)='array' THEN label.value
+                  ELSE '[]'::JSONB END) AS element(value) ON TRUE
+$$;
+
 CREATE OR REPLACE FUNCTION db3_projection_labels(
     p_row JSONB,p_sources JSONB
 ) RETURNS JSONB
 LANGUAGE sql IMMUTABLE STRICT SET search_path=pg_catalog,public,pg_temp AS $$
     SELECT COALESCE(
       jsonb_object_agg(source.key,
-        CASE WHEN left(source.value,1)='=' THEN substring(source.value FROM 2)
-             ELSE COALESCE(p_row->>source.value,'') END
+        CASE WHEN left(source.value,1)='=' THEN to_jsonb(substring(source.value FROM 2))
+             -- A source column holding a JSON array is a multi-valued label and
+             -- is carried through as one. Every projection registered today names
+             -- a TEXT column, so this is the string branch for all of them and
+             -- the emitted JSON is unchanged.
+             WHEN jsonb_typeof(p_row->source.value)='array' THEN p_row->source.value
+             ELSE to_jsonb(COALESCE(p_row->>source.value,'')) END
         ORDER BY source.key),
       '{}'::JSONB)
       FROM jsonb_each_text(p_sources) AS source(key,value)
@@ -1138,16 +1167,38 @@ BEGIN
        (p_kind='upsert' AND COALESCE(p_vector,'')='') OR
        (p_kind<>'upsert' AND COALESCE(p_vector,'')<>'') OR
        p_labels IS NULL OR jsonb_typeof(p_labels)<>'object' OR
-       (SELECT count(*) FROM jsonb_each(p_labels))>16 OR
-       EXISTS (SELECT 1 FROM jsonb_each(p_labels) WHERE jsonb_typeof(value)<>'string') OR
-       (SELECT COALESCE(sum(4+octet_length(key)+octet_length(value)),0)
-          FROM jsonb_each_text(p_labels))>4096 OR
+       -- A value is a string, or a non-empty array of strings for a
+       -- multi-valued label. An empty array would be a label that survives
+       -- validation and vanishes on the wire, which is a point silently missing
+       -- a scope it belongs to.
        EXISTS (
-         SELECT 1 FROM jsonb_each_text(p_labels) AS label(key,value)
+         SELECT 1 FROM jsonb_each(p_labels) AS label(key,value)
+          WHERE CASE jsonb_typeof(value)
+                  WHEN 'string' THEN FALSE
+                  WHEN 'array' THEN
+                    jsonb_array_length(value)=0 OR
+                    EXISTS (SELECT 1 FROM jsonb_array_elements(value) AS item(value)
+                             WHERE jsonb_typeof(item.value)<>'string')
+                  ELSE TRUE END
+       ) OR
+       -- Counted and bounded in PAIRS. A key with four values is four labels'
+       -- worth of wire, and bounding keys would have let one key carry an
+       -- unbounded block.
+       (SELECT count(*) FROM public.db3_label_pairs(p_labels))>16 OR
+       (SELECT COALESCE(sum(4+octet_length(key)+octet_length(value)),0)
+          FROM public.db3_label_pairs(p_labels))>4096 OR
+       EXISTS (
+         SELECT 1 FROM public.db3_label_pairs(p_labels) AS label(key,value)
           WHERE octet_length(key) NOT BETWEEN 1 AND 31 OR
                 key !~ '^[a-z][a-z0-9_.-]*$' OR
                 octet_length(value)>255 OR value !~ '^[ -~]*$'
-       ) THEN
+       ) OR
+       -- The same pair twice is refused here rather than at the codec, which
+       -- would reject the whole apply after the row was already written. Two
+       -- encodings of one point defeat comparing them.
+       (SELECT count(*) FROM public.db3_label_pairs(p_labels))<>
+       (SELECT count(*) FROM (SELECT DISTINCT key,value
+                                FROM public.db3_label_pairs(p_labels)) AS distinct_pairs) THEN
         RAISE EXCEPTION 'DB3_OUTBOX_CONTRACT' USING ERRCODE='22023';
     END IF;
     IF p_principal IS NULL THEN

@@ -415,10 +415,50 @@ Candidate authorisation runs on every external result and is a query, so the
 round trip above returns no candidates by construction; the authorised path is
 covered against live PostgreSQL by `unit-test-vector-route-pgvec`.
 
-**Also still missing**: the apply path does not write the multi-valued
-`visibility` and `generation` labels the searches filter on --
-`db3_projection_labels()` builds a JSONB object via `jsonb_object_agg`, which is
-single-valued, and the Go outbox parses labels into `map[string]string`.
+**A label can now carry several values.** It could not, and three separate layers
+each independently made sure of it: the codec required labels strictly ascending
+by KEY, so a repeated key was malformed; `db3_enqueue_vector_to()` required every
+JSONB value to be a string and counted keys against the 16-label bound; and the
+Go outbox decoded into `map[string]string`, where the last value would simply
+have won.
+
+That matters because multi-valued labels are the reason search version 2 needs no
+OR. Scope visibility is a four-way disjunction in SQL -- active project, active
+workspace, `global`, `_shared`, and the ABSENCE of any scope row meaning
+legacy-untagged -- and it collapses to one `in` predicate only if a point carries
+every scope it belongs to under one key. Until this, the design said that and the
+wire refused it.
+
+| layer | was | is |
+|---|---|---|
+| codec (C and Go) | ascending by key | ascending by **(key, value)**, still strict |
+| labels JSONB | value must be a string | value is a string **or a non-empty array of strings** |
+| bounds | 16 keys, 4096 bytes over keys | 16 **pairs**, 4096 bytes over pairs |
+| Go outbox | `map[string]string` | ordered `[]ExactLabel`, sorted within the key |
+
+The ordering stays strict, so the encoding is still canonical and the same
+`(key, value)` twice is refused -- a duplicate pair carries no information, and
+two encodings of one point defeat comparing them. `db3_enqueue_vector_to()`
+refuses it at write time rather than leaving it for the codec, which would reject
+the whole apply after the row was durable.
+
+Bounding **pairs** rather than keys is the part that would have been easy to get
+wrong: a key with four values is four labels' worth of wire, and a bound on keys
+would have let a single key carry an unbounded block past the 16 the wire allows.
+
+`db3_label_pairs()` is the one definition of what a label flattens to, so the
+count, the byte bound, the character checks and the duplicate check all read the
+same thing. `scripts/db2_replay_env.sh` exercises it against a real database:
+a repeated key survives the outbox as separate pairs, and an empty array, a
+non-string element, a duplicate pair, and seventeen values under one key are each
+refused.
+
+**Still missing**: nothing WRITES a `visibility` label yet. The mechanism exists
+and no projection uses it -- `memory_embeddings` has a `primary_scope` column that
+`memory_primary_scope()` returns nothing for, and the denormalisation itself is
+the expensive part: a generation bump rewrites the labels of every point in the
+project, and the legacy-untagged case has to be computed because it is the absence
+of rows rather than the presence of one.
 
 No provider module exists yet, which is why the struct layout could still change:
 once one exists it cannot.

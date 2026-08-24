@@ -179,22 +179,35 @@ func validLabelValue(value string) bool {
 	return true
 }
 
+// Labels are strictly ascending by (key, value), not by key.
+//
+// Ordering by key alone made a repeated key malformed, which made a MULTI-VALUED
+// label inexpressible -- and multi-valued labels are the reason search version 2
+// needs no OR. Scope visibility is a four-way disjunction in SQL and becomes one
+// FilterIn only if a point can carry every scope it belongs to under one key.
+//
+// Still strict, so the encoding stays canonical and the same (key, value) twice
+// is still refused.
 func labelsSize(labels []ExactLabel) (int, bool) {
 	if len(labels) > MaxLabelCount {
 		return 0, false
 	}
 	total := 0
-	previous := ""
-	for _, label := range labels {
-		if !validLabelKey(label.Key) || !validLabelValue(label.Value) ||
-			(previous != "" && label.Key <= previous) {
+	for index, label := range labels {
+		if !validLabelKey(label.Key) || !validLabelValue(label.Value) {
 			return 0, false
+		}
+		if index > 0 {
+			previous := labels[index-1]
+			if label.Key < previous.Key ||
+				(label.Key == previous.Key && label.Value <= previous.Value) {
+				return 0, false
+			}
 		}
 		total += labelHeader + len(label.Key) + len(label.Value)
 		if total > MaxLabelsBytes {
 			return 0, false
 		}
-		previous = label.Key
 	}
 	return total, true
 }

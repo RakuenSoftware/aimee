@@ -264,10 +264,19 @@ func parseDB3Vector(value string) ([]float32, error) {
 	return vector, nil
 }
 
+// A label value is a string, or an array of strings for a multi-valued label.
+//
+// map[string]string could not express the second, which is the form scope
+// visibility needs: a point carries every scope it belongs to under one key, so
+// the four-way disjunction becomes one FilterIn on the wire. json.RawMessage per
+// key rather than `any` so a number or an object is a decode failure here rather
+// than something that stringifies into a plausible label further on.
+//
+// The count is of PAIRS. A key with four values is four labels' worth of wire,
+// and the codec bounds labels the same way.
 func parseDB3Labels(raw []byte) ([]protocol.ExactLabel, error) {
-	var labels map[string]string
-	if err := json.Unmarshal(raw, &labels); err != nil || len(labels) == 0 ||
-		len(labels) > protocol.MaxLabelCount {
+	var labels map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &labels); err != nil || len(labels) == 0 {
 		return nil, ErrVectorMalformedRow
 	}
 	keys := make([]string, 0, len(labels))
@@ -275,9 +284,28 @@ func parseDB3Labels(raw []byte) ([]protocol.ExactLabel, error) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+
 	result := make([]protocol.ExactLabel, 0, len(keys))
 	for _, key := range keys {
-		result = append(result, protocol.ExactLabel{Key: key, Value: labels[key]})
+		var single string
+		if err := json.Unmarshal(labels[key], &single); err == nil {
+			result = append(result, protocol.ExactLabel{Key: key, Value: single})
+			continue
+		}
+		var many []string
+		if err := json.Unmarshal(labels[key], &many); err != nil || len(many) == 0 {
+			return nil, ErrVectorMalformedRow
+		}
+		// Sorted within the key, because the codec requires labels strictly
+		// ascending by (key, value) and the database's array order is the order
+		// the projection produced, not a sorted one.
+		sort.Strings(many)
+		for _, value := range many {
+			result = append(result, protocol.ExactLabel{Key: key, Value: value})
+		}
+	}
+	if len(result) > protocol.MaxLabelCount {
+		return nil, ErrVectorMalformedRow
 	}
 	return result, nil
 }

@@ -182,10 +182,16 @@ func TestApplyV2LabelsRoundTripAndV1Compatibility(t *testing.T) {
 
 func TestApplyV2RejectsNonCanonicalLabelsAndMalformedFrames(t *testing.T) {
 	invalid := map[string][]ExactLabel{
-		"duplicate": {{Key: "project", Value: "a"}, {Key: "project", Value: "b"}},
-		"unsorted":  {{Key: "workspace", Value: "a"}, {Key: "project", Value: "b"}},
-		"bad-key":   {{Key: "Project", Value: "a"}},
-		"control":   {{Key: "project", Value: "not\nprintable"}},
+		// The same PAIR twice, not the same key twice: a repeated key is a
+		// multi-valued label and is now the point. A duplicate pair carries no
+		// information and would give one point two encodings.
+		"duplicate-pair": {{Key: "project", Value: "a"}, {Key: "project", Value: "a"}},
+		// Values under one key must ascend as well, so the encoding stays
+		// canonical rather than depending on the order the database produced.
+		"unsorted-values": {{Key: "project", Value: "b"}, {Key: "project", Value: "a"}},
+		"unsorted":        {{Key: "workspace", Value: "a"}, {Key: "project", Value: "b"}},
+		"bad-key":         {{Key: "Project", Value: "a"}},
+		"control":         {{Key: "project", Value: "not\nprintable"}},
 		"too-many": func() []ExactLabel {
 			labels := make([]ExactLabel, MaxLabelCount+1)
 			for i := range labels {
@@ -203,6 +209,31 @@ func TestApplyV2RejectsNonCanonicalLabelsAndMalformedFrames(t *testing.T) {
 			}
 		})
 	}
+	// A key carrying several values, which the wire refused until labels were
+	// ordered by (key, value) rather than by key. Scope visibility is a four-way
+	// disjunction and becomes one FilterIn only if a point can carry every scope
+	// it belongs to under one key.
+	multiValued := fixtureLabeledApply()
+	multiValued.Labels = []ExactLabel{
+		{Key: "record_type", Value: "memory"},
+		{Key: "visibility", Value: "global"},
+		{Key: "visibility", Value: "project:widgets"},
+		{Key: "visibility", Value: "workspace:acme"},
+	}
+	encodedMulti, err := EncodeApply(multiValued)
+	if err != nil {
+		t.Fatalf("a multi-valued label must encode: %v", err)
+	}
+	decodedMulti, err := DecodeApply(encodedMulti)
+	if err != nil {
+		t.Fatalf("a multi-valued label must decode: %v", err)
+	}
+	// Four labels back, three of them one key -- not one label with the last
+	// value, which is what any map-shaped carrier would have produced.
+	if !reflect.DeepEqual(decodedMulti.Labels, multiValued.Labels) {
+		t.Fatalf("labels = %+v", decodedMulti.Labels)
+	}
+
 	deleteWithLabels := fixtureLabeledApply()
 	deleteWithLabels.Kind = ApplyDelete
 	deleteWithLabels.Vector = nil

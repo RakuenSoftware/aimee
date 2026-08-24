@@ -156,12 +156,61 @@ func TestPGVectorOutboxClaimsCanonicalLabeledAndDeleteOperations(t *testing.T) {
 	}
 }
 
+// A key carrying several values is the form scope visibility needs: a point says
+// every scope it belongs to under one key, and the four-way disjunction becomes
+// one FilterIn on the wire. The old map[string]string decode could not represent
+// it at all -- the last value would have won, silently, and the point would have
+// gone out visible in one scope instead of three.
+func TestPGVectorOutboxClaimsMultiValuedLabels(t *testing.T) {
+	rows := &db3FakeRows{data: [][]any{
+		{uint64(11), uint64(7), int64(41), "upsert", "memory", "[0.1]",
+			// Deliberately unsorted within the key: the database's array order is
+			// whatever the projection produced, and the codec requires labels
+			// strictly ascending by (key, value).
+			[]byte(`{"record_type":"memory","visibility":["workspace:acme","global","project:widgets"]}`)},
+	}}
+	store, err := NewPGVectorOutbox(&db3FakeSQL{rows: rows}, "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations, err := store.Claim(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLabels := []protocol.ExactLabel{
+		{Key: "record_type", Value: "memory"},
+		{Key: "visibility", Value: "global"},
+		{Key: "visibility", Value: "project:widgets"},
+		{Key: "visibility", Value: "workspace:acme"},
+	}
+	if len(operations) != 1 || !reflect.DeepEqual(operations[0].Labels, wantLabels) {
+		t.Fatalf("labels = %+v", operations)
+	}
+	// Claim already ran Validate, so reaching here means the codec accepted the
+	// repeated key. Asserted anyway, because that is the property the whole
+	// change exists for and it would otherwise be implied rather than pinned.
+	if err := operations[0].Validate(); err != nil {
+		t.Fatalf("a multi-valued label must be a valid apply: %v", err)
+	}
+}
+
 func TestPGVectorOutboxRejectsMalformedDurableRows(t *testing.T) {
 	for name, row := range map[string][]any{
 		"vector": {uint64(11), uint64(7), int64(41), "upsert", "memory", "[NaN]",
 			[]byte(`{"project":"p"}`)},
 		"labels": {uint64(11), uint64(7), int64(41), "upsert", "memory", "[0.1]",
 			[]byte(`{"project":7}`)},
+		// An empty array is a label that survives the row and vanishes on the
+		// wire -- a point silently missing a scope it belongs to.
+		"empty-multi-value": {uint64(11), uint64(7), int64(41), "upsert", "memory", "[0.1]",
+			[]byte(`{"visibility":[]}`)},
+		// Values must be strings, in the array form as much as the scalar one.
+		"non-string-in-array": {uint64(11), uint64(7), int64(41), "upsert", "memory", "[0.1]",
+			[]byte(`{"visibility":["global",7]}`)},
+		// The same pair twice: the codec requires STRICTLY ascending (key,value),
+		// so this is refused rather than silently deduplicated.
+		"duplicate-pair": {uint64(11), uint64(7), int64(41), "upsert", "memory", "[0.1]",
+			[]byte(`{"visibility":["global","global"]}`)},
 		"kind": {uint64(11), uint64(7), int64(41), "unknown", "memory", "", []byte(`{}`)},
 	} {
 		t.Run(name, func(t *testing.T) {

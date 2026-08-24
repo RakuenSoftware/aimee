@@ -127,6 +127,13 @@ static int label_value_valid(const char *value)
    return 1;
 }
 
+/* Total order on labels: key, then value. */
+static int label_order(const aimee_vector_exact_label_t *a, const aimee_vector_exact_label_t *b)
+{
+   int key = strcmp(a->key, b->key);
+   return key != 0 ? key : strcmp(a->value, b->value);
+}
+
 static int labels_size(const aimee_vector_apply_t *apply, size_t *size)
 {
    if (!apply || !size || apply->label_count > AIMEE_VECTOR_MAX_LABELS)
@@ -135,8 +142,19 @@ static int labels_size(const aimee_vector_apply_t *apply, size_t *size)
    for (uint32_t i = 0; i < apply->label_count; ++i)
    {
       const aimee_vector_exact_label_t *label = &apply->labels[i];
+      /* Strictly ascending by (key, value), not by key.
+       *
+       * Ordering by key alone made a repeated key malformed, which made a
+       * MULTI-VALUED label inexpressible -- and multi-valued labels are the
+       * reason search version 2 needs no OR. Scope visibility is a four-way
+       * disjunction in SQL and becomes one IN predicate only if a point can
+       * carry every scope it belongs to under one key.
+       *
+       * Still strict, so the encoding stays canonical and the same (key, value)
+       * twice is still refused: a duplicate pair carries no information and two
+       * encodings of one point would defeat comparing them. */
       if (!label_key_valid(label->key) || !label_value_valid(label->value) ||
-          (i > 0 && strcmp(apply->labels[i - 1].key, label->key) >= 0))
+          (i > 0 && label_order(&apply->labels[i - 1], label) >= 0))
          return -1;
       size_t key = text_length(label->key, sizeof(label->key));
       size_t value = text_length(label->value, sizeof(label->value));

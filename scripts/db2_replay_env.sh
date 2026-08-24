@@ -203,3 +203,65 @@ if [ "$flagged" != "proposed kept=1 flagged=true reason=replayed" ]; then
    exit 1
 fi
 say "flag-review merged the flag into the artifact's own payload"
+
+# Multi-valued labels, against the real schema rather than a substring match on
+# it. Scope visibility is a four-way disjunction -- active project, active
+# workspace, global, shared, and the ABSENCE of any scope row meaning
+# legacy-untagged -- and it becomes one set-membership predicate on the wire only
+# if a point can carry every scope it belongs to under ONE key. A JSONB object
+# cannot hold a key twice, so the value may be an array, and everything
+# downstream counts PAIRS rather than keys.
+say "checking the outbox contract accepts a multi-valued label"
+run_sql "$DB" "INSERT INTO db3_provider (principal, state, corpus_generation)
+   VALUES (424242, 'active', 1)
+   ON CONFLICT (principal) DO UPDATE SET state = EXCLUDED.state,
+     corpus_generation = EXCLUDED.corpus_generation" >/dev/null ||
+   { say "could not seed a provider for the label probe"; exit 1; }
+
+# The enqueue and the read-back are two STATEMENTS, not one.
+#
+# db3_enqueue_vector INSERTs, and a statement reads the snapshot taken when it
+# started, so a scan of db3_outbox in the same statement as the enqueue cannot
+# see the row the enqueue just wrote -- whatever the call sits in. Two earlier
+# versions of this check were one statement (the call in WHERE, then the call in
+# a MATERIALIZED CTE) and both reported a refusal for a contract that was
+# working. The id is captured with \gset and read back in the next statement,
+# which takes a new snapshot.
+#
+# COALESCE rather than a bare aggregate, so a zero return -- the enqueue finding
+# no provider generation -- is distinguishable from a refusal.
+multi=$(run_sql "$DB" "SELECT public.db3_enqueue_vector(
+     'memory', 987654321, 'upsert', '[0.5]',
+     '{\"record_type\":\"memory\",\"visibility\":[\"workspace:acme\",\"global\"]}'::jsonb)
+     AS enqueued
+\gset
+SELECT COALESCE(string_agg(pair.key || '=' || pair.value, ',' ORDER BY pair.key, pair.value),
+                'operation ' || :enqueued || ' wrote no labels')
+  FROM public.db3_outbox AS outbox,
+       LATERAL public.db3_label_pairs(outbox.labels) AS pair
+ WHERE outbox.operation_id = :enqueued")
+if [ "$multi" != "record_type=memory,visibility=global,visibility=workspace:acme" ]; then
+   say "a multi-valued label did not survive the outbox: ${multi:-<refused>}"
+   exit 1
+fi
+say "outbox carried a repeated key as separate pairs"
+
+# Each of these must be refused, and each stands for a real way a point would go
+# out wrong: a label that vanishes on the wire, a value that is not text, and a
+# key whose values exceed the wire's label count once flattened. Bounding KEYS
+# rather than pairs would have let the last one through.
+for bad in \
+   'empty-array:{"visibility":[]}' \
+   'non-string:{"visibility":["global",7]}' \
+   'duplicate-pair:{"visibility":["global","global"]}' \
+   'over-count:{"visibility":["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q"]}'
+do
+   name=${bad%%:*}
+   labels=${bad#*:}
+   if run_sql "$DB" "SELECT db3_enqueue_vector('memory', 987654322, 'upsert', '[0.5]',
+      '$(printf '%s' "$labels" | sed "s/'/''/g")'::jsonb)" >/dev/null 2>&1; then
+      say "the outbox accepted a label form it must refuse: $name"
+      exit 1
+   fi
+done
+say "outbox refused every malformed multi-valued label"

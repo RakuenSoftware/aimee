@@ -141,15 +141,41 @@ class DB3OutboxSchemaTests(unittest.TestCase):
         self.assertIn("jsonb_object_agg", labels)
         self.assertIn("ORDER BY source.key", labels)
         self.assertIn("public.db3_projection_labels(v_row,p.label_sources)", self.schema)
+        # A source column already holding a JSON array is a multi-valued label and
+        # travels as one. Every projection registered today names a TEXT column,
+        # so this is the string branch for all of them.
+        self.assertIn("WHEN jsonb_typeof(p_row->source.value)='array'", labels)
+
+    def test_a_label_may_carry_several_values_under_one_key(self) -> None:
+        # Scope visibility is a four-way disjunction in SQL and becomes ONE
+        # set-membership predicate on the wire only if a point can say every scope
+        # it belongs to under one key. A JSONB object cannot hold a key twice, so
+        # the value may be an array, and db3_label_pairs is the one definition of
+        # what that flattens to. Behaviour is asserted against a real database in
+        # scripts/db2_replay_env.sh; this pins that the definition is single.
+        pairs = self.schema[self.schema.index("CREATE OR REPLACE FUNCTION db3_label_pairs"):
+                            self.schema.index("CREATE OR REPLACE FUNCTION db3_projection_labels")]
+        self.assertIn("jsonb_array_elements_text", pairs)
+        self.assertIn("RETURNS TABLE(key TEXT,value TEXT)", pairs)
+        enqueue = self.schema[
+            self.schema.index("CREATE OR REPLACE FUNCTION db3_enqueue_vector_to"):
+            self.schema.index("CREATE OR REPLACE FUNCTION db3_enqueue_vector(")
+        ]
+        # Every bound is computed over the flattened pairs. A bound still written
+        # over jsonb_each would be counting keys, which lets one key carry an
+        # unbounded label block.
+        self.assertNotIn("jsonb_each(p_labels))>16", enqueue)
+        self.assertNotIn("jsonb_each_text(p_labels))>4096", enqueue)
+        self.assertIn("jsonb_array_length(value)=0", enqueue)
 
     def test_contract_bounds_and_atomic_failure_are_database_enforced(self) -> None:
         enqueue = self.schema[
             self.schema.index("CREATE OR REPLACE FUNCTION db3_enqueue_vector_to"):
             self.schema.index("CREATE OR REPLACE FUNCTION db3_enqueue_vector(")
         ]
-        self.assertIn("(SELECT count(*) FROM jsonb_each(p_labels))>16", enqueue)
+        self.assertIn("(SELECT count(*) FROM public.db3_label_pairs(p_labels))>16", enqueue)
         self.assertIn("octet_length(value)>255", enqueue)
-        self.assertIn("FROM jsonb_each_text(p_labels))>4096", enqueue)
+        self.assertIn("FROM public.db3_label_pairs(p_labels))>4096", enqueue)
         self.assertIn("DB3_OUTBOX_CONTRACT", enqueue)
         self.assertNotIn("EXCEPTION WHEN OTHERS", enqueue)
         self.assertIn("AFTER INSERT OR UPDATE OR DELETE", self.schema)
