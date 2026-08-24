@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "6b5ec240af2272067988513061b14a05a33c969c",
+  "source_revision": "edc7a875e7dc4bb6a83ccc783b8def07af3959a9",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
@@ -10,8 +10,8 @@
     "production_consumers": 152,
     "test_consumers": 157,
     "include_directives": 1007,
-    "outbound_dependency_rows": 578,
-    "outbound_include_directives": 578
+    "outbound_dependency_rows": 579,
+    "outbound_include_directives": 579
   },
   "source_files": {
     "c": [
@@ -9179,6 +9179,13 @@
     },
     {
       "source": "src/modules/db2/c/memory_scope_query.h",
+      "header": "stdio.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scope_query.h",
       "header": "string.h",
       "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
       "classification": "vendored-system-api",
@@ -10235,5 +10242,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "b96caeb2d1915a3d397f637c9296751a2deee231f48b7d8f5e5758ab99e70c37"
+  "fingerprint": "e7db2f60df3fc27c0ffc7bb4b7cd40af2b2a7ce30657136f21c5f01237316c84"
 }

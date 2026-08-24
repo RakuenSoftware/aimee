@@ -453,12 +453,52 @@ a repeated key survives the outbox as separate pairs, and an empty array, a
 non-string element, a duplicate pair, and seventeen values under one key are each
 refused.
 
-**Still missing**: nothing WRITES a `visibility` label yet. The mechanism exists
-and no projection uses it -- `memory_embeddings` has a `primary_scope` column that
-`memory_primary_scope()` returns nothing for, and the denormalisation itself is
-the expensive part: a generation bump rewrites the labels of every point in the
-project, and the legacy-untagged case has to be computed because it is the absence
-of rows rather than the presence of one.
+### Scope visibility, denormalised
+
+The memory projection now WRITES the `visibility` label, which is what the
+multi-valued label was built for. `memory_visibility_labels()` is the point's
+half and `db2_memory_visibility_filter_values()` is the caller's; a point is
+visible when the two sets intersect, which is one `in` and no `OR`.
+
+One vocabulary, named in both places:
+
+| value | the rank clause it stands for |
+|---|---|
+| `project:<value>` | a `project` scope row matching the active project |
+| `workspace:<value>` | a `workspace` scope row, or a legacy `memory_workspaces` row |
+| `global` | the `global`/`_global` row |
+| `workspace:_shared` | the `_shared` workspace row -- no special value needed, it is just a workspace |
+| `untagged` | no scope row of any of the three types and no legacy row |
+
+`untagged` is the part that could only be done this way. Legacy-untagged rows are
+visible because of rows that are NOT there, and a provider cannot be asked about
+a row that does not exist -- so the absence is computed once, at apply time, and
+carried as a value like any other.
+
+The one subtle case is a `global` scope row whose value is not `_global`. It
+makes a memory neither globally visible NOR untagged, because the untagged
+clause is the absence of the ROW and not of the value. That memory is visible to
+nobody, and the label set for it is empty -- so `db3_projection_labels()` drops
+the key rather than emitting `[]`, which the outbox contract would refuse. A
+point visible to no scope must still be written; it simply matches no caller's
+`in`.
+
+Agreeing with `DB2_MEMORY_SCOPE_RANK_SQL` is the entire requirement, and two
+hand-written copies of one predicate drift silently, so `db2_replay_env.sh`
+checks the two against the rank over a real database: eight scope shapes,
+including the legacy row and the not-`_global` global row, against an in-scope
+and an out-of-scope caller.
+
+**What it costs, which is the part that was worth deciding first.** A scope row
+is one row; the points that carried its answer are however many that memory has.
+`memory_relabel_points()` rewrites them and each rewrite is an outbox upsert
+carrying the point's whole vector again, so it touches only rows whose labels
+actually changed -- a no-op UPDATE here is a re-index of a point nothing changed
+about. Currency needs none of this: a point's generation is fixed when it is
+written, so re-ingesting a project relabels nothing.
+
+**Still missing**: `generation` is not written either. It is the cheap half --
+one label, written once, never rewritten -- but no projection carries it yet.
 
 No provider module exists yet, which is why the struct layout could still change:
 once one exists it cannot.

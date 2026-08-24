@@ -1,5 +1,7 @@
 #include <aimee/db2/vector_route.h>
 
+#include "memory_scope_query.h"
+
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
@@ -862,6 +864,81 @@ static void test_what_does_not_fit_is_still_refused(void)
    assert(aimee_vector_search_filters_expressible(&over) == 0);
 }
 
+/* The caller's half of the visibility vocabulary.
+ *
+ * memory_visibility_labels() (modules/db2/c/schema.sql) writes every scope a
+ * point belongs to as separate values of one label; this builds the set a
+ * caller may match, and visibility is then "do the two sets intersect" -- one
+ * IN over a multi-valued label, which is why the four-way disjunction needs no
+ * OR. That the two halves agree with DB2_MEMORY_SCOPE_RANK_SQL is checked
+ * against a real database in scripts/db2_replay_env.sh; what is pinned here is
+ * the vocabulary itself, because a value spelled differently on the two sides
+ * makes every search return nothing and looks exactly like no matches.
+ *
+ * Asserted as exact strings on purpose. Building the expectation from the same
+ * macros the implementation uses would agree with any typo in them. */
+static void test_the_callers_half_of_the_visibility_vocabulary(void)
+{
+   db2_memory_scope_context_t ctx;
+   char storage[DB2_MEMORY_VISIBILITY_MAX_VALUES][DB2_MEMORY_VISIBILITY_VALUE_MAX];
+   const char *values[DB2_MEMORY_VISIBILITY_MAX_VALUES];
+
+   /* No scope, and include_all, are both "admit everything" to the rank
+    * filter -- so no predicate at all, not a predicate matching everything. */
+   memset(&ctx, 0, sizeof(ctx));
+   assert(db2_memory_visibility_filter_values(&ctx, storage, values,
+                                              DB2_MEMORY_VISIBILITY_MAX_VALUES) == 0);
+   ctx.active = 1;
+   ctx.include_all = 1;
+   assert(db2_memory_visibility_filter_values(&ctx, storage, values,
+                                              DB2_MEMORY_VISIBILITY_MAX_VALUES) == 0);
+
+   /* An active scope: the caller's project and workspace, then the three that
+    * are always visible -- global, '_shared', and the legacy-untagged rows,
+    * whose visibility is the ABSENCE of a scope row and therefore has to be a
+    * value before a provider can be asked about it. */
+   ctx.include_all = 0;
+   snprintf(ctx.workspace, sizeof(ctx.workspace), "ws-a");
+   snprintf(ctx.project, sizeof(ctx.project), "pj-a");
+   assert(db2_memory_visibility_filter_values(&ctx, storage, values,
+                                              DB2_MEMORY_VISIBILITY_MAX_VALUES) == 5);
+   assert(strcmp(values[0], "project:pj-a") == 0);
+   assert(strcmp(values[1], "workspace:ws-a") == 0);
+   assert(strcmp(values[2], "global") == 0);
+   assert(strcmp(values[3], "workspace:_shared") == 0);
+   assert(strcmp(values[4], "untagged") == 0);
+
+   /* An empty component is not a wildcard: it drops out rather than matching
+    * every project, which is the same rule the rank applies with ?104 <> ''. */
+   ctx.project[0] = '\0';
+   assert(db2_memory_visibility_filter_values(&ctx, storage, values,
+                                              DB2_MEMORY_VISIBILITY_MAX_VALUES) == 4);
+   assert(strcmp(values[0], "workspace:ws-a") == 0);
+
+   /* A workspace literally named '_shared' builds the constant a second time.
+    * One question, one encoding. */
+   snprintf(ctx.workspace, sizeof(ctx.workspace), "_shared");
+   assert(db2_memory_visibility_filter_values(&ctx, storage, values,
+                                              DB2_MEMORY_VISIBILITY_MAX_VALUES) == 3);
+   assert(strcmp(values[0], "workspace:_shared") == 0);
+   assert(strcmp(values[1], "global") == 0);
+   assert(strcmp(values[2], "untagged") == 0);
+
+   /* Refused, not truncated. A workspace cut short is a different workspace,
+    * and the search it filters returns a short answer that cannot be told
+    * apart from a complete one. */
+   memset(ctx.workspace, 'w', sizeof(ctx.workspace) - 1);
+   ctx.workspace[sizeof(ctx.workspace) - 1] = '\0';
+   assert(db2_memory_visibility_filter_values(&ctx, storage, values,
+                                              DB2_MEMORY_VISIBILITY_MAX_VALUES) == -1);
+
+   /* A set that does not fit the caller's array is refused for the same
+    * reason: a filter silently narrowed is a filter missing. */
+   snprintf(ctx.workspace, sizeof(ctx.workspace), "ws-a");
+   snprintf(ctx.project, sizeof(ctx.project), "pj-a");
+   assert(db2_memory_visibility_filter_values(&ctx, storage, values, 4) == -1);
+}
+
 int main(void)
 {
    test_capabilities_codec();
@@ -875,6 +952,7 @@ int main(void)
    test_a_request_with_nothing_extra_is_still_version_one();
    test_what_does_not_fit_is_still_refused();
    test_one_meaning_has_one_encoding();
+   test_the_callers_half_of_the_visibility_vocabulary();
    puts("test_vector_route: routing, fallback, revalidation, and codecs passed");
    return 0;
 }

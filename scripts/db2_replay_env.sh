@@ -265,3 +265,108 @@ do
    fi
 done
 say "outbox refused every malformed multi-valued label"
+
+# ---------------------------------------------------------------- visibility
+#
+# The point of the multi-valued label: scope visibility, denormalised onto the
+# point so a provider that can neither join nor ask about a missing row can
+# still answer it. memory_visibility_labels() writes the point's half and
+# db2_memory_visibility_filter_values() builds the caller's; visible means the
+# two sets intersect, which is what DB2_MEMORY_SCOPE_RANK_SQL > 0 means today.
+#
+# The matrix below is the discriminating one. Every case is a scope shape that
+# a set-membership test could get wrong in a way no smaller fixture would show:
+# the legacy memory_workspaces row that carries no memory_scopes row at all, and
+# the global row whose value is not '_global' -- which leaves a memory neither
+# globally visible NOR untagged, because the untagged clause is the absence of
+# the ROW and not of the value.
+say "checking visibility labels against the scope rank"
+run_sql "$DB" "
+INSERT INTO memories (id, key) VALUES
+  (9200001,'vis-project'),(9200002,'vis-workspace'),(9200003,'vis-global'),
+  (9200004,'vis-shared'),(9200005,'vis-untagged'),(9200006,'vis-legacy-ws'),
+  (9200007,'vis-global-other'),(9200008,'vis-project-and-workspace')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO memory_scopes (memory_id, scope_type, scope_value) VALUES
+  (9200001,'project','pj-a'),
+  (9200002,'workspace','ws-a'),
+  (9200003,'global','_global'),
+  (9200004,'workspace','_shared'),
+  (9200007,'global','other'),
+  (9200008,'project','pj-a'),(9200008,'workspace','ws-b')
+ON CONFLICT DO NOTHING;
+INSERT INTO memory_workspaces (memory_id, workspace) VALUES (9200006,'ws-a')
+ON CONFLICT DO NOTHING;" >/dev/null ||
+   { say "could not seed the visibility fixtures"; exit 1; }
+
+# The values a caller in (workspace ws-a, project pj-a) may see, written out
+# rather than computed, so this states the vocabulary instead of re-deriving it.
+inside="ARRAY['project:pj-a','workspace:ws-a','global','workspace:_shared','untagged']"
+outside="ARRAY['project:pj-z','workspace:ws-z','global','workspace:_shared','untagged']"
+
+for probe in \
+   "9200001:project scope:true:false" \
+   "9200002:workspace scope:true:false" \
+   "9200003:global row:true:true" \
+   "9200004:_shared workspace row:true:true" \
+   "9200005:no scope rows at all:true:true" \
+   "9200006:legacy memory_workspaces row:true:false" \
+   "9200007:global row that is not _global:false:false" \
+   "9200008:project and workspace rows:true:false"
+do
+   memory=$(printf '%s' "$probe" | cut -d: -f1)
+   name=$(printf '%s' "$probe" | cut -d: -f2)
+   want_in=$(printf '%s' "$probe" | cut -d: -f3)
+   want_out=$(printf '%s' "$probe" | cut -d: -f4)
+   got=$(run_sql "$DB" "SELECT
+       (SELECT bool_or(v.value = ANY($inside))
+          FROM jsonb_array_elements_text(memory_visibility_labels($memory)) AS v(value))
+       IS TRUE
+    || ':' ||
+       ((SELECT bool_or(v.value = ANY($outside))
+           FROM jsonb_array_elements_text(memory_visibility_labels($memory)) AS v(value))
+        IS TRUE)")
+   if [ "$got" != "$want_in:$want_out" ]; then
+      say "$name: visible in/out = ${got:-<refused>}, expected $want_in:$want_out"
+      exit 1
+   fi
+done
+say "visibility labels agree with the rank on every scope shape"
+
+# The label has to reach the OUTBOX, not just the function. A projection whose
+# label_sources never named the column would pass everything above.
+vector="(SELECT '[' || string_agg('0.1', ',') || ']' FROM generate_series(1,$EMBED_DIM))"
+run_sql "$DB" "INSERT INTO memory_embeddings (point_id, embedding, record_type)
+   VALUES (9200005, ($vector)::vector, 'memory')
+ ON CONFLICT (point_id) DO UPDATE SET embedding=EXCLUDED.embedding" >/dev/null ||
+   { say "could not write the embedding the outbox probe reads"; exit 1; }
+# Read in a separate call, not a separate statement: psql prints a command tag
+# for anything that is not a SELECT, and a captured mixture of tag and result
+# equals neither.
+enqueued=$(run_sql "$DB" "SELECT
+     COALESCE(string_agg(pair.value, ',' ORDER BY pair.value), 'no visibility label')
+  FROM public.db3_outbox AS outbox,
+       LATERAL public.db3_label_pairs(outbox.labels) AS pair
+ WHERE outbox.point_id = 9200005 AND pair.key = 'visibility'")
+if [ "$enqueued" != "untagged" ]; then
+   say "an untagged memory reached the outbox as: ${enqueued:-<refused>}"
+   exit 1
+fi
+say "outbox carried the point's visibility"
+
+# A scope row is one row; the points that carried its answer are however many
+# the memory has. Relabelling them is the cost the denormalisation buys, and a
+# stale label is a point visible in a scope it has left.
+run_sql "$DB" "INSERT INTO memory_scopes (memory_id, scope_type, scope_value)
+   VALUES (9200005,'project','pj-a') ON CONFLICT DO NOTHING" >/dev/null ||
+   { say "could not add the scope row the relabel probe changes"; exit 1; }
+relabelled=$(run_sql "$DB" "SELECT
+     COALESCE(string_agg(v.value, ',' ORDER BY v.value), 'none')
+  FROM memory_embeddings e,
+       LATERAL jsonb_array_elements_text(e.visibility) AS v(value)
+ WHERE e.point_id = 9200005")
+if [ "$relabelled" != "project:pj-a" ]; then
+   say "a scope change left the point labelled: ${relabelled:-<refused>}"
+   exit 1
+fi
+say "a scope change relabelled the points that carried its answer"

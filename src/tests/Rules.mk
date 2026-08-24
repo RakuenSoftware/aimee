@@ -3467,7 +3467,7 @@ db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-r
 	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
 	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
 
-$(OBJDIR)/tests/test_vector_route.o: C_FLAGS += -Imodules/db2/include
+$(OBJDIR)/tests/test_vector_route.o: C_FLAGS += -Imodules/db2/include -Imodules/db2/c
 $(OBJDIR)/modules/db2/vector_route.o: C_FLAGS += -Imodules/db2/include
 $(TESTPREFIX)/unit-test-vector-route: $(OBJDIR)/tests/test_vector_route.o \
                                       $(OBJDIR)/modules/db2/vector_route.o

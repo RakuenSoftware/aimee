@@ -139,11 +139,11 @@ class DB3OutboxSchemaTests(unittest.TestCase):
         labels = self.schema[self.schema.index("CREATE OR REPLACE FUNCTION db3_projection_labels"):
                              self.schema.index("CREATE OR REPLACE FUNCTION db3_enqueue_vector_to")]
         self.assertIn("jsonb_object_agg", labels)
-        self.assertIn("ORDER BY source.key", labels)
+        self.assertIn("ORDER BY label.key", labels)
         self.assertIn("public.db3_projection_labels(v_row,p.label_sources)", self.schema)
         # A source column already holding a JSON array is a multi-valued label and
-        # travels as one. Every projection registered today names a TEXT column,
-        # so this is the string branch for all of them.
+        # travels as one. Every projection registered today names a TEXT column
+        # except memory's `visibility`, so this is the string branch for the rest.
         self.assertIn("WHEN jsonb_typeof(p_row->source.value)='array'", labels)
 
     def test_a_label_may_carry_several_values_under_one_key(self) -> None:
@@ -167,6 +167,67 @@ class DB3OutboxSchemaTests(unittest.TestCase):
         self.assertNotIn("jsonb_each(p_labels))>16", enqueue)
         self.assertNotIn("jsonb_each_text(p_labels))>4096", enqueue)
         self.assertIn("jsonb_array_length(value)=0", enqueue)
+
+    def test_scope_visibility_is_denormalised_onto_the_point(self) -> None:
+        # The reason multi-valued labels exist. A provider can run neither half
+        # of the scope predicate -- a join is not an attribute, and the absence
+        # of a row is not a value -- so the decision is written onto the point
+        # and the caller's half becomes one IN. Behaviour is checked against the
+        # rank itself, over a real database, in scripts/db2_replay_env.sh; what
+        # is pinned here is that there is ONE definition of each half.
+        self.assertEqual(
+            len(re.findall(r"CREATE OR REPLACE FUNCTION memory_visibility_labels\b",
+                           self.schema)), 1)
+        labels = self.schema[
+            self.schema.index("CREATE OR REPLACE FUNCTION memory_visibility_labels"):
+            self.schema.index("CREATE OR REPLACE FUNCTION memory_relabel_points")
+        ]
+        # The four pieces of the rank, each turned into a value.
+        self.assertIn("'project:'||s.scope_value", labels)
+        self.assertIn("'workspace:'||s.scope_value", labels)
+        self.assertIn("'workspace:'||w.workspace", labels)
+        self.assertIn("SELECT 'global'", labels)
+        # Untagged is the ABSENCE of a row of any of the three types, not the
+        # absence of a value: a global row whose value is not '_global' leaves a
+        # memory neither globally visible nor untagged, and the rank agrees.
+        self.assertIn("SELECT 'untagged'", labels)
+        self.assertIn("s.scope_type IN ('global','workspace','project')", labels)
+
+        # The point carries it, and the projection names the column -- a
+        # column nothing reads is a label that never reaches the wire.
+        self.assertIn("ADD COLUMN IF NOT EXISTS visibility JSONB", self.schema)
+        self.assertIn('"visibility":"visibility"', self.schema)
+
+        # The backfill runs only when the column is new. This schema is applied
+        # on every connect, so an unconditional one would scan the embeddings
+        # table and evaluate every point's visibility at each server start.
+        self.assertIn("v_backfill := NOT EXISTS (", self.schema)
+        self.assertIn("IF v_backfill THEN", self.schema)
+
+        # One writer, and the relabelling of the points a scope change reaches.
+        self.assertIn("CREATE TRIGGER memory_embeddings_visibility", self.schema)
+        self.assertIn("CREATE TRIGGER memory_scopes_relabel", self.schema)
+        self.assertIn("CREATE TRIGGER memory_workspaces_relabel", self.schema)
+        relabel = self.schema[
+            self.schema.index("CREATE OR REPLACE FUNCTION memory_relabel_points"):
+            self.schema.index("CREATE OR REPLACE FUNCTION memory_embeddings_set_visibility")
+        ]
+        # Every row touched is a point re-enqueued with its whole vector, so a
+        # relabel that rewrote unchanged rows would re-index the corpus.
+        self.assertIn("e.visibility IS DISTINCT FROM v_labels", relabel)
+
+    def test_a_multi_valued_label_with_no_values_drops_its_key(self) -> None:
+        # A point belonging to no scope is legitimate -- the rank answers 0 for
+        # it -- and it must still be WRITTEN. An empty array would be refused by
+        # db3_enqueue_vector_to, which would turn "visible to nobody" into
+        # "cannot be indexed at all".
+        labels = self.schema[
+            self.schema.index("CREATE OR REPLACE FUNCTION db3_projection_labels"):
+            self.schema.index("CREATE OR REPLACE FUNCTION db3_enqueue_vector_to")
+        ]
+        self.assertIn(
+            "WHERE jsonb_typeof(label.value)<>'array' OR jsonb_array_length(label.value)>0",
+            labels)
 
     def test_contract_bounds_and_atomic_failure_are_database_enforced(self) -> None:
         enqueue = self.schema[

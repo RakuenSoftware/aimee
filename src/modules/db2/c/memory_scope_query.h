@@ -3,6 +3,7 @@
 
 #include "db_postgres.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Canonical local-first rank for a memory id.  Keep this SQL equivalent to
@@ -98,5 +99,95 @@ static inline void db2_memory_scope_guard_release(db2_memory_scope_guard_t *guar
 #define DB2_MEMORY_SCOPE_GUARD __attribute__((cleanup(db2_memory_scope_guard_release)))
 int db2_memory_scope_context_rank(int64_t memory_id);
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *st);
+
+/* The vocabulary a point's `visibility` label is written in.
+ *
+ * memory_visibility_labels() (modules/db2/c/schema.sql) writes it; this builds
+ * the caller's half of it. Named here, beside the rank they both have to agree
+ * with, because the whole hazard is two hand-written copies of one predicate. */
+#define DB2_MEMORY_VISIBILITY_PROJECT_PREFIX   "project:"
+#define DB2_MEMORY_VISIBILITY_WORKSPACE_PREFIX "workspace:"
+#define DB2_MEMORY_VISIBILITY_GLOBAL           "global"
+#define DB2_MEMORY_VISIBILITY_SHARED           "workspace:_shared"
+#define DB2_MEMORY_VISIBILITY_UNTAGGED         "untagged"
+
+#define DB2_MEMORY_VISIBILITY_VALUE_MAX  256
+#define DB2_MEMORY_VISIBILITY_MAX_VALUES 5
+
+/* The visibility values a caller in this scope is allowed to see.
+ *
+ * A point carries every scope it belongs to as separate values of one
+ * `visibility` label, so DB2_MEMORY_SCOPE_RANK_SQL > 0 becomes exactly "these
+ * two sets intersect" -- one IN, no OR. That equivalence is what
+ * scripts/db2_replay_env.sh checks, against the rank itself, over a real
+ * database: agreeing with the rank is the entire requirement here.
+ *
+ * Returns how many values were written; 0 when no scope filter applies at all
+ * -- an inactive scope, or include_all, both of which the rank filter reads as
+ * "admit everything". Zero is unambiguous, because an active scope always
+ * yields at least the three unconditional values. Returns -1 if a value does
+ * not FIT, which is refused rather than truncated: a workspace cut short is a
+ * different workspace, and a search narrowed behind the caller's back returns a
+ * short answer indistinguishable from a complete one.
+ *
+ * `storage` holds the built values and must outlive `values`, which points into
+ * it. The request builder allocates nothing and neither does this. */
+static inline int
+db2_memory_visibility_filter_values(const db2_memory_scope_context_t *ctx,
+                                    char storage[][DB2_MEMORY_VISIBILITY_VALUE_MAX],
+                                    const char *values[], size_t capacity)
+{
+   if (!ctx || !storage || !values)
+      return -1;
+   if (!ctx->active || ctx->include_all)
+      return 0;
+
+   const char *prefixes[DB2_MEMORY_VISIBILITY_MAX_VALUES];
+   const char *suffixes[DB2_MEMORY_VISIBILITY_MAX_VALUES];
+   size_t wanted = 0;
+   if (ctx->project[0])
+   {
+      prefixes[wanted] = DB2_MEMORY_VISIBILITY_PROJECT_PREFIX;
+      suffixes[wanted++] = ctx->project;
+   }
+   if (ctx->workspace[0])
+   {
+      prefixes[wanted] = DB2_MEMORY_VISIBILITY_WORKSPACE_PREFIX;
+      suffixes[wanted++] = ctx->workspace;
+   }
+   /* Rank 1 in three pieces: the global row, the '_shared' workspace row, and
+    * the absence of any scope row -- which the writer turns into a value
+    * because a provider cannot ask about a row that is not there. */
+   prefixes[wanted] = DB2_MEMORY_VISIBILITY_GLOBAL;
+   suffixes[wanted++] = "";
+   prefixes[wanted] = DB2_MEMORY_VISIBILITY_SHARED;
+   suffixes[wanted++] = "";
+   prefixes[wanted] = DB2_MEMORY_VISIBILITY_UNTAGGED;
+   suffixes[wanted++] = "";
+
+   size_t count = 0;
+   for (size_t i = 0; i < wanted; ++i)
+   {
+      char built[DB2_MEMORY_VISIBILITY_VALUE_MAX];
+      int written = snprintf(built, sizeof(built), "%s%s", prefixes[i], suffixes[i]);
+      if (written < 0 || (size_t)written >= sizeof(built))
+         return -1;
+      /* An active workspace literally named '_shared' would build the constant
+       * a second time. Harmless to a set-membership test, but two encodings of
+       * one question are worth not emitting. */
+      int already = 0;
+      for (size_t j = 0; j < count; ++j)
+         if (strcmp(storage[j], built) == 0)
+            already = 1;
+      if (already)
+         continue;
+      if (count >= capacity)
+         return -1;
+      memcpy(storage[count], built, (size_t)written + 1);
+      values[count] = storage[count];
+      count++;
+   }
+   return (int)count;
+}
 
 #endif

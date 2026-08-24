@@ -1109,6 +1109,139 @@ CREATE TABLE IF NOT EXISTS db3_backfill (
     PRIMARY KEY(principal,projection_id)
 );
 
+-- The memory a point belongs to, matching PGVEC_MEMORY_OWNER_ID_SQL.
+--
+-- A 'unit' point is a memory_units row offset by 1000000000000, so units and
+-- memories share one id space. Its visibility is the owning memory's: a unit is
+-- a fragment of a memory, not something scoped on its own.
+CREATE OR REPLACE FUNCTION memory_point_owner_id(p_point_id BIGINT,p_record_type TEXT)
+RETURNS BIGINT
+LANGUAGE sql STABLE SET search_path=pg_catalog,public,pg_temp AS $$
+    SELECT CASE WHEN p_record_type='unit'
+                THEN (SELECT mu.memory_id FROM public.memory_units mu
+                       WHERE mu.id=p_point_id-1000000000000)
+                ELSE p_point_id END
+$$;
+
+-- Every scope a memory is visible in, as the values of one multi-valued label.
+--
+-- This is DB2_MEMORY_SCOPE_RANK_SQL (modules/db2/c/memory_scope_query.h) turned
+-- inside out. The rank asks, of one memory and one caller, "is this visible":
+-- four EXISTS clauses over memory_scopes and memory_workspaces, plus the
+-- ABSENCE of any row. A vector provider can run none of it -- a join is not an
+-- attribute and a missing row is not a value -- so the decision is denormalised
+-- onto the point when it is written, and the caller's half becomes a single IN.
+--
+-- The vocabulary, which both halves are written against:
+--
+--   project:<value>    a project scope row
+--   workspace:<value>  a workspace scope row, INCLUDING '_shared'
+--   global             the global/_global row, the only global pair the rank
+--                      recognises -- a global row with any other value leaves a
+--                      memory neither globally visible NOR untagged, and the
+--                      rank answers 0 for it
+--   untagged           no scope row of any of the three types and no legacy
+--                      memory_workspaces row: the absence, made a value
+--
+-- db2_memory_visibility_filter_values() builds the caller's half from the same
+-- vocabulary. Agreeing with the rank is the entire requirement, and two
+-- hand-written copies of a predicate drift silently, so the two halves are
+-- checked against the rank itself, over a real database, in
+-- scripts/db2_replay_env.sh.
+--
+-- A memory the rank can never admit yields NO values rather than an empty
+-- array: db3_projection_labels drops a source with nothing in it, and a point
+-- carrying no visibility value satisfies no caller's IN -- which is the answer
+-- the rank gives for it.
+CREATE OR REPLACE FUNCTION memory_visibility_labels(p_memory_id BIGINT) RETURNS JSONB
+LANGUAGE sql STABLE STRICT SET search_path=pg_catalog,public,pg_temp AS $$
+    SELECT COALESCE(jsonb_agg(scope.value ORDER BY scope.value),'[]'::JSONB)
+      FROM (
+        SELECT 'project:'||s.scope_value AS value
+          FROM public.memory_scopes s
+         WHERE s.memory_id=p_memory_id AND s.scope_type='project'
+         UNION
+        SELECT 'workspace:'||s.scope_value
+          FROM public.memory_scopes s
+         WHERE s.memory_id=p_memory_id AND s.scope_type='workspace'
+         UNION
+        SELECT 'workspace:'||w.workspace
+          FROM public.memory_workspaces w
+         WHERE w.memory_id=p_memory_id
+         UNION
+        SELECT 'global'
+          FROM public.memory_scopes s
+         WHERE s.memory_id=p_memory_id AND s.scope_type='global'
+           AND s.scope_value='_global'
+         UNION
+        SELECT 'untagged'
+         WHERE NOT EXISTS (SELECT 1 FROM public.memory_scopes s
+                            WHERE s.memory_id=p_memory_id
+                              AND s.scope_type IN ('global','workspace','project'))
+           AND NOT EXISTS (SELECT 1 FROM public.memory_workspaces w
+                            WHERE w.memory_id=p_memory_id)
+      ) AS scope(value)
+$$;
+
+-- Recompute one memory's points after its scope rows changed.
+--
+-- This is the cost the denormalisation buys: a scope row is one row, and the
+-- points carrying its answer are however many that memory has. Only rows whose
+-- labels actually differ are touched, because every row touched is an upsert on
+-- the outbox carrying the point's whole vector again -- a no-op UPDATE here is
+-- a re-index of a point nothing changed about.
+CREATE OR REPLACE FUNCTION memory_relabel_points(p_memory_id BIGINT) RETURNS VOID
+LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE
+    v_labels JSONB;
+BEGIN
+    IF p_memory_id IS NULL THEN
+        RETURN;
+    END IF;
+    v_labels := public.memory_visibility_labels(p_memory_id);
+    UPDATE public.memory_embeddings e
+       SET visibility=v_labels
+     WHERE e.visibility IS DISTINCT FROM v_labels
+       AND ((e.point_id=p_memory_id AND e.record_type<>'unit') OR
+            e.point_id IN (SELECT mu.id+1000000000000 FROM public.memory_units mu
+                            WHERE mu.memory_id=p_memory_id));
+END $$;
+
+-- The one writer of the column, so an insert and a later scope change cannot
+-- disagree about what a point's visibility is.
+CREATE OR REPLACE FUNCTION memory_embeddings_set_visibility() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+    -- COALESCE because a unit point whose memory_units row is gone has no
+    -- owner. Such a point is visible to nobody, which is what the rank says
+    -- about it too.
+    NEW.visibility := COALESCE(
+      public.memory_visibility_labels(
+        public.memory_point_owner_id(NEW.point_id,NEW.record_type)),'[]'::JSONB);
+    RETURN NEW;
+END $$;
+
+-- A scope row moving between memories relabels BOTH, so the memory that lost
+-- the row stops claiming the scope.
+CREATE OR REPLACE FUNCTION memory_scope_relabel_points() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+    IF TG_OP<>'INSERT' THEN
+        PERFORM public.memory_relabel_points(OLD.memory_id);
+    END IF;
+    IF TG_OP<>'DELETE' THEN
+        PERFORM public.memory_relabel_points(NEW.memory_id);
+    END IF;
+    RETURN NULL;
+END $$;
+
+DROP TRIGGER IF EXISTS memory_scopes_relabel ON memory_scopes;
+CREATE TRIGGER memory_scopes_relabel AFTER INSERT OR UPDATE OR DELETE ON memory_scopes
+  FOR EACH ROW EXECUTE FUNCTION public.memory_scope_relabel_points();
+DROP TRIGGER IF EXISTS memory_workspaces_relabel ON memory_workspaces;
+CREATE TRIGGER memory_workspaces_relabel AFTER INSERT OR UPDATE OR DELETE ON memory_workspaces
+  FOR EACH ROW EXECUTE FUNCTION public.memory_scope_relabel_points();
+
 -- One label's (key,value) pairs, whichever form the label holds.
 --
 -- A label value is a string, or an ARRAY of strings for a multi-valued label.
@@ -1138,17 +1271,23 @@ CREATE OR REPLACE FUNCTION db3_projection_labels(
 ) RETURNS JSONB
 LANGUAGE sql IMMUTABLE STRICT SET search_path=pg_catalog,public,pg_temp AS $$
     SELECT COALESCE(
-      jsonb_object_agg(source.key,
-        CASE WHEN left(source.value,1)='=' THEN to_jsonb(substring(source.value FROM 2))
-             -- A source column holding a JSON array is a multi-valued label and
-             -- is carried through as one. Every projection registered today names
-             -- a TEXT column, so this is the string branch for all of them and
-             -- the emitted JSON is unchanged.
-             WHEN jsonb_typeof(p_row->source.value)='array' THEN p_row->source.value
-             ELSE to_jsonb(COALESCE(p_row->>source.value,'')) END
-        ORDER BY source.key),
-      '{}'::JSONB)
-      FROM jsonb_each_text(p_sources) AS source(key,value)
+      jsonb_object_agg(label.key,label.value ORDER BY label.key),'{}'::JSONB)
+      FROM (
+        SELECT source.key,
+          CASE WHEN left(source.value,1)='=' THEN to_jsonb(substring(source.value FROM 2))
+               -- A source column holding a JSON array is a multi-valued label and
+               -- is carried through as one. Every projection registered today
+               -- names a TEXT column except memory's `visibility`, so this is the
+               -- string branch for the rest and their emitted JSON is unchanged.
+               WHEN jsonb_typeof(p_row->source.value)='array' THEN p_row->source.value
+               ELSE to_jsonb(COALESCE(p_row->>source.value,'')) END AS value
+          FROM jsonb_each_text(p_sources) AS source(key,value)
+      ) AS label
+     -- A multi-valued source with nothing in it is a label with nothing to say.
+     -- The key is dropped rather than emitted empty: db3_enqueue_vector_to
+     -- refuses an empty array, and a point that belongs to no scope should be
+     -- written and match no caller's IN, not fail to be written at all.
+     WHERE jsonb_typeof(label.value)<>'array' OR jsonb_array_length(label.value)>0
 $$;
 
 CREATE OR REPLACE FUNCTION db3_enqueue_vector_to(
@@ -1293,7 +1432,7 @@ END $$;
 -- `requires = 'vector'`); it supplies the column type. `vectorscale` supplies
 -- the diskann access method and the operator classes over that type. Neither is
 -- selectable: there is one vector index method here and it is diskann.
-DO $pgvec_setup$ DECLARE v_table TEXT; p RECORD; BEGIN
+DO $pgvec_setup$ DECLARE v_table TEXT; p RECORD; v_backfill BOOLEAN; BEGIN
     BEGIN
         CREATE EXTENSION IF NOT EXISTS vector;
     EXCEPTION WHEN OTHERS THEN
@@ -1461,6 +1600,43 @@ DO $pgvec_setup$ DECLARE v_table TEXT; p RECORD; BEGIN
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'embedding dimension check skipped (%)', SQLERRM;
     END;
+
+    -- Visibility is denormalised onto the point because a provider cannot run
+    -- the join that decides it. See memory_visibility_labels() for the
+    -- vocabulary and why the absence of a scope row has to become a value.
+    -- Asked BEFORE the column is added, because the answer is what decides
+    -- whether the backfill below runs at all. This schema is applied on every
+    -- connect, and an unconditional backfill would scan memory_embeddings and
+    -- evaluate the visibility of every point in it each time a server started.
+    v_backfill := NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_attribute a
+       WHERE a.attrelid='public.memory_embeddings'::regclass
+         AND a.attname='visibility' AND NOT a.attisdropped);
+    EXECUTE $T$
+        ALTER TABLE memory_embeddings
+            ADD COLUMN IF NOT EXISTS visibility JSONB NOT NULL DEFAULT '[]'::JSONB
+    $T$;
+    EXECUTE $T$
+        DROP TRIGGER IF EXISTS memory_embeddings_visibility ON memory_embeddings
+    $T$;
+    EXECUTE $T$
+        CREATE TRIGGER memory_embeddings_visibility
+            BEFORE INSERT OR UPDATE ON memory_embeddings
+            FOR EACH ROW EXECUTE FUNCTION public.memory_embeddings_set_visibility()
+    $T$;
+    -- Rows written before the column existed carry '[]'. They are computed once,
+    -- here, and the triggers keep them from then on. Only where it differs,
+    -- because every row touched is a point re-enqueued with its whole vector; on
+    -- a fresh database this matches nothing.
+    IF v_backfill THEN
+        EXECUTE $T$
+            UPDATE memory_embeddings e
+               SET visibility=COALESCE(memory_visibility_labels(
+                     memory_point_owner_id(e.point_id,e.record_type)),'[]'::JSONB)
+             WHERE e.visibility IS DISTINCT FROM COALESCE(memory_visibility_labels(
+                     memory_point_owner_id(e.point_id,e.record_type)),'[]'::JSONB)
+        $T$;
+    END IF;
 
     EXECUTE $T$
         CREATE INDEX IF NOT EXISTS idx_memory_embeddings_record_type
@@ -1700,7 +1876,8 @@ DO $pgvec_setup$ DECLARE v_table TEXT; p RECORD; BEGIN
     ) VALUES
       (1,'memory_embeddings','memory','embedding',
         ('{"kind":"kind","primary_scope":"primary_scope","project":"project",' ||
-        '"record_type":"record_type","workspace":"workspace"}')::JSONB),
+        '"record_type":"record_type","visibility":"visibility",' ||
+        '"workspace":"workspace"}')::JSONB),
       (2,'kb_embeddings','kb','embedding',
         '{"project":"project","record_type":"=kb"}'),
       (3,'kb_pdf_embeddings','kb_pdf','embedding',
