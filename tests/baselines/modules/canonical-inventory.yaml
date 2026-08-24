@@ -19,7 +19,8 @@
     "vault",
     "execution-policy",
     "audit",
-    "db1"
+    "db1",
+    "aimee"
   ],
   "optional": [
     "governance",
@@ -64,7 +65,8 @@
     "economizer": 27,
     "postgres": 28,
     "db2": 29,
-    "db1": 30
+    "db1": 30,
+    "aimee": 31
   },
   "retired_principal_refs": []
 }

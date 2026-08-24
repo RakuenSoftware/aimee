@@ -11,10 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
+	"github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
@@ -49,6 +53,66 @@ const roundtableDelegatePrincipalRef uint32 = 65
 // second principal that is granted exactly that request and nothing else.
 const economizerStorePrincipalRef uint32 = 66
 
+// aimeeDirectoryPrincipalRef is the aimee module's OUTBOUND identity, used only
+// to read the session directory out of db1. Same reason as the economizer's: a
+// serving grant requests nothing, so reaching another module's stage needs a
+// second principal granted exactly that request.
+//
+// 67, and deliberately not the 69 the validation probe uses. Two clients sharing
+// a ref are a duplicate principal and the bus refuses whichever attaches second,
+// which would surface as a failure in whichever of the two started later rather
+// than at the cause.
+const aimeeDirectoryPrincipalRef uint32 = 67
+
+// aimeeDirectory builds the peer capability's DirectorySource.
+//
+// The choice is EXPLICIT and defaults to none. AIMEE_PEER_DIRECTORY=db1 reads
+// existence from db1's session family over the bus; anything else, including
+// unset, declares that there is no directory and the session-scoped stages
+// answer no_directory.
+//
+// Defaulting to none is not caution, it is accuracy. db1's server_session_get
+// returns 0 only on SQLITE_ROW and -1 for everything else including no row, and
+// its stage maps a non-zero rc to FAILED, so on the store that ships today an
+// absent session and a broken store are one status. Under that contract this
+// module would have to report either "gone" for a transient outage -- which
+// destroys mail under the undeliverable rule -- or "retry" for a session that
+// will never exist. The Go store distinguishes them and the catalog now declares
+// all four, so this becomes the default when db1 runs it.
+func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.DirectorySource, string) {
+	if os.Getenv("AIMEE_PEER_DIRECTORY") != "db1" {
+		return aimee.NoDirectory{}, "none (set AIMEE_PEER_DIRECTORY=db1 to read db1's session family)"
+	}
+	if ctx == nil || moduleBusSocket == "" {
+		return aimee.NoDirectory{}, "none: db1 was asked for but there is no module bus socket"
+	}
+	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, aimeeDirectoryPrincipalRef)
+	if err != nil {
+		// Reported, not silently downgraded: a module that was told to use db1
+		// and quietly did not would answer no_directory for a reason nobody
+		// could see.
+		return aimee.NoDirectory{}, fmt.Sprintf("none: could not attach as principal %d: %v",
+			aimeeDirectoryPrincipalRef, err)
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	if err != nil {
+		busClient.Detach()
+		return aimee.NoDirectory{}, fmt.Sprintf("none: no module caller: %v", err)
+	}
+	directory, err := aimee.NewDB1Directory(caller, 5*time.Second)
+	if err != nil {
+		// CloseAndWait BEFORE Detach. The caller's goroutine is polling the
+		// shared-memory region by now and Detach unmaps it; the Detach above is
+		// safe only because the constructor failed and no goroutine exists yet.
+		// Same defect that segfaulted the probe after every check passed.
+		caller.CloseAndWait()
+		busClient.Detach()
+		return aimee.NoDirectory{}, fmt.Sprintf("none: %v", err)
+	}
+	return directory, fmt.Sprintf("db1 sessions (kind %d) as principal 1/%d",
+		peerwire.EventKind(aimee.DB1PrincipalRef, aimee.DB1SessionsStage), aimeeDirectoryPrincipalRef)
+}
+
 // economizerStore seats the economizer's reducer state on DB1.
 //
 // A failure here is not fatal to the module. Reducer state makes the NEXT turn
@@ -70,6 +134,9 @@ func economizerStore(ctx context.Context, moduleBusSocket string) economizer.Sta
 	}
 	store, err := db1.NewClient(caller, 0)
 	if err != nil {
+		// CloseAndWait before Detach: the poll goroutine is live here and
+		// Detach unmaps the region it reads.
+		caller.CloseAndWait()
 		busClient.Detach()
 		return nil
 	}
@@ -99,6 +166,9 @@ func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtabl
 	}
 	client, err := delegatecontract.NewBusClient(caller, 0)
 	if err != nil {
+		// CloseAndWait before Detach: the poll goroutine is live here and
+		// Detach unmaps the region it reads.
+		caller.CloseAndWait()
 		busClient.Detach()
 		return nil, err
 	}
@@ -302,6 +372,51 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// the module reduces without warming up.
 		config.Handler = economizer.NewHandlerWithStore(
 			economizerStore(ctx, moduleBusSocket))
+	case "aimee":
+		config.ModuleName = name
+		config.PrincipalRef = aimee.PrincipalRef
+		// The module hosts capabilities; peer messaging is the first. A second
+		// capability is another argument here, not a restructure.
+		//
+		// The registry is process-local today: inboxes and grants live in
+		// memory and do not survive a bounce. Durable storage arrives through
+		// the postgres module's generic wire and changes nothing here.
+		//
+		// NoDirectory{} is not a placeholder, it is the accurate description of
+		// this build. There is no DirectorySource yet -- it needs db1's session
+		// family, which lands with the absorption -- and nothing else populates
+		// the registry either: Register has no caller outside tests, and no bus
+		// op reaches it. So no session can exist here, and PEER MESSAGING IS
+		// INERT IN THIS CONFIGURATION.
+		//
+		// Said explicitly because the previous nil said it silently. Every
+		// session-scoped call refused with unknown_sender or no_peer, which are
+		// answers ABOUT A SESSION from a module that could not know about any
+		// session, and every refusal check in the container validation passed
+		// against exactly this state. A correct refusal and a module that can
+		// never do anything produce the same word.
+		directory, sourceDescription := aimeeDirectory(ctx, moduleBusSocket)
+		peerCapability, err := aimee.NewPeer(peer.New(peer.Options{}), directory)
+		if err != nil {
+			log.Printf("aimee module unavailable: %v", err)
+			return bus.ModuleProcessConfig{}, false
+		}
+		// Logged at every start, not once at build time: an operator reading
+		// why a peer send refuses should find the reason in the log of the
+		// process that refused it. It names the source either way, so a run
+		// that MEANT to use db1 and did not is visible rather than looking the
+		// same as one that never asked.
+		log.Printf("aimee module: session directory = %s", sourceDescription)
+		module, err := aimee.New(peerCapability)
+		if err != nil {
+			// A stage conflict is a programming error in the capability list,
+			// not a runtime condition: refusing to advertise is better than
+			// advertising a stage served by the wrong owner.
+			log.Printf("aimee module unavailable: %v", err)
+			return bus.ModuleProcessConfig{}, false
+		}
+		config.Stages = module.Stages()
+		config.Handler = module.Handle
 	case "postgres":
 		config.ModuleName = name
 		config.PrincipalRef = 28

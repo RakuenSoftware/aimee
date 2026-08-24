@@ -465,6 +465,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-client-base \
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
                $(TESTPREFIX)/unit-test-cli-kb-smoke \
+               $(TESTPREFIX)/unit-test-peer-client \
+               $(TESTPREFIX)/unit-test-core-connect-budget \
                $(TESTPREFIX)/unit-test-kb-sidecar-identity \
                $(TESTPREFIX)/unit-test-synthesis-mtls-client \
                $(TESTPREFIX)/unit-test-workspace-scope \
@@ -4454,6 +4456,17 @@ $(TESTPREFIX)/unit-test-webuser-runtime: \
                       $(OBJDIR)/tests/support/webuser_name_validator.o \
                       $(OBJDIR)/tests/module_handlers/workspace.o \
                       $(OBJDIR)/aimee_home.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-core-connect-budget: \
+                      $(OBJDIR)/tests/test_core_connect_budget.o \
+                      $(CORE_CONNECTION_LIB)
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-peer-client: \
+                      $(OBJDIR)/tests/test_peer_client.o \
+                      $(OBJDIR)/peer_client/peer_client.o \
+                      $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-cli-kb-smoke: \

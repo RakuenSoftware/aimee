@@ -22,6 +22,12 @@ extern "C"
       AIMEE_CORE_CONNECT_NUMERIC_HOST = 1U << 0,
       AIMEE_CORE_CONNECT_NONBLOCKING = 1U << 1
    };
+   /* One candidate address's share of the remaining connect budget. Exposed for
+      the unit test: the starvation it prevents cannot be reproduced portably
+      through the socket path, because that needs a first address that HANGS and
+      a test can only conjure one that REFUSES -- which the broken code handled
+      correctly. */
+   int aimee_core_connect_slice_ms(int remaining_ms, int candidates, int attempted);
 
    aimee_core_result_t aimee_core_socket_connect_controlled(const char *host, const char *port,
                                                             unsigned flags,

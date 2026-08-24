@@ -21,7 +21,7 @@ from pathlib import Path
 MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 DEFAULT_INVENTORY = Path("tests/baselines/modules/canonical-inventory.yaml")
 ALLOWED_KEYS = {"schema_version", "required", "optional", "principal_refs", "retired_principal_refs"}
-REQUIRED_COUNT = 19
+REQUIRED_COUNT = 20
 # PostgreSQL is appended while its C-to-Go migration is staged so existing
 # optional-module principal references remain stable.
 OPTIONAL_COUNT = 11

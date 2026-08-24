@@ -9,6 +9,81 @@
 #include <stdint.h>
 #include <string.h>
 
+/* The smallest slice a single candidate address may be given.
+ *
+ * Dividing the budget by the number of candidates is right until the list is
+ * long, at which point each share becomes too short for any connection to
+ * complete in and the dial fails everywhere at once -- trading one starved
+ * address for all of them. This floor keeps every attempt long enough to be a
+ * real attempt; the caller's own deadline, checked at the top of the loop, is
+ * what stops the walk. */
+#define AIMEE_CORE_CONNECT_MIN_SLICE_MS 1200
+
+/* One candidate's share of what remains.
+ *
+ * Extracted so the arithmetic that fixes the starvation can be pinned directly.
+ * A test that drives the whole connect cannot reliably produce the condition --
+ * it needs a first address that HANGS, and an address that merely refuses (the
+ * only kind a unit test can conjure portably) returns ECONNREFUSED at once,
+ * which the broken code survived. Testing the division instead is deterministic
+ * and asserts the actual property: after a candidate burns its slice, budget
+ * remains for the next one.
+ *
+ * `attempted` is how many candidates have already had a turn, so the last one
+ * is handed the true remainder rather than a fraction of it. */
+int aimee_core_connect_slice_ms(int remaining_ms, int candidates, int attempted)
+{
+   if (remaining_ms <= 0)
+      return 0;
+   int left = candidates - attempted;
+   int slice = left > 0 ? remaining_ms / left : remaining_ms;
+   /* A floor, so a long address list cannot slice the budget into pieces too
+      short for any connection to complete in -- trading one starved address for
+      all of them. */
+   if (slice < AIMEE_CORE_CONNECT_MIN_SLICE_MS)
+      slice = AIMEE_CORE_CONNECT_MIN_SLICE_MS;
+   if (slice > remaining_ms)
+      slice = remaining_ms;
+   return slice;
+}
+
+/* Resolution is not connection, and the connect budget must not pay for it.
+ *
+ * aimee_core_control_init_timeout(&control, AGENT_HTTP_CONNECT_TIMEOUT_MS) is
+ * built by the caller BEFORE this function runs, and the same control bounds the
+ * address loop below. On a host whose first nameserver does not answer for a
+ * name, getaddrinfo costs ~5s falling back to the second -- the whole 5s connect
+ * budget -- so the loop's first control check failed and NOT ONE ADDRESS WAS
+ * EVER DIALLED. The caller then logged "TCP connect failed", which is a claim
+ * about a connection that was never attempted.
+ *
+ * Measured: `getent ahosts api.minimax.io` at 5.0s and 5.3s, curl reaching the
+ * same host in 0.36s once the resolver was replaced, and every provider call
+ * failing in between on a network that was fine.
+ *
+ * So the deadline is pushed out by however long the lookup actually took. The
+ * caller's own control object is never mutated -- the extension lives in a local
+ * copy handed to the address walk -- and a caller that asked for no deadline
+ * still gets none. */
+static void connect_budget_excluding_resolution(aimee_core_control_t *out,
+                                                const aimee_core_control_t *control,
+                                                int64_t resolve_started_ns)
+{
+   *out = *control;
+   if (!control->deadline_ns || resolve_started_ns <= 0)
+      return;
+   int64_t now = aimee_core_now_ns();
+   if (now <= resolve_started_ns)
+      return;
+   int64_t spent = now - resolve_started_ns;
+   /* Saturating: a clock that jumped must not wrap the deadline into the past
+      and turn a working connect into an instant refusal. */
+   if (out->deadline_ns > INT64_MAX - spent)
+      out->deadline_ns = INT64_MAX;
+   else
+      out->deadline_ns += spent;
+}
+
 #ifdef _WIN32
 #include <stdio.h>
 #include <stdlib.h>
@@ -74,19 +149,56 @@ aimee_core_result_t aimee_core_socket_connect_controlled(const char *host, const
    hints.ai_protocol = IPPROTO_TCP;
    hints.ai_flags = (flags & AIMEE_CORE_CONNECT_NUMERIC_HOST) ? AI_NUMERICHOST : 0;
    struct addrinfo *addresses = NULL;
+   int64_t resolve_started_ns = aimee_core_now_ns();
    if (getaddrinfo(host, port, &hints, &addresses) != 0 || !addresses)
    {
       NETDBG("address resolution failed for %s:%s\n", host, port);
       return AIMEE_CORE_IO_ERROR;
    }
+   /* Same as the POSIX path: the lookup must not spend the connect budget. */
+   aimee_core_control_t dialling;
+   connect_budget_excluding_resolution(&dialling, control, resolve_started_ns);
+   control = &dialling;
+
+   /* Every candidate gets a BOUNDED SHARE of what remains, because one
+      unreachable address must not consume the whole budget and starve the rest.
+      That is not hypothetical: a host whose DNS answers AAAA first, on a network
+      with no working IPv6 egress, spent the entire 5s connect budget waiting on
+      the v6 address -- and the A record, sitting next in the same list, was
+      never tried. curl and python reached the same host in ~5s by bounding the
+      first attempt and falling back; aimee reported "TCP connect failed".
+
+      The loop always iterated ai_next, so the bug was invisible by inspection:
+      the list WAS walked, and the walk ended on the first entry because
+      aimee_core_wait_fd returns TIMEOUT only when the SHARED deadline expires.
+      One address had already spent it. */
+   int candidates = 0;
+   for (struct addrinfo *counted = addresses; counted; counted = counted->ai_next)
+      candidates++;
 
    SOCKET connected = INVALID_SOCKET;
    aimee_core_result_t result = AIMEE_CORE_IO_ERROR;
-   for (struct addrinfo *address = addresses; address; address = address->ai_next)
+   int attempted = 0;
+   for (struct addrinfo *address = addresses; address; address = address->ai_next, attempted++)
    {
       result = aimee_core_control_check(control);
       if (result != AIMEE_CORE_OK)
          break;
+
+      /* The attempt control shares the caller's cancellation but carries its own
+         slice of the deadline. An unbounded caller (deadline_ns == 0) stays
+         unbounded per address: a caller that asked for no timeout must not be
+         given one here. */
+      aimee_core_control_t attempt = *control;
+      int remaining = aimee_core_control_remaining_ms(control);
+      if (remaining > 0)
+      {
+         int slice = aimee_core_connect_slice_ms(remaining, candidates, attempted);
+         if (aimee_core_control_init_timeout(&attempt, slice, control->cancel_poll_ms,
+                                             control->cancelled,
+                                             control->cancel_context) != AIMEE_CORE_OK)
+            attempt = *control;
+      }
       SOCKET candidate = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
       if (candidate == INVALID_SOCKET)
          continue;
@@ -99,7 +211,7 @@ aimee_core_result_t aimee_core_socket_connect_controlled(const char *host, const
       int rc = connect(candidate, address->ai_addr, (int)address->ai_addrlen);
       if (rc != 0 && WSAGetLastError() == WSAEWOULDBLOCK)
       {
-         result = aimee_core_wait_fd((int)(intptr_t)candidate, AIMEE_CORE_WAIT_WRITE, control);
+         result = aimee_core_wait_fd((int)(intptr_t)candidate, AIMEE_CORE_WAIT_WRITE, &attempt);
          int error = 0;
          int error_length = sizeof(error);
          if (result == AIMEE_CORE_OK &&
@@ -129,7 +241,11 @@ aimee_core_result_t aimee_core_socket_connect_controlled(const char *host, const
          }
       }
       closesocket(candidate);
-      if (result == AIMEE_CORE_TIMEOUT || result == AIMEE_CORE_CANCELLED)
+      /* CANCELLED stops everything -- the caller asked us to. A TIMEOUT is now
+         this ADDRESS's slice expiring, not the caller's budget, so the next
+         candidate still gets a turn; the check at the top of the loop is what
+         ends the walk when the caller's own deadline is gone. */
+      if (result == AIMEE_CORE_CANCELLED)
          break;
    }
    freeaddrinfo(addresses);
@@ -311,12 +427,33 @@ aimee_core_result_t aimee_core_socket_connect_addresses(const struct addrinfo *a
    if (!addresses || !control || !out_fd ||
        (flags & ~(AIMEE_CORE_CONNECT_NUMERIC_HOST | AIMEE_CORE_CONNECT_NONBLOCKING)))
       return AIMEE_CORE_INVALID;
+   /* Every candidate gets a BOUNDED SHARE of what remains. See the note on
+      aimee_core_connect_slice_ms: one unreachable address must not spend the
+      whole budget and starve the rest, which is what happened to every provider
+      call on a host whose DNS answers AAAA first with no IPv6 egress. */
+   int candidates = 0;
+   for (const struct addrinfo *counted = addresses; counted; counted = counted->ai_next)
+      candidates++;
+
    aimee_core_result_t result = AIMEE_CORE_IO_ERROR;
-   for (const struct addrinfo *address = addresses; address; address = address->ai_next)
+   int attempted = 0;
+   for (const struct addrinfo *address = addresses; address;
+        address = address->ai_next, attempted++)
    {
       result = aimee_core_control_check(control);
       if (result != AIMEE_CORE_OK)
          return result;
+
+      aimee_core_control_t attempt = *control;
+      int remaining = aimee_core_control_remaining_ms(control);
+      if (remaining > 0)
+      {
+         int slice = aimee_core_connect_slice_ms(remaining, candidates, attempted);
+         if (aimee_core_control_init_timeout(&attempt, slice, control->cancel_poll_ms,
+                                             control->cancelled,
+                                             control->cancel_context) != AIMEE_CORE_OK)
+            attempt = *control;
+      }
       int candidate = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
       if (candidate < 0)
          continue;
@@ -332,7 +469,7 @@ aimee_core_result_t aimee_core_socket_connect_addresses(const struct addrinfo *a
       int rc = connect(candidate, address->ai_addr, address->ai_addrlen);
       if (rc != 0 && errno == EINPROGRESS)
       {
-         result = aimee_core_wait_fd(candidate, AIMEE_CORE_WAIT_WRITE, control);
+         result = aimee_core_wait_fd(candidate, AIMEE_CORE_WAIT_WRITE, &attempt);
          int error = 0;
          socklen_t error_length = sizeof(error);
          if (result == AIMEE_CORE_OK &&
@@ -356,7 +493,11 @@ aimee_core_result_t aimee_core_socket_connect_addresses(const struct addrinfo *a
          }
       }
       close(candidate);
-      if (result == AIMEE_CORE_TIMEOUT || result == AIMEE_CORE_CANCELLED)
+      /* CANCELLED stops everything -- the caller asked us to. A TIMEOUT is now
+         this ADDRESS's slice expiring rather than the caller's whole budget, so
+         the next candidate still gets a turn; the check at the top of the loop
+         ends the walk when the caller's own deadline is genuinely gone. */
+      if (result == AIMEE_CORE_CANCELLED)
          return result;
    }
    return result;
@@ -378,10 +519,13 @@ aimee_core_result_t aimee_core_socket_connect_controlled(const char *host, const
    hints.ai_socktype = SOCK_STREAM;
    hints.ai_flags = (flags & AIMEE_CORE_CONNECT_NUMERIC_HOST) ? AI_NUMERICHOST : 0;
    struct addrinfo *addresses = NULL;
+   int64_t resolve_started_ns = aimee_core_now_ns();
    if (getaddrinfo(host, port, &hints, &addresses) != 0 || !addresses)
       return AIMEE_CORE_IO_ERROR;
+   aimee_core_control_t dialling;
+   connect_budget_excluding_resolution(&dialling, control, resolve_started_ns);
    aimee_core_result_t result =
-       aimee_core_socket_connect_addresses(addresses, flags, control, out_fd);
+       aimee_core_socket_connect_addresses(addresses, flags, &dialling, out_fd);
    freeaddrinfo(addresses);
    return result;
 }
