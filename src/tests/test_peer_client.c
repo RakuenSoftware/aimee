@@ -194,6 +194,22 @@ static void test_three_outcomes(void)
    ok(strcmp(seen_cell(1, buf, sizeof buf), "sess-b") == 0, "cell 1 is the recipient");
    ok(strcmp(seen_cell(5, buf, sizeof buf), "0") == 0,
       "expect_reply travels in peerwire's grammar (\"0\"), not a second spelling");
+   ok(strcmp(seen_cell(3, buf, sizeof buf), "conv-1") == 0,
+      "conversation_id is passed through, so a caller can thread onto one");
+
+   /* Both optional parameters are ADVERTISED in the tool schema, and an
+      advertised parameter nothing exercises is a promise the handler has never
+      been asked to keep. This repo has the precedent: git_commit came to
+      advertise parameters its handler never accepted. */
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
+   ok(peer_client_send("sess-a", "sess-b", "t", NULL, 1, &m, &status, NULL) == PEER_CLIENT_OK,
+      "a send with expect_reply set is accepted");
+   peer_client_message_free(&m);
+   ok(strcmp(seen_cell(5, buf, sizeof buf), "1") == 0,
+      "expect_reply=true travels as \"1\", the spelling Btoa writes");
+   ok(strcmp(seen_cell(3, buf, sizeof buf), "") == 0,
+      "an omitted conversation_id travels as the empty cell, which opens a new one");
    ok(g_seen_kind == 4096u + 31u * 256u + 1u && g_seen_stage == 1u,
       "the kind is the bus formula for ref 31 stage 1, not a transcribed 12033");
 }

@@ -402,6 +402,17 @@ static const struct fam_def MCP_FAMILIES[] = {
      "command",
      "Investigation notes. Set 'command'.",
      {{"create", "create_note"}, {"list", "list_notes"}, {"search", "search_notes"}, {NULL, NULL}}},
+    /* Folded into ONE family so peer messaging can sit on the core floor at the
+     * cost of a single entry. Two flat tools would have been two, and the floor
+     * is kept short deliberately -- but a capability an agent is never shown is
+     * a capability it does not have, and unlike retrieval there is no clumsier
+     * fallback it would reach for instead. There is no way to message another
+     * session except this. */
+    {"peer",
+     "command",
+     "Talk to another aimee session, including one running a different model. Set 'command': "
+     "'send' to deliver a message, 'inbox' to take the messages sent to you.",
+     {{"send", "peer_send"}, {"inbox", "peer_inbox"}, {NULL, NULL}}},
     {"prospective_memory",
      "command",
      "'When X, surface Y' reminders. Set 'command'.",
