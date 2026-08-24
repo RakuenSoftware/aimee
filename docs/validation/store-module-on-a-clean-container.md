@@ -715,3 +715,106 @@ the test reads back what it wrote and the subject is the writer; the real client
 is right when the symbol surface is too large to fake; and a gate is right when
 the assertion's subject is the store itself. Choosing one by habit would have
 produced a vacuous test in at least three of the four.
+
+---
+
+# The gap is closed: the store serves
+
+Everything above this line was written while the store module could not run. It
+attached, built its client, found nothing serving kind 11266, and exited. Every
+green reading in this document before this point was a reading of parts.
+
+## What was missing
+
+`storeBackend()` in `cmd/aimee-module` connects as principal 68 and reaches
+PostgreSQL **through the postgres module's SQL stage**. That stage did not
+exist. `server-go/modules/postgres/sql.go` is it: seven operations (exec, query,
+begin, commit, rollback, migrate, current_version), a transaction registry with
+a ceiling and an idle reaper, the limits enforced rather than trusted, and
+PostgreSQL's own SQLSTATE carried back so the client can tell a replay from an
+outage.
+
+Declared alongside it, in the same change, exactly as `store_client.go` said it
+must be: `postgres` gains stage 2 in `process-contracts.json`, and
+`aimee-postgres` joins its clients at ref 68 requesting 11266 and serving
+nothing.
+
+**`postgres` had to move to `server` as well.** It was declared `kb`-only while
+the store module runs on `server`, so the store would have had no postgres
+module to call even with the stage written.
+
+## Every store opcode was 1
+
+The client's operation constants were a `const` block with no `iota`:
+
+    opStoreExec uint32 = 1
+    opStoreQuery      // ← also 1
+    opStoreBegin      // ← also 1
+    ...
+
+All seven were 1. Every operation aimee asked of the store — query, begin,
+commit, rollback, migrate, current_version — went onto the wire as EXEC.
+
+Nothing caught it because nothing served the other end. Every call failed at the
+transport before its opcode was read. The Go compiler found it the moment the
+stage existed, refusing a switch with seven identical cases. **A wire constant is
+only checked by the far side reading it**, and until there is a far side, "the
+numbers are obviously right" is the only check there is.
+
+Pinned now by `store_opcodes_test.go`, to the numbers rather than to being
+distinct — asserting distinctness would pass on any renumbering, and renumbering
+a live wire silently reinterprets every frame.
+
+## It works
+
+Against PostgreSQL 17.11, on a database created UTF8 with `TEMPLATE template0`:
+
+    93 tables, ledger db1 v21 (21 rows)
+
+All 21 migrations applied through MIGRATE and recorded in the version ledger,
+which the module owns and recomputes rather than trusting the client's checksum.
+
+Every suite gated on the store fixture, **zero skips**:
+
+    unit-test-trajectory-batch                 exit=0
+    unit-test-server-mgmt-status               exit=0
+    unit-test-server-mgmt-checkpoint-client    exit=0
+    unit-test-server-write-tier-db1            exit=0
+    unit-test-web-search-fuse                  exit=0
+    unit-test-curiosity                        exit=0
+
+The fixture now starts the postgres module **beside** the store, with its own
+grant and the store's separate outbound grant at ref 68 — a serving grant and a
+requesting grant are two different admissions, and the store needs both.
+
+## Three defects the working store exposed
+
+Making it run is what found these. None could fail while every call failed first.
+
+**`server_mgmt_status_init()` was deleted from a test with the dead code around
+it.** The migration removed `db1_init(path)`/`db1_shutdown()` — correct — and
+took the init call with them, which was not dead: it calls
+`db1_mgmt_nonce_clear()`. Two assertions were about it, and one is the subject of
+a real property: across a restart the high-water mark survives and an in-flight
+nonce does not. Without the init the nonce survived, the assertion could not
+hold, and the pair stopped testing restarts at all. Restored.
+
+**`ErrStoreUnavailable` discarded the transport's error at all three sites.** A
+refused grant, an unreachable socket and a genuinely absent module all produced
+the same sentence, naming none of them — which is what I spent the first hour of
+diagnosis inside. Wrapped now, so `errors.Is` still answers and the cause travels.
+
+**`test_bus_shutdown_race` could no longer make its second claim.** It asserted
+that every event counted written is in the store, read back *after*
+`obs_bus_stop()`. That was free with in-process SQLite. It is impossible now: the
+store is reached over the bus, and stopping the bus is the thing under test.
+Restarting the host does not recover it — the module does not re-attach, measured
+with a ten-second poll rather than assumed. Pointing its sink at the real store
+instead made it a load test against a database on another host and it stopped
+finishing.
+
+It has a counting sink now, which is what the in-process SQLite one actually gave
+it: somewhere fast for events to go. That makes the accounting claim **exact**
+rather than inferred — the sink reports what it was handed. 54,241 events raced
+the stop, all accounted for. The store-durability property is stated in the file
+as belonging elsewhere, with the retired `test_bus_guardrail_durability`.

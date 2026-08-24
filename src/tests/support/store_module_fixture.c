@@ -23,14 +23,25 @@
  * because it IS a contiguous block by construction -- a gap would mean a family
  * lost its stage, which the Go contract test catches before this ever runs. */
 #define STORE_PRINCIPAL_REF 30u
-#define STORE_KIND_FIRST    11777u
-#define STORE_KIND_LAST     11795u
+/* The store's OUTBOUND principal, and the postgres module it calls. */
+#define STORE_CLIENT_REF 68u
+#define PG_PRINCIPAL_REF 28u
+#define PG_KIND_HEALTH   11265u
+#define PG_KIND_SQL      11266u
+#define STORE_KIND_FIRST 11777u
+#define STORE_KIND_LAST  11795u
 /* The runtime family, whose availability means the module is serving. Any of
  * the block would do; this one is polled because every suite that needs the
  * fixture touches runtime state somewhere. */
 #define STORE_KIND_RUNTIME 11783u
 
 static pid_t g_module = -1;
+/* The postgres module, which the store calls to reach the database. Two
+ * processes, because they are two principals: the store serves aimee's
+ * nineteen kinds at ref 30 and asks for SQL as ref 68, and postgres serves
+ * health and SQL at ref 28. Running them as one process would collapse a
+ * boundary the grants exist to hold. */
+static pid_t g_postgres = -1;
 static char g_root[256];
 
 static void die(const char *what)
@@ -38,6 +49,8 @@ static void die(const char *what)
    fprintf(stderr, "store_module_fixture: %s (errno=%s)\n", what, strerror(errno));
    if (g_module > 0)
       kill(g_module, SIGKILL);
+   if (g_postgres > 0)
+      kill(g_postgres, SIGKILL);
    abort();
 }
 
@@ -61,28 +74,7 @@ int store_module_fixture_available(void)
       return 0;
    }
 
-   /* THE DSN IS NOT SUFFICIENT, and answering on it alone was a yes to the wrong
-    * question. The store module does not open PostgreSQL itself: storeBackend()
-    * in cmd/aimee-module connects as principal 68 and reaches the database
-    * through the postgres module's SQL stage, kind 11266. Nothing in this tree
-    * serves that stage -- see docs/validation/store-module-on-a-clean-container.md
-    * -- so the module exits before it attaches whatever the DSN names.
-    *
-    * This matters because start() ABORTS on failure, by design: once available()
-    * has said yes, a failure there is a real fault. So every suite gated on this
-    * died the moment anyone set AIMEE_STORE_URL, reporting "module exited before
-    * it attached (check AIMEE_STORE_URL reaches the database)" -- which points at
-    * the operator's DSN, and the DSN was fine.
-    *
-    * Found by setting the variable and running, not by reading. With it unset
-    * every one of these suites skips, and a skip that would abort if taken is
-    * indistinguishable from a skip that would pass.
-    *
-    * DELETE THIS BLOCK when the postgres SQL stage lands; the DSN check above is
-    * the real one and stays. */
-   printf("  SKIP: nothing serves kind 11266 (the postgres SQL stage) in this tree,\n"
-          "        so the store module cannot attach whatever AIMEE_STORE_URL names\n");
-   return 0;
+   return 1;
 }
 
 void store_module_fixture_stop(void)
@@ -92,6 +84,15 @@ void store_module_fixture_stop(void)
       kill(g_module, SIGTERM);
       waitpid(g_module, NULL, 0);
       g_module = -1;
+   }
+   /* The store first, then what it calls: stopping postgres underneath a live
+    * store would have the store log a lost backend on its way out, which reads
+    * like a fault in the thing being torn down. */
+   if (g_postgres > 0)
+   {
+      kill(g_postgres, SIGTERM);
+      waitpid(g_postgres, NULL, 0);
+      g_postgres = -1;
    }
    if (g_root[0])
    {
@@ -119,12 +120,15 @@ void store_module_fixture_start(void)
    snprintf(policy, sizeof(policy), "%s/policy", g_root);
    snprintf(socket_path, sizeof(socket_path), "%s/bus.sock", g_root);
    snprintf(executable, sizeof(executable), "%s/aimee-module-store", g_root);
+   char pg_executable[320];
+   snprintf(pg_executable, sizeof(pg_executable), "%s/aimee-module-postgres", g_root);
    run("mkdir -p '%s'", policy);
 
-   /* A real file at this exact name, not a symlink: the module derives its
-    * identity from argv[0]'s basename, and the runtime pins the peer's resolved
-    * executable path against the grant. */
+   /* Real files at these exact names, not symlinks: the module is a multicall
+    * binary that derives its identity from argv[0]'s basename, and the runtime
+    * pins the peer's resolved executable path against the grant. */
    run("cp '%s' '%s' && chmod 0755 '%s'", source, executable, executable);
+   run("cp '%s' '%s' && chmod 0755 '%s'", source, pg_executable, pg_executable);
 
    char grant_path[384];
    snprintf(grant_path, sizeof(grant_path), "%s/store.grant", policy);
@@ -139,12 +143,78 @@ void store_module_fixture_start(void)
    if (fclose(grant) != 0)
       die("write the grant manifest");
 
+   /* THE STORE'S OUTBOUND GRANT, separate from the one above and easy to
+    * forget. The store serves at ref 30 and CALLS at ref 68, and the bus judges
+    * each attachment on its own: without this the module serves its nineteen
+    * kinds and is refused the moment it asks postgres for SQL, which reads as
+    * the database being unreachable rather than as a missing grant.
+    *
+    * request=, not serve=. A client that served anything would be a second
+    * server on kinds it does not own. */
+   snprintf(grant_path, sizeof(grant_path), "%s/store-client.grant", policy);
+   grant = fopen(grant_path, "w");
+   if (!grant)
+      die("open the store client grant");
+   fprintf(grant,
+           "version=1\nprincipal_class=1\nprincipal_ref=%u\nuid=self\nexecutable=%s\n"
+           "request=%u\n",
+           STORE_CLIENT_REF, executable, PG_KIND_SQL);
+   if (fclose(grant) != 0)
+      die("write the store client grant");
+
+   /* And the postgres module itself, which owns the connection and the DSN. */
+   snprintf(grant_path, sizeof(grant_path), "%s/postgres.grant", policy);
+   grant = fopen(grant_path, "w");
+   if (!grant)
+      die("open the postgres grant");
+   fprintf(grant,
+           "version=1\nprincipal_class=1\nprincipal_ref=%u\nuid=self\nexecutable=%s\n"
+           "serve=%u,%u\n",
+           PG_PRINCIPAL_REF, pg_executable, PG_KIND_HEALTH, PG_KIND_SQL);
+   if (fclose(grant) != 0)
+      die("write the postgres grant");
+
    if (obs_bus_configure_module_runtime(socket_path, policy) != 0)
       die("configure the module endpoint");
    if (obs_bus_start() != 0)
       die("start the bus");
 
    pid_t parent = getpid();
+
+   /* POSTGRES FIRST, and waited for. The store exits when it cannot reach the
+    * SQL stage -- that is its correct behaviour, not a race to be slept
+    * through -- so starting it against a module that is not yet serving would
+    * fail intermittently and look like flakiness in whatever suite ran it. */
+   pid_t pg = fork();
+   if (pg < 0)
+      die("fork the postgres module");
+   if (pg == 0)
+   {
+      prctl(PR_SET_PDEATHSIG, SIGKILL);
+      if (getppid() != parent)
+         _exit(0);
+      execl(pg_executable, pg_executable, socket_path, (char *)NULL);
+      _exit(127);
+   }
+   g_postgres = pg;
+   atexit(store_module_fixture_stop);
+   for (int tick = 0;; tick++)
+   {
+      if (obs_bus_module_available(PG_KIND_SQL))
+         break;
+      int status = 0;
+      if (waitpid(pg, &status, WNOHANG) == pg)
+      {
+         g_postgres = -1;
+         die("the postgres module exited before it served SQL "
+             "(check AIMEE_STORE_URL reaches the database)");
+      }
+      if (tick >= 400)
+         die("the postgres module never served the SQL stage");
+      struct timespec pause = {0, 50 * 1000 * 1000};
+      nanosleep(&pause, NULL);
+   }
+
    pid_t child = fork();
    if (child < 0)
       die("fork the module");

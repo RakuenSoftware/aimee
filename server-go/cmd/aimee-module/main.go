@@ -374,8 +374,27 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "postgres":
 		config.ModuleName = name
 		config.PrincipalRef = 28
-		config.Stages = []bus.ModuleStage{{EventKind: postgres.EventHealth, StageID: postgres.StageHealth}}
-		config.Handler = postgres.Handle
+		// Two stages, and the SQL one is what every store call in the tree
+		// ultimately lands on: aimee keeps no database and reaches PostgreSQL
+		// through here. Before it existed the store module attached, built its
+		// client, found nothing serving 11266 and exited -- which read as "the
+		// store is absent" on a system where every other part had been written.
+		config.Stages = []bus.ModuleStage{
+			{EventKind: postgres.EventHealth, StageID: postgres.StageHealth},
+			{EventKind: postgres.EventSQL, StageID: postgres.StageSQL},
+		}
+		// BOTH STAGES, ALWAYS. The SQL handler opens its pool on first use and
+		// answers with the reason when it cannot, so a missing DSN produces an
+		// explained refusal rather than a stage that is declared and absent.
+		// Trimming the list here instead would make this process disagree with
+		// process-contracts.json exactly when the database is unreachable.
+		sqlHandler := postgres.NewSQLHandler()
+		config.Handler = func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+			if invocation.StageID == postgres.StageSQL {
+				return sqlHandler(invocation, frame)
+			}
+			return postgres.Handle(invocation, frame)
+		}
 	// "aimee" is what a deployment installs this as: the id in
 	// process-contracts.json and the executable every generated grant pins.
 	//

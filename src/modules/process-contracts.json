@@ -615,13 +615,19 @@
       "runtime": "go",
       "principal_ref": 28,
       "placements": [
-        "kb"
+        "kb",
+        "server"
       ],
       "stages": [
         {
           "id": 1,
           "name": "postgres-health",
           "event_kind": 11265
+        },
+        {
+          "id": 2,
+          "name": "postgres-sql",
+          "event_kind": 11266
         }
       ]
     },
@@ -784,6 +790,17 @@
       ],
       "request": [
         11777
+      ]
+    },
+    {
+      "id": "aimee-postgres",
+      "principal_ref": 68,
+      "executable": "/usr/local/bin/aimee-module-aimee",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11266
       ]
     }
   ]

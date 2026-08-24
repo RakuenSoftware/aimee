@@ -72,6 +72,15 @@ type StageCaller interface {
 // than saying no -- and only one of those is worth retrying.
 var ErrStoreUnavailable = errors.New("aimee: the postgres module is not answering")
 
+// WRAPPED, NOT REPLACED, at every site below. The three call sites used to
+// return this sentinel bare, discarding the transport's own error -- so a
+// refused grant, an unreachable socket and a module that is genuinely absent
+// all produced the same sentence, and the first thing anyone debugging saw was
+// a message that named none of them.
+//
+// errors.Is(err, ErrStoreUnavailable) still answers true, which is what the
+// callers key on; what changes is that the cause travels with it.
+
 // Store is what the module holds at startup: the storage capability plus the
 // migration one.
 //
@@ -217,7 +226,7 @@ func (d *storeDB) CurrentSchemaVersion(ctx context.Context, owner string) (int64
 	body, err := d.caller.Call(ctx, EventPostgresSQL, StagePostgresSQL, 0,
 		d.deadline(ctx), encodeCurrentVersion(owner))
 	if err != nil {
-		return 0, "", ErrStoreUnavailable
+		return 0, "", fmt.Errorf("%w: %w", ErrStoreUnavailable, err)
 	}
 	rep, err := decodeReply(body, "current_version")
 	if err != nil {
@@ -245,7 +254,7 @@ func (d *storeDB) Migrate(ctx context.Context, m MigrationRequest) error {
 	body, err := d.caller.Call(ctx, EventPostgresSQL, StagePostgresSQL, 0,
 		d.deadline(ctx), request)
 	if err != nil {
-		return ErrStoreUnavailable
+		return fmt.Errorf("%w: %w", ErrStoreUnavailable, err)
 	}
 	_, err = decodeReply(body, fmt.Sprintf("migrate %s v%d", m.Owner, m.Version))
 	return err
@@ -274,7 +283,7 @@ func (d *storeDB) call(ctx context.Context, op uint32, statementID string,
 	body, err := d.caller.Call(ctx, EventPostgresSQL, StagePostgresSQL, 0,
 		d.deadline(ctx), request)
 	if err != nil {
-		return nil, ErrStoreUnavailable
+		return nil, fmt.Errorf("%w: %w", ErrStoreUnavailable, err)
 	}
 	name := statementID
 	if name == "" {

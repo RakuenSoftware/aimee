@@ -50,8 +50,19 @@ const (
 )
 
 // Operations aimee asks of the store.
+//
+// iota, and its absence here was a real defect for as long as this file has
+// existed: without it a const block repeats the EXPRESSION, so `= 1` followed by
+// six bare names made all seven constants 1. Every operation -- query, begin,
+// commit, rollback, migrate, current_version -- went onto the wire as EXEC.
+//
+// Nothing caught it because nothing served the other end. The store module's
+// SQL stage did not exist, so every call failed at the transport before its
+// opcode was ever read, and the first thing to notice was the Go compiler
+// refusing a switch with seven identical cases when that stage was written.
+// A wire constant is only checked by the far side reading it.
 const (
-	opStoreExec uint32 = 1
+	opStoreExec uint32 = iota + 1
 	opStoreQuery
 	opStoreBegin
 	opStoreCommit

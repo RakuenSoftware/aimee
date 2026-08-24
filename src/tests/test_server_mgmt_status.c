@@ -41,6 +41,12 @@ int main(void)
       return 0;
    store_module_fixture_start();
 
+   /* Clear nonces left by a previous run against this database. The fixture
+      deliberately does not truncate -- it would be a loaded gun pointed at
+      whatever AIMEE_STORE_URL names -- so a suite that needs a clean table
+      clears its own. */
+   assert(server_mgmt_status_init() == 0);
+
    char path[256];
    snprintf(path, sizeof path, "%s/aimee-mgmt-status-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
@@ -110,7 +116,17 @@ int main(void)
    assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.read.v1", 201, 1) ==
           SERVER_MGMT_NONCE_NOT_FOUND);
 
+   /* A DAEMON RESTART, and the point of the two assertions after it: the
+      high-water mark is durable and an in-flight nonce is not. Restarting is
+      what server_mgmt_status_init() models -- it clears the nonce table, which
+      is why a nonce issued a line earlier is gone and the hwm is still 4.
+
+      This call used to sit between db1_shutdown() and db1_init(path), and was
+      deleted with them when the store moved behind a module. Only the db1_ pair
+      was dead: without the init the nonce survives, the last assertion cannot
+      hold, and the pair stops testing anything about restarts. */
    s = issue(&p, 100);
+   assert(server_mgmt_status_init() == 0);
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 4);
    assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_NOT_FOUND);
    unlink(path);
