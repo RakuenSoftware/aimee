@@ -927,3 +927,104 @@ speaks the module's grammar, delivery and drain-once work, refusals differ, and
 the sender's session registers in the directory. What has never been observed is
 a model choosing to emit the call. That needs a container with a provisioned
 provider credential, which is a different subsystem's setup.
+
+## A live model calls peer_send (2026-08-24, CT 9106)
+
+The operator supplied a MiniMax key, and the last gap closed:
+
+```
+=== THE ANSWER: did a LIVE MODEL message another aimee session? ===
+  messages: 1
+   from driver | owner 'uid:0' | text 'hello from a live model'
+```
+
+MiniMax-M3, running through aimee's own agent loop, chose to call the `peer`
+tool and the message landed in another session's inbox with the sender stamped
+by the module. Two provider round trips (the tool call, then the final answer),
+and the turn closed with `DONE` as instructed.
+
+That is the native path — aimee's own agents, not an external MCP client — and
+it was the one thing repeatedly recorded here as unverified.
+
+### Five layers of first-run configuration, none of them peer messaging
+
+Each was found by fixing the one before it, and none was a defect in the feature:
+
+1. **The credential.** A literal `api_key` in `agents.json` is LOADED but never
+   PERSISTED — the writer keeps `$VAR` references only, because a literal key
+   belongs in the vault. The first save stripped it and the next load had none,
+   so routing refused the agent as `AGENT_ROUTE_NO_CREDENTIALS`. Installed via
+   `POST /v1/vault/set_server {agent, cred, secret}` instead.
+2. **Delegate policy.** `server.c` installs a filter whose rule is "the primary
+   never delegates to itself". The roster held one agent and it was the primary,
+   so the delegate role `code` had no candidate. A second seat fixed it.
+3. **The primary agent.** Set via the `set_primary_agent` MCP tool, so the turn
+   is answered in-process rather than delegated at all.
+4. **Role permissions.** `delegate_permissions_resolve` needs a registered
+   provider — the **governance** module. `aimee-module` is a multicall binary
+   keyed on `argv[0]`, so the same build serves it under another name.
+5. **DNS**, which is the one that turned out to be an aimee defect. Below.
+
+### The connect budget was being spent on name resolution
+
+`AGENT_HTTP_CONNECT_TIMEOUT_MS` is 5000, and that control is built BEFORE
+`getaddrinfo` while bounding the connect that follows. On this network the
+container's first nameserver does not answer for `api.minimax.io`, so every
+lookup cost ~5s falling back to the second — the entire connect budget. The
+address loop's first check then found the budget gone and **dialled nothing**,
+while the caller logged `TCP connect failed: api.minimax.io:443`: a claim about
+a connection that was never attempted.
+
+Measured, at the same moment, in the same container:
+
+| | result |
+|---|---|
+| `getent ahosts api.minimax.io` | **5.036s**, then 5.320s |
+| curl (broken resolver) | 401 in **5.34s** |
+| curl (resolver replaced) | 401 in **0.36s** |
+| aimee `agent_http` | `TCP connect failed` ×3 |
+
+Fixed by excluding resolution from the connect budget: the deadline handed to
+the address walk is pushed out by however long the lookup actually took, in a
+LOCAL copy, so the caller's own control is never mutated and an unbounded caller
+still gets no deadline. Applied to both the POSIX and Windows entry points —
+they are separate implementations in one file, and the first version of this fix
+landed only in the Windows one and changed nothing.
+
+**Verified by restoring the broken resolver**, one variable, same binary
+otherwise:
+
+```
+lookup cost with the broken resolver: 5.036s
+http_retry: attempt 1/3: HTTP 200 (provider=minimax model=MiniMax-M3)
+messages: 1  from driver | text 'through a slow resolver'
+```
+
+First attempt, no retries, no `TCP connect failed` — where the same
+configuration previously failed three times in a row.
+
+### A second, smaller robustness change in the same file
+
+Each candidate address now gets a bounded SHARE of the connect budget rather
+than all of it, so one unreachable address cannot starve the rest. **This did
+not fix anything observed** — it came from an earlier, wrong diagnosis of the
+same symptom, and is kept because the property is worth having, not because it
+explained the failure. Said plainly so the record does not credit it with the
+repair.
+
+### Wrong turns, recorded
+
+- I diagnosed IPv6-without-fallback, was confident and specific, and was wrong:
+  the container has no IPv6 default route at all, so a v6 candidate fails
+  instantly rather than slowly. The ~5s was always DNS.
+- The first fix landed in the `#ifdef _WIN32` branch of a file with two
+  implementations. It compiled, the tests passed, and the behaviour was
+  unchanged — visible only because the hardware run still failed.
+- A probe script named `enum.py` shadowed Python's stdlib `enum` and broke every
+  later probe in that container with an unrelated-looking traceback.
+
+### Teardown
+
+CT 9106 destroyed and purged, the key file shredded, `/root` verified free of
+`sk-cp-` material and of every rig file. Containers 9001 and 9078–9080 belong to
+other sessions and were not touched.
