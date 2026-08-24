@@ -26,6 +26,15 @@ extern "C"
       char event_type[32];
       char role[64];
       char failure_mode[128];
+      char scope_kind[32];
+      char scope_id[128];
+      char task_family[128];
+      char action_sequence[512];
+      char error_signature[256];
+      char environment[256];
+      char preconditions[512];
+      char outcome[32];
+      char recovery_action[512];
       char payload_json[4096];
       char embedding[2048];
       char cluster_key[128];
