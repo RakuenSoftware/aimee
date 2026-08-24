@@ -99,6 +99,44 @@ after the cause. 69 is validation-only and is not declared in
 `process-contracts.json`; its grant is written by hand into the container and
 never shipped.
 
+## Re-run 2026-08-24: the decoders changed, so the probe had to
+
+The end-to-end result below was made at an earlier commit. Production code has
+changed since -- a new wire status, both scalar decoders now refusing a corrupt
+cell instead of defaulting, the bus caller lifecycle -- so the run was repeated,
+and the probe grew two checks for the part that changed.
+
+A re-run exercising only what the previous one did proves the build compiles.
+These two are the ones that could not have passed before:
+
+```
+  PASS  a corrupt boolean cell is refused, not read as false     status=bad_request
+  PASS  a corrupt timestamp cell is refused, not read as absent  status=bad_request
+```
+
+Both used to answer the ZERO VALUE. `Atob` returned plain false for anything
+unrecognised, so a malformed flag and a deliberate "no" were one value;
+`textToTime` mapped an unparseable timestamp onto the zero time, which is exactly
+what the encoder writes for a message that has none. In process the unit tests
+assert the same thing -- what only hardware shows is that a frame carrying a
+corrupt cell survives the transport intact and is refused by the MODULE rather
+than mangled on the way.
+
+**25 checks, green, twice consecutively, `probe exit=0`**, with delivery between
+two sessions db1 holds unchanged. The full stack: `aimee-server` hosting the bus,
+the config module, the C db1 module over SQLite, and this module wired to db1's
+session family at `principal 1/67`.
+
+One finding about the rig, which is this session's own ambient-state defect
+turned on itself: the run script assumed grants already seeded in
+`/etc/aimee/modules.d/server/`, because on the previous container an earlier
+script had written them. On a fresh container there were none, the server never
+started, and the failure looked like a missing bus socket. The script is
+self-contained now.
+
+Cleanup: CT 9097 destroyed and verified absent, watchdog stopped, source, scripts
+and logs removed.
+
 ## END TO END: two sessions exchange a message
 
 **The feature works.** On a clean Debian 13 container, against the current tree,
@@ -261,6 +299,8 @@ to fail.
 | channel send by an unknown sender refused | pass |
 | members of an absent channel answers OK with none | pass |
 | unadvertised stage 9 is not served | pass |
+| a corrupt boolean cell is refused, not read as false | pass |
+| a corrupt timestamp cell is refused, not read as absent | pass |
 | db1 holds session (probe-a and probe-b) | pass |
 | send between two directory-known sessions is accepted | pass |
 | the send reply carries a stamped envelope | pass |

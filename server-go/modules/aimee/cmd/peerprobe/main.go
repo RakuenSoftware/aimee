@@ -21,6 +21,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
 
@@ -254,6 +255,34 @@ func main() {
 	_, err = caller.Call(ctx, peerwire.EventKind(aimee.PrincipalRef, 9), 9, 0, callDeadline, mustFrame())
 	check("unadvertised stage 9 is not served", err != nil,
 		fmt.Sprintf("err=%v (want refusal)", err))
+
+	// A CORRUPT CELL is refused rather than read as an unset one.
+	//
+	// These two exist because the decoders changed after the last hardware run,
+	// and a re-run that exercises only what the previous one did proves the
+	// build compiles rather than that the change works. Atob used to answer
+	// plain false for anything unrecognised, so a malformed flag and a
+	// deliberate "no" were one value; textToTime mapped an unparseable timestamp
+	// onto the zero time, which is exactly what the encoder writes for a message
+	// that has none.
+	//
+	// Over the wire, both now arrive as bad_request. In process the same is
+	// asserted by unit tests -- what only hardware can show is that the frame
+	// carrying a corrupt cell survives the transport intact and is refused by
+	// the MODULE rather than mangled on the way.
+	status, _, err = call(peerwire.StageDelivery, peerwire.OpSend,
+		[]string{"probe-A", "probe-B", "hi", "", "0", "not-a-flag"})
+	check("a corrupt boolean cell is refused, not read as false",
+		err == nil && status == peerwire.StatusBadRequest,
+		fmt.Sprintf("status=%v (want bad_request)", status))
+
+	corruptRow := append([]string{"probe-A"},
+		peerwire.MessageCells(peer.Message{ID: "m1"})...)
+	corruptRow[1+9] = "yesterday" // sent_at
+	status, _, err = call(peerwire.StageDelivery, peerwire.OpReply, corruptRow)
+	check("a corrupt timestamp cell is refused, not read as absent",
+		err == nil && status == peerwire.StatusBadRequest,
+		fmt.Sprintf("status=%v (want bad_request)", status))
 
 	// ---- delivery, end to end ------------------------------------------
 	//
