@@ -74,6 +74,46 @@ services:
       # workspace volume at the same path so those paths are actually readable.
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
+  # The server's store: PostgreSQL, holding every table the daemon keeps.
+  #
+  # A STOCK upstream image, deliberately. The kb builds its own PostgreSQL
+  # because DB2 needs pgvector and pgvectorscale, and no published image carries
+  # vectorscale -- which is why pointing DB2 at an external container went badly
+  # before. The store has no such requirement: all 22 of its schema files
+  # declare no extension at all, so it runs on what upstream ships and anyone
+  # can support it without knowing anything about this project.
+  #
+  # A SEPARATE database from DB2, not a second one in the kb's cluster: the kb's
+  # PostgreSQL listens on no TCP port and lives inside that container.
+  #
+  # UTF8 is pinned rather than inherited. The store bounds text with
+  # octet_length, and in a SQL_ASCII database octet_length and char_length are
+  # the same function -- so every byte-limit CHECK would pass whether or not it
+  # held, and the schema would look enforced while enforcing nothing.
+  aimee-store-db:
+    restart: unless-stopped
+    image: ${AIMEE_STORE_DB_IMAGE:-postgres:18}
+    environment:
+      # Literal, not per-field knobs. AIMEE_STORE_URL below is the ONE override
+      # that matters: an operator with their own PostgreSQL points it there and
+      # this service goes unused. Per-field variables would have to be kept in
+      # agreement with that DSN by hand, and a password that disagrees with the
+      # URL fails as "the store is unreachable".
+      POSTGRES_USER: aimee
+      POSTGRES_PASSWORD: aimee
+      POSTGRES_DB: aimee_store
+      POSTGRES_INITDB_ARGS: --encoding=UTF8
+    # No published port: the store is reached only across this compose network,
+    # by aimee-server. Publishing it would put the daemon's whole state on the
+    # host interface for no deployment that needs it there.
+    volumes:
+      - aimee-store-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "aimee", "-d", "aimee_store"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
   aimee-server:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
@@ -92,8 +132,11 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # DB1: user-scoped store owned by the server (self-contained SQLite file).
-      AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
+      # The store: a PostgreSQL DSN, read by the postgres module. This replaced
+      # AIMEE_DB1_URL, which named a SQLite file for a C module that no longer
+      # exists -- nothing had read it since the store became a Go module, so it
+      # was telling operators the server kept a database it does not keep.
+      AIMEE_STORE_URL: ${AIMEE_STORE_URL:-postgres://aimee:aimee@aimee-store-db:5432/aimee_store}
       # Reach the kb over its /v1 HTTP API. The base URL must NOT include /v1 —
       # kb_client paths already carry the /v1 prefix (kb_client_v1_url).
       AIMEE_KB_API_URL: http://aimee-kb:8741
@@ -138,6 +181,8 @@ services:
       # webchat UI — on by default; gated off only by AIMEE_RUNTIME_WEB_ENABLED=0 above.
       - "8443:8443"
     depends_on:
+      aimee-store-db:
+        condition: service_healthy
       aimee-kb:
         condition: service_healthy
     # An unauthenticated probe gets 401, which still proves the listener is up;
@@ -156,6 +201,7 @@ services:
       - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
 
 volumes:
+  aimee-store-db:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:

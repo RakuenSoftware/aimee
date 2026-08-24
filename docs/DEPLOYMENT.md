@@ -27,6 +27,30 @@ The one-KB Compose files are deployment profiles, not the fleet limit. The targe
 route among several KB containers with explicit corpus, authority, and capability identity. Fleet
 routing is not integrated in this checkout; see [KB fleet and model placement](KB_FLEET.md).
 
+## The server's store database
+
+Every Compose file that runs `aimee-server` also runs `aimee-store-db`: a stock
+upstream `postgres:18` holding DB1, the tables the daemon keeps. It is a plain
+image on purpose. DB1 declares no extensions, so unlike DB2 it needs neither
+pgvector nor pgvectorscale, and any PostgreSQL an operator already supports will
+do.
+
+It is reached only across the Compose network and publishes no port. To use your
+own PostgreSQL instead, set `AIMEE_STORE_URL` and the bundled service goes
+unused:
+
+```bash
+export AIMEE_STORE_URL='postgres://user:password@host:5432/aimee_store'
+docker compose -f compose.server.yaml up -d
+```
+
+Create that database `ENCODING UTF8 TEMPLATE template0`. This is load-bearing
+rather than tidiness: the store bounds text with `octet_length`, and in a
+SQL_ASCII database `octet_length` and `char_length` are the same function, so
+every byte-limit `CHECK` would pass whether or not it held.
+
+One profile, one database: being PostgreSQL does not make DB1 shareable.
+
 ## External PostgreSQL
 
 Use `AIMEE_DB2_URL` only as first-boot input, seal it into the KB Vault with a

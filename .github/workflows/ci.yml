@@ -1687,6 +1687,20 @@ jobs:
           files: ${{ matrix.compose_file }}
           load: true
           set: ${{ steps.cache_flags.outputs.set }}
+      # The server topologies stand up a stock PostgreSQL for the store. Bake
+      # only loads the images the compose file BUILDS, so this one is pulled --
+      # and `up -d --no-build` would pull it inline with no retry, which is the
+      # transient-Docker-Hub failure every other pull in this file guards
+      # against. T1 is kb-only and runs no server, so it needs no store.
+      - name: Pre-pull the store database image with retry
+        if: matrix.topology != 'T1'
+        run: |
+          img=postgres:18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
       - name: Run Docker deploy topology ${{ matrix.topology }}
         # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
