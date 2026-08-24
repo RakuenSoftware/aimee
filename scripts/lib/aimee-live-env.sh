@@ -283,6 +283,20 @@ live_env_pg_create() {
    # PG15+: the database owner still needs CREATE on public explicitly.
    pg_db -c "GRANT CREATE ON SCHEMA public TO $LIVE_OWNER" >/dev/null 2>&1
    pg_db -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null 2>&1
+   # BOTH tiers, exported HERE rather than beside the process that reads each.
+   # The store's DSN used to be set nowhere: AIMEE_DB2_URL was exported inside
+   # live_env_start_kb, and live_env_start_module passed AIMEE_STORE_URL through
+   # as ${AIMEE_STORE_URL:-} -- empty, in every rig. The store then attached,
+   # found no database, and declined to serve, which every rig reported as
+   # nineteen separate "DB1 <family> is unreachable" warnings and one failure
+   # somewhere downstream. Not one of them named the DSN.
+   #
+   # They are the same database on purpose: a rig provisions ONE disposable
+   # database, and the two tiers own disjoint tables in it. TCP rather than the
+   # socket for the reason above -- kb runs as root here and peer auth would
+   # present root.
+   export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
+   export AIMEE_STORE_URL="$AIMEE_DB2_URL"
    echo "database $LIVE_DB on $LIVE_PG_HOST:$LIVE_PG_PORT"
 }
 
@@ -451,8 +465,8 @@ live_env_start_kb() {
    # failure is silent and identical wherever it happens.
    local v
    for v in $(env | sed -nE 's/^(AIMEE_KB_OIDC[A-Z_]*)=.*/\1/p'); do unset "$v"; done
-   # TCP, not the socket: kb runs as root here and peer auth would present root.
-   export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
+   # AIMEE_DB2_URL and AIMEE_STORE_URL are exported by live_env_pg_create, with
+   # the database they name.
    export AIMEE_KB_API_BEARER_TOKEN="$LIVE_KB_BEARER"
    live_env_start_kb_modules
    ./aimee-kb --http-port="$LIVE_KB_PORT" >"$LIVE_KB_LOG" 2>&1 &

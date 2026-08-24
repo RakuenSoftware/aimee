@@ -1206,6 +1206,8 @@ jobs:
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      AIMEE_STORE_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_integration_ci
     steps:
       - uses: actions/checkout@v4
       # The harness builds the workflow control module, which is Go. The runner
@@ -1217,6 +1219,38 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
+      # The store is a PostgreSQL module now, so a rig that stands a server up
+      # needs a database. Before the C store was retired this harness ran
+      # against a SQLite file it created itself and needed nothing; the store
+      # module now attaches, finds no backend, and declines to serve, which
+      # surfaces as every family reporting "DB1 <family> is unreachable" rather
+      # than as a missing database.
+      #
+      # Started with the same image and pull-retry as the sibling Postgres jobs:
+      # the runner pulls with no retry, so a transient Docker Hub timeout would
+      # fail a required check for a reason that has nothing to do with the code.
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-integration-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_integration_ci \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img" -c fsync=off -c full_page_writes=off -c synchronous_commit=off
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-integration-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"
+          docker logs aimee-integration-pg || true
+          exit 1
       - name: Install dependencies
         run: |
           # Same transient-apt-mirror workaround the sibling jobs carry.
@@ -1224,7 +1258,7 @@ jobs:
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+            libpq-dev postgresql-client
       # actions/checkout leaves refs/remotes/origin/HEAD unset -- it clones
       # shallow and detached, and never records which branch the remote calls
       # default. aimee's git surface resolves a session's worktree base from
@@ -1678,8 +1712,42 @@ jobs:
     # persist it on both sides; the consumed bootstrap must be dead afterwards.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      AIMEE_STORE_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_adoption_ci
     steps:
       - uses: actions/checkout@v4
+      # The store is a PostgreSQL module now, so a rig that stands a server up
+      # needs a database. Before the C store was retired this harness ran
+      # against a SQLite file it created itself and needed nothing; the store
+      # module now attaches, finds no backend, and declines to serve, which
+      # surfaces as every family reporting "DB1 <family> is unreachable" rather
+      # than as a missing database.
+      #
+      # Started with the same image and pull-retry as the sibling Postgres jobs:
+      # the runner pulls with no retry, so a transient Docker Hub timeout would
+      # fail a required check for a reason that has nothing to do with the code.
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-adoption-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_adoption_ci \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img" -c fsync=off -c full_page_writes=off -c synchronous_commit=off
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-adoption-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"
+          docker logs aimee-adoption-pg || true
+          exit 1
       - name: Install dependencies
         run: |
           # Same apt hygiene as the build jobs: drop flaky third-party repos,
@@ -1688,7 +1756,7 @@ jobs:
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+            libpq-dev postgresql-client
       - name: Thin-client adoption E2E
         run: scripts/aimee-thinclient-adoption-e2e.sh
       - name: Server log on failure
