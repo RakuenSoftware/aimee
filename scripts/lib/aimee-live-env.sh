@@ -654,6 +654,52 @@ live_env_start_module() {
       "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server"
 }
 
+# Block until the store is SERVING, not merely started. Called after the server
+# is proven healthy, never from live_env_start_module: that function ARMS the
+# modules, and they attach only once the daemon creates the bus socket.
+#
+# Arming the module returns as soon as the process is running. What follows
+# inside it is an attach, a backend probe, and 22 schema files plus their
+# migrations against a database that was created seconds ago -- and until that
+# finishes the store advertises nothing, so a caller gets CAPABILITY_ABSENT.
+#
+# A rig that seeds the store right after the server reports healthy therefore
+# raced it and usually lost. The server being healthy says the LISTENER is up;
+# it is not a statement about a module that attaches afterwards. What that cost
+# was a failure reading "DB1 mgmt jwks is unreachable" followed by "the store
+# refused the signed JWKS envelope" -- nothing had refused anything, the store
+# was still applying its schema.
+#
+# The module's own log is the signal, because it is the thing that knows: it
+# prints "schema applied" once the schema is in and it is about to serve. A
+# store that fails instead says so on the same stream, so this reports that
+# rather than spending the whole timeout on a process that has already given up.
+live_env_await_store() {
+   local log="$AIMEE_HOME/db1-module.log" i
+   # 120s, matching the store's OWN schema deadline. A shorter wait here would
+   # report a timeout while the thing it waits for still considered itself
+   # within budget, which blames the rig for the store's slowest legal start.
+   for i in $(seq 1 1200); do
+      if grep -q "store: schema applied" "$log" 2>/dev/null; then
+         return 0
+      fi
+      if grep -qE "store: (no store backend|schema):" "$log" 2>/dev/null; then
+         echo "$LIVE_NAME: the store module failed to come up:" >&2
+         sed 's/^/    /' "$log" >&2
+         exit 2
+      fi
+      [ -n "${LIVE_MODULE_PID:-}" ] && ! kill -0 "$LIVE_MODULE_PID" 2>/dev/null && {
+         echo "$LIVE_NAME: the store module exited before serving:" >&2
+         sed 's/^/    /' "$log" >&2
+         exit 2
+      }
+      sleep 0.1
+   done
+   echo "$LIVE_NAME: the store module did not serve within 120s:" >&2
+   sed 's/^/    /' "$log" >&2
+   exit 2
+}
+
 live_env_stop_module() {
    local var pid
    for var in LIVE_MODULE_PID LIVE_PG_MODULE_PID LIVE_SERVER_CONFIG_PID; do
@@ -703,6 +749,7 @@ live_env_start_server() {
       exit 2
    }
    echo "aimee-server TCP listener healthy on $LIVE_SRV_PORT"
+   live_env_await_store
 }
 
 live_env_restart_server() {
@@ -721,7 +768,10 @@ live_env_restart_server() {
    local i
    for i in $(seq 1 60); do
       curl -sf -H "x-api-key: $LIVE_SRV_BEARER" \
-         "http://127.0.0.1:$LIVE_SRV_PORT/v1/health" >/dev/null 2>&1 && return 0
+         "http://127.0.0.1:$LIVE_SRV_PORT/v1/health" >/dev/null 2>&1 && {
+         live_env_await_store
+         return 0
+      }
       sleep 1
    done
    echo "$LIVE_NAME: aimee-server did not come back" >&2

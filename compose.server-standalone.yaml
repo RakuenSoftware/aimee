@@ -46,7 +46,18 @@ services:
       POSTGRES_USER: aimee
       POSTGRES_PASSWORD: aimee
       POSTGRES_DB: aimee_store
-      POSTGRES_INITDB_ARGS: --encoding=UTF8
+      # The LOCALE travels with the encoding. initdb refuses a UTF8 encoding
+      # against a locale whose own encoding differs, and aborts before the
+      # server ever starts -- which presents as the container exiting half a
+      # second after `Started`, with no healthcheck having run and nothing in
+      # the compose output to say why. C.UTF-8 is present in the image and
+      # pins both halves of the pair.
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+      # PGDATA is stated rather than inherited, and points INSIDE the mount.
+      # postgres:18 moved its default data directory out of
+      # /var/lib/postgresql/data, so a compose file that mounts that path and
+      # says nothing else is version-dependent in a way nothing announces.
+      PGDATA: /var/lib/postgresql/data/pgdata
     # No published port: the store is reached only across this compose network,
     # by aimee-server. Publishing it would put the daemon's whole state on the
     # host interface for no deployment that needs it there.
@@ -57,6 +68,9 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+      # First boot runs initdb before the server answers. Without this, that
+      # time is spent out of `retries` rather than before the count starts.
+      start_period: 30s
 
   aimee-server:
     restart: unless-stopped
