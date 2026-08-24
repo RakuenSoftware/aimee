@@ -312,6 +312,19 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
+      # runtime-web reaches PAM through an indirect cgo dependency, so `go test`
+      # needs the header even though no Go file in the tree includes it. Without
+      # this the job fails at BUILD, not at a test -- which reads as a broken
+      # module rather than a missing package. Only this one header is missing:
+      # gcc and make are preinstalled, and no other Go module here uses cgo.
+      - name: Install dependencies
+        run: |
+          # Same apt hardening as the sibling jobs: runner images preinstall
+          # third-party repos that intermittently serve bad metadata and fail
+          # `apt-get update` hard, though nothing we install comes from them.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q libpam0g-dev
       - name: Go unit tests
         run: make -C src go-unit-tests
 
