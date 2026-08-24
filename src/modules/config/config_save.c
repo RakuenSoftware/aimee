@@ -4,7 +4,6 @@
 #include "config_internal.h"
 #include "config_fields.h"
 #include "db1_optional.h"
-#include "maintenance.h"
 #include "platform_process.h"
 #include "platform_path.h"
 #include "sandbox.h"
@@ -310,9 +309,6 @@ static void ensure_config_dir(void)
 
 static const char *config_save_default_db1_path(void)
 {
-   if (db1_default_path)
-      return db1_default_path();
-
    static char path[MAX_PATH_LEN];
    const char *dir = config_default_dir();
    snprintf(path, sizeof(path), "%s/aimee.db", dir ? dir : "/tmp");

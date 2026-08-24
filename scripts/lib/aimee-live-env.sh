@@ -503,13 +503,27 @@ live_env_restart_kb() {
 #
 # Armed BEFORE the daemon, waiting for the socket the daemon is about to create.
 # The daemon does one-shot startup work that needs the store (the mTLS ramp among
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "${LIVE_NAME:-$(basename "$0")}: AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 # it), so a module that attaches afterwards is already too late.
 live_env_start_module() {
+   require_store_url
    live_env_stop_module
-   local module="${LIVE_DB1_MODULE:-src/build/obj/aimee-module-db1}"
+   local module="${LIVE_DB1_MODULE:-src/build/obj/aimee-module-aimee}"
    # `make all` does not build the module, and both CI rigs that source this
    # file run exactly that. Build it here rather than making them remember.
-   [ -x "$module" ] || make -C src build/obj/aimee-module-db1 >/dev/null 2>&1 || true
+   [ -x "$module" ] || make -C src build/obj/aimee-module-aimee >/dev/null 2>&1 || true
    [ -x "$module" ] || {
       echo "$LIVE_NAME: could not build the DB1 module at $module" >&2
       exit 2
@@ -528,7 +542,7 @@ live_env_start_module() {
       i=0
       while [ "$i" -lt 600 ]; do
          if [ -S "$AIMEE_HOME/server-module-bus.sock" ]; then
-            AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db" exec "$module" \
+            AIMEE_STORE_URL="$AIMEE_STORE_URL" exec "$module" \
                "$AIMEE_HOME/server-module-bus.sock"
          fi
          i=$((i + 1))

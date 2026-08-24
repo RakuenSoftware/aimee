@@ -1,6 +1,6 @@
 # Configuration Reference
 
-> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
+> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/` and `os.Getenv()` in `server-go/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 This reference covers every configurable surface:
 
@@ -297,22 +297,22 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 246 `AIMEE_*` environment variables (scanned from `getenv()` in `src/` and `os.Getenv()` in `server-go/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_BUNDLED_SKILLS_DIR` | Override directory for the bundled skills. |
-| `AIMEE_DB1_PATH` | SQLite database the DB1 module process opens. The module is a separate process and cannot read the config store, so it is told the path and refuses to start without it rather than guessing a default and serving a different, empty database. Set it whenever `db1_path` is overridden in the configuration; the container entrypoint otherwise defaults it to `<AIMEE_HOME>/aimee.db`, which is config's own default. |
 | `AIMEE_FORENSICS_DIR` | Directory for shutdown-forensics dumps. |
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
-| `AIMEE_HOME` | Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default. |
+| `AIMEE_HOME` | Root of the per-user state/config store (config, `workflows/`, keys). Overrides the platform default. DB1 is no longer under it: the store is a PostgreSQL database reached through AIMEE_STORE_URL. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
 | `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_RUNTIME_DIR` | Private runtime directory for sockets, temporary credentials, and process state. |
+| `AIMEE_STORE_URL` | PostgreSQL DSN the DB1 store module connects to. The module is a separate process and cannot read the config store, so it is told the DSN and refuses to start without it rather than guessing a default and serving a different, empty database. Replaces AIMEE_DB1_PATH, which named a SQLite file back when the store was a C module; nothing reads that variable now. |
 | `AIMEE_TOOLSETS_CONFIG` | Path to a toolsets config file (overrides the default tool allowlists). |
 | `AIMEE_WORKSPACES_DIR` | Root directory for mirrored/registered workspaces. |
 
@@ -325,7 +325,9 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_API_ENDPOINT` | Override the `/v1` API endpoint used by the client RPC layer. |
 | `AIMEE_ATTACH_ID` | Presence attach id used when joining an existing session. |
 | `AIMEE_CLIENT_TYPE` | Calling client type used for integration-specific request shaping. |
+| `AIMEE_CLI_PATH` | Absolute path to the aimee CLI, quoted into the guidance an agent receives so it does not assume `aimee` is on PATH. |
 | `AIMEE_HOOK_CLIENT` | Identifies the calling hook client (e.g. claude/codex) for hook routing. |
+| `AIMEE_HOOK_TRANSPORT` | Which repository-intelligence surface the session-start guidance points an agent at: `mcp` names the Aimee MCP index capability, anything else names the CLI at `AIMEE_CLI_PATH`. |
 | `AIMEE_MODE` | Operating-mode override (e.g. interactive / autonomous). |
 | `AIMEE_NO_CLIENT_INTEGRATIONS` | If set (to any value other than 0/false), aimee does not auto-register itself into detected AI-tool user configs (Claude Code, Gemini, Copilot, Codex). Overrides the client_integrations_enabled config; honored by the aimee binary and by install.sh/configure-hooks.sh. |
 | `AIMEE_PRIMARY_CLI_INGESTOR` | Name of the primary CLI integration that owns session-ingest events. |
@@ -335,6 +337,7 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_SERVER_URL` | aimee-server endpoint the thin client connects to (UDS path or `tcp:host:port`). |
 | `AIMEE_SESSION_ID` | Pre-set the session id (enables non-blocking session attach). |
 | `AIMEE_SESSION_START_VERBOSE` | Verbose logging during session start. |
+| `AIMEE_SESSION_WORKTREE_BASE` | Which checkout a session's worktree branches from. `remote_default` (the default) uses the server's default branch; `current` opts in to inheriting the source checkout's branch, for offline or detached workflows. Only ever an explicit opt-in -- `current` is never reached as a fallback. |
 | `AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED` | Resident HTTPS connection reuse. Defaults on; set to 0 to restore one request per connection. |
 | `AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED` | Negotiated gzip for eligible buffered thin-client routes. Defaults off; set to 1 only for a measured remote link profile. |
 | `AIMEE_TUI_SESSION` | Identifies the TUI session. |
@@ -353,6 +356,10 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_GITLAB_OAUTH_CLIENT_ID` | Client ID of a GitLab OAuth application (device flow enabled) for the webchat "Sign in with GitLab" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h. |
 | `AIMEE_MGMT_STATUS_KEY_ID` | Identifier of the management-status verification key. |
 | `AIMEE_MGMT_STATUS_PUBLIC_KEY` | Hex-encoded Ed25519 key used to verify management-status staples. |
+| `AIMEE_MODULE_BUS_SOCKET` | Unix socket the module bus listens on; the default for `--module-bus-socket`. |
+| `AIMEE_MODULE_EVENT_BASE` | Retired. Event kinds are derived from the principal ref now. An instance still carrying this variable starts only if the value agrees with the derivation; when it disagrees the module refuses, because a deployment provisioned under the old scheme has a `.grant` naming kinds that belong to other modules. Re-run `scripts/provision-plugin-module.py` for the instance instead of unsetting it. |
+| `AIMEE_MODULE_POLICY_DIR` | Directory of module `.grant` manifests, overriding the built-in location. The bus reads a peer's grant from here to decide what that module may serve. |
+| `AIMEE_MODULE_PRINCIPAL_REF` | Principal reference an instanced module serves under, written into its `.grant` at provisioning time. A module cannot allocate its own authorization identity, so it refuses to start without this. Event kinds are derived from it: `kind = 4096 + ref*256 + stage`. |
 | `AIMEE_MODULE_ROUNDTABLE` | Enable the optional roundtable module; invalid values fail closed to off. |
 | `AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT` | Permit the operator-configured search backend (`search.searxng_url`) to resolve to a private, loopback, or link-local address. Off by default: every outbound fetch is validated and pinned, so a self-hosted SearXNG on a LAN address is refused unless this is set. Deliberately an environment variable rather than a config key, because `config.set` is reachable from inside the running system and pointing the search backend at a cloud metadata address would exfiltrate instance credentials through a tool that looks like search. Set to exactly `1`; any other value is off. Never widens fetches of model-supplied or search-result URLs, which stay denied. |
 | `AIMEE_SERVER_HTTP_BIND` | TCP bind address for the server `/v1` HTTP listener (else UDS-only). |
@@ -507,6 +514,8 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_FORGE_APP_INSTALLATION_ID` | GitHub App installation id. |
 | `AIMEE_FORGE_APP_PRIVATE_KEY` | GitHub App private-key PEM accepted only as first-boot transport; it is sealed into Vault and filesystem paths are rejected. |
 | `AIMEE_FORGE_SCOPE` | Scope for the minted forge token. |
+| `AIMEE_FORGE_SERVICE_SOCKET` | Unix socket for the forge service, used instead of a URL when it is local. |
+| `AIMEE_FORGE_SERVICE_URL` | Forge service endpoint; the default for `--forge-service-url`. |
 | `AIMEE_FORGE_TOKEN` | First-boot static forge token. aimee-server seals it into the server Vault and unsets it before serving; subsequent boots read only from Vault. |
 
 ### Gateway (voice / webhooks / push)
@@ -541,6 +550,8 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_PANEL_SEAT_WAIT_SECS` | Maximum wait for a roundtable seat to acquire an eligible agent. |
 | `AIMEE_PR_BASE_MODE` | What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free. |
 | `AIMEE_WFE_ENGINE` | Workflow runtime selector; current server images require `go`. |
+| `AIMEE_WFE_RUNNER_SOCKET` | Unix socket for the workflow runner, used instead of a URL when the runner is local. |
+| `AIMEE_WFE_RUNNER_URL` | Workflow runner endpoint; the default for `--runner-url`. |
 | `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | Grace period before an unowned workflow worktree can be collected. |
 | `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER` | Enable automatic scheduling of admitted autonomous work items. |
 | `AIMEE_WORKFLOW_BASE` | Legacy C workflow fallback for the freeze/diff base. It does not set the Go WFE integration branch. |
@@ -553,7 +564,10 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
+| `AIMEE_GIT_AUTHOR_EMAIL` | Author email on commits the native workflow runner makes. Unset falls back to the repository's own git configuration. |
+| `AIMEE_GIT_AUTHOR_NAME` | Author name on commits the native workflow runner makes. Unset falls back to the repository's own git configuration. |
 | `AIMEE_MCP_CWD` | Working-directory hint for MCP git-root resolution. |
+| `AIMEE_MCP_TOOLS_WATCH_SECONDS` | Seconds between registry-generation polls in `aimee mcp serve`; a change emits notifications/tools/list_changed so a client sees a plugin that appeared mid-session (default: 15). |
 | `AIMEE_MCP_TOOL_PROFILE` | MCP tools/list presentation profile: 'core'/'lean' (default: Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront). |
 | `AIMEE_VERIFY_LOCK_FILE` | Override the host-wide file lock that serializes complete repository verification runs. |
 | `AIMEE_VERIFY_PARALLEL` | Run `aimee git verify` steps in parallel. |
@@ -578,6 +592,16 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_TLS_CN` | Common Name used when generating a local TLS certificate. |
 | `AIMEE_TLS_EXTRA_SAN` | Additional subject-alternative names for a generated TLS certificate. |
 | `AIMEE_TLS_INSECURE` | Disable TLS certificate verification (development only). |
+
+### Plugins
+
+| Variable | Description |
+|----------|-------------|
+| `AIMEE_MCP_PLUGIN_ARGV` | Command line for an MCP plugin instance, as a JSON array of strings. JSON rather than a shell string so an argument containing a space stays one argument. With no argv the module runs inert: it serves its stages, declares no commands and answers CapabilityAbsent. |
+| `AIMEE_MCP_PLUGIN_CWD` | Working directory the MCP plugin instance is started in. |
+| `AIMEE_MCP_PLUGIN_PERMISSION` | Permission ceiling for an MCP plugin instance -- the most it may ever do, whatever it requests. Unset means `read`, the least privilege. |
+| `AIMEE_MCP_TOOL_ALLOWLIST` | Comma-separated tool names `aimee mcp serve` will expose. Unset serves the full tool set; set, it serves only these. |
+| `AIMEE_MCP_TOOL_PROSE` | Selects the wording of MCP tool descriptions offered to a model. |
 
 ### Diagnostics & misc
 
@@ -605,12 +629,6 @@ The binaries read 234 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE` | Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited SYNTHESIS_API_KEY is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token. |
 | `AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK` | Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall. |
-
-### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)
-
-> These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
-
-`AIMEE_CLI_PATH`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
 
 ## External & provider environment
 

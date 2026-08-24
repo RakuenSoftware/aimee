@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Verify the DB2 shim schema and the DB2 native schema cover the same set
-of tables, and that the DB1 schema only contains DB1-owned tables.
+of tables, and that the store's schema only contains DB1-owned tables.
+
+The store's schema is server-go/modules/aimee/families/schema_*.sql, one file
+per family, since DB1 became a Go module.
 
 After the 3db split, the DB2 shim schema used by tests lives in
 src/modules/db2/c/schema_sqlite.sql; production DB2 uses src/modules/db2/c/schema.sql.
@@ -21,7 +24,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DB1_SCHEMA = ROOT / "src" / "modules" / "db1" / "schema.sql"
+# The store's schema, one file per family since it became a Go module. Was a
+# single src/modules/db1/schema.sql.
+STORE_SCHEMA_DIR = ROOT / "server-go" / "modules" / "aimee" / "families"
 DB2_SCHEMA_PG = ROOT / "src" / "modules" / "db2" / "c" / "schema.sql"
 DB2_SCHEMA_SQLITE = ROOT / "src" / "modules" / "db2" / "c" / "schema_sqlite.sql"
 
@@ -49,6 +54,15 @@ DB2_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
 # DB1-local user/session/runtime tables. These belong only in the DB1 schema;
 # the DB2 schemas (sqlite shim and postgres) must not create them.
 DB1_ONLY_TABLES = {
+    # pki_certs and pki_mtls_ramp were created lazily by pki_store.c with
+    # CREATE TABLE IF NOT EXISTS and never appeared in a schema file, so this
+    # check could not see them. The Go store declares them, so it can.
+    "pki_certs",
+    "pki_mtls_ramp",
+    # economizer_state was a labelled row in `checkpoints` in the C store and is
+    # its own table in the Go one -- only the newest row per session is ever
+    # read, which is a table with a primary key, not a log to filter.
+    "economizer_state",
     "agent_cache",
     "agent_jobs",
     "agent_log",
@@ -179,7 +193,13 @@ def extract_tables(path: Path) -> set[str]:
 
 
 def main() -> int:
-    db1_tables = extract_tables(DB1_SCHEMA)
+    store_schemas = sorted(STORE_SCHEMA_DIR.glob("schema_*.sql"))
+    if not store_schemas:
+        print(f"schema-sync: no store schema files under {STORE_SCHEMA_DIR}")
+        return 1
+    db1_tables = set()
+    for schema in store_schemas:
+        db1_tables |= extract_tables(schema)
     db2_shim_tables = extract_tables(DB2_SCHEMA_SQLITE)
     db2_native_tables = extract_tables(DB2_SCHEMA_PG)
 
@@ -209,7 +229,7 @@ def main() -> int:
         return 0
 
     if db1_unexpected:
-        print("schema drift: non-DB1 tables present in src/modules/db1/schema.sql:")
+        print(f"schema drift: non-DB1 tables present in {STORE_SCHEMA_DIR}/schema_*.sql:")
         for name in sorted(db1_unexpected):
             print(f"  - {name}")
     if db1_only_in_db2_native:

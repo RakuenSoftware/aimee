@@ -31,7 +31,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	wire "github.com/JBailes/aimee/server-go/db1"
@@ -738,18 +737,4 @@ func (s *Store) TerminalDelegateJobs(ctx context.Context) ([]DelegateJobMapping,
 		out = append(out, DelegateJobMapping{ExecutionKey: row.ExecutionKey, JobID: int(row.JobID)})
 	}
 	return out, nil
-}
-
-// isSQLiteContention is retained because callers outside this package still
-// classify errors with it. Contention is handled inside the module now -- the
-// retry loop lives next to the transaction -- so this only ever answers about
-// an error the module chose to report.
-func isSQLiteContention(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "database is locked") ||
-		strings.Contains(message, "database is busy") ||
-		strings.Contains(message, "sqlite_busy")
 }

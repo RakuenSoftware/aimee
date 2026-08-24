@@ -11,7 +11,7 @@
  */
 #include "prompts.h"
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "dstr.h"
 #include "working_profile.h"
 #include "platform_path.h"

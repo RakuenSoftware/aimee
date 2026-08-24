@@ -1187,10 +1187,21 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     END;
     IF NOT v_ok THEN RETURN; END IF;
 
+    -- pgvectorscale (StreamingDiskANN) is the DEFAULT vector index. It is not
+    -- required: when the extension is absent every index below falls back to
+    -- HNSW, which is what the aimee test environment did for its whole history.
+    -- Installing it here rather than gating on a row-count threshold is
+    -- deliberate -- a threshold that is always crossed is configuration debt.
+    BEGIN
+        CREATE EXTENSION IF NOT EXISTS vectorscale;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'pgvectorscale not available (%), vector indexes use HNSW', SQLERRM;
+    END;
+
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS memory_embeddings (
             point_id      BIGINT PRIMARY KEY,
-            embedding     halfvec(__EMBED_DIM__),
+            embedding     vector(__EMBED_DIM__),
             record_type   TEXT NOT NULL DEFAULT '',
             primary_scope TEXT NOT NULL DEFAULT '',
             workspace     TEXT NOT NULL DEFAULT '',
@@ -1203,7 +1214,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS kb_embeddings (
             point_id     BIGINT PRIMARY KEY,
-            embedding    halfvec(__EMBED_DIM__),
+            embedding    vector(__EMBED_DIM__),
             project      TEXT NOT NULL DEFAULT '',
             payload_json TEXT NOT NULL DEFAULT ''
         )
@@ -1228,7 +1239,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS kb_pdf_embeddings (
             point_id     BIGINT PRIMARY KEY,
-            embedding    halfvec(__EMBED_DIM__),
+            embedding    vector(__EMBED_DIM__),
             project      TEXT NOT NULL DEFAULT '',
             payload_json TEXT NOT NULL DEFAULT ''
         )
@@ -1243,7 +1254,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_entity_vectors (
             point_id       BIGINT PRIMARY KEY,
-            embedding      halfvec(__EMBED_DIM__),
+            embedding      vector(__EMBED_DIM__),
             scope_kind     TEXT NOT NULL DEFAULT '',
             scope_id       TEXT NOT NULL DEFAULT '',
             canonical_name TEXT NOT NULL DEFAULT '',
@@ -1263,7 +1274,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_narrative_vectors (
             point_id     BIGINT PRIMARY KEY,
-            embedding    halfvec(__EMBED_DIM__),
+            embedding    vector(__EMBED_DIM__),
             artifact_id  TEXT NOT NULL DEFAULT '',
             kind         TEXT NOT NULL DEFAULT '',
             doc_id       TEXT NOT NULL DEFAULT '',
@@ -1282,8 +1293,8 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_claim_vectors (
             point_id      BIGINT PRIMARY KEY,
-            subj_attr_vec halfvec(__EMBED_DIM__),
-            value_vec     halfvec(__EMBED_DIM__),
+            subj_attr_vec vector(__EMBED_DIM__),
+            value_vec     vector(__EMBED_DIM__),
             artifact_id   TEXT NOT NULL DEFAULT '',
             subject       TEXT NOT NULL DEFAULT '',
             attribute     TEXT NOT NULL DEFAULT '',
@@ -1304,9 +1315,9 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_code_unit_vectors (
             point_id      BIGINT PRIMARY KEY,
-            intent_vec    halfvec(__EMBED_DIM__),
-            signature_vec halfvec(__EMBED_DIM__),
-            body_vec      halfvec(__EMBED_DIM__),
+            intent_vec    vector(__EMBED_DIM__),
+            signature_vec vector(__EMBED_DIM__),
+            body_vec      vector(__EMBED_DIM__),
             artifact_id   TEXT NOT NULL DEFAULT '',
             file_path     TEXT NOT NULL DEFAULT '',
             def_kind      TEXT NOT NULL DEFAULT '',
@@ -1316,18 +1327,32 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
         )
     $T$;
 
-    -- The embedding columns are halfvec(N) — fp16 — where N is the deployment's
-    -- configured embedding_dim (a placeholder token in the column defs above is
-    -- substituted at schema-apply time): 1024 for the default pplx-embed-v1-0.6b,
-    -- 2560 for the pplx-embed-v1-4b. One embedder per deployment, so every column
-    -- shares that one dimension. A fresh database gets it straight from the
-    -- CREATE TABLE definitions above. We deliberately do NOT auto-alter an
-    -- existing differently-typed column here (a routine schema-apply must never
-    -- reshape the corpus); instead we surface a NOTICE:
-    --   * a column still vector(N) (pre-halfvec) just needs an in-place cast —
-    --     run deploy/migrations/2026-embed-halfvec.sql (no re-embed);
-    --   * a column with a different DIMENSION (e.g. switching 0.6b<->4b, or old
-    --     vector(384) all-MiniLM) additionally needs a re-embed at the new dim.
+    -- The embedding columns are vector(N) where N is the deployment's configured
+    -- embedding_dim (a placeholder token in the column defs above is substituted
+    -- at schema-apply time). Default operations run at 384 or 768 dimensions.
+    --
+    -- vector rather than halfvec, and that is a deliberate REVERSAL. halfvec was
+    -- adopted to make HNSW work at 2560 dimensions: pgvector's HNSW stores the
+    -- vector in one 8 KB index page, so it caps at 2000 dims for vector and 4000
+    -- for halfvec -- the same ~8000-byte budget, which is why the ratio is
+    -- exactly 2:1. pgvectorscale's StreamingDiskANN is a separate access method
+    -- with its own on-disk layout and does not inherit that cap; but it ships
+    -- diskann operator classes for `vector` ONLY. There is no halfvec_cosine_ops
+    -- for diskann, so a halfvec column could never use it at all.
+    --
+    -- At 384/768 both index methods work and the storage difference is ~3 KB vs
+    -- ~1.5 KB per row. Trading that for an index method that is not
+    -- dimension-capped is the better side of the deal.
+    --
+    -- A deployment whose embedder exceeds what BOTH methods can index is told to
+    -- attach an external vector provider -- see the index loop below.
+    --
+    -- We deliberately do NOT auto-alter an existing differently-typed column here
+    -- (a routine schema-apply must never reshape the corpus); instead we surface
+    -- a NOTICE:
+    --   * a column still halfvec(N) needs an in-place cast -- run
+    --     deploy/migrations/2026-embed-vector.sql (no re-embed);
+    --   * a column with a different DIMENSION additionally needs a re-embed.
     -- Vector ops degrade (not crash) until then.
     DECLARE
         cur_type text;
@@ -1336,8 +1361,8 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
           FROM pg_attribute
          WHERE attrelid = 'memory_embeddings'::regclass
            AND attname = 'embedding' AND NOT attisdropped;
-        IF cur_type IS NOT NULL AND cur_type <> 'halfvec(__EMBED_DIM__)' THEN
-            RAISE NOTICE 'aimee: embedding columns are "%" but expected halfvec(__EMBED_DIM__). Run deploy/migrations/2026-embed-halfvec.sql to cast (no re-embed); if the dimension also differs, re-embed at the configured embedding_dim. Vector ops degraded until then — back up DB2 first.', cur_type;
+        IF cur_type IS NOT NULL AND cur_type <> 'vector(__EMBED_DIM__)' THEN
+            RAISE NOTICE 'aimee: embedding columns are "%" but expected vector(__EMBED_DIM__). Run deploy/migrations/2026-embed-halfvec.sql to cast (no re-embed); if the dimension also differs, re-embed at the configured embedding_dim. Vector ops degraded until then — back up DB2 first.', cur_type;
         END IF;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'embedding dimension check skipped (%)', SQLERRM;
@@ -1376,86 +1401,55 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
             ON curator_code_unit_vectors (def_kind)
     $T$;
 
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_memory_embeddings_hnsw
-                ON memory_embeddings USING hnsw (embedding halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'memory_embeddings HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_kb_embeddings_hnsw
-                ON kb_embeddings USING hnsw (embedding halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'kb_embeddings HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_kb_pdf_embeddings_hnsw
-                ON kb_pdf_embeddings USING hnsw (embedding halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'kb_pdf_embeddings HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_curator_entity_vectors_hnsw
-                ON curator_entity_vectors USING hnsw (embedding halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'curator_entity_vectors HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_curator_narrative_vectors_hnsw
-                ON curator_narrative_vectors USING hnsw (embedding halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'curator_narrative_vectors HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_curator_claim_vectors_subj_attr_hnsw
-                ON curator_claim_vectors USING hnsw (subj_attr_vec halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'curator_claim_vectors subj_attr HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_curator_claim_vectors_value_hnsw
-                ON curator_claim_vectors USING hnsw (value_vec halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'curator_claim_vectors value HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_intent_hnsw
-                ON curator_code_unit_vectors USING hnsw (intent_vec halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'curator_code_unit_vectors intent HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_signature_hnsw
-                ON curator_code_unit_vectors USING hnsw (signature_vec halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'curator_code_unit_vectors signature HNSW index skipped (%)', SQLERRM;
-    END;
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_body_hnsw
-                ON curator_code_unit_vectors USING hnsw (body_vec halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'curator_code_unit_vectors body HNSW index skipped (%)', SQLERRM;
-    END;
+    -- Vector indexes: StreamingDiskANN when pgvectorscale is present, HNSW
+    -- otherwise. One loop rather than ten near-identical BEGIN/EXCEPTION blocks,
+    -- so a table cannot be added to the list and silently miss the fallback.
+    --
+    -- An existing deployment keeps its HNSW index alongside the new diskann one.
+    -- Dropping it is NOT done here: DROP INDEX takes ACCESS EXCLUSIVE, and the
+    -- concurrent form cannot run inside this DO block's transaction. Reclaiming
+    -- that space is an explicit migration step, not a side effect of schema apply.
+    FOR p IN
+        SELECT * FROM (VALUES
+            ('memory_embeddings',        'embedding',     'memory_embeddings'),
+            ('kb_embeddings',            'embedding',     'kb_embeddings'),
+            ('kb_pdf_embeddings',        'embedding',     'kb_pdf_embeddings'),
+            ('curator_entity_vectors',   'embedding',     'curator_entity_vectors'),
+            ('curator_narrative_vectors','embedding',     'curator_narrative_vectors'),
+            ('curator_claim_vectors',    'subj_attr_vec', 'curator_claim_vectors'),
+            ('curator_claim_vectors',    'value_vec',     'curator_claim_vectors_value'),
+            ('curator_code_unit_vectors','signature_vec', 'curator_code_unit_vectors'),
+            ('curator_code_unit_vectors','intent_vec',    'curator_code_unit_vectors_intent'),
+            ('curator_code_unit_vectors','body_vec',      'curator_code_unit_vectors_body')
+        ) AS t(tbl, col, idxbase)
+    LOOP
+        BEGIN
+            EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS idx_%s_diskann ON %I USING diskann (%I vector_cosine_ops)',
+                p.idxbase, p.tbl, p.col);
+        EXCEPTION WHEN OTHERS THEN
+            BEGIN
+                EXECUTE format(
+                    'CREATE INDEX IF NOT EXISTS idx_%s_hnsw ON %I USING hnsw (%I vector_cosine_ops)',
+                    p.idxbase, p.tbl, p.col);
+            EXCEPTION WHEN OTHERS THEN
+                -- Neither method would take this column. The usual cause is a
+                -- dimension above what an in-database index supports: pgvector's
+                -- HNSW caps at 2000 dims for vector, and pgvectorscale's diskann
+                -- has its own ceiling. That is a supported configuration, not a
+                -- broken one -- it is what the external vector provider module
+                -- exists for. Say so, rather than leaving an operator to infer it
+                -- from a silent absence of an index.
+                RAISE NOTICE
+                    'aimee: %.% has no in-database vector index (%). Exact search '
+                    'still works but does not scale. If this is a dimension limit, '
+                    'attach an external vector provider module (Qdrant, Milvus, or '
+                    'another adapter) -- see docs/modules/db3.md. The relational '
+                    'store keeps the canonical vectors either way.',
+                    p.tbl, p.col, SQLERRM;
+            END;
+        END;
+    END LOOP;
 
     -- exemplar_vectors: pgvector embeddings for case artifact exemplar recall.
     -- See docs/proposals/accepted/graph-reasoning-case-based-recall-and-contradiction-logic.md
@@ -1465,7 +1459,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'case_exemplars',
-                embedding   halfvec(__EMBED_DIM__),
+                embedding   vector(__EMBED_DIM__),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;
@@ -1491,7 +1485,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'evidence',
-                embedding   halfvec(__EMBED_DIM__),
+                embedding   vector(__EMBED_DIM__),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;
@@ -1511,7 +1505,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
         EXECUTE $T$
             CREATE TABLE IF NOT EXISTS code_embeddings (
                 point_id     BIGINT PRIMARY KEY,
-                embedding    halfvec(__EMBED_DIM__),
+                embedding    vector(__EMBED_DIM__),
                 project      TEXT NOT NULL DEFAULT '',
                 generation   BIGINT NOT NULL DEFAULT 1 CHECK (generation > 0),
                 node_key     TEXT NOT NULL DEFAULT '',
@@ -1563,13 +1557,24 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'code_embeddings table skipped (%)', SQLERRM;
     END;
+    -- Same policy as the loop above: diskann by default, HNSW fallback.
     BEGIN
         EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_code_embeddings_hnsw
-                ON code_embeddings USING hnsw (embedding halfvec_cosine_ops)
+            CREATE INDEX IF NOT EXISTS idx_code_embeddings_diskann
+                ON code_embeddings USING diskann (embedding vector_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'code_embeddings HNSW index skipped (%)', SQLERRM;
+        BEGIN
+            EXECUTE $T$
+                CREATE INDEX IF NOT EXISTS idx_code_embeddings_hnsw
+                    ON code_embeddings USING hnsw (embedding vector_cosine_ops)
+            $T$;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE
+                'aimee: code_embeddings has no in-database vector index (%). If '
+                'this is a dimension limit, attach an external vector provider '
+                'module -- see docs/modules/db3.md.', SQLERRM;
+        END;
     END;
 
     -- One reviewed catalog drives live capture, trigger installation, and

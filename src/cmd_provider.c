@@ -5,7 +5,7 @@
 #include "aimee.h"
 #include "commands.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "runtime_secret.h"
 #include <aimee/delegates/delegate_credentials.h>
 #include "cJSON.h"

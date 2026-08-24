@@ -544,7 +544,8 @@ def render_config(fields, sections, flat):
            "",
            "> Auto-generated from the canonical source tables by "
            "`scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + "
-           "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
+           "`src/config*.c`, env vars scanned from `getenv()` in `src/` and "
+           "`os.Getenv()` in `server-go/`, and the "
            "workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
@@ -651,6 +652,11 @@ def render_config(fields, sections, flat):
 # not silently omitted from generated reference docs.
 ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 
+# The same contract on the Go side. Modules are Go now, and a module's env is
+# just as much a deployment contract as a C binary's -- AIMEE_STORE_URL, without
+# which the store module refuses to start, was invisible here until this existed.
+GO_ENV_RE = re.compile(r'os\.(?:Getenv|LookupEnv)\(\s*"(AIMEE_[A-Z0-9_]+)"')
+
 # Helpers that take the env var NAME as an argument and getenv() it internally.
 # config_sidecar_endpoint is the OCR/TSR resolver: centralising those two reads
 # moved "AIMEE_OCR_URL" / "AIMEE_TSR_URL" out of a literal getenv() call and into
@@ -691,8 +697,26 @@ ENV_GROUP_ORDER = [
 
 ENV_DESC = {
     # Paths & assets
-    "AIMEE_HOME": ("Paths & assets", "Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default."),
-    "AIMEE_DB1_PATH": ("Paths & assets", "SQLite database the DB1 module process opens. The module is a separate process and cannot read the config store, so it is told the path and refuses to start without it rather than guessing a default and serving a different, empty database. Set it whenever `db1_path` is overridden in the configuration; the container entrypoint otherwise defaults it to `<AIMEE_HOME>/aimee.db`, which is config's own default."),
+    "AIMEE_HOME": ("Paths & assets", "Root of the per-user state/config store (config, `workflows/`, keys). Overrides the platform default. DB1 is no longer under it: the store is a PostgreSQL database reached through AIMEE_STORE_URL."),
+    "AIMEE_STORE_URL": ("Paths & assets", "PostgreSQL DSN the DB1 store module connects to. The module is a separate process and cannot read the config store, so it is told the DSN and refuses to start without it rather than guessing a default and serving a different, empty database. Replaces AIMEE_DB1_PATH, which named a SQLite file back when the store was a C module; nothing reads that variable now."),
+    "AIMEE_MODULE_PRINCIPAL_REF": ("Server runtime", "Principal reference an instanced module serves under, written into its `.grant` at provisioning time. A module cannot allocate its own authorization identity, so it refuses to start without this. Event kinds are derived from it: `kind = 4096 + ref*256 + stage`."),
+    "AIMEE_MODULE_EVENT_BASE": ("Server runtime", "Retired. Event kinds are derived from the principal ref now. An instance still carrying this variable starts only if the value agrees with the derivation; when it disagrees the module refuses, because a deployment provisioned under the old scheme has a `.grant` naming kinds that belong to other modules. Re-run `scripts/provision-plugin-module.py` for the instance instead of unsetting it."),
+    "AIMEE_MODULE_BUS_SOCKET": ("Server runtime", "Unix socket the module bus listens on; the default for `--module-bus-socket`."),
+    "AIMEE_MODULE_POLICY_DIR": ("Server runtime", "Directory of module `.grant` manifests, overriding the built-in location. The bus reads a peer's grant from here to decide what that module may serve."),
+    "AIMEE_MCP_PLUGIN_ARGV": ("Plugins", "Command line for an MCP plugin instance, as a JSON array of strings. JSON rather than a shell string so an argument containing a space stays one argument. With no argv the module runs inert: it serves its stages, declares no commands and answers CapabilityAbsent."),
+    "AIMEE_MCP_PLUGIN_CWD": ("Plugins", "Working directory the MCP plugin instance is started in."),
+    "AIMEE_MCP_PLUGIN_PERMISSION": ("Plugins", "Permission ceiling for an MCP plugin instance -- the most it may ever do, whatever it requests. Unset means `read`, the least privilege."),
+    "AIMEE_MCP_TOOL_ALLOWLIST": ("Plugins", "Comma-separated tool names `aimee mcp serve` will expose. Unset serves the full tool set; set, it serves only these."),
+    "AIMEE_MCP_TOOL_PROSE": ("Plugins", "Selects the wording of MCP tool descriptions offered to a model."),
+    "AIMEE_WFE_RUNNER_URL": ("Workflow engine", "Workflow runner endpoint; the default for `--runner-url`."),
+    "AIMEE_WFE_RUNNER_SOCKET": ("Workflow engine", "Unix socket for the workflow runner, used instead of a URL when the runner is local."),
+    "AIMEE_FORGE_SERVICE_URL": ("Forge (GitHub App / tokens)", "Forge service endpoint; the default for `--forge-service-url`."),
+    "AIMEE_FORGE_SERVICE_SOCKET": ("Forge (GitHub App / tokens)", "Unix socket for the forge service, used instead of a URL when it is local."),
+    "AIMEE_GIT_AUTHOR_NAME": ("Git verify / MCP", "Author name on commits the native workflow runner makes. Unset falls back to the repository's own git configuration."),
+    "AIMEE_GIT_AUTHOR_EMAIL": ("Git verify / MCP", "Author email on commits the native workflow runner makes. Unset falls back to the repository's own git configuration."),
+    "AIMEE_SESSION_WORKTREE_BASE": ("Client & session", "Which checkout a session's worktree branches from. `remote_default` (the default) uses the server's default branch; `current` opts in to inheriting the source checkout's branch, for offline or detached workflows. Only ever an explicit opt-in -- `current` is never reached as a fallback."),
+    "AIMEE_HOOK_TRANSPORT": ("Client & session", "Which repository-intelligence surface the session-start guidance points an agent at: `mcp` names the Aimee MCP index capability, anything else names the CLI at `AIMEE_CLI_PATH`."),
+    "AIMEE_CLI_PATH": ("Client & session", "Absolute path to the aimee CLI, quoted into the guidance an agent receives so it does not assume `aimee` is on PATH."),
     "AIMEE_INSTALL_PREFIX": ("Paths & assets", "Install prefix used to locate bundled assets and plugins."),
     "AIMEE_BUNDLED_SKILLS_DIR": ("Paths & assets", "Override directory for the bundled skills."),
     "AIMEE_TOOLSETS_CONFIG": ("Paths & assets", "Path to a toolsets config file (overrides the default tool allowlists)."),
@@ -901,7 +925,7 @@ ENV_DESC = {
         "`AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the "
         "statement bound.",
     ),
-    "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
+    "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives vector column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory
     "AIMEE_MEMORY_CITATIONS_MODE": ("Memory", "Citation rendering mode for memory recall."),
@@ -981,6 +1005,7 @@ ENV_DESC = {
     "AIMEE_VERIFY_STEP_TIMEOUT_MS": ("Git verify / MCP", "Per-step timeout (ms) for git verify."),
     "AIMEE_MCP_CWD": ("Git verify / MCP", "Working-directory hint for MCP git-root resolution."),
     "AIMEE_MCP_TOOL_PROFILE": ("Git verify / MCP", "MCP tools/list presentation profile: 'core'/'lean' (default: Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront)."),
+    "AIMEE_MCP_TOOLS_WATCH_SECONDS": ("Git verify / MCP", "Seconds between registry-generation polls in `aimee mcp serve`; a change emits notifications/tools/list_changed so a client sees a plugin that appeared mid-session (default: 15)."),
     # Models
     "AIMEE_MODEL_CAPABILITY_OVERRIDES": ("Models", "Override model capability flags (reasoning/tools/vision/…)."),
     # TLS & networking
@@ -1090,7 +1115,7 @@ ENV_DESC = {
 
 
 def parse_env_vars():
-    """Every AIMEE_* env var read outside src/tests/ (test-only vars excluded)."""
+    """Every AIMEE_* env var the shipped binaries read, C and Go, tests excluded."""
     found = set()
     for f in sorted(SRC.rglob("*")):
         if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
@@ -1100,6 +1125,13 @@ def parse_env_vars():
             found.add(m.group(1))
         for m in ENV_BY_NAME_RE.finditer(text):
             found.add(m.group(1))
+    go_root = SRC.parent / "server-go"
+    for f in sorted(go_root.rglob("*.go")):
+        if f.name.endswith("_test.go"):
+            continue
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        for m in GO_ENV_RE.finditer(text):
+            found.add(m.group(1))
     return found | ENV_DYNAMIC
 
 
@@ -1107,7 +1139,8 @@ def render_env(found):
     out = ["## Environment variables",
            "",
            f"The binaries read {len(found)} `AIMEE_*` environment variables (scanned "
-           "from `getenv()` in `src/`, excluding tests, plus the generic first-boot "
+           "from `getenv()` in `src/` and `os.Getenv()` in `server-go/`, excluding "
+           "tests, plus the generic first-boot "
            "credential inputs). Depending on the setting, these "
            "variables either override config-store values or provide fallbacks when no "
            "explicit config value is present. Module-activation variables use fallback "

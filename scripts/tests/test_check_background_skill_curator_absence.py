@@ -25,7 +25,9 @@ class CuratorAbsenceTests(unittest.TestCase):
         (root / "src/server").mkdir(parents=True)
         files = set(checker.CONFIG_FILES + checker.BUILD_FILES + (
             "src/modules/memory/memory_maintenance.c",
-            "src/modules/db1/maintenance.c",
+            # The store's side of maintenance state, in Go since DB1 became a
+            # module. Was src/modules/db1/maintenance.c.
+            "server-go/modules/aimee/families/runtime_state.go",
             "src/modules/config/config_kb_curator.c",
             "src/modules/kb-synthesis/kb_curator_pipeline.c",
             "src/modules/kb-synthesis/kb_curator_queue.c",

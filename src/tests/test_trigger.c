@@ -51,8 +51,8 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
    (void)fmt;
 }
 
-#include "modules/db1/wfe_store.h" /* db1_work_item_t for the list/cost-cap stubs */
-#include "db1_trigger.h"
+#include "db1_client/wfe_store.h" /* db1_work_item_t for the list/cost-cap stubs */
+#include "db1_client/db1_trigger.h"
 int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task,
                        const char *workspace, const char *metadata)
 {

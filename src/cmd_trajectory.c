@@ -2,7 +2,7 @@
 #include "commands.h"
 
 #include "agent_config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "trajectory.h"
 
 #include <stdio.h>

@@ -16,7 +16,7 @@
 #include <openssl/sha.h>
 
 #include "config.h"
-#include "modules/db1/remote_client_grant.h"
+#include "db1_client/remote_client_grant.h"
 #include "log.h"
 #include "platform_random.h"
 #include "runtime_secret.h"

@@ -15,23 +15,38 @@
 #                         MaxOpenConns(1), _txlock=immediate
 #
 # WAL supports multiple processes, so the expected result is that this passes.
-# It is worth running anyway: "we believe WAL handles it" and "we watched it
+# It is worth running anyway: "we believe it handles it" and "we watched it
 # handle it at this rate" are different claims, and only the second one is
-# evidence. A busy_timeout does not make contention free -- it makes it slow,
-# and a write that takes longer than the timeout still fails.
+# evidence.
 #
-# The second writer here is a sqlite3 process holding an IMMEDIATE transaction
-# over lifecycle_work_item in a loop. It stands in for a competing writer rather
-# than reproducing one: after the engine moved behind the module there is no
-# second writer in production, which is the point of the port -- so this is a
-# deliberately adversarial condition, and what it exercises is the module's own
-# BEGIN IMMEDIATE retry. Without that retry a caller would see an operation
-# "refused" the first time a competing writer held the lock through the
-# connection's busy timeout.
+# This used to drive four sqlite3 processes holding an IMMEDIATE transaction on
+# the store file, standing in for a competing writer, to force the module's own
+# BEGIN IMMEDIATE retry. Neither half survives the move to PostgreSQL: there is
+# no file for an outside process to open, and there is no whole-database write
+# lock to contend for -- concurrent inserts of distinct rows do not block each
+# other at all, which is a good part of why the store moved.
+#
+# So the writers are now module clients, which is the only concurrency a
+# deployment can have, and the tolerance for refused writes is zero rather than
+# the tenth SQLite needed.
+#
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/db1.grant}
+MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
+GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
 SERVER=${AIMEE_SERVER_BIN:-/usr/local/bin/aimee-server}
 WRITERS=${WRITERS:-4}
 ROUNDS=${ROUNDS:-150}
@@ -55,10 +70,14 @@ export AIMEE_SESSION_ID="contend$$"
 mkdir -p "$AIMEE_HOME/modules.d/server"
 HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
-DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-cp "$GRANT" "$AIMEE_HOME/modules.d/server/db1.grant"
+# The grant's executable= is what the daemon pins the peer against, so it must
+# name the module this rig actually starts. In a container the two are the same
+# path and a plain copy works; against a build tree they are not, and a grant
+# naming an uninstalled path makes the daemon reject the whole policy and exit.
+sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
+    >"$AIMEE_HOME/modules.d/server/aimee.grant"
 
 state() {
    curl -s --unix-socket "$HTTP_SOCK" http://localhost/v1/server/health |
@@ -73,7 +92,8 @@ while [ $i -lt 300 ]; do
    sleep 0.1
    i=$((i + 1))
 done
-AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
+require_store_url
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0
 while [ $i -lt 150 ]; do
@@ -88,35 +108,24 @@ done
 
 echo "      $WRITERS external writers x $ROUNDS rows, against $CREATES module writes"
 
-# The external writers, started first so they are already contending when the
-# module's writes begin.
+# Concurrent writers, all through the module -- the only way into the store, so
+# the only concurrency a deployment can actually have. They start first so they
+# are already running when the serial writes below begin.
 WRITER_PIDS=""
 w=1
 while [ $w -le "$WRITERS" ]; do
    (
-      # lifecycle_work_item carries UNIQUE(repo, proposal_path) as well as a
-      # unique work_item_id, so every row needs all three distinct or the
-      # insert fails on the constraint and measures nothing. The first version
-      # of this reused one repo/path pair and "failed" 599 of 600 writes with
-      # no lock involved at all.
       err=0
       r=1
       while [ $r -le "$ROUNDS" ]; do
-         # An explicit IMMEDIATE transaction that holds the write lock for a
-         # moment, rather than a bare INSERT. A bare INSERT takes and releases
-         # the lock so fast that the module rarely collides with it, and a
-         # contention test that never contends proves nothing. Holding it is
-         # what forces the module's own BEGIN IMMEDIATE to wait and retry.
-         sqlite3 "$DB" \
-            "PRAGMA busy_timeout=5000;
-             BEGIN IMMEDIATE;
-             INSERT INTO lifecycle_work_item
-               (work_item_id, repo, proposal_path, workflow_name, workflow_version,
-                current_stage, state, mode)
-             VALUES ('w$w-$r','repo-$w','path-$w-$r','wf','1','s','queued','m');
-             SELECT COUNT(*) FROM lifecycle_work_item;
-             COMMIT;" \
-            >/dev/null 2>>"$HOME/writer.$w.err" || err=$((err + 1))
+         out=$(curl -s --unix-socket "$HTTP_SOCK" -X POST \
+            -H 'Content-Type: application/json' \
+            -d "{\"title\":\"writer $w round $r\"}" \
+            http://localhost/v1/sessions/create 2>>"$HOME/writer.$w.err")
+         case "$out" in
+         *'"session_id"'*) ;;
+         *) err=$((err + 1)); printf '%s\n' "$out" >>"$HOME/writer.$w.err" ;;
+         esac
          r=$((r + 1))
       done
       echo "$err" >"$HOME/writer.$w.failures"
@@ -129,7 +138,7 @@ while [ $w -le "$WRITERS" ]; do
    w=$((w + 1))
 done
 
-# The module's writes, through the daemon, while the above is running.
+# More writes, serially, while the above is running.
 CREATE_ERR=0
 n=1
 while [ $n -le "$CREATES" ]; do
@@ -152,58 +161,41 @@ while [ $w -le "$WRITERS" ]; do
    w=$((w + 1))
 done
 
+WRITER_TOTAL=$((WRITERS * ROUNDS))
+TOTAL=$((WRITER_TOTAL + CREATES))
+ERRORS=$((WRITER_ERR + CREATE_ERR))
+
 echo
 echo "=== results ==="
-echo "      module writes attempted: $CREATES, failed: $CREATE_ERR"
-echo "      external writes attempted: $((WRITERS * ROUNDS)), failed: $WRITER_ERR"
+echo "      serial writes attempted: $CREATES, failed: $CREATE_ERR"
+echo "      concurrent writes attempted: $WRITER_TOTAL, failed: $WRITER_ERR"
 
-# A refused write is not a lost write. Four external writers hammering the same
-# SQLite file will make some module writes exhaust their busy-retry budget and be
-# REFUSED -- reported to the caller, never silently dropped -- and that is the
-# database behaving as designed, not the module failing. Measured interleaved
-# against the pre-migration build on an idle host: base 19 refusals across four
-# runs, this build 22. Indistinguishable, and the base refuses too, so a
-# zero-tolerance assertion here fails for both builds on a busy machine and says
-# nothing about either.
-#
-# What must hold is the pair below: every write that was ACCEPTED landed, and
-# integrity is clean afterwards. Those are asserted exactly. This one bounds the
-# refusal rate instead, loosely enough not to flap and tightly enough that a real
-# regression -- a module that starts refusing most of its writes -- still trips
-# it.
-CREATE_ERR_MAX=$((CREATES / 10))
-[ "$CREATE_ERR" -le "$CREATE_ERR_MAX" ] &&
-   say_pass "module writes survived the contention ($CREATE_ERR refused, bound $CREATE_ERR_MAX)" ||
-   say_fail "$CREATE_ERR of $CREATES module writes refused, over the $CREATE_ERR_MAX bound"
-# The same bound, for the same reason, on the control side. These writers hold an
-# IMMEDIATE transaction with busy_timeout=5000 and still occasionally exhaust it
-# under the module's concurrent writes -- observed on the pre-migration build too.
-# A refused external write is likewise reported and not lost, which the exact
-# row-count check below proves.
-WRITER_TOTAL=$((WRITERS * ROUNDS))
-WRITER_ERR_MAX=$((WRITER_TOTAL / 10))
-[ "$WRITER_ERR" -le "$WRITER_ERR_MAX" ] &&
-   say_pass "external writes survived the contention ($WRITER_ERR refused, bound $WRITER_ERR_MAX)" ||
-   say_fail "$WRITER_ERR of $WRITER_TOTAL external writes refused, over the $WRITER_ERR_MAX bound"
+# Zero, not a tolerance. The SQLite version of this rig bounded refusals at a
+# tenth, because four processes holding an IMMEDIATE transaction on one file
+# really did exhaust each other's busy-retry budget -- measured at 19 and 22
+# refusals across four runs. PostgreSQL does not have a whole-database write
+# lock: concurrent inserts of distinct rows do not contend, so a refusal here is
+# a defect rather than the database behaving as designed.
+[ "$ERRORS" -eq 0 ] &&
+   say_pass "no write was refused under $WRITERS-way concurrency ($TOTAL writes)" ||
+   say_fail "$ERRORS of $TOTAL writes were refused"
 
-SESS=$(sqlite3 "$DB" "select count(*) from server_sessions" 2>/dev/null)
-ITEMS=$(sqlite3 "$DB" "select count(*) from lifecycle_work_item" 2>/dev/null)
-echo "      rows landed: server_sessions=$SESS lifecycle_work_item=$ITEMS"
-[ "${SESS:-0}" -eq $((CREATES - CREATE_ERR)) ] &&
-   say_pass "no module write was lost" ||
-   say_fail "module rows do not match successful writes ($SESS vs $((CREATES - CREATE_ERR)))"
-[ "${ITEMS:-0}" -eq $((WRITERS * ROUNDS - WRITER_ERR)) ] &&
-   say_pass "no external write was lost" ||
-   say_fail "external rows do not match ($ITEMS vs $((WRITERS * ROUNDS - WRITER_ERR)))"
+# And every write that was accepted is readable back. Asked through /v1, because
+# nothing outside the module opens the store -- reaching around it would be
+# testing something other than what a caller gets.
+LISTED=$(curl -s --unix-socket "$HTTP_SOCK" -X POST -H 'Content-Type: application/json' \
+         -d '{}' http://localhost/v1/sessions/list | grep -o '"client_type"' | wc -l)
+# The list answers one page -- 100 rows -- so with hundreds of writes accepted
+# this cannot count them all. What it does prove is that reads still work at
+# this volume and come back full rather than short, which is what a lost or
+# half-committed write would break.
+PAGE=100
+EXPECT=$((TOTAL - ERRORS)); [ "$EXPECT" -gt "$PAGE" ] && EXPECT=$PAGE
+echo "      sessions readable afterwards: ${LISTED:-0} (one page is $PAGE)"
+[ "${LISTED:-0}" -ge "$EXPECT" ] &&
+   say_pass "reads come back full after $((TOTAL - ERRORS)) accepted writes" ||
+   say_fail "$LISTED sessions readable, expected at least $EXPECT"
 
-# Integrity is the thing that would make this a corruption story rather than a
-# contention story, so ask SQLite directly.
-INTEG=$(sqlite3 "$DB" "PRAGMA integrity_check;" 2>&1 | head -1)
-[ "$INTEG" = "ok" ] && say_pass "integrity_check clean after concurrent writers" ||
-   say_fail "integrity_check: $INTEG"
-
-LOCKED=$(cat "$HOME"/writer.*.err 2>/dev/null | grep -ci "locked\|busy" || echo 0)
-echo "      lock/busy complaints from external writers: $LOCKED"
 [ "$(state)" = "ok" ] && say_pass "store still healthy afterwards" ||
    say_fail "store unhealthy afterwards: $(state)"
 

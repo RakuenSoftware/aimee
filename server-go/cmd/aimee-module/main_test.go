@@ -80,6 +80,8 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 		Components []struct {
 			ID        string `json:"id"`
 			Execution string `json:"execution"`
+			Runtime   string `json:"runtime"`
+			HostedBy  string `json:"hosted_by"`
 			Stages    []struct {
 				EventKind uint32 `json:"event_kind"`
 				Name      string `json:"name"`
@@ -100,7 +102,29 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 		}
 		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + declared.ID)
 		if !ok {
-			continue // not built into this binary (e.g. a C-hosted component)
+			// UNRECOGNISED is not the same as COULD NOT START, and only the
+			// first is a defect here. main.go already draws that line: a
+			// recognised module sets ModuleName before giving up, so an empty
+			// one means the name matched no case at all.
+			//
+			// Several modules legitimately return !ok under test -- the store
+			// needs a bus socket to reach the postgres module, and there is none
+			// here -- but they still name themselves. A module that does not is
+			// one the contract says this binary hosts and the registry has never
+			// heard of, which is what a rename produces when only one of the two
+			// moves.
+			//
+			// Checking this at all is the point: the loop used to `continue`
+			// silently, so the module whose name just changed would be the one
+			// nobody compared, while `checked` stayed comfortably non-zero from
+			// the other nineteen.
+			if declared.Runtime == "go" && declared.HostedBy == "" && config.ModuleName == "" {
+				t.Errorf("%s is declared runtime=go in process-contracts.json but "+
+					"aimee-module-%s matches no case in the module registry: the "+
+					"contract and the registry disagree about its name",
+					declared.ID, declared.ID)
+			}
+			continue
 		}
 		checked++
 		advertised := map[uint32]bool{}

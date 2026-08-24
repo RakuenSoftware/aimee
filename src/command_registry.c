@@ -26,6 +26,8 @@ typedef struct
    const char *module;
 } agent_surface_t;
 
+static unsigned long g_generation;
+
 static agent_surface_t *g_agent_surfaces;
 static size_t g_agent_surface_count;
 static size_t g_agent_surface_cap;
@@ -81,6 +83,7 @@ int aimee_command_register(const aimee_command_t *cmd)
       g_cap = cap;
    }
    g_cmds[g_count++] = *cmd;
+   g_generation++;
    return 0;
 }
 
@@ -92,6 +95,37 @@ int aimee_command_register_many(const aimee_command_t *cmds, size_t n)
       if (aimee_command_register(&cmds[i]) != 0)
          return -1;
    return 0;
+}
+
+size_t aimee_command_unregister_module(const char *module)
+{
+   if (!module || !module[0])
+      return 0;
+   size_t kept = 0;
+   size_t removed = 0;
+   for (size_t i = 0; i < g_count; i++)
+   {
+      if (g_cmds[i].module && strcmp(g_cmds[i].module, module) == 0)
+      {
+         removed++;
+         continue;
+      }
+      if (kept != i)
+         g_cmds[kept] = g_cmds[i];
+      kept++;
+   }
+   g_count = kept;
+   if (removed)
+   {
+      g_generation++;
+      LOG_INFO("commands", "withdrew %zu command(s) registered by %s", removed, module);
+   }
+   return removed;
+}
+
+unsigned long aimee_command_registry_generation(void)
+{
+   return g_generation;
 }
 
 const aimee_command_t *aimee_command_find(const char *group, const char *verb)
@@ -205,4 +239,7 @@ void aimee_command_registry_reset(void)
    g_agent_surfaces = NULL;
    g_agent_surface_count = 0;
    g_agent_surface_cap = 0;
+   /* Bump rather than zero: a cached view taken before the reset must not
+    * compare equal to one taken after it. */
+   g_generation++;
 }

@@ -17,7 +17,7 @@
 #include "kb_client_cache.h"
 #include "kb_client_mtls.h"
 #include "kb_client_ws.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
@@ -100,6 +100,13 @@ static int startup_notify_fd(void)
 
 static void startup_notify(int fd, const char *message)
 {
+   /* stderr as well as the pipe, and BEFORE it: the pipe exists only when a
+      service manager started us, so a foreground run -- a container that execs
+      the binary, a developer, a test rig -- got the exit code and nothing else.
+      A daemon that refuses to start owes the operator the reason wherever they
+      are watching from. */
+   if (message && message[0])
+      (void)fputs(message, stderr);
    if (fd < 0)
       return;
    if (message && message[0])

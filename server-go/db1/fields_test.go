@@ -9,7 +9,7 @@ import (
 
 // The bytes are the contract, so they are spelled out here rather than produced
 // by the encoder and compared to itself. This frame is what
-// src/modules/db1/db1_module_api.h describes: op, count, then each field
+// src/db1_client/db1_module_api.h describes: op, count, then each field
 // length-prefixed.
 func TestEncodeFieldsMatchesTheDocumentedFrame(t *testing.T) {
 	got, err := EncodeFields(7, []string{"wi-1", "", "42"})

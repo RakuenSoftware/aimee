@@ -19,7 +19,6 @@
 #include "config_learning.h"
 #include "config_memory.h"
 #include "db1_optional.h"
-#include "maintenance.h"
 #include "platform_process.h"
 #include "platform_path.h"
 #include "runtime_secret.h"
@@ -303,9 +302,6 @@ const char *config_output_dir(void)
 
 const char *config_default_db1_path(void)
 {
-   if (db1_default_path)
-      return db1_default_path();
-
    /* Thread-local returned-pointer scratch; see config_default_path(). */
    static __thread char path[MAX_PATH_LEN];
    const char *dir = config_default_dir();

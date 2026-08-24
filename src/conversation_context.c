@@ -9,7 +9,7 @@
  *   the pending event count reaches AUTO_FLUSH_THRESHOLD.
  */
 #include "headers/conversation_context.h"
-#include "modules/db1/conv_context.h"
+#include "db1_client/conv_context.h"
 #include "config.h"
 #include "headers/log.h"
 #include <cJSON.h>

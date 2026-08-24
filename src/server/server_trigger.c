@@ -13,8 +13,8 @@
 #include "server_trigger.h"
 #include "server.h"
 #include "config.h"
-#include "modules/db1/db1_trigger.h"
-#include "modules/db1/pipelines.h"
+#include "db1_client/db1_trigger.h"
+#include "db1_client/pipelines.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "log.h"

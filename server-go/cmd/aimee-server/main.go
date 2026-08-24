@@ -104,6 +104,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("module bus caller: %v", err)
 	}
+	// Stop the caller's poll goroutine before the deferred Detach unmaps the
+	// region it reads. Deferred calls run last-in-first-out, so registering
+	// this AFTER the Detach above is what makes it run BEFORE it.
+	//
+	// Without it this is a use-after-unmap on the ordinary exit path, not an
+	// error path: poll is parked reading shared memory when Detach pulls it out
+	// from under it, so a plain shutdown can end in SIGSEGV after all the work
+	// succeeded. It survives because the fault arrives after everything a test
+	// would assert, and no in-process test can see it -- a fake bus has no
+	// region to unmap.
+	defer caller.CloseAndWait()
 	storeClient, err := db1contract.NewClient(caller, 0)
 	if err != nil {
 		log.Fatalf("db1 bus client: %v", err)

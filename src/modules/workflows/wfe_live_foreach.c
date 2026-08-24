@@ -15,8 +15,8 @@
 
 #include "aimee_home.h"
 #include "cJSON.h"
-#include "db1.h"
-#include "wfe_store.h"
+#include "db1_client/db1.h"
+#include "db1_client/wfe_store.h"
 #include "wfe_blocks.h"
 #include "wfe_engine.h"
 #include "log.h"

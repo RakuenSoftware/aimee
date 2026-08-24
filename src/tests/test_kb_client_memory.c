@@ -13,7 +13,7 @@
 
 #include "kb_client.h"
 #include "runtime_secret.h"
-#include "modules/db1/user_memory.h"
+#include "db1_client/user_memory.h"
 #include "support/mock_agent_http.h"
 #include "cJSON.h"
 

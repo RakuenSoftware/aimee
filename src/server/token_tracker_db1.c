@@ -7,7 +7,7 @@
  * token_tracker.o. A constructor wires it up automatically in any binary that links
  * this TU. */
 #include "token_tracker.h"
-#include "modules/db1/model_pricing.h"
+#include "db1_client/model_pricing.h"
 
 static int db1_price(const char *model, double *in_per_mtok, double *out_per_mtok)
 {

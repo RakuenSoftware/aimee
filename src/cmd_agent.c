@@ -1,7 +1,7 @@
 /* cmd_agent.c: agent subcommand CLI (agent list/test/run/add/remove/setup/token) */
 #include "aimee.h"
 #include "util.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tier_lint.h" /* agent_resolved_price */

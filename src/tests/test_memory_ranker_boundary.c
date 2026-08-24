@@ -19,8 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "modules/memory/memory_ontology.h"
@@ -83,7 +82,6 @@ int main(void)
 {
    printf("memory_ranker_boundary:\n");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 
    test_ranker_input_type_is_narrow();

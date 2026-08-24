@@ -1,7 +1,7 @@
 /* learning_router.c: explicit-signal capture, proposal gate, and sink routing. */
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/collab_rules.h"
 #include "modules/db2/c/db2_learning.h"

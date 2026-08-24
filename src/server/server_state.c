@@ -7,6 +7,7 @@
 #include "token_audit.h"              /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "embedder_catalog.h"
 #include "server.h"
+#include "headers/module_commands.h"
 #include "dashboard.h"
 #include "render.h"                   /* decision_to_json + db2_decision_log_list */
 #include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
@@ -19,7 +20,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "modules/workspace/workspace_handle.h"
 #include "modules/workspace/workspace_runner_registry.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "compute_pool.h"
@@ -1476,6 +1477,46 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          for (int m = 0; m < AIMEE_IR_M__COUNT; m++)
             cJSON_AddNumberToObject(ir, aimee_ir_metric_name((aimee_ir_metric_t)m),
                                     (double)aimee_ir_metric_total((aimee_ir_metric_t)m));
+   }
+
+   /* Plugin modules: one row per attached instance.
+    *
+    * "Is my plugin running, and if not why not" is otherwise unanswerable from
+    * outside the daemon log. An instance blocked by the supply-chain gate, one
+    * whose plugin exited, and one that was never configured all present as zero
+    * commands, and each needs a different action -- so the STATE is reported,
+    * not just a count. Read off the last collect rather than probing, so this
+    * endpoint cannot stall behind a wedged plugin. */
+   {
+      /* Refresh before reporting.
+       *
+       * Reading the snapshot alone made this endpoint useless as a diagnostic:
+       * the status table is filled by a collect, and nothing here triggered one,
+       * so "is my plugin running" answered "no plugins" until some OTHER surface
+       * happened to ask. Found on the live host -- the instance was attached and
+       * serving, and this said nothing. The TTL is what keeps the refresh from
+       * costing a bus round trip per scrape. */
+      aimee_module_commands_refresh(2000);
+
+      aimee_plugin_status_t plugins[32];
+      int n = aimee_module_commands_snapshot(plugins, 32);
+      cJSON *arr = cJSON_AddArrayToObject(resp, "plugins");
+      if (arr)
+      {
+         for (int i = 0; i < n; i++)
+         {
+            cJSON *row = cJSON_CreateObject();
+            if (!row)
+               continue;
+            cJSON_AddNumberToObject(row, "principal_ref", (double)plugins[i].principal_ref);
+            cJSON_AddStringToObject(row, "state", aimee_plugin_state_name(plugins[i].state));
+            cJSON_AddStringToObject(row, "group", plugins[i].group);
+            cJSON_AddNumberToObject(row, "commands", plugins[i].command_count);
+            if (plugins[i].last_error[0])
+               cJSON_AddStringToObject(row, "last_error", plugins[i].last_error);
+            cJSON_AddItemToArray(arr, row);
+         }
+      }
    }
 
    /* Shadow-traffic mirror: sent vs dropped-at-cap. Dropped is not a failure (the

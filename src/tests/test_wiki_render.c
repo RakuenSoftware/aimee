@@ -4,8 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "db.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "wiki_render.h"
@@ -71,7 +70,6 @@ int main(void)
 {
    printf("wiki_render:\n");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 
    test_render_creates_files();

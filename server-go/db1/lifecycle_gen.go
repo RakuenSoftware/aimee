@@ -1,8 +1,14 @@
 package db1
 
-// GENERATED from src/modules/db1/eventcontract/operations.json by
-// scripts/gen_db1_contract.py. Do not edit: add an operation to the catalog
-// and regenerate, so the wire and its callers cannot drift apart.
+// Originally GENERATED from the store's operation catalog by
+// scripts/gen_db1_contract.py. That generator went with the C store, so this
+// file is maintained BY HAND now and the old "do not edit, regenerate"
+// instruction cannot be followed.
+//
+// What keeps it from drifting instead: lifecycle_catalog_test.go checks every
+// constant below against server-go/modules/aimee/operations.json, which is
+// still the catalog and still the contract. Add an operation there first, then
+// here, and the test will tell you if the two disagree.
 //
 // Family 16: lifecycle, event kind 11792.
 

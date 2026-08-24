@@ -1,7 +1,7 @@
 /* cmd_mcp.c: MCP operator commands. */
 #include "commands.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "osv_check.h"
 #include "render.h"
 

@@ -19,8 +19,9 @@
 #include <time.h>
 
 #include <aimee/audit/obs_bus.h>
-#include "modules/db1/db1.h"
+#include "db1_client/db1.h"
 #include "server/obs_bus_adapter.h"
+#include "support/store_module_fixture.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define NTHREADS 4
@@ -45,6 +46,13 @@ static void *producer(void *arg)
 
 int main(void)
 {
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    printf("test_bus_shutdown_race:\n");
 
    char home[256];
@@ -55,7 +63,6 @@ int main(void)
       return 1;
    }
    setenv("AIMEE_HOME", home, 1);
-   assert(db1_init(":memory:") == 0);
    assert(server_obs_bus_configure() == 0);
    assert(obs_bus_start() == 0);
 
@@ -98,7 +105,6 @@ int main(void)
       return 1;
    }
 
-   db1_shutdown();
    printf("test_bus_shutdown_race: OK (producers raced stop with no UAF and no lost/double row)\n");
    return 0;
 }

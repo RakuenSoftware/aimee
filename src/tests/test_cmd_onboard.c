@@ -9,10 +9,9 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../db1/db.h"
 #include "cJSON.h"
 #include "commands.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "memory.h"
 #include "platform_test_util.h"
 
@@ -72,8 +71,6 @@ static void scratch_env(char *tmpdir, size_t cap)
    config_t cfg;
    config_load(&cfg);
    assert(config_save(&cfg) == 0);
-   assert(db1_init(cfg.db1_path) == 0);
-   db1_shutdown();
 }
 
 static void scratch_cleanup(const char *tmpdir)

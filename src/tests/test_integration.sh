@@ -76,8 +76,10 @@ export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 # builds the module, so the ordinary path has one; a hand-run without it
 # degrades to the old behaviour rather than to a server that will not come up.
 # ---------------------------------------------------------------
-DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module-db1"
-DB1_MODULE="$AIMEE_HOME/aimee-module-db1"
+# One Go binary serves every module; which one it is comes from argv[0], so the
+# harness stages it under the name the grant pins.
+DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module"
+DB1_MODULE="$AIMEE_HOME/aimee-module-aimee"
 MODULE_POLICY_DIR="$AIMEE_HOME/modules.d/server"
 MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB1_MODULE_PID=""
@@ -94,7 +96,7 @@ install_db1_module() {
         echo "ABORT: the DB1 module is not built at $DB1_MODULE_BUILT."
         echo "       Every store-backed check needs it: nothing serves the store"
         echo "       without it. Build it with:"
-        echo "           make -C src build/obj/aimee-module-db1"
+        echo "           make -C src build/obj/aimee-module"
         echo "       or run this harness through 'make integration-tests', which"
         echo "       builds it as a prerequisite."
         exit 1
@@ -144,17 +146,58 @@ GRANT
 
 start_db1_module() {
     [ -x "$DB1_MODULE" ] || return 0
+    # The store is a Go module against PostgreSQL and reads AIMEE_STORE_URL; it
+    # opened a SQLite file named by AIMEE_DB1_PATH until it moved. Skip the same
+    # way an unbuilt module is skipped, but SAY so -- starting it without a DSN
+    # would fork a process that exits immediately and leave the wait below to
+    # burn ten seconds discovering a socket that is never coming.
+    if [ -z "${AIMEE_STORE_URL:-}" ]; then
+        echo "integration: AIMEE_STORE_URL unset; skipping the store module" >&2
+        return 0
+    fi
+    # One schema per run. Without it the run inherits every row the last one
+    # wrote -- the harness used to get a fresh SQLite file each time and the
+    # isolation came free. The module creates the schema it is pointed at, so
+    # this needs no CREATE DATABASE right and no postgres client here.
+    if [ -z "${AIMEE_STORE_SCHEMA:-}" ]; then
+        AIMEE_STORE_SCHEMA="integ_$$"
+        case "$AIMEE_STORE_URL" in
+            *\?*) AIMEE_STORE_URL="$AIMEE_STORE_URL&search_path=$AIMEE_STORE_SCHEMA" ;;
+            *)    AIMEE_STORE_URL="$AIMEE_STORE_URL?search_path=$AIMEE_STORE_SCHEMA" ;;
+        esac
+        export AIMEE_STORE_URL AIMEE_STORE_SCHEMA
+    fi
     stop_db1_module
-    AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db" "$DB1_MODULE" "$MODULE_BUS_SOCK" >/dev/null 2>&1 &
+    # Its output goes to a file, not /dev/null: a module that refuses to start
+    # says why exactly once, and discarding that leaves the failure looking like
+    # a socket that never appeared.
+    AIMEE_STORE_URL="$AIMEE_STORE_URL" "$DB1_MODULE" "$MODULE_BUS_SOCK"         >"$AIMEE_HOME/db1-module.log" 2>&1 &
     DB1_MODULE_PID=$!
-    # Wait for the module to answer rather than guessing, for the reason
-    # start_server does: a fixed sleep is either a stall or a flake.
+    # Wait for the store to be SERVING, not for the bus socket: the daemon owns
+    # that socket and creates it before the module is forked, so polling it fell
+    # through immediately and the harness ran on against a store that had not
+    # attached. The module now also opens a connection pool and applies its
+    # schema before it serves, which made that window wide enough to fail a
+    # health assertion.
+    #
+    # The daemon's own health state is the condition every caller depends on, so
+    # that is what this waits for.
     local i
-    for i in $(seq 1 100); do
-        [ -S "$MODULE_BUS_SOCK" ] && break
-        kill -0 "$DB1_MODULE_PID" 2>/dev/null || break
+    for i in $(seq 1 200); do
+        if [ -S "$HTTP_SOCK" ] && curl -s --max-time 2 --unix-socket "$HTTP_SOCK" \
+                http://localhost/v1/server/health 2>/dev/null | grep -q '"state":"ok"'; then
+            return 0
+        fi
+        if ! kill -0 "$DB1_MODULE_PID" 2>/dev/null; then
+            echo "integration: the store module exited before it served:" >&2
+            sed 's/^/    /' "$AIMEE_HOME/db1-module.log" 2>/dev/null | head -5 >&2
+            return 1
+        fi
         sleep 0.1
     done
+    echo "integration: the store module never reached serving; its log was:" >&2
+    sed 's/^/    /' "$AIMEE_HOME/db1-module.log" 2>/dev/null | head -5 >&2
+    return 1
 }
 
 stop_db1_module() {

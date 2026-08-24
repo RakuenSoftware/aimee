@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "db.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "../modules/db2/c/db2_internal.h"

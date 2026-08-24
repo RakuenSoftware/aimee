@@ -19,7 +19,7 @@
     "vault",
     "execution-policy",
     "audit",
-    "db1"
+    "aimee"
   ],
   "optional": [
     "governance",
@@ -64,7 +64,9 @@
     "economizer": 27,
     "postgres": 28,
     "db2": 29,
-    "db1": 30
+    "aimee": 30
   },
-  "retired_principal_refs": []
+  "retired_principal_refs": [],
+  "plugin_principal_ref_band": { "first": 200, "limit": 456 },
+  "db3_provider_principal_ref_band": { "first": 456, "limit": 512 }
 }

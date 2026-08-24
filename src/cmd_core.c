@@ -5,7 +5,7 @@
 #include "agent_config.h"
 #include "config.h"
 #include "config_database.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include <aimee/delegates/delegate_credentials.h>
 #include "modules/db2/c/lifecycle.h"
 #include "kb_client.h"
@@ -358,7 +358,9 @@ void cmd_setup(app_ctx_t *ctx, int argc, char **argv)
    int ws_n = config_workspace_count();
    for (int w = 0; w < ws_n; w++)
       setup_register_workspace(config_workspaces(w), &total_projects);
-   db1_stmt_cache_clear();
+   /* Nothing to flush here any more: the statement cache belonged to the
+    * in-process SQLite connection, and a client that sends frames holds no
+    * prepared statements of its own. */
 
    /* 8. Generate .aimee-rules from detected stacks when manifest allows */
    if (!have_manifest || manifest.generate_rules)
@@ -409,15 +411,14 @@ void cmd_status(app_ctx_t *ctx, int argc, char **argv)
 
    printf("aimee %s\n", AIMEE_VERSION);
 
-   /* Database status */
-   char db1_path[CONFIG_COPY_MAX];
-   config_db1_path_copy(db1_path, sizeof(db1_path));
-   db1_diag_t diag;
-   db1_diag_inspect(db1_path, 0, &diag);
-   if (diag.opened)
-      printf("Database:  ok (schema v%d)\n", diag.schema_version);
-   else
-      printf("Database:  error (cannot open)\n");
+   /* No database line here any more.
+    *
+    * It used to open a SQLite file and print the schema version out of it. The
+    * store is a PostgreSQL server reached over the bus, and opening a file to
+    * ask whether it is healthy would answer a question about the wrong thing --
+    * `aimee doctor` is where the store is actually probed, through the module
+    * that owns the connection.
+    */
 
    /* Provider status: test each configured agent */
    agent_config_t acfg;

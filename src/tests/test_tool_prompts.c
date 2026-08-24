@@ -4,8 +4,7 @@
 #include <string.h>
 #include "aimee.h"
 #include "agent_exec.h"
-#include "db.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "db_postgres.h"
 #include "modules/db2/c/db2_test_shim.h"
@@ -14,7 +13,6 @@
 static void setup(void)
 {
    db2_test_shim_close();
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
    /* Schema apply seeds the default tool_registry (bash, read_file, ...).
     * Clear it so each case sees only the rows it explicitly inserts. */
@@ -24,7 +22,6 @@ static void setup(void)
 static void teardown(void)
 {
    db2_test_shim_close();
-   db1_shutdown();
 }
 
 /* Insert a tool into tool_registry (postgres) for testing. */

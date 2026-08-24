@@ -17,7 +17,7 @@ flowchart LR
     S -->|typed /v1| K[aimee-kb, one-KB profile]
     S -->|provider API| P[model providers]
     K -->|remote model role, when configured| X[model endpoint]
-    S --> D1[(DB1 SQLite)]
+    S -->|module bus| D1[(DB1 PostgreSQL)]
     F --> WF[(workflow SQLite)]
     K --> D2[(DB2 PostgreSQL + pgvector)]
 ```
@@ -138,14 +138,15 @@ There are two product data tiers and one workflow store.
 
 | Store | Owner | Contents |
 | --- | --- | --- |
-| DB1, SQLite | `aimee-server` | sessions, working memory, local state, agent jobs, policy and audit state, caches |
+| DB1, PostgreSQL | `aimee-store` module | sessions, working memory, local state, agent jobs, policy and audit state, caches |
 | Workflow SQLite | `aimee-wfe` | definitions, immutable snapshots, work items, lifecycle events, artifacts, retries and parks |
 | DB2, PostgreSQL + pgvector | `aimee-kb` | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
 
 The DB1/DB2 boundary is compile-enforced:
 
-- server builds disable DB2 and never link libpq;
-- KB builds disable DB1 and never link SQLite;
+- the server links no database driver at all: it reaches DB1 through the store module
+  over the bus, and DB2 through typed `/v1` calls;
+- KB builds never open DB1;
 - thin clients link neither;
 - calls across the boundary use public typed APIs.
 

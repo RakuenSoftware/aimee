@@ -1,4 +1,4 @@
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "server_mgmt_status.h"
 
 #include <assert.h>
@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "support/store_module_fixture.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static server_tls_peer_cert_t peer(char c)
@@ -33,12 +34,18 @@ static kb_mgmt_status_t issue(const server_tls_peer_cert_t *p, uint64_t now)
 
 int main(void)
 {
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    char path[256];
    snprintf(path, sizeof path, "%s/aimee-mgmt-status-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);
-   assert(db1_init(path) == 0 && server_mgmt_status_init() == 0);
    server_tls_peer_cert_t p = peer('a'), other = peer('c');
 
    kb_mgmt_status_t s = issue(&p, 100);
@@ -104,11 +111,8 @@ int main(void)
           SERVER_MGMT_NONCE_NOT_FOUND);
 
    s = issue(&p, 100);
-   db1_shutdown();
-   assert(db1_init(path) == 0 && server_mgmt_status_init() == 0);
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 4);
    assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_NOT_FOUND);
-   db1_shutdown();
    unlink(path);
    puts("server_mgmt_status: ok");
    return 0;

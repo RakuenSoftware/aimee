@@ -642,9 +642,9 @@
       ]
     },
     {
-      "id": "db1",
+      "id": "aimee",
       "execution": "process",
-      "runtime": "c",
+      "runtime": "go",
       "principal_ref": 30,
       "placements": [
         "server"
@@ -652,97 +652,97 @@
       "stages": [
         {
           "id": 1,
-          "name": "db1-economizer-state",
+          "name": "aimee-economizer-state",
           "event_kind": 11777
         },
         {
           "id": 2,
-          "name": "db1-git-ownership",
+          "name": "aimee-git-ownership",
           "event_kind": 11778
         },
         {
           "id": 3,
-          "name": "db1-conversation",
+          "name": "aimee-conversation",
           "event_kind": 11779
         },
         {
           "id": 4,
-          "name": "db1-agent-work",
+          "name": "aimee-agent-work",
           "event_kind": 11780
         },
         {
           "id": 5,
-          "name": "db1-delegation",
+          "name": "aimee-delegation",
           "event_kind": 11781
         },
         {
           "id": 6,
-          "name": "db1-sessions",
+          "name": "aimee-sessions",
           "event_kind": 11782
         },
         {
           "id": 7,
-          "name": "db1-runtime",
+          "name": "aimee-runtime",
           "event_kind": 11783
         },
         {
           "id": 8,
-          "name": "db1-telemetry",
+          "name": "aimee-telemetry",
           "event_kind": 11784
         },
         {
           "id": 9,
-          "name": "db1-guardrail-state",
+          "name": "aimee-guardrail-state",
           "event_kind": 11785
         },
         {
           "id": 10,
-          "name": "db1-ensemble",
+          "name": "aimee-ensemble",
           "event_kind": 11786
         },
         {
           "id": 11,
-          "name": "db1-workflow",
+          "name": "aimee-workflow",
           "event_kind": 11787
         },
         {
           "id": 12,
-          "name": "db1-roundtable",
+          "name": "aimee-roundtable",
           "event_kind": 11788
         },
         {
           "id": 13,
-          "name": "db1-identity",
+          "name": "aimee-identity",
           "event_kind": 11789
         },
         {
           "id": 14,
-          "name": "db1-checkpoints",
+          "name": "aimee-checkpoints",
           "event_kind": 11790
         },
         {
           "id": 15,
-          "name": "db1-jti-replay",
+          "name": "aimee-jti-replay",
           "event_kind": 11791
         },
         {
           "id": 16,
-          "name": "db1-lifecycle",
+          "name": "aimee-lifecycle",
           "event_kind": 11792
         },
         {
           "id": 17,
-          "name": "db1-mgmt-jwks",
+          "name": "aimee-mgmt-jwks",
           "event_kind": 11793
         },
         {
           "id": 18,
-          "name": "db1-mgmt-nonce",
+          "name": "aimee-mgmt-nonce",
           "event_kind": 11794
         },
         {
           "id": 19,
-          "name": "db1-pki",
+          "name": "aimee-pki",
           "event_kind": 11795
         }
       ]

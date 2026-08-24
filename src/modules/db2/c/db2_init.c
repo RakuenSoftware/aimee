@@ -54,7 +54,7 @@ static void db2_maybe_clear_sqlite_cache(sqlite3 *db)
 static void *g_conn = NULL;
 static char g_pg_url[512] = "";
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
-/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment).
+/* Embedding dimension for the DB2 vector columns (one embedder per deployment).
  * Set from the loaded config by the server / aimee-kb startup via
  * db2_set_embedding_dim() before db2_init(), so this layer needs no config
  * dependency. 0 = unset, which lets the §2a precedence (pinned > recorded >
@@ -460,7 +460,7 @@ static int db2_query_flag(void *conn, const char *sql, const char *param_name,
 static int db2_verify_pre_provisioned(void *conn, int expected_dim, char *err, size_t errlen)
 {
    /* 1. Embedding dim: recorded (proves the migrate ran) and equal to what this kb
-    *    will size its halfvec columns / readers to. */
+    *    will size its vector columns / readers to. */
    int recorded_dim = 0;
    db2_dim_read_t rd = db2_embedding_dim_read(conn, &recorded_dim);
    if (rd == DB2_DIM_ERROR)
@@ -823,7 +823,7 @@ int db2_init(const char *libpq_url)
    }
 
    /* The deployment runs a single embedder (0.6b=1024 / 4b=2560); the configured
-    * embedding_dim drives the dimension of the DB2 halfvec embedding columns.
+    * embedding_dim drives the dimension of the DB2 vector embedding columns.
     * The dimension is supplied by db2_set_embedding_dim() at startup (the server
     * and aimee-kb, which hold the loaded config) so this low-level layer stays
     * config-free; it defaults to 1024 when unset. */
@@ -911,7 +911,7 @@ int db2_init(const char *libpq_url)
             if (pbudget < 1000)
                pbudget = 1000;
             int prc = g_embedder_probe(&probed, pbudget, perr, sizeof(perr));
-            /* Bound to a valid halfvec width: an out-of-range value must NOT fall
+            /* Bound to a valid vector width: an out-of-range value must NOT fall
              * through to db_apply's clamp-to-1024 (that would record a wrong dim). */
             if (prc != 0 || probed <= 0 || probed > EMBED_MAX_DIM)
             {
@@ -971,7 +971,7 @@ int db2_init(const char *libpq_url)
          LOG_WARN("db2",
                   "using recorded embedding dim %d (no operator pin; configured default was %d)",
                   effective_dim, configured_dim);
-      db2_set_embedding_dim(effective_dim); /* halfvec columns + all readers agree */
+      db2_set_embedding_dim(effective_dim); /* vector columns + all readers agree */
    }
    int apply_rc;
    if (pre_provisioned)
@@ -1001,7 +1001,7 @@ int db2_init(const char *libpq_url)
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
-   /* Schema (incl. the halfvec columns) is now applied AND the dim recorded last
+   /* Schema (incl. the vector columns) is now applied AND the dim recorded last
     * (record-after-DDL), so the lock can release: a later starter reads the dim. */
    if (dim_lock_held)
       db2_dim_lock_release(conn);

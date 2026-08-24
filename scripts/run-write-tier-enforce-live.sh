@@ -98,13 +98,17 @@ pg_indb()     { pg_db -c "$1"; }
 pg_indb_val() { pg_val "$1"; }
 
 # --- the management trust chain -------------------------------------------
-# Seeded BEFORE the server starts, into the very db1 file the server will open
-# ($AIMEE_HOME/aimee.db), because the server reads the envelope at request time
-# and an absent one denies every token as INVALID — which looks identical to a
+# Seeded BEFORE the server starts, into the store both this rig and the server
+# reach over the bus, because the server reads the envelope at request time and
+# an absent one denies every token as INVALID — which looks identical to a
 # forged token and would make this rig "pass" for the wrong reason.
+#
+# This used to name a SQLite file ($AIMEE_HOME/aimee.db) that the server would
+# open directly. The store is a Go module now, so the store module must be
+# running and pointed at its database before this step.
 step "Provisioning the JWKS trust chain (real envelope, real signature)"
 kid=$(./write-tier-enforce-live provision \
-        --db1 "$AIMEE_HOME/aimee.db" --bundle "$BUNDLE" --key "$TOKEN_KEY") \
+        --bundle "$BUNDLE" --key "$TOKEN_KEY") \
   || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
 echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
 
@@ -217,7 +221,10 @@ deny "wrong issuer          " "$(./write-tier-enforce-live mint --key "$TOKEN_KE
 # A token signed by a key the JWKS does not carry: the IdP-signed / rotated-away
 # case. Its kid is derived from ITS OWN modulus, so it is well-formed and simply
 # unknown to this server.
-./write-tier-enforce-live provision --db1 "$work/other.db" --bundle "$work/other.pem" --key "$work/other-key.pem" >/dev/null 2>&1
+# --no-store is what the throwaway --db1 "$work/other.db" was really buying: a
+# key the server has NEVER been taught. Seeding it into the shared store would
+# teach the server this key and invert the assertion below.
+./write-tier-enforce-live provision --no-store --bundle "$work/other.pem" --key "$work/other-key.pem" >/dev/null 2>&1
 deny "signed by a foreign key" "$(./write-tier-enforce-live mint --key "$work/other-key.pem" --aud "$SERVER_ID" --team $TEAM_ID --sub 'oidc:test:alice' --tier full --jti enf-$$-key)"
 # The mutation must be GUARANTEED to change the token. `sed 's/.$/A/'` did not:
 # when the signature already ended in 'A' it rewrote 'A' as 'A', left the token

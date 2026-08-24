@@ -146,7 +146,10 @@ static int tail_is_legacy_schema(const char *tail, char tier, int sqlite_variant
    return tail[0] == '.' && tail[1] == 's' && tail[2] == 'q' && tail[3] == 'l' && tail[4] == '\0';
 }
 
-static void build_schema_path(char *buf, size_t buf_len, char tier, int sqlite_variant)
+/* Builds db2's canonical schema path. This took a tier once, when db1 had a
+   schema file of its own to point at; the Go store replaced that single file
+   with one per family, so there is nothing left to build for tier 1. */
+static void build_schema_path(char *buf, size_t buf_len, int sqlite_variant)
 {
    if (!buf || buf_len == 0)
       return;
@@ -164,26 +167,20 @@ static void build_schema_path(char *buf, size_t buf_len, char tier, int sqlite_v
    /* The INPUT still matches the legacy src/dbN/ spelling, because that is what
       proposals written before the moves say and canonicalizing them is the whole
       point of this function. DB2's preserved C tree has one extra c/ segment. */
-   if (tier == '1' || tier == '2')
-   {
-      APPEND_CH('m');
-      APPEND_CH('o');
-      APPEND_CH('d');
-      APPEND_CH('u');
-      APPEND_CH('l');
-      APPEND_CH('e');
-      APPEND_CH('s');
-      APPEND_CH('/');
-   }
+   APPEND_CH('m');
+   APPEND_CH('o');
+   APPEND_CH('d');
+   APPEND_CH('u');
+   APPEND_CH('l');
+   APPEND_CH('e');
+   APPEND_CH('s');
+   APPEND_CH('/');
    APPEND_CH('d');
    APPEND_CH('b');
-   APPEND_CH(tier);
+   APPEND_CH('2');
    APPEND_CH('/');
-   if (tier == '2')
-   {
-      APPEND_CH('c');
-      APPEND_CH('/');
-   }
+   APPEND_CH('c');
+   APPEND_CH('/');
    APPEND_CH('s');
    APPEND_CH('c');
    APPEND_CH('h');
@@ -212,19 +209,19 @@ static const char *canonical_owned_path(const char *path, char *buf, size_t buf_
 {
    if (!path || !buf || buf_len == 0)
       return path;
-   if (path_prefix_src_db(path, '1') && tail_is_legacy_schema(path + 8, '1', 0))
-   {
-      build_schema_path(buf, buf_len, '1', 0);
-      return buf;
-   }
+   /* No db1 rewrite. Its target, src/modules/db1/schema.sql, went with the C
+      store; the schema is per-family under server-go now, so a legacy db1
+      spelling has no single file to name. Rewriting it to the deleted path made
+      the planner drop the packet silently -- leaving it alone reports it as
+      missing, which is both true and something the author can act on. */
    if (path_prefix_src_db(path, '2') && tail_is_legacy_schema(path + 8, '2', 0))
    {
-      build_schema_path(buf, buf_len, '2', 0);
+      build_schema_path(buf, buf_len, 0);
       return buf;
    }
    if (path_prefix_src_db(path, '2') && tail_is_legacy_schema(path + 8, '2', 1))
    {
-      build_schema_path(buf, buf_len, '2', 1);
+      build_schema_path(buf, buf_len, 1);
       return buf;
    }
    return path;

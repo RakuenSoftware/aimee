@@ -4,7 +4,7 @@
  * in cmd_memory_core.c too). */
 #include "aimee.h"
 #include "cmd_memory_internal.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/collab_rules.h"
 #include "modules/db2/c/memory_query.h"
 #include "kb_client.h"

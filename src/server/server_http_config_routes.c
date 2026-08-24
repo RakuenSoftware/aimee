@@ -30,6 +30,8 @@
 #include "util.h" /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "aimee_home.h"
+#include "command_registry.h"
+#include "headers/module_commands.h"
 #include "config.h"
 #include "prompts.h"
 #include <aimee/delegates/delegate_role.h>
@@ -1185,6 +1187,55 @@ int rh_server_forensics(const route_req_t *rq, char *resp, int cap)
  * (cli_v1_pathid_route_for_method). Rows with no `op` are not
  * method-addressable at all.
  */
+/* POST /v1/commands/<group>.<verb> -- invoke a command from THE registry.
+ *
+ * Until this existed, aimee_command_register() had no consumer that could
+ * actually CALL anything: neither aimee_command_find_method nor a command's own
+ * handler had a production caller, so a registered command appeared in listings
+ * and could not be invoked from any surface. That is worse than not appearing --
+ * command_registry.h's whole point is that a listed capability is a reachable one.
+ *
+ * The body is the command's argument object, passed to its handler unchanged;
+ * shaping it is the surface's job, not the handler's. */
+int rh_command_invoke(const route_req_t *rq, char *resp, int cap)
+{
+   if (!rq->id || !rq->id[0])
+      return err_json(resp, cap, 400, "missing command method");
+
+   /* A plugin instance may have attached since the last refresh; converge before
+    * deciding a command does not exist. */
+   aimee_module_commands_refresh(2000);
+
+   const aimee_command_t *cmd = aimee_command_find_method(rq->id);
+   if (!cmd || !cmd->fn)
+      return err_json(resp, cap, 404, "no such command");
+   if (!(cmd->surfaces & AIMEE_SURFACE_RPC))
+      return err_json(resp, cap, 404, "command is not on the RPC surface");
+
+   cJSON *args = NULL;
+   if (rq->body && rq->body_len > 0)
+   {
+      args = cJSON_ParseWithLength(rq->body, (size_t)rq->body_len);
+      if (!args)
+         return err_json(resp, cap, 400, "invalid JSON body");
+   }
+
+   cJSON *result = cmd->fn(args, cmd->ud);
+   cJSON_Delete(args);
+   if (!result)
+      return err_json(resp, cap, 502, "command handler failed");
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+   {
+      cJSON_Delete(result);
+      return err_json(resp, cap, 500, "out of memory");
+   }
+   cJSON_AddStringToObject(root, "status", "ok");
+   cJSON_AddItemToObject(root, "result", result);
+   return emit(resp, cap, root);
+}
+
 int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -1213,6 +1264,57 @@ int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
          cJSON_AddBoolToObject(row, "async", 1);
       cJSON_AddItemToArray(routes, row);
    }
+   /* Commands a MODULE declared, which no compiled route table can know.
+    *
+    * A plugin module hosts one MCP server or pluggy plugin and declares its
+    * tools over the bus; those commands exist only while that instance is
+    * attached, so they cannot come from g_v1_routes. Refreshing here rather
+    * than at boot is what lets an instance that started after the daemon show
+    * up without a restart -- the TTL keeps that from costing a bus round trip
+    * per attached instance on every request.
+    *
+    * They are added to the SAME `routes` array on purpose: a client already
+    * knows how to read it, and the whole point of the command registry is that
+    * one declaration reaches every surface. A dynamic row that collides with a
+    * static one is skipped, so a plugin can never shadow a built-in route. */
+   aimee_module_commands_refresh(2000);
+   for (size_t i = 0; i < aimee_command_count(); i++)
+   {
+      const aimee_command_t *c = aimee_command_at(i);
+      if (!c || !(c->surfaces & AIMEE_SURFACE_RPC))
+         continue;
+      char op[192];
+      snprintf(op, sizeof op, "%s.%s", c->group, c->verb);
+      int shadowed = 0;
+      cJSON *existing = NULL;
+      cJSON_ArrayForEach(existing, routes)
+      {
+         const cJSON *existing_op = cJSON_GetObjectItemCaseSensitive(existing, "op");
+         if (cJSON_IsString(existing_op) && strcmp(existing_op->valuestring, op) == 0)
+         {
+            shadowed = 1;
+            break;
+         }
+      }
+      if (shadowed)
+         continue;
+      cJSON *row = cJSON_CreateObject();
+      if (!row)
+         continue;
+      cJSON_AddStringToObject(row, "op", op);
+      cJSON_AddStringToObject(row, "verb", "POST");
+      /* The FULL path, not the prefix. An earlier draft advertised the bare
+       * "/v1/commands/" here, which is a route no client can reach -- exactly
+       * the "listed but unroutable" failure the registry exists to remove. */
+      char path[224];
+      snprintf(path, sizeof path, "/v1/commands/%s", op);
+      cJSON_AddStringToObject(row, "path", path);
+      cJSON_AddBoolToObject(row, "module", 1);
+      if (c->summary && c->summary[0])
+         cJSON_AddStringToObject(row, "summary", c->summary);
+      cJSON_AddItemToArray(routes, row);
+   }
+
    /* Bumped only when the SHAPE of this document changes. A client that does
     * not recognise the version must say so rather than guess at the rows. */
    cJSON_AddNumberToObject(root, "manifest_version", 1);

@@ -1,6 +1,6 @@
 /* cmd_hooks.c: POSIX platform implementations for cmd_hooks background operations. */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "config.h"
 #include "kb_client.h"
 #include "cmd_hooks_platform.h"

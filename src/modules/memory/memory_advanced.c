@@ -9,7 +9,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/anti_patterns.h"
 #include "modules/db2/c/bandit.h"
@@ -25,6 +25,7 @@
 #include "kb_reasoning.h"
 #include "log.h"
 #include "memory.h"
+#include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
 #include <ctype.h>
@@ -506,7 +507,10 @@ static const style_dimension_t style_dimensions[] = {
 static int match_keywords(const char *text, const char *const keywords[])
 {
    for (int k = 0; keywords[k]; k++)
-      if (strstr(text, keywords[k]))
+      /* Whole-word: as a bare substring the positive marker "structured" matched
+       * inside the negative marker "unstructured", so any text complaining about
+       * unstructured output scored BOTH sides of the structure dimension. */
+      if (memory_keyword_present(text, keywords[k]))
          return 1;
    return 0;
 }

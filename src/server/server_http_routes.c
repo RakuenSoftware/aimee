@@ -88,12 +88,12 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
-#include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"     /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>      /* mkdir for the proposal artifact dir */
-#include <time.h>          /* unique proposal artifact filename */
+#include "router_advise.h"        /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"         /* wfe_approval_record/present — human-gate approval */
+#include "db1_client/wfe_store.h" /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>             /* mkdir for the proposal artifact dir */
+#include <time.h>                 /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -2190,6 +2190,10 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/dev/ci-event", NULL, RM_EXACT, NULL, 0, rh_dev_ci_event},
     {"POST", "/v1/runs", NULL, RM_EXACT, NULL, CAP_CHAT, rh_runs_post},
     {"POST", "/v1/runs/", "/stop", RM_PREFIX, NULL, CAP_CHAT, rh_runs_stop},
+    /* Registry-declared commands, including a plugin module's. RM_PREFIX so the
+     * "<group>.<verb>" method rides in the path, matching what GET /v1/cli/manifest
+     * advertises for these rows. */
+    {"POST", "/v1/commands/", NULL, RM_PREFIX, NULL, CAP_CHAT, rh_command_invoke},
     {"GET", "/v1/runs/", "/events", RM_PREFIX, NULL, CAP_SESSION_READ, NULL},
     {"GET", "/v1/runs/", NULL, RM_PREFIX, NULL, CAP_SESSION_READ, rh_runs_get},
 

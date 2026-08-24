@@ -38,4 +38,12 @@ void embed_unembedded_l2(void);
 int is_coverage_stopword(const char *word);
 int has_temporal_markers(const char *text);
 
+/* From memory_context.c — whole-word keyword matching for the module's intent and
+ * tagging keyword lists. Returns 1 iff |needle| occurs in |haystack| on both a left
+ * and a right word boundary, case-insensitively, where the right boundary also
+ * accepts a common inflectional suffix ("deploy" matches "deployed"). Plain strstr
+ * on these lists matched "add" inside "address", "count" inside "account", and
+ * "auth" inside "author". Multi-word needles are matched on their outer edges. */
+int memory_keyword_present(const char *haystack, const char *needle);
+
 #endif /* DEC_MEMORY_CONTEXT_INTERNAL_H */

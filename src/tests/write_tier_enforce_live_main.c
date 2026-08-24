@@ -18,9 +18,9 @@
  *
  * WHY A DRIVER AND NOT A SHELL SCRIPT. The server does not accept a raw JWKS. It
  * reads AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE, a root-owned 0644 file pinning a
- * manifest key, then loads a SIGNED PUBLICATION ENVELOPE from db1 and validates
+ * manifest key, then loads a SIGNED PUBLICATION ENVELOPE from the store and validates
  * it against that bundle. Standing that up means real Ed25519 manifest signing,
- * the real envelope encoder, and a real db1 row — none of which can be faked
+ * the real envelope encoder, and a real store row — none of which can be faked
  * from the shell. This driver uses the production functions for every step, so a
  * change that breaks the real publication path breaks this rig too.
  *
@@ -30,16 +30,16 @@
  * exists for, is what the server does with a token once it has one.
  *
  * Usage:
- *   write-tier-enforce-live provision --db1 PATH --bundle PATH --key PATH
+ *   write-tier-enforce-live provision --bundle PATH --key PATH [--no-store]
  *   write-tier-enforce-live mint --key PATH --aud SERVER_ID --team N \
  *                                --sub SUBJECT --tier off|data|full --jti ID \
  *                                [--iat N] [--exp N] [--issuer S]
  *
- * `provision` writes the trust bundle and seeds db1; `mint` prints one compact
+ * `provision` writes the trust bundle and seeds the store; `mint` prints one compact
  * JWS on stdout. Both exit non-zero with a reason on stderr.
  */
 
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_mgmt_jwks_publication.h"
 #include "kb_mgmt_token_public.h"
 #include "kb_mgmt_token_roots_provision.h"
@@ -161,8 +161,8 @@ static int write_trust_bundle(const char *path, const char *bundle, size_t bundl
    return ok ? 0 : -1;
 }
 
-static int cmd_provision(const char *db1_path, const char *bundle_path, const char *key_path,
-                         int64_t now)
+static int cmd_provision(const char *bundle_path, const char *key_path,
+                         int64_t now, int seed_store)
 {
    EVP_PKEY *token_key = rsa_generate();
    if (!token_key)
@@ -224,12 +224,20 @@ static int cmd_provision(const char *db1_path, const char *bundle_path, const ch
    if (write_trust_bundle(bundle_path, bundle, bundle_n) != 0)
       return fail("could not write the trust bundle 0644");
 
-   if (db1_init(db1_path) != 0)
-      return fail("could not open db1");
-   fetch_ctx_t ctx = {record.envelope, record.envelope_len};
-   if (server_mgmt_jwks_cache_refresh(bundle, bundle_n, now, fetch_envelope, &ctx) !=
-       SERVER_MGMT_JWKS_CACHE_OK)
-      return fail("db1 refused the signed JWKS envelope");
+   /* No open. The store is a separate process reached over the bus, so there is
+      nothing here to initialise -- the refresh below either finds the module
+      serving or fails saying it could not.
+
+      --no-store skips the seeding entirely. The caller that passes it wants a
+      key the server has never heard of; writing this envelope would teach the
+      server that key and quietly invert the assertion it is about to make. */
+   if (seed_store)
+   {
+      fetch_ctx_t ctx = {record.envelope, record.envelope_len};
+      if (server_mgmt_jwks_cache_refresh(bundle, bundle_n, now, fetch_envelope, &ctx) !=
+          SERVER_MGMT_JWKS_CACHE_OK)
+         return fail("the store refused the signed JWKS envelope");
+   }
 
    /* Prove the server's own read path accepts what we just wrote, here, rather
     * than letting a bad provision surface later as an opaque INVALID at request
@@ -324,6 +332,15 @@ static const char *opt(int argc, char **argv, const char *name, const char *dflt
    return dflt;
 }
 
+/* A valueless switch, unlike opt() which takes the next argv slot. */
+static int has_flag(int argc, char **argv, const char *name)
+{
+   for (int i = 2; i < argc; ++i)
+      if (!strcmp(argv[i], name))
+         return 1;
+   return 0;
+}
+
 static int64_t opt_i64(int argc, char **argv, const char *name, int64_t dflt)
 {
    const char *raw = opt(argc, argv, name, NULL);
@@ -344,12 +361,12 @@ int main(int argc, char **argv)
    int64_t now = (int64_t)time(NULL);
    if (!strcmp(argv[1], "provision"))
    {
-      const char *db1_path = opt(argc, argv, "--db1", NULL);
       const char *bundle = opt(argc, argv, "--bundle", NULL);
       const char *key = opt(argc, argv, "--key", NULL);
-      if (!db1_path || !bundle || !key)
-         return fail("provision needs --db1, --bundle and --key");
-      return cmd_provision(db1_path, bundle, key, now);
+      if (!bundle || !key)
+         return fail("provision needs --bundle and --key");
+      int seed_store = !has_flag(argc, argv, "--no-store");
+      return cmd_provision(bundle, key, now, seed_store);
    }
    if (!strcmp(argv[1], "mint"))
    {

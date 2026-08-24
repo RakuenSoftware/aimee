@@ -161,6 +161,7 @@ typedef struct
  * carrying one. NULL-verb terminated. */
 extern const http_route_t g_v1_routes[];
 int rh_dispatch_op(const route_req_t *rq, char *resp, int cap);
+int rh_command_invoke(const route_req_t *rq, char *resp, int cap);
 int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap);
 int rh_cli_manifest(const route_req_t *rq, char *resp, int cap);
 

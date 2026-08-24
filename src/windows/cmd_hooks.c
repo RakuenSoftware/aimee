@@ -1,7 +1,7 @@
 /* cmd_hooks.c: Windows implementations for cmd_hooks platform operations. */
 #include "aimee.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "cmd_hooks_platform.h"
 #include "lifecycle.h"

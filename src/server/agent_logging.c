@@ -6,8 +6,8 @@
  * override used by ingress workers such as /v1/runs. */
 #include "aimee.h"
 #include "agent_exec.h"
-#include "config.h" /* session_id(), config_load */
-#include "db1.h"    /* token_audit + agent_log inserts */
+#include "config.h"         /* session_id(), config_load */
+#include "db1_client/db1.h" /* token_audit + agent_log inserts */
 #include "token_tracker.h"
 #include "request_context.h" /* per-request id / principal / idempotency */
 

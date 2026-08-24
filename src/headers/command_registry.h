@@ -88,6 +88,30 @@ int aimee_command_register(const aimee_command_t *cmd);
  * entries before it -- the caller is expected to treat that as fatal. */
 int aimee_command_register_many(const aimee_command_t *cmds, size_t n);
 
+/* Drop every command registered by `module`, returning how many were removed.
+ *
+ * Registration is otherwise append-only, which was right while every registrant
+ * was a compiled-in module whose command set could not change. A PLUGIN module
+ * can: its commands are whatever the plugin it hosts advertises, so a plugin
+ * that disconnects has to take its commands with it. Leaving them registered
+ * would advertise capabilities to every surface that answer only "unavailable",
+ * and would block the same plugin re-registering on reconnect, since a duplicate
+ * (group, verb) is refused.
+ *
+ * INVALIDATES pointers previously returned by aimee_command_find/_at: entries
+ * after the removed ones shift down. Every surface enumerates synchronously and
+ * does not hold one across a mutation, which is the property this relies on. */
+size_t aimee_command_unregister_module(const char *module);
+
+/* Bumped on every registration, withdrawal, and reset.
+ *
+ * A surface that caches a view of the table (an MCP tools/list, a CLI manifest)
+ * needs to know the table changed WITHOUT diffing it. It is also what makes a
+ * push notification possible at all: MCP advertises tools.listChanged, and a
+ * client that trusts that capability and is never notified simply never re-lists.
+ * Monotonic within a process; not meaningful across restarts. */
+unsigned long aimee_command_registry_generation(void);
+
 /* Lookup. NULL when absent -- which is the same answer every surface must give,
  * so an unregistered command is unroutable everywhere alike. */
 const aimee_command_t *aimee_command_find(const char *group, const char *verb);

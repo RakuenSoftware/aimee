@@ -1,5 +1,5 @@
 /* test_schema_subst.c: the DB2 schema is shipped with a __EMBED_DIM__
- * placeholder in its halfvec embedding columns so a deployment can run a single
+ * placeholder in its vector embedding columns so a deployment can run a single
  * embedder at its own dimension (768 for the default nomic embedder; older
  * deployments may still record the Qwen3 ladder's 1024 or 2560).
  * db_apply_schema_postgres() substitutes the configured dimension before
@@ -112,16 +112,16 @@ static void assert_fully_substituted(const char *sql)
 static void test_substitutes_explicit_dim(void)
 {
    const char *sql = apply_with_dim(2560);
-   assert(strstr(sql, "halfvec(2560)") != NULL);
-   assert(strstr(sql, "halfvec(1024)") == NULL);
+   assert(strstr(sql, "vector(2560)") != NULL);
+   assert(strstr(sql, "vector(1024)") == NULL);
    assert_fully_substituted(sql);
 }
 
 static void test_default_dim(void)
 {
    const char *sql = apply_with_dim(1024);
-   assert(strstr(sql, "halfvec(1024)") != NULL);
-   assert(strstr(sql, "halfvec(2560)") == NULL);
+   assert(strstr(sql, "vector(1024)") != NULL);
+   assert(strstr(sql, "vector(2560)") == NULL);
    assert_fully_substituted(sql);
 }
 
@@ -154,9 +154,9 @@ static void test_all_columns_substituted(void)
 {
    const char *sql = apply_with_dim(2560);
    /* memory_embeddings, kb_embeddings, and the curator vector tables all carry a
-    * halfvec embedding column; expect several substituted occurrences. */
+    * vector embedding column; expect several substituted occurrences. */
    int count = 0;
-   for (const char *p = sql; (p = strstr(p, "halfvec(2560)")) != NULL; p += 13)
+   for (const char *p = sql; (p = strstr(p, "vector(2560)")) != NULL; p += 12)
       count++;
    assert(count >= 5);
 }

@@ -7,10 +7,10 @@
 
 #include "cJSON.h"
 #include "wfe_advance.h"
-#include "wfe_binding.h" /* db1_wfe_binding_get */
-#include "wfe_engine.h"  /* wfe_engine_advance */
-#include "wfe_enforce.h" /* dial */
-#include "wfe_store.h"   /* db1_work_item_get, lifecycle events */
+#include "wfe_binding.h"          /* db1_wfe_binding_get */
+#include "wfe_engine.h"           /* wfe_engine_advance */
+#include "wfe_enforce.h"          /* dial */
+#include "db1_client/wfe_store.h" /* db1_work_item_get, lifecycle events */
 
 /* Audit actor + record kind for a driver-applied advance (distinct from the
  * engine's own "advance" event, so the nonce scan below never confuses them). */

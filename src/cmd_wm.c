@@ -1,7 +1,7 @@
 /* cmd_wm.c: working memory CLI (session-scoped key-value scratch space) */
 #include "aimee.h"
 #include "commands.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "cJSON.h"
 
 static const char *resolve_session(const opt_parsed_t *opts)

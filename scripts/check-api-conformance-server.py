@@ -82,6 +82,19 @@ def main() -> int:
     paths = sorted((spec.get("paths") or {}).keys())
     literals, seg_literals = load_code()
 
+    # An empty spec makes every documented path routed by vacuity, and no route
+    # literals makes the comparison about neither side. Either way the check
+    # exits zero having verified nothing, and a gate that stopped reading its
+    # input is indistinguishable from one that is satisfied.
+    if not paths:
+        print(f"server-api-conformance-check: {SPEC} declares no paths; this check "
+              f"would pass having verified nothing")
+        return 2
+    if not literals and not seg_literals:
+        print("server-api-conformance-check: found no route literals in the "
+              "sources; the comparison would be about neither side")
+        return 2
+
     # spec -> code: every documented path must have a route handler.
     missing = [p for p in paths if not implemented(p, literals, seg_literals)]
     if missing:

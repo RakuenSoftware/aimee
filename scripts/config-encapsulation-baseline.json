@@ -41,10 +41,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_cmd_doctor.c": {
-      "decls": 6,
-      "loads": 6
-    },
     "src/tests/test_cmd_onboard.c": {
       "decls": 1,
       "loads": 1
@@ -125,10 +121,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_guardrails.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/tests/test_gw_stage_memory.c": {
       "decls": 1,
       "loads": 1
@@ -157,10 +149,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_memory.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/tests/test_memory_lanes.c": {
       "decls": 4,
       "loads": 4
@@ -168,10 +156,6 @@
     "src/tests/test_memory_retrieval_eval.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/tests/test_payload_rewrite.c": {
-      "decls": 3,
-      "loads": 3
     },
     "src/tests/test_planner.c": {
       "decls": 2,
@@ -189,24 +173,8 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_server_dispatch.c": {
-      "decls": 6,
-      "loads": 2
-    },
-    "src/tests/test_server_jobs_aux.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/tests/test_token_audit_load.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/tests/test_trigger.c": {
       "decls": 2,
-      "loads": 1
-    },
-    "src/tests/test_trigger_e2e.c": {
-      "decls": 1,
       "loads": 1
     },
     "src/tests/test_web_search_fusion.c": {
@@ -219,8 +187,8 @@
     }
   },
   "totals": {
-    "decls": 239,
-    "files": 55,
-    "loads": 147
+    "decls": 217,
+    "files": 46,
+    "loads": 133
   }
 }

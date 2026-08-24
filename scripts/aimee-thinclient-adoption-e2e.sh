@@ -25,6 +25,19 @@
 #
 # Exit code: 0 = all checks passed.
 
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 set -uo pipefail
 
 TLS_PORT="${TLS_PORT:-28743}"
@@ -60,10 +73,12 @@ fi
 # family failing makes the mTLS ramp self-test fail, TLS is then disabled, and
 # this harness times out waiting for a listener that was never coming.
 # `make all` does not build the module, so build it here.
-DB1_MODULE_BUILT="$REPO/src/build/obj/aimee-module-db1"
+# One Go binary serves every module; argv[0] picks which. It is staged below
+# under aimee-module-aimee, the name the grant pins.
+DB1_MODULE_BUILT="$REPO/src/build/obj/aimee-module"
 if [[ ! -x "$DB1_MODULE_BUILT" ]]; then
-  bold "==> Building the DB1 module"
-  make -C src build/obj/aimee-module-db1 >/dev/null
+  bold "==> Building the module runtime"
+  make -C src build/obj/aimee-module >/dev/null
 fi
 
 # --- server: scratch home, TLS listener, first-boot Vault bearer ------------
@@ -76,7 +91,7 @@ sed "s/8740/${HTTP_PORT}/; s/8743/${TLS_PORT}/" \
 
 # The grant the supervisor would write, taken from the generated bundle so the
 # served kinds cannot drift from what the module actually serves.
-DB1_MODULE="$SERVER_HOME/aimee-module-db1"
+DB1_MODULE="$SERVER_HOME/aimee-module-aimee"
 MODULE_BUS_SOCK="$SERVER_HOME/server-module-bus.sock"
 module_pid=""
 install -m0755 "$DB1_MODULE_BUILT" "$DB1_MODULE"
@@ -97,12 +112,13 @@ sed "s|^executable=.*|executable=$DB1_MODULE|" "$DB1_GRANT" \
 # The daemon runs its mTLS ramp self-test once, at startup, and that needs the
 # pki family; a module attaching afterwards is already too late.
 start_module() {
+   require_store_url
   stop_module
   (
     deadline=$((SECONDS + WAIT_SECONDS))
     while (( SECONDS < deadline )); do
       if [[ -S "$MODULE_BUS_SOCK" ]]; then
-        AIMEE_DB1_PATH="$SERVER_HOME/aimee.db" exec "$DB1_MODULE" "$MODULE_BUS_SOCK"
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" exec "$DB1_MODULE" "$MODULE_BUS_SOCK"
       fi
       sleep 0.1
     done

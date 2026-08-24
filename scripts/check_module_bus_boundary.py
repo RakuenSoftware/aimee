@@ -66,18 +66,11 @@ PENDING_BUS_MIGRATION = {
 # means the owner grows a bus stage for what the caller needs, not that the
 # caller switches to the peer's public header.
 PRIVATE_HEADER_REACH = {
-    # DB1 moved under src/modules, so every pre-existing reach into it became a
-    # visible crossing. These carry a modules/ prefix. Phase B of the DB1 proposal
-    # retires them, and stale-allowlist forces each line out as it goes -- this
-    # block emptying IS that migration's progress bar.
-    ("src/modules/delegates/delegate_run_phases.c", "modules/db1/delegate_learning.h"),
-    ("src/modules/delegates/delegate_run_phases.c", "modules/db1/interaction_events.h"),
-    ("src/modules/git/mcp_git_query.c", "modules/db1/git_ownership.h"),
-    ("src/modules/guardrails/guardrails_semantic.c", "modules/db1/guardrail_events.h"),
-    ("src/modules/kb_client/kb_client_memory.c", "modules/db1/user_memory.h"),
-    ("src/modules/roadmap/roadmap_auto.c", "modules/db1/roadmap_runtime.h"),
-    ("src/modules/roadmap/roadmap_milestone.c", "modules/db1/roadmap_runtime.h"),
-    ("src/modules/roadmap/roadmap_report.c", "modules/db1/roadmap_runtime.h"),
+    # The DB1 block that used to sit here is gone. The store became a Go module,
+    # src/modules/db1 stopped being a module at all, and its callers now include
+    # db1_client/*.h -- a bus client, which this checker counts as bus
+    # communication rather than coupling. That is the ratchet finishing, not an
+    # entry being waived.
     ("src/modules/git/git_ops.c", "modules/workspace/workspace_scope.h"),
     ("src/modules/git/git_project.c", "modules/workspace/workspace_scope.h"),
     ("src/modules/git/mcp_git_query.c", "modules/workspace/workspace_provider.h"),
@@ -110,7 +103,6 @@ PRIVATE_HEADER_REACH = {
 CORE_LINKED_REACH = {
     # db1 reaching config, which is core-linked. Retires when db1 stops reading
     # config directly.
-    ("src/modules/db1/db1_cron_jobs.h", "config/config.h"),
     ("src/modules/audit/audit_ledger.c", "config/config.h"),
     ("src/modules/audit/obs_bus.c", "config/config.h"),
     ("src/modules/benchmarks/agent_eval.c", "config/config.h"),
@@ -173,6 +165,11 @@ CORE_LINKED_REACH = {
     ("src/modules/memory/memory_logic.c", "config/config.h"),
     ("src/modules/memory/memory_rewrite_llm.h", "config/config.h"),
     ("src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h", "config/config.h"),
+    # mcp_osv_gate.c is the supply-chain gate LIFTED OUT of mcp_client_registry.c
+    # so the aimee.yaml client path and provisioned plugin instances run the same
+    # policy instead of two copies. It inherits that file's already-sanctioned
+    # crossings rather than adding new ones; the pair moves or dies together.
+    ("src/modules/protocols/mcp/mcp_osv_gate.c", "config/config.h"),
     ("src/modules/protocols/mcp/mcp_client_registry.c", "vault/runtime_secret.h"),
     ("src/modules/roundtable/delegate_ensemble.c", "config/config.h"),
     ("src/modules/roundtable/delegate_ensemble.c", "vault/runtime_secret.h"),
@@ -210,37 +207,6 @@ FLAT_ROOT_REACH = {
     # The same DB1 move, reached by bare filename because the build puts
     # -Imodules/db1 on the include path. Two run the other way, db1 itself
     # reaching config, and retire when db1 stops linking config directly.
-    ("src/modules/audit/include/aimee/audit/obs_bus.h", "db1/guardrail_events.h"),
-    ("src/modules/benchmarks/agent_eval.c", "db1/db1.h"),
-    ("src/modules/config/config.c", "db1/maintenance.h"),
-    ("src/modules/config/config_save.c", "db1/maintenance.h"),
-    ("src/modules/delegates/delegate_launch.c", "db1/db1.h"),
-    ("src/modules/delegates/include/aimee/delegates/delegate_economics.h", "db1/coord_jobs.h"),
-    ("src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h", "db1/coord_jobs.h"),
-    ("src/modules/execution-policy/execution_policy.c", "db1/db1.h"),
-    ("src/modules/learning/learning_router.c", "db1/db1.h"),
-    ("src/modules/memory/memory_advanced.c", "db1/db1.h"),
-    ("src/modules/protocols/mcp/mcp_client_registry.c", "db1/mcp_osv_cache.h"),
-    ("src/modules/roundtable/delegate_ensemble.c", "db1/cost_fold.h"),
-    ("src/modules/roundtable/delegate_ensemble_review.c", "db1/cost_fold.h"),
-    ("src/modules/roundtable/roundtable_pipeline_capture.c", "db1/roundtable_pipeline.h"),
-    ("src/modules/roundtable/roundtable_pipeline_eval.c", "db1/roundtable_pipeline.h"),
-    ("src/modules/tools/agent_tools.c", "db1/db1.h"),
-    ("src/modules/tools/agent_tools_dispatch.c", "db1/db1.h"),
-    ("src/modules/workflows/wfe_advance_exec.c", "db1/wfe_binding.h"),
-    ("src/modules/workflows/wfe_advance_exec.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_approval.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_autonomy.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_bind_ingress.c", "db1/wfe_binding.h"),
-    ("src/modules/workflows/wfe_bind_ingress.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_block_resolve.c", "db1/wfe_binding.h"),
-    ("src/modules/workflows/wfe_block_resolve.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_blocks.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_engine.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_live_foreach.c", "db1/db1.h"),
-    ("src/modules/workflows/wfe_live_foreach.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_roundtable.c", "db1/wfe_store.h"),
-    ("src/modules/workflows/wfe_scheduler.c", "db1/wfe_store.h"),
     ("src/modules/config/config_sections.c", "economizer/economizer.h"),
     ("src/modules/delegates/delegate_prompt.c", "kb_client/kb_client.h"),
     ("src/modules/delegates/delegate_run_phases.c", "guardrails/guardrails.h"),

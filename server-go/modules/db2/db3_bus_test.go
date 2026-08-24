@@ -123,7 +123,7 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 				flags |= bus.FMore
 			}
 			client.events <- bus.Event{Frame: bus.Frame{HdrFlags: flags,
-				EventKind: protocol.EventSearch, CorrelationID: correlation, PrincipalRef: 1001,
+				EventKind: protocol.EventSearch, CorrelationID: correlation, PrincipalRef: 457,
 				SrcHandle: 41}, Payload: wire[offset:end]}
 		}
 	}
@@ -141,10 +141,10 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueueCapabilities(t, client, 1001, 41, 1, db3Capabilities(7, true))
+	enqueueCapabilities(t, client, 457, 41, 1, db3Capabilities(7, true))
 	waitDB3(t, func() bool {
 		return router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteSelect,
-			Principal: 1001, CapabilityGeneration: 7}).Result == protocol.RouteOK
+			Principal: 457, CapabilityGeneration: 7}).Result == protocol.RouteOK
 	})
 	outcome := router.Search(context.Background(), db3Request())
 	if outcome.Result != DB3OK || outcome.Route != DB3External ||
@@ -156,14 +156,14 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 		OperationID: 1001, Generation: 7, Watermark: 1001, Result: protocol.AppliedOK,
 	})
 	client.events <- bus.Event{Frame: bus.Frame{HdrFlags: bus.FNotification,
-		EventKind: protocol.EventApplied, PrincipalRef: 1001, SrcHandle: 41}, Payload: appliedWire}
+		EventKind: protocol.EventApplied, PrincipalRef: 457, SrcHandle: 41}, Payload: appliedWire}
 	waitDB3(t, func() bool {
 		observedMu.Lock()
 		defer observedMu.Unlock()
 		return observed.OperationID == 1001
 	})
 	observedMu.Lock()
-	if observedPrincipal != 1001 || observed.Watermark != 1001 {
+	if observedPrincipal != 457 || observed.Watermark != 1001 {
 		t.Fatalf("applied observation = principal %d, %+v", observedPrincipal, observed)
 	}
 	observedMu.Unlock()
@@ -171,7 +171,7 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 	routeWire, _ := protocol.EncodeRouteRequest(protocol.RouteRequest{RequestID: 91,
 		Action: protocol.RouteQuery})
 	client.events <- bus.Event{Frame: bus.Frame{HdrFlags: bus.FRequest,
-		EventKind: protocol.EventRoute, CorrelationID: 55, PrincipalRef: 500}, Payload: routeWire}
+		EventKind: protocol.EventRoute, CorrelationID: 55, PrincipalRef: 456}, Payload: routeWire}
 	var replyWire []byte
 	for {
 		part := <-client.repls
@@ -184,7 +184,7 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 		}
 	}
 	routeReply, err := protocol.DecodeRouteReply(replyWire)
-	if err != nil || routeReply.SelectedPrincipal != 1001 || routeReply.ProviderGeneration != 7 {
+	if err != nil || routeReply.SelectedPrincipal != 457 || routeReply.ProviderGeneration != 7 {
 		t.Fatalf("route reply = (%+v, %v)", routeReply, err)
 	}
 	if endpoint.Err() != nil {
@@ -202,7 +202,7 @@ func TestDB3BusRouterRejectsWrongProviderAndSupportsExplicitFallback(t *testing.
 		wire, _ := protocol.EncodeSearchReply(reply)
 		client.events <- bus.Event{Frame: bus.Frame{HdrFlags: bus.FReply,
 			EventKind: protocol.EventSearch, CorrelationID: correlation,
-			PrincipalRef: 1002, SrcHandle: 42}, Payload: wire}
+			PrincipalRef: 458, SrcHandle: 42}, Payload: wire}
 	}
 	router, _, err := newDB3BusRouter(ctx, client,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
@@ -211,10 +211,10 @@ func TestDB3BusRouterRejectsWrongProviderAndSupportsExplicitFallback(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueueCapabilities(t, client, 1001, 41, 1, db3Capabilities(7, true))
+	enqueueCapabilities(t, client, 457, 41, 1, db3Capabilities(7, true))
 	waitDB3(t, func() bool {
 		return router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteSelect,
-			Principal: 1001, CapabilityGeneration: 7, Fallback: true}).Result == protocol.RouteOK
+			Principal: 457, CapabilityGeneration: 7, Fallback: true}).Result == protocol.RouteOK
 	})
 	outcome := router.Search(context.Background(), db3Request())
 	if outcome.Result != DB3OK || outcome.Route != DB3ExplicitFallback ||
@@ -279,10 +279,10 @@ func TestDB3BusRouterCancelsOutstandingSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueueCapabilities(t, client, 1001, 41, 1, db3Capabilities(7, true))
+	enqueueCapabilities(t, client, 457, 41, 1, db3Capabilities(7, true))
 	waitDB3(t, func() bool {
 		return router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteSelect,
-			Principal: 1001, CapabilityGeneration: 7}).Result == protocol.RouteOK
+			Principal: 457, CapabilityGeneration: 7}).Result == protocol.RouteOK
 	})
 	callCtx, callCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer callCancel()
@@ -323,7 +323,7 @@ func TestDB3BusRouterPersistsApplyProviderBeforeRouting(t *testing.T) {
 		}, allowAll, DB3BusObservers{
 			Capabilities: func(_ context.Context, principal, handle uint32, sequence uint64,
 				capabilities protocol.Capabilities) error {
-				if principal != 1001 || handle != 41 || sequence != 1 ||
+				if principal != 457 || handle != 41 || sequence != 1 ||
 					capabilities.Generation != 7 {
 					t.Fatalf("capability evidence = %d/%d/%d %+v",
 						principal, handle, sequence, capabilities)
@@ -335,7 +335,7 @@ func TestDB3BusRouterPersistsApplyProviderBeforeRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueueCapabilities(t, client, 1001, 41, 1, db3Capabilities(7, true))
+	enqueueCapabilities(t, client, 457, 41, 1, db3Capabilities(7, true))
 	waitDB3(t, func() bool { return observed.Load() == 1 })
 	if got := router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteQuery}); got.SelectedPrincipal != 0 {
 		t.Fatalf("unpersisted provider became route = %+v", got)
@@ -345,10 +345,10 @@ func TestDB3BusRouterPersistsApplyProviderBeforeRouting(t *testing.T) {
 	searchOnly := db3Capabilities(7, true)
 	searchOnly.Operations = protocol.OperationSearch
 	searchOnly.MaxBatch = 0
-	enqueueCapabilities(t, client, 2002, 42, 1, searchOnly)
+	enqueueCapabilities(t, client, 460, 42, 1, searchOnly)
 	waitDB3(t, func() bool {
 		return router.Route(protocol.RouteRequest{RequestID: 2, Action: protocol.RouteQuery}).
-			SelectedPrincipal == 2002
+			SelectedPrincipal == 460
 	})
 	if observed.Load() != 1 {
 		t.Fatalf("search-only provider was persisted: %d", observed.Load())

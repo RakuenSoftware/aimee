@@ -14,7 +14,7 @@
 #include "modules/workspace/workspace_handle.h"
 #include "modules/workspace/workspace_runner_registry.h"
 #include "modules/git/forge_credentials.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "compute_pool.h"
 #include "cJSON.h"
