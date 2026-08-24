@@ -131,8 +131,8 @@ int main(void)
                      " VALUES ('temporal-fixture','assert','test','system',100,'open')",
                      err, sizeof(err));
    assert(sql_rc == 0);
-   sql_rc = aimee_pg_exec(
-       db2_conn(),
+   const char *temporal_fixture_sql =
+       "BEGIN;"
        "INSERT INTO entity_edges"
        " (id,source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,"
        " confidence,authority_rank,valid_from,valid_until,asserted_at,superseded_at,commit_id) "
@@ -142,8 +142,14 @@ int main(void)
        " '2026-01-02T00:00:00Z','2026-03-02T00:00:00Z','temporal-fixture'),"
        " (9002,'Atlas','deployment_state','new','semantic','world_fact','persistent','A',"
        "  0.95,80,'2026-03-01T00:00:00Z','','2026-03-02T00:00:00Z','',"
-       " 'temporal-fixture')",
-       err, sizeof(err));
+       " 'temporal-fixture');"
+       "INSERT INTO fact_graph_changes"
+       " (commit_id,assertion_id,action,existed_before,existed_after,after_lifecycle,"
+       " after_confidence,after_authority_rank,after_version) VALUES"
+       " ('temporal-fixture',9001,'assert',0,1,'persistent',0.9,80,1),"
+       " ('temporal-fixture',9002,'assert',0,1,'persistent',0.95,80,1);"
+       "COMMIT";
+   sql_rc = aimee_pg_exec(db2_conn(), temporal_fixture_sql, err, sizeof(err));
    if (sql_rc != 0)
       fprintf(stderr, "semantic fixture insert failed: %s\n", err);
    assert(sql_rc == 0);
