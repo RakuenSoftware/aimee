@@ -1,29 +1,37 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — residual scope only. S1 and S2 are complete, S3 is in progress, and S4/S6 remain open.
-- **Completed slices:** The C source boundary, separately buildable process shell, generated health
-  contract/client, declaration and
-  closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
-  support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
-  deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link closure is complete. Its closure records 139 external symbols, all declared system links;
-  packaging, injected-contract, portable API, private-implementation, and dead-code debt are zero.
-  The disabled-by-default runtime bundle now compiles all 138 DB2 owner translation units into a
-  real `aimee-module-db2`, opens only from `AIMEE_DB2_URL`, and serves health through strong backend
-  symbols; missing or failed initialization refuses attachment without logging the DSN. Its
-  descriptor also owns deterministic SQL-to-header generation, so a clean runtime-bundle build no
-  longer depends on a prior monolithic build writing `src/schema_data.h`. Its standalone repository
-  now materializes the descriptor's explicit 55-header compatibility closure, keeps those files
-  distinct from DB2 ownership, and includes them in the reproducible source pin; all 138 DB2
-  translation units compile and link from the isolated export. The first live S3 replay group now
-  starts that packaged executable against fresh PostgreSQL, crosses an executable-bound event bus,
-  compares canonical health bytes, verifies the recorded dimension and schema effects, and serves
-  that effective dimension plus a bounded PostgreSQL pool snapshot through post-bootstrap envelope
-  operations. This is
-  explicitly not the S4 ownership cutover or
-  the S6 pure-Go DB2 port: production remains on direct calls, the vector path remains in DB2, and no
-  external provider grant ships until the complete C backend passes replay and S4 activates it.
-- **Date:** 2026-08-15.
+- **State:** PENDING — S1-S3 and the contract half of S5 are complete; S4, the rest of S5, and
+  S6/S7 remain open. Measured against the branch rather than the last narrative: `aimee-kb` still
+  links libpq and still compiles 126 C DB2 translation units, so its DB2 ownership has not
+  transferred. The pool-level move has: `db2` and the control plane reach PostgreSQL through the
+  postgres module rather than through pools of their own.
+- **Where each goal stands.**
+  - **A PostgreSQL module in Go, on the standard module and bus machinery.** Done. `postgres` is a
+    standard module -- `enabled_by_default`, a supported runtime toggle, `ownership_complete`,
+    depending only on `config` and `module-runtime` -- serving two bus stages over one pool:
+    `postgres-health` (11265) and `postgres-sql` (11266), the latter seven operations with typed
+    values and SQLSTATE-carrying statuses. It owns no domain, and must not: a module that knew what
+    a row meant would be two modules.
+  - **aimee-kb's database moved onto it.** The destination is complete and the switch has not been
+    thrown. 96 Go sources implement all 445 catalogued operations (`gocoverage` 445/445, `gosync`
+    pins 445) and the replay exercises all 445 against real PostgreSQL. But the `db2` descriptor is
+    `enabled_by_default: false` with `runtime_toggle.supported: false` and no `ownership_complete`;
+    `L_KB` still carries `$(PQ_LIB)`, and `$(KB)` still links `KB_DB2_PG_OBJS`, `KB_DB2_OBJS` and
+    `KB_DB2_HOST_ADAPTER_OBJS`. Two implementations of every operation ship in the image and only
+    the C one is reachable. This is S4 and it is the largest remaining piece.
+  - **An external vector database module.** Half. The contract an external store implements is built
+    and proven: wire and codecs, capability announcement and detection, a provider registry, routed
+    searches, revalidation of candidates a third party returned, and the durable outbox that fans
+    committed mutations out. Nothing implements it. There is no provider module and no conformance
+    harness, so S5's exit -- an attached external module serving every eligible operation, and
+    detaching it returning service to the native path -- has never been demonstrated by anything.
+    The write side is also short: points now carry `visibility` but not `generation`, so a
+    currency-filtered search would match nothing.
+- **The eligible set is deliberately not everything.** `vector-portability.json` classifies 83
+  symbols: 14 portable-now, 32 portable-after-commit, 13 provider-local, 21 retained by DB2
+  authority, 3 deferred analytics. 46 can leave and 34 must not -- externalising the last 34 would
+  move authority rather than work, which is the thing a provider boundary must not do.
+- **Date:** 2026-08-24.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
 - **Thesis:** DB2 was created as a portable source boundary and its storage owner now resides at
   `src/modules/db2/c`. Preserve its behavior by putting that C implementation behind a KB-local
@@ -49,10 +57,13 @@ There is no cgo bridge. The module boundary is language-neutral: phase one uses 
 client; phase two uses the Go bus client. Production has one authoritative DB2 state owner,
 one schema owner, and one implementation of every declared DB2 operation in both phases.
 
-The existing read-only `server-go/modules/postgres` health process is evidence that Go can open
-PostgreSQL and serve a KB-local event, but changing or retiring it is not part of this migration.
-It owns no DB2 schema or mutation. A later cleanup may fold that bounded observer into DB2 after
-the requested two-step move; this proposal neither depends on nor blocks on that cleanup.
+`server-go/modules/postgres` was a read-only health process when this was written, and the plan
+said changing it was not part of the migration. That is no longer what it is. It now owns
+PostgreSQL for whichever module owns the rows -- statements, owner-scoped transactions and
+versioned migration, over the bus -- and DB2 reaches the database through it rather than through a
+pool of its own. It still owns no DB2 schema and no domain, which is the property that made it
+safe to depend on. The two-step move below is unchanged; what changed is that step one no longer
+opens its own connection.
 
 This is a physical and language relocation, not a database redesign. PostgreSQL remains DB2;
 `AIMEE_DB2_URL`, table identities, durable row IDs, tenant semantics, vector dimensions, and
