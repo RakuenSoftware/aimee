@@ -207,8 +207,8 @@ int main(void)
    assert(saw_canonical_rendering);
    assert(aimee_pg_exec(db2_conn(),
                         "INSERT INTO memory_embeddings"
-                        " (point_id,embedding,record_type,kind,payload_json)"
-                        " VALUES(2000000009001,'[]','semantic_assertion','assertion_v1','{}')",
+                        " (point_id,record_type,kind,payload_json)"
+                        " VALUES(2000000009001,'semantic_assertion','assertion_v1','{}')",
                         err, sizeof(err)) == 0);
    indexed = db2_semantic_assertion_index_list(9000, index_rows, 4);
    for (int i = 0; i < indexed; i++)
