@@ -17,6 +17,7 @@
  * `acfg` may be NULL to check only the built-in/adapter sets. */
 int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
+#include "memory_authority.h" /* memory_authority_t — attested write authority */
 
 /* Forward declaration */
 typedef struct cJSON cJSON;
@@ -91,12 +92,12 @@ typedef struct cJSON cJSON;
 #define SHTTP_MAX_ROUNDTABLE_BODY (2 * ROUNDTABLE_MAX_ARTIFACT)
 
 /* Per-method payload size limits */
-#define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
-#define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
-#define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
+#define LIMIT_MEMORY     (256 * 1024)      /* 256KB for memory operations */
+#define LIMIT_TOOL       (4 * 1024 * 1024) /* 4MB for tool I/O */
+#define LIMIT_DELEGATE   (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
 #define LIMIT_ROUNDTABLE SHTTP_MAX_ROUNDTABLE_BODY /* artifact + JSON escaping; see above */
-#define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
-#define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
+#define LIMIT_CHAT       (512 * 1024)              /* 512KB for chat messages */
+#define LIMIT_INGEST     (1024 * 1024)             /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
    (3 * 1024 * 1024)               /* 3MB: session transcript snapshots (< SHTTP_MAX_BODY) */
 #define LIMIT_DEFAULT (256 * 1024) /* 256KB default */
@@ -146,14 +147,22 @@ typedef struct cJSON cJSON;
  * any capability check. kb then independently requires admin or team-lead authority. */
 #define CAP_GRANT_ADMIN (1u << 18)
 
+/* Destructive memory administration: memory.delete — the ONLY memory operation
+ * that can destroy a stored value rather than version it. Deliberately separate
+ * from CAP_MEMORY_WRITE, mirroring rules.delete/CAP_RULES_ADMIN vs rules.*: a
+ * grant that lets an agent remember must not, by itself, let it forget. It sits
+ * inside CAPS_AUTHENTICATED (an operator-grade bearer may still administer its
+ * own store) but outside the narrower memory:write grants handed to delegates. */
+#define CAP_MEMORY_ADMIN (1u << 19)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x7FFFFu
+#define CAPS_ALL 0xFFFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
 #define CAPS_AUTHENTICATED                                                                         \
    (CAPS_READ_ONLY | CAP_DELEGATE | CAP_TOOL_EXECUTE | CAP_TOOL_BASH | CAP_TOOL_WRITE |            \
-    CAP_MEMORY_WRITE | CAP_RULES_ADMIN | CAP_SESSION_ADMIN)
+    CAP_MEMORY_WRITE | CAP_MEMORY_ADMIN | CAP_RULES_ADMIN | CAP_SESSION_ADMIN)
 
 /* aimee.api.remote_writes levels: how far an authorized TCP bearer may go. The
  * UDS path is always full (CAPS_ALL); these gate the optional TCP listener.
@@ -349,6 +358,50 @@ int server_ct_equal(const char *a, const char *b);
 uint32_t server_capability_for_method(const char *method);
 const method_policy_t *server_policy_for_method(const char *method);
 
+/* Does this request come from a PERSON?
+ *
+ * Capability answers what a caller may do; this answers who it is, which is a
+ * different question and the one the memory and typed-fact layers ask before
+ * letting a write speak as the user (typed-fact §5, memory_authority.h).
+ *
+ * The answer is the ACCOUNT, and nothing else. Authentication happens once, at
+ * message receipt: the channel (mTLS), the session (bearer) and the account
+ * (OIDC / PAM host account / webuser / enrolled first-user cert) are each
+ * verified there, and a request that fails any of them never reaches a handler.
+ * By the time this is asked, identity is already proven -- so the only question
+ * left is whether the proven identity names a person, which is exactly "is
+ * there an account".
+ *
+ * This deliberately does NOT look at the transport. An earlier version keyed
+ * off attested_transport_t and treated UDS/webchat as people and everything
+ * else -- including mTLS and OIDC-over-TCP -- as anonymous agents. That was
+ * wrong twice over: an mTLS client cert names a specific enrolled machine
+ * (narrower than a person, not weaker), and an OIDC subject is the same account
+ * whichever socket carried it. It also disagreed with aimee-kb, which derives
+ * the same decision from the authenticated principal, so one caller could be a
+ * person to one daemon and an agent to the other.
+ *
+ * The account comes from request_context_caller_subject(), which is
+ * verify-then-trust at every entry: a kernel-verified UDS peer uid resolved to
+ * a host account, a verified KB-signed identity token's subject, an enrolled
+ * client certificate's grant, or a proxy stamp honoured only from the root UDS
+ * hop or a caller presenting the vaulted ingress secret. A plain authorized TCP
+ * client cannot choose its own.
+ *
+ * Empty account -> 0. That is a bare bearer: it authorizes the call but names
+ * nobody, so it cannot speak as the user. Such a caller is not refused
+ * anything -- it acts with model authority, which is non-destructive and cannot
+ * outrank the user's own facts. */
+int server_account_is_person(const char *account);
+
+/* The memory-write authority a request from `account` has earned. Shorthand for
+ * the above at the memory surfaces, so the mapping lives in exactly one place. */
+memory_authority_t server_account_memory_authority(const char *account);
+
+/* The verified account for the request being handled, or "" if it proved none.
+ * The single point every surface below ingress asks "who is this". */
+const char *server_request_account(void);
+
 /* Session handlers (server_session.c) */
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -375,14 +428,33 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
  * RETURNS the result, writes to no connection. The handler above is now only the
  * RPC surface's connection write. This is the shape every surface needs, and the
  * lack of it is why capability surface was declared four separate times. */
-cJSON *memory_store_command(const cJSON *req);
+/* Takes the write's authority for the same reason: it is persisted as the new
+ * row's provenance and governs what the typed-fact drain may later mine from it
+ * (memory.h). handle_memory_store derives it from the connection's attestation. */
+cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
-cJSON *memory_delete_command(cJSON *req);
+/* Takes the request's authenticated ACCOUNT because only a person's delete
+ * DESTROYS; a caller with no account that clears CAP_MEMORY_ADMIN retires the
+ * row instead. The response reports which happened via `destroyed`. */
+cJSON *memory_delete_command(cJSON *req, const char *account);
+/* Typed-fact correction surface (§3 / §4); all CAP_MEMORY_WRITE.
+ *
+ * facts_retract_command takes the request's authenticated ACCOUNT because a
+ * retraction's authority (typed-fact §5) decides whether it may delete a
+ * user-stated Class-A fact. It is derived from that account via
+ * server_account_is_person(), never from the request body and never from which
+ * socket the request arrived on. */
+cJSON *facts_retract_command(cJSON *req, const char *account);
+cJSON *entities_merge_command(cJSON *req);
+cJSON *entities_unmerge_command(cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -393,6 +465,11 @@ int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Canonical investigation packet shared by the command and MCP surfaces.  The
+ * returned object is owned by the caller.  It performs the product-level
+ * context -> hybrid fallback and attaches systemic-scope evidence. */
+cJSON *server_index_investigate_packet(const char *query, const char *symbol, const char *project,
+                                       int include_code, int fallback_enabled);
 int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -1,5 +1,9 @@
 # P7-reseal-b primary vault maintenance barrier
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered.
 - **Depends on:** signed-HWM steady-state admission and P7-reseal-a.
 

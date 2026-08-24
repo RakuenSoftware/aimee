@@ -35,7 +35,38 @@ static long target_rows(const code_project_manifest_t *m, const char *table)
 static void exec_ok(const char *sql)
 {
    char err[256] = "";
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "exec_ok failed: %s\n  sql: %s\n", err, sql);
+      assert(0 && "exec_ok");
+   }
+}
+
+/* signature_bytes is BYTEA. Postgres reads x'01' as a BIT literal and sqlite as a
+ * blob, so there is no shared literal spelling -- bind the bytes instead, the way
+ * sketch.c writes this column in production. */
+static void insert_signature(const char *project, int generation, const char *path,
+                             unsigned char byte)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO kb_minhash_signatures(project,generation,file_path,signature_bytes)"
+       " VALUES(?1,?2,?3,?4)",
+       err, sizeof(err));
+   assert(st);
+   char gen[16];
+   snprintf(gen, sizeof(gen), "%d", generation);
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", gen);
+   aimee_pg_bind_text(st, "?3", path);
+   aimee_pg_bind_blob(st, "?4", &byte, 1);
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
+   {
+      fprintf(stderr, "insert_signature(%s,%d,%s) failed: %s\n", project, generation, path, err);
+      assert(0 && "insert_signature");
+   }
+   aimee_pg_finalize(st);
 }
 
 static void test_move_detach_readd(void)
@@ -51,8 +82,7 @@ static void test_move_detach_readd(void)
            " VALUES('stable-project',1,'docs/same.md','old')");
    exec_ok("INSERT INTO kb_code_unit_jobs(project,generation,file_path,symbol)"
            " VALUES('stable-project',1,'src/main.c','stable_symbol')");
-   exec_ok("INSERT INTO kb_minhash_signatures(project,generation,file_path,signature_bytes)"
-           " VALUES('stable-project',1,'docs/same.md',x'01')");
+   insert_signature("stable-project", 1, "docs/same.md", 0x01);
    exec_ok("INSERT INTO kb_lsh_buckets(project,generation,band,band_hash,file_path)"
            " VALUES('stable-project',1,0,'same','docs/same.md')");
    exec_ok("INSERT INTO code_projection_generations(project,state)"
@@ -109,8 +139,7 @@ static void test_move_detach_readd(void)
            " VALUES('stable-project',2,'docs/same.md','new')");
    exec_ok("INSERT INTO kb_code_unit_jobs(project,generation,file_path,symbol)"
            " VALUES('stable-project',2,'src/main.c','stable_symbol')");
-   exec_ok("INSERT INTO kb_minhash_signatures(project,generation,file_path,signature_bytes)"
-           " VALUES('stable-project',2,'docs/same.md',x'02')");
+   insert_signature("stable-project", 2, "docs/same.md", 0x02);
    exec_ok("INSERT INTO kb_lsh_buckets(project,generation,band,band_hash,file_path)"
            " VALUES('stable-project',2,0,'same','docs/same.md')");
    assert(scalar("SELECT COUNT(*) FROM kb_file_index WHERE project='stable-project'"
@@ -228,7 +257,13 @@ static void test_manifest_confirmation_and_audit(void)
    assert(scalar("SELECT COUNT(*) FROM kb_audit_event WHERE action='code.index.purge'"
                  " AND actor_principal='tester' AND subject='stable-project'"
                  " AND detail LIKE '%manifest_hash%' AND detail LIKE '%generation%'"
-                 " AND detail LIKE '%cleanup\\u000a%' AND length(detail)>3000") == 1);
+                 /* ESCAPE '~': backslash is LIKE's default escape character in
+                  * Postgres (sqlite has none), so an unescaped '\\u' in the pattern
+                  * matches a bare 'u' there and the row is never found. Naming an
+                  * escape character neither engine sees in the needle makes the
+                  * backslash literal on both. */
+                 " AND detail LIKE '%cleanup\\u000a%' ESCAPE '~'"
+                 " AND length(detail)>3000") == 1);
    exec_ok("ALTER TABLE code_projection_edges_unavailable RENAME TO code_projection_edges");
    exec_ok("ALTER TABLE code_projection_communities_unavailable"
            " RENAME TO code_projection_communities");
@@ -263,9 +298,8 @@ static void test_gc_audit(void)
    exec_ok("INSERT INTO kb_file_index(project,generation,file_path,file_hash)"
            " VALUES('gc-project',1,'docs/retired.md','old'),"
            " ('gc-project',2,'docs/current.md','new')");
-   exec_ok("INSERT INTO kb_minhash_signatures"
-           "(project,generation,file_path,signature_bytes)"
-           " VALUES('gc-project',1,'src/old.c',x'01'),('gc-project',2,'src/new.c',x'02')");
+   insert_signature("gc-project", 1, "src/old.c", 0x01);
+   insert_signature("gc-project", 2, "src/new.c", 0x02);
    exec_ok("INSERT INTO kb_lsh_buckets(project,generation,band,band_hash,file_path)"
            " VALUES('gc-project',1,0,'old','src/old.c'),"
            " ('gc-project',2,0,'new','src/new.c')");

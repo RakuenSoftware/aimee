@@ -1,5 +1,9 @@
 # Proposal: structured PDF ingestion + coordinate-anchored evidence layer (KB)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **DONE — Phases 1–2 + the access-controlled evidence surface + agent reachability
   shipped; proposal filed.** Phase 1 (#702/#706: extractor + geometry + §6 sensitivity/upload
   enforcement), Phase 2 (#712 search_chunks; #715 §6 quarantine admin; #717 §5 escalation reads

@@ -24,6 +24,12 @@ aimee-forwarder
 /aimee-negation-eval
 /aimee-blast-radius-eval
 /aimee-runtime-web
+# The Go binaries, under the names they are deployed as: server-go/cmd/aimee-server
+# builds to aimee-wfe and cmd/aimee-module to aimee-module. Their C siblings are
+# ignored above; these two were not, so a build left them as untracked noise in
+# every `git status` (and `gh pr create` warned about them).
+/aimee-wfe
+/aimee-module
 # `go build ./...` inside runtime-web/ drops the binary next to its source; it was
 # tracked for a while and rode along in unrelated commits.
 runtime-web/runtime-web

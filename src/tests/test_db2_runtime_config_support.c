@@ -13,7 +13,6 @@ static void test_fail_closed_defaults(void)
    assert(config_kb_curator_cross_repo_k() == 0);
    assert(config_kb_pdf_vector_enabled() == 0);
    assert(config_present() == 0);
-   assert(config_typed_facts_enabled() == 0);
 }
 
 static void test_full_snapshot(void)
@@ -36,7 +35,6 @@ static void test_full_snapshot(void)
        .kb_pdf_vector_enabled = 14,
        .kb_purge_fence_ttl_s = 15,
        .present = 16,
-       .typed_facts_enabled = 17,
        .embedder_command = "configured-embedder --json",
    };
    assert(db2_runtime_config_install(&cfg) == 0);
@@ -56,7 +54,6 @@ static void test_full_snapshot(void)
    assert(config_kb_pdf_vector_enabled() == 14);
    assert(config_kb_purge_fence_ttl_s() == 15);
    assert(config_present() == 16);
-   assert(config_typed_facts_enabled() == 17);
    assert(strcmp(config_embedder_command_current(NULL), "configured-embedder --json") == 0);
    const char *requested = "request-specific";
    assert(config_embedder_command_current(requested) == requested);

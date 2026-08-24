@@ -18,11 +18,18 @@ through the module include root:
 | `aimee/protocols/mcp/mcp_client.h` | MCP transports, JSON-RPC framing, and client-session contract |
 | `aimee/protocols/mcp/mcp_client_registry.h` | Configured remote-client registry, discovery, and namespaced dispatch |
 | `aimee/protocols/mcp/mcp_tools.h` | Native MCP catalog, presentation profiles, discovery tools, and family demultiplexing |
+| `aimee/protocols/mcp/mcp_group_tool.h` | One multiplexed MCP tool per command-registry group, built from the registry so advertised verbs cannot drift from registered ones |
+| `aimee/protocols/mcp/mcp_osv_gate.h` | The OSV malware gate for launching an MCP server, shared by the `aimee.yaml` client registry and plugin-module admission |
 
 Headers used only to compose module-local tool families remain beside their implementation and are
 declared private. Production code outside `src/modules/protocols/` may not include those headers or
 use a bare/source-tree spelling for a public header. There is one canonical header for each public
 contract; the retired paths have no forwarding copies.
+
+`mcp_osv_gate.h` is public specifically because two callers must not drift: the `aimee.yaml` client
+registry (`mcp_client_registry.c`) and the plugin-module admission path (`src/module_commands.c`) run
+the SAME function. A second copy of that policy would pass every test while enforcing something
+different on the path that runs third-party code.
 
 Canonical module source includes the MCP client, registry, tool-table/profile, gateway bridge, and
 skill-tool code plus server-direction ACP in `src/modules/protocols/acp/acp_server.c`. Significant MCP server

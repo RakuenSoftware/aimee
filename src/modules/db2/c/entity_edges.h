@@ -46,7 +46,15 @@ extern "C"
     * the typed-fact gate (db2_fact_commit) — callers route through it, not here
     * directly. Bumps weight on a repeat (source,relation,target) and upgrades the
     * stored confidence_class/confidence when the new write outranks it (§5; never
-    * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C"). 0/-1. */
+    * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C").
+    *
+    * On a FUNCTIONAL (single-valued) relation a differing object contradicts the
+    * prior one, so the relation's correction_behavior applies — bounded by class
+    * rank (§5): a write only corrects values it outranks or matches, and a write
+    * outranked by a current value is DROPPED rather than left contradicting it.
+    * So a model-authored (Class B/C) assertion can neither supersede nor sit
+    * beside a user-stated Class-A fact. Returns 0 on success (including a dropped
+    * outranked write, which leaves *out_added = 0), -1 on error. */
    int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
                                        int relation_id, int subject_kind, int object_kind,
                                        const char *confidence_class, double confidence,
@@ -77,10 +85,16 @@ extern "C"
     * DESC). Used by memory_episodes BFS. Returns full edge_t rows. */
    int db2_entity_edge_walk_step(const char *node, edge_t *out, int max);
 
-   /* Typed walk-step: same shape as db2_entity_edge_walk_step but fills
-    * a richer struct with relation_id / subject_kind / object_kind for
-    * the typed BFS in memory_episodes. Legacy NULL columns surface as
-    * REL_CO_DISCUSSED (12) / NODE_OTHER (99). */
+   /* Walk-step with ontology kinds: same traversal as db2_entity_edge_walk_step,
+    * but fills a richer struct carrying relation_id / subject_kind / object_kind
+    * for the BFS in memory_episodes. Legacy NULL columns surface as
+    * REL_CO_DISCUSSED (12) / NODE_OTHER (99).
+    *
+    * "kinds" here means the ontology kind COLUMNS, and nothing more. This was
+    * called *_typed, which read as "walks typed facts" and is not what it does or
+    * ever did — the distinction between the two edge populations is edge_class,
+    * not this struct. Like every traversal reader it sees both populations
+    * (semantic rows constrained to current); it is named for its output shape. */
    typedef struct
    {
       char source[128];
@@ -90,9 +104,10 @@ extern "C"
       int subject_kind;
       int object_kind;
       int weight;
-   } db2_entity_edge_typed_t;
+   } db2_entity_edge_with_kinds_t;
 
-   int db2_entity_edge_walk_step_typed(const char *node, db2_entity_edge_typed_t *out, int max);
+   int db2_entity_edge_walk_step_with_kinds(const char *node, db2_entity_edge_with_kinds_t *out,
+                                            int max);
 
    /* memory_scan recurring topics: top targets where source=? AND
     * relation=?, GROUP BY target ORDER BY SUM(weight) DESC. */
@@ -127,28 +142,33 @@ extern "C"
     * rows ordered by weight DESC. */
    int db2_entity_edge_search_by_token(const char *token, edge_t *out, int max, int limit_sql);
 
-   /* Maintenance: drop edges where neither endpoint appears in any
-    * L1/L2 memory key/content. Returns rows deleted. */
+   /* Maintenance: drop CO-OCCURRENCE edges where neither endpoint appears in any
+    * L1/L2 memory key/content. Typed-fact ('semantic') edges are never pruned
+    * this way — they were asserted directly rather than observed, and leave only
+    * by §4/§5 retraction or expiry, both of which retain the row. Returns rows
+    * deleted. */
    int db2_entity_edge_prune_orphans(void);
 
    /* Maintenance: normalize weights per relation so the maximum is 100.
     * Returns rows updated. */
    int db2_entity_edge_normalize_weights(void);
 
-   /* (relation_id, subject_kind, object_kind) triple from
-    * memory_relation_schema. Subject/object kinds use the integer codes
-    * from memory_ontology_node_kind_t with 99 as the wildcard "any". */
+   /* (relation_id, subject_kind, object_kind) triple carried by
+    * relations.schema_list. Subject/object kinds use the integer codes from
+    * memory_ontology_node_kind_t with 99 as the wildcard "any".
+    *
+    * The rows are served from the ontology's static rule table (see
+    * memory_ontology_rules) because that is what memory_ontology_validate()
+    * enforces. The `memory_relation_schema` TABLE has DDL and an index but no
+    * writer anywhere in the tree, so the reader that used to back this surface
+    * could only ever return zero rows; it was removed rather than left as a
+    * second, always-empty source of truth for the same question. */
    typedef struct
    {
       int relation_id;
       int subject_kind;
       int object_kind;
    } db2_relation_schema_row_t;
-
-   /* List the memory_relation_schema rows ordered by
-    * (relation_id, subject_kind, object_kind). Returns rows written
-    * into |out|. */
-   int db2_relation_schema_list(db2_relation_schema_row_t *out, int max);
 
    /* Rich edge row for `graph explain`: full provenance + scoring fields. */
    typedef struct
@@ -170,13 +190,20 @@ extern "C"
 
    /* --- Phase 4: utility-aware graph scoring --- */
 
-   /* Extended neighbour result including utility_score for scoring. */
+   /* Extended neighbour result including utility_score for scoring.
+    * `relation` and `confidence_class` let the caller score the edge it
+    * actually traversed rather than falling back to the generic gravity
+    * default. is_semantic=1 marks a typed-fact edge (edge_class='semantic');
+    * confidence_class is only meaningful when it is set. */
    typedef struct
    {
       char node[GRAPH_ENDPOINT_MAX];
       int weight;
       double utility_score;
       double effective_utility; /* decayed utility after half-life */
+      char relation[64];
+      char confidence_class[4]; /* "A"/"B"/"C"; empty for co-occurrence */
+      int is_semantic;
    } db2_entity_edge_weighted_neighbor_t;
 
    /* Utility half-life decay.
@@ -209,6 +236,9 @@ extern "C"
       char node[GRAPH_ENDPOINT_MAX];
       int weight;
       int hop; /* 1 or 2 */
+      char relation[64];
+      char confidence_class[4]; /* "A"/"B"/"C"; empty for co-occurrence */
+      int is_semantic;
    } db2_entity_edge_hop_t;
 
    int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per_hop,

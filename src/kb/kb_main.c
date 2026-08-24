@@ -2,6 +2,7 @@
 #include "aimee_home.h"
 #include "agent_exec.h"
 #include "config.h"
+#include "config_client.h"
 #include "config_database.h"
 #include "css_render_cmd.h"
 #include "modules/db2/c/code_index.h"
@@ -30,6 +31,7 @@
 #include "kb_sidecar_identity.h"
 #include "kb_paths.h"
 #include "kb_service.h"
+#include "kb_service_kb.h"
 #include "kb_tenancy_cli.h"
 #include "log.h"
 #include "lifecycle.h"
@@ -55,6 +57,7 @@
 #include "runtime_secret.h"           /* wipe Vault-sourced runtime cache at exit */
 #include "kb_memory_audit_bridge.h"   /* record memory mutations on aimee-kb's own obs bus */
 #include "kb_module_stage_adapters.h" /* process-module calls over aimee-kb's event bus */
+#include "kb_obs_bus_adapter.h"       /* bus durability rows -> PostgreSQL WORM */
 #include <aimee/audit/obs_bus.h>
 #include "log.h" /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
@@ -481,11 +484,15 @@ static void bootstrap_local_tools_end(int lockfd)
 }
 #endif
 
-static int bootstrap_db2_try_url(const char *url, int save_config, cJSON *resp)
+static int bootstrap_db2_try_url(const char *url, cJSON *resp)
 {
    if (!url || !url[0])
       return -1;
 
+   /* Supply the width BEFORE db2_init, as the daemon and doctor do; bootstrap
+    * was the one path that skipped it, so first provisioning refused. */
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_embedder_dims_current());
    if (db2_init(url) != 0)
       return -1;
 
@@ -496,26 +503,13 @@ static int bootstrap_db2_try_url(const char *url, int save_config, cJSON *resp)
    if (!ok)
       return -1;
 
-   if (save_config)
-   {
-      if (config_set("db2_url", url) != 0)
-      {
-         /* DB2 is already proven healthy (db2_init + health probe above). The
-          * config persist is only a fast-path cache for later starts — the URL
-          * is re-resolved from AIMEE_DB2_URL / db2_url every boot regardless — so
-          * a failed save (e.g. a read-only aimee.yaml, as the remote-writes
-          * compose override bind-mounts it :ro) must NOT abort an otherwise
-          * healthy kb. Record that the save was skipped and continue. */
-         fprintf(stderr, "aimee-kb: warning: could not persist db2_url to config "
-                         "(continuing; DB2 is reachable via the resolved URL)\n");
-         save_config = 0;
-      }
-   }
-
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddBoolToObject(resp, "knowledge_ready", 1);
    cJSON_AddStringToObject(resp, "db2_url", url);
-   cJSON_AddBoolToObject(resp, "config_saved", save_config ? 1 : 0);
+   /* Database credentials belong to Vault.  The config module deliberately
+    * rejects this key, so bootstrap verifies the resolved secret without ever
+    * copying it into public configuration. */
+   cJSON_AddBoolToObject(resp, "config_saved", 0);
    return 0;
 }
 
@@ -583,52 +577,46 @@ static int bootstrap_db2_with_local_tools(cJSON *steps)
    return rc == 0 ? 0 : -1;
 }
 
-/* Resolve and bootstrap DB2, persisting the URL that succeeded via config_set
- * (which republishes the live snapshot, so a caller re-reading afterwards sees
- * it). `resp` collects step-level details (used by the init RPC; pass a
+/* Resolve and bootstrap DB2 from the runtime-secret store. `resp` collects
+ * step-level details (used by the init RPC; pass a
  * throwaway object when calling from startup). Returns 0 on success, 1 on
  * failure. */
 static int kb_bootstrap_db2_resolve(cJSON *resp)
 {
    cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
 
-   /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
-    * cached in aimee.yaml from a previous boot. In a container deploy the
-    * runtime injects the current Postgres address every start; a service it
-    * depends on can be recreated onto a NEW bridge IP, so a db2_url persisted on
-    * an earlier boot goes stale. Preferring the cached value (as before) made
-    * the kb connect to the old/wrong address forever — even though the correct
-    * URL was right there in the environment. The successful bootstrap below
-    * re-persists this URL (config_set inside bootstrap_db2_try_url), refreshing
-    * the cache. The cached value is used only as a fallback when AIMEE_DB2_URL is
-    * unset (manual / non-container setups). That precedence now lives in
-    * config_db2_url_effective() rather than being applied to a struct here.
+   /* AIMEE_DB2_URL is a credential-shaped value sourced exclusively from the
+    * runtime secret store. Public configuration never contains a database URL.
     *
-    * `url` is a stable copy for the same reason it always was: try_url used to
-    * write the winner back through the same buffer it was reading, and
-    * snprintf'ing a buffer onto itself is undefined -- on glibc it truncated the
-    * destination to empty, leaving db2_init() with an empty URL. */
+    * `url` is a stable copy because try_url used to write the winner back through
+    * the buffer it was reading, and snprintf onto itself is undefined -- glibc
+    * truncated it to empty, leaving db2_init() with an empty URL. */
    char url[CONFIG_DB2_URL_LEN];
    int have_url = config_db2_url_effective(url, sizeof(url));
 
-   if (have_url && bootstrap_db2_try_url(url, 1, resp) == 0)
+   if (have_url && bootstrap_db2_try_url(url, resp) == 0)
       return 0;
 
-   if (!have_url && bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+   if (!have_url && bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, resp) == 0)
+   {
+      (void)runtime_secret_store("AIMEE_DB2_URL", AIMEE_DB2_BOOTSTRAP_URL);
       return 0;
+   }
 
    if (!have_url)
    {
       (void)bootstrap_db2_with_local_tools(steps);
-      if (bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+      if (bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, resp) == 0)
+      {
+         (void)runtime_secret_store("AIMEE_DB2_URL", AIMEE_DB2_BOOTSTRAP_URL);
          return 0;
+      }
    }
 
    cJSON_AddStringToObject(resp, "status", "error");
    cJSON_AddBoolToObject(resp, "knowledge_ready", 0);
-   cJSON_AddStringToObject(
-       resp, "message",
-       "DB2 bootstrap failed; install/start Postgres or set AIMEE_DB2_URL or db2_url");
+   cJSON_AddStringToObject(resp, "message",
+                           "DB2 bootstrap failed; install/start Postgres or set AIMEE_DB2_URL");
    cJSON_AddStringToObject(
        resp, "remediation",
        "Install PostgreSQL, start the service, then run: createdb " AIMEE_DB2_BOOTSTRAP_DB
@@ -1663,20 +1651,6 @@ int main(int argc, char **argv)
       runtime_secret_wipe(embedded, sizeof(embedded));
       return external ? 0 : 1;
    }
-   /* The entrypoint's selection query. It used to parse aimee.yaml with a sed regex —
-    * a second reader of a setting, hardcoding the file paths and assuming the key sits
-    * at the top level. It worked only because config_save happens to write it there,
-    * and its failure was silent: an unparsed key reads as "no embedder selected", the
-    * builtin serves forever, and nothing says so. Ask config instead, which is the
-    * only thing that knows where the value lives and how it is spelled. */
-   if (argc == 2 && strcmp(argv[1], "--print-embedding-model") == 0)
-   {
-      const char *model = config_embedder_model();
-      if (!model || !model[0])
-         return 1; /* nothing selected — the caller starts no embedder */
-      printf("%s\n", model);
-      return 0;
-   }
    if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
    {
       char token[513];
@@ -1784,10 +1758,27 @@ int main(int argc, char **argv)
    agent_http_init();
    kb_install_signal_handlers();
 
-   /* Seed the live snapshot first: from here every config read in this process
-    * is an accessor against it, and the bootstrap below republishes through
-    * config_set when it persists a resolved db2_url. */
-   (void)config_snapshot_seed();
+   /* Config is a required supervised Go process on the KB's existing event
+    * bus. Bring up that bus before the first accessor, then wait only during
+    * startup for the supervisor (already running in the entrypoint) to attach. */
+   audit_log_open();
+   if (kb_obs_bus_configure() != 0 ||
+       obs_bus_configure_daemon_module_runtime("kb", kb_default_config_dir()) != 0 ||
+       obs_bus_start() != 0)
+   {
+      fputs("aimee-kb: module bus failed to start\n", stderr);
+      audit_log_close();
+      agent_http_cleanup();
+      return 1;
+   }
+   if (!config_wait_ready(10000))
+   {
+      fprintf(stderr, "aimee-kb: config module unavailable: %s\n", config_client_last_error());
+      obs_bus_stop();
+      audit_log_close();
+      agent_http_cleanup();
+      return 1;
+   }
 
    /* Copied out because kb_vault_tpm_runtime_identity hands BACK one of these
     * pointers (whichever wins over the env) and main holds it to the end. */
@@ -1801,14 +1792,6 @@ int main(int argc, char **argv)
    /* aimee-kb records the AUTHORITATIVE memory-mutation events on its own
     * observability bus at the store (every caller). Open the KB audit ledger so
     * the bus consumer can persist the rows, then install the store-side hook. */
-   audit_log_open();
-   if (obs_bus_configure_daemon_module_runtime("kb", kb_default_config_dir()) != 0)
-   {
-      fputs("aimee-kb: invalid module-bus path configuration\n", stderr);
-      audit_log_close();
-      agent_http_cleanup();
-      return 1;
-   }
    kb_module_stage_adapters_configure();
    kb_memory_audit_bridge_install();
 
@@ -1861,20 +1844,15 @@ int main(int argc, char **argv)
     * The distinction belongs to the module that knows what each probe requires, not to
     * its caller. */
    embedder_probe_register(config_embedder_command_current(NULL));
+   /* S6: register the policy arms and install the bandit-backed sampler.
+    * Without this nothing ever samples, and the registry only describes a
+    * decision nobody makes. */
+   kb_policy_arms_init();
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
 
-   /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
-    * cached in aimee.yaml from a previous boot — applied here unconditionally,
-    * BEFORE the bootstrap gate below. In a container deploy the runtime injects
-    * the current Postgres address on every start; if Postgres is recreated on a
-    * new bridge IP, the persisted db2_url goes stale. kb_bootstrap_db2_resolve()
-    * already prefers the env URL, but it only runs when db2_url is empty (the
-    * gate below), so a populated-but-stale cached URL would skip the override
-    * entirely and db2_init() below would dial the dead address and exit. The
-    * precedence now lives in config_db2_url_effective(), which every read below
-    * goes through, so there is no struct to pre-apply it to and no window in
-    * which a stale cached value is visible. */
+   /* AIMEE_DB2_URL is hydrated from Vault before this point. It intentionally
+    * has no public-config fallback. */
 
    /* Auto-bootstrap on startup so kb keeps working for users who upgrade past
     * the "DB2 required" cutover (#1151) without their config being touched.
@@ -1922,14 +1900,7 @@ int main(int argc, char **argv)
       cJSON_Delete(resp);
    }
 
-   /* Publish the fully resolved daemon config before request threads start.
-    * This keeps hot-path config reads on the lock-free snapshot instead of
-    * racing through the process-wide file mtime cache. */
-   /* Republish: the bootstrap above may have persisted a resolved db2_url. */
-   (void)config_snapshot_seed();
-   /* And re-read it. The value taken before the bootstrap is the PRE-bootstrap
-    * one; when the bootstrap succeeded it wrote a different URL, and dialling the
-    * old one here would undo the whole point of bootstrapping. */
+   /* Re-read the runtime secret after bootstrap. */
    (void)config_db2_url_effective(db2_url, sizeof(db2_url));
 
    /* DB2 owns project, workspace, and global knowledge for aimee-kb.
@@ -2310,7 +2281,11 @@ int main(int argc, char **argv)
    kb_oidc_jwks_fleet_enable();
    /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
     * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
-   kb_http_set_telemetry_token(config_telemetry_metrics_token());
+   char telemetry_token[256] = "";
+   (void)runtime_secret_get("AIMEE_TELEMETRY_METRICS_TOKEN", telemetry_token,
+                            sizeof(telemetry_token));
+   kb_http_set_telemetry_token(telemetry_token);
+   runtime_secret_wipe(telemetry_token, sizeof(telemetry_token));
    if (vault_tpm_runtime_lock &&
        kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) != KB_VAULT_TPM_RUNTIME_LOCK_OK)
    {
@@ -2340,23 +2315,11 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
-   if (obs_bus_start() != 0)
-   {
-      fputs("aimee-kb: module bus failed to start\n", stderr);
-      kb_management_runtime_stop();
-      kb_service_shutdown(&g_ctx);
-      kb_vault_operator_service_stop(vault_operator_service);
-      vault_operator_service = NULL;
-      kb_vault_operator_components_destroy(&vault_operator_components);
-      if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
-      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
-      audit_log_close();
-      agent_http_cleanup();
-      return 1;
-   }
-   if (kb_http_start(http_port, config_kb_api_bearer_token()) != 0)
+   char kb_http_bearer[4096] = "";
+   (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", kb_http_bearer, sizeof(kb_http_bearer));
+   int kb_http_start_rc = kb_http_start(http_port, kb_http_bearer);
+   runtime_secret_wipe(kb_http_bearer, sizeof(kb_http_bearer));
+   if (kb_http_start_rc != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
        * systemd (Restart=on-failure) doesn't restart-loop. */

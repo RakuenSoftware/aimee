@@ -10,8 +10,15 @@
     "supported": false
   },
   "ownership_complete": true,
-  "sources": [
-    "src/modules/execution-policy/execution_policy.c"
+  "sources": [],
+  "go_sources": [
+    "server-go/modules/execution-policy/execution_policy.go"
+  ],
+  "go_tests": [
+    "server-go/modules/execution-policy/execution_policy_test.go"
+  ],
+  "public_headers": [
+    "src/modules/execution-policy/include/aimee/execution-policy/module_api.h"
   ],
   "private_headers": [],
   "tests": [],

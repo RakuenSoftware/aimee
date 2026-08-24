@@ -6,9 +6,12 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
+#include "log.h" /* aimee_log — a failed recall must not read as an empty one */
 #include "modules/db2/c/memory_lint.h"
 #include "config.h"
+#include "modules/db2/c/entity_registry.h"  /* db2_entity_merge / db2_entity_unmerge */
 #include "modules/db2/c/fact_ingest.h"      /* db2_typed_fact_ingress */
+#include "modules/db2/c/fact_lifecycle.h"   /* db2_fact_retract, FACT_RETRACT_IMMUTABLE */
 #include "modules/db2/c/fact_recall.h"      /* db2_fact_recall_in_query */
 #include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "modules/db2/c/kb_payload.h"       /* db2_kb_async_enqueue */
@@ -54,6 +57,9 @@ static cJSON *kbs_memory_row_to_json(const memory_t *m)
    cJSON_AddStringToObject(obj, "created_at", m->created_at);
    cJSON_AddStringToObject(obj, "updated_at", m->updated_at);
    cJSON_AddStringToObject(obj, "source_session", m->source_session);
+   cJSON_AddStringToObject(obj, "provenance_category", m->provenance_category);
+   cJSON_AddNumberToObject(obj, "retrieval_score", m->retrieval_score);
+   cJSON_AddNumberToObject(obj, "hybrid_rank", m->hybrid_rank);
    return obj;
 }
 
@@ -258,6 +264,12 @@ static cJSON *kbs_memory_diagnostic_to_json(const memory_diagnostic_t *d)
    cJSON_AddNumberToObject(parts, "pagerank", d->parts.pagerank);
    cJSON_AddNumberToObject(parts, "hybrid_total", d->parts.hybrid_total);
    cJSON_AddNumberToObject(parts, "blended_total", d->parts.blended_total);
+   cJSON_AddNumberToObject(parts, "graph_score", d->parts.graph_score);
+   cJSON_AddNumberToObject(parts, "graph_weight", d->parts.graph_weight);
+   cJSON_AddNumberToObject(parts, "code_proximity", d->parts.code_proximity);
+   cJSON_AddNumberToObject(parts, "utility", d->parts.utility);
+   cJSON_AddNumberToObject(parts, "outcome", d->parts.outcome);
+   cJSON_AddNumberToObject(parts, "source_fusion", d->parts.source_fusion);
    cJSON_AddNumberToObject(parts, "total", d->parts.total);
    return j;
 }
@@ -678,18 +690,21 @@ cJSON *db2_kb_service_memory_query_health_json(void)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_delete_json(int64_t id)
+cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   if (memory_delete(id) != 0)
+   if (memory_delete_as(id, (memory_authority_t)authority) != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "failed to delete memory");
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   /* Tell the caller which of the two things actually happened, so an agent is
+    * not told "forgotten" when the content is still recoverable. */
+   cJSON_AddBoolToObject(resp, "destroyed", authority == (int)MEMORY_AUTHORITY_USER);
    return resp;
 }
 
@@ -708,7 +723,7 @@ cJSON *db2_kb_service_memory_touch_json(int64_t id)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content)
+cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -719,13 +734,18 @@ cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content)
       cJSON_AddStringToObject(resp, "message", "content is required");
       return resp;
    }
-   if (memory_update_content(id, content) != 0)
+   int64_t new_id = 0;
+   if (memory_update_content_as(id, content, (memory_authority_t)authority, &new_id) != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "failed to update memory content");
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   /* Under model authority the update was versioned, so the current value now
+    * lives under a NEW id; the caller needs it to keep referring to the fact. */
+   cJSON_AddNumberToObject(resp, "id", (double)new_id);
+   cJSON_AddBoolToObject(resp, "superseded", new_id != id);
    return resp;
 }
 
@@ -1186,22 +1206,36 @@ cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, con
                                          const char *content, double confidence,
                                          const char *session_id)
 {
-   return db2_kb_service_memory_insert_ex_json(tier, kind, key, content, "", confidence,
-                                               session_id);
+   /* No authority named: this spelling has no caller that established one, so the
+    * row records the fail-closed agent provenance. */
+   return db2_kb_service_memory_insert_ex_json(tier, kind, key, content, "", confidence, session_id,
+                                               MEMORY_AUTHORITY_MODEL);
 }
 
 cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
                                             const char *content, const char *use_cases,
-                                            double confidence, const char *session_id)
+                                            double confidence, const char *session_id,
+                                            int authority)
+{
+   return db2_kb_service_memory_insert_epistemic_ex_json(
+       tier, kind, "world_fact", key, content, use_cases, confidence, session_id, authority);
+}
+
+cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
+                                                      const char *epistemic_kind, const char *key,
+                                                      const char *content, const char *use_cases,
+                                                      double confidence, const char *session_id,
+                                                      int authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
 
    memory_t out;
-   int rc =
-       memory_insert_ex(tier ? tier : "", kind ? kind : "", key ? key : "", content ? content : "",
-                        use_cases ? use_cases : "", confidence, session_id ? session_id : "", &out);
+   int rc = memory_insert_epistemic_ex(
+       tier ? tier : "", kind ? kind : "", epistemic_kind ? epistemic_kind : "", key ? key : "",
+       content ? content : "", use_cases ? use_cases : "", confidence, session_id ? session_id : "",
+       (memory_authority_t)authority, &out);
    if (rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
@@ -1215,8 +1249,31 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
     * synchronous fact work on the store hot path; the drain's pattern pass now
     * captures the high-precision triples the old inline call did. */
    {
-      if (config_typed_facts_enabled() && out.id > 0)
-         (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
+      /* The note's own authority caps the captured actor: it is the same value
+       * that chose provenance_category just above, and the two must not be able
+       * to disagree about one memory. */
+      if (out.id > 0)
+      {
+         /* BOTH STEPS ARE SILENT DROPS IF THEY FAIL, and this is the only thing
+          * that starts fact extraction for a stored memory. The capture failing
+          * skips the enqueue entirely; the enqueue failing was discarded with a
+          * (void). Either way the memory is stored, the caller is told "ok", and
+          * its facts are never mined -- with nothing anywhere to say so.
+          *
+          * That mattered less while the drain was gated off and did no work
+          * regardless. Now that the typed-fact layer is unconditional, this
+          * enqueue is the whole path, so a lost job is lost extraction. */
+         if (db2_fact_actor_capture_memory(out.id, authority == (int)MEMORY_AUTHORITY_USER) != 0)
+            aimee_log(LOG_WARN, "memory",
+                      "could not record the fact actor for memory %lld; not enqueuing "
+                      "extraction, so its facts will not be mined",
+                      (long long)out.id);
+         else if (db2_kb_async_enqueue("memory_facts", out.id, "memory") != 0)
+            aimee_log(LOG_WARN, "memory",
+                      "could not enqueue memory_facts for memory %lld; it is stored but "
+                      "its facts will not be mined",
+                      (long long)out.id);
+      }
    }
    cJSON *obj = kbs_memory_row_to_json(&out);
    if (obj)
@@ -1243,16 +1300,20 @@ cJSON *db2_kb_service_memory_briefing_json(int limit_tokens)
 }
 
 cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
-                                                int limit)
+                                                int limit, fact_authority_t authority)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
 
-   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Default-off via
-    * typed_facts_enabled (writes facts="" when off); orchestration in fact_ingest. */
+   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Unconditional:
+    * the config.typed_facts_enabled master gate is retired. Orchestration lives
+    * in fact_ingest.
+    * `authority` is the caller's authenticated write authority, resolved by the
+    * RPC handler — this call can retract facts, so it must not be inferred from
+    * `query`, which the caller supplies. */
    char facts[2048] = "";
-   (void)db2_typed_fact_ingress(query, facts, sizeof(facts));
+   (void)db2_typed_fact_ingress(query, authority, facts, sizeof(facts));
 
    char *block = memory_get_context_block(query ? query : "",
                                           (block_type && block_type[0]) ? block_type : "general",
@@ -1284,16 +1345,34 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
 }
 
 /* Read-only typed-fact recall (§7), PII-gated: the cheap path ingress_preinject
- * calls every turn. No write; no-op (facts="") when the layer is off. */
+ * calls every turn. No write; facts="" when there are none. */
 cJSON *db2_kb_service_memory_facts_json(const char *query)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
    char facts[2048] = "";
-   if (config_typed_facts_enabled() && query && query[0])
-      (void)db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
-                                     sizeof(facts));
+   if (query && query[0])
+   {
+      /* A FAILED RECALL IS NOT AN EMPTY ONE. This discarded the return, so a
+       * negative (db2 unavailable) produced facts="" and a "status":"ok"
+       * response -- indistinguishable from "this turn has no facts", on the path
+       * ingress_preinject calls EVERY turn. The model would then answer without
+       * the user's facts and nothing would say why.
+       *
+       * db2_typed_fact_ingress() already logs this exact condition, with the
+       * note that "recall affects prompt content, so a persistent failure is
+       * worth surfacing". The same call on this sibling path was left silent --
+       * the defect repeating where the reasoning had already been written down.
+       *
+       * Still a soft failure: the turn proceeds without facts rather than
+       * erroring, which is the right trade for a read. It must not be silent. */
+      int fr = db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
+                                        sizeof(facts));
+      if (fr < 0)
+         aimee_log(LOG_WARN, "memory",
+                   "typed-fact recall failed (db2 unavailable?); answering with no facts");
+   }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "facts", facts);
    return resp;
@@ -2011,5 +2090,99 @@ cJSON *db2_kb_service_memory_lint_json(void)
       cJSON_AddStringToObject(iss, "message", issues[i].message);
       cJSON_AddItemToArray(arr, iss);
    }
+   return resp;
+}
+
+/* --- Typed-fact §4 retraction and §3 entity merge/unmerge ---
+ *
+ * These three primitives were built, tested, and left with no production caller:
+ * a wrong entity merge was recorded and reversible in principle, with no way to
+ * reverse one outside a test, and retraction was reachable only from the
+ * pattern-extraction path in fact_ingest. They are the correction half of the
+ * typed-fact layer — without a surface, the layer can learn a wrong fact but
+ * cannot be told that it is wrong. */
+
+cJSON *db2_kb_service_facts_retract_json(const char *source, const char *relation,
+                                         const char *target, const char *authority)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+
+   /* §4/§5 authority guard: only an explicit "user" authority may retract a
+    * user-stated Class A fact. Anything else — including an absent or
+    * unrecognised value — is treated as model authority, the conservative
+    * reading, since a caller that cannot name its authority must not inherit the
+    * user's.
+    *
+    * `authority` reaches here ALREADY RESOLVED against the caller's
+    * authentication by the request boundary that has it — kb_handle_facts_retract
+    * (authenticated actor) and facts_retract_command (attested transport). It is
+    * not a field a client can set on the way in; do not add a path that forwards
+    * a request body's value here unresolved. */
+   fact_authority_t auth =
+       (authority && strcmp(authority, "user") == 0) ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
+
+   int rc = db2_fact_retract(source ? source : "", relation ? relation : "",
+                             (target && target[0]) ? target : NULL, auth);
+   if (rc == FACT_RETRACT_IMMUTABLE)
+   {
+      /* Distinct from a plain failure: the relation is immutable and this caller
+       * lacks the authority to override it. Naming that lets a client explain the
+       * refusal instead of retrying a request that can never succeed. */
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "reason", "immutable");
+      cJSON_AddStringToObject(resp, "message",
+                              "this relation is immutable; only a user authority may retract it");
+      return resp;
+   }
+   if (rc < 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "fact retraction failed");
+      return resp;
+   }
+
+   cJSON_AddStringToObject(resp, "status", "ok");
+   /* rc == 0 is success with nothing matched, NOT an error: retracting a fact
+    * that is already gone leaves the caller in exactly the state they asked for.
+    * The count is what distinguishes the two cases, so it is always reported. */
+   cJSON_AddNumberToObject(resp, "retracted", rc);
+   return resp;
+}
+
+cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   int64_t merge_id = db2_entity_merge(from_id, into_id);
+   if (merge_id <= 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message",
+                              "merge refused: both ids must be distinct active entities");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   /* The audit id is the only handle a caller can later unmerge with, so it is
+    * the one field this response must always carry. */
+   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
+   return resp;
+}
+
+cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (db2_entity_unmerge(merge_id) != 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "no such merge, or it was already undone");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
    return resp;
 }

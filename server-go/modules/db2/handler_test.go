@@ -66,6 +66,21 @@ func loadHealthBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
+	// The nine this test replays, in order, at the FRONT of the baseline. It used
+	// to demand the baseline hold exactly nine, which made every later operation
+	// added to db2 fail here -- a test for the health wire refusing to run because
+	// something unrelated was appended alongside it.
+	if len(baseline.Operations) < 9 || baseline.Operations[0].Name != "health" ||
+		baseline.Operations[1].Name != "embedding_dimension" ||
+		baseline.Operations[2].Name != "pool_status" ||
+		baseline.Operations[3].Name != "embedding_refusals" ||
+		baseline.Operations[4].Name != "postgres_status" ||
+		baseline.Operations[5].Name != "reembed_status" ||
+		baseline.Operations[6].Name != "reembed_clear" ||
+		baseline.Operations[7].Name != "reembed_clear_maintenance" ||
+		baseline.Operations[8].Name != "embedder_serving_id" {
+		t.Fatalf("unexpected operation baseline: %+v", baseline.Operations)
+	}
 	return baseline
 }
 

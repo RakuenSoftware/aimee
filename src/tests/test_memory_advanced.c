@@ -7,13 +7,14 @@
 #include <sys/stat.h>
 #include "aimee.h"
 #include "cJSON.h"
-#include "db.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "support/test_time.h"
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
 #include "modules/memory/memory_ontology.h"
+#include "modules/memory/memory_platform.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -24,11 +25,11 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
-/* The file-static config_t this suite used to share is gone. It existed because
+/* The file-static legacy_config_record this suite used to share is gone. It existed because
  * ten block-scoped ~750 KiB copies in this one long main() pushed GCC past the
  * default 8 MiB stack and the optimized binary segfaulted before reaching the
  * later cases. Every case now states its precondition through write_test_config()
- * and the code under test reads it back via accessors, so no config_t is needed
+ * and the code under test reads it back via accessors, so no legacy_config_record is needed
  * here at all — which is the outcome the encapsulation proposal is chasing. */
 
 static void write_test_config(const char *yaml)
@@ -51,6 +52,13 @@ int main(void)
 
    /* DB1 is required by the maintenance cycle (maintenance_state table). */
    assert(db1_init(":memory:") == 0);
+
+   /* This suite exercises memory state transitions, not the asynchronous
+    * embedder. Leaving background embedding enabled makes every insert fork a
+    * detached KB RPC worker even though no service exists in this fixture. On
+    * the real-Postgres shard those children can outlive their test cases and
+    * obscure the suite's runtime. Embedding has dedicated coverage elsewhere. */
+   int background_embed_was_suppressed = platform_memory_background_embed_set_suppressed(1);
 
    /* DB2 backed by an in-memory sqlite shim. Test seeds use aimee_pg_*
     * against db2_conn() — same surface production code uses. */
@@ -306,7 +314,7 @@ int main(void)
       static const char *ins_sql =
           "INSERT INTO memories (tier, kind, key, content, confidence, use_count, source_session,"
           " created_at, updated_at)"
-          " VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, datetime('now'), datetime('now'))";
+          " VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, pg_now_text(), pg_now_text())";
       aimee_pg_stmt_t *ins = aimee_pg_prepare(db2_conn(), ins_sql, err, sizeof(err));
       assert(ins);
 
@@ -650,7 +658,7 @@ int main(void)
 
    /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 ---
     *
-    * These two cases used to zero a local config_t to express "disabled". Now that
+    * These two cases used to zero a local legacy_config_record to express "disabled". Now that
     * the function reads live config, the precondition has to be written to the
     * config file the test owns — otherwise the case silently reads whatever the
     * developer's real aimee.yaml says and stops testing the disabled path. */
@@ -822,21 +830,38 @@ int main(void)
       memory_insert(TIER_L2, KIND_FACT, "cognify:test:key", "test content", 1.0, "test", &m);
       assert(m.id > 0);
 
-      int rc = db1_cognify_job_enqueue(m.id);
-      assert(rc == 0);
+      /* THE STORE IS A SEPARATE PROCESS NOW, and this is one of the minimal
+         binaries: it links module_bus_stub, whose honest default is "no module
+         attached". Every db1_* call here therefore fails closed, so the queue
+         assertions have nothing to measure and are skipped rather than
+         inverted.
+         They are not lost. What they check is the cognify queue's UNIQUE
+         constraint -- store behaviour -- and the postgres family suites
+         exercise it against a real database. Skipping here and covering there
+         beats reimplementing the constraint in a stub and then testing the
+         stub. */
+      if (!db1_store_ready())
+      {
+         printf("\n  SKIP: cognify queue assertions need the store module\n");
+      }
+      else
+      {
+         int rc = db1_cognify_job_enqueue(m.id);
+         assert(rc == 0);
 
-      memory_cognify_queue_stats_t stats;
-      int sr = memory_cognify_queue_status(&stats);
-      assert(sr == 0);
-      assert(stats.pending >= 1);
+         memory_cognify_queue_stats_t stats;
+         int sr = memory_cognify_queue_status(&stats);
+         assert(sr == 0);
+         assert(stats.pending >= 1);
 
-      /* Duplicate enqueue must be ignored (UNIQUE constraint) */
-      int rc2 = db1_cognify_job_enqueue(m.id);
-      assert(rc2 == 0);
+         /* Duplicate enqueue must be ignored (UNIQUE constraint) */
+         int rc2 = db1_cognify_job_enqueue(m.id);
+         assert(rc2 == 0);
 
-      memory_cognify_queue_stats_t stats2;
-      memory_cognify_queue_status(&stats2);
-      assert(stats2.pending == stats.pending);
+         memory_cognify_queue_stats_t stats2;
+         memory_cognify_queue_status(&stats2);
+         assert(stats2.pending == stats.pending);
+      }
    }
 
    /* --- memory_cognify_drain with cognifier disabled --- */
@@ -844,8 +869,14 @@ int main(void)
       /* When cognify is disabled, drain is a no-op but must not crash */
       write_test_config("memory:\n  cognify:\n    enabled: false\n");
       memory_cognify_queue_stats_t stats;
-      int rc = memory_cognify_drain(0, &stats);
-      assert(rc == 0);
+      /* Same gate as the block above: drain reads the queue through the store,
+         so with no module attached it reports failure rather than the no-op
+         this asserts. */
+      if (db1_store_ready())
+      {
+         int rc = memory_cognify_drain(0, &stats);
+         assert(rc == 0);
+      }
       /* pending jobs remain because we can't actually run cognifier in tests */
    }
 
@@ -1402,23 +1433,29 @@ int main(void)
                               &stale) == 0);
          /* Created 9 days ago with a 10-day window — 90% elapsed > 80%
           * threshold, so stale_pending should pick it up. */
-         assert(aimee_pg_exec(db2_conn(),
-                              "UPDATE memories SET lifecycle_state = 'pending',"
-                              " created_at = datetime('now', '-9 days'),"
-                              " ttl_at = datetime('now', '+1 days')"
-                              " WHERE key = 'alert:stale'",
-                              err, sizeof(err)) == 0);
+         char stale_created[TEST_TS_MAX], stale_ttl[TEST_TS_MAX], stale_sql[512];
+         test_ts_days(stale_created, sizeof(stale_created), -9);
+         test_ts_days(stale_ttl, sizeof(stale_ttl), 1);
+         snprintf(stale_sql, sizeof(stale_sql),
+                  "UPDATE memories SET lifecycle_state = 'pending',"
+                  " created_at = '%s', ttl_at = '%s'"
+                  " WHERE key = 'alert:stale'",
+                  stale_created, stale_ttl);
+         assert(aimee_pg_exec(db2_conn(), stale_sql, err, sizeof(err)) == 0);
 
          /* Fresh pending (just created, 10-day window) must NOT be stale. */
          memory_t fresh;
          assert(memory_insert(TIER_L2, KIND_FACT, "alert:fresh", "I'll sync tomorrow", 0.9, "s1",
                               &fresh) == 0);
-         assert(aimee_pg_exec(db2_conn(),
-                              "UPDATE memories SET lifecycle_state = 'pending',"
-                              " created_at = datetime('now', '-1 days'),"
-                              " ttl_at = datetime('now', '+9 days')"
-                              " WHERE key = 'alert:fresh'",
-                              err, sizeof(err)) == 0);
+         char fresh_created[TEST_TS_MAX], fresh_ttl[TEST_TS_MAX], fresh_sql[512];
+         test_ts_days(fresh_created, sizeof(fresh_created), -1);
+         test_ts_days(fresh_ttl, sizeof(fresh_ttl), 9);
+         snprintf(fresh_sql, sizeof(fresh_sql),
+                  "UPDATE memories SET lifecycle_state = 'pending',"
+                  " created_at = '%s', ttl_at = '%s'"
+                  " WHERE key = 'alert:fresh'",
+                  fresh_created, fresh_ttl);
+         assert(aimee_pg_exec(db2_conn(), fresh_sql, err, sizeof(err)) == 0);
 
          /* Conflict row for the unresolved section. */
          memory_t a, b;
@@ -1483,29 +1520,31 @@ int main(void)
 
          /* Seed 500 rows evenly spaced across the last 90 days. Each has a
           * 10-day TTL — anything whose created_at is older than ~10 days
-          * ago is already expired and must be archived by the sweep. */
+          * ago is already expired and must be archived by the sweep. This is a
+          * store-level sweep fixture, so seed the authoritative rows directly:
+          * memory_insert would run derived-metadata and opportunistic-maintenance
+          * work after every row, neither of which is part of this assertion. */
          char err[256] = "";
          aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err));
          for (int i = 0; i < 500; i++)
          {
             char key[64];
             snprintf(key, sizeof(key), "stress:%d", i);
-            memory_t m;
-            memory_insert(TIER_L2, KIND_FACT, key, "I'll ship this next week", 0.9, "s1", &m);
-
-            char ageq[512];
+            char ageq[1024];
             int age_days = 90 - (i % 90); /* 1..90 */
+            char created_ts[TEST_TS_MAX], ttl_ts[TEST_TS_MAX];
+            test_ts_days(created_ts, sizeof(created_ts), -age_days);
+            test_ts_days(ttl_ts, sizeof(ttl_ts), -age_days + 10);
             snprintf(ageq, sizeof(ageq),
-                     "UPDATE memories SET lifecycle_state = 'pending',"
-                     " created_at = datetime('now', '-%d days'),"
-                     " ttl_at = datetime('now', '-%d days', '+10 days')"
-                     " WHERE key = '%s'",
-                     age_days, age_days, key);
+                     "INSERT INTO memories(tier,kind,key,content,confidence,source_session,"
+                     " lifecycle_state,created_at,ttl_at) VALUES('L2','fact','%s',"
+                     " 'I''ll ship this next week',0.9,'s1','pending','%s','%s')",
+                     key, created_ts, ttl_ts);
             err[0] = '\0';
             int urc = aimee_pg_exec(db2_conn(), ageq, err, sizeof(err));
             if (urc != 0)
             {
-               fprintf(stderr, "stress update failed at i=%d: %s\nSQL: %s\n", i, err, ageq);
+               fprintf(stderr, "stress seed failed at i=%d: %s\nSQL: %s\n", i, err, ageq);
                assert(0);
             }
          }
@@ -1562,8 +1601,8 @@ int main(void)
       assert(memory_insert(TIER_L2, KIND_FACT, "active:one", "touched today", 0.8, "s1", &m) == 0);
       char err[256] = "";
       assert(aimee_pg_exec(db2_conn(),
-                           "UPDATE memories SET last_used_at = datetime('now'),"
-                           " updated_at = datetime('now') WHERE key = 'active:one'",
+                           "UPDATE memories SET last_used_at = pg_now_text(),"
+                           " updated_at = pg_now_text() WHERE key = 'active:one'",
                            err, sizeof(err)) == 0);
 
       /* Open commitment: mark one fact pending. */
@@ -1954,6 +1993,15 @@ int main(void)
     * optional sub-pass off, default cadence". It reads live config now, so that
     * precondition has to be written down instead of implied by a null pointer —
     * otherwise the block inherits whatever the previous case last wrote. */
+   /* STORE-BACKED, and gated for the same reason as the cognify blocks above.
+      memory_maintenance_run records its own last-run time and reads it back to
+      decide whether the idle guard fires, so with no module attached every run
+      looks like the first: s2.skipped comes back 0 and the second assertion in
+      this block fails.
+      The policy it checks is exercised against a real database by the postgres
+      family suites. Inverting the assertions to match a broken store would be
+      the wrong repair -- it would encode "no store" as the expected shape. */
+   if (db1_store_ready())
    {
       reset_db();
       write_test_config("memory_maintenance:\n"
@@ -2189,6 +2237,7 @@ int main(void)
    }
 
    db2_test_shim_close();
+   platform_memory_background_embed_set_suppressed(background_embed_was_suppressed);
    db1_shutdown();
 
    printf("all tests passed\n");

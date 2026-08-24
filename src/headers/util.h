@@ -452,4 +452,10 @@ int aimee_main_clone_edits_allowed(const char *repo_cwd);
  * edited, not just the session cwd. */
 int aimee_edit_target_in_main_clone(const char *file_path, const char *cwd);
 
+/* Return the largest prefix of `remaining` bytes that is at most `max_bytes`
+ * and ends on a UTF-8 character boundary. The input must be valid UTF-8.
+ * Returns 0 only when max_bytes is 0 or too small to hold the first complete
+ * character (a max of at least 4 bytes guarantees progress for valid input). */
+size_t text_utf8_chunk_len(const char *s, size_t remaining, size_t max_bytes);
+
 #endif /* DEC_UTIL_H */

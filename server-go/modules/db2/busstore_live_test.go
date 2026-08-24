@@ -30,7 +30,7 @@ func liveBusStore(t *testing.T) *BusStore {
 	invocation := bus.ModuleInvocation{
 		StageID: modulepg.StageSQL, PrincipalRef: 29, SrcHandle: 1}
 	client := storage.New(func(ctx context.Context, body []byte) ([]byte, error) {
-		reply, status := handler.Handle(invocation, body)
+		reply, status := handler(invocation, body)
 		if status != bus.ModuleStatusOK {
 			t.Fatalf("module status = %v", status)
 		}

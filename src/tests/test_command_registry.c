@@ -90,6 +90,24 @@ static void test_malformed_names_refused(void)
    printf("malformed_names_refused OK\n");
 }
 
+/* CLI is the capability floor. There are no MCP-only exceptions: a capability
+ * useful over MCP must have the same implementation reachable from the CLI. */
+static void test_mcp_without_cli_refused(void)
+{
+   aimee_command_registry_reset();
+   aimee_command_t dual = mk("future", "read", AIMEE_SURFACE_CLI | AIMEE_SURFACE_MCP);
+   aimee_command_t mcp_only = mk("future", "special", AIMEE_SURFACE_MCP);
+   assert(aimee_command_register(&dual) == 0);
+   assert(aimee_command_register(&mcp_only) == -1);
+   assert(aimee_command_count() == 1);
+
+   aimee_command_registry_reset();
+   assert(aimee_command_register(&mcp_only) == -1);
+   assert(aimee_command_register(&dual) == 0);
+   assert(aimee_command_count() == 1);
+   printf("mcp_without_cli_refused OK\n");
+}
+
 /* THE INVARIANT. An unregistered command is unroutable from EVERY surface, not
  * just the one that forgot it. Before the registry, `memory get` existed on the
  * CLI while the agent's tool surface had no idea it did. */
@@ -108,7 +126,7 @@ static void test_surface_view_is_derived(void)
    aimee_command_registry_reset();
    aimee_command_t a = mk("memory", "get", AIMEE_SURFACE_ALL);
    aimee_command_t b = mk("memory", "search", AIMEE_SURFACE_CLI | AIMEE_SURFACE_RPC);
-   aimee_command_t c = mk("session", "search", AIMEE_SURFACE_MCP);
+   aimee_command_t c = mk("session", "search", AIMEE_SURFACE_CLI | AIMEE_SURFACE_MCP);
    assert(aimee_command_register(&a) == 0);
    assert(aimee_command_register(&b) == 0);
    assert(aimee_command_register(&c) == 0);
@@ -123,9 +141,40 @@ static void test_surface_view_is_derived(void)
          cli++;
    }
    assert(mcp == 2); /* memory.get + session.search */
-   assert(cli == 2); /* memory.get + memory.search */
+   assert(cli == 3); /* every MCP command is also CLI-callable */
    assert(aimee_command_at(aimee_command_count()) == NULL);
    printf("surface_view_is_derived OK\n");
+}
+
+static void test_agent_surface_projection_separates_external_modules(void)
+{
+   aimee_command_registry_reset();
+   aimee_command_t dual = mk("memory", "get", AIMEE_SURFACE_CLI | AIMEE_SURFACE_MCP);
+   aimee_command_t cli = mk("local", "doctor", AIMEE_SURFACE_CLI);
+   aimee_command_t mcp_a = mk("kb_future", "search", AIMEE_SURFACE_CLI | AIMEE_SURFACE_MCP);
+   aimee_command_t mcp_b = mk("kb_future", "explain", AIMEE_SURFACE_CLI | AIMEE_SURFACE_MCP);
+   assert(aimee_command_register(&dual) == 0);
+   assert(aimee_command_register(&cli) == 0);
+   assert(aimee_command_register(&mcp_a) == 0);
+   assert(aimee_command_register(&mcp_b) == 0);
+   assert(aimee_agent_surface_register("kb_future", AIMEE_SURFACE_MCP, "kb-future") == 0);
+   assert(aimee_agent_surface_register("runtime inspect", AIMEE_SURFACE_CLI, "runtime-future") ==
+          0);
+   assert(aimee_agent_surface_register("kb_future", AIMEE_SURFACE_MCP, "duplicate") == -1);
+   assert(aimee_agent_surface_register("invalid", AIMEE_SURFACE_CLI | AIMEE_SURFACE_MCP,
+                                       "invalid") == -1);
+
+   cJSON *projection = aimee_command_agent_surfaces_json();
+   assert(cJSON_IsObject(projection));
+   cJSON *cli_only = cJSON_GetObjectItemCaseSensitive(projection, "cli_only");
+   cJSON *mcp_only = cJSON_GetObjectItemCaseSensitive(projection, "mcp_only");
+   assert(cJSON_GetArraySize(cli_only) == 2);
+   assert(strcmp(cJSON_GetArrayItem(cli_only, 0)->valuestring, "local doctor") == 0);
+   assert(strcmp(cJSON_GetArrayItem(cli_only, 1)->valuestring, "runtime inspect") == 0);
+   assert(cJSON_GetArraySize(mcp_only) == 1);
+   assert(strcmp(cJSON_GetArrayItem(mcp_only, 0)->valuestring, "kb_future") == 0);
+   cJSON_Delete(projection);
+   printf("agent_surface_projection_separates_external_modules OK\n");
 }
 
 int main(void)
@@ -135,8 +184,10 @@ int main(void)
    test_duplicate_refused();
    test_no_surface_refused();
    test_malformed_names_refused();
+   test_mcp_without_cli_refused();
    test_unregistered_is_unroutable_everywhere();
    test_surface_view_is_derived();
+   test_agent_surface_projection_separates_external_modules();
    aimee_command_registry_reset();
    printf("all command_registry tests passed\n");
    return 0;

@@ -172,7 +172,7 @@ def catalog_entry(operation: dict[str, object]) -> str:
         "transaction": operation.get("transaction", "none"),
         "idempotency": operation.get("idempotency", "safe"),
         "results": operation.get("results", ["ok"]),
-        "db3_placement": "retained-db2",
+        "vector_placement": "retained-db2",
         "db3_reason": operation.get("db3_reason", operation["reason"][:200]),
         "c_symbols": [operation["symbol"]] + [str(item["symbol"])
                                               for item in operation.get("also", [])],
@@ -245,7 +245,7 @@ def apply_review(batch: list[dict[str, object]]) -> None:
                      f'      "signature_sha256": "{ledger[symbol]["signature_sha256"]}",\n'
                      '      "disposition": "wire-operation",\n'
                      f'      "family": "{operation["family"]}",\n'
-                     '      "db3_placement": "retained-db2",\n'
+                     '      "vector_placement": "retained-db2",\n'
                      f'      "reason": {json.dumps(reason)}\n'
                      '    }')
             additions.append((bisect.bisect_left(symbols, symbol), symbol, block))

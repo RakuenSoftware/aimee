@@ -212,6 +212,9 @@ static void test_release_membership(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("kb_releases_db"))
+      return 0;
+
    printf("kb_releases_db:\n");
    test_create_read();
    test_promote_activates();

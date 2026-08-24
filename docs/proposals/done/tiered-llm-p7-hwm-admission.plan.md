@@ -1,5 +1,9 @@
 # P7 steady-state signed-HWM key-use admission
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and merged-ready implementation slice.
 - **Depends on:** P7 signed-HWM rotation core and fenced rotation operations.
 

@@ -1,5 +1,9 @@
 # P7 external WORM witness and full kill matrix
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
   `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). E1, E2, and E3 are all delivered — the
   P2b release gate flip is live (`kb_egress_release_allowed()` returns

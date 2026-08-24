@@ -1,10 +1,11 @@
 /* fact_ingest.c: pattern-first typed-fact ingest pipeline (§6 -> §1) + the
  * per-turn ingress orchestration (§4/§6/§7). P5. See fact_ingest.h. */
 #include "fact_ingest.h"
-#include "fact_lifecycle.h"   /* db2_fact_retract */
-#include "fact_recall.h"      /* db2_fact_recall_in_query */
-#include "rel_types_store.h"  /* db2_fact_commit */
-#include "../headers/aimee.h" /* config_t */
+#include "fact_lifecycle.h"       /* db2_fact_retract */
+#include "fact_recall.h"          /* db2_fact_recall_in_query */
+#include "rel_types_store.h"      /* db2_fact_commit */
+#include "../headers/rel_types.h" /* rel_types_seed_lookup, rel_type_kind_allowed */
+#include "../headers/aimee.h"     /* legacy_config_record */
 #include "../support/db2_runtime_config.h"
 #include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "../support/db2_log.h"             /* LOG_WARN */
@@ -46,7 +47,9 @@ static int fact_candidate_valid(const db2_fact_candidate_t *candidate)
           fact_kind_valid(candidate->subject_kind) && fact_kind_valid(candidate->object_kind);
 }
 
-int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabled)
+int db2_fact_ingest_text_as_actor(const char *text, const fact_actor_t *actor, int enabled,
+                                  const fact_evidence_input_t *evidence, const char *assertion_kind,
+                                  const char *valid_from, const char *valid_until)
 {
    if (!text)
       return -1;
@@ -65,9 +68,35 @@ int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabl
    for (int i = 0; i < nt; i++)
    {
       const db2_fact_candidate_t *t = &triples[i];
+
+      /* The extractor GUESSES endpoint kinds from the value's shape: an IP looks
+       * like an IP, an email like a scalar, and everything else falls to
+       * NODE_OTHER. The gate then REJECTS a seed relation whose declared kinds
+       * disagree, and the fact is silently dropped -- so "my age is 41" produced
+       * nothing at all, because `age` declares tail NODE_SCALAR and a bare number
+       * classifies as NODE_OTHER. Most seed relations are unreachable from this
+       * path for exactly that reason.
+       *
+       * A seed relation's own definition is better evidence than a guess made
+       * from the value's spelling, so prefer it whenever the guess is not already
+       * allowed. This is the same repair kb_memory_facts.c makes on the LLM
+       * extraction path; only the pattern path was left without it. Novel
+       * relations keep the guess -- they are not kind-checked, and inventing
+       * kinds for them would be a guess with no definition behind it. */
+      memory_node_kind_t subj_kind = (memory_node_kind_t)t->subject_kind;
+      memory_node_kind_t obj_kind = (memory_node_kind_t)t->object_kind;
+      const rel_type_def_t *sdef = rel_types_seed_lookup(t->rel_type);
+      if (sdef)
+      {
+         if (!rel_type_kind_allowed(sdef, 1, subj_kind) && sdef->head_kind_count > 0)
+            subj_kind = sdef->head_kinds[0];
+         if (!rel_type_kind_allowed(sdef, 0, obj_kind) && sdef->tail_kind_count > 0)
+            obj_kind = sdef->tail_kinds[0];
+      }
+
       fact_gate_verdict_t v =
-          db2_fact_commit(t->subject, (memory_node_kind_t)t->subject_kind, t->rel_type, t->object,
-                          (memory_node_kind_t)t->object_kind, authority, enabled);
+          db2_fact_commit_with_actor(t->subject, subj_kind, t->rel_type, t->object, obj_kind, actor,
+                                     enabled, evidence, assertion_kind, valid_from, valid_until);
       /* Count the triples the gate let through when enabled: ACCEPT writes/bumps a
        * validated edge, NOVEL stages a provisional rel_type + a Class-C edge. A
        * re-ingest of a known triple still counts (it bumps weight, no new row).
@@ -78,21 +107,49 @@ int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabl
    return written;
 }
 
-int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
+int db2_fact_ingest_text_with_evidence(const char *text, fact_authority_t authority, int enabled,
+                                       const fact_evidence_input_t *evidence,
+                                       const char *assertion_kind, const char *valid_from,
+                                       const char *valid_until)
+{
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(
+           authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
+      return -1;
+   return db2_fact_ingest_text_as_actor(text, &actor, enabled, evidence, assertion_kind, valid_from,
+                                        valid_until);
+}
+
+int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabled)
+{
+   return db2_fact_ingest_text_with_evidence(text, authority, enabled, NULL, FACT_KIND_WORLD_FACT,
+                                             NULL, NULL);
+}
+
+int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *facts_out,
+                           size_t facts_cap)
 {
    if (facts_out && facts_cap)
       facts_out[0] = '\0';
    if (!query || !query[0])
       return 0;
 
-   if (!config_typed_facts_enabled())
-      return 0;
-
+   /* The typed-fact layer is unconditional. It used to sit behind
+    * config.typed_facts_enabled, a master gate that defaulted OFF and turned the
+    * whole layer -- retraction, recall, class keying -- into a silent no-op.
+    * A gate that silently disables a correctness feature is worse than no
+    * feature: this one returned 0 here, so a turn asking to forget a fact
+    * completed normally with the fact still standing and nothing logged. */
    int requests_sensitive = memory_pii_turn_requests_sensitive(query);
 
    /* §4: a retraction turn corrects rather than asserts — retract the named
-    * attribute about the user (a user retraction always wins; an imprecise attr
-    * safely no-ops). This stays synchronous: it is a cheap Postgres write, no LLM.
+    * attribute about the user at the CALLER'S authority (an imprecise attr safely
+    * no-ops). The authority is the caller's authenticated one, passed in: this
+    * path deletes, and `query` is a caller-supplied string, so a turn that merely
+    * says "forget my ..." must not thereby speak as the user. Under
+    * FACT_AUTHORITY_MODEL db2_fact_retract skips Class-A rows and refuses an
+    * immutable relation, which is what a model-issued correction should do.
+    * This stays synchronous: it is a cheap Postgres write, no LLM.
     * Fact EXTRACTION is offline-only (the memory_facts drain runs pattern + LLM),
     * so we do NOT run db2_fact_ingest_text() on the turn hot path. */
    int is_retraction = 0;
@@ -106,7 +163,68 @@ int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
        * again) where deleting one they did not name is not. */
       LOG_WARN("memory", "retraction scan gave no answer; not retracting this turn");
    else if (is_retraction && has_attr)
-      (void)db2_fact_retract("user", attr, NULL, FACT_AUTHORITY_USER);
+   {
+      fact_actor_t actor;
+      /* THE DECLARED AUTHORITY CAPS THE ACTOR; it is not a fallback for it.
+       *
+       * This used to try db2_fact_actor_from_request() FIRST and only fall back
+       * to |authority| when that failed. But that function returns
+       * FACT_ACTOR_USER for ANY authenticated principal, so whenever a request
+       * context existed it silently overrode the authority the caller had
+       * deliberately passed. kb_handle_memory_context_block() passes
+       * FACT_AUTHORITY_MODEL precisely because get_context_block's `query` is
+       * composed by the MODEL inside an authenticated human's turn -- and that
+       * is exactly the case where a request context DOES exist, so the
+       * structural MODEL was discarded every single time.
+       *
+       * Measured before the fix: a Class-A row at authority_rank 30 went
+       * lifecycle_state persistent -> invalidated from the agent's own
+       * "please forget my email". That is gap 1, in the path this layer's own
+       * comment calls the sharpest form of it.
+       *
+       * Same reasoning, and same shape, as db2_fact_actor_capture_memory(): a
+       * turn composed at MODEL authority is model-composed text whoever was
+       * authenticated while it ran, so the request identity must not raise its
+       * rank. Under FACT_ACTOR_MODEL, db2_fact_mutation_invalidate skips Class-A
+       * rows and refuses an immutable relation, which is what a model-issued
+       * correction should do. */
+      if (authority != FACT_AUTHORITY_USER)
+      {
+         if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0)
+            return 0;
+      }
+      else if (db2_fact_actor_from_request(0, &actor) != 0 &&
+               db2_fact_actor_internal(FACT_ACTOR_USER, &actor) != 0)
+         return 0;
+      /* A REFUSED RETRACTION IS NOT A SUCCESSFUL ONE, and this used to discard
+       * the difference. db2_fact_mutation_invalidate() distinguishes its
+       * outcomes -- -2 when the target is an episode/experience that may only
+       * be annotated, -1 when it is a policy needing operator authority or the
+       * write failed -- and every one of them was thrown away with a (void)
+       * cast. The turn then completed normally with the fact still standing, so
+       * "I forgot it" and "I refused to forget it" looked identical from
+       * outside and left nothing in the log.
+       *
+       * That cost real time: a retraction silently not landing under real
+       * Postgres, while succeeding under the sqlite shim, presented only as a
+       * unit-test count assertion three layers away with no indication that the
+       * mutation had been declined at all.
+       *
+       * Refusals are legitimate outcomes here, not errors -- an annotate-only
+       * target SHOULD survive -- so this logs rather than fails the turn. What
+       * it must not do is stay silent. */
+      int inv = db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
+      if (inv == -2)
+         LOG_WARN("memory",
+                  "retraction declined for '%s': target is an episode/experience "
+                  "(annotate-only); the fact still stands",
+                  attr);
+      else if (inv < 0)
+         LOG_WARN("memory",
+                  "retraction of '%s' did not land (rank=%d): refused as policy "
+                  "without operator authority, or the write failed",
+                  attr, (int)actor.rank);
+   }
 
    /* §7 read: the user's facts + facts about any entity named in the turn,
     * PII-gated, into the envelope. */

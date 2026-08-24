@@ -173,6 +173,12 @@ class DescriptorTests(unittest.TestCase):
                         "optional": ["x"],
                         "principal_refs": {"memory": 7, "x": 29},
                         "retired_principal_refs": [],
+                        # The reserved bands are present because load_inventory
+                        # compares the key set EXACTLY. Without them this
+                        # fixture fails on inventory-shape and never reaches
+                        # the version rule it exists to exercise.
+                        "plugin_principal_ref_band": {"first": 200, "limit": 456},
+                        "db3_provider_principal_ref_band": {"first": 456, "limit": 512},
                     }
                 ),
                 encoding="utf-8",
@@ -439,7 +445,10 @@ class DescriptorTests(unittest.TestCase):
             ("routing", "sources", "src/modules/routing/routing.c"),
             ("routing", "go_sources", "server-go/modules/routing/routing.go"),
             ("routing", "go_tests", "server-go/modules/routing/routing_test.go"),
-            ("execution-policy", "sources", "src/modules/execution-policy/execution_policy.c"),
+            ("execution-policy", "go_sources",
+             "server-go/modules/execution-policy/execution_policy.go"),
+            ("execution-policy", "go_tests",
+             "server-go/modules/execution-policy/execution_policy_test.go"),
             ("kb-synthesis", "sources", "src/modules/kb-synthesis/kb_curator_synthesize.c"),
             ("kb-synthesis", "private_headers", "src/modules/kb-synthesis/kb_curator_synthesize.h"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
@@ -458,8 +467,7 @@ class DescriptorTests(unittest.TestCase):
             ("workspace", "go_tests", "server-go/modules/workspace/workspace_test.go"),
             ("vault", "sources", "src/modules/vault/vault_service.c"),
             ("vault", "private_headers", "src/modules/vault/vault_internal.h"),
-            ("config", "sources", "src/modules/config/config.c"),
-            ("config", "private_headers", "src/modules/config/config_internal.h"),
+            ("config", "contracts", "src/modules/config/eventcontract/operations.json"),
             ("git", "sources", "src/modules/git/git_ops.c"),
             ("git", "private_headers", "src/modules/git/git_verify_internal.h"),
             ("git", "go_sources", "server-go/modules/git/git.go"),

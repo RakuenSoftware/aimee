@@ -1,5 +1,9 @@
 # Implementation plan — replayable-evidence verification (Part A)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for [replayable-verification-and-deepening-sweep.md](replayable-verification-and-deepening-sweep.md),
 **scoped to Part A only** per the proposal's Phasing decision (ship A standalone,
 exercise its evidence vocabulary on real runs, then plan Part B separately).
@@ -141,7 +145,7 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
 - Pure/deterministic and unit-testable with a fake surface backend (no network).
 
 ### WP-A3 — Verifier pass (`roundtable_verify.{c,h}`)
-- `int roundtable_verify_items(agent_config_t*, const config_t*, roundtable_result_t*, ...)`:
+- `int roundtable_verify_items(agent_config_t*, const legacy_config_record*, roundtable_result_t*, ...)`:
   for each captured item — call `evidence_replay`; `UNVERIFIABLE` → move the item
   to the **rejected list**.
 - **Tolerance contract (B1):** severity is always derived from the **reproduced

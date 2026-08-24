@@ -100,6 +100,23 @@ static const char *const MCP_CORE_TOOLS[] = {
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */
+    /* peer family: send/inbox. One entry, and it earns the slot for a reason
+     * that does not apply to anything else on this floor.
+     *
+     * Every other capability withheld from the floor has a fallback the agent
+     * reaches for instead -- worse, slower, but a fallback: `index` was added
+     * here because leaving it out did not reduce retrieval, it produced 87 shell
+     * searches. Peer messaging has NO fallback. There is no clumsier way for one
+     * session to reach another; the alternative to being shown this tool is not
+     * coordinating at all, and an agent that does not know the capability exists
+     * never calls find_tools looking for it.
+     *
+     * `send_message` sitting two lines above is a live hazard rather than a
+     * coincidence: it delivers to an operator over telegram/ntfy/webhook and
+     * reads, to an agent wanting to reach another session, exactly like the tool
+     * for doing that. Being on the floor beside it is what keeps the two
+     * distinguishable at the moment of choosing. */
+    "peer",
     NULL,
 };
 

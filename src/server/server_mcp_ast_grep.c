@@ -11,7 +11,7 @@
 #include "memory.h"
 #include "index.h"
 #include "code_span.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "dashboard.h"
 #include "aimee/protocols/mcp/mcp_tools.h"

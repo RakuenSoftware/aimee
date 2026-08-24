@@ -19,6 +19,7 @@
 #include "headers/cmd_self_update.h"
 
 #include "cli_client.h"
+#include "client_config.h"
 #include "cJSON.h"
 #include "headers/aimee_client.h"
 #include "headers/aimee_home.h"
@@ -251,41 +252,12 @@ static int fetch_asset_sha256(const char *tnorm, const char *asset, char *hex, s
    return found;
 }
 
-/* Read `update_mode:` from <aimee_home>/aimee.yaml. Returns "off", "notify"
- * (default), or "apply". Minimal scalar read (mirrors the attention-guard's). */
 static const char *read_update_mode(void)
 {
    static char mode[16];
-   snprintf(mode, sizeof mode, "notify");
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return mode;
-   char path[1024];
-   snprintf(path, sizeof path, "%s/aimee.yaml", home);
-   FILE *fp = fopen(path, "r");
-   if (!fp)
-      return mode;
-   char line[256];
-   while (fgets(line, sizeof line, fp))
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-      if (strncmp(p, "update_mode:", 12) != 0)
-         continue;
-      p += 12;
-      while (*p == ' ' || *p == '\t')
-         p++;
-      char v[16];
-      size_t n = 0;
-      while (*p && *p != '\n' && *p != '\r' && *p != ' ' && *p != '#' && n < sizeof v - 1)
-         v[n++] = *p++;
-      v[n] = '\0';
-      if (strcmp(v, "off") == 0 || strcmp(v, "apply") == 0 || strcmp(v, "notify") == 0)
-         snprintf(mode, sizeof mode, "%s", v);
-      break;
-   }
-   fclose(fp);
+   client_config_string("update_mode", mode, sizeof(mode), "notify");
+   if (strcmp(mode, "off") != 0 && strcmp(mode, "apply") != 0 && strcmp(mode, "notify") != 0)
+      snprintf(mode, sizeof mode, "notify");
    return mode;
 }
 

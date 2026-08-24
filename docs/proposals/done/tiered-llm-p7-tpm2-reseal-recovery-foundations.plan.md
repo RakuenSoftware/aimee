@@ -1,5 +1,9 @@
 # P7-reseal-d1 recovery, guard, and completion foundations
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and validated on PostgreSQL 17 plus swtpm (CT260), with
   default and ASAN/UBSAN builds; only fail-closed startup epoch synchronization
   is wired in production, with no recovery/rotation caller or operator enablement.

@@ -290,6 +290,38 @@ type triggerFireRequest struct {
 	MaxSpend  float64 `json:"max_spend_usd,omitempty"`
 	Origin    string  `json:"-"`
 	Error     string  `json:"-"`
+
+	// The CLI dispatch envelope, declared so the strict decoder accepts it.
+	// `aimee trigger fire` reaches this route through the generic CLI dispatch,
+	// whose request body always carries the method it is invoking and the client
+	// protocol version. The daemon forwards that body to this module verbatim,
+	// and the C-served routes ignore the extras -- cJSON simply does not look at
+	// them. This decoder does look, and refused the whole request:
+	//
+	//     aimee: decode trigger: json: unknown field "method"
+	//
+	// so the command could not run at all once the route moved behind the
+	// module. Naming the fields keeps DisallowUnknownFields doing its real job
+	// (catching a misspelled workspace or ref) while accepting the envelope the
+	// protocol has always sent. Both are ignored.
+	Method          string `json:"method,omitempty"`
+	ProtocolVersion int    `json:"protocol_version,omitempty"`
+
+	// Declared, not implemented. `aimee trigger fire` documents a general form
+	// -- --source <source> --task <task> [--metadata ...] -- that this slice
+	// does not serve; the source check below refuses anything but
+	// proposals/watch-dir and says so. Leaving these fields out meant the
+	// request never reached that check: it died as
+	//
+	//     aimee: decode trigger: json: unknown field "task"
+	//
+	// which reads as a protocol fault rather than the accurate answer, that the
+	// requested trigger source is not supported here. Naming them lets the
+	// refusal come from the check that actually knows. Nothing reads them, so a
+	// task can never be silently accepted and dropped.
+	Task      string `json:"task,omitempty"`
+	Metadata  string `json:"metadata,omitempty"`
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 func (s *Server) triggerFire(w http.ResponseWriter, r *http.Request) {

@@ -1,7 +1,7 @@
 /* cmd_agent.c: agent subcommand CLI (agent list/test/run/add/remove/setup/token) */
 #include "aimee.h"
 #include "util.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tier_lint.h" /* agent_resolved_price */
@@ -733,7 +733,7 @@ static void ag_parallel(app_ctx_t *ctx, int argc, char **argv)
 
 static void ag_stats(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("agent stats: could not initialize DB1");
    const char *name = (argc >= 1) ? argv[0] : NULL;
    agent_stats_t stats[MAX_AGENTS];
@@ -1184,7 +1184,7 @@ static void ag_local(app_ctx_t *ctx, int argc, char **argv)
    if (agent_save_config(cfg) != 0)
       fatal("could not save %s", agent_config_path());
    if (ag_set_model_concurrency(ag->model, ag->max_parallel) != 0)
-      fatal("could not update delegate concurrency in %s", config_default_path());
+      fatal("could not update delegate concurrency through the config module");
    if (old_model[0] && strcmp(old_model, ag->model) != 0)
       (void)ag_clear_model_concurrency_if_unused(cfg, old_model);
 
@@ -1391,7 +1391,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(argv[0], "list") == 0)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans list: could not initialize DB1");
       plan_t plans[20];
       int count = db1_execution_plan_list(plans, 20);
@@ -1404,7 +1404,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "show") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans show: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1442,7 +1442,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "verify") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans verify: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1458,7 +1458,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "replay") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans replay: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;

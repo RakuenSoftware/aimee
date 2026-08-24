@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 68
+Total commands: 76
 
 ## Core commands
 
@@ -45,6 +45,28 @@ Subcommands:
   status <job_id> [job_id...]  Check background delegate status
 
 Use `aimee jobs list|status|logs|cancel` for durable background delegate jobs.
+```
+
+### `aimee get-help`
+
+Explain how aimee itself works.
+
+Subcommands:
+
+```
+  <topic>          Explain a topic -- work queue, delegation, memory,
+                   git, build, conventions. The words are joined, so
+                   `aimee get-help work queue` is one topic.
+```
+
+### `aimee get_help`
+
+Explain how aimee itself works.
+
+Subcommands:
+
+```
+  Underscore spelling of `aimee get-help`; both route to help.get.
 ```
 
 ### `aimee help`
@@ -103,6 +125,17 @@ Subcommands:
   grant revoke     Revoke one subject's grant (--server, --team, --subject)
 ```
 
+### `aimee launch`
+
+Launch any client in an isolated Aimee session.
+
+Subcommands:
+
+```
+  -- <client> [args...]  Bind one session id and worktree, then exec the client
+                         (Codex, Claude, OpenCode, or any executable)
+```
+
 ### `aimee manuscript`
 
 Novel-mode manuscript tools.
@@ -144,6 +177,29 @@ Subcommands:
   edit <name>      Edit or create a persona in $EDITOR
   add <name>       Alias for edit
   rm <name>        Reset a built-in or remove a custom persona
+```
+
+### `aimee presence`
+
+Show who and what is currently active.
+
+Subcommands:
+
+```
+  --owner <who>    Limit the listing to one owner
+```
+
+### `aimee primary`
+
+Session's active primary agent.
+
+Subcommands:
+
+```
+  <name>           Set the session's primary agent
+  --show           Print the current primary (also the default with no
+                   argument)
+  --clear          Clear the session's primary agent
 ```
 
 ### `aimee rules`
@@ -210,6 +266,19 @@ Subcommands:
   list             List named toolsets
   show <name>      Show a toolset definition
   resolve <name>   Print the resolved tool list
+```
+
+### `aimee use`
+
+Select the active model provider.
+
+Subcommands:
+
+```
+  <name>           Make <name> the active provider
+  Same command as `aimee provider set`; both spellings route to
+  provider.set, so `aimee use ollama` and `aimee provider set ollama`
+  do the same thing.
 ```
 
 ### `aimee vault`
@@ -510,6 +579,25 @@ Subcommands:
   show <job_id>    Alias for status
   logs <job_id>    Print the recorded delegate result/log body
   cancel <job_id>  Cooperatively cancel a queued or running delegate job
+```
+
+### `aimee learning`
+
+Learning-loop safety, regret, and negative knowledge.
+
+Subcommands:
+
+```
+  approaches "<goal>"
+                   Approaches that already failed against a similar goal
+                   (advisory recall for planning; never blocks)
+  attribution [suite]
+                   Measured per-capability contribution from the ablation grid
+  fate <id> <standing|superseded|contradicted|reverted> [--reason R]
+                   Record what became of a committed proposal; regret raises
+                   the bar for the detector that raised it
+  resolve [--budget N]
+                   Close curiosity gaps the corpus now answers (bounded, on demand)
 ```
 
 ### `aimee model`
@@ -820,4 +908,14 @@ Subcommands:
 
 ```
   trust            Set per-repo cross-repo trust
+```
+
+### `aimee verify`
+
+Verify the working tree against its remote.
+
+Subcommands:
+
+```
+  Same command as `aimee git verify`; both spellings route to git.verify.
 ```

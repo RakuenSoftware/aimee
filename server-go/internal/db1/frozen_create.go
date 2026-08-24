@@ -2,11 +2,12 @@ package db1
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	wire "github.com/JBailes/aimee/server-go/db1"
 )
 
 // FrozenCreate is one path first introduced by a slice's immutable diff. The
@@ -29,14 +30,24 @@ type FrozenCreateConflict struct {
 // diff. Identical sibling creations coexist. A divergent claim rolls back as a
 // unit, so simultaneous freezes have exactly one winner and never leave a
 // partial path set behind.
+//
+// The normalisation below stays on this side and the transaction went to the
+// module, which is the split the port used everywhere: deciding what to claim
+// is the engine's business, and claiming it atomically is the store's.
 func (s *Store) ClaimFrozenCreates(ctx context.Context, parentID, workItemID string,
 	creates []FrozenCreate) (*FrozenCreateConflict, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(parentID) == "" || strings.TrimSpace(workItemID) == "" {
 		return nil, errors.New("frozen-create parent and work item are required")
 	}
 	if len(creates) == 0 {
 		return nil, nil
 	}
+	// Sorted and de-duplicated before it crosses: two entries for one path that
+	// disagree are a malformed diff, not a conflict between slices, and saying
+	// so here names the actual problem.
 	ordered := append([]FrozenCreate(nil), creates...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Path < ordered[j].Path })
 	normalized := make([]FrozenCreate, 0, len(ordered))
@@ -52,49 +63,27 @@ func (s *Store) ClaimFrozenCreates(ctx context.Context, parentID, workItemID str
 		}
 		normalized = append(normalized, create)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin frozen-create claim: %w", err)
-	}
-	defer tx.Rollback()
-	// Make the first statement a write so correctness does not depend on the
-	// connection's transaction-lock mode. This reserves SQLite's sole writer
-	// before the conflict read: two connections can never both observe an empty
-	// claim set and then race independent inserts whose primary keys differ.
-	result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET updated_at=updated_at
-WHERE work_item_id=? AND parent_id=? AND state='active'`, workItemID, parentID)
-	if err != nil {
-		return nil, fmt.Errorf("validate frozen-create owner: %w", err)
-	}
-	eligible, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("count frozen-create owner: %w", err)
-	}
-	if eligible != 1 {
-		return nil, errors.New("frozen-create owner is not an active child of the parent")
-	}
+
+	items := make([]wire.WfeClaimFrozenCreatesItem, 0, len(normalized))
 	for _, create := range normalized {
-		var existing string
-		err := tx.QueryRowContext(ctx, `SELECT work_item_id FROM wfe_frozen_create
-WHERE parent_id=? AND path=? AND work_item_id<>? AND content_hash<>?
-ORDER BY work_item_id LIMIT 1`, parentID, create.Path, workItemID, create.ContentHash).Scan(&existing)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("check frozen-create claim: %w", err)
-		}
-		if err == nil {
-			return &FrozenCreateConflict{Path: create.Path, ExistingWorkItem: existing,
-				ConflictingWorkItem: workItemID}, nil
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO wfe_frozen_create
-(parent_id,path,work_item_id,content_hash) VALUES (?,?,?,?)
-ON CONFLICT(parent_id,path,work_item_id) DO UPDATE SET
-content_hash=excluded.content_hash,updated_at=datetime('now')`,
-			parentID, create.Path, workItemID, create.ContentHash); err != nil {
-			return nil, fmt.Errorf("publish frozen-create claim: %w", err)
-		}
+		items = append(items, wire.WfeClaimFrozenCreatesItem{
+			Path:        create.Path,
+			ContentHash: create.ContentHash,
+		})
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit frozen-create claim: %w", err)
+	got, err := s.client.WfeClaimFrozenCreates(ctx, parentID, workItemID, len(items), items)
+	if err != nil {
+		return nil, fmt.Errorf("claim frozen creates: %w", err)
 	}
-	return nil, nil
+	// An empty path is the module's way of saying there was no conflict. The
+	// alternative -- a separate boolean -- would give two ways to say the same
+	// thing, and eventually they disagree.
+	if got.Path == "" {
+		return nil, nil
+	}
+	return &FrozenCreateConflict{
+		Path:                got.Path,
+		ExistingWorkItem:    got.ExistingWorkItem,
+		ConflictingWorkItem: got.ConflictingWorkItem,
+	}, nil
 }

@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=24
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-control-web
+publish=
+subscribe=
+request=
+serve=10241

@@ -30,6 +30,7 @@
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
+#include "db1_client/db1.h"
 #include "http_content_encoding.h"
 #include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
@@ -63,6 +64,32 @@ int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long
    }
    int retry = (int)(SHTTP_RATE_WINDOW_SECS - (now - st->window_start));
    return retry > 0 ? retry : 1;
+}
+
+/* Claim first-message persona delivery for this session, creating the durable
+ * row on first sight so a session that was never registered still gets exactly
+ * one delivery. Returns 1 to deliver, 0 if another caller already has it. */
+int session_persona_delivery_claim(const char *session_id)
+{
+   if (!session_id || !session_id[0])
+      return 1;
+   db1_server_session_t row;
+   if (db1_server_session_get(session_id, &row) != 0)
+   {
+      const char *principal = server_http_identity_principal();
+      (void)db1_server_session_create(session_id, "gateway", principal ? principal : "");
+      if (db1_server_session_get(session_id, &row) != 0)
+         return -1;
+   }
+   return db1_server_session_persona_delivery_claim(session_id);
+}
+
+void session_persona_delivery_finish(const char *session_id, int delivered)
+{
+   if (session_id && session_id[0] &&
+       db1_server_session_persona_delivery_finish(session_id, delivered) != 0)
+      aimee_log(LOG_ERROR, "persona_ingress", "could not finish delivery for session %s",
+                session_id);
 }
 
 void server_http_request_id(const char *provided, int pid, unsigned long seq, char *buf, size_t n)

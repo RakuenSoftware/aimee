@@ -12,6 +12,8 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/css_graph.h"
 #include "../modules/db2/c/css_migration.h"
 #include "../modules/db2/c/typed_facts.h"
@@ -99,14 +101,18 @@ int main(void)
    snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
    FILE *cf = fopen(cfgpath, "w");
    assert(cf);
-   fputs("css_style_graph_enabled: true\ntyped_facts_enabled: false\n", cf);
+   /* The style-graph flag is the ONLY gate now. This pair used to be
+    * (css_style_graph_enabled: true, typed_facts_enabled: false) -> 0, but the
+    * typed-fact master gate is retired, so the off-case has to be expressed
+    * through the flag that still exists. */
+   fputs("css_style_graph_enabled: false\n", cf);
    fclose(cf);
    assert(db2_css_migration_assert_conventions("mig", "2026-01-02T00:00:00Z") == 0);
 
-   /* Enable both flags, then assert the conventions. */
+   /* Enable the style graph, then assert the conventions. */
    cf = fopen(cfgpath, "w");
    assert(cf);
-   fputs("css_style_graph_enabled: true\ntyped_facts_enabled: true\n", cf);
+   fputs("css_style_graph_enabled: true\n", cf);
    fclose(cf);
 
    /* mig has .card__title (BEM __) + :root --brand (custom property). */
@@ -125,9 +131,9 @@ int main(void)
 
    /* Operational migration state is generation-scoped: a re-added checkout
     * cannot inherit the prior generation's verified unit. */
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(sqlite3_exec(db, "UPDATE projects SET current_generation=2 WHERE name='mig'", NULL, NULL,
-                       NULL) == SQLITE_OK);
+   char gen_err[256] = "";
+   assert(aimee_pg_exec(db2_conn(), "UPDATE projects SET current_generation=2 WHERE name='mig'",
+                        gen_err, sizeof(gen_err)) == 0);
    assert(db2_css_migration_list("mig", NULL, units, 16) == 0);
 
    db2_test_shim_close();

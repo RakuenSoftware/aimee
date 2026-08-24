@@ -1,5 +1,9 @@
 # Proposal: Code-graph intelligence — a living, embedded, reasoning graph over code
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Completed:** 2026-06-28
 - **Moved from:** `docs/proposals/pending/code-graph-intelligence.md`
@@ -265,7 +269,7 @@ missing-query 400). **Agent-callable** via the MCP `index` family — `index({co
 "hybrid", query, symbol?, project?})` — wired through `kb_client_code_hybrid`
 (verbatim JSON forward). **Per-signal weights are config-tunable** (shipped):
 `kb.code_hybrid.{weight_code,weight_graph,rrf_k}` (defaults `1.0/1.0/60` preserve the
-prior behavior; `weight ≤ 0` disables a leg) flow from `config_load` into
+prior behavior; `weight ≤ 0` disables a leg) flow from `legacy_config_read` into
 `kb_rrf_fuse`, so an operator can re-balance lexical-vs-structural relevance without a
 rebuild. **Remaining:** the **vector** leg (`pgvec_code_search`, needs the query
 embedder — integration/deploy-tier) as a third fused signal.

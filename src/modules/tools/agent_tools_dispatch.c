@@ -5,7 +5,6 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_tools_internal.h"
 #include "aimee_home.h"
-#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "log.h"
 #include "economizer.h"
 #include "tool_args_coerce.h"
@@ -135,7 +134,7 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "process_mgr.h"
 #include "agent_exec.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "sandbox.h"
 #include "slop_detect.h"
@@ -1684,7 +1683,7 @@ static char *td_clarify_start(cJSON *args, const char *name, const char *dispatc
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1716,7 +1715,7 @@ static char *td_clarify_answer(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1746,7 +1745,7 @@ static char *td_diagnose_start(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1779,7 +1778,7 @@ static char *td_diagnose_observe(cJSON *args, const char *name, const char *disp
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1851,7 +1850,7 @@ static char *td_diagnose_evidence(cJSON *args, const char *name, const char *dis
                rank = DIAG_RANK_SPECULATION;
          }
          const char *src = (jsource && cJSON_IsString(jsource)) ? jsource->valuestring : "";
-         if (!config_present() || db1_init(config_db1_path()) != 0)
+         if (!config_present() || !db1_store_ready())
             result = safe_strdup("error: server storage unavailable");
          else
          {
@@ -1884,7 +1883,7 @@ static char *td_diagnose_status(cJSON *args, const char *name, const char *dispa
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -2202,7 +2201,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
        * already called db1_init; this is idempotent. Keeping the call here
        * so delegate subprocesses that reach dispatch without going through
        * a main-opened DB1 still persist read-before-write tracking. */
-      db1_init(config_db1_path());
 
       session_state_t state;
       session_state_load(&state, dispatch_sid);

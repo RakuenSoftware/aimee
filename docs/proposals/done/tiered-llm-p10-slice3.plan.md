@@ -5,6 +5,10 @@
 
 # P10/P7 slice 3 implementation plan — kb CA key behind the vault (P7 §7)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice 3 of P10+P7. Branch off `testing` (P1, P3a, P10 slice 1, P10/P7 slice 2 merged).
 Goal: stop persisting the kb enrollment CA **private** key as plaintext PKCS#8
 (`kb/pki.c` `ca-key.pem`, mode 0600) — store it as a vault credential

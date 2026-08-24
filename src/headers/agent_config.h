@@ -32,7 +32,7 @@ const char *agent_config_path(void);
 agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
 /* The two system settings routing actually consults. This used to be a whole
- * config_t threaded through for exactly these two booleans -- callers had to hold
+ * legacy_config_record threaded through for exactly these two booleans -- callers had to hold
  * the 750 KB struct, and a reader could not tell which of its ~600 fields
  * mattered. Populate with agent_route_policy_current(). */
 typedef struct
@@ -90,6 +90,12 @@ int agent_registry_find(const char *name, agent_t *out);
 
 /* As agent_default_primary, against the cached registry. */
 int agent_registry_default_primary(agent_t *out);
+
+/* Resolve the standard OpenAI/Anthropic request `model` field. `aimee` (or an
+ * omitted field) selects the configured primary; every other value is the exact
+ * registered agent name and never silently falls back. The selected agent must
+ * be enabled. This is the shared ingress contract for all client wire formats. */
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
  * agent, else NULL. Never returns a disabled agent. */
@@ -104,6 +110,20 @@ int agent_is_available_for_routing(const agent_t *agent);
 typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count,
                                         uint32_t *selected_index);
 void agent_set_route_selection_provider(agent_route_selection_fn provider);
+/* Test/bench seam: clear the provider AND the latched authority, so a suite can
+ * exercise the built-in balancer after installing one. Daemons never call it. */
+void agent_reset_route_selection_authority(void);
+/* Did the last routing attempt fail because the selection authority could not be
+ * consulted, rather than because no agent was eligible? Callers use it to report
+ * the real fault instead of blaming the roster. */
+int agent_route_last_was_module_fault(void);
+/* The one place a failed route is turned into words. Every caller that renders
+ * a NULL from agent_route (or a -1 from delegate_pick_for_role) has to draw the
+ * same distinction, and each one that spelled the message itself got it wrong
+ * the same way: an operator sent to audit an agent roster that is fine. Writes
+ * the routing-fault wording when the selection authority could not be consulted
+ * and the empty-roster wording otherwise. */
+void agent_route_failure_message(const char *role, char *buf, size_t len);
 
 /* Why an agent is not a routable delegate. Mirrors the decision order of
  * agent_is_available_for_routing so callers can surface the ACTUAL reason

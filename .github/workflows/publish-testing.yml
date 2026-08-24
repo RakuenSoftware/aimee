@@ -51,6 +51,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -155,6 +156,7 @@ jobs:
   # two platforms. Adding a leg here is a matrix entry if that trade stops holding.
   thin-client:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -169,7 +171,7 @@ jobs:
       - name: Deps
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q gcc make libsqlite3-dev
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
 
       # Stamp the version the SERVER images in this same run are stamped with, so
       # a client and the server it was published beside report the same build.

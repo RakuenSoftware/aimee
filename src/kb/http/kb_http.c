@@ -3,6 +3,7 @@
  * Serves /v1/health, /v1/version, /v1/capabilities on a plain TCP port.
  * Runs in a background pthread; disabled when port == 0. */
 #include "aimee.h"
+#include "command_registry.h"
 #include "config.h"
 #include "config_database.h"        /* §2c: config_resolve_embedder_dims / is_pinned */
 #include "modules/db2/c/db2_pool.h" /* db2_pool_stats — health reports pool starvation */
@@ -200,10 +201,7 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 
    if (strcmp(path, "/v1/capabilities") == 0)
    {
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"capabilities\":[\"memory\",\"search\",\"index\"],"
-               "\"version\":\"%s\"}",
-               AIMEE_VERSION);
+      kb_http_capabilities_json(out_buf, (size_t)out_cap, aimee_command_agent_surfaces_json());
       return 200;
    }
 

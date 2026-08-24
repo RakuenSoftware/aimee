@@ -8,14 +8,16 @@
 #include "cli_client.h"
 #include "cli_mcp_serve.h"
 #include "client_constants.h"
-#include "client_session_worktree.h"
 #include "platform_path.h"
 #include "platform_random.h"
 #include "util.h"
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
 #include <aimee/protocols/mcp/mcp_tools.h> /* mcp_compact_tool_prose */
 #include <ctype.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,11 +50,64 @@
 
 static int g_output_ndjson = 1;
 
+/* When CLI is the preferred surface but the Runtime projection contains
+ * MCP-only module capabilities, the generated Codex registration starts this
+ * bridge with their exact tool names. An absent allowlist means ordinary/full
+ * MCP mode; a present list is both presentation and dispatch policy, so hidden
+ * dual-surface tools cannot still be invoked by guessing their names. */
+static int mcp_tool_allowlisted(const char *name)
+{
+   const char *list = getenv("AIMEE_MCP_TOOL_ALLOWLIST");
+   if (!list || !list[0])
+      return 1;
+   if (!name || !name[0])
+      return 0;
+   size_t want = strlen(name);
+   for (const char *p = list; *p;)
+   {
+      const char *end = strchr(p, ',');
+      size_t n = end ? (size_t)(end - p) : strlen(p);
+      if (n == want && memcmp(p, name, n) == 0)
+         return 1;
+      if (!end)
+         break;
+      p = end + 1;
+   }
+   return 0;
+}
+
+static int mcp_filter_tool_allowlist(cJSON *tools)
+{
+   if (!cJSON_IsArray(tools) || !getenv("AIMEE_MCP_TOOL_ALLOWLIST"))
+      return 0;
+   int removed = 0;
+   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+   {
+      cJSON *tool = cJSON_GetArrayItem(tools, i);
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
+      if (!cJSON_IsString(name) || !mcp_tool_allowlisted(name->valuestring))
+      {
+         cJSON_DeleteItemFromArray(tools, i);
+         removed++;
+      }
+   }
+   return removed;
+}
+
+/* Serialises writes to stdout.
+ *
+ * The list-changed watcher below emits notifications from its own thread while
+ * the main loop may be writing a response. Two interleaved writes produce one
+ * corrupt frame and the client drops the session, so every frame goes out under
+ * this lock. */
+static pthread_mutex_t g_out_lock = PTHREAD_MUTEX_INITIALIZER;
+
 static void mcp_send(cJSON *msg)
 {
    char *s = cJSON_PrintUnformatted(msg);
    if (s)
    {
+      pthread_mutex_lock(&g_out_lock);
       size_t len = strlen(s);
       if (g_output_ndjson)
       {
@@ -65,6 +120,7 @@ static void mcp_send(cJSON *msg)
          fwrite(s, 1, len, stdout);
       }
       fflush(stdout);
+      pthread_mutex_unlock(&g_out_lock);
       free(s);
    }
    cJSON_Delete(msg);
@@ -105,12 +161,11 @@ static const char *client_session_id(void)
    static int loaded = 0;
    if (loaded)
       return id[0] ? id : NULL;
-   loaded = 1;
-
    const char *env = getenv("AIMEE_SESSION_ID");
    if (env && env[0])
    {
       snprintf(id, sizeof(id), "%s", env);
+      loaded = 1;
       return id;
    }
 
@@ -131,6 +186,7 @@ static const char *client_session_id(void)
          id[--len] = '\0';
    }
    fclose(fp);
+   loaded = id[0] != '\0';
    return id[0] ? id : NULL;
 }
 
@@ -446,62 +502,9 @@ static void add_prompt_message(cJSON *messages, const char *role, const char *te
 
 /* --- Local protocol handlers --- */
 
-/* Place this MCP session on its own branch + worktree, and ENTER it.
- *
- * An MCP-hosted agent has no SessionStart hook, so nothing else would isolate
- * it: it would drive aimee's file/exec tools straight against the shared
- * checkout. Unlike a hook — which cannot chdir its host — this proxy IS the
- * process those tools resolve their paths in, so it can complete the handoff
- * itself by chdir'ing into the worktree.
- *
- * Runs once, at `initialize`, before any tool traffic. Writes the entered path
- * into out[cap] and returns 1; returns 0 when no worktree was entered (isolation
- * disabled, already inside one, not a git repo, or creation failed — in which
- * case client_session_worktree_ensure has already explained itself on stderr,
- * which the MCP host surfaces as server log output). Never fatal: a session that
- * cannot be isolated still serves read-only tools, and the attention guard
- * remains the backstop that refuses its writes. */
-static int mcp_enter_session_worktree(char *out, size_t cap)
-{
-   const char *sid = client_session_id();
-   char fallback[64];
-   if (!sid || !sid[0])
-   {
-      /* No host-provided id (no AIMEE_SESSION_ID, no session-ppid file yet).
-       * Mint one the way config.c does and PERSIST it to session-ppid-<ppid>,
-       * rather than inventing a private "mcp-ppid-N" string.
-       *
-       * Both halves matter. Processes of one agent session share a PPID, and
-       * that file is how the hook, this proxy and the delegates agree on one
-       * session id — an id invented here would be seen by nobody else, so the
-       * proxy would work in a different worktree from its own session. And a
-       * bare ppid is not unique enough to key a worktree on: two proxies under
-       * one host process would derive the same key and land in the SAME
-       * worktree, overwriting each other. The file's O_EXCL create settles that
-       * race — whoever loses re-reads the winner's id. */
-      if (client_session_id_ensure(fallback, sizeof(fallback)) != 0 || !fallback[0])
-         return 0; /* no stable identity -> better unisolated than colliding */
-      sid = fallback;
-   }
-
-   if (client_session_worktree_ensure(sid, out, cap) != 0)
-      return 0;
-   if (chdir(out) != 0)
-   {
-      fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
-      return 0;
-   }
-   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
-   return 1;
-}
-
-/* A remote MCP bridge starts in the developer's canonical checkout, then enters
- * a hidden per-session worktree for isolation. If the first code-index request
- * is forwarded only after that chdir, the remote server sees a hidden
- * `.aimee/worktrees/.../main` cwd while its KB has no canonical project to map
- * it to. Bootstrap the canonical repository before isolation. The remote helper
- * first asks index.list and uploads only when the project/root is absent, so an
- * ordinary initialize is one cheap read rather than a full rescan. */
+/* Bootstrap the repository visible in the client-bound cwd before the first
+ * remote code-index request. The helper uploads only when that project/root is
+ * absent, so ordinary initialization remains one cheap readiness read. */
 static void mcp_ensure_remote_repo_index(void)
 {
    if (!cli_v1_remote_endpoint_is_network())
@@ -552,85 +555,27 @@ static void handle_initialize(cJSON *id)
    cJSON_AddStringToObject(info, "version", MCP_VERSION);
    cJSON_AddItemToObject(result, "serverInfo", info);
 
-   /* EVERY TOOL IN tools/list IS DIRECTLY CALLABLE. SAY SO FIRST.
-    *
-    * This text used to open with "call get_help() before trying anything else"
-    * and then describe find_tools -> describe_tool -> call_tool as the way to
-    * reach tools. Agents read that as the normal path and spent their tool budget
-    * on the protocol rather than the work. Measured twice now: once at five of
-    * fourteen calls, and again on a benchmark cell that made two find_tools, two
-    * describe_tool and two call_tool calls and NOT ONE direct find_symbol -- while
-    * find_symbol was in the advertised list the whole time, one call away.
-    *
-    * Discovery is for what is NOT in the list. Leading with it taxes every session
-    * to buy something almost none of them need. */
-   /* AND SAY WHICH SURFACE IS CHEAPER, because this text is the reason agents
-    * pick the expensive one.
-    *
-    * It used to say the listed tools were the "first move on repository
-    * questions", full stop. That is the ONE instruction guaranteed to reach every
-    * MCP session -- it rides the initialize handshake, before any work, whether or
-    * not the agent calls a tool we happen to hook. Measured result: 13.3 MCP tool
-    * calls per benchmark cell and ZERO `aimee ...` invocations across 13 cells,
-    * with the binary on PATH throughout.
-    *
-    * An MCP call is one call, one turn, and the whole conversation re-sent. The
-    * same lookups as commands join with && into a shell call the agent is already
-    * making. The tools are not worse; the SURFACE is, whenever more than one
-    * lookup is wanted. So the cheaper form leads and the tools stay named for the
-    * cases that have no command form.
-    *
-    * Hooking memory_recall(session_start) instead was tried first and did not
-    * work: that tool is optional, the agent simply never called it, and the
-    * guidance never arrived. Only the handshake is unskippable. */
-   static const char *const base_instructions =
-       "The tools in tools/list are directly callable — call them directly, by "
-       "name, with their arguments. Do not route a listed tool through call_tool, "
-       "and do not look one up before using it. "
-       "IF YOU CAN RUN A SHELL COMMAND, USE THE COMMAND FORM, NOT THE TOOL. "
-       "`aimee index find <symbol>`, `aimee index callers <symbol>`, `aimee index "
-       "blast-radius <file>`, `aimee index structure <file>`, `aimee index span "
-       "<file> <start> <end>`, `aimee index investigate \"<question>\"`, `aimee "
-       "index deps <file>`, `aimee index hybrid \"<phrase>\"` and `aimee memory "
-       "search <terms>` answer the same questions as the "
-       "listed tools. They are ordinary commands, so they join with && inside a "
-       "shell call you are already making — one round trip for as many lookups as "
-       "you want. Every tool call is instead its own turn and re-sends the whole "
-       "conversation, so N tool calls cost N times what the same N commands cost. "
-       "This holds for a single lookup too: fold it into the command you were "
-       "already going to run. "
-       "Use the listed tools when there is no command form — ast_grep_search — or when "
-       "you genuinely cannot run a shell command. Tool calls cannot be chained, so "
-       "when you do call one, use its plural argument (spans, queries, symbols, "
-       "identifiers) instead of repeating the call. "
-       "Only when you need a tool that is NOT listed: find_tools("
-       "\"<keyword>\") to locate it, describe_tool(\"<name>\") for its schema, "
-       "then call_tool with that name and matching arguments. get_help(\"<topic>\") "
-       "explains how aimee itself works — work queue, delegation, memory, git, "
-       "build, conventions — when you are unsure; it is not a required first step. "
-       "Do not use provider-native sub-agent tools such as spawn_agent or Agent; "
-       "use the aimee delegate tool for delegated work.";
+   /* Initialize describes capabilities, not desired model behaviour. Persona and
+    * standing instructions belong to the first conversation message at shared
+    * model ingress; lookup strategy belongs to the caller. */
+   static const char *const surface_instructions =
+       "Tools returned by tools/list are optional and directly callable by name. "
+       "Use find_tools only to discover a capability that is not listed.";
 
    /* The canonical checkout must be known to the remote index before isolation
     * moves this process underneath its hidden .aimee/worktrees directory. */
    mcp_ensure_remote_repo_index();
 
-   /* Isolate before serving any tool call, and tell the caller where its work
-    * will land — the host's own idea of the cwd is now stale for aimee's tools. */
-   char wt[4200];
-   if (mcp_enter_session_worktree(wt, sizeof(wt)))
-   {
-      char instructions[8192];
-      snprintf(instructions, sizeof(instructions),
-               "%s\n\nThis session has its own isolated checkout — a branch cut from the "
-               "repository's default branch, in a dedicated worktree at %s. aimee's file and "
-               "shell tools already run there; use RELATIVE paths, or absolute paths under that "
-               "root. Do not edit the shared checkout.",
-               base_instructions, wt);
-      cJSON_AddStringToObject(result, "instructions", instructions);
-   }
-   else
-      cJSON_AddStringToObject(result, "instructions", base_instructions);
+   /* Session identity remains shared for MCP-only hosts, but cwd allocation is
+    * not repeated here. The universal launcher has already entered the one
+    * session worktree; an MCP child changing only its own cwd would split the
+    * host shell and Aimee tools across two checkouts. */
+   char prepared_sid[64];
+   if (!client_session_id())
+      (void)client_session_id_ensure(prepared_sid, sizeof(prepared_sid));
+   /* MCP initialization describes the tool surface only. Persona content is
+    * delivered at shared model ingress, so every client gets the same behavior. */
+   cJSON_AddStringToObject(result, "instructions", surface_instructions);
 
    mcp_respond(id, result);
 }
@@ -675,6 +620,8 @@ static void handle_tools_list(cJSON *id)
       return;
    }
 
+   (void)mcp_filter_tool_allowlist(tools);
+
    /* Trim guidance prose on the way out, when asked. The server applies the same
     * function at its own choke point, but this is the one that decides what THIS
     * consumer's context carries, and a thin client can face a server it does not
@@ -707,6 +654,11 @@ static void handle_tools_call(cJSON *id, cJSON *req)
    }
 
    const char *tool = name->valuestring;
+   if (!mcp_tool_allowlisted(tool))
+   {
+      mcp_error(id, -32601, "Tool is not registered on this MCP-only capability surface");
+      return;
+   }
 
    /* A remote bridge only needs the detached-workspace long poll once an
     * actual tool may touch its working tree. Starting it at process startup
@@ -1359,6 +1311,120 @@ static int read_mcp_message(FILE *in, char **out)
    return read_framed_json(in, ch, out);
 }
 
+/* --- tools/list_changed watcher ---------------------------------------------
+ *
+ * handle_initialize advertises tools.listChanged, which tells a client "I will
+ * tell you when the list changes, you need not re-poll". Nothing ever sent that
+ * notification, so a client that trusted the capability never re-listed: a
+ * plugin module could attach, register its commands, and remain invisible for
+ * the life of the session.
+ *
+ * The list is owned by aimee-server, not by this bridge, so the change signal
+ * has to travel. mcp.tools_list now returns the command-registry `generation`;
+ * this thread samples it and emits notifications/tools/list_changed whenever it
+ * moves. Polling rather than a server push because the bridge has no inbound
+ * channel of its own -- and from the CLIENT's side this is still push, which is
+ * what the capability actually promises.
+ *
+ * A server that does not return `generation` (an older one) simply never
+ * triggers a notification, which is exactly the behaviour before this existed. */
+static atomic_int g_watch_stop;
+static pthread_t g_watch_thread;
+static int g_watch_running;
+
+/* Seconds between samples. Slow on purpose: this costs one tools_list build per
+ * tick per connected bridge, and a plugin appearing a few seconds late is not a
+ * cost anyone can perceive.
+ *
+ * A variable rather than a constant so the watcher is testable at all -- a
+ * 15-second loop cannot be driven by a unit test, and an untested background
+ * thread in a shipped path is exactly the thing to avoid. Also lets an operator
+ * tighten or loosen it without a rebuild. */
+static int g_tools_watch_interval_sec = 15;
+
+static void tools_watch_read_interval(void)
+{
+   const char *env = getenv("AIMEE_MCP_TOOLS_WATCH_SECONDS");
+   if (!env || !env[0])
+      return;
+   int v = atoi(env);
+   if (v > 0)
+      g_tools_watch_interval_sec = v;
+}
+
+static int tools_generation_now(double *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "mcp.tools_list");
+   cJSON *resp = server_request(req, DEFAULT_TIMEOUT_MS);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1;
+   cJSON *gen = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   int ok = cJSON_IsNumber(gen);
+   if (ok && out)
+      *out = gen->valuedouble;
+   cJSON_Delete(resp);
+   return ok ? 0 : -1;
+}
+
+static void *tools_watch_run(void *unused)
+{
+   (void)unused;
+   double last = 0;
+   int have_last = 0;
+
+   while (!atomic_load(&g_watch_stop))
+   {
+      /* Sleep in short slices so stop() is prompt even on a long interval: a
+       * thread that only checks its stop flag once per interval makes shutdown
+       * wait out the whole tick. */
+      for (int i = 0; i < g_tools_watch_interval_sec * 10 && !atomic_load(&g_watch_stop); i++)
+         usleep(100000);
+      if (atomic_load(&g_watch_stop))
+         break;
+
+      double now = 0;
+      if (tools_generation_now(&now) != 0)
+         continue; /* server down or too old to report it; try again next tick */
+      if (!have_last)
+      {
+         last = now;
+         have_last = 1;
+         continue; /* the first sample is a baseline, not a change */
+      }
+      if (now == last)
+         continue;
+      last = now;
+
+      cJSON *note = cJSON_CreateObject();
+      if (!note)
+         continue;
+      cJSON_AddStringToObject(note, "jsonrpc", "2.0");
+      cJSON_AddStringToObject(note, "method", "notifications/tools/list_changed");
+      mcp_send(note); /* a notification carries no id */
+   }
+   return NULL;
+}
+
+static void tools_watch_start(void)
+{
+   tools_watch_read_interval();
+   atomic_store(&g_watch_stop, 0);
+   g_watch_running = pthread_create(&g_watch_thread, NULL, tools_watch_run, NULL) == 0;
+}
+
+static void tools_watch_stop(void)
+{
+   if (!g_watch_running)
+      return;
+   atomic_store(&g_watch_stop, 1);
+   pthread_join(g_watch_thread, NULL);
+   g_watch_running = 0;
+}
+
 /* --- Entry point --- */
 
 int cli_mcp_serve(void)
@@ -1367,6 +1433,9 @@ int cli_mcp_serve(void)
     * by cli_main so write() to a dead server socket surfaces EPIPE rather
     * than killing the bridge. */
    setvbuf(stdout, NULL, _IONBF, 0);
+
+   /* Honour the tools.listChanged capability handle_initialize advertises. */
+   tools_watch_start();
 
    char *message = NULL;
    int rc;
@@ -1389,6 +1458,7 @@ int cli_mcp_serve(void)
    free(message);
    if (rc < 0)
       mcp_error(NULL, -32700, "Parse error");
+   tools_watch_stop();
    cli_workspace_reverse_channel_stop();
    cli_close(&g_conn);
    return 0;

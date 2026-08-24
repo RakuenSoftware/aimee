@@ -1,5 +1,9 @@
 # Search egress policy: separate untrusted destinations from operator-configured endpoints
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — delivered scope archived 2026-07-26.
 
 *Filed as a precondition record for

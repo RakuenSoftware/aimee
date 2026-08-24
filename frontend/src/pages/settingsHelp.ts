@@ -1,6 +1,6 @@
 /* Plain-English help for the Settings page. Keyed by the exact config key the
  * server's config_fields allowlist exposes. Descriptions are grounded in the
- * config_t field comments in src/headers/config.h — keep them in sync when a
+ * legacy_config_record field comments in src/headers/config.h — keep them in sync when a
  * field's behaviour or default changes. A key with no entry here still renders;
  * it just shows no help line, so the page degrades gracefully for new keys. */
 

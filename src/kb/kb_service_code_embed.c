@@ -24,7 +24,7 @@
 #define CE_ERRBUF   256
 #define CE_TEXT_CAP 4096
 /* Upper bound on the embedding dimension we will buffer. Tied to the global
- * EMBED_MAX_DIM (4000 — the buffered embedder maximum) so the code-embed
+ * EMBED_MAX_DIM (4000 — the pgvector vector index ceiling) so the code-embed
  * buffer + cap track the embed ladder (0.6B=1024 / 4B=2560 / 8B-trunc=4000) and
  * never silently reject or overflow a larger-dim model. */
 #define CE_EMBED_MAX_DIM        EMBED_MAX_DIM

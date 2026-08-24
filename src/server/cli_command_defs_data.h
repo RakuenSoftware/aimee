@@ -98,6 +98,9 @@
     {"api", "Inspect the public /v1 HTTP API (aimee.api.*)", AIMEE_CMD_TIER_ADVANCED, 0,
      "  status           Show the loopback /v1 listener config and emit VS Code /\n"
      "                   OpenAI-compatible model-provider setup snippets\n"},
+    {"launch", "Launch any client in an isolated Aimee session", AIMEE_CMD_TIER_CORE, 0,
+     "  -- <client> [args...]  Bind one session id and worktree, then exec the client\n"
+     "                         (Codex, Claude, OpenCode, or any executable)\n"},
     {"session-start", "SessionStart hook entry point", AIMEE_CMD_TIER_CORE, 1, NULL},
     {"delegate", "Delegate a task to a sub-agent", AIMEE_CMD_TIER_CORE, 0,
      "  <role> \"prompt\"   Run a delegate in <role>: code, review, explain,\n"
@@ -196,6 +199,18 @@
      "  list             List trigger runs\n"
      "  status           Show one trigger run\n"
      "  cancel           Cancel a queued trigger run\n"},
+    {"learning", "Learning-loop safety, regret, and negative knowledge",
+     AIMEE_CMD_TIER_ADVANCED, 0,
+     "  approaches \"<goal>\"\n"
+     "                   Approaches that already failed against a similar goal\n"
+     "                   (advisory recall for planning; never blocks)\n"
+     "  attribution [suite]\n"
+     "                   Measured per-capability contribution from the ablation grid\n"
+     "  fate <id> <standing|superseded|contradicted|reverted> [--reason R]\n"
+     "                   Record what became of a committed proposal; regret raises\n"
+     "                   the bar for the detector that raised it\n"
+     "  resolve [--budget N]\n"
+     "                   Close curiosity gaps the corpus now answers (bounded, on demand)\n"},
     {"aux", "Auxiliary model routing", AIMEE_CMD_TIER_ADVANCED, 0,
      "  config           Show resolved aux task->provider/model mapping\n"
      "  test <task> \"<prompt>\"\n"
@@ -348,4 +363,37 @@
      "  batch            Export trajectories in batch\n"},
     {"episode", "Delegation episodes", AIMEE_CMD_TIER_ADVANCED, 0,
      "  list             List recent delegation episodes\n"},
+
+    /* These six route and work, and `aimee help <cmd>` answered "Unknown
+       command" for every one of them. The coverage gate could not see them: it
+       required the dispatch row's VERB to be a quoted string, and each of these
+       is either a bare group whose verb is NULL (`aimee use`, `aimee presence`)
+       or an alias of a subcommand. So the gate exempted precisely the commands
+       an operator types first -- a bare group name -- while reading as coverage
+       of the whole surface. */
+
+    {"use", "Select the active model provider", AIMEE_CMD_TIER_CORE, 0,
+     "  <name>           Make <name> the active provider\n"
+     "  Same command as `aimee provider set`; both spellings route to\n"
+     "  provider.set, so `aimee use ollama` and `aimee provider set ollama`\n"
+     "  do the same thing.\n"},
+    {"presence", "Show who and what is currently active", AIMEE_CMD_TIER_CORE, 0,
+     "  --owner <who>    Limit the listing to one owner\n"},
+    {"primary", "Session's active primary agent", AIMEE_CMD_TIER_CORE, 0,
+     "  <name>           Set the session's primary agent\n"
+     "  --show           Print the current primary (also the default with no\n"
+     "                   argument)\n"
+     "  --clear          Clear the session's primary agent\n"},
+    /* hidden_default: an alias spelling is answered by `aimee help verify` but
+       not listed in `help --all`, which is how cmd_table.c already treats an
+       alias -- and build_integrity bans the bare word from the listing. */
+    {"verify", "Verify the working tree against its remote", AIMEE_CMD_TIER_ADMIN, 1,
+     "  Same command as `aimee git verify`; both spellings route to git.verify.\n"},
+    {"get-help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 0,
+     "  <topic>          Explain a topic -- work queue, delegation, memory,\n"
+     "                   git, build, conventions. The words are joined, so\n"
+     "                   `aimee get-help work queue` is one topic.\n"},
+    {"get_help", "Explain how aimee itself works", AIMEE_CMD_TIER_CORE, 1,
+     "  Underscore spelling of `aimee get-help`; both route to help.get.\n"},
+
     {NULL, NULL, 0, 0, NULL},

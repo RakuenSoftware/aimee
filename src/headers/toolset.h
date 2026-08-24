@@ -29,8 +29,6 @@ typedef struct
 
 void toolset_registry_init(toolset_registry_t *registry);
 int toolset_registry_load_effective(toolset_registry_t *registry, char *err, size_t err_len);
-int toolset_registry_load_file(toolset_registry_t *registry, const char *path, char *err,
-                               size_t err_len);
 const toolset_def_t *toolset_registry_find(const toolset_registry_t *registry, const char *name);
 int toolset_registry_validate(const toolset_registry_t *registry, char *err, size_t err_len);
 int toolset_resolve(const toolset_registry_t *registry, const char *name,

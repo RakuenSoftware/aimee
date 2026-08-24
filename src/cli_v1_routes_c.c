@@ -100,6 +100,10 @@ static void print_agent_list(cJSON *resp)
       printf("No agents configured.\n");
       return;
    }
+   cJSON *preferred = cJSON_GetObjectItemCaseSensitive(resp, "default_delegate");
+   if (cJSON_IsString(preferred) && preferred->valuestring[0])
+      printf("Preferred delegate: %s (soft preference; normal routing is fallback)\n",
+             preferred->valuestring);
    cJSON *ag;
    cJSON_ArrayForEach(ag, agents)
    {
@@ -716,48 +720,6 @@ static void print_episode_list(cJSON *resp)
    }
 }
 
-static void print_eval_run(cJSON *resp)
-{
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "results");
-   printf("%-30s %-12s %-12s %-6s %-6s %-8s %-10s\n", "Task", "Agent", "Ablation", "Pass", "Turns",
-          "ToolOK", "Latency");
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *row;
-      cJSON_ArrayForEach(row, rows)
-      {
-         double tool_ok =
-             cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "tool_call_success_rate"));
-         printf("%-30s %-12s %-12s %-6s %-6d %-7.2f%% %-10dms\n", json_str(row, "task_name"),
-                json_str(row, "agent_name"), json_str(row, "ablation"),
-                json_int(row, "success", 0) ? "PASS" : "FAIL", json_int(row, "turns", 0),
-                tool_ok * 100.0, json_int(row, "latency_ms", 0));
-      }
-   }
-   printf("\n%d/%d passed.\n", json_int(resp, "passes", 0), json_int(resp, "total", 0));
-}
-
-static void print_eval_results(cJSON *resp)
-{
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "results");
-   if (!cJSON_IsArray(rows) || cJSON_GetArraySize(rows) == 0)
-   {
-      printf("No eval results.\n");
-      return;
-   }
-   printf("%-15s %-25s %-12s %-12s %-6s %-6s %-6s %-10s %s\n", "Suite", "Task", "Agent", "Ablation",
-          "Pass", "Turns", "Tools", "Latency", "Time");
-   cJSON *row;
-   cJSON_ArrayForEach(row, rows)
-   {
-      printf("%-15s %-25s %-12s %-12s %-6s %-6d %-6d %-10dms %s\n", json_str(row, "suite"),
-             json_str(row, "task_name"), json_str(row, "agent_name"), json_str(row, "ablation"),
-             json_int(row, "success", 0) ? "PASS" : "FAIL", json_int(row, "turns", 0),
-             json_int(row, "tool_calls", 0), json_int(row, "latency_ms", 0),
-             json_str(row, "created_at"));
-   }
-}
-
 static void print_delegate_status_object(cJSON *job, cJSON *full_result, cJSON *result_limit)
 {
    cJSON *id = cJSON_GetObjectItemCaseSensitive(job, "job_id");
@@ -1156,7 +1118,13 @@ void pt_print_index_investigate(const char *method, cJSON *resp)
          if (raw && raw[0] && strcmp(raw, "-") != 0)
             printf("%s\n", raw);
          else
-            printf("(no answer; error_status %s)\n", json_str(row, "error_status"));
+         {
+            cJSON *status = cJSON_GetObjectItemCaseSensitive(row, "error_status");
+            if (cJSON_IsNumber(status))
+               printf("(no answer; error_status %d)\n", status->valueint);
+            else
+               printf("(no answer; error_status unknown)\n");
+         }
       }
    }
 }
@@ -2185,14 +2153,6 @@ void pt_print_dogfood_report(const char *method, cJSON *resp)
    if (cJSON_IsTrue(armed))
       printf("  review reminder armed\n");
 }
-void pt_print_eval_run(const char *method, cJSON *resp)
-{
-   print_eval_run(resp);
-}
-void pt_print_eval_results(const char *method, cJSON *resp)
-{
-   print_eval_results(resp);
-}
 void pt_print_identity_show(const char *method, cJSON *resp)
 {
    cJSON *charter = cJSON_GetObjectItemCaseSensitive(resp, "charter");
@@ -2254,7 +2214,42 @@ void pt_print_roundtable_review(const char *method, cJSON *resp)
    (void)method;
    cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
    if (cJSON_IsString(art) && art->valuestring[0])
+   {
       printf("%s\n", art->valuestring);
+      /* An artifact is not the same as an answer. A panel whose every seat
+       * failed still renders one -- "Roundtable did not approve the artifact and
+       * returned no usable findings." -- and printing only that hid the reason
+       * the SAME response was carrying: pause_reason, detail, and a
+       * participant_failures entry naming each seat's persona and its error.
+       * Measured against a real panel: three seats failed with "unsupported
+       * delegate cli_kind", the --json caller saw all three, and the operator
+       * reading the terminal saw one sentence that named nothing. Say the rest
+       * whenever the panel did not approve. */
+      if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "approved")))
+      {
+         cJSON *reason = cJSON_GetObjectItemCaseSensitive(resp, "pause_reason");
+         cJSON *failures = cJSON_GetObjectItemCaseSensitive(resp, "participant_failures");
+         cJSON *total = cJSON_GetObjectItemCaseSensitive(resp, "participants_total");
+         cJSON *failed = cJSON_GetObjectItemCaseSensitive(resp, "participants_failed");
+         if (cJSON_IsString(reason) && reason->valuestring[0])
+            fprintf(stderr, "  reason: %s\n", reason->valuestring);
+         if (cJSON_IsNumber(total) && cJSON_IsNumber(failed) && (int)failed->valuedouble > 0)
+            fprintf(stderr, "  seats: %d of %d failed\n", (int)failed->valuedouble,
+                    (int)total->valuedouble);
+         if (cJSON_IsArray(failures))
+         {
+            cJSON *f = NULL;
+            cJSON_ArrayForEach(f, failures)
+            {
+               cJSON *persona = cJSON_GetObjectItemCaseSensitive(f, "persona");
+               cJSON *detail = cJSON_GetObjectItemCaseSensitive(f, "detail");
+               fprintf(stderr, "    %s: %s\n",
+                       cJSON_IsString(persona) ? persona->valuestring : "seat",
+                       cJSON_IsString(detail) ? detail->valuestring : "failed");
+            }
+         }
+      }
+   }
    else
    {
       /* A review that produced no artifact is the case that matters most, and it

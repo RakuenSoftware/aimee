@@ -15,6 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -157,7 +158,7 @@ func TestRetryPassesPreviousFailureDetailToRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +201,7 @@ func testSiblingStepsRunConcurrently(t *testing.T, maxUSD, stepCostUSD float64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +331,7 @@ func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +367,7 @@ func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
 
 func TestReconciledSpendReopensAndCommitsExactlyOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	store, err := db1.Open(path)
+	store, err := db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +385,7 @@ func TestReconciledSpendReopensAndCommitsExactlyOnce(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = db1.Open(path)
+	store, err = db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +426,7 @@ func TestUncappedDuplicateAdvanceCannotShareOneInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +502,7 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "aimee.db")
-	store, err := db1.Open(path)
+	store, err := db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +527,7 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = db1.Open(path)
+	store, err = db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +570,7 @@ func TestPreDispatchRunnerFailureDoesNotConsumeBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +613,7 @@ func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +759,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -842,7 +843,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -911,7 +912,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -985,7 +986,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1057,7 +1058,7 @@ func TestUnmeasuredSpendIsChargedAtTheReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1108,7 +1109,7 @@ func TestMeasuredZeroCostIsNotInflated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1167,7 +1168,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		store, err := db1.Open(filepath.Join(root, "aimee.db"))
+		store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1252,7 +1253,7 @@ func TestPersistentRunnerFailureParksForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1325,7 +1326,7 @@ func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1364,7 +1365,7 @@ func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
 // delegate problem is fixed.
 func TestDelegateFailedIsOperatorResumable(t *testing.T) {
 	root := t.TempDir()
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1428,7 +1429,7 @@ func TestParkSurvivesACancelledStepContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1590,7 +1591,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

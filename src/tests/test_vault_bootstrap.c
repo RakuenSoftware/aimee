@@ -422,8 +422,54 @@ static void test_no_plaintext_at_rest(void)
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
+/* Remove every credential-shaped variable this process INHERITED, before any
+ * test runs.
+ *
+ * Several assertions here are global -- vault_env_has_credential_environment()
+ * answers "is there ANY credential left in the environment", not "is mine gone".
+ * That makes them a property of the whole environment, so a single unrelated
+ * variable in the developer's shell fails the test no matter how correct the
+ * code under test is. It bit exactly that way: a harness-injected
+ * CLAUDE_CODE_MESSAGING_TOKEN matches the `_TOKEN` suffix rule, so the scrub
+ * assertion could never pass locally while CI, with no such variable, stayed
+ * green.
+ *
+ * Deliberately reusing vault_env_name_is_any_credential() rather than
+ * re-listing the patterns: the point is to clear precisely what the predicate
+ * under test counts, so the two cannot drift apart and reopen this.
+ *
+ * environ is rebuilt by unsetenv(), so collect the names first and only then
+ * remove them -- unsetting mid-walk skips entries. */
+#define TEST_ENV_NAME_MAX 128 /* mirrors ENV_NAME_MAX, private to the module */
+
+static void scrub_inherited_credential_env(void)
+{
+   extern char **environ;
+   char names[64][TEST_ENV_NAME_MAX];
+   int n = 0;
+
+   for (char **entry = environ; *entry && n < (int)(sizeof(names) / sizeof(names[0])); entry++)
+   {
+      const char *eq = strchr(*entry, '=');
+      if (!eq || eq == *entry)
+         continue;
+      size_t len = (size_t)(eq - *entry);
+      if (len >= TEST_ENV_NAME_MAX)
+         continue;
+      memcpy(names[n], *entry, len);
+      names[n][len] = '\0';
+      if (vault_env_name_is_any_credential(names[n]))
+         n++;
+   }
+
+   for (int i = 0; i < n; i++)
+      unsetenv(names[i]);
+}
+
 int main(void)
 {
+   scrub_inherited_credential_env();
+
    snprintf(g_root, sizeof(g_root), "/tmp/aimee-vaultboot-test-%d", (int)getpid());
    snprintf(g_home, sizeof(g_home), "%s/home", g_root);
    char mk[700];

@@ -13,12 +13,13 @@
 #include "server_trigger.h"
 #include "server.h"
 #include "config.h"
-#include "modules/db1/db1_trigger.h"
-#include "modules/db1/pipelines.h"
+#include "db1_client/db1_trigger.h"
+#include "db1_client/pipelines.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "log.h"
 #include "platform_random.h"
+#include "runtime_secret.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,15 +64,20 @@ int handle_trigger_fire(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* 1. Load config */
 
    /* 2. Auth check */
-   if (config_trigger_auth_token()[0])
+   char trigger_token[256] = "";
+   if (runtime_secret_get("AIMEE_TRIGGER_AUTH_TOKEN", trigger_token, sizeof(trigger_token)))
    {
       cJSON *tok_item = cJSON_GetObjectItemCaseSensitive(req, "auth_token");
       if (!tok_item)
          tok_item = cJSON_GetObjectItemCaseSensitive(req, "token");
       const char *tok = (tok_item && cJSON_IsString(tok_item)) ? tok_item->valuestring : "";
-      if (strcmp(tok, config_trigger_auth_token()) != 0)
+      if (strcmp(tok, trigger_token) != 0)
+      {
+         runtime_secret_wipe(trigger_token, sizeof(trigger_token));
          return server_send_error(conn, "unauthorized", NULL);
+      }
    }
+   runtime_secret_wipe(trigger_token, sizeof(trigger_token));
 
    /* Manual one-at-a-time proposal fire: source=proposals + proposal=<name> files exactly
     * that pending proposal through the WFE pipeline, bypassing the default-off auto scan

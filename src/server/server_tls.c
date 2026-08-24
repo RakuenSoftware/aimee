@@ -2,12 +2,14 @@
  * client-cert verification + revocation. */
 #include "server_tls.h"
 #include "server_conn_io.h" /* register/clear the per-conn SSL on the I/O shim */
-#include "config.h"         /* config_default_dir, config_load */
+#include "config.h"         /* config_default_dir, legacy_config_read */
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
 #include "log.h"
 #include "cJSON.h"
 #include <aimee/core/connection/tls_openssl.h>
+
+#include <time.h>
 
 #include <openssl/bn.h>
 #include <openssl/err.h>
@@ -968,6 +970,44 @@ static SSL *server_tls_management_accept(int fd)
    return tls_accept_with_ssl(fd, ssl);
 }
 
+/* How long server_tls_wait_for_store waits. The module attaches in well under a
+   second when it is coming at all, and this is paid once, at startup. */
+#define TLS_STORE_WAIT_MS 5000
+#define TLS_STORE_POLL_MS 50
+
+/* Wait for the store before the mTLS ramp runs.
+ *
+ * The ramp inside server_tls_init_default reads and writes DB1, and DB1 lives
+ * in a module that attaches on its own schedule: it connects to the bus socket
+ * the daemon owns, so it cannot begin until the daemon is already listening.
+ * Racing it is permanent -- the ramp self-test fails, init returns non-zero, and
+ * TLS stays DISABLED for the life of the process while a healthy module attaches
+ * a moment later. Observed as "tls_port set but TLS cert/key not loadable"
+ * beside a running module, and in CI as an adoption run timing out on a TLS
+ * listener that was never coming.
+ *
+ * The probe is a parameter rather than a direct call so this file keeps no DB1
+ * dependency: its unit test links it alone, deliberately. Only waits when mTLS
+ * is configured on, since that is the only mode whose init needs the store. A
+ * module that is coming attaches in well under a second; one that is not leaves
+ * TLS refused exactly as before, having cost a second once, and says why. */
+void server_tls_wait_for_store(int (*store_ready)(void))
+{
+   if (!store_ready || config_server_api_mtls() <= 0)
+      return;
+   for (int waited_ms = 0; waited_ms < TLS_STORE_WAIT_MS && !store_ready();
+        waited_ms += TLS_STORE_POLL_MS)
+   {
+      struct timespec ts = {0, TLS_STORE_POLL_MS * 1000000L};
+      nanosleep(&ts, NULL);
+   }
+   if (!store_ready())
+      aimee_log(LOG_WARN, "server.tls",
+                "the store did not answer within %dms; the mTLS ramp needs it, so TLS may be "
+                "refused",
+                TLS_STORE_WAIT_MS);
+}
+
 int server_tls_init_default(void)
 {
    char cert[MAX_PATH_LEN], key[MAX_PATH_LEN];
@@ -975,7 +1015,10 @@ int server_tls_init_default(void)
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
    int effective_mtls = pki_mtls_ramp_init(config_server_api_mtls());
    if (effective_mtls < 0)
-      return -1;
+      /* NOT a certificate problem, and it must not be reported as one: the ramp
+       * self-test is DB1 stage 19 (db1-pki), so this is what a missing or
+       * unreachable db1 module looks like from here. */
+      return SERVER_TLS_INIT_ERR_MTLS_RAMP;
    if (effective_mtls == 1)
       aimee_log(LOG_WARN, "server.tls",
                 "mTLS migration is optional: bearer-only clients remain accepted until the "
@@ -990,8 +1033,27 @@ int server_tls_init_default(void)
     * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
     * file and the verify callback starts consulting the snapshot. */
    if (effective_mtls > 0 && pki_ca_ensure() != 0)
-      return -1;
-   return server_tls_init(cert, NULL, effective_mtls, config_server_api_mtls_client_ca());
+      return SERVER_TLS_INIT_ERR_CLIENT_CA;
+   return server_tls_init(cert, NULL, effective_mtls, config_server_api_mtls_client_ca()) == 0
+              ? SERVER_TLS_INIT_OK
+              : SERVER_TLS_INIT_ERR_IDENTITY;
+}
+
+const char *server_tls_init_result_str(int result)
+{
+   switch (result)
+   {
+   case SERVER_TLS_INIT_OK:
+      return "ok";
+   case SERVER_TLS_INIT_ERR_MTLS_RAMP:
+      return "the mTLS ramp self-test refused (DB1 pki unreachable; is the db1 module running?)";
+   case SERVER_TLS_INIT_ERR_CLIENT_CA:
+      return "aimee's client CA could not be created or loaded";
+   case SERVER_TLS_INIT_ERR_IDENTITY:
+      return "the server certificate or its Vault-held key could not be loaded";
+   }
+   /* An out-of-range code is a bug, and a bug must not name a specific cause. */
+   return "unknown";
 }
 
 SSL *server_tls_begin(int fd)

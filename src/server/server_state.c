@@ -7,6 +7,7 @@
 #include "token_audit.h"              /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "embedder_catalog.h"
 #include "server.h"
+#include "headers/module_commands.h"
 #include "dashboard.h"
 #include "render.h"                   /* decision_to_json + db2_decision_log_list */
 #include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
@@ -19,7 +20,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "modules/workspace/workspace_handle.h"
 #include "modules/workspace/workspace_runner_registry.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "compute_pool.h"
@@ -183,12 +184,22 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * Splitting it costs nothing at the wire: server_send_error and jo_err build the
  * identical {status:"error", message} envelope, so the bytes on the RPC path are
  * unchanged. handle_memory_store below is now only the connection write. */
-cJSON *memory_store_command(const cJSON *req)
+cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
 {
    const char *key, *content;
    if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
        jo_need_str((cJSON *)req, "content", &content) < 0)
       return jo_err("missing key or content");
+   /* An empty key or content is a malformed REQUEST, not a storage failure. The
+    * store already refuses it, but the refusal surfaced as "failed to store
+    * memory" -- which reads as the database declining a valid write and sends
+    * the caller to look at the store. jo_need_str only proves the field is a
+    * string and present; "" satisfies that. Refused here, beside the sibling
+    * argument checks (memory.delete's positive id, facts.retract's non-empty
+    * source), and with the same kind so a client can tell the two apart. */
+   if (!key[0] || !content[0])
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store requires a non-empty key and content", NULL);
 
    const char *tier = jo_str((cJSON *)req, "tier", TIER_L0);
    const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);
@@ -196,7 +207,8 @@ cJSON *memory_store_command(const cJSON *req)
    const char *sid = jo_str((cJSON *)req, "session_id", "");
 
    memory_t out;
-   if (kb_client_memory_insert(tier, kind, key, content, confidence, sid, &out) != 0)
+   if (kb_client_memory_insert_as(tier, kind, key, content, "", confidence, sid, authority, &out) !=
+       0)
       return jo_err("failed to store memory");
 
    cJSON *resp = jo_ok();
@@ -207,7 +219,13 @@ cJSON *memory_store_command(const cJSON *req)
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return send_and_free(conn, memory_store_command(req));
+   /* Whose words these are follows the connection's kernel-attested identity, the
+    * same rule facts.retract uses (server_facts.c) and for the same reason: this
+    * row's provenance decides whether the typed-fact drain may mine Class-A facts
+    * out of it, and a caller must not be able to claim that by asking. A bearer
+    * over TCP/TLS is a service or an agent, not a person. */
+   return send_and_free(
+       conn, memory_store_command(req, server_account_memory_authority(server_request_account())));
 }
 
 cJSON *memory_list_command(const cJSON *req)
@@ -258,7 +276,7 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* cJSON stores numbers as doubles. Reject fractional and unrepresentable IDs
  * instead of truncating them into a different memory's integer primary key. */
-static int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
+int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
 {
    cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||
@@ -339,29 +357,47 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * interface a user has — a memory stored by mistake (a secret, a typo, a test
  * fixture written against a live deployment) could not be taken back.
  *
- * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
- * memory.store rather than inventing its own. */
-cJSON *memory_delete_command(cJSON *req)
+ * Gated on CAP_MEMORY_ADMIN — deliberately NOT the CAP_MEMORY_WRITE that
+ * memory.store carries. This is the one memory path that destroys rather than
+ * versions, so it is graded like rules.delete: holding "may remember" is not
+ * holding "may forget". The model-facing MCP `forget` verb has no such authority
+ * and retires the memory instead.
+ *
+ * The capability decides whether the caller MAY delete. It does not decide
+ * whether the caller is a person, and only a person's delete destroys: the
+ * capability travels with a bearer, and CAP_MEMORY_ADMIN sits inside
+ * CAPS_AUTHENTICATED, so a TCP bearer under remote_writes=DATA/FULL clears this
+ * gate. Destroying a row and its provenance is irreversible and the audit event
+ * carries only the id, so a token that leaked cannot be allowed to spend the
+ * user's one non-recoverable verb. An un-attested caller that clears the
+ * capability still deletes — it retires the memory, which memory_fact_history
+ * can still read — so this narrows the blast radius rather than the feature. */
+cJSON *memory_delete_command(cJSON *req, const char *account)
 {
    int64_t id = 0;
    if (memory_request_positive_id(req, "id", &id) != 0)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   if (kb_client_memory_delete(id) != 0)
+   memory_authority_t authority = server_account_memory_authority(account);
+   if (kb_client_memory_delete_as(id, authority) != 0)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "id", (double)id);
    cJSON_AddBoolToObject(resp, "deleted", 1);
+   /* Say which happened. "deleted" alone would report a retire as a destroy, and
+    * a caller correcting a mistake needs to know whether the value is really gone
+    * or still readable through memory_fact_history. */
+   cJSON_AddBoolToObject(resp, "destroyed", authority == MEMORY_AUTHORITY_USER);
    return resp;
 }
 
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   return server_send_ok(conn, memory_delete_command(req));
+   return server_send_ok(conn, memory_delete_command(req, server_request_account()));
 }
 
 cJSON *memory_get_command(cJSON *req)
@@ -1474,6 +1510,10 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                     (double)aimee_ir_metric_total((aimee_ir_metric_t)m));
    }
 
+   /* One row per attached plugin instance. Serialised by module_commands,
+    * which owns the snapshot this reads -- see aimee_module_commands_report. */
+   aimee_module_commands_report(resp);
+
    /* Shadow-traffic mirror: sent vs dropped-at-cap. Dropped is not a failure (the
     * mirror is best-effort) but it must be visible — a high drop rate means the
     * in-flight cap is throttling coverage, not that parity is clean. */
@@ -1690,7 +1730,7 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * config_reload_if_changed() tick — the same read-your-writes fix workspace.add
     * already carries, which this path was simply never given.
     *
-    * config_load() returns the SNAPSHOT in the server, not the file, so until that
+    * legacy_config_read() returns the SNAPSHOT in the server, not the file, so until that
     * tick every reader still saw the removed entry. Measured: `workspace remove`
     * followed immediately by `workspace add` answered "already registered", and a
     * second `workspace remove` answered "removed" again — both reading a registry
@@ -1953,8 +1993,8 @@ int handle_identity_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (platform_mkdir_p(out_dir, 0755) != 0)
       return server_send_error(conn, "identity snapshot: could not create output directory", NULL);
-   if (db1_init(config_db1_path()) != 0)
-      return server_send_error(conn, "identity snapshot: could not initialize DB1", NULL);
+   if (!db1_store_ready())
+      return server_send_error(conn, "identity snapshot: DB1 store unavailable", NULL);
 
    cJSON *snap = identity_snapshot_build();
    if (!snap)

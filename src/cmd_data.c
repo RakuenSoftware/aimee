@@ -1,6 +1,6 @@
 /* cmd_data.c: data management commands (db, export, import, config) */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
 #include "kb_client.h"
@@ -17,7 +17,7 @@
 #include "dstr.h"
 #include "modules/git/mcp_git.h"
 #include "modules/git/git_verify.h"
-#include "config_fields.h"
+#include "config_client.h"
 #include "config_database.h" /* config_emit_deploy_env — page-2 compose env */
 #include "runtime_secret.h"
 #include <unistd.h>
@@ -25,21 +25,6 @@
 #include <ctype.h>
 
 #define CMD_DATA_ERRBUF 256
-
-void cmd_db(app_ctx_t *ctx, int argc, char **argv)
-{
-   const char *sub = (argc > 0) ? argv[0] : NULL;
-   if (argc > 0)
-   {
-      argc--;
-      argv++;
-   }
-
-   if (subcmd_dispatch(get_db_subcmds(), sub, ctx, argc, argv) != 0)
-      subcmd_usage("db", get_db_subcmds());
-}
-
-/* --- cmd_db: status and pragma subcmds --- */
 
 void cmd_export(app_ctx_t *ctx, int argc, char **argv)
 {
@@ -383,19 +368,19 @@ static void cmd_config_show(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "Failed to load config\n");
       return;
    }
-   if (access(config_default_path(), F_OK) != 0)
-      (void)config_persist_defaults(); /* ensure file exists only when missing */
-
    /* Render the shared public field surface instead of echoing the YAML file.
     * Besides producing the JSON this command promises, this makes the local
     * fallback obey the same Vault redaction contract as config.show RPC: an
     * unmigrated legacy credential can never be printed from disk. */
-   cJSON *out = cJSON_CreateObject();
+   cJSON *out = config_client_snapshot_copy();
    if (!out)
       return;
-   for (int i = 0; config_fields[i].key; i++)
-      cJSON_AddItemToObject(out, config_fields[i].key,
-                            config_field_public_value_json_current(&config_fields[i]));
+   for (cJSON *item = out->child, *next = NULL; item; item = next)
+   {
+      next = item->next;
+      if (config_client_key_is_secret(item->string))
+         cJSON_ReplaceItemInObjectCaseSensitive(out, item->string, cJSON_CreateBool(0));
+   }
    char *json = cJSON_Print(out);
    cJSON_Delete(out);
    if (!json)
@@ -458,27 +443,30 @@ static void cmd_config_get(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
    const char *key = argv[1];
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
-   {
-      fprintf(stderr, "Unknown config key: %s\n", key);
-      return;
-   }
-
    if (!config_present())
    {
       fprintf(stderr, "Failed to load config\n");
       return;
    }
 
-   char rendered[4096];
-   if (config_field_render(f, rendered, sizeof(rendered)) != 0)
+   cJSON *value = config_client_value_copy(key);
+   if (!value)
    {
-      fprintf(stderr, "Failed to read config key: %s\n", key);
+      fprintf(stderr, "Unknown config key: %s\n", key);
       return;
    }
-   printf("%s\n", rendered);
-   runtime_secret_wipe(rendered, sizeof(rendered));
+   if (config_client_key_is_secret(key))
+      printf("%s\n",
+             cJSON_IsString(value) && value->valuestring[0] ? "configured" : "not configured");
+   else if (cJSON_IsString(value))
+      printf("%s\n", value->valuestring[0] ? value->valuestring : "(unset)");
+   else
+   {
+      char *rendered = cJSON_PrintUnformatted(value);
+      if (rendered)
+         printf("%s\n", rendered), free(rendered);
+   }
+   cJSON_Delete(value);
    (void)ctx;
    return;
 }
@@ -492,27 +480,15 @@ static void cmd_config_set(app_ctx_t *ctx, int argc, char **argv)
    }
    const char *key = argv[1];
    const char *value = argv[2];
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
-   {
-      fprintf(stderr, "Unknown config key: %s\n", key);
-      return;
-   }
-
    /* Surgical write: config_set edits the config YAML document in place (sets this
     * one key, preserves every other), persists, and republishes — no whole-file
-    * rebuild from config_t. */
+    * rebuild from legacy_config_record. */
    if (config_set(key, value) < 0)
    {
-      if ((f->is_bool || f->type == CFG_BOOL))
-         fprintf(stderr, "Invalid boolean value: %s (use true/false)\n", value);
-      else if (f->type == CFG_ECON_MODE)
-         fprintf(stderr, "Invalid value: %s (use off|safe|aggressive)\n", value);
-      else
-         fprintf(stderr, "Failed to set config\n");
+      fprintf(stderr, "Failed to set config: %s\n", config_client_last_error());
       return;
    }
-   if (config_field_secret_name(f))
+   if (config_client_key_is_secret(key))
       fprintf(stderr, "%s = [stored in Vault]\n", key);
    else
       fprintf(stderr, "%s = %s\n", key, value);
@@ -544,8 +520,7 @@ void cmd_config(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "  aimee use <provider>\n");
       fprintf(stderr, "  aimee provider [name]\n");
       fprintf(stderr, "\nKeys: ");
-      for (int i = 0; config_fields[i].key; i++)
-         fprintf(stderr, "%s%s", i ? ", " : "", config_fields[i].key);
+      fprintf(stderr, "use `aimee config show` for the module-owned key catalogue");
       fprintf(stderr, "\n");
       return;
    }
@@ -557,52 +532,11 @@ void cmd_config(app_ctx_t *ctx, int argc, char **argv)
               sub);
 }
 
-/* --- db subcmds (moved from cmd_core.c) --- */
-
-/* Removed `aimee db status` and `aimee db pragma`; the supported operator
- * surface is `aimee doctor db` plus native DB2 tooling for storage stats. */
-
-static void db_subcmd_backup(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)ctx;
-   const char *out = (argc > 0) ? argv[0] : NULL;
-   if (db1_backup(config_db1_path(), out) != 0)
-   {
-      LOG_ERROR("db", "db backup failed");
-      exit(1);
-   }
-}
-
-static void db_subcmd_check(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)ctx;
-   (void)argc;
-   (void)argv;
-   if (db1_check(config_db1_path(), 1) != 0)
-      exit(1);
-}
-
-static void db_subcmd_recover(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)ctx;
-   int force = 0;
-   for (int i = 0; i < argc; i++)
-   {
-      if (strcmp(argv[i], "--force") == 0)
-         force = 1;
-   }
-   if (db1_recover(config_db1_path(), force) != 0)
-      exit(1);
-}
-
-static const subcmd_t db_subcmds[] = {
-    {"backup", "Create a manual database backup", db_subcmd_backup},
-    {"check", "Run full integrity check", db_subcmd_check},
-    {"recover", "Recover from most recent valid backup", db_subcmd_recover},
-    {NULL, NULL, NULL},
-};
-
-const subcmd_t *get_db_subcmds(void)
-{
-   return db_subcmds;
-}
+/* The `db` command group is gone.
+ *
+ * Its three subcommands -- backup, check and recover -- copied, integrity-
+ * checked and restored a SQLite file at config_db1_path(). The store is
+ * PostgreSQL: there is no file to copy, no PRAGMA integrity_check to run, and
+ * nothing this process could recover if there were. Backups are pg_dump's job
+ * and consistency is the server's.
+ */

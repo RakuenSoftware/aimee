@@ -82,7 +82,7 @@ func TestSandboxRequestForMatchesThePlan(t *testing.T) {
 	writePlan, _ := PlanWorktree(true, "deleg-7")
 	req := SandboxRequestFor(writePlan, "/srv/repo",
 		"/srv/repo/.aimee/worktrees/w1/main", "/srv/repo/.git/worktrees/w1", true,
-		"/run/aimee/server.sock", "/run/aimee.sock", "")
+		"/run/aimee/aimee-http.sock", "/run/aimee/aimee-http.sock", "")
 	spec, err := BuildSandboxSpec(req)
 	if err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -96,7 +96,7 @@ func TestSandboxRequestForMatchesThePlan(t *testing.T) {
 
 	readPlan, _ := PlanWorktree(false, "deleg-8")
 	req = SandboxRequestFor(readPlan, "/srv/repo", "/srv/repo", "", true,
-		"/run/aimee/server.sock", "/run/aimee.sock", "")
+		"/run/aimee/aimee-http.sock", "/run/aimee/aimee-http.sock", "")
 	spec, err = BuildSandboxSpec(req)
 	if err != nil {
 		t.Fatalf("read spec: %v", err)

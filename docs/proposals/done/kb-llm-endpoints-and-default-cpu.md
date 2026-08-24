@@ -1,5 +1,9 @@
 # Proposal: aimee-kb LLM endpoint config + zero-config default CPU container
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 **Status:** done — P1 (config surface) shipped in #694; P2 (zero-config CPU LLM) delivered
 across all deploy topologies via the unified `aimee-llm` architecture, including the
 **combined image now bundling + auto-starting the aimee-llm CPU variant** (see the

@@ -24,12 +24,12 @@
 #include "cJSON.h"
 #include <aimee/gateway/gateway_pipeline.h> /* gw_request_t — the shared gateway seam */
 #include "ingress_preinject.h"              /* query-from-messages + per-turn id */
-#include "interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include "wfe_autonomous_route.h" /* S4: clamp/floor policy */
 #include "wfe_bind_ingress.h"
 #include "wfe_enforce.h"
 #include "wfe_router.h"
-#include "wfe_store.h" /* db1_lifecycle_event_add -- S4 route audit */
+#include "db1_client/wfe_store.h" /* db1_lifecycle_event_add -- S4 route audit */
 
 /* ~1 in N DEFER turns get the LLM classifier telemetry call. */
 #define ROUTER_SAMPLE_ONE_IN_N 5

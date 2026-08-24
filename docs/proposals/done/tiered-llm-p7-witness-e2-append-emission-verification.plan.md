@@ -1,5 +1,9 @@
 # P7-witness-e2 atomic append, emission, and continuous verification
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
   `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). Atomic witness append is wired into all
   three source ledgers (audit, reseal, open) — proven by the wiring + atomicity gate

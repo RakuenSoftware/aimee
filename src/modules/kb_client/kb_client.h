@@ -90,9 +90,14 @@ int kb_client_health(kb_health_t *out);
  * the curator block (richer than the flat kb_health_t snapshot). */
 char *kb_client_health_json(void);
 
-/* Cached read of the KB's advertised typed-facts state (proposal §8). aimee-server
- * gates per-turn fact injection on this instead of owning typed_facts_enabled. */
-int kb_client_typed_facts_enabled(void);
+/* Fetch the KB's agent-facing one-surface capability projection from
+ * /v1/capabilities. Returns a heap JSON object with cli_only and mcp_only
+ * arrays, or NULL when the KB is unreachable or does not advertise the
+ * projection. The runtime merges this into its client-facing capabilities. */
+char *kb_client_agent_surfaces_json(void);
+
+/* kb_client_typed_facts_enabled() is retired: the typed-fact layer is
+ * unconditional, so aimee-server has nothing to ask the KB about. */
 /* §2c: POST /v1/reembed; raw response JSON (caller frees) or NULL on transport
  * failure; *status_out (optional) gets the HTTP status. target_dim>0 pins the
  * reset target (bypasses the embedder probe); clear_maintenance!=0 instead just
@@ -650,6 +655,11 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
  * failure / kb unreachable.  Mirrors memory_delete(). */
 int kb_client_memory_delete(int64_t id);
 
+/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL retires the memory
+ * (recoverable via memory_fact_history); MEMORY_AUTHORITY_USER destroys it.
+ * kb_client_memory_delete() above is the USER-authority spelling. */
+int kb_client_memory_delete_as(int64_t id, memory_authority_t authority);
+
 /* Increment use_count and stamp last_used_at (positive reinforcement).
  * Returns 0 on success, -1 on failure / kb unreachable. */
 int kb_client_memory_touch(int64_t id);
@@ -657,6 +667,12 @@ int kb_client_memory_touch(int64_t id);
 /* Replace a memory's content in place (update verb).
  * Returns 0 on success, -1 on failure / kb unreachable. */
 int kb_client_memory_update(int64_t id, const char *content);
+
+/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL versions the old content
+ * via supersede and reports the new current id through `new_id_out` (optional);
+ * MEMORY_AUTHORITY_USER overwrites in place and reports `id`. */
+int kb_client_memory_update_as(int64_t id, const char *content, memory_authority_t authority,
+                               int64_t *new_id_out);
 
 /* Apply negative reinforcement: reduce confidence by 0.1 (floor 0.0).
  * Optional reason is recorded for audit.
@@ -696,6 +712,11 @@ int kb_client_memory_compact_windows(int *summary_count, int *fact_count);
  * markdown string (caller frees) or NULL on failure / kb unreachable.
  * Mirrors memory_assemble_context(). */
 char *kb_client_memory_assemble_context(const char *task_hint);
+
+/* Assemble the default temporal-learning context (current semantic assertions,
+ * active observations, and reviewed procedures) via aimee-kb. Returns the
+ * trust-labelled rendered context, or NULL when unavailable or empty. */
+char *kb_client_memory_assemble_typed_context(const char *query);
 
 /* Search conversation windows via aimee-kb.  Returns row count.
  * Mirrors memory_search(). */
@@ -813,6 +834,17 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
                                const char *content, const char *use_cases, double confidence,
                                const char *session_id, memory_t *out);
 
+/* Same, but says whose words these are. The authority is recorded as the row's
+ * provenance and decides whether the typed-fact drain may later mint Class-A
+ * facts from this note (memory.h, memory_insert_ex). MEMORY_AUTHORITY_USER is
+ * for a surface where the USER is the author — the `memory store` CLI, the
+ * onboarding wizard — never for text the agent composed, and the kb still checks
+ * that the request authenticated as a person before honouring it. The two
+ * spellings above are the MODEL-authority ones. */
+int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_authority_t authority, memory_t *out);
+
 /* Look up a memory id by (key, kind) via aimee-kb.  Returns 0 if no
  * row matches or kb is unreachable; the row id otherwise.  Mirrors
  * db2_memory_find_id_by_key_kind(). */
@@ -825,6 +857,26 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
  * memory_supersede(). */
 int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
                                const char *session_id, memory_t *out);
+
+/* Typed-fact §4 retraction via aimee-kb.  `target` NULL/empty retracts every
+ * current value of (source, relation); `authority` is "user" or "model" (NULL
+ * and anything unrecognised read as model, which cannot retract a user-stated
+ * Class A fact).  *out_retracted receives the number of edges affected — 0 is a
+ * success meaning nothing current matched.  *out_immutable is set when the
+ * relation is immutable and this authority may not override it, so a caller can
+ * report a refusal rather than an unexplained failure.  Both out params may be
+ * NULL.  Returns 0 on success, -1 on refusal / kb unreachable. */
+int kb_client_facts_retract(const char *source, const char *relation, const char *target,
+                            const char *authority, int *out_retracted, int *out_immutable);
+
+/* §3 entity merge via aimee-kb: collapse from_id into into_id.  *out_merge_id
+ * receives the audit id, which is the handle kb_client_entities_unmerge needs —
+ * a caller that discards it cannot reverse the merge.  0 / -1. */
+int kb_client_entities_merge(int64_t from_id, int64_t into_id, int64_t *out_merge_id);
+
+/* Reverse a recorded merge by its audit id.  0 on success, -1 if unknown or
+ * already undone. */
+int kb_client_entities_unmerge(int64_t merge_id);
 
 /* Fetch the version history for a memory key via aimee-kb.  Returns
  * the number of rows written into |out| (0 if kb is unreachable).
@@ -984,6 +1036,27 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
  * `learning_proposal_to_json` shape.  On any failure the response has
  * {"status":"error","message":"..."}. */
 char *kb_client_learning_list_proposals_json(const char *state, const char *sink, int limit);
+
+/* The endogeneity gate, answered by the knowledge service because the ledger it
+ * reads is DB2 and the daemon builds without it. Returns the response JSON (the
+ * caller frees), or NULL when the service is unreachable — which is NOT the same
+ * as a closed gate, and callers must not conflate them. */
+char *kb_client_learning_endogeneity_json(int window_days);
+
+/* Record what became of a committed proposal (S5). The router observes
+ * supersession and post-commit rejection itself; this is how a judgement it
+ * cannot make — that a commit was CONTRADICTED — gets entered. */
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason);
+
+/* Drain the curiosity backlog (S4). Served by the knowledge service: the
+ * backlog is DB2 and the evidence probe needs the corpus, neither of which
+ * the daemon has. */
+char *kb_client_learning_resolve_json(int budget);
+
+/* Ask which policy arm to apply (S6). The bandit lives in the knowledge
+ * service, so the daemon renders the fragment but does not choose it. NULL
+ * or an unparseable answer means "use the local default". */
+char *kb_client_learning_policy_select_json(const char *decision_point);
 
 /* Fetch a single learning proposal via the aimee-kb sidecar.  Sends
  * `learning.get_proposal` with {id} and returns the heap-allocated JSON

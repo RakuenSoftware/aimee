@@ -5,7 +5,9 @@
 // module. Independently exported callers must also be listed by
 // scripts/export_c_repositories.py:go_process_shared_sources.
 //
-// The wire is fixed by src/modules/db1/db1_module_api.h. Keep the two in step:
+// The wire is fixed by the catalog, server-go/modules/aimee/operations.json,
+// and the module that serves it checks its own dispatch against that catalog.
+// Keep this client in step with it:
 // the C module is the serving side of exactly these bytes.
 package db1
 

@@ -14,7 +14,9 @@
  * (workspace-resource-plane §3), so a client can serve its working tree to a
  * server on another host (e.g. a container). */
 #include "cli_client.h"
+#include "cli_v1_routes_internal.h"
 #include "platform_process.h"
+#include "platform_random.h"
 #include "workspace_provider_detached.h"
 #include "util.h" /* safe_exec_capture: the client's own vcs coordinates */
 #include <aimee/workspace/client_diff.h>
@@ -385,16 +387,33 @@ static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *h
  *
  * Best-effort: a failure is reported, never fatal, because a tree at base is
  * still a usable (if stale) sandbox and the drift report will say so. */
-static int rc_ship_client_diff(const char *endpoint, const char *bearer, const char *root,
-                               const char *base, const char *branch, const char *upstream)
+/* A transfer id the server will accept: exactly 32 lowercase hex characters.
+   It only has to be unique among concurrent transfers for one workspace, so
+   random bytes are enough and a collision would be caught by the server's own
+   sequence check rather than silently merging two patches. */
+static int rc_transfer_id(char *out, size_t cap)
 {
-   char *patch = workspace_client_diff_compute(root, base);
+   unsigned char raw[16];
+   if (cap < 33 || platform_random_bytes(raw, sizeof raw) != 0)
+      return -1;
+   for (size_t i = 0; i < sizeof raw; i++)
+      snprintf(out + i * 2u, cap - i * 2u, "%02x", raw[i]);
+   out[32] = '\0';
+   return 0;
+}
+
+/* One chunk of the patch, as its own mirror-sync request. seq 0 begins the
+ * transfer, later ones append, and `final` publishes the assembled diff. Every
+ * chunk repeats head/branch/upstream because the server reads them from
+ * whichever request it is handling and the final one validates head. */
+static int rc_ship_chunk(const char *endpoint, const char *bearer, const char *root,
+                         const char *base, const char *branch, const char *upstream,
+                         const char *transfer, int seq, int final, const char *slice,
+                         size_t slice_len)
+{
    cJSON *req = cJSON_CreateObject();
    if (!req)
-   {
-      free(patch);
       return -1;
-   }
    cJSON_AddStringToObject(req, "method", "workspace.mirror-sync");
    cJSON *args = cJSON_CreateArray();
    cJSON_AddItemToArray(args, cJSON_CreateString(root));
@@ -402,15 +421,42 @@ static int rc_ship_client_diff(const char *endpoint, const char *bearer, const c
    cJSON_AddStringToObject(req, "head", base ? base : "");
    cJSON_AddStringToObject(req, "branch", branch ? branch : "");
    cJSON_AddStringToObject(req, "upstream", upstream ? upstream : "");
-   cJSON_AddStringToObject(req, "diff", patch ? patch : "");
-   free(patch);
+   char *slice_z = malloc(slice_len + 1);
+   if (!slice_z)
+   {
+      cJSON_Delete(req);
+      return -1;
+   }
+   memcpy(slice_z, slice, slice_len);
+   slice_z[slice_len] = '\0';
+   cJSON_AddStringToObject(req, "diff", slice_z);
+   free(slice_z);
+   if (transfer)
+   {
+      cJSON_AddStringToObject(req, "transfer", transfer);
+      cJSON_AddNumberToObject(req, "seq", seq);
+      cJSON_AddBoolToObject(req, "final", final);
+   }
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!body)
       return -1;
-   /* Resolve the route rather than hardcode it: the method->path table is the
-    * one place that mapping is maintained, and a stale copy here would fail as a
-    * 404 the operator would have to trace back to a literal in this file. */
+
+   /* The listener drops a body over its ceiling without reading it, and the
+      client then sees only EPIPE on a write it had not finished -- reported as
+      "could not reach the endpoint", which blames a server that is up and
+      answering. Refuse it here, where the size is known and can be said. */
+   size_t body_len = strlen(body);
+   if (body_len >= CLI_V1_MAX_BODY)
+   {
+      fprintf(stderr,
+              "aimee: a single mirror-sync chunk came to %zu bytes, over the %d-byte request "
+              "ceiling; the working-tree diff cannot be shipped\n",
+              body_len, (int)CLI_V1_MAX_BODY);
+      free(body);
+      return -1;
+   }
+
    const char *verb = "POST";
    const char *path = cli_v1_route_for_method("workspace.mirror-sync", &verb);
    if (!path)
@@ -423,17 +469,76 @@ static int rc_ship_client_diff(const char *endpoint, const char *bearer, const c
    int status = 0;
    cJSON *resp = cli_http_request(endpoint, verb, path, body, bearer, 60000, &status);
    free(body);
-   if (status < 200 || status >= 300)
-   {
+   int ok = status >= 200 && status < 300;
+   if (!ok)
       fprintf(stderr,
-              "aimee: could not ship the working-tree diff for %s (HTTP %d); the server-side "
-              "sandbox will be a clean checkout at HEAD and will NOT contain uncommitted work\n",
-              root, status);
-      cJSON_Delete(resp);
-      return -1;
-   }
+              "aimee: could not ship the working-tree diff for %s (HTTP %d, chunk %d); the "
+              "server-side sandbox will be a clean checkout at HEAD and will NOT contain "
+              "uncommitted work\n",
+              root, status, seq);
    cJSON_Delete(resp);
-   return 0;
+   return ok ? 0 : -1;
+}
+
+/* Ship the client's working-tree patch for `root` so the server's reconstruct
+ * matches what the developer actually has: everything between `base` and the
+ * working tree, which is unpushed commits AND uncommitted edits AND untracked
+ * files.
+ *
+ * That is unbounded. A tree a few commits ahead can produce megabytes, and the
+ * whole patch used to go in one request: over the listener's ceiling it was
+ * dropped unread, the client hit EPIPE partway through writing and reported
+ * "HTTP 0", and the sandbox silently became a clean checkout at HEAD. The
+ * server has always been able to reassemble a chunked transfer -- seq, final
+ * and a transfer id -- and this is the client that uses it.
+ *
+ * `base` is the commit just registered as the workspace head. Passed in rather
+ * than re-resolved so the patch cannot be computed against a different commit
+ * than the one the server will check out; a patch and its base are one fact.
+ *
+ * Best-effort: a failure is reported, never fatal, because a tree at base is
+ * still a usable (if stale) sandbox and the drift report will say so. */
+static int rc_ship_client_diff(const char *endpoint, const char *bearer, const char *root,
+                               const char *base, const char *branch, const char *upstream)
+{
+   char *patch = workspace_client_diff_compute(root, base);
+   const char *text = patch ? patch : "";
+   size_t total = strlen(text);
+
+   /* Raw bytes per chunk. Well under the ceiling so that JSON escaping, which
+      can lengthen a byte into six, cannot push a chunk over it. */
+   const size_t chunk_max = 512u * 1024u;
+
+   int rc;
+   if (total <= chunk_max)
+   {
+      /* One request, and deliberately WITHOUT seq/final: a server that predates
+         chunking treats a bare request as a whole transfer, which is what this
+         has always sent. */
+      rc = rc_ship_chunk(endpoint, bearer, root, base, branch, upstream, NULL, 0, 1, text, total);
+   }
+   else
+   {
+      char transfer[33];
+      if (rc_transfer_id(transfer, sizeof transfer) != 0)
+      {
+         free(patch);
+         fprintf(stderr, "aimee: could not name a mirror-sync transfer; the working-tree diff "
+                         "cannot be shipped\n");
+         return -1;
+      }
+      rc = 0;
+      int seq = 0;
+      for (size_t at = 0; at < total && rc == 0; at += chunk_max, seq++)
+      {
+         size_t len = total - at < chunk_max ? total - at : chunk_max;
+         int final = (at + len >= total);
+         rc = rc_ship_chunk(endpoint, bearer, root, base, branch, upstream, transfer, seq, final,
+                            text + at, len);
+      }
+   }
+   free(patch);
+   return rc;
 }
 
 int cli_workspace_reverse_channel_start(void)

@@ -1,5 +1,9 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — E0–E6 merged or reconciled; E6 retains `observe` and links bounded residual work
 - **Author:** JBailes
 - **Date:** 2026-07-29

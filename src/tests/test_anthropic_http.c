@@ -41,6 +41,7 @@ static const char *g_stream_payload;
 static const char *g_response_body = NULL;
 static int g_response_status = 200;
 static int g_proof_gated = 0;
+static char g_requested_agent[128];
 
 static void reset_capture(void)
 {
@@ -53,6 +54,7 @@ static void reset_capture(void)
    g_response_body = NULL;
    g_response_status = 200;
    g_proof_gated = 0;
+   g_requested_agent[0] = '\0';
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -103,6 +105,16 @@ int agent_registry_default_primary(agent_t *out)
       return -1;
    *out = *found;
    return 0;
+}
+
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   snprintf(g_requested_agent, sizeof(g_requested_agent), "%s", model ? model : "");
+   if (model && strcmp(model, "missing") == 0)
+      return -1;
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
 }
 
 void delegate_drivers_init(void)
@@ -351,28 +363,10 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    (void)instructions;
    return envelope ? strdup(envelope) : NULL;
 }
-/* The economizer seam moved from config_load to econ_mode_current(). Mirror
- * exactly what the config_load stub below produces (module_economizer = 1, so
- * mode is authoritative) so these assertions are unchanged. */
+/* Mirror the configured economizer mode for these assertions. */
 int econ_mode_current(void)
 {
    return g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
-}
-
-/* messages_run_request_pipeline reads config for the P5 anthropic-inject opt-in;
- * these whitebox tests run with it off (zeroed). */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-      cfg->module_economizer = 1;
-      cfg->economizer_mode = g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
-   }
-   return 0;
 }
 
 /* HTTP-layer stub: agent_http_last_retry_after has no upstream socket here, so 0
@@ -498,6 +492,29 @@ static void cap_emit(void *ctx, const char *event, const char *data_json)
    snprintf(cap->events[cap->count], sizeof(cap->events[cap->count]), "%s", event);
    snprintf(cap->data[cap->count], sizeof(cap->data[cap->count]), "%s", data_json);
    cap->count++;
+}
+
+static void test_explicit_unknown_model_is_rejected(void)
+{
+   const char *request =
+       "{\"model\":\"missing\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\","
+       "\"content\":\"hello\"}]}";
+   char resp[1024];
+   emit_capture_t cap;
+
+   reset_capture();
+   assert(messages_buffered(request, resp, sizeof(resp)) == 404);
+   assert(strstr(resp, "not_found_error") != NULL);
+   assert(strcmp(g_requested_agent, "missing") == 0);
+
+   memset(&cap, 0, sizeof(cap));
+   assert(messages_stream(request, cap_emit, &cap) == 0);
+   assert(cap.count == 1);
+   assert(strcmp(cap.events[0], "error") == 0);
+   assert(strstr(cap.data[0], "not_found_error") != NULL);
+   assert(strcmp(g_requested_agent, "missing") == 0);
+   reset_capture();
+   PASS("explicit_unknown_model_is_rejected");
 }
 
 static void test_translate_request_anthropic_passthrough(void)
@@ -786,6 +803,7 @@ static void test_messages_buffered_anthropic_preserves_request_shape(void)
                          "\"stop_sequences\":[\"STOP\"],\"top_k\":7}",
                          resp, sizeof(resp)) == 200);
    assert(g_last_body != NULL);
+   assert(strcmp(g_requested_agent, "ignored") == 0);
    sent = parse(g_last_body);
    /* Anthropic primary speaks the Anthropic API -> inbound model honored verbatim. */
    assert(strcmp(obj(sent, "model")->valuestring, "ignored") == 0);
@@ -1167,6 +1185,7 @@ static void test_proof_gated_ingress_wire_parity(void)
 
 int main(void)
 {
+   test_explicit_unknown_model_is_rejected();
    test_translate_request_anthropic_passthrough();
    test_anthropic_relay_round_trip();
    test_anthropic_relay_usage_capture();
@@ -1189,10 +1208,8 @@ int main(void)
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. These reproduce exactly what the config_load stub they
- * replaced produced: config readable, modules unspecified (-1) so the env
- * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+/* Configuration is readable, modules are unspecified (-1) so the environment
+ * default decides, economizer is on, and the P5 injection opt-in is off. */
 int config_present(void)
 {
    return 1;

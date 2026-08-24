@@ -253,11 +253,26 @@ extern "C"
     * observation_count=1) plus the caller-supplied tier/kind/key/content/
     * confidence/sensitivity/evidence/salience/surprise. `ts` is used for
     * last_used_at, created_at, updated_at. Returns the new rowid on
-    * success, -1 on SQL error. */
+    * success, -1 on SQL error.
+    *
+    * `provenance_category` records WHERE the content came from — it is what the
+    * typed-fact drain later reads to decide whether facts mined out of this note
+    * may enter at Class A (fact_authority_from_provenance). It is written
+    * explicitly on every insert rather than left to the column default, because a
+    * default is a guess and this one used to guess "user_stated" for text the
+    * model wrote. NULL/empty is stored as the fail-closed agent value. */
    int64_t db2_memory_row_insert_ex(const char *tier, const char *kind, const char *key,
                                     const char *content, const char *use_cases, double confidence,
                                     const char *session_id, const char *ts, const char *sensitivity,
-                                    double evidence_strength, double salience, double surprise);
+                                    double evidence_strength, double salience, double surprise,
+                                    const char *provenance_category);
+   int64_t db2_memory_row_insert_epistemic_ex(
+       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
+       const char *content, const char *use_cases, double confidence, const char *session_id,
+       const char *ts, const char *sensitivity, double evidence_strength, double salience,
+       double surprise, const char *provenance_category);
+   int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap);
+   double db2_memory_outcome_adjustment(int64_t memory_id);
    int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
                                  const char *content, double confidence, const char *session_id,
                                  const char *ts, const char *sensitivity, double evidence_strength,
@@ -483,6 +498,11 @@ extern "C"
       char kind[16];
       double confidence;
       int use_count;
+      /* Recency inputs for the context scorer. last_used_at is empty until the
+       * memory has actually been recalled, so the scorer falls back to
+       * created_at for never-recalled rows. */
+      char last_used_at[32];
+      char created_at[32];
    } db2_memory_cand_row_t;
 
    /* Tier filter selecting which set of candidates to load. */
@@ -687,6 +707,13 @@ extern "C"
    /* Increment a memory's use_count and stamp last_used_at = now.
     * Returns 0 on success, -1 on miss / SQL failure. */
    int db2_memory_touch(int64_t memory_id);
+
+   /* Batch form of db2_memory_touch. Recall touches every memory injected into
+    * a turn, so the single-row form would cost one UPDATE per injected memory
+    * on the context-assembly path; this issues one statement per chunk instead.
+    * Ids <= 0 are skipped. Returns the number of rows updated, or -1 when no
+    * statement could be issued at all. */
+   int db2_memory_touch_many(const int64_t *ids, int n);
 
    /* Single-row SELECT into memory_t. Returns 0 on hit, -1 on miss. */
    int db2_memory_get(int64_t memory_id, memory_t *out);

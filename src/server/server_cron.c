@@ -7,7 +7,7 @@
 
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "modules/db1/db1_cron_jobs.h"
+#include "db1_client/db1_cron_jobs.h"
 #include "events.h"
 #include "trigger_scheduler.h"
 #include "json_fluent.h" /* jo_ok */

@@ -195,8 +195,8 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
 
    char sql[256];
    snprintf(sql, sizeof(sql),
-            "CREATE INDEX IF NOT EXISTS idx_%s_diskann "
-            "ON %s USING diskann (embedding vector_cosine_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_%s_hnsw "
+            "ON %s USING hnsw (embedding vector_cosine_ops)",
             table, table);
    if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
    {

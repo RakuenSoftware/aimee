@@ -24,12 +24,14 @@ MAX_DEPTH = 32
 MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
+EXTERNAL_SOURCE_KEYS = {"module", "package", "repository"}
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
 # Optional build properties include validated preprocessor switches and
 # third-party sources a module compiles but does not own. Vendor sources remain
 # restricted to src/vendor/; see export_c_repositories for the ownership rule.
 C_BUILD_OPTIONAL_KEYS = {
-    "compile_definitions", "generated_headers", "header_dependencies", "vendor_sources",
+    "compile_definitions", "generated_headers", "header_dependencies", "shared_sources",
+    "vendor_sources",
 }
 BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 C_DEFINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -127,12 +129,21 @@ def module_id(value: object, pointer: str) -> str:
 
 def load_inventory(repo: Path) -> tuple[set[str], set[str]]:
     value = load_json(repo / INVENTORY_PATH)
+    # The two *_principal_ref_band keys are read by check_module_inventory.py,
+    # which owns the rule they express: a ref inside a band reserved for
+    # dynamically provisioned processes must not be handed to a module. They are
+    # accepted rather than ignored because this comparison is EXACT -- an
+    # unlisted key fails the whole file, so the branch that added them to the
+    # inventory and to that script and not to this one left this validator
+    # rejecting a document the other one considered correct.
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
         "required",
         "optional",
         "principal_refs",
         "retired_principal_refs",
+        "plugin_principal_ref_band",
+        "db3_provider_principal_ref_band",
     }:
         fail("inventory-shape", "canonical inventory keys differ from v2")
     if type(value["schema_version"]) is not int or value["schema_version"] != 2:
@@ -173,6 +184,16 @@ def schema() -> dict[str, object]:
             },
             "enabled_by_default": {"type": "boolean"},
             "ownership_complete": {"type": "boolean"},
+            "external_source": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": sorted(EXTERNAL_SOURCE_KEYS),
+                "properties": {
+                    "module": {"type": "string"},
+                    "package": {"type": "string"},
+                    "repository": {"type": "string"},
+                },
+            },
             "c_build": {
                 "type": "object",
                 "additionalProperties": False,
@@ -227,6 +248,11 @@ def schema() -> dict[str, object]:
                     "system_libraries": {
                         "type": "array",
                         "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
+                        "uniqueItems": True,
+                    },
+                    "shared_sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
                         "uniqueItems": True,
                     },
                     "vendor_sources": {
@@ -284,7 +310,8 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     # that finding c_build on a Go module stays a defect, and validated with the
     # same shape below because it IS the same shape.
     allowed_keys = (required_keys | set(OWNERSHIP_FIELDS)
-                    | {"ownership_complete", "c_build", "c_test_build", "c_init"})
+                    | {"ownership_complete", "c_build", "c_test_build", "c_init",
+                       "external_source"})
     if not required_keys <= set(value) or not set(value) <= allowed_keys:
         fail(
             "descriptor-keys",
@@ -344,6 +371,23 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     if "ownership_complete" in value and type(value["ownership_complete"]) is not bool:
         fail("ownership-complete-type", "ownership_complete must be boolean",
              "/ownership_complete")
+    if "external_source" in value:
+        external = value["external_source"]
+        if not isinstance(external, dict) or set(external) != EXTERNAL_SOURCE_KEYS:
+            fail("external-source-shape",
+                 f"external_source must contain exactly {sorted(EXTERNAL_SOURCE_KEYS)}",
+                 "/external_source")
+        for field in sorted(EXTERNAL_SOURCE_KEYS):
+            entry = external[field]
+            if not isinstance(entry, str) or not entry or any(char.isspace() for char in entry):
+                fail("external-source-value", f"external_source.{field} is invalid",
+                     f"/external_source/{field}")
+        if not external["repository"].startswith("https://github.com/"):
+            fail("external-source-value", "external repository must be an HTTPS GitHub URL",
+                 "/external_source/repository")
+        if not external["package"].startswith(external["module"] + "/"):
+            fail("external-source-value", "external package must belong to external module",
+                 "/external_source/package")
     for build_key in ("c_build", "c_test_build"):
         if build_key not in value:
             continue
@@ -639,7 +683,7 @@ def validate_complete_ownership(repo: Path, identifier: str,
                  f"{identifier} {role} mismatch for Go files; missing={missing}, extra={extra}",
                  f"/{role}")
     implementation_roles = ("sources", "private_headers", "go_sources", "go_tests")
-    if not any(found.get(role) for role in implementation_roles):
+    if not any(found.get(role) for role in implementation_roles) and "external_source" not in value:
         # An empty module root satisfies set equality vacuously, so the latch would
         # assert completeness for a module whose implementation has never been moved
         # under src/modules/<id>. That is migration debt, not completion. Keep this

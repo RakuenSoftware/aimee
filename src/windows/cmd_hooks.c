@@ -1,7 +1,7 @@
 /* cmd_hooks.c: Windows implementations for cmd_hooks platform operations. */
 #include "aimee.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "cmd_hooks_platform.h"
 #include "lifecycle.h"
@@ -45,12 +45,9 @@ void platform_hooks_background_reindex(char idx_names[][128], char idx_roots[][M
 
 void platform_hooks_background_cleanup(void)
 {
-   /* No fork on Windows: run synchronously.  prune_stale_sessions is
-    * pure DB1 + kb_client, so we only need DB1 here. */
-   int db1_was_up = db1_is_initialized();
-   int db1_up = db1_was_up || (db1_init(config_db1_path()) == 0);
-   if (db1_up)
+   /* Always synchronous here. The store is a module now, so there is no local
+    * connection to open or shut: either it can be reached or the prune waits
+    * for a run when it can. */
+   if (db1_store_ready())
       prune_stale_sessions();
-   if (db1_up && !db1_was_up)
-      db1_shutdown();
 }

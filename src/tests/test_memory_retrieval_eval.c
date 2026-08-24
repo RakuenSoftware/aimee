@@ -1,5 +1,6 @@
 /* test_memory_retrieval_eval.c: unit tests for corpus-based memory retrieval evaluation */
 #include <assert.h>
+#include "modules/db2/c/db2_test_shim.h"
 #include <sqlite3.h>
 #include "platform_test_util.h"
 #include <math.h>
@@ -8,7 +9,6 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../db1/db.h"
 #include "agent_eval.h"
 #include "modules/db2/c/db2.h"
 #include "../modules/db2/c/db2_internal.h"
@@ -17,6 +17,7 @@
 #include "memory.h"
 #include "modules/memory/memory_graph_fusion.h"
 #include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_vectors.h"
 #include "config.h"
 #include "agent_eval_internal.h"
 
@@ -189,9 +190,11 @@ static void test_fusion_surfaces_bridged_memory(void)
 {
    assert(mem_eval_open_temp_db() == 0);
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed = cfg.embedder_command[0] ? cfg.embedder_command : MEMORY_EMBED_TEST_FIXTURE;
+   /* The product deliberately has no implicit embedder fallback. This retrieval
+    * test selects the explicit deterministic test backend by name. */
+   assert(setenv("EMBEDDER_URL", MEMORY_EMBED_TEST_FIXTURE, 1) == 0);
+
+   const char *embed = config_embedder_command_current(NULL);
 
    /* Base hit: lexically/semantically matches the query. */
    memory_t base;
@@ -199,12 +202,20 @@ static void test_fusion_surfaces_bridged_memory(void)
                         "nginx deployment listens on port 443", 0.9, "sess", &base) == 0);
    assert(memory_embed(base.id, embed) == 0);
 
-   /* Bridge: zero query-term overlap and intentionally NOT embedded, so the
-    * vector/lexical base retrieval can never reach it — only the graph
-    * expansion (which reads memory_entities directly) can. */
+   /* Bridge: zero query-term overlap. The write path embeds derived units, so
+    * remove both its top-level and unit points to make this a deliberately
+    * graph-only fixture on sqlite and real Postgres alike. */
    memory_t bridge;
    assert(memory_insert(TIER_L2, KIND_DECISION, "retry policy",
                         "we cap delegate retries at three attempts", 0.9, "sess", &bridge) == 0);
+   assert(pgvec_memory_vector_delete_point(bridge.id) == 0);
+   int64_t bridge_unit_ids[64];
+   int bridge_unit_count = db2_memory_unit_list_ids(
+       bridge.id, bridge_unit_ids, (int)(sizeof(bridge_unit_ids) / sizeof(bridge_unit_ids[0])));
+   assert(bridge_unit_count > 0);
+   for (int i = 0; i < bridge_unit_count; i++)
+      assert(pgvec_memory_vector_delete_point(PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET +
+                                              bridge_unit_ids[i]) == 0);
 
    /* Link both to a shared non-code canonical entity node whose key shares NO
     * token with the query, so plain entity-candidate retrieval can't reach the
@@ -244,6 +255,7 @@ static void test_fusion_surfaces_bridged_memory(void)
    assert(bridge_on && "fusion surfaces the graph-bridged memory");
 
    mem_eval_close_temp_db();
+   unsetenv("EMBEDDER_URL");
 }
 
 static void test_corpus_load_multi_expected(void)
@@ -727,6 +739,11 @@ int main(int argc, char **argv)
    int cli_rc = maybe_run_cli_mode(argc, argv, &handled);
    if (handled)
       return cli_rc;
+
+   /* The eval scratch store needs a disposable database when the test shim is
+    * backed by Postgres; a no-op under the sqlite shim, which makes its own
+    * in-memory handle. */
+   assert(db2_test_shim_prepare_eval_store() == 0);
 
    printf("test_mrr_hit_first... ");
    test_mrr_hit_first();

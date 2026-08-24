@@ -883,9 +883,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
        * request N+1. OIDC, when configured, runs through this same verifier
        * registry with its issuer/audience/signature policy pinned. */
       char expected_bearer[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
-      if (!runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", expected_bearer,
-                              sizeof(expected_bearer)))
-         snprintf(expected_bearer, sizeof(expected_bearer), "%s", config_kb_api_bearer_token());
+      (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", expected_bearer,
+                               sizeof(expected_bearer));
       const char *presented_bearer = aimee_core_bearer_token(presented_authorization);
       kb_verify_result_t service_identity;
       int bearer_authority =
@@ -1209,8 +1208,8 @@ static SSL_CTX *g_mtls_ctx = NULL;
 /* Keep ample headroom for route-local state and TLS/libpq frames; live memory
  * queries exhausted 4 MiB once nested search frames were active concurrently.
  *
- * This used to be asserted as sizeof(config_t) + 1 MiB, because routes loaded a
- * whole ~750 KiB config_t onto this stack. They no longer do -- config is read a
+ * This used to be asserted as sizeof(legacy_config_record) + 1 MiB, because routes loaded a
+ * whole ~750 KiB legacy_config_record onto this stack. They no longer do -- config is read a
  * field at a time -- so the config term is gone and the floor is stated
  * directly. The headroom is still needed for the nested-search case, which is
  * what actually exhausted the old 4 MiB. */
@@ -1305,8 +1304,7 @@ static void *mtls_listener_thread(void *arg)
 int kb_mtls_start(int port, const char *data_dir, const char *host)
 {
    char bearer_probe[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
-   if (!runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", bearer_probe, sizeof(bearer_probe)))
-      snprintf(bearer_probe, sizeof(bearer_probe), "%s", config_kb_api_bearer_token());
+   (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", bearer_probe, sizeof(bearer_probe));
    if (!bearer_probe[0])
    {
       LOG_ERROR("kb_mtls",

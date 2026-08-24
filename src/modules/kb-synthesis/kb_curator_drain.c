@@ -783,7 +783,6 @@ static size_t kb_curator_ordered_stages(kb_curator_stage_desc_t *out, size_t max
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
-
    /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
     * built>0 event, so the incremental rebuild below would never fire and
     * cross_repo_route would stay empty — silently demoting every legitimate
@@ -833,42 +832,18 @@ static void *drain_thread_main(void *arg)
 
       /* Typed-fact extraction drain — runs every poll, independent of the
        * curator extract gates. Pulls "memory_facts" jobs enqueued by memory.store
-       * and runs the general LLM extractor over each memory's content. Gated on
-       * typed_facts_enabled (a no-op when off). */
-      if (config_typed_facts_enabled())
+       * and runs the general LLM extractor over each memory's content. No longer
+       * gated: config.typed_facts_enabled is retired and the layer is
+       * unconditional. */
       {
          int n = kb_memory_facts_drain(8);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
 
-         /* §7.2 autonomous ontology reconciliation: promote provisional relations
-          * (novel predicates the extractor's "other" fallback staged) to active
-          * once they have recurred >= threshold times across sources, so facts
-          * using them become durable/recallable WITHOUT a human approving each.
-          * Default-on with typed facts; the threshold is operator-tunable via
-          * kb.typed_facts.promote_threshold (§8), falling back to the built-in. */
-         if (config_kb_typed_facts_auto_promote_enabled())
-         {
-            int thr = config_kb_typed_facts_promote_threshold() > 0
-                          ? config_kb_typed_facts_promote_threshold()
-                          : KB_ONTO_PROMOTE_DEFAULT_THRESHOLD;
-            char cands[KB_ONTO_PROMOTE_BATCH][REL_TYPE_NAME_MAX];
-            int nc = db2_ontology_eval_candidates(thr, cands, KB_ONTO_PROMOTE_BATCH);
-            for (int i = 0; i < nc; i++)
-            {
-               /* Never promote a generic catch-all bucket to active: it would make
-                * low-quality "misc" facts durable and can't be reconciled to a
-                * real predicate. The extractor is instructed not to emit these,
-                * but exclude them defensively. */
-               if (strcmp(cands[i], "other") == 0 || strcmp(cands[i], "unknown") == 0 ||
-                   strcmp(cands[i], "misc") == 0 || strcmp(cands[i], "unspecified") == 0)
-                  continue;
-               if (db2_ontology_approve(cands[i]) == 0)
-                  aimee_log(LOG_INFO, "kb.ontology.promote",
-                            "auto-promoted relation '%s' to active (>= %d observations)", cands[i],
-                            thr);
-            }
-         }
+         /* Observation counts only affect the operator queue's priority. P7
+          * deliberately removes the former count-based ontology promotion:
+          * activating a provisional relation is an authenticated governance
+          * decision, regardless of how often extraction observed it. */
       }
 
       /* Backfill: queue extract_doc curation for docs that entered kb_documents
@@ -1117,24 +1092,15 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
       return;
    memset(ctx, 0, sizeof(*ctx));
 
-   if (!config_kb_curator_extract_docs_enabled() && !config_kb_curator_extract_code_enabled() &&
-       !config_kb_curator_resolve_entities_enabled() &&
-       !config_kb_curator_index_narrative_enabled() && !config_kb_curator_index_claims_enabled() &&
-       !config_kb_curator_detect_contradictions_enabled() &&
-       !config_kb_curator_index_code_unit_enabled() &&
-       !config_kb_curator_link_artifacts_enabled() && !config_kb_curator_synthesize_enabled() &&
-       !config_kb_curator_promote_entity_enabled() &&
-       !config_kb_curator_projection_graph_enabled() && !config_kb_evidence_embed_enabled() &&
-       !config_learning_synthesize_enabled() && !config_typed_facts_enabled())
-   {
-      aimee_log(LOG_DEBUG, "kb.curator.drain",
-                "all gates off (kb_curator_extract_docs_enabled=0,"
-                " kb_curator_extract_code_enabled=0, kb_curator_resolve_entities_enabled=0,"
-                " kb_curator_index_narrative_enabled=0, kb_curator_index_claims_enabled=0,"
-                " kb_evidence_embed_enabled=0, learning_synthesize_enabled=0);"
-                " drain thread not started");
-      return;
-   }
+   /* THE "ALL GATES OFF" EARLY RETURN IS GONE, because one of the gates it
+    * tested no longer exists and the work behind it is now unconditional.
+    *
+    * This skipped starting the drain thread when every curator gate was off,
+    * with config.typed_facts_enabled as the last term. The typed-fact drain runs
+    * every poll and is no longer gated, so the thread always has work to do:
+    * keeping the check would mean an install with the curator stages off never
+    * drains "memory_facts" jobs, and typed facts would silently stop being
+    * extracted -- exactly the class of silent-disable this retirement removes. */
 
    ctx->stop = 0;
 

@@ -1,5 +1,9 @@
 # Proposal: Codex frontend ingress (`/v1/responses`)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Status refreshed:** 2026-06-09
 - **Moved from:** `docs/proposals/pending/codex-frontend-ingress.md`

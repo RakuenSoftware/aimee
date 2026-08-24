@@ -41,8 +41,27 @@ ROGUE_RE = re.compile(r"(artifact|audit_event|artifact_citation|artifact_link)",
 
 
 def tables_in(path: pathlib.Path):
+    """Tables declared by a schema file, or by a DIRECTORY of schema files.
+
+    The store's schema stopped being one file when it became a Go module: it is
+    now 21 per-family files under server-go/modules/aimee/families/. This used
+    to name src/modules/db1/schema.sql, and when that was deleted with the C
+    module `tables_in` returned [] for it -- so half of this check went quiet.
+    The "charter table must live in DB2 only" rule and the rogue-table scan over
+    the store's tables were both examining nothing, and the check still passed.
+
+    A missing path is now an ERROR rather than an empty list, because every
+    caller here is naming a schema it expects to exist.
+    """
+    if path.is_dir():
+        text = "\n".join(f.read_text() for f in sorted(path.glob("*.sql")))
+        if not text:
+            raise SystemExit(f"check-charter-tables: {path} holds no .sql files; "
+                             f"this check would pass having read nothing")
+        return CREATE_RE.findall(text)
     if not path.exists():
-        return []
+        raise SystemExit(f"check-charter-tables: {path} does not exist; this check "
+                         f"would pass having read nothing")
     return CREATE_RE.findall(path.read_text())
 
 
@@ -116,10 +135,13 @@ def main() -> int:
     if args.plant_test:
         return plant_test()
 
-    src = pathlib.Path(args.src_dir)
+    # Resolved: the make target passes --src-dir . from src/, and Path(".").parent
+    # is "." rather than the repository root.
+    src = pathlib.Path(args.src_dir).resolve()
     return check(
         src / "modules" / "db2" / "c" / "schema.sql",
-        src / "modules" / "db1" / "schema.sql",
+        # The store's schema, one file per family since it became a Go module.
+        src.parent / "server-go" / "modules" / "aimee" / "families",
     )
 
 

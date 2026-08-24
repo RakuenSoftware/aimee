@@ -5,12 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "wfe_binding.h"         /* db1_wfe_binding_get */
-#include "wfe_def.h"             /* wfe_def_node, wfe_node_t */
-#include "wfe_engine.h"          /* wfe_load_workflow, wfe_def_free */
-#include "wfe_externalization.h" /* wfe_is_externalization_tool, _permitted */
-#include "wfe_iface.h"           /* wfe_block_type_t */
-#include "wfe_store.h"           /* db1_work_item_get */
+#include "wfe_binding.h"          /* db1_wfe_binding_get */
+#include "wfe_def.h"              /* wfe_def_node, wfe_node_t */
+#include "wfe_engine.h"           /* wfe_load_workflow, wfe_def_free */
+#include "wfe_externalization.h"  /* wfe_is_externalization_tool, _permitted */
+#include "wfe_iface.h"            /* wfe_block_type_t */
+#include "db1_client/wfe_store.h" /* db1_work_item_get */
 
 /* Gate blocks advance via their own satisfaction (roundtable verdict, human
  * decision, CI, delivery) -- NOT via the primary's advance_request. Producing

@@ -10,7 +10,7 @@
 #include "session_compact.h"
 #include "agent_eval.h"
 #include "commands.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "cJSON.h"
 #include "dogfood.h"
 #include "json_fluent.h"

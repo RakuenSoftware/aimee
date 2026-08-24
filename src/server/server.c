@@ -14,7 +14,7 @@
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 #include "kb_client.h"           /* request-local memory scope context */
-
+#include <aimee/audit/obs_bus.h>
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "modules/git/git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
 #include "modules/git/mcp_git.h" /* mcp_git_run_tool — the native surface's git-write impl */
@@ -50,8 +50,8 @@
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
-#include "db1.h"
-#include "modules/db1/user_memory.h"
+#include "db1_client/db1.h"
+#include "db1_client/user_memory.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -367,15 +367,20 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
-
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
-   cJSON_AddStringToObject(resp, "state", db1_is_initialized() ? "ok" : "unavailable");
+   /* Probe DB1 directly; module registry state survives death for about 37s. */
+   cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   obs_bus_capture_health_t capture;
+   obs_bus_capture_health(&capture);
+   cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
+   cJSON_AddStringToObject(resp, "capture_reason", capture.reason);
+   cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
+   cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
    server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
 }
-
 /* worktree.gc: remove abandoned session worktrees under the operator's git_root.
  * Server-side because the GC primitive lives in workspace.c (already linked into
  * the daemon); the CLI just sends client_cwd and renders the report. */
@@ -770,8 +775,8 @@ static int handle_init_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cwd = jcwd->valuestring;
 
    cJSON *resp = jo_ok();
-   cJSON_AddBoolToObject(resp, "local_ready", db1_is_initialized() ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "db1_ready", db1_is_initialized() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "local_ready", db1_store_ready() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "db1_ready", db1_store_ready() ? 1 : 0);
 
    if (cwd)
    {
@@ -807,7 +812,7 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   if (!db1_is_initialized())
+   if (!db1_store_ready())
       return server_send_error(conn, "server storage unavailable", NULL);
    hud_status_t hs;
    if (hud_gather(&hs) != 0)
@@ -1459,6 +1464,9 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"memory.get", handle_memory_get},
     {"memory.delete", handle_memory_delete},
     {"memory.supersede", handle_memory_supersede},
+    {"facts.retract", handle_facts_retract},
+    {"entities.merge", handle_entities_merge},
+    {"entities.unmerge", handle_entities_unmerge},
     {"memory.read", handle_memory_read},
     {"memory.benchmark", handle_memory_benchmark},
     {"index.scan", handle_index_scan},
@@ -1565,8 +1573,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dogfood.tag", handle_dogfood_tag},
     {"dogfood.review", handle_dogfood_review},
     {"dogfood.report", handle_dogfood_report},
-    {"eval.run", handle_eval_run},
-    {"eval.results", handle_eval_results},
+#include "server_dispatch_eval_data.h"
     /* Identity */
     {"identity.show", handle_identity_show},
     {"identity.snapshot", handle_identity_snapshot},
@@ -1708,6 +1715,9 @@ static size_t method_size_limit(const char *method)
    return LIMIT_DEFAULT;
 }
 
+/* Above this an RPC earns an INFO access line of its own; below it DEBUG. */
+#define SERVER_RPC_SLOW_MS 1000
+
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {
    /* Quick method extraction for size limit check (scan for "method":"..." in raw JSON) */
@@ -1793,6 +1803,7 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    }
 
    rc = -1;
+   const long long dispatch_started_ms = util_now_ms();
    for (int i = 0; server_dispatch_table[i].method; i++)
    {
       if (strcmp(m, server_dispatch_table[i].method) == 0)
@@ -1801,6 +1812,16 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
          break;
       }
    }
+   /* Every HTTP request has an access line; this surface had none, so a call
+    * that stalled here was invisible: the client reported only that it gave
+    * up, and the log showed an idle server because it never recorded being
+    * asked. Duration is the point -- 30s and 3ms are the same line without
+    * it. Promote only slow or failed calls, as the HTTP line does for poll. */
+   const long long dispatch_ms = util_now_ms() - dispatch_started_ms;
+   if (rc < 0 || dispatch_ms >= SERVER_RPC_SLOW_MS)
+      LOG_INFO("server.rpc", "%s -> rc=%d %lldms", m, rc, dispatch_ms);
+   else
+      LOG_DEBUG("server.rpc", "%s -> rc=%d %lldms", m, rc, dispatch_ms);
    if (rc == -1)
    {
       cJSON *resp = cJSON_CreateObject();
@@ -1951,7 +1972,7 @@ static int server_agent_route_is_degraded(const char *agent_name)
  * explicit agent policy plus review-role membership; they do not invent a
  * second hidden exclusion based on the configured primary provider.
  * The gate is config-independent (it reads the agent record), so it holds even
- * when config_load would fail. */
+ * when legacy_config_read would fail. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
 {
    if (!ag)
@@ -2143,10 +2164,10 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       return -1;
    }
    /* Ensure the config dir (parent of the socket, pid file, and DB1 file)
-    * exists before we write the pid file or open DB1. On a fresh AIMEE_HOME
-    * (e.g. a deploy not seeded by install.sh) nothing else has created it yet,
-    * so without this both server_pid_write and db1_init silently fail and DB1
-    * stays unavailable for the whole process lifetime. */
+    * exists before we write the pid file. On a fresh AIMEE_HOME (e.g. a deploy
+    * not seeded by install.sh) nothing else has created it yet, so without this
+    * server_pid_write silently fails -- and the module, which opens the DB1
+    * file in that same directory, has nowhere to create it either. */
    {
       char cfg_dir[sizeof(ctx->socket_path)];
       snprintf(cfg_dir, sizeof(cfg_dir), "%s", socket_path);
@@ -2161,31 +2182,28 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Record our pid so future server_init calls can detect us deterministically
     * (and `aimee server start/restart` can probe liveness). */
    server_pid_write(socket_path);
-   /* Initialize DB1 (aimee-server is DB1's exclusive owner). */
-   /* Copied out: named twice here, and the warning path must report the SAME
-    * path db1_init was given. */
-   char db1_path[MAX_PATH_LEN];
-   snprintf(db1_path, sizeof(db1_path), "%s", config_db1_path());
-   if (db1_init(db1_path) != 0)
-      LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
-               db1_path);
-   else
-   {
-      db1_apply_server_pragmas();
-      int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
-      if (orphaned < 0)
-         LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
-      else if (orphaned > 0)
-         LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
-      if (server_mgmt_status_init() != 0)
-         LOG_WARN("server", "management status nonce initialization failed");
-      const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
-      if (trust_path && trust_path[0] &&
-          server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
-                                         kb_client_mtls_management_jwks_fetch,
-                                         NULL) != SERVER_MGMT_JWKS_CACHE_OK)
-         LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
-   }
+   /* This process opens no database. DB1 is a module, and every family it
+    * serves is reached over the bus -- so the connection the server used to
+    * hold here was one it never read or wrote through, and the cache and mmap
+    * tuning that went with it was being applied to the one process where it
+    * could not matter. The module applies it now.
+    *
+    * The three restart chores below reach the store over the bus. Each already
+    * warns when it cannot, which is also what happens when the module has not
+    * attached yet: nothing in this process launches it. */
+   int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
+   if (orphaned < 0)
+      LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
+   else if (orphaned > 0)
+      LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
+   if (server_mgmt_status_init() != 0)
+      LOG_WARN("server", "management status nonce initialization failed");
+   const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   if (trust_path && trust_path[0] &&
+       server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
+                                      kb_client_mtls_management_jwks_fetch,
+                                      NULL) != SERVER_MGMT_JWKS_CACHE_OK)
+      LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
    /* Container cleanup is independent of DB availability. No worker pool exists
     * yet, so a matching container cannot belong to this server generation. */
    int orphan_containers = delegate_backend_docker_remove_orphans();
@@ -2471,10 +2489,12 @@ void server_shutdown(server_ctx_t *ctx)
    platform_evloop_destroy(&ctx->evloop);
    /* Drop our pid file so a future server can detect that we are gone. */
    server_pid_clear(ctx->socket_path);
-   /* Drain any audit rows still queued in the async writer before closing DB1, so
-    * rows enqueued near shutdown are not lost (the writer thread is detached). The
-    * request/compute pools are already drained above, so no new rows arrive. */
+   /* Drain any audit rows still queued in the async writer, so rows enqueued
+    * near shutdown are not lost (the writer thread is detached). The
+    * request/compute pools are already drained above, so no new rows arrive.
+    *
+    * Nothing to close afterwards: this process opens no DB1 connection, and
+    * the module closes its own when it stops. */
    agent_audit_async_flush();
-   db1_shutdown();
    LOG_INFO("server", "shut down");
 }

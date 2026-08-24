@@ -1,5 +1,9 @@
 # Implementation plan: roundtable panel composition
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `roundtable-panel-composition.md` (State: READY). This plan is the
 concrete change list. Scope = panel *composition* on the existing engine; no new
 pipeline, no routing-layer rework. `ENSEMBLE_MAX_REFS = 8` is unchanged.
@@ -56,7 +60,7 @@ cases; existing enum values are untouched.
 File: `src/server/delegate_ensemble.c` (add `#include "persona.h"`).
 
 - New static helper:
-  `static const char *panel_persona_name(const config_t *cfg, roundtable_mode_t
+  `static const char *panel_persona_name(const legacy_config_record *cfg, roundtable_mode_t
   mode, int model_index)`:
   - returns `NULL` unless `mode == ROUNDTABLE_REVIEW` (draft/MoA unchanged);
   - if `cfg->ensemble_reference_personas[model_index][0]` set → return it;

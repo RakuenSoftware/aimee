@@ -53,13 +53,14 @@ static const char *g_stream_payload;
  * buffered P2c test. NULL = empty "{}" (regression-canary default). */
 static const char *g_response_body;
 static int g_response_status;
-/* P2c policy gate. The real config_load is stubbed to honor this global;
+/* P2c policy gate. The real legacy_config_read is stubbed to honor this global;
  * flip g_prevent to 1 to enable the streaming-side tool policing. */
 static int g_prevent;
 /* Tool-use fixtures for parsed_with_tool_uses (the driver parse_response
  * stub reads `g_tool_uses_json` and synthesizes a populated parsed struct). */
 static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
+static const char *g_response_content;
 
 static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
                                          uint32_t tool_count, const char *stop_reason,
@@ -103,6 +104,7 @@ static void reset_capture(void)
    g_prevent = 0;
    g_tool_uses_json = NULL;
    g_upstream_stop_reason = NULL;
+   g_response_content = NULL;
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -153,6 +155,13 @@ int agent_registry_default_primary(agent_t *out)
       return -1;
    *out = *found;
    return 0;
+}
+
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
 }
 
 void delegate_drivers_init(void)
@@ -346,6 +355,8 @@ static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response
    memset(out, 0, sizeof(*out));
    if (g_upstream_stop_reason)
       snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", g_upstream_stop_reason);
+   if (g_response_content)
+      out->content = strdup(g_response_content);
    arr = g_tool_uses_json ? cJSON_Parse(g_tool_uses_json) : NULL;
    if (!cJSON_IsArray(arr))
    {
@@ -371,23 +382,7 @@ static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response
    cJSON_Delete(arr);
 }
 
-/* Minimal config_load stub (the real one depends on the YAML loader,
- * out of scope for this minimal-link test). Mirrors test_anthropic_http_p2c.c. */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->gateway_prevent_subagents = g_prevent;
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. These mirror what the stub above produced — prevent_subagents
+/* Accessor stubs mirror this fixture's policy — prevent_subagents
  * tracks g_prevent, pin_model was left zeroed — so assertions are unchanged. */
 int config_gateway_prevent_subagents(void)
 {
@@ -399,7 +394,7 @@ int config_gateway_pin_model(void)
    return 0;
 }
 
-/* Same migration for the economizer seam: the config_load stub above leaves the
+/* The economizer fixture leaves the
  * economizer zeroed, so the live-config form must report OFF. */
 int econ_mode_current(void)
 {
@@ -777,6 +772,82 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
    PASS("streaming_openai_policy_off_is_byte_neutral");
 }
 
+/* An Anthropic client can stream against an OpenAI-compatible delegate. Once
+ * that ordinary session has edited code, completion inspection needs the whole
+ * response before any bytes reach the client. This pins the branch condition:
+ * an armed turn is buffered even when subagent policing is off. */
+static void assert_streaming_armed_completion_is_buffered(const char *driver_name)
+{
+   const delegate_driver_t driver = {.name = driver_name, .parse_response = parsed_with_tool_uses};
+   replay_cap_t cap;
+
+   reset_capture();
+   g_driver = &driver;
+   g_tool_uses_json = "[]";
+   g_upstream_stop_reason = "end_turn";
+   g_response_content =
+       "The same vulnerability exists in another handler, but I left it unchanged. Want me to "
+       "fix it?";
+
+   memset(&cap, 0, sizeof(cap));
+   messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
+                   "\"tools\":[{\"name\":\"Bash\",\"input_schema\":{\"type\":\"object\","
+                   "\"properties\":{\"command\":{\"type\":\"string\"}}}}],"
+                   "\"messages\":[{\"role\":\"user\",\"content\":\"repair it\"},"
+                   "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"e1\","
+                   "\"name\":\"Bash\",\"input\":{\"command\":\"cat > app/file.py\"}}]},"
+                   "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+                   "\"tool_use_id\":\"e1\",\"content\":\"ok\"}]}]}",
+                   replay_capture, &cap);
+
+   int saw_gate_tool = 0;
+   int saw_gate_marker = 0;
+   for (int i = 0; i < cap.count; i++)
+   {
+      if (strcmp(cap.events[i], "content_block_start") == 0 &&
+          strstr(cap.data[i], "\"type\":\"tool_use\"") && strstr(cap.data[i], "\"name\":\"Bash\""))
+         saw_gate_tool = 1;
+      if (strstr(cap.data[i], AIMEE_COMPLETION_CALL_PREFIX))
+         saw_gate_marker = 1;
+   }
+   assert(saw_gate_tool);
+   assert(saw_gate_marker);
+
+   reset_capture();
+}
+
+static void test_streaming_armed_completion_is_provider_neutral(void)
+{
+   assert_streaming_armed_completion_is_buffered("openai");
+   assert_streaming_armed_completion_is_buffered("anthropic");
+   PASS("streaming_armed_completion_is_provider_neutral");
+}
+
+static void test_native_completion_followup_reaches_provider_system(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   replay_cap_t cap;
+
+   reset_capture();
+   g_driver = &driver;
+   g_stream_payload = "event: message_stop\ndata: {}\n\n";
+   memset(&cap, 0, sizeof(cap));
+   messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
+                   "\"system\":\"existing system\","
+                   "\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\","
+                   "\"id\":\"call_aimee_completion_42\",\"name\":\"Bash\","
+                   "\"input\":{\"command\":\"true\"}}]},"
+                   "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+                   "\"tool_use_id\":\"call_aimee_completion_42\",\"content\":\"\"}]}]}",
+                   replay_capture, &cap);
+
+   assert(g_last_body != NULL);
+   assert(strstr(g_last_body, "existing system") != NULL);
+   assert(strstr(g_last_body, "aimee-completion-policy") != NULL);
+   reset_capture();
+   PASS("native_completion_followup_reaches_provider_system");
+}
+
 int main(void)
 {
    printf("test_anthropic_http_streaming_p2c:\n");
@@ -788,12 +859,13 @@ int main(void)
    test_streaming_openai_police_drops_subagent_tool_use();
    test_streaming_openai_police_on_no_tool_use_passthrough();
    test_streaming_openai_policy_off_is_byte_neutral();
+   test_streaming_armed_completion_is_provider_neutral();
+   test_native_completion_followup_reaches_provider_system();
    printf("anthropic_http_streaming_p2c: OK\n");
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. This policing integration fixture explicitly enables
+/* This policing integration fixture explicitly enables
  * the governance module; the module's unspecified production default is
  * covered by test_response_governance_stage.c. */
 int config_present(void)

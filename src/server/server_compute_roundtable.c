@@ -7,7 +7,7 @@
 #include "server_compute_internal.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
@@ -29,10 +29,10 @@
 #include <openssl/crypto.h>
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/delegate_run_phases.h>
-#include "modules/db1/delegate_learning.h"
+#include "db1_client/delegate_learning.h"
 #include "kb_client.h"
 #include "kb_bandit.h"
-#include "modules/db1/interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include <aimee/delegates/delegate_role.h>
 #include "delegate_ensemble.h"
 #include "evidence_replay.h"

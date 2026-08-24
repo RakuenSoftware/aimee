@@ -11,11 +11,30 @@ import (
 	"testing"
 	"time"
 
+	configcontract "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/api"
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	appconfig "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
 )
+
+type externalConfigStore struct{ *appconfig.Store }
+
+func (s externalConfigStore) TriggerRules() ([]configcontract.TriggerRule, error) {
+	rules, err := s.Store.TriggerRules()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]configcontract.TriggerRule, len(rules))
+	for i, rule := range rules {
+		out[i] = configcontract.TriggerRule{
+			Source: rule.Source, Event: rule.Event, Schedule: rule.Schedule, Mode: rule.Mode,
+			Pipeline: configcontract.TriggerPipeline{Template: rule.Pipeline.Template,
+				Workspace: rule.Pipeline.Workspace, MaxSpendUSD: rule.Pipeline.MaxSpendUSD},
+		}
+	}
+	return out, nil
+}
 
 type e2eAgents struct {
 	mu       sync.Mutex
@@ -239,7 +258,7 @@ nodes:
 	if _, err := registry.Save("slice", slice, ""); err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +280,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.SetConfigStore(configStore)
+	handler.SetConfigStore(externalConfigStore{Store: configStore})
 	handler.ScanTriggers(context.Background())
 	items, err := store.WorkItems(context.Background())
 	if err != nil || len(items) != 1 {

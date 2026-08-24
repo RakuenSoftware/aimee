@@ -1,24 +1,28 @@
-# Proposal: `config_t` is a config-module secret
+# Proposal: `legacy_config_record` is a config-module secret
+
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
 
 - **State:** DONE — production encapsulation delivered and archived 2026-08-04; test/safety residual extracted.
 
 > **Archived after partial delivery.** The ratchet now reports zero production files naming
-> `config_t`; generated accessors, conversion tooling, and the lint gate hold that boundary. Test
+> `legacy_config_record`; generated accessors, conversion tooling, and the lint gate hold that boundary. Test
 > fixtures still construct the type and the accessor/runtime-validation hazards recorded below are
 > not fully discharged. That remaining scope is
 > [`config-t-test-and-accessor-safety-residual.md`](../pending/config-t-test-and-accessor-safety-residual.md).
 - **Rule (from the owner, absolute):** if something needs knowledge from config's headers about
-  `config_t`, it must be rewritten. Only config handles env vars. Only config provides
+  `legacy_config_record`, it must be rewritten. Only config handles env vars. Only config provides
   getters/setters/accessors for settings. Narrow, documented exceptions only.
 
 ## Why this is not merely tidiness
 
-`gen_config_accessors.py` already states the intent — "config_t is ~750 KB and its shape is a
+`gen_config_accessors.py` already states the intent — "legacy_config_record is ~750 KB and its shape is a
 config-module implementation detail" — and the accessor surface was generated. The call sites were
 never converted, so the encapsulation is aspirational.
 
 **Converting naively is unsafe.** Found while converting the first module: `config_field_read`
-copied the value only when `config_load` returned 0, so every generated accessor returned its zero
+copied the value only when `legacy_config_read` returned 0, so every generated accessor returned its zero
 seed on failure. That INVERTS every default-ON dial. Converting `subagent_ban_enabled` to its
 accessor — the exact mechanical change this proposal asks for — turned a fail-closed guard
 fail-OPEN precisely when config is broken.
@@ -38,8 +42,8 @@ attempt at the test passed with the bug reinstated and proved nothing.
 authoritative counter — a ratchet with a plant test proving a pointer-only leak is caught and
 named. Use it; do not hand-grep (my initial greps undercounted, missing `.c`-side mentions).
 
-After the phase-A work below: **253** files, **902** `config_t` mentions, **462** `config_load()`
-calls. Its docstring carries the load-bearing rationale — `sizeof(config_t)` is ~750 KB, those
+After the phase-A work below: **253** files, **902** `legacy_config_record` mentions, **462** `legacy_config_read()`
+calls. Its docstring carries the load-bearing rationale — `sizeof(legacy_config_record)` is ~750 KB, those
 locals nest, and a measured chain had consumed ~6 MB of an 8 MB stack, with one added field
 segfaulting `unit-test-memory-advanced` inside `config_load_file`. This is a correctness problem,
 not a style preference.
@@ -49,11 +53,11 @@ a migration cannot be left un-banked.
 
 ## Phases
 
-**A. Cross-module APIs that take `config_t` in their signature.** These block their callers: no
+**A. Cross-module APIs that take `legacy_config_record` in their signature.** These block their callers: no
 amount of call-site editing removes the leak. Convert the function to read via accessors and drop
 the parameter. *(in progress — 78 -> 75)*
 
-**B. Leaf call sites.** `config_t cfg; config_load(&cfg); ... cfg.field` -> `config_field()`.
+**B. Leaf call sites.** `legacy_config_record cfg; legacy_config_read(&cfg); ... cfg.field` -> `config_field()`.
 Mechanical, and strictly cheaper than a 750 KB copy. Blocked behind A wherever a site feeds a
 phase-A function.
 
@@ -67,7 +71,7 @@ ratchet. Nothing to build; just keep the baseline current.
 
 1. Confirm the accessors exist (`config_accessors.h`); the generator already emits one per field,
    including indexed ones for arrays (`config_workspaces(i)`).
-2. Rewrite the implementation to call accessors; drop the `config_t` parameter.
+2. Rewrite the implementation to call accessors; drop the `legacy_config_record` parameter.
 3. Drop `#include "config.h"` from the header — the point is that callers stop seeing the type.
 4. Fix whatever the include removal exposes. Removing it reveals headers that were never
    self-contained (`agent_types.h` reached `MAX_PATH_LEN` only through `config.h`); fix those
@@ -82,10 +86,10 @@ that thread. Two different accessors can be held live at once (relied on in the 
 
 ## Done in phase A
 
-- `computer_use_policy_from_config(const config_t *, ...)` -> `(computer_use_policy_t *out)`;
+- `computer_use_policy_from_config(const legacy_config_record *, ...)` -> `(computer_use_policy_t *out)`;
   3 call sites (guardrails, execution-policy, agent_tools). Dropped `config.h` from
   `headers/computer_use.h`.
-- `kb_tsr_endpoint(const config_t *)` / `kb_ocr_endpoint(const config_t *)` **deleted**. These
+- `kb_tsr_endpoint(const legacy_config_record *)` / `kb_ocr_endpoint(const legacy_config_record *)` **deleted**. These
   resolved config-then-env, so they were both leaks at once. Replaced by `config_tsr_endpoint()` /
   `config_ocr_endpoint()` in the config module; the KB no longer reads `AIMEE_TSR_URL` /
   `AIMEE_OCR_URL`. Dropped `config.h` from both sidecar headers.
@@ -98,19 +102,19 @@ that thread. Two different accessors can be held live at once (relied on in the 
   config can be read (fail closed)" — that sentence described the bug.
 - `kb_detect_observe`, `kb_demote_run`, `kb_ranker_rerank`, `kb_ranker_rerank_with_sketch`,
   `kb_planner_search`, `kb_planner_validate`, `kb_bandit_sample`, `kb_bandit_reward` — all lost
-  their `config_t` parameter. `kb_ranker`'s was pure dead weight (`(void)cfg;`).
+  their `legacy_config_record` parameter. `kb_ranker`'s was pure dead weight (`(void)cfg;`).
   `kb_detect.h`, `kb_demote.h`, `kb_ranker.h`, `kb_planner.h`, `kb_bandit.h` no longer include
   `config.h` at all.
-- Five now-dead `config_t` locals deleted (`kb_service_agent.c`, `kb_intel_payload.c` x2,
+- Five now-dead `legacy_config_record` locals deleted (`kb_service_agent.c`, `kb_intel_payload.c` x2,
   `kb_service_memory.c`, plus the guardrails ones) — each was a ~750 KB stack frame kept alive
   only to feed a parameter that no longer exists. `kb_service_memory.c` carried a comment saying
-  it was materialised *only* because `kb_bandit_sample` took a `config_t`; that is now resolved.
+  it was materialised *only* because `kb_bandit_sample` took a `legacy_config_record`; that is now resolved.
 
-**Ratchet:** 902 -> 877 mentions, 462 -> 458 `config_load()`, 253 -> 242 files.
+**Ratchet:** 902 -> 877 mentions, 462 -> 458 `legacy_config_read()`, 253 -> 242 files.
 
-### Converting a function that tests drive with a hand-built `config_t`
+### Converting a function that tests drive with a hand-built `legacy_config_record`
 
-Several tests did `config_t cfg; memset(...); cfg.some_command = ""` and passed it in to exercise a
+Several tests did `legacy_config_record cfg; memset(...); cfg.some_command = ""` and passed it in to exercise a
 "disabled" path. Once the function reads the LIVE config, such a test silently starts reading the
 developer's real `aimee.yaml` and fails wherever that key happens to be set. Pin it instead: point
 `HOME` at a fresh empty dir, `unsetenv("AIMEE_HOME")`, set `AIMEE_NO_CACHE=1`, call, restore.
@@ -123,36 +127,36 @@ call fails. Re-`snprintf` the template each time.
 
 Converted: `memory_cognify_unit`, `memory_cognify_drain`, `memory_episode_card_generate`.
 `memory_cognify_drain` held its `cfg` purely to hand to `memory_cognify_unit`, so it fell out for
-free once that one changed. Two more dead `config_t` locals deleted in `cmd_memory_vector.c`, each
-a ~750 KB frame `config_load`ed to read a single boolean for an error message.
+free once that one changed. Two more dead `legacy_config_record` locals deleted in `cmd_memory_vector.c`, each
+a ~750 KB frame `legacy_config_read`ed to read a single boolean for an error message.
 
-**Ratchet:** 877 -> 869 mentions, 458 -> 456 `config_load()`, 242 -> 239 files.
+**Ratchet:** 877 -> 869 mentions, 458 -> 456 `legacy_config_read()`, 242 -> 239 files.
 
-Six test cases in `test_memory_advanced.c` were the hand-built-`config_t` hazard above. They now
+Six test cases in `test_memory_advanced.c` were the hand-built-`legacy_config_record` hazard above. They now
 call the file's existing `write_test_config()` helper so the precondition is written to the config
 file the test owns. Note this works because that binary never calls `config_snapshot_init`, so each
-accessor falls through to a fresh `config_load()` from `AIMEE_HOME` — a test binary that DOES pin a
+accessor falls through to a fresh `legacy_config_read()` from `AIMEE_HOME` — a test binary that DOES pin a
 snapshot would need `config_reload()` instead. The two fixture-command cases are the useful check
 that this is real: they assert `rc == 0` and match `memory_kind`, which only holds if the command
 was genuinely read back out of config.
 
 **Blocked, not done — `memory_query_rewrite`.** It reads five own fields (fine), but also passes
 `cfg` to `memory_rewrite_llm_inproc`, which passes it to `kb_curator_provider_for_stage`
-(`kb_curator_provider.c:116`). That has 6 call sites plus a test that hand-builds a `config_t`, so
+(`kb_curator_provider.c:116`). That has 6 call sites plus a test that hand-builds a `legacy_config_record`, so
 it is its own tranche. Do the curator-provider chain first, then this falls out.
 `memory_maintenance_run` / `memory_maintenance_maybe_run` also remain: two `#ifdef` variants each,
-and `test_curiosity.c` + `test_memory_advanced.c` both drive them with a hand-built `config_t`.
-`memory.h` is down to 4 `config_t` mentions from 7.
+and `test_curiosity.c` + `test_memory_advanced.c` both drive them with a hand-built `legacy_config_record`.
+`memory.h` is down to 4 `legacy_config_record` mentions from 7.
 
 ### Round 4 — the memory maintenance pair
 
 `memory_maintenance_run` and `memory_maintenance_maybe_run` (plus their two `#ifdef` stub variants
-and the file-static helpers `mm_interval_secs` / `mm_should_skip`) no longer take a `config_t`;
-`memory_maintenance.c` names it nowhere now. One more dead `config_t` local deleted in
-`kb_service_backend_memory.c` — `config_load`ed purely to feed the call.
+and the file-static helpers `mm_interval_secs` / `mm_should_skip`) no longer take a `legacy_config_record`;
+`memory_maintenance.c` names it nowhere now. One more dead `legacy_config_record` local deleted in
+`kb_service_backend_memory.c` — `legacy_config_read`ed purely to feed the call.
 
-**Ratchet:** 869 -> 858 mentions, 456 -> 455 `config_load()`, 239 -> 237 files.
-`memory.h` is down to **2** `config_t` mentions from 7.
+**Ratchet:** 869 -> 858 mentions, 456 -> 455 `legacy_config_read()`, 239 -> 237 files.
+`memory.h` is down to **2** `legacy_config_record` mentions from 7.
 
 Two test hazards, both the pattern above:
 
@@ -170,30 +174,30 @@ Both are non-vacuous: the curiosity case asserts run-then-skip, which only holds
 ### Round 5 — memory_derive_facts, and memory.h reaches 1
 
 `memory_derive_facts` was the `kb_ranker` pattern again: it already read its one field through
-`config_memory_derive_facts_enabled()`, and kept the `config_t *` solely as a `!cfg` null guard.
+`config_memory_derive_facts_enabled()`, and kept the `legacy_config_record *` solely as a `!cfg` null guard.
 Pure dead weight. No caller ever passed NULL, so dropping it changes nothing observable.
-The `config_t` local feeding it in `memory_assemble.c` went with it.
+The `legacy_config_record` local feeding it in `memory_assemble.c` went with it.
 
-**Ratchet:** 858 -> 854 mentions, 455 -> 454 `config_load()`, 237 -> 234 files.
+**Ratchet:** 858 -> 854 mentions, 455 -> 454 `legacy_config_read()`, 237 -> 234 files.
 
-**`memory.h` is down to 1 `config_t` mention** (from 7) — only `memory_query_rewrite`, which is
+**`memory.h` is down to 1 `legacy_config_record` mention** (from 7) — only `memory_query_rewrite`, which is
 blocked behind the curator-provider chain below.
 
-Best result of this round: `test_memory_advanced.c`'s **file-static `config_t` is deleted**. Its
+Best result of this round: `test_memory_advanced.c`'s **file-static `legacy_config_record` is deleted**. Its
 comment explained it existed because ten block-scoped ~750 KiB copies in one `main()` pushed GCC
 past the 8 MiB stack and segfaulted the optimized binary. With every case now writing its
 precondition to a config file and the code reading it back through accessors, the suite needs no
-`config_t` at all. That is the shape the whole proposal is aiming at: the workaround disappears
+`legacy_config_record` at all. That is the shape the whole proposal is aiming at: the workaround disappears
 rather than being managed.
 
 ### Round 6 — prompts.c, and a generator hole it exposed
 
 `prompt_apply_dispositions`, `prompt_apply_charter` and `prompt_apply_working_profile` (plus the
-statics `charter_total_entries` and `working_profile_field_allowed`) no longer take a `config_t`.
-**`headers/prompts.h` no longer mentions `config_t` at all** — its forward `typedef` is gone too.
-One more dead `config_t` local in `cmd_session_lifecycle.c`.
+statics `charter_total_entries` and `working_profile_field_allowed`) no longer take a `legacy_config_record`.
+**`headers/prompts.h` no longer mentions `legacy_config_record` at all** — its forward `typedef` is gone too.
+One more dead `legacy_config_record` local in `cmd_session_lifecycle.c`.
 
-**Ratchet:** 854 -> 836 mentions, 454 -> 453 `config_load()`, 234 -> 231 files.
+**Ratchet:** 854 -> 836 mentions, 454 -> 453 `legacy_config_read()`, 234 -> 231 files.
 
 `charter_append_section` took `const char entries[][CONFIG_CHARTER_ENTRY_LEN]` — a block of memory
 the caller no longer possesses. It now takes the section's **indexed accessor** as a
@@ -218,13 +222,13 @@ It is caught here only because the case asserts a field is FILTERED OUT.
 ### Round 7 — workspace.c, where the parameter turned out to be policy
 
 `workspace_active_root`, `workspace_build_context_from_config` and
-`workspace_resolve_proposal_path` no longer take or load a `config_t`;
+`workspace_resolve_proposal_path` no longer take or load a `legacy_config_record`;
 `modules/workspace/workspace.c` and its header name it nowhere. Three more dead
-`config_t` locals deleted (`agent_runtime.c`, `cmd_session_lifecycle.c`,
+`legacy_config_record` locals deleted (`agent_runtime.c`, `cmd_session_lifecycle.c`,
 `server_state.c`) — two of which the compiler never warned about, because their own
-`config_load(&cfg)` counted as a use.
+`legacy_config_read(&cfg)` counted as a use.
 
-**Ratchet:** 836 -> 824 mentions, 453 -> 449 `config_load()`, 231 -> 227 files.
+**Ratchet:** 836 -> 824 mentions, 453 -> 449 `legacy_config_read()`, 231 -> 227 files.
 
 **The `cfg` parameter here was not data access, it was a POLICY SWITCH.** Four callers
 passed NULL deliberately. `cmd_hooks_scope.c:148` says why: resolve the project from cwd
@@ -235,13 +239,13 @@ inside a configured workspace. Split by intent instead of adding a boolean flag:
 `workspace_active_root()` consults the configured workspaces, `workspace_active_root_from_cwd()`
 never does. Five callers took the first, four the second.
 
-Generalise: before deleting a `config_t` parameter, check whether NULL is *meaningful* at
+Generalise: before deleting a `legacy_config_record` parameter, check whether NULL is *meaningful* at
 any call site. If it is, the parameter encodes a decision and the conversion owes you two
 named functions, not one.
 
 **Latent bug fixed on the way.** In `workspace_resolve_proposal_path`, `cfg` was loaded
-inside `if (config_load(&cfg) == 0)` but read again *outside* that block, so a failed load
-left the second loop iterating an uninitialised `config_t`. Reading through accessors
+inside `if (legacy_config_read(&cfg) == 0)` but read again *outside* that block, so a failed load
+left the second loop iterating an uninitialised `legacy_config_record`. Reading through accessors
 deletes the failure mode rather than patching it.
 
 ### `make -j8` DOES NOT BUILD EVERYTHING — this bit twice
@@ -260,10 +264,10 @@ parameter, grep the file for `(void)<param>;` in every `#ifdef` branch.
 Converted by finding the functions whose signature held everything else hostage,
 rather than grinding leaves:
 
-- **`config_guardrail_mode(const config_t *)` -> `(void)`** — one field, but it kept a
+- **`config_guardrail_mode(const legacy_config_record *)` -> `(void)`** — one field, but it kept a
   ~750 KB local alive in 7 files. Two of those locals existed for nothing else.
 - **`config_embedding_command(&cfg, x)` -> `config_embedding_command_current(x)`** — 30
-  call sites across 22 files. The `config_t`-free variant already existed, with a header
+  call sites across 22 files. The `legacy_config_record`-free variant already existed, with a header
   note saying *"Prefer this: materialising the ~750 KB struct to read one string is what
   overflowed the stack in the memory-search path."* Converting it unblocked 11 more files
   on the next pass.
@@ -272,25 +276,25 @@ rather than grinding leaves:
   automated sweep.
 
 `scripts/config-convert-locals.py` does the safe shape and REFUSES the rest — missing accessor,
-`(void)X;` in an `#ifdef`, `config_load` used as a guard, or the local's address escaping.
+`(void)X;` in an `#ifdef`, `legacy_config_read` used as a guard, or the local's address escaping.
 Its first escape rule matched only `func(&X` (first argument position), so
 `agent_route_with_caps_scoped(&acfg, role, &route_cfg, ...)` slipped through and it deleted
 locals that genuinely escape. Rule is now "any address-of other than
-config_load/memset/sizeof escapes", which cut a batch from 20 files to 15.
+legacy_config_read/memset/sizeof escapes", which cut a batch from 20 files to 15.
 
 ### Converting a module changes what the LINKER needs
 
 Four narrow test targets broke, all for the same structural reason: an accessor is opaque
-where a stubbed `config_load` was transparent to LTO.
+where a stubbed `legacy_config_read` was transparent to LTO.
 
-`unit-test-kb-http-ingest` is the clearest. It stubbed `config_load` to zero everything but
+`unit-test-kb-http-ingest` is the clearest. It stubbed `legacy_config_read` to zero everything but
 one flag, which let LTO prove `kb_pdf_assets_enabled` was always false, fold the branch, and
 drop the call to `kb_doc_pdf_render_assets` entirely. An accessor cannot be folded, so that
 branch reaches the linker and the symbol must exist.
 
 `CONFIG_ACCESSOR_OBJS` (tests/Rules.mk) is the answer: the shards depend on nothing but
 `config_field_read`, so a narrow target links them and supplies its own stub. Make the stub
-read the SAME state the target's existing `config_load` stub returns — a zero-returning stub
+read the SAME state the target's existing `legacy_config_read` stub returns — a zero-returning stub
 links fine and silently makes every config value read as unset.
 
 Verification per tranche is `make all kb server` THEN a full `make unit-tests`. Not
@@ -299,8 +303,8 @@ in an `#ifdef AIMEE_DB1_DISABLED` branch passes the default build and breaks the
 
 ### Strict mode: what it found, and why it stayed opt-in
 
-`g_config_strict` has no production setter, so `config_load` never returns non-zero in a
-shipping binary and every `if (config_load(&cfg) != 0)` guard in the tree is unreachable —
+`g_config_strict` has no production setter, so `legacy_config_read` never returns non-zero in a
+shipping binary and every `if (legacy_config_read(&cfg) != 0)` guard in the tree is unreachable —
 including `server_main`'s own "server startup rejected invalid configuration".
 
 Turning it on found **nine real keys missing from `config_schema[]`**, three of them WRITTEN
@@ -314,7 +318,7 @@ pins that strict DOES reject them. Both contracts hold only while strict is opt-
 
 **Open decision.** Making runtime validation fatal — the "config module refuses to come up"
 rule — needs unknown-key (tolerate) split from known-key-wrong-shape (refuse). Until that
-split exists, the 36 `config_load`-as-a-guard sites are unreachable rather than redundant,
+split exists, the 36 `legacy_config_read`-as-a-guard sites are unreachable rather than redundant,
 and deleting them is still correct but for a weaker reason.
 
 ### The curator-provider chain needs a design decision first (attempted, reverted)
@@ -323,7 +327,7 @@ and deleting them is still correct but for a weaker reason.
 generalises to any function that fills a **borrowed-pointer struct** from config.
 
 `provider_def_t` (`provider_client.h:37`) holds `const char *base_url/model/api_key` — a borrowed
-view, documented as aliasing fields inside the caller's `config_t`. Convert the function to string
+view, documented as aliasing fields inside the caller's `legacy_config_record`. Convert the function to string
 accessors and those pointers now alias each accessor's `static _Thread_local` buffer instead. Every
 current *production* caller consumes its def immediately, so they are fine — but
 `test_kb_curator_provider.c` holds **two** defs at once (`&a` and `&b`) across ~30 assertions and
@@ -343,15 +347,15 @@ allowed to link the accessor layer before converting functions they cover.
 
 Order to do this in: (1) make `provider_def_t` own its strings; (2) then convert
 `kb_curator_provider_for_stage` and `config_synth_chat_endpoint`; (3) then `memory_query_rewrite`
-falls out, since its only remaining tie to `config_t` is `memory_rewrite_llm_inproc`.
+falls out, since its only remaining tie to `legacy_config_record` is `memory_rewrite_llm_inproc`.
 
 ## Known hazards (phase C)
 
 - **Fail-open on read failure** — fixed for scalars via defaults. Audit whether any *string*
   accessor has a caller treating `""` as a meaningful value rather than "unset".
-- **`aimee.h:161` embeds `config_t *cfg` in a struct**, not just a signature. Needs its own
+- **`aimee.h:161` embeds `legacy_config_record *cfg` in a struct**, not just a signature. Needs its own
   decision: hold an opaque handle, or drop the member and have consumers call accessors.
-- **`memory_core_internal.h:33` `memory_config_load_heap()`** mallocs a whole `config_t` inside a
+- **`memory_core_internal.h:33` `memory_config_load_heap()`** mallocs a whole `legacy_config_record` inside a
   non-config module — a deliberate whole-struct copy that phase B must replace, not just rewrap.
 - **Hot paths**: a few sites load once and read many fields. Per-field accessor calls are cheap
   (one pinned read each), but check the loop-heavy ones rather than assuming.

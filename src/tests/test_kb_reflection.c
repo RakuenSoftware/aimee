@@ -29,7 +29,9 @@ void reflection_test_release_idle(void);
 #define db2_lease_release_idle reflection_test_release_idle
 #include <sqlite3.h>
 
+#include "modules/db2/c/db2_internal.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/db_postgres.h"
 
 /* The unit under test (pulls its own headers). */
 #include "../kb/kb_reflection.c"
@@ -85,21 +87,23 @@ kb_service_ctx_t *g_kb_ctx = NULL;
 
 /* ── Helpers ── */
 
-static int count_session_synthesis(sqlite3 *db)
+static int count_session_synthesis(void)
 {
-   sqlite3_stmt *st = NULL;
-   assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM artifacts WHERE kind='session_synthesis'",
-                             -1, &st, NULL) == SQLITE_OK);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   int n = sqlite3_column_int(st, 0);
-   sqlite3_finalize(st);
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(), "SELECT COUNT(*) FROM artifacts WHERE kind='session_synthesis'",
+                        err, sizeof(err));
+   assert(st);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   int n = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
    return n;
 }
 
 /* A config wired to run synthesis via the command seam (no provider ⇒ the
  * reflection Tier-B stage falls back to kb_synthesize_command). */
 /* run_synthesis_pass reads config through accessors now instead of taking a
- * config_t. This suite links the REAL config module (TEST_CORE_OBJS), so the
+ * legacy_config_record. This suite links the REAL config module (TEST_CORE_OBJS), so the
  * settings come from a real aimee.yaml under an isolated HOME rather than from
  * stubs -- stubbing them here would collide with the linked accessors. Same
  * values base_cfg used to write into the struct; each case still overrides the
@@ -120,7 +124,12 @@ static void write_cfg(void)
    fprintf(fp, "    mdl_tiebreak_enabled: %s\n", g_mdl_tiebreak ? "true" : "false");
    fprintf(fp, "    synthesize_n_attempts: %d\n", g_n_attempts);
    fprintf(fp, "    reflection_shadow: %s\n", g_shadow ? "true" : "false");
-   fprintf(fp, "    synthesize_command: \"%s\"\n", g_synth_cmd);
+   cJSON *command = cJSON_CreateString(g_synth_cmd);
+   char *encoded_command = command ? cJSON_PrintUnformatted(command) : NULL;
+   assert(encoded_command != NULL);
+   fprintf(fp, "    synthesize_command: %s\n", encoded_command);
+   free(encoded_command);
+   cJSON_Delete(command);
    fclose(fp);
    /* Prove the file round-tripped rather than trusting it: a silently unparsed
     * key would turn every assertion below into a test of the defaults. */
@@ -163,14 +172,13 @@ static void test_valid_writes_one(void)
 {
    g_idle_release_calls = 0;
    db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    base_cfg("printf '%s' '" VALID_JSON "'");
    db2_artifact_proposed_t row;
    mk_row(&row);
 
    int rc = run_synthesis_pass(&row);
    assert(rc == 0);
-   assert(count_session_synthesis(db) == 1);
+   assert(count_session_synthesis() == 1);
    assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  valid response, normal mode → 1 candidate written OK\n");
@@ -181,7 +189,6 @@ static void test_shadow_writes_none(void)
 {
    g_idle_release_calls = 0;
    db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    base_cfg("printf '%s' '" VALID_JSON "'");
    g_shadow = 1;
    write_cfg();
@@ -190,7 +197,7 @@ static void test_shadow_writes_none(void)
 
    int rc = run_synthesis_pass(&row);
    assert(rc == 0); /* shadow is a clean no-write success */
-   assert(count_session_synthesis(db) == 0);
+   assert(count_session_synthesis() == 0);
    assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  valid response, shadow mode → 0 candidates written OK\n");
@@ -201,14 +208,13 @@ static void test_garbage_writes_none(void)
 {
    g_idle_release_calls = 0;
    db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    base_cfg("printf '%s' 'not json at all'");
    db2_artifact_proposed_t row;
    mk_row(&row);
 
    int rc = run_synthesis_pass(&row);
    assert(rc == -1); /* no valid candidates */
-   assert(count_session_synthesis(db) == 0);
+   assert(count_session_synthesis() == 0);
    assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  garbage response → defer, 0 candidates written OK\n");
@@ -219,14 +225,13 @@ static void test_command_failure_writes_none(void)
 {
    g_idle_release_calls = 0;
    db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    base_cfg("false");
    db2_artifact_proposed_t row;
    mk_row(&row);
 
    int rc = run_synthesis_pass(&row);
    assert(rc == -1);
-   assert(count_session_synthesis(db) == 0);
+   assert(count_session_synthesis() == 0);
    assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  command failure → 0 candidates written OK\n");

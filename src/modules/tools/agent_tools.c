@@ -2,7 +2,6 @@
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
 #include "aimee_home.h"
-#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "economizer.h"
 #include "log.h"
 #include "agent_tools_internal.h"
@@ -10,7 +9,7 @@
 #include "process_mgr.h"
 #include "agent_exec.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "sandbox.h"
 #include "slop_detect.h"
 #include "web_search.h"
@@ -694,7 +693,7 @@ int64_t auto_snapshot_record(const char *path)
    if (!sid || !sid[0])
       return 0;
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       return 0;
 
    int64_t snap_id = agent_tools_get_snap_id();

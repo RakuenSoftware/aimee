@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"github.com/JBailes/aimee/server-go/modules/aimee"
 	"os"
 	"testing"
 
@@ -33,7 +34,7 @@ func liveClient(t *testing.T) *client.Client {
 	invocation := bus.ModuleInvocation{
 		StageID: module.StageSQL, PrincipalRef: 32, SrcHandle: 1}
 	return client.New(func(ctx context.Context, body []byte) ([]byte, error) {
-		reply, status := handler.Handle(invocation, body)
+		reply, status := handler(invocation, body)
 		if status != bus.ModuleStatusOK {
 			t.Fatalf("module status = %v", status)
 		}
@@ -214,9 +215,13 @@ type errorString string
 
 func (e errorString) Error() string { return string(e) }
 
-// checksumOf uses the module's own hash rather than reimplementing it. A second
+// checksumOf uses the CONTRACT's hash rather than reimplementing it. A second
 // implementation of a checksum is a second thing that can disagree, and the
 // whole point of the checksum is that two sides agree about what ran.
+//
+// store_wire.go is the specification the postgres module's checksum.go mirrors,
+// so taking it from here checks the client against the contract rather than
+// against one implementation of it.
 func checksumOf(statements []string) string {
-	return module.Migration{Statements: statements}.Checksum()
+	return aimee.StoreChecksum(statements)
 }

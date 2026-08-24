@@ -52,6 +52,7 @@ int route_roundtable_set_active(const char *body, char *resp, int cap);
 void send_rate_limited(int fd, int retry_after, const char *request_id);
 void send_response(int fd, int status, const char *body, const char *request_id);
 void handle_session_events(int fd, const char *id_in, const char *request_id);
+void server_http_sse_live_run(int fd, const char *body, server_http_responses_stream_fn handler);
 
 extern atomic_int g_conn_live;
 extern atomic_int g_management_conn_live;
@@ -160,6 +161,7 @@ typedef struct
  * carrying one. NULL-verb terminated. */
 extern const http_route_t g_v1_routes[];
 int rh_dispatch_op(const route_req_t *rq, char *resp, int cap);
+int rh_command_invoke(const route_req_t *rq, char *resp, int cap);
 int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap);
 int rh_cli_manifest(const route_req_t *rq, char *resp, int cap);
 
@@ -226,6 +228,7 @@ int rh_server_forensics(const route_req_t *rq, char *resp, int cap);
  * (relocated out of server_http_routes.c to stay under the line-check
  * ceiling). Referenced by the route table in server_http_routes.c. */
 int git_surface_enabled(void); /* AIMEE_WEBCHAT_GIT gate shared by every git route */
+int rh_curiosity(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap);

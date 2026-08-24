@@ -1,5 +1,9 @@
 # Implementation plan — embedder auto-dimension §2a: recorded-dim precedence
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for [embedder-runtime-fetch-autodim.md](embedder-runtime-fetch-autodim.md),
 **scoped to §2a only**: make the recorded `schema_embedding_dim` an actual
 *source* of the runtime embedding dimension, under the proposal's precedence
@@ -96,7 +100,7 @@ must not crash a read.)
  * config_resolve_embedding_dim(cfg) > 0 so "pinned" is exactly consistent with the
  * value db2_set_embedding_dim received: AIMEE_EMBEDDING_DIM="0"/non-numeric/empty
  * is NOT a pin (config_resolve already ignores it -> 0), nor is an unset cfg dim. */
-int config_embedding_dim_is_pinned(const config_t *cfg);
+int config_embedding_dim_is_pinned(const legacy_config_record *cfg);
 ```
 
 The db2 layer stays config-free; the caller passes the bool via a setter mirroring

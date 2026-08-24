@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "aimee_home.h"
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 
 struct wfe_ctx
 {
@@ -167,6 +167,17 @@ static const char *next_stage_for(const wfe_node_t *n, wfe_step_status_t st)
    return "";
 }
 
+/* Start an outcome with the two fields every one of them carries. The rest are
+   set by whichever branch the engine decides on, and an unset field is empty --
+   which is what the store reads as "no cost", "no PR ref", "did not park". */
+static void wfe_outcome_init(db1_work_item_outcome_t *o, const char *work_item_id,
+                             const char *node_id)
+{
+   memset(o, 0, sizeof(*o));
+   snprintf(o->work_item_id, sizeof o->work_item_id, "%s", work_item_id ? work_item_id : "");
+   snprintf(o->node_id, sizeof o->node_id, "%s", node_id ? node_id : "");
+}
+
 static const char *pause_name(wfe_pause_reason_t r)
 {
    switch (r)
@@ -290,30 +301,23 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
     * that returned 200 yet never persisted, and a WAL frozen for the length
     * of an implement stage). --- */
 
-   /* Every state-mutating DB write below is checked; on ANY failure we roll the
-    * whole step back (goto txn_fail) so the work item is never left advanced but
-    * un-parked, or otherwise half-applied. (Audit/counter writes are
-    * non-corrupting and left unchecked.) */
-#define WFE_CKW(call)                                                                              \
-   do                                                                                              \
-   {                                                                                               \
-      if ((call) != 0)                                                                             \
-         goto txn_fail;                                                                            \
-   } while (0)
-
    /* cost pre-flight (estimate is 0 for stubs; executors report actuals).
     * Its pause+event pair rides a short transaction of its own. */
    if (wi.work_item_max_cost_usd > 0 && wi.cum_cost_usd >= wi.work_item_max_cost_usd)
    {
-      if (db1_lifecycle_txn_begin() != 0)
+      db1_work_item_outcome_t pre;
+      wfe_outcome_init(&pre, work_item_id, node->id);
+      pre.disposition = DB1_WORK_ITEM_OUTCOME_PAUSE;
+      snprintf(pre.pause_reason, sizeof pre.pause_reason, "%s", "budget_exceeded");
+      snprintf(pre.pause_stage, sizeof pre.pause_stage, "%s", node->id);
+      snprintf(pre.event_kind, sizeof pre.event_kind, "%s", "pause");
+      snprintf(pre.event_detail, sizeof pre.event_detail, "%s", "budget_exceeded");
+      if (db1_work_item_record_outcome(&pre) != 0)
       {
-         snprintf(err, errlen, "could not begin advance transaction");
+         snprintf(err, errlen, "could not record the budget pause");
          wfe_def_free(def);
          return -1;
       }
-      WFE_CKW(db1_work_item_set_pause(work_item_id, "budget_exceeded", node->id));
-      db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "budget_exceeded", "", 0);
-      db1_lifecycle_txn_commit();
       out->last_status = WFE_STEP_PENDING;
       out->pause_reason = WFE_PAUSE_BUDGET_EXCEEDED;
       snprintf(out->next_stage, sizeof out->next_stage, "%s", node->id);
@@ -331,16 +335,28 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    out->failure_class = r.failure_class;
    out->failure_has_new_input = r.failure_has_new_input;
 
-   /* --- atomic critical section: cost + step outcome + state update. Held only
-    * for these writes (milliseconds), never across the executor above. --- */
-   if (db1_lifecycle_txn_begin() != 0)
-   {
-      snprintf(err, errlen, "could not begin advance transaction");
-      wfe_def_free(def);
-      return -1;
-   }
+   /* --- the step's outcome, decided here and applied in one call. ---
+    *
+    * This used to be BEGIN, up to five writes, COMMIT, with a goto rolling the
+    * lot back on any failure. That cannot cross a module boundary: the store
+    * would have to hold an open transaction between requests, on a shared
+    * connection behind the gate mutex, and a caller that died mid-section would
+    * block every other writer. The decision below is unchanged and still the
+    * engine's; only the applying moved into db1_work_item_record_outcome, which
+    * keeps the same all-or-nothing guarantee on the far side.
+    *
+    * One thing did change. db1_stage_attempt_inc is a counter whose NEW value
+    * picks the branch, so it cannot be part of an outcome the engine has not
+    * decided yet -- it now runs before, on its own. If the outcome write then
+    * fails, the attempt stays counted where it used to roll back. That is
+    * bounded and one-directional: a node's loop budget is at most one smaller
+    * on the retry, so an exhausted cap escalates sooner and never later, which
+    * is the safe side of a loop cap to be wrong on. */
+   db1_work_item_outcome_t oc;
+   wfe_outcome_init(&oc, work_item_id, node->id);
    if (r.cost_usd > 0)
-      WFE_CKW(db1_work_item_add_cost(work_item_id, r.cost_usd));
+      oc.cost_usd = r.cost_usd;
+
    /* post-executor budget re-check: a single step's cost can push over the cap,
     * which the pre-flight (before the executor) cannot see. Bound overshoot to
     * one step by parking now. */
@@ -366,19 +382,23 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       if (r.pause_reason == WFE_PAUSE_PENDING_HUMAN && strcmp(wi.mode, "autonomous") == 0 &&
           node->block != WFE_BLK_GATE_HUMAN)
       {
-         WFE_CKW(db1_work_item_set_terminal(work_item_id, "abandoned"));
-         (void)db1_work_item_abandon_children(work_item_id); /* no-op for a leaf slice */
-         db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine",
-                                 "abandoned: autonomous dead-end (no human to escalate to)", "",
-                                 r.cost_usd);
+         oc.disposition = DB1_WORK_ITEM_OUTCOME_TERMINAL;
+         snprintf(oc.state, sizeof oc.state, "%s", "abandoned");
+         oc.abandon_children = 1;
+         snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "terminal");
+         snprintf(oc.event_detail, sizeof oc.event_detail, "%s",
+                  "abandoned: autonomous dead-end (no human to escalate to)");
          out->terminal = 1;
          snprintf(out->state, sizeof out->state, "abandoned");
       }
       else
       {
-         WFE_CKW(db1_work_item_set_pause(work_item_id, pr, node->id));
-         db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", pr, r.content_hash,
-                                 r.cost_usd);
+         oc.disposition = DB1_WORK_ITEM_OUTCOME_PAUSE;
+         snprintf(oc.pause_reason, sizeof oc.pause_reason, "%s", pr);
+         snprintf(oc.pause_stage, sizeof oc.pause_stage, "%s", node->id);
+         snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "pause");
+         snprintf(oc.event_detail, sizeof oc.event_detail, "%s", pr);
+         snprintf(oc.event_hash, sizeof oc.event_hash, "%s", r.content_hash);
          out->pause_reason = r.pause_reason;
          snprintf(out->next_stage, sizeof out->next_stage, "%s", node->id);
       }
@@ -417,8 +437,11 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       default:
          break; /* terminal-reject: reason "failed", detail "" (inert) */
       }
-      WFE_CKW(db1_work_item_set_pause(work_item_id, reason, node->id));
-      db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", detail, "", r.cost_usd);
+      oc.disposition = DB1_WORK_ITEM_OUTCOME_PAUSE;
+      snprintf(oc.pause_reason, sizeof oc.pause_reason, "%s", reason);
+      snprintf(oc.pause_stage, sizeof oc.pause_stage, "%s", node->id);
+      snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "failed");
+      snprintf(oc.event_detail, sizeof oc.event_detail, "%s", detail);
    }
    else
    {
@@ -426,21 +449,23 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       if (r.status == WFE_STEP_ADVANCED && (!next || !next[0]))
       {
          /* terminal node reached */
-         WFE_CKW(db1_work_item_set_terminal(work_item_id, "accepted"));
-         db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine", "accepted",
-                                 r.content_hash, r.cost_usd);
+         oc.disposition = DB1_WORK_ITEM_OUTCOME_TERMINAL;
+         snprintf(oc.state, sizeof oc.state, "%s", "accepted");
+         snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "terminal");
+         snprintf(oc.event_detail, sizeof oc.event_detail, "%s", "accepted");
+         snprintf(oc.event_hash, sizeof oc.event_hash, "%s", r.content_hash);
          out->terminal = 1;
          snprintf(out->state, sizeof out->state, "accepted");
       }
       else if (!next || !next[0])
       {
          snprintf(err, errlen, "node '%s' looped with no on_fail edge", node->id);
-         db1_lifecycle_txn_rollback();
          wfe_def_free(def);
          return -1;
       }
       else
       {
+         int capped = 0;
          if (r.status == WFE_STEP_LOOPED)
          {
             /* Generic per-node loop cap. Keyed on the GATE node (node->id) so
@@ -450,30 +475,29 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
             if (att >= wfe_node_max_iters(node))
             {
                wfe_on_max_t pol = wfe_node_on_max(node);
+               capped = 1;
                if (pol == WFE_ON_MAX_FAIL)
                {
-                  WFE_CKW(db1_work_item_set_terminal(work_item_id, "rejected"));
-                  db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine",
-                                          "rejected: max_iters reached", "", r.cost_usd);
+                  oc.disposition = DB1_WORK_ITEM_OUTCOME_TERMINAL;
+                  snprintf(oc.state, sizeof oc.state, "%s", "rejected");
+                  snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "terminal");
+                  snprintf(oc.event_detail, sizeof oc.event_detail, "%s",
+                           "rejected: max_iters reached");
                   out->terminal = 1;
                   snprintf(out->state, sizeof out->state, "rejected");
-                  db1_lifecycle_txn_commit();
-                  wfe_def_free(def);
-                  return 0;
                }
-               if (pol == WFE_ON_MAX_PASS)
+               else if (pol == WFE_ON_MAX_PASS)
                {
                   /* Proceed forward as if the node advanced; the validator
                    * guarantees on_max:pass carries an on_pass/next forward edge. */
                   const char *fwd = node->on_pass[0] ? node->on_pass : node->next;
-                  WFE_CKW(db1_work_item_set_stage(work_item_id, fwd, r.content_hash));
-                  db1_lifecycle_event_add(work_item_id, node->id, "forced_pass", "engine", fwd,
-                                          r.content_hash, r.cost_usd);
+                  oc.disposition = DB1_WORK_ITEM_OUTCOME_ADVANCE;
+                  snprintf(oc.next_stage, sizeof oc.next_stage, "%s", fwd);
+                  snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "forced_pass");
+                  snprintf(oc.event_detail, sizeof oc.event_detail, "%s", fwd);
+                  snprintf(oc.event_hash, sizeof oc.event_hash, "%s", r.content_hash);
                   out->last_status = WFE_STEP_ADVANCED;
                   snprintf(out->next_stage, sizeof out->next_stage, "%s", fwd);
-                  db1_lifecycle_txn_commit();
-                  wfe_def_free(def);
-                  return 0;
                }
                /* WFE_ON_MAX_HUMAN (default): pause for a human — but an AUTONOMOUS
                 * run has no human to escalate to, so an exhausted loop cap is a
@@ -481,64 +505,65 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
                 * 'active' forever (the reaper never reaps a human wait) — the very
                 * zombie-accumulation this avoids. Terminate it (abandoned) with an
                 * audit trail; an interactive run still parks for its operator. */
-               if (strcmp(wi.mode, "autonomous") == 0)
+               else if (strcmp(wi.mode, "autonomous") == 0)
                {
-                  WFE_CKW(db1_work_item_set_terminal(work_item_id, "abandoned"));
-                  (void)db1_work_item_abandon_children(work_item_id); /* no-op for a leaf slice */
-                  db1_lifecycle_event_add(
-                      work_item_id, node->id, "terminal", "engine",
-                      "abandoned: max_iters reached (autonomous, no human to escalate to)", "",
-                      r.cost_usd);
+                  oc.disposition = DB1_WORK_ITEM_OUTCOME_TERMINAL;
+                  snprintf(oc.state, sizeof oc.state, "%s", "abandoned");
+                  oc.abandon_children = 1;
+                  snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "terminal");
+                  snprintf(oc.event_detail, sizeof oc.event_detail, "%s",
+                           "abandoned: max_iters reached (autonomous, no human to escalate to)");
                   out->terminal = 1;
                   snprintf(out->state, sizeof out->state, "abandoned");
-                  db1_lifecycle_txn_commit();
-                  wfe_def_free(def);
-                  return 0;
                }
-               WFE_CKW(db1_work_item_set_pause(work_item_id, "pending_human", next));
-               db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "max_iters", "",
-                                       r.cost_usd);
-               out->last_status = WFE_STEP_PENDING;
-               out->pause_reason = WFE_PAUSE_PENDING_HUMAN;
-               snprintf(out->next_stage, sizeof out->next_stage, "%s", next);
-               db1_lifecycle_txn_commit();
-               wfe_def_free(def);
-               return 0;
+               else
+               {
+                  oc.disposition = DB1_WORK_ITEM_OUTCOME_PAUSE;
+                  snprintf(oc.pause_reason, sizeof oc.pause_reason, "%s", "pending_human");
+                  snprintf(oc.pause_stage, sizeof oc.pause_stage, "%s", next);
+                  snprintf(oc.event_kind, sizeof oc.event_kind, "%s", "pause");
+                  snprintf(oc.event_detail, sizeof oc.event_detail, "%s", "max_iters");
+                  out->last_status = WFE_STEP_PENDING;
+                  out->pause_reason = WFE_PAUSE_PENDING_HUMAN;
+                  snprintf(out->next_stage, sizeof out->next_stage, "%s", next);
+               }
             }
          }
-         WFE_CKW(db1_work_item_set_stage(work_item_id, next, r.content_hash));
-         /* pr.open carries the opened PR ref in content_hash; persist it durably so
-          * the later gate.ci / check.mergeable / merge blocks resolve the real PR
-          * (full-autonomous-development Phase A). Rides this atomic txn. */
-         if (node->block == WFE_BLK_PR_OPEN && r.status == WFE_STEP_ADVANCED && r.content_hash[0])
-            WFE_CKW(db1_work_item_set_pr_ref(work_item_id, r.content_hash));
-         db1_lifecycle_event_add(work_item_id, node->id,
-                                 r.status == WFE_STEP_LOOPED ? "loop" : "advance", "engine", next,
-                                 r.content_hash, r.cost_usd);
-         snprintf(out->next_stage, sizeof out->next_stage, "%s", next);
-         if (over_budget)
+         if (!capped)
          {
-            /* the step advanced but its cost crossed the cap: park before the
-             * next stage so a human must resume --budget-bump. */
-            WFE_CKW(db1_work_item_set_pause(work_item_id, "budget_exceeded", next));
-            db1_lifecycle_event_add(work_item_id, next, "pause", "engine", "budget_exceeded", "",
-                                    0);
-            out->last_status = WFE_STEP_PENDING;
-            out->pause_reason = WFE_PAUSE_BUDGET_EXCEEDED;
+            oc.disposition = DB1_WORK_ITEM_OUTCOME_ADVANCE;
+            snprintf(oc.next_stage, sizeof oc.next_stage, "%s", next);
+            /* pr.open carries the opened PR ref in content_hash; persist it durably so
+             * the later gate.ci / check.mergeable / merge blocks resolve the real PR
+             * (full-autonomous-development Phase A). Rides this atomic outcome. */
+            if (node->block == WFE_BLK_PR_OPEN && r.status == WFE_STEP_ADVANCED &&
+                r.content_hash[0])
+               snprintf(oc.pr_ref, sizeof oc.pr_ref, "%s", r.content_hash);
+            snprintf(oc.event_kind, sizeof oc.event_kind, "%s",
+                     r.status == WFE_STEP_LOOPED ? "loop" : "advance");
+            snprintf(oc.event_detail, sizeof oc.event_detail, "%s", next);
+            snprintf(oc.event_hash, sizeof oc.event_hash, "%s", r.content_hash);
+            snprintf(out->next_stage, sizeof out->next_stage, "%s", next);
+            if (over_budget)
+            {
+               /* the step advanced but its cost crossed the cap: park before the
+                * next stage so a human must resume --budget-bump. */
+               snprintf(oc.park_reason, sizeof oc.park_reason, "%s", "budget_exceeded");
+               out->last_status = WFE_STEP_PENDING;
+               out->pause_reason = WFE_PAUSE_BUDGET_EXCEEDED;
+            }
          }
       }
    }
 
-   db1_lifecycle_txn_commit();
+   if (db1_work_item_record_outcome(&oc) != 0)
+   {
+      snprintf(err, errlen, "advance: the step outcome was not recorded; nothing was applied");
+      wfe_def_free(def);
+      return -1;
+   }
    wfe_def_free(def);
    return 0;
-
-txn_fail:
-   db1_lifecycle_txn_rollback();
-   snprintf(err, errlen, "advance: a state write failed; rolled back");
-   wfe_def_free(def);
-   return -1;
-#undef WFE_CKW
 }
 
 int wfe_engine_run(const char *work_item_id, char *err, size_t errlen)

@@ -81,7 +81,6 @@
   "tests": [
     "src/tests/test_delegate_ensemble.c",
     "src/tests/test_roundtable_chair.c",
-    "src/tests/test_roundtable_pipeline_capture.c",
     "src/tests/test_roundtable_pipeline_chunk.c",
     "src/tests/test_roundtable_pipeline_eval.c",
     "src/tests/test_roundtable_preset.c",

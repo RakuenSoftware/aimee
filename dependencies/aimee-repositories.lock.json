@@ -102,7 +102,8 @@
       "commit": "d4fc0dd0f7cc3c4d8a876c2c5856332850417265",
       "execution": "process",
       "placements": [
-        "server"
+        "server",
+        "kb"
       ],
       "source_sha256": "cecfee274c344b442ff018d2a85d734d6868e824928af1614778e8670a7b2f94",
       "runtime": "go",
@@ -126,7 +127,8 @@
       "commit": "4f603cebea169413813a0d9c2217698f63947414",
       "execution": "process",
       "placements": [
-        "server"
+        "server",
+        "kb"
       ],
       "source_sha256": "514eb1ffffdac374faca358b378f99c9d162af151df60ddae30957149c311a5f",
       "runtime": "go",

@@ -7,7 +7,7 @@
  * ownership scope via --git-common-dir resolution in get_repo_path. */
 
 #include <stdio.h>
-#include "modules/db1/git_ownership.h"
+#include "db1_client/git_ownership.h"
 #include <stdlib.h>
 #include <string.h>
 

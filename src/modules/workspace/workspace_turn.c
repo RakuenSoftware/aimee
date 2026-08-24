@@ -41,6 +41,7 @@ static __thread int t_turn_container_hibernate;
  * the turn's cwd into that worktree and stash the drift line to surface. */
 static __thread char t_turn_cwd[MAX_PATH_LEN];
 static __thread char t_turn_drift[256];
+static __thread char t_test_default_workspace[MAX_PATH_LEN];
 
 /* Is `cwd` inside (or equal to) workspace root `ws`? */
 static int cwd_in_workspace(const char *cwd, const char *ws)
@@ -536,10 +537,20 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
     * apply grew a branch back to it. Refusing is the whole point: a delegate that
     * cannot be sandboxed does not run. */
 
+   if ((!workspace || !workspace[0]) && t_test_default_workspace[0])
+      workspace = t_test_default_workspace;
    char ws_real[MAX_PATH_LEN] = "";
    if (workspace && workspace[0] &&
        !workspace_turn_workspace_authorized(workspace, ws_real, sizeof(ws_real)))
       return -1; /* refused + logged by the authorization check */
+   if (!ws_real[0])
+   {
+      LOG_ERROR("delegate-sandbox",
+                "delegate '%s': a complete registered source workspace is required; refusing an "
+                "empty sandbox",
+                task_id);
+      return -1;
+   }
 
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
@@ -558,7 +569,7 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
        .workspace = ws_real[0] ? ws_real : NULL,
        .workspace_read_only = workspace_read_only,
        .pkg_proxy = (strcmp(config_delegate_sandbox_package_access(), "proxy") == 0),
-       .require_isolation = config_delegate_sandbox_require_isolation()};
+       .require_isolation = 1};
    void *state = NULL;
    int arc = b->acquire(b, task_id, &bcfg, &state);
    if (arc == DELEGATE_ACQUIRE_REFUSED_ISOLATION)
@@ -588,10 +599,15 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    t_turn_bound = 1;
    LOG_INFO("delegate-sandbox",
             "delegate '%s': file/exec bound to its container (image=%s, workspace=%s, mode=%s)",
-            task_id, bcfg.image ? bcfg.image : "<default>",
-            bcfg.workspace ? bcfg.workspace : "<backend scratch dir — NOT the source tree>",
+            task_id, bcfg.image ? bcfg.image : "<default>", bcfg.workspace,
             bcfg.workspace_read_only ? "ro" : "rw");
    return 1;
+}
+
+void workspace_turn_set_default_workspace_for_test(const char *workspace)
+{
+   snprintf(t_test_default_workspace, sizeof(t_test_default_workspace), "%s",
+            workspace ? workspace : "");
 }
 
 /* Test override: -1 = report the real bound state; 0/1 = force it. Lets guardrail/tool

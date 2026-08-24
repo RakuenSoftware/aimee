@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -124,7 +125,7 @@ func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
 	gitRun(t, repo, "branch", feature)
 	gitRun(t, repo, "push", "origin", feature)
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +323,7 @@ func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testi
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +465,7 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +603,7 @@ func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}

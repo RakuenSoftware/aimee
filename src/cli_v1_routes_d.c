@@ -170,6 +170,12 @@ static const struct
     {"dogfood.report", pt_print_dogfood_report},
     {"eval.run", pt_print_eval_run},
     {"eval.results", pt_print_eval_results},
+    {"eval.candidates", pt_print_eval_candidates},
+    {"eval.candidates-update", pt_print_eval_candidates_update},
+    {"learning.approaches", pt_print_learning_approaches},
+    {"learning.attribution", pt_print_learning_attribution},
+    {"learning.resolve", pt_print_learning_resolve},
+    {"learning.fate", pt_print_learning_fate},
     {"identity.show", pt_print_identity_show},
     {"api.status", pt_print_api_status},
     {"api.enable", pt_print_api_status},
@@ -237,22 +243,6 @@ static int delegate_timeout_from_args(int argc, char **argv)
    return cli_args_get_int(&opts, "timeout", 0);
 }
 
-/* `agent probe` is a diagnostic command, so its process status must agree with
- * the result it prints.  A 2xx response only means the server completed the
- * probe; it does not mean the provider was usable.  Prefer the execution probe
- * when it ran because some hosted providers reject /models while accepting
- * inference.  With --no-run, model availability is the strongest result we
- * have. */
-static int agent_probe_response_is_failure(cJSON *resp)
-{
-   cJSON *execution_ok = cJSON_GetObjectItemCaseSensitive(resp, "execution_ok");
-   if (execution_ok)
-      return !cJSON_IsTrue(execution_ok);
-
-   cJSON *model_available = cJSON_GetObjectItemCaseSensitive(resp, "model_available");
-   return model_available && !cJSON_IsTrue(model_available);
-}
-
 static int write_delegate_output_file(const char *path, const char *text)
 {
    if (!path || !path[0] || !text)
@@ -277,64 +267,14 @@ static int write_delegate_output_file(const char *path, const char *text)
    return 0;
 }
 
-/* The remote-endpoint resolvers below are portable (env + aimee.yaml, no UDS)
+/* The remote-endpoint resolvers below are portable (env + remote.conf, no UDS)
  * and MUST compile on Windows too: cli_v1_forward calls them unconditionally
  * and the Windows thin client always takes the remote /v1 path. */
 
-/* cli_v1_aimee_yaml_value: scan <aimee_home>/aimee.yaml for the first
- * (non-comment) line containing <key> and return its malloc'd, unquoted value,
- * or NULL when absent/empty. The full config_t parser is not linked into the
- * thin client, so the api.client_* settings are read with this lightweight
- * scan. Caller frees. */
-static char *cli_v1_aimee_yaml_value(const char *key)
-{
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return NULL;
-   char path[512];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-   FILE *fp = fopen(path, "r");
-   if (!fp)
-      return NULL;
-
-   char *result = NULL;
-   char line[512];
-   while (fgets(line, sizeof(line), fp))
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-      if (*p == '#')
-         continue; /* comment line */
-      char *k = strstr(line, key);
-      if (!k)
-         continue;
-      k += strlen(key);
-      while (*k == ' ' || *k == '\t')
-         k++;
-      char val[256];
-      int i = 0;
-      while (*k && *k != '\n' && *k != '\r' && *k != '#' && i < (int)sizeof(val) - 1)
-      {
-         if (*k != '"' && *k != '\'')
-            val[i++] = *k;
-         k++;
-      }
-      while (i > 0 && (val[i - 1] == ' ' || val[i - 1] == '\t'))
-         i--;
-      val[i] = '\0';
-      if (val[0])
-         result = strdup(val);
-      break;
-   }
-   fclose(fp);
-   return result;
-}
-
 /* cli_v1_client_endpoint: a remote aimee-server /v1 endpoint for the HTTP
  * transport — "tcp:host:port" (or an explicit "unix:/path"). AIMEE_API_ENDPOINT
- * overrides; otherwise aimee.api.client_endpoint in aimee.yaml. NULL means no
- * remote is configured and the caller falls back to the local aimee-http.sock.
+ * overrides; otherwise the explicit remote target is used. NULL means no remote
+ * is configured and the caller falls back to the local aimee-http.sock.
  * This is the only client path that reaches an aimee-server on another host
  * (e.g. a container's published port); the aimee-http.sock helpers above are
  * loopback-only. Caller frees. */
@@ -384,13 +324,6 @@ char *cli_v1_client_endpoint(void)
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
       return cli_v1_normalize_endpoint(env);
-   char *yaml = cli_v1_aimee_yaml_value("client_endpoint:");
-   if (yaml)
-   {
-      char *norm = cli_v1_normalize_endpoint(yaml);
-      free(yaml);
-      return norm;
-   }
    /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
     * by synthesizing the transport endpoint cli_http_request expects: "tls:" for
     * an https:// target (native client TLS, #304), else "tcp:". This makes the
@@ -408,17 +341,13 @@ char *cli_v1_client_endpoint(void)
 }
 
 /* cli_v1_client_bearer: bearer token sent with the remote HTTP transport.
- * AIMEE_API_BEARER overrides; otherwise the `bearer_token:` key in aimee.yaml
- * (the same value aimee-server reads for aimee.api.bearer_token). NULL means no
- * Authorization header. Caller frees. */
+ * AIMEE_API_BEARER overrides; otherwise use the explicit remote credential.
+ * Credentials are never read from public config storage. Caller frees. */
 char *cli_v1_client_bearer(void)
 {
    const char *env = getenv("AIMEE_API_BEARER");
    if (env && env[0])
       return strdup(env);
-   char *yaml = cli_v1_aimee_yaml_value("bearer_token:");
-   if (yaml)
-      return yaml;
    /* Token for a synthesized aimee_client endpoint: --server-token /
     * AIMEE_SERVER_TOKEN / remote.conf line 2. */
    char tok[300];
@@ -446,7 +375,7 @@ void cli_v1_warn_no_endpoint(const char *method)
            "aimee: no remote aimee-server is configured, so '%s' cannot run.\n"
            "  aimee is a thin client: there is no co-located server to fall back to.\n"
            "  set one with: aimee remote set https://<host>:8743\n"
-           "  (or aimee.api.client_endpoint in aimee.yaml, or AIMEE_API_ENDPOINT)\n",
+           "  (or set AIMEE_API_ENDPOINT)\n",
            method ? method : "this command");
 }
 
@@ -470,7 +399,7 @@ int cli_v1_has_remote_endpoint(void)
    }
    return 0;
 #else
-   /* Windows has no UDS path and no AIMEE_API_ENDPOINT/aimee.yaml config: its
+   /* Windows has no UDS path and no AIMEE_API_ENDPOINT config: its
     * remote target comes from aimee_client (AIMEE_SERVER_URL or --server). Report
     * that so the dispatcher skips the (always-failing) local-socket preflight and
     * lets cli_v1_forward route over the remote /v1 via aimee_client_request. */
@@ -1252,6 +1181,7 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
  * only, so these helpers are no-ops on Windows (the reverse-channel serve path
  * still works there; client-push indexing does not). */
 #if defined(AIMEE_POSIX)
+static int g_cli_ws_json_output;
 
 /* Keep the thin-client push path aligned with the local/canonical scanners.
  * Hidden-root projects are deliberately excluded from index reads and startup
@@ -1402,8 +1332,9 @@ static void ws_ingest_flush(ws_ingest_ctx_t *s)
       else
          s->failed += have;
       s->batches++;
-      fprintf(stderr, "index upload: batch %d %s (%d file%s; %d uploaded total)\n", batch_no,
-              batch_ok ? "complete" : "failed", have, have == 1 ? "" : "s", s->pushed);
+      if (!g_cli_ws_json_output)
+         fprintf(stderr, "index upload: batch %d %s (%d file%s; %d uploaded total)\n", batch_no,
+                 batch_ok ? "complete" : "failed", have, have == 1 ? "" : "s", s->pushed);
    }
    s->batch = NULL;
    s->batch_bytes = 0;
@@ -1440,13 +1371,13 @@ static int ws_ingest_collect_cb(const char *rel_path, const char *content, void 
 
 static int cli_ws_ingest_root(const char *remote, const char *bearer, const char *abs_root)
 {
-   const char *base = strrchr(abs_root, '/');
-   base = (base && base[1]) ? base + 1 : abs_root;
+   char project_name[128];
+   cli_ws_project_identity(remote, bearer, abs_root, project_name, sizeof(project_name));
 
    ws_ingest_ctx_t s = {0};
    s.remote = remote;
    s.bearer = bearer;
-   s.base = base;
+   s.base = project_name;
    s.abs_root = abs_root;
 
    code_collect_files_cb(abs_root, ws_ingest_collect_cb, &s);
@@ -1454,7 +1385,8 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
 
    if (s.batches == 0 && !s.oom)
    {
-      printf("no indexable files found in %s\n", abs_root);
+      if (!g_cli_ws_json_output)
+         printf("no indexable files found in %s\n", abs_root);
       return 0;
    }
 
@@ -1463,8 +1395,9 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
               "aimee: warning: ran out of memory building an ingest batch; some files in "
               "'%s' were not pushed\n",
               abs_root);
-   printf("ingested %d file(s) from %s (%d batch%s)%s\n", s.pushed, abs_root, s.batches,
-          s.batches == 1 ? "" : "es", (s.failed || s.oom) ? " — some batches failed" : "");
+   if (!g_cli_ws_json_output)
+      printf("ingested %d file(s) from %s (%d batch%s)%s\n", s.pushed, abs_root, s.batches,
+             s.batches == 1 ? "" : "es", (s.failed || s.oom) ? " — some batches failed" : "");
    return (s.failed || s.oom) ? 1 : 0;
 }
 
@@ -1486,8 +1419,11 @@ static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
    ws_tree_ctx_t *t = (ws_tree_ctx_t *)ctx;
    const char *base = strrchr(repo_abs, '/');
    base = (base && base[1]) ? base + 1 : repo_abs;
-   printf("indexing project: %s\n", base);
-   fflush(stdout);
+   if (!g_cli_ws_json_output)
+   {
+      printf("indexing project: %s\n", base);
+      fflush(stdout);
+   }
    if (cli_ws_ingest_root(t->remote, t->bearer, repo_abs) != 0)
       t->rc = 1;
    t->count++;
@@ -1504,11 +1440,12 @@ static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char
    return t.rc;
 }
 
-int cli_workspace_add_remote(const char *path)
+int cli_workspace_add_remote(const char *path, int prepare, int json_output)
 {
+   g_cli_ws_json_output = json_output;
    if (!path || !path[0])
    {
-      fprintf(stderr, "usage: aimee workspace add <path>\n");
+      fprintf(stderr, "usage: aimee workspace %s <path>\n", prepare ? "prepare" : "add");
       return 1;
    }
    /* `--repo <url>` exists in the local (same-host) command but not here, and the
@@ -1569,10 +1506,30 @@ int cli_workspace_add_remote(const char *path)
    }
    if (rresp)
       cJSON_Delete(rresp);
-   printf("workspace registered: %s (detached)\n", abs);
-   fflush(stdout);
+   if (!json_output)
+   {
+      printf("workspace registered: %s (detached)\n", abs);
+      fflush(stdout);
+   }
 
    int rc = cli_ws_ingest_tree(remote, bearer, abs);
+   if (json_output)
+   {
+      cJSON *result = cJSON_CreateObject();
+      cJSON_AddStringToObject(result, "path", abs);
+      cJSON_AddStringToObject(result, "host_path", abs);
+      cJSON_AddStringToObject(result, "index_root", abs);
+      cJSON_AddStringToObject(result, "transport", "detached-upload");
+      cJSON_AddStringToObject(result, "workspace_state", already ? "reused" : "registered");
+      cJSON_AddBoolToObject(result, "ready", rc == 0);
+      char *printed = cJSON_PrintUnformatted(result);
+      cJSON_Delete(result);
+      if (printed)
+      {
+         printf("%s\n", printed);
+         free(printed);
+      }
+   }
    free(abs);
    free(remote);
    free(bearer);
@@ -1651,9 +1608,11 @@ int cli_index_scan_remote(int argc, char **argv)
 
 #else /* !AIMEE_POSIX */
 
-int cli_workspace_add_remote(const char *path)
+int cli_workspace_add_remote(const char *path, int prepare, int json_output)
 {
    (void)path;
+   (void)prepare;
+   (void)json_output;
    fprintf(stderr, "aimee: remote workspace add is not supported on this platform\n");
    return 1;
 }
@@ -2043,7 +2002,13 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       exit_rc = 1;
    }
-   else if (strcmp(route->method, "model.probe") == 0 && agent_probe_response_is_failure(resp))
+   else if (strcmp(route->method, "model.probe") == 0 && cli_agent_probe_response_is_failure(resp))
+   {
+      exit_rc = 1;
+   }
+   else if ((strcmp(route->method, "index.investigate") == 0 ||
+             strcmp(route->method, "index.hybrid") == 0) &&
+            cli_index_investigate_response_is_failure(resp))
    {
       exit_rc = 1;
    }

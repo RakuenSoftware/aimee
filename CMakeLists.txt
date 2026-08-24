@@ -100,6 +100,7 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/roundtable/include"
     "${AIMEE_SRC_DIR}/modules/benchmarks/include"
     "${AIMEE_SRC_DIR}/modules/governance/include"
+    "${AIMEE_SRC_DIR}/modules/execution-policy/include"
     "${AIMEE_SRC_DIR}/modules/workflows/include"
     "${AIMEE_SRC_DIR}/modules/kb-synthesis/include"
     "${AIMEE_SRC_DIR}/modules/runtime-web/include"
@@ -119,7 +120,6 @@ include_directories(
     # header should not be another red CI run.
     "${AIMEE_SRC_DIR}/modules/workflows"
     "${AIMEE_SRC_DIR}/modules/guardrails"
-    "${AIMEE_SRC_DIR}/modules/config"
     "${AIMEE_SRC_DIR}/modules/economizer"
     "${AIMEE_SRC_DIR}/modules/roadmap"
     "${AIMEE_SRC_DIR}/modules/sandbox"
@@ -415,58 +415,13 @@ else()
     )
 endif()
 
+# The C store module is gone: server-go/modules/postgres serves its kinds now.
+#
+# What is left of it here is the secret store, which stores secrets as files
+# under the config directory and opened no database at any point -- it merely
+# lived in that directory.
 set(DB1_SRCS
-    ${AIMEE_SRC_DIR}/modules/db1/db1_init.c
-    ${AIMEE_SRC_DIR}/modules/db1/db1_write.c
-    ${AIMEE_SRC_DIR}/modules/db1/wm.c
-    ${AIMEE_SRC_DIR}/modules/db1/fsnap.c
-    ${AIMEE_SRC_DIR}/modules/db1/checkpoints.c
-    ${AIMEE_SRC_DIR}/modules/db1/clarify.c
-    ${AIMEE_SRC_DIR}/modules/db1/diagnose.c
-    ${AIMEE_SRC_DIR}/modules/db1/ensemble.c
-    ${AIMEE_SRC_DIR}/modules/db1/caches.c
-    ${AIMEE_SRC_DIR}/modules/db1/web_page_cache.c
-    ${AIMEE_SRC_DIR}/modules/db1/primary_sessions.c
-    ${AIMEE_SRC_DIR}/modules/db1/webchat_claude_sessions.c
-    ${AIMEE_SRC_DIR}/modules/db1/env.c
-    ${AIMEE_SRC_DIR}/modules/db1/delegations.c
-    ${AIMEE_SRC_DIR}/modules/db1/delegation_checkpoint.c
-    ${AIMEE_SRC_DIR}/modules/db1/model_catalog.c
-    ${AIMEE_SRC_DIR}/modules/db1/decisions.c
-    ${AIMEE_SRC_DIR}/modules/db1/eval.c
-    ${AIMEE_SRC_DIR}/modules/db1/runtime_state.c
-    ${AIMEE_SRC_DIR}/modules/db1/server_sessions.c
-    ${AIMEE_SRC_DIR}/modules/db1/session_state.c
-    ${AIMEE_SRC_DIR}/modules/db1/session_paths.c
-    ${AIMEE_SRC_DIR}/modules/db1/token_audit.c
-    ${AIMEE_SRC_DIR}/modules/db1/agent_log.c
-    ${AIMEE_SRC_DIR}/modules/db1/agent_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/coord_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/execution_plans.c
-    ${AIMEE_SRC_DIR}/modules/db1/pipelines.c
-    ${AIMEE_SRC_DIR}/modules/db1/secrets.c
-    ${AIMEE_SRC_DIR}/modules/db1/cognify_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/cost_fold.c
-    ${AIMEE_SRC_DIR}/modules/db1/local_operator.c
-    ${AIMEE_SRC_DIR}/modules/db1/project_clones.c
-    ${AIMEE_SRC_DIR}/modules/db1/git_ownership.c
-    ${AIMEE_SRC_DIR}/modules/db1/tool_local_availability.c
-    ${AIMEE_SRC_DIR}/modules/db1/execution_trace.c
-    ${AIMEE_SRC_DIR}/modules/db1/working_profile_local.c
-    ${AIMEE_SRC_DIR}/modules/db1/windows.c
-    ${AIMEE_SRC_DIR}/modules/db1/diagnostics.c
-    ${AIMEE_SRC_DIR}/modules/db1/maintenance.c
-    ${AIMEE_SRC_DIR}/modules/db1/conv_context.c
-    ${AIMEE_SRC_DIR}/modules/db1/payload_rewrite_state.c
-    ${AIMEE_SRC_DIR}/modules/db1/guardrail_events.c
-    ${AIMEE_SRC_DIR}/modules/db1/db1_trigger.c
-    ${AIMEE_SRC_DIR}/modules/db1/db1_cron_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/delegate_learning.c
-    ${AIMEE_SRC_DIR}/modules/db1/interaction_events.c
-    ${AIMEE_SRC_DIR}/modules/db1/mcp_osv_cache.c
-    ${AIMEE_SRC_DIR}/modules/db1/server_management_jti.c
-    ${AIMEE_SRC_DIR}/modules/db1/wfe_store.c
-    ${AIMEE_SRC_DIR}/modules/db1/wfe_binding.c
+    ${AIMEE_SRC_DIR}/secrets.c
 )
 
 # The preserved C implementation now lives under module ownership. It remains
@@ -492,6 +447,8 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/admin_grant.c
     ${AIMEE_SRC_DIR}/modules/db2/c/oidc_jwks.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/evidence_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_profiles.c
     ${AIMEE_SRC_DIR}/modules/db2/c/epistemic_directives.c
     ${AIMEE_SRC_DIR}/modules/db2/c/failed_queries.c
@@ -508,6 +465,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_runtime_state.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_ingest.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_context.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_briefing.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_conflicts.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_export.c
@@ -574,20 +532,19 @@ set(DB2_HOST_ADAPTER_SRCS
 )
 
 set(CORE_SRCS
-    ${AIMEE_SRC_DIR}/modules/db1/db.c
-    ${AIMEE_SRC_DIR}/modules/db1/db_schema.c
+    ${AIMEE_SRC_DIR}/config_client.c
+    ${AIMEE_SRC_DIR}/config_client_contract.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_0.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_1.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_2.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_3.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_4.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_5.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_6.c
+    ${AIMEE_SRC_DIR}/config_client_accessors_7.c
+    ${AIMEE_SRC_DIR}/module_json_call.c
+    ${AIMEE_SRC_DIR}/session_id.c
     ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c
-    ${AIMEE_SRC_DIR}/modules/config/config.c
-    ${AIMEE_SRC_DIR}/modules/config/config_sections.c
-    ${AIMEE_SRC_DIR}/modules/config/config_database.c
-    ${AIMEE_SRC_DIR}/modules/config/config_learning.c
-    ${AIMEE_SRC_DIR}/modules/config/config_memory.c
-    ${AIMEE_SRC_DIR}/modules/config/config_charter.c
-    ${AIMEE_SRC_DIR}/modules/config/config_trigger.c
-    ${AIMEE_SRC_DIR}/modules/config/config_kb_maintenance.c
-    ${AIMEE_SRC_DIR}/modules/config/config_kb_curator.c
-    ${AIMEE_SRC_DIR}/modules/config/config_skills.c
-    ${AIMEE_SRC_DIR}/modules/config/config_save.c
     ${AIMEE_SRC_DIR}/util.c
     ${AIMEE_SRC_DIR}/util_url.c
     ${AIMEE_SRC_DIR}/kb/kb_identity.c
@@ -702,8 +659,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/session_worktree_key.c
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
-    ${AIMEE_SRC_DIR}/modules/config/agent_config.c
-    ${AIMEE_SRC_DIR}/modules/config/agent_registry.c
     ${AIMEE_SRC_DIR}/modules/vault/agent_credentials.c
     ${AIMEE_SRC_DIR}/modules/routing/routing.c
     ${AIMEE_SRC_DIR}/agent_tier_lint.c
@@ -751,7 +706,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/primary_session_adapter.c
     ${AIMEE_SRC_DIR}/server/primary_cli_ingestor.c
     ${AIMEE_SRC_DIR}/server/agent_policy.c
-    ${AIMEE_SRC_DIR}/server/agent_policy_intercept.c
+    ${AIMEE_SRC_DIR}/server/execution_policy_bus.c
     ${AIMEE_SRC_DIR}/server/agent_tasks.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_support.c
@@ -935,6 +890,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
+    ${AIMEE_SRC_DIR}/cli_v1_routes_f.c
     ${AIMEE_SRC_DIR}/cli_argspec.c
     ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
@@ -946,6 +902,9 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tool_profile.c
     ${AIMEE_SRC_DIR}/cli_profile.c
     ${AIMEE_SRC_DIR}/client_integrations.c
+    # Thin-client config reads and structured profile mutations route through
+    # the server; this is the caller-only dispatcher, not a config engine.
+    ${AIMEE_SRC_DIR}/client_config.c
     ${AIMEE_SRC_DIR}/cmd_profile.c
     ${AIMEE_SRC_DIR}/cmd_manuscript.c
     ${AIMEE_SRC_DIR}/cmd_optimize.c
@@ -967,6 +926,7 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
     ${AIMEE_SRC_DIR}/server/server.c
@@ -1050,6 +1010,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
+    ${AIMEE_SRC_DIR}/cli_v1_routes_f.c
     ${AIMEE_SRC_DIR}/cli_argspec.c
     ${AIMEE_SRC_DIR}/server/agent_admission.c
     ${AIMEE_SRC_DIR}/server/provider_catalog.c
@@ -1113,6 +1074,7 @@ list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
+    ${AIMEE_SRC_DIR}/kb/kb_obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/kb/kb_background.c
     ${AIMEE_SRC_DIR}/kb/kb_service.c
     ${AIMEE_SRC_DIR}/kb/kb_service_workers.c
@@ -1239,8 +1201,6 @@ set(KB_DATA_SRCS
 )
 set(KB_CORE_SRCS ${CORE_SRCS})
 list(REMOVE_ITEM KB_CORE_SRCS
-    ${AIMEE_SRC_DIR}/modules/db1/db.c
-    ${AIMEE_SRC_DIR}/modules/db1/db_schema.c
 )
 
 find_package(Threads REQUIRED)
@@ -1260,7 +1220,6 @@ if(NOT AIMEE_THIN_CLIENT)
 set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}
     ${AIMEE_SRC_DIR}/headers
-    ${AIMEE_SRC_DIR}/modules/config
     ${AIMEE_SRC_DIR}/modules/economizer
     ${AIMEE_SRC_DIR}/modules/governance
     ${AIMEE_SRC_DIR}/modules/workflows
@@ -1286,7 +1245,7 @@ add_library(aimee-core STATIC
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_PROJECT_INCLUDE_DIRS}
-    ${AIMEE_SRC_DIR}/modules/db1
+    ${AIMEE_SRC_DIR}/db1_client
     ${AIMEE_SRC_DIR}/modules/db2/c
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
@@ -1539,9 +1498,8 @@ add_executable(aimee
 target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}
     ${AIMEE_SRC_DIR}/headers
-    ${AIMEE_SRC_DIR}/modules/config
     ${AIMEE_SRC_DIR}/vendor/headers
-    ${AIMEE_SRC_DIR}/modules/db1
+    ${AIMEE_SRC_DIR}/db1_client
     ${AIMEE_SRC_DIR}/modules/db2/c)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE aimee-core-connection)
@@ -1665,7 +1623,6 @@ add_dependencies(aimee-agent tool_prompts_header)
 # generator only ran from the Makefile.
 set(SCHEMA_DATA_HEADER "${AIMEE_SRC_DIR}/schema_data.h")
 set(SCHEMA_FILES
-    "${AIMEE_SRC_DIR}/modules/db1/schema.sql"
     "${AIMEE_SRC_DIR}/modules/db2/c/schema.sql"
     "${AIMEE_SRC_DIR}/modules/db2/c/schema_sqlite.sql"
 )

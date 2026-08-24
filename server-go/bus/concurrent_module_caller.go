@@ -17,15 +17,19 @@ var ErrModuleCallNotDispatched = errors.New("module call was not dispatched")
 // for long-lived processes (the WFE and module-to-module requesters) that have
 // one admitted principal but many simultaneous calls.
 type ConcurrentModuleCaller struct {
-	client       callerBus
-	next         atomic.Uint64
-	sendMu       sync.Mutex
-	mu           sync.Mutex
-	pending      map[uint64]concurrentPending
-	assemblies   map[uint64]concurrentAssembly
-	isClosed     bool
-	closed       chan struct{}
+	client     callerBus
+	next       atomic.Uint64
+	sendMu     sync.Mutex
+	mu         sync.Mutex
+	pending    map[uint64]concurrentPending
+	assemblies map[uint64]concurrentAssembly
+	isClosed   bool
+	closed     chan struct{}
+	// stopped is closed by the poll goroutine as it returns, so a caller can
+	// wait for it to be gone before unmapping what it reads.
+	stopped      chan struct{}
 	closeOnce    sync.Once
+	calls        sync.WaitGroup
 	pollInterval time.Duration
 }
 
@@ -51,7 +55,7 @@ func NewConcurrentModuleCaller(ctx context.Context, client *Client) (*Concurrent
 func newConcurrentModuleCaller(ctx context.Context, client callerBus) *ConcurrentModuleCaller {
 	c := &ConcurrentModuleCaller{client: client, pending: make(map[uint64]concurrentPending),
 		assemblies: make(map[uint64]concurrentAssembly), closed: make(chan struct{}),
-		pollInterval: 200 * time.Microsecond}
+		stopped: make(chan struct{}), pollInterval: 200 * time.Microsecond}
 	go c.poll(ctx)
 	return c
 }
@@ -71,8 +75,17 @@ func (c *ConcurrentModuleCaller) finish(err error) {
 }
 
 func (c *ConcurrentModuleCaller) poll(ctx context.Context) {
+	defer close(c.stopped)
 	idleDelay := c.pollInterval
 	for {
+		// Stop when asked, not only when the context ends or a read fails.
+		// Without this the loop cannot be shut down at all, so a caller that
+		// wants to detach has no way to wait for it to stop first.
+		select {
+		case <-c.closed:
+			return
+		default:
+		}
 		if err := ctx.Err(); err != nil {
 			c.finish(errors.Join(ErrModuleCallCancelled, err))
 			return
@@ -168,7 +181,9 @@ func (c *ConcurrentModuleCaller) Call(ctx context.Context, eventKind, stageID ui
 		return nil, ErrModuleRuntime
 	}
 	c.pending[id] = concurrentPending{eventKind: eventKind, reply: ch}
+	c.calls.Add(1)
 	c.mu.Unlock()
+	defer c.calls.Done()
 
 	var deadlineNS uint64
 	if deadline > 0 {
@@ -200,6 +215,35 @@ func (c *ConcurrentModuleCaller) Call(ctx context.Context, eventKind, stageID ui
 		c.abandon(eventKind, id)
 		return nil, ErrModuleRuntime
 	}
+}
+
+// CloseAndWait refuses new calls, releases pending calls, and blocks until both
+// the admitted calls and the poll goroutine have finished. It must run before
+// the underlying Client is detached and its shared-memory region is unmapped.
+//
+// TWO WAITS, because two things are still using that region and they finish
+// independently. This branch and upstream each added a CloseAndWait waiting for
+// one of them, and the merge duplicated the method -- which the Go compiler
+// caught, and which is worth writing down because either version alone looks
+// complete:
+//
+//	c.calls.Wait()  every call admitted before shutdown has returned, so no
+//	                caller is still reading a reply out of the region
+//	<-c.stopped     the poll goroutine has returned, so nothing is reading the
+//	                ring itself
+//
+// Dropping the second is a read through an unmapped page on the ORDINARY exit
+// path: poll is parked reading shared memory when Detach pulls it out from
+// under it. NO IN-PROCESS TEST CAN FAIL ON IT -- a fake bus has no region to
+// unmap -- and it was found on real hardware, as a fault arriving after the
+// last assertion.
+func (c *ConcurrentModuleCaller) CloseAndWait() {
+	if c == nil {
+		return
+	}
+	c.finish(ErrModuleRuntime)
+	c.calls.Wait()
+	<-c.stopped
 }
 
 func (c *ConcurrentModuleCaller) abandon(kind uint32, id uint64) {

@@ -45,8 +45,8 @@ static uint32_t fnv1a32(const char *s)
 }
 
 /* Resolve the dogfood settings from the live config. Replaces
- * dogfood_config_from(const config_t *, ...), which every caller reached by
- * loading a whole config_t and immediately projecting seven fields out of it. */
+ * dogfood_config_from(const legacy_config_record *, ...), which every caller reached by
+ * loading a whole legacy_config_record and immediately projecting seven fields out of it. */
 void dogfood_config_current(dogfood_config_t *out)
 {
    if (!out)

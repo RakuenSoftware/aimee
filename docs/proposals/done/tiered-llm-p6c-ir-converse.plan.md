@@ -1,5 +1,9 @@
 # P6c-ir plan — Bedrock Converse ↔ IR serializer (P6 §2, the 4th backend adapter)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice of P6 (Bedrock). Branch off `testing`. Completes the pure Bedrock cores: P6a (SigV4/STS
 auth) + P6b (eventstream framing) + **this (IR↔Converse mapping)**. The proposal §2: "Converse
 maps directly onto the IR for every family — the default adapter." This ships that mapping as a

@@ -1,5 +1,9 @@
 # Proposal: User-configurable curator pipeline — reorder, constraints, presets, user-defined stages
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — every §8 acceptance criterion is met and verified. Shipped
   across Phase A reorder + DAG (#1175), Phase C presets (#1177), Phase D composed
   custom stages backend (#1211) and GUI (#1212); Phase B GUI reorder shipped

@@ -5,7 +5,7 @@
 #include "agent_config.h"
 #include "config.h"
 #include "config_database.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include <aimee/delegates/delegate_credentials.h>
 #include "modules/db2/c/lifecycle.h"
 #include "kb_client.h"
@@ -22,6 +22,7 @@
 #include "headers/events.h"
 #include "headers/aimee_home.h"
 #include "modules/workspace/workspace_manifest.h"
+#include "runtime_secret.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -39,12 +40,12 @@
  * Returns -1 when DB2 was configured but unreachable / unhealthy. */
 static int bootstrap_db2(int json_output)
 {
-   if (!config_db2_url()[0])
+   char db2_url[2048] = "";
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       if (!json_output)
-         fprintf(stderr,
-                 "Note: db2_url is not configured. Set it in ~/.config/aimee/aimee.yaml under "
-                 "database.db2_url to enable the project/workspace knowledge tier.\n");
+         fprintf(stderr, "Note: AIMEE_DB2_URL is not available from the runtime secret store; "
+                         "the project/workspace knowledge tier is disabled.\n");
       return 0;
    }
 
@@ -54,7 +55,7 @@ static int bootstrap_db2(int json_output)
    /* unified-llm-container §2: activate the model-identity drift guard with the
     * configured embedder identity (empty => no-op, back-compat). */
    db2_set_embedder_model_id(config_embedder_model());
-   if (db2_init(config_db2_url()) == 0)
+   if (db2_init(db2_url) == 0)
    {
       int schema_ok = 0;
       int have_pg_trgm = 0;
@@ -63,9 +64,11 @@ static int bootstrap_db2(int json_output)
          if (!json_output)
             fprintf(stderr, "DB2 reachable: schema applied, pg_trgm installed.\n");
          db2_shutdown();
+         runtime_secret_wipe(db2_url, sizeof(db2_url));
          return 0;
       }
       db2_shutdown();
+      runtime_secret_wipe(db2_url, sizeof(db2_url));
       if (!json_output)
          fprintf(stderr, "DB2 reachable but health probe failed (schema=%d trgm=%d).\n", schema_ok,
                  have_pg_trgm);
@@ -76,18 +79,17 @@ static int bootstrap_db2(int json_output)
     * the cause; otherwise the failure is connect/auth/database-missing.
     * Surface a generic remediation that covers the common cases. */
    if (!json_output)
-      fprintf(stderr,
-              "DB2 init failed for %s.\n"
-              "Common fixes:\n"
-              "  - Ensure the postgres server is running and reachable from this host.\n"
-              "  - Ensure the role and database in db2_url exist:\n"
-              "      CREATE ROLE aimee LOGIN PASSWORD '...';\n"
-              "      CREATE DATABASE aimee OWNER aimee;\n"
-              "  - Connect as a privileged role and install the trigram extension:\n"
-              "      \\c aimee\n"
-              "      CREATE EXTENSION pg_trgm;\n"
-              "  - Re-run `aimee init` once the above succeeds.\n",
-              config_db2_url());
+      fprintf(stderr, "DB2 init failed.\n"
+                      "Common fixes:\n"
+                      "  - Ensure the postgres server is running and reachable from this host.\n"
+                      "  - Ensure the role and database in db2_url exist:\n"
+                      "      CREATE ROLE aimee LOGIN PASSWORD '...';\n"
+                      "      CREATE DATABASE aimee OWNER aimee;\n"
+                      "  - Connect as a privileged role and install the trigram extension:\n"
+                      "      \\c aimee\n"
+                      "      CREATE EXTENSION pg_trgm;\n"
+                      "  - Re-run `aimee init` once the above succeeds.\n");
+   runtime_secret_wipe(db2_url, sizeof(db2_url));
    return -1;
 }
 
@@ -123,7 +125,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
    else if (songwriter)
       config_persist_mode("songwriter");
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("failed to initialize database");
    db1_shutdown();
 
@@ -180,7 +182,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
       cJSON *root = cJSON_CreateObject();
       cJSON_AddStringToObject(root, "db1_path", config_db1_path());
       cJSON_AddBoolToObject(root, "db2_ready", db2_ok);
-      cJSON_AddStringToObject(root, "db2_url", config_db2_url());
+      cJSON_AddBoolToObject(root, "db2_configured", runtime_secret_has("AIMEE_DB2_URL"));
       emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
       cJSON_Delete(root);
    }
@@ -250,7 +252,7 @@ void cmd_setup(app_ctx_t *ctx, int argc, char **argv)
    /* 1. Initialize database and config if missing — db1_init creates
     * the file and applies the DB1 schema if the connection is fresh. */
    (void)config_persist_defaults();
-   if (db1_init(config_db1_path()) == 0)
+   if (db1_store_ready())
       db1_shutdown();
 
    /* 2. Check for aimee.workspace.yaml in CWD */
@@ -358,7 +360,9 @@ void cmd_setup(app_ctx_t *ctx, int argc, char **argv)
    int ws_n = config_workspace_count();
    for (int w = 0; w < ws_n; w++)
       setup_register_workspace(config_workspaces(w), &total_projects);
-   db1_stmt_cache_clear();
+   /* Nothing to flush here any more: the statement cache belonged to the
+    * in-process SQLite connection, and a client that sends frames holds no
+    * prepared statements of its own. */
 
    /* 8. Generate .aimee-rules from detected stacks when manifest allows */
    if (!have_manifest || manifest.generate_rules)
@@ -409,15 +413,14 @@ void cmd_status(app_ctx_t *ctx, int argc, char **argv)
 
    printf("aimee %s\n", AIMEE_VERSION);
 
-   /* Database status */
-   char db1_path[CONFIG_COPY_MAX];
-   config_db1_path_copy(db1_path, sizeof(db1_path));
-   db1_diag_t diag;
-   db1_diag_inspect(db1_path, 0, &diag);
-   if (diag.opened)
-      printf("Database:  ok (schema v%d)\n", diag.schema_version);
-   else
-      printf("Database:  error (cannot open)\n");
+   /* No database line here any more.
+    *
+    * It used to open a SQLite file and print the schema version out of it. The
+    * store is a PostgreSQL server reached over the bus, and opening a file to
+    * ask whether it is healthy would answer a question about the wrong thing --
+    * `aimee doctor` is where the store is actually probed, through the module
+    * that owns the connection.
+    */
 
    /* Provider status: test each configured agent */
    agent_config_t acfg;
@@ -492,7 +495,7 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -548,7 +551,7 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
 
 void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -696,7 +699,6 @@ void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 void cmd_mode(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 
@@ -818,7 +820,6 @@ void cmd_implement(app_ctx_t *ctx, int argc, char **argv)
 void cmd_tdd(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 
@@ -870,7 +871,7 @@ void cmd_env(app_ctx_t *ctx, int argc, char **argv)
 
    if (argc < 1 || strcmp(argv[0], "detect") == 0)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("env detect: could not initialize DB1");
       agent_introspect_env();
       /* Display results */
@@ -990,7 +991,7 @@ void cmd_notify(app_ctx_t *ctx, int argc, char **argv)
  */
 void cmd_clarify(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("clarify: could not initialize DB1");
 
    if (argc == 0)

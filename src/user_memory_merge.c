@@ -13,7 +13,7 @@
  * direction. Its own file rather than folded into a larger one so the property
  * its old comment claimed still holds: the merge is unit-testable without kb. */
 #include "cJSON.h"
-#include "user_memory.h"
+#include "db1_client/user_memory.h"
 
 #include <string.h>
 

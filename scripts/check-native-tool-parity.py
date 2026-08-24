@@ -143,6 +143,60 @@ def mcp_derived_tools(src: Path) -> set:
     return set(re.findall(r'\{"([a-z_0-9]+)",\s*mcph_[a-z_0-9]+,\s*"[a-z_,]+"\}', f.read_text()))
 
 
+def native_toolset_names(src: Path) -> dict:
+    """Which toolset(s) each native MCP row registers itself into.
+
+    The `native` column is a comma-separated toolset list, and
+    toolset_register_native_tool silently ignores a name no toolset defines. A row
+    marked native against a toolset that does not exist therefore registers into
+    NOTHING -- the parity check still counts it as native, no role is ever offered
+    it, and nothing anywhere says so.
+
+    That is the served-but-unreachable shape peer messaging shipped twice: four
+    bus stages nothing called, then two MCP tools that worked and were not on the
+    client floor. Both were found by running the product, not by a gate. This is
+    the gate for the third instance.
+    """
+    f = src / "server" / "server_mcp_call_table.c"
+    rows = re.findall(r'\{"([a-z_0-9]+)",\s*mcph_[a-z_0-9]+,\s*"([a-z_,]+)"\}', f.read_text())
+    return {name: [t for t in sets.split(",") if t] for name, sets in rows}
+
+
+def declared_toolsets(src: Path) -> set:
+    """Toolset names the builtin registry actually defines."""
+    body = (src / "toolset.c").read_text()
+    m = re.search(r"BUILTINS\[\] = \{(.*?)\n\};", body, re.S)
+    if not m:
+        # Loud rather than an empty set, which would pass every tool vacuously.
+        sys.exit("check-native-tool-parity: FAIL - could not find BUILTINS[] in toolset.c")
+    # `,\s*\{` anchors this to a STRUCT entry -- {"core", {NULL}, {...}} -- rather
+    # than to the tool names inside each entry's arrays, which the bare pattern
+    # also matched. That made `declared` a SUPERSET containing every tool name, so
+    # a native marker misspelled as an existing tool ("read_file") would have
+    # passed. A guard whose accepted set is larger than the real one fails open.
+    return set(re.findall(r'\{"([a-z_0-9]+)",\s*\{', m.group(1)))
+
+
+def check_native_toolsets(src: Path) -> None:
+    declared = declared_toolsets(src)
+    if not declared:
+        sys.exit("check-native-tool-parity: FAIL - BUILTINS[] parsed to nothing")
+    bad = []
+    for tool, sets in sorted(native_toolset_names(src).items()):
+        for name in sets:
+            if name not in declared:
+                bad.append((tool, name))
+    if bad:
+        lines = "\n".join("    %s -> %s" % (t, s) for t, s in bad)
+        sys.exit(
+            "check-native-tool-parity: FAIL - native rows naming a toolset that does "
+            "not exist:\n" + lines + "\n"
+            "  toolset_register_native_tool ignores an unknown name, so these register\n"
+            "  into nothing: counted as native, offered to no role, silent about it.\n"
+            "  Declared toolsets: " + ", ".join(sorted(declared))
+        )
+
+
 def native_tools(src: Path) -> set:
     """Everything aimee's own agents can call.
 
@@ -269,6 +323,10 @@ def main() -> int:
         print("check-native-tool-parity plant: ok (planted violation correctly detected)")
         return 0
 
+    # Before the parity arithmetic: a native row is only native if the toolset it
+    # names exists. Counting a row that registers into nothing as "native" is how
+    # the parity number stays green while no role can call the tool.
+    check_native_toolsets(src)
     return check(src)
 
 

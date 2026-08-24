@@ -1736,6 +1736,279 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /console/typed_facts:
+    get:
+      operationId: getConsoleTypedFacts
+      summary: List ontology, assertion, and canonical-entity review state
+      description: |
+        Returns quarantined assertion candidates with their lifecycle, authority,
+        evidence count, and originating graph commit. Candidates are excluded from
+        default recall. Also returns canonical entities and reversible merge
+        history for operator review. Requires a console-admin credential.
+      responses:
+        "200":
+          description: Typed-fact configuration and review queues
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401": { description: Unauthorized }
+        "403": { description: Console operator required }
+
+  /console/evidence:
+    post:
+      operationId: operateConsoleEvidenceLifecycle
+      summary: Inspect and govern the evidence and lifecycle layer
+      description: |
+        Authenticated operator surface for P1-P9. The `action` selects a fixed,
+        parameter-bound operation; actor and authority always come from the
+        verified credential. Supported actions are `changeset.show`,
+        `changeset.diff`, `changeset.preview_revert`, `changeset.revert`,
+        `document.preview_lifecycle`, `document.apply_lifecycle`, `derived.status`,
+        `outcome.record`, `review.list`, `review.decide`, `ontology.export`,
+        `ontology.import`, `ontology.dry_run`, `ontology.migrate`,
+        `ontology.report`, `ontology.rollback`, `recall.trace_record`, and
+        `recall.trace_get`. Destructive document and ontology operations require
+        a fresh preview token bound to the current changeset head.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - changeset.show
+                    - changeset.diff
+                    - changeset.preview_revert
+                    - changeset.revert
+                    - document.preview_lifecycle
+                    - document.apply_lifecycle
+                    - derived.status
+                    - outcome.record
+                    - review.list
+                    - review.decide
+                    - ontology.export
+                    - ontology.import
+                    - ontology.dry_run
+                    - ontology.migrate
+                    - ontology.report
+                    - ontology.rollback
+                    - recall.trace_record
+                    - recall.trace_get
+                changeset_id: { type: string }
+                force_partial: { type: boolean }
+                doc_id: { type: integer, minimum: 1 }
+                operation: { type: string, enum: [invalidate, purge] }
+                preview_token: { type: string }
+                reason: { type: string }
+                derived_kind: { type: string }
+                derived_memory_id: { type: string }
+                input_kind: { type: string }
+                input_id: { type: string }
+                limit: { type: integer, minimum: 1, maximum: 1000 }
+                item_id: { type: string }
+                item_head: { type: string }
+                decision:
+                  type: string
+                  enum: [accept, correct, retire, restore, promote, invalidate_source, purge, request_evidence, annotate, revoke, resolve]
+                requested_value: { type: string }
+                package: { type: object, additionalProperties: true }
+                package_id: { type: string }
+                review_record: { type: string }
+                signature: { type: string }
+                acknowledge_widening: { type: boolean }
+                outcome_id: { type: string }
+                retrieval_event_id: { type: string }
+                subject_kind: { type: string }
+                subject_id: { type: string }
+                outcome:
+                  type: string
+                  enum: [useful, dead_end, corrected, misleading, outdated]
+                task_label: { type: string }
+                workflow: { type: string }
+                resulting_action: { type: string }
+                correction_ref: { type: string }
+                source_hash: { type: string }
+                code_generation: { type: integer, minimum: 0 }
+                fault_kind: { type: string }
+                fault_value: { type: string }
+                turn_id: { type: string }
+                query_fingerprint: { type: string }
+                sensitivity: { type: string }
+                results: { type: array, items: { type: object, additionalProperties: true } }
+                persist: { type: boolean }
+                trace_id: { type: string }
+      responses:
+        "200":
+          description: Operation result; shape is selected by action
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { description: Invalid action or request }
+        "403": { description: Authenticated operator required }
+        "409": { description: "Conflict, stale preview, authority refusal, or atomic failure" }
+
+  /console/typed_facts/assertion:
+    post:
+      operationId: reviewConsoleFactAssertion
+      summary: Approve, reject, or undo an assertion review
+      description: |
+        Applies an operator-authorized lifecycle transition. Authority is derived
+        from the verified request identity; no authority field is accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, assertion_id]
+              properties:
+                action:
+                  type: string
+                  enum: [approve, reject, undo]
+                assertion_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: Review transition applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  assertion_id: { type: integer }
+                  lifecycle: { type: string }
+                  commit_id: { type: string, format: uuid }
+        "400": { description: Invalid review request }
+        "403": { description: Authenticated operator required }
+        "409": { description: Review transition conflict }
+
+  /console/typed_facts/entity:
+    post:
+      operationId: manageConsoleCanonicalEntity
+      summary: Merge or unmerge canonical entities
+      description: |
+        Atomically changes canonical name resolution and records a reversible
+        graph commit, structured diff, and WORM audit event. Actor identity and
+        operator authority come only from the verified console credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [merge, unmerge]
+                from_id: { type: integer, minimum: 1 }
+                into_id: { type: integer, minimum: 1 }
+                merge_id: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Entity transition applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  merge_id: { type: integer }
+                  commit_id: { type: string, format: uuid }
+        "400": { description: Invalid merge request }
+        "403": { description: Authenticated operator required }
+        "409": { description: Entity state conflicts with requested transition }
+
+  /console/typed_facts/commit:
+    post:
+      operationId: manageConsoleFactCommit
+      summary: Preview or roll back a graph commit
+      description: |
+        Previews the structured batch diff, or rolls back a reversible assertion,
+        ontology, or entity-merge commit. A commit with later dependent changes
+        must have those descendants rolled back first. Supplying ingest_run_id
+        previews or atomically rolls back every commit in that ingestion batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              oneOf:
+                - required: [commit_id]
+                - required: [ingest_run_id]
+              properties:
+                action:
+                  type: string
+                  enum: [preview, rollback]
+                commit_id:
+                  type: string
+                  format: uuid
+                ingest_run_id:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Commit diff or rollback result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400": { description: Invalid commit request }
+        "403": { description: Authenticated operator required }
+        "404": { description: Commit not found }
+        "409": { description: Commit is not currently reversible }
+
+  /console/typed_facts/erasure:
+    post:
+      operationId: manageConsoleFactErasure
+      summary: Preview or execute permanent fact erasure
+      description: |
+        Reports the assertion/evidence cascade before removal. `erase` permanently
+        removes matching assertion and evidence rows while returning an explicit
+        residual-data report. Ordinary correction should use reversible invalidation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, subject]
+              properties:
+                action:
+                  type: string
+                  enum: [preview, erase]
+                subject: { type: string, minLength: 1 }
+                relation: { type: string }
+                object: { type: string }
+      responses:
+        "200":
+          description: Impact preview or completed erasure report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  action: { type: string }
+                  assertions: { type: integer }
+                  evidence_mentions: { type: integer }
+                  residual_data: { type: string }
+                  commit_id: { type: string, format: uuid }
+        "400": { description: Invalid erasure request }
+        "403": { description: Authenticated operator required }
+        "409": { description: Erasure could not be completed atomically }
+
   /console/settings:
     get:
       operationId: getConsoleSettings
@@ -2750,7 +3023,12 @@ paths:
           description: Document not found
     delete:
       operationId: deleteDoc
-      summary: Delete a staged document
+      deprecated: true
+      summary: Refuse lifecycle-bypassing document deletion
+      description: >-
+        Direct deletion is disabled. Use `POST /console/evidence` with
+        `document.preview_lifecycle`, inspect the blast radius, then submit
+        `document.apply_lifecycle` with the actor-bound preview token.
       parameters:
         - name: id
           in: path
@@ -2759,8 +3037,12 @@ paths:
             type: integer
             format: int64
       responses:
-        "200":
-          description: Document deleted
+        "409":
+          description: Lifecycle preview and explicit invalidate or purge required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
         "404":

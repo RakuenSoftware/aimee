@@ -1,5 +1,9 @@
 # P1 Slice 1 — review request (tenancy schema + Postgres hardening)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived review artifact for the completed slice.
 
 Branch `worktree-claude+tiered-llm-p1-tenancy`, 6 commits, ~2329 lines. This is the

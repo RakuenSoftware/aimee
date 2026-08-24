@@ -48,7 +48,7 @@ static const char *g_stream_payload;
  * to police. NULL = empty "{}" (preserves shape-test behavior). */
 static const char *g_response_body;
 static int g_response_status = 200;
-/* P2c policy gate. The real config_load is stubbed here to honor this global;
+/* P2c policy gate. The real legacy_config_read is stubbed here to honor this global;
  * flip g_prevent to 1 to enable the response-side tool policing. */
 static int g_prevent = 0;
 /* Tool-use fixtures for parsed_with_tool_uses. The JSON is a cJSON array of
@@ -150,6 +150,13 @@ int agent_registry_default_primary(agent_t *out)
       return -1;
    *out = *found;
    return 0;
+}
+
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
 }
 
 void delegate_drivers_init(void)
@@ -362,26 +369,7 @@ int agent_http_last_retry_after(void)
  * helpers (they don't matter for response-side policing) to keep the test
  * focused on what B2 tests. */
 
-/* Minimal config_load: only `gateway_prevent_subagents` is read by the
- * police function. Tests set g_prevent to flip the policy on/off. The real
- * config.c depends on the home dir + YAML loader, which are out of scope
- * for a minimal-link integration test. */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->gateway_prevent_subagents = g_prevent;
-      /* module toggles are -1 (unspecified) in production; memset-0 would read as disabled and
-       * wrongly gate the governance/memory modules this test exercises. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. These mirror exactly what the stub above produced —
+/* Accessor stubs mirror this fixture's policy —
  * gateway_prevent_subagents tracks g_prevent, and pin_model (an int) was
  * left zeroed —
  * so the assertions below are unchanged. */
@@ -395,7 +383,7 @@ int config_gateway_pin_model(void)
    return 0;
 }
 
-/* Same migration for the economizer seam: the config_load stub above leaves the
+/* The economizer fixture leaves the
  * economizer zeroed, so the live-config form must report OFF. */
 int econ_mode_current(void)
 {
@@ -624,8 +612,7 @@ int main(void)
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. This policing integration fixture explicitly enables
+/* This policing integration fixture explicitly enables
  * the governance module; the module's unspecified production default is
  * covered by test_response_governance_stage.c. */
 int config_present(void)

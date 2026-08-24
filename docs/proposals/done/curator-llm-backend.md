@@ -1,5 +1,9 @@
 # Proposal: Pluggable curator LLM backend (shared provider client + optional curator container)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **SHIPPED / CLOSED (2026-06-24).** The proposal's goal — a
   pluggable, decoupled, operator-owned curator LLM backend — is achieved and merged
   to `testing`: the shared LLM-provider client (§1, **#395**), the kb-level provider

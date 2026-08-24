@@ -206,12 +206,13 @@ void memory_query_rewrite(const char *query, memory_query_rewrite_t *out)
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out)
 {
-   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
+   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id,
+                           MEMORY_AUTHORITY_MODEL, out);
 }
 
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
                      const char *use_cases, double confidence, const char *session_id,
-                     memory_t *out)
+                     memory_authority_t authority, memory_t *out)
 {
    (void)tier;
    (void)kind;
@@ -220,6 +221,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    (void)use_cases;
    (void)confidence;
    (void)session_id;
+   (void)authority;
    if (out)
       memset(out, 0, sizeof(*out));
    return -1;
@@ -236,6 +238,24 @@ int memory_get(int64_t id, memory_t *out)
 int memory_touch(int64_t id)
 {
    (void)id;
+   return -1;
+}
+
+int memory_touch_many(const int64_t *ids, int n)
+{
+   (void)ids;
+   (void)n;
+   return -1;
+}
+
+int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
+                             int64_t *new_id_out)
+{
+   (void)id;
+   (void)content;
+   (void)authority;
+   if (new_id_out)
+      *new_id_out = 0;
    return -1;
 }
 
@@ -261,6 +281,13 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
    (void)out;
    (void)max;
    return 0;
+}
+
+int memory_delete_as(int64_t id, memory_authority_t authority)
+{
+   (void)id;
+   (void)authority;
+   return -1;
 }
 
 int memory_delete(int64_t id)

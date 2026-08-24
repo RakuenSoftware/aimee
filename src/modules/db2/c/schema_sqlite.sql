@@ -19,9 +19,31 @@ CREATE TABLE IF NOT EXISTS file_exports (  id INTEGER PRIMARY KEY AUTOINCREMENT,
 CREATE TABLE IF NOT EXISTS file_imports (  id INTEGER PRIMARY KEY AUTOINCREMENT,  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  name TEXT NOT NULL,  kind TEXT NOT NULL DEFAULT '',  is_system INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS terms (  id INTEGER PRIMARY KEY AUTOINCREMENT,  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  name TEXT NOT NULL,  kind TEXT NOT NULL DEFAULT '',  def_kind TEXT NOT NULL DEFAULT '',  line INTEGER NOT NULL DEFAULT 0,  line_end INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS stopwords (  word TEXT PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS entity_edges (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source TEXT NOT NULL,  relation TEXT NOT NULL,  target TEXT NOT NULL,  weight INTEGER NOT NULL DEFAULT 1,  window_id INTEGER, utility_score REAL NOT NULL DEFAULT 0.0, valid_from TEXT NOT NULL DEFAULT '', valid_until TEXT NOT NULL DEFAULT '', relation_id INTEGER, subject_kind INTEGER, object_kind INTEGER,  utility_touched_at TEXT NOT NULL DEFAULT '',  structural_weight INTEGER NOT NULL DEFAULT 0,  edge_origin TEXT NOT NULL DEFAULT 'session',  projection_generation_id INTEGER NOT NULL DEFAULT 0,  structural_updated_at TEXT NOT NULL DEFAULT '',  edge_class TEXT NOT NULL DEFAULT 'cooccurrence',  confidence_class TEXT NOT NULL DEFAULT 'C' CHECK (confidence_class IN ('A', 'B', 'C')),  confidence REAL NOT NULL DEFAULT 0.4,  asserted_at TEXT NOT NULL DEFAULT '',  superseded_at TEXT NOT NULL DEFAULT '',  suppressed INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS entity_edges (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source TEXT NOT NULL,  relation TEXT NOT NULL,  target TEXT NOT NULL,  weight INTEGER NOT NULL DEFAULT 1,  window_id INTEGER, utility_score REAL NOT NULL DEFAULT 0.0, valid_from TEXT NOT NULL DEFAULT '', valid_until TEXT NOT NULL DEFAULT '', relation_id INTEGER, subject_kind INTEGER, object_kind INTEGER,  utility_touched_at TEXT NOT NULL DEFAULT '',  structural_weight INTEGER NOT NULL DEFAULT 0,  edge_origin TEXT NOT NULL DEFAULT 'session',  projection_generation_id INTEGER NOT NULL DEFAULT 0,  structural_updated_at TEXT NOT NULL DEFAULT '',  edge_class TEXT NOT NULL DEFAULT 'cooccurrence',  confidence_class TEXT NOT NULL DEFAULT 'C' CHECK (confidence_class IN ('A', 'B', 'C')),  confidence REAL NOT NULL DEFAULT 0.4,  asserted_at TEXT NOT NULL DEFAULT '',  superseded_at TEXT NOT NULL DEFAULT '',  suppressed INTEGER NOT NULL DEFAULT 0, assertion_kind TEXT NOT NULL DEFAULT 'world_fact', epistemic_kind TEXT NOT NULL DEFAULT 'world_fact' CHECK(epistemic_kind IN ('world_fact','episode','experience','mental_model','preference','instruction','policy','hypothesis')), lifecycle_state TEXT NOT NULL DEFAULT 'persistent', authority_rank INTEGER NOT NULL DEFAULT 0, actor_principal TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1, prior_version_id INTEGER NOT NULL DEFAULT 0, commit_id TEXT NOT NULL DEFAULT '', invalidated_at TEXT NOT NULL DEFAULT '', governance_promoted INTEGER NOT NULL DEFAULT 0, support_status TEXT NOT NULL DEFAULT 'supported', reverify_needed INTEGER NOT NULL DEFAULT 0, ontology_version INTEGER NOT NULL DEFAULT 0, ontology_quarantined INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_entity_edges_fact_lifecycle ON entity_edges(source,relation,lifecycle_state,authority_rank) WHERE edge_class='semantic';
+CREATE INDEX IF NOT EXISTS idx_entity_edges_fact_commit ON entity_edges(commit_id) WHERE edge_class='semantic' AND commit_id<>'';
 -- rel_types: typed-relationship ontology (typed-fact §1 / P1), live overlay of the in-code SEED_ONTOLOGY.
 CREATE TABLE IF NOT EXISTS rel_types (  id INTEGER PRIMARY KEY AUTOINCREMENT,  rel_type TEXT NOT NULL UNIQUE,  head_kinds TEXT NOT NULL DEFAULT '',  tail_kinds TEXT NOT NULL DEFAULT '',  is_symmetric INTEGER NOT NULL DEFAULT 0,  inverse_rel_type TEXT NOT NULL DEFAULT '',  correction_behavior TEXT NOT NULL DEFAULT 'supersede',  category TEXT NOT NULL DEFAULT '',  sensitivity TEXT NOT NULL DEFAULT 'pii',  is_hierarchy_rel INTEGER NOT NULL DEFAULT 0,  status TEXT NOT NULL DEFAULT 'active');
+CREATE TABLE IF NOT EXISTS fact_evidence ( id INTEGER PRIMARY KEY AUTOINCREMENT, assertion_id INTEGER NOT NULL REFERENCES entity_edges(id) ON DELETE CASCADE, source_kind TEXT NOT NULL DEFAULT 'observation', source_id TEXT NOT NULL, source_span TEXT NOT NULL DEFAULT '', evidence_hash TEXT NOT NULL DEFAULT '', actor_principal TEXT NOT NULL DEFAULT '', observed_at TEXT NOT NULL DEFAULT '', ingest_run_id TEXT NOT NULL DEFAULT '', commit_id TEXT NOT NULL DEFAULT '', invalidated_at TEXT NOT NULL DEFAULT '', stance TEXT NOT NULL DEFAULT 'supports' CHECK (stance IN ('supports','contradicts')), created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(assertion_id,source_kind,source_id,source_span,evidence_hash,stance));
+CREATE INDEX IF NOT EXISTS idx_fact_evidence_assertion ON fact_evidence(assertion_id,id);
+CREATE INDEX IF NOT EXISTS idx_fact_evidence_source ON fact_evidence(source_kind,source_id);
+CREATE INDEX IF NOT EXISTS idx_fact_evidence_ingest ON fact_evidence(ingest_run_id,id);
+CREATE TABLE IF NOT EXISTS memory_fact_actors ( memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE, actor_principal TEXT NOT NULL, actor_role TEXT NOT NULL, authority_rank INTEGER NOT NULL, authenticated INTEGER NOT NULL DEFAULT 0, transport_identity TEXT NOT NULL DEFAULT 'internal', captured_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS fact_graph_commits ( commit_id TEXT PRIMARY KEY, parent_commit_id TEXT NOT NULL DEFAULT '', operation TEXT NOT NULL, origin_ref TEXT NOT NULL DEFAULT '', actor_principal TEXT NOT NULL, actor_role TEXT NOT NULL, authority_rank INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'applied' CHECK (status IN ('open','applied','reverted','superseded','partial','rolled_back','erased')), reversible INTEGER NOT NULL DEFAULT 1, irreversible_why TEXT NOT NULL DEFAULT '', reverts_changeset TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), closed_at TEXT NOT NULL DEFAULT '', rolled_back_at TEXT NOT NULL DEFAULT '', rolled_back_by TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS fact_graph_changes ( id INTEGER PRIMARY KEY AUTOINCREMENT, commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id) ON DELETE CASCADE, assertion_id INTEGER NOT NULL DEFAULT 0, object_kind TEXT NOT NULL DEFAULT 'assertion', object_key TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, event_id TEXT NOT NULL DEFAULT '', existed_before INTEGER NOT NULL DEFAULT 0, existed_after INTEGER NOT NULL DEFAULT 0, before_state TEXT NOT NULL DEFAULT '', after_state TEXT NOT NULL DEFAULT '', revert_plan TEXT NOT NULL DEFAULT 'restore-envelope', before_lifecycle TEXT NOT NULL DEFAULT '', after_lifecycle TEXT NOT NULL DEFAULT '', before_superseded_at TEXT NOT NULL DEFAULT '', after_superseded_at TEXT NOT NULL DEFAULT '', before_invalidated_at TEXT NOT NULL DEFAULT '', after_invalidated_at TEXT NOT NULL DEFAULT '', before_suppressed INTEGER NOT NULL DEFAULT 0, after_suppressed INTEGER NOT NULL DEFAULT 0, before_confidence REAL NOT NULL DEFAULT 0, after_confidence REAL NOT NULL DEFAULT 0, before_authority_rank INTEGER NOT NULL DEFAULT 0, after_authority_rank INTEGER NOT NULL DEFAULT 0, before_version INTEGER NOT NULL DEFAULT 0, after_version INTEGER NOT NULL DEFAULT 0, diff_detail TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS idx_fact_graph_changes_commit ON fact_graph_changes(commit_id,id);
+CREATE INDEX IF NOT EXISTS idx_fact_graph_changes_assertion ON fact_graph_changes(assertion_id,id);
+CREATE TABLE IF NOT EXISTS fact_review_actions ( id INTEGER PRIMARY KEY AUTOINCREMENT, assertion_id INTEGER NOT NULL REFERENCES entity_edges(id) ON DELETE CASCADE, action TEXT NOT NULL CHECK (action IN ('approve','reject','undo')), prior_lifecycle TEXT NOT NULL, new_lifecycle TEXT NOT NULL, actor_principal TEXT NOT NULL, commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id), reverses_review_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS idx_fact_review_assertion ON fact_review_actions(assertion_id,id);
+CREATE TABLE IF NOT EXISTS fact_erasure_reports ( commit_id TEXT PRIMARY KEY REFERENCES fact_graph_commits(commit_id), selector TEXT NOT NULL, assertion_count INTEGER NOT NULL DEFAULT 0, evidence_count INTEGER NOT NULL DEFAULT 0, residual_data TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '');
+CREATE VIEW IF NOT EXISTS fact_assertions_current AS SELECT e.id,e.source,e.relation,e.target,e.subject_kind,e.object_kind,e.assertion_kind,e.lifecycle_state,e.confidence,e.authority_rank,e.valid_from,e.valid_until,e.asserted_at,e.actor_principal,e.version,e.prior_version_id,e.commit_id,(SELECT COUNT(*) FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.stance='supports' AND fe.invalidated_at='') AS evidence_count FROM entity_edges e WHERE e.edge_class='semantic' AND e.lifecycle_state IN ('persistent','promoted') AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0;
+CREATE VIEW IF NOT EXISTS entity_fact_profiles AS SELECT source AS entity,relation,target,assertion_kind,confidence,evidence_count,id AS assertion_id FROM fact_assertions_current;
+CREATE VIEW IF NOT EXISTS entity_mental_models AS SELECT source AS entity,relation AS dimension,target AS inferred_value,COUNT(*) AS supporting_assertions,SUM(evidence_count) AS supporting_evidence,AVG(confidence) AS confidence,MIN(valid_from) AS valid_from,MAX(valid_until) AS valid_until FROM fact_assertions_current WHERE assertion_kind IN ('world_fact','experience','observation') GROUP BY source,relation,target;
+CREATE TRIGGER IF NOT EXISTS entity_edges_semantic_guard_insert BEFORE INSERT ON entity_edges WHEN NEW.edge_class='semantic' AND (NEW.commit_id='' OR NOT EXISTS (SELECT 1 FROM fact_graph_commits WHERE commit_id=NEW.commit_id AND status='open')) BEGIN SELECT RAISE(ABORT,'semantic facts must be changed through fact_mutation'); END;
+CREATE TRIGGER IF NOT EXISTS entity_edges_semantic_guard_update BEFORE UPDATE ON entity_edges WHEN (NEW.edge_class='semantic' OR OLD.edge_class='semantic') AND (NEW.commit_id='' OR NOT EXISTS (SELECT 1 FROM fact_graph_commits WHERE commit_id=NEW.commit_id AND status='open')) BEGIN SELECT RAISE(ABORT,'semantic facts must be changed through fact_mutation'); END;
+CREATE TRIGGER IF NOT EXISTS entity_edges_semantic_guard_delete BEFORE DELETE ON entity_edges WHEN OLD.edge_class='semantic' AND NOT EXISTS (SELECT 1 FROM fact_graph_commits WHERE status='open' AND operation='fact.erase' AND reversible=0) BEGIN SELECT RAISE(ABORT,'semantic facts must be erased through fact_mutation'); END;
+CREATE TRIGGER IF NOT EXISTS entity_edges_mental_model_guard_insert BEFORE INSERT ON entity_edges WHEN NEW.edge_class='semantic' AND (NEW.assertion_kind='mental_model' OR NEW.epistemic_kind='mental_model') AND NEW.governance_promoted=0 BEGIN SELECT RAISE(ABORT,'mental models require governance promotion'); END;
+CREATE TRIGGER IF NOT EXISTS entity_edges_mental_model_guard_update BEFORE UPDATE ON entity_edges WHEN NEW.edge_class='semantic' AND (NEW.assertion_kind='mental_model' OR NEW.epistemic_kind='mental_model') AND NEW.governance_promoted=0 BEGIN SELECT RAISE(ABORT,'mental models require governance promotion'); END;
 -- ontology_evaluations: self-extending ontology promotion pipeline (typed-fact §2 / P4).
 CREATE TABLE IF NOT EXISTS ontology_evaluations (  id INTEGER PRIMARY KEY AUTOINCREMENT,  rel_type TEXT NOT NULL UNIQUE,  occurrence_count INTEGER NOT NULL DEFAULT 0,  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'mapped', 'rejected')),  mapped_to TEXT NOT NULL DEFAULT '',  decided_at TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT '');
 -- entity_registry / entity_aliases: surrogate-id entity canonicalization (typed-fact §3 / P2).
@@ -31,7 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_entity_aliases_cid ON entity_aliases(canonical_id
 -- entity_merges / entity_name_conflicts: merge audit (for unmerge) + ambiguity queue (typed-fact §3 / P2b).
 CREATE TABLE IF NOT EXISTS entity_merges (  id INTEGER PRIMARY KEY AUTOINCREMENT,  from_id INTEGER NOT NULL,  into_id INTEGER NOT NULL,  undone INTEGER NOT NULL DEFAULT 0,  created_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS entity_name_conflicts (  id INTEGER PRIMARY KEY AUTOINCREMENT,  name_norm TEXT NOT NULL UNIQUE,  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved', 'failed')),  priority INTEGER NOT NULL DEFAULT 1,  retries INTEGER NOT NULL DEFAULT 0,  created_at TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS memories (  id INTEGER PRIMARY KEY AUTOINCREMENT,  tier TEXT NOT NULL DEFAULT 'L0',  kind TEXT NOT NULL DEFAULT 'fact',  key TEXT NOT NULL,  content TEXT NOT NULL DEFAULT '',  use_cases TEXT NOT NULL DEFAULT '',  confidence REAL NOT NULL DEFAULT 1.0,  use_count INTEGER NOT NULL DEFAULT 0,  last_used_at TEXT,  source_session TEXT,  valid_from TEXT,  valid_until TEXT,  artifact_type TEXT,  artifact_ref TEXT,  artifact_hash TEXT,  effectiveness REAL DEFAULT NULL,  sensitivity TEXT NOT NULL DEFAULT 'normal',  evidence_strength REAL NOT NULL DEFAULT 0.5,  observation_count INTEGER NOT NULL DEFAULT 1,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')), salience REAL NOT NULL DEFAULT 0.5, surprise REAL NOT NULL DEFAULT 0.5, contradiction_group TEXT NOT NULL DEFAULT '', merged_into INTEGER NOT NULL DEFAULT 0, negation_tokens TEXT NOT NULL DEFAULT '', lifecycle_state TEXT NOT NULL DEFAULT 'active', archive_reason TEXT NOT NULL DEFAULT '', ttl_at TEXT NOT NULL DEFAULT '', cognified_memory_kind TEXT NOT NULL DEFAULT '', provenance_category TEXT NOT NULL DEFAULT 'user_stated');
+CREATE TABLE IF NOT EXISTS memories (  id INTEGER PRIMARY KEY AUTOINCREMENT,  tier TEXT NOT NULL DEFAULT 'L0',  kind TEXT NOT NULL DEFAULT 'fact',  key TEXT NOT NULL,  content TEXT NOT NULL DEFAULT '',  use_cases TEXT NOT NULL DEFAULT '',  confidence REAL NOT NULL DEFAULT 1.0,  use_count INTEGER NOT NULL DEFAULT 0,  last_used_at TEXT,  source_session TEXT,  valid_from TEXT,  valid_until TEXT,  artifact_type TEXT,  artifact_ref TEXT,  artifact_hash TEXT,  effectiveness REAL DEFAULT NULL,  sensitivity TEXT NOT NULL DEFAULT 'normal',  evidence_strength REAL NOT NULL DEFAULT 0.5,  observation_count INTEGER NOT NULL DEFAULT 1,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')), salience REAL NOT NULL DEFAULT 0.5, surprise REAL NOT NULL DEFAULT 0.5, contradiction_group TEXT NOT NULL DEFAULT '', merged_into INTEGER NOT NULL DEFAULT 0, negation_tokens TEXT NOT NULL DEFAULT '', lifecycle_state TEXT NOT NULL DEFAULT 'active', archive_reason TEXT NOT NULL DEFAULT '', ttl_at TEXT NOT NULL DEFAULT '', cognified_memory_kind TEXT NOT NULL DEFAULT '', provenance_category TEXT NOT NULL DEFAULT 'agent_message', epistemic_kind TEXT NOT NULL DEFAULT 'world_fact' CHECK(epistemic_kind IN ('world_fact','episode','experience','mental_model','preference','instruction','policy','hypothesis')), governance_promoted INTEGER NOT NULL DEFAULT 0, expiry_days_migration_override INTEGER DEFAULT NULL);
+CREATE TRIGGER IF NOT EXISTS memories_episode_content_immutable BEFORE UPDATE OF content ON memories WHEN OLD.epistemic_kind IN ('episode','experience') AND NEW.content<>OLD.content BEGIN SELECT RAISE(ABORT,'episode and experience memories are immutable; add an annotation'); END;
+CREATE TRIGGER IF NOT EXISTS memories_directive_content_immutable BEFORE UPDATE OF content ON memories WHEN OLD.epistemic_kind IN ('instruction','policy') AND NEW.content<>OLD.content BEGIN SELECT RAISE(ABORT,'instruction and policy memories must be revoked and replaced'); END;
 CREATE TABLE IF NOT EXISTS memory_provenance (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  session_id TEXT NOT NULL,  action TEXT NOT NULL,  details TEXT,  created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS memory_conflicts (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_a INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  memory_b INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  detected_at TEXT NOT NULL,  resolved INTEGER NOT NULL DEFAULT 0,  resolution TEXT);
 CREATE TABLE IF NOT EXISTS tasks (  id INTEGER PRIMARY KEY AUTOINCREMENT,  parent_id INTEGER DEFAULT 0,  title TEXT NOT NULL,  state TEXT NOT NULL DEFAULT 'todo',  confidence REAL NOT NULL DEFAULT 1.0,  session_id TEXT,  success_criteria TEXT DEFAULT '',  description TEXT DEFAULT '',  acceptance_json TEXT DEFAULT '',  assignee TEXT DEFAULT '',  estimate_minutes INTEGER DEFAULT 0,  created_at TEXT NOT NULL,  updated_at TEXT NOT NULL);
@@ -84,7 +108,7 @@ CREATE TABLE IF NOT EXISTS agent_outcomes (  id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS memory_links (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  target_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  relation TEXT NOT NULL DEFAULT 'related',  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS trace_mining_log (  id INTEGER PRIMARY KEY AUTOINCREMENT,  last_trace_id INTEGER NOT NULL DEFAULT 0,  mined_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS mining_jobs (  id TEXT PRIMARY KEY,  last_run_at TEXT,  hwm INTEGER NOT NULL DEFAULT 0,  interval_s INTEGER NOT NULL DEFAULT 300,  enabled INTEGER NOT NULL DEFAULT 1,  last_error TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS interaction_event_embeddings (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source_event_id INTEGER NOT NULL UNIQUE,  session_id TEXT NOT NULL DEFAULT '',  event_type TEXT NOT NULL,  role TEXT NOT NULL DEFAULT '',  failure_mode TEXT NOT NULL DEFAULT '',  payload_json TEXT NOT NULL DEFAULT '{}',  embedding TEXT NOT NULL DEFAULT '[]',  cluster_key TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS interaction_event_embeddings (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source_event_id INTEGER NOT NULL UNIQUE,  session_id TEXT NOT NULL DEFAULT '',  event_type TEXT NOT NULL,  role TEXT NOT NULL DEFAULT '',  failure_mode TEXT NOT NULL DEFAULT '', scope_kind TEXT NOT NULL DEFAULT 'workspace', scope_id TEXT NOT NULL DEFAULT '', task_family TEXT NOT NULL DEFAULT '', action_sequence TEXT NOT NULL DEFAULT '', error_signature TEXT NOT NULL DEFAULT '', environment TEXT NOT NULL DEFAULT '', preconditions TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL DEFAULT '', recovery_action TEXT NOT NULL DEFAULT '', payload_json TEXT NOT NULL DEFAULT '{}',  embedding TEXT NOT NULL DEFAULT '[]',  cluster_key TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_interaction_event_embeddings_type_id ON interaction_event_embeddings (event_type, source_event_id);
 CREATE INDEX IF NOT EXISTS idx_interaction_event_embeddings_failure ON interaction_event_embeddings (role, failure_mode);
 CREATE TABLE IF NOT EXISTS code_calls (  id INTEGER PRIMARY KEY AUTOINCREMENT,  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  caller TEXT NOT NULL DEFAULT '',  callee TEXT NOT NULL DEFAULT '',  line INTEGER NOT NULL DEFAULT 0);
@@ -147,6 +171,12 @@ CREATE TABLE IF NOT EXISTS working_profile_observations (  id INTEGER PRIMARY KE
 CREATE TABLE IF NOT EXISTS curiosity_items (  id INTEGER PRIMARY KEY AUTOINCREMENT,  gap_type TEXT NOT NULL,  target_entity TEXT NOT NULL DEFAULT '',  target_topic TEXT NOT NULL DEFAULT '',  evidence TEXT NOT NULL DEFAULT '',  importance REAL NOT NULL DEFAULT 0.0,  novelty REAL NOT NULL DEFAULT 0.0,  progress REAL NOT NULL DEFAULT 0.0,  routing_score REAL NOT NULL DEFAULT 0.0,  state TEXT NOT NULL DEFAULT 'open',  source_session TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS learning_signals (  id INTEGER PRIMARY KEY AUTOINCREMENT,  signal_type TEXT NOT NULL,  source TEXT NOT NULL DEFAULT 'explicit',  polarity TEXT NOT NULL DEFAULT '',  title TEXT NOT NULL DEFAULT '',  description TEXT NOT NULL DEFAULT '',  target_key TEXT NOT NULL DEFAULT '',  target_memory_id INTEGER NOT NULL DEFAULT 0,  correction_text TEXT NOT NULL DEFAULT '',  workflow_project TEXT NOT NULL DEFAULT '',  workflow_signal_type TEXT NOT NULL DEFAULT '',  evidence_refs TEXT NOT NULL DEFAULT '[]',  source_session TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS learning_proposals (  id INTEGER PRIMARY KEY AUTOINCREMENT,  signal_id INTEGER NOT NULL REFERENCES learning_signals(id) ON DELETE CASCADE,  sink TEXT NOT NULL,  state TEXT NOT NULL DEFAULT 'pending',  target_key TEXT NOT NULL DEFAULT '',  target_memory_id INTEGER NOT NULL DEFAULT 0,  action_json TEXT NOT NULL DEFAULT '{}',  evidence_refs TEXT NOT NULL DEFAULT '[]',  corroboration_count INTEGER NOT NULL DEFAULT 1,  expires_at TEXT NOT NULL DEFAULT '',  committed_at TEXT NOT NULL DEFAULT '',  archive_reason TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS learning_proposal_fate (  proposal_id INTEGER PRIMARY KEY REFERENCES learning_proposals(id) ON DELETE CASCADE,  fate TEXT NOT NULL DEFAULT 'standing',  reason TEXT NOT NULL DEFAULT '',  recorded_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS learning_observations ( observation_id TEXT PRIMARY KEY, scope_kind TEXT NOT NULL DEFAULT 'workspace', scope_id TEXT NOT NULL DEFAULT '', observation_type TEXT NOT NULL CHECK (observation_type IN ('recurring_failure','failed_strategy','successful_recovery','missing_precondition','tool_misuse','environment_mismatch','unstable_procedure')), title TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'candidate' CHECK (status IN ('candidate','active','retired','rejected')), confidence REAL NOT NULL DEFAULT 0.0 CHECK (confidence >= 0.0 AND confidence <= 1.0), evidence_window_start TEXT NOT NULL DEFAULT '', evidence_window_end TEXT NOT NULL DEFAULT '', synthesis_policy_version TEXT NOT NULL, evidence_count INTEGER NOT NULL DEFAULT 0, independent_session_count INTEGER NOT NULL DEFAULT 0, supersedes TEXT NOT NULL DEFAULT '', superseded_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), refreshed_at TEXT NOT NULL DEFAULT (datetime('now')), retired_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS learning_observation_evidence ( observation_id TEXT NOT NULL REFERENCES learning_observations(observation_id) ON DELETE CASCADE, evidence_kind TEXT NOT NULL DEFAULT 'interaction_event', source_event_id INTEGER NOT NULL REFERENCES interaction_event_embeddings(source_event_id) ON DELETE CASCADE, source_span TEXT NOT NULL DEFAULT '', stance TEXT NOT NULL DEFAULT 'supports' CHECK (stance IN ('supports','contradicts')), observed_at TEXT NOT NULL DEFAULT '', PRIMARY KEY (observation_id, evidence_kind, source_event_id, source_span, stance));
+CREATE TABLE IF NOT EXISTS learning_application_events ( application_id TEXT PRIMARY KEY, source_event_id INTEGER NOT NULL REFERENCES interaction_event_embeddings(source_event_id) ON DELETE CASCADE, session_id TEXT NOT NULL DEFAULT '', scope_kind TEXT NOT NULL DEFAULT 'workspace', scope_id TEXT NOT NULL DEFAULT '', task_family TEXT NOT NULL DEFAULT '', observation_id TEXT NOT NULL DEFAULT '', procedure_artifact_id TEXT NOT NULL DEFAULT '', proposal_id INTEGER NOT NULL DEFAULT 0, retrieved INTEGER NOT NULL DEFAULT 0, rendered INTEGER NOT NULL DEFAULT 0, selected INTEGER NOT NULL DEFAULT 0, applied INTEGER NOT NULL DEFAULT 0, outcome TEXT NOT NULL DEFAULT 'unknown' CHECK (outcome IN ('unknown','success','failure','corrected','abandoned')), failure_class TEXT NOT NULL DEFAULT '', human_correction TEXT NOT NULL DEFAULT '', latency_ms INTEGER NOT NULL DEFAULT 0, tool_count INTEGER NOT NULL DEFAULT 0, turn_count INTEGER NOT NULL DEFAULT 0, token_count INTEGER NOT NULL DEFAULT 0, retrieved_refs TEXT NOT NULL DEFAULT '[]', rendered_refs TEXT NOT NULL DEFAULT '[]', selected_refs TEXT NOT NULL DEFAULT '[]', applied_refs TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS idx_learning_application_procedure ON learning_application_events(procedure_artifact_id, applied, outcome, created_at);
+CREATE INDEX IF NOT EXISTS idx_learning_application_observation ON learning_application_events(observation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_kb_async_jobs_status ON kb_async_jobs(status, id);
 CREATE TABLE IF NOT EXISTS kb_ingest_queue (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL,  root_path TEXT NOT NULL,  workspace TEXT NOT NULL DEFAULT '',  status TEXT NOT NULL DEFAULT 'pending',  force INTEGER NOT NULL DEFAULT 0,  priority INTEGER NOT NULL DEFAULT 0,  queued_at TEXT NOT NULL DEFAULT (datetime('now')),  started_at TEXT DEFAULT NULL,  completed_at TEXT DEFAULT NULL,  files_indexed INTEGER NOT NULL DEFAULT 0,  chunks_added INTEGER NOT NULL DEFAULT 0,  embeddings_added INTEGER NOT NULL DEFAULT 0,  error_message TEXT DEFAULT NULL);
 CREATE INDEX IF NOT EXISTS idx_kb_ingest_queue_status ON kb_ingest_queue(status);
@@ -242,6 +272,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_curiosity_dedup_missing_fact  ON curiosity
 CREATE INDEX IF NOT EXISTS idx_learning_signals_type  ON learning_signals(signal_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_learning_proposals_state  ON learning_proposals(state, sink, created_at);
 CREATE INDEX IF NOT EXISTS idx_learning_proposals_target  ON learning_proposals(sink, target_key, target_memory_id)  WHERE state = 'pending';
+CREATE INDEX IF NOT EXISTS idx_learning_observations_scope ON learning_observations(scope_kind, scope_id, status, observation_type);
+CREATE INDEX IF NOT EXISTS idx_learning_observation_evidence_source ON learning_observation_evidence(source_event_id, observation_id);
 CREATE TRIGGER IF NOT EXISTS memory_chunks_fts_ai AFTER INSERT ON memory_chunks BEGIN  INSERT INTO memory_chunks_fts(rowid, chunk_text) VALUES (new.id, new.chunk_text);END;
 CREATE TRIGGER IF NOT EXISTS memory_chunks_fts_ad AFTER DELETE ON memory_chunks BEGIN  INSERT INTO memory_chunks_fts(memory_chunks_fts, rowid, chunk_text)  VALUES('delete', old.id, old.chunk_text);END;
 CREATE TRIGGER IF NOT EXISTS memory_chunks_fts_au AFTER UPDATE ON memory_chunks BEGIN  INSERT INTO memory_chunks_fts(memory_chunks_fts, rowid, chunk_text)  VALUES('delete', old.id, old.chunk_text);  INSERT INTO memory_chunks_fts(rowid, chunk_text) VALUES (new.id, new.chunk_text);END;
@@ -283,6 +315,16 @@ INSERT OR IGNORE INTO kind_lifecycle VALUES('task',3,0.900000000000000022,14,0.6
 INSERT OR IGNORE INTO kind_lifecycle VALUES('scratch',5,0.949999999999999955,7,0.699999999999999955,3,0.25);
 INSERT OR IGNORE INTO kind_lifecycle VALUES('procedure',2,0.800000000000000044,180,0.5,90,3.0);
 INSERT OR IGNORE INTO kind_lifecycle VALUES('policy',1,0.699999999999999955,365,0.299999999999999988,180,5.0);
+INSERT INTO kind_lifecycle(kind,promote_use_count,promote_confidence,demote_days,demote_confidence,expire_days,demotion_resistance) VALUES
+ ('world_fact',3,0.90,60,0.70,30,1.0),
+ ('episode',5,0.90,30,0.70,36500,0.5),
+ ('experience',5,0.90,30,0.70,14,0.5),
+ ('mental_model',2,0.80,180,0.50,90,3.0),
+ ('preference',2,0.80,90,0.60,90,1.5),
+ ('instruction',3,0.90,14,0.70,7,0.5),
+ ('policy',1,0.70,365,0.30,36500,5.0),
+ ('hypothesis',5,0.95,7,0.70,3,0.25)
+ ON CONFLICT(kind) DO UPDATE SET expire_days=excluded.expire_days;
 CREATE TABLE IF NOT EXISTS sketch_store (  id INTEGER PRIMARY KEY AUTOINCREMENT,  sketch_kind TEXT NOT NULL,  scope_kind TEXT NOT NULL,  scope_id TEXT NOT NULL DEFAULT '',  feature_family TEXT NOT NULL,  state_bytes BLOB NOT NULL,  item_count INTEGER NOT NULL DEFAULT 0,  params_json TEXT NOT NULL DEFAULT '{}',  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE (sketch_kind, scope_kind, scope_id, feature_family));
 CREATE TABLE IF NOT EXISTS kb_minhash_signatures (  project TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),  file_path TEXT NOT NULL,  file_hash TEXT NOT NULL DEFAULT '',  signature_bytes BLOB NOT NULL,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY (project, generation, file_path));
 CREATE INDEX IF NOT EXISTS idx_kb_minhash_signatures_project ON kb_minhash_signatures(project);
@@ -602,3 +644,193 @@ CREATE TABLE IF NOT EXISTS org_egress_dispatch (
 );
 CREATE INDEX IF NOT EXISTS idx_org_egress_recover
   ON org_egress_dispatch(state,lease_expires_at,id);
+
+-- Evidence-lifecycle proposal tables. SQLite mirrors the complete data shape
+-- used by local and unit-test stores; PostgreSQL retains the authoritative WORM,
+-- transaction-fencing, RLS, and lifecycle trigger enforcement.
+CREATE TABLE IF NOT EXISTS memory_evidence_events (
+  event_id TEXT PRIMARY KEY,
+  changeset_id TEXT NOT NULL DEFAULT '',
+  object_kind TEXT NOT NULL CHECK(object_kind IN
+    ('assertion','memory','document','document_version','entity','alias','rel_type',
+     'derived','scope','link','ontology_package','review','outcome','recall_trace')),
+  object_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK(operation IN
+    ('assert','confirm','contradict','supersede','retire','restore','promote','demote',
+     'invalidate','redact','purge','derive')),
+  before_ref TEXT NOT NULL DEFAULT '', after_ref TEXT NOT NULL DEFAULT '',
+  authenticated_actor TEXT NOT NULL, transport_identity TEXT NOT NULL DEFAULT '',
+  effective_authority TEXT NOT NULL, source_document_id TEXT NOT NULL DEFAULT '',
+  source_span TEXT NOT NULL DEFAULT '', source_hash TEXT NOT NULL DEFAULT '',
+  code_generation INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '',
+  occurred_at TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+  correlation_id TEXT NOT NULL DEFAULT '',
+  CHECK(operation <> 'purge' OR (before_ref = '' AND after_ref = ''))
+);
+CREATE TABLE IF NOT EXISTS evidence_lifecycle_settings (
+  singleton INTEGER PRIMARY KEY DEFAULT 1 CHECK(singleton=1),
+  outcome_rank_weight REAL NOT NULL DEFAULT 0.0,
+  trace_sample_rate REAL NOT NULL DEFAULT 0.05 CHECK(trace_sample_rate BETWEEN 0 AND 1),
+  trace_max_rows INTEGER NOT NULL DEFAULT 10000 CHECK(trace_max_rows>0),
+  trace_max_age_days INTEGER NOT NULL DEFAULT 30 CHECK(trace_max_age_days>0),
+  trace_top_k INTEGER NOT NULL DEFAULT 20 CHECK(trace_top_k>0)
+);
+CREATE TABLE IF NOT EXISTS document_lifecycle_previews (
+  preview_token TEXT PRIMARY KEY, doc_id INTEGER NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+  operation TEXT NOT NULL CHECK(operation IN ('invalidate','purge')),
+  lifecycle_version INTEGER NOT NULL, changeset_head TEXT NOT NULL DEFAULT '',
+  facts_only INTEGER NOT NULL DEFAULT 0, facts_surviving INTEGER NOT NULL DEFAULT 0,
+  derived_items INTEGER NOT NULL DEFAULT 0, citations INTEGER NOT NULL DEFAULT 0,
+  entity_links INTEGER NOT NULL DEFAULT 0, code_links INTEGER NOT NULL DEFAULT 0,
+  recall_impact INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS document_purge_receipts (
+  receipt_id TEXT PRIMARY KEY, doc_id INTEGER NOT NULL, selector TEXT NOT NULL,
+  section_count INTEGER NOT NULL DEFAULT 0, region_count INTEGER NOT NULL DEFAULT 0,
+  cell_count INTEGER NOT NULL DEFAULT 0, embedding_count INTEGER NOT NULL DEFAULT 0,
+  trace_count INTEGER NOT NULL DEFAULT 0, actor TEXT NOT NULL, authority TEXT NOT NULL,
+  reason TEXT NOT NULL, changeset_id TEXT NOT NULL,
+  purged_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS derivation_policy_versions (
+  derived_kind TEXT PRIMARY KEY, current_version TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS derived_memory_registry (
+  derived_kind TEXT NOT NULL, derived_memory_id TEXT NOT NULL,
+  current_status TEXT NOT NULL DEFAULT 'dependencies:not-recorded' CHECK(current_status IN
+    ('dependencies:not-recorded','fresh','stale','unsupported')),
+  stale_cause_kind TEXT NOT NULL DEFAULT '', stale_cause_id TEXT NOT NULL DEFAULT '',
+  response_policy TEXT NOT NULL DEFAULT 'warn',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(derived_kind,derived_memory_id)
+);
+CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, derived_kind TEXT NOT NULL,
+  derived_memory_id TEXT NOT NULL, input_kind TEXT NOT NULL CHECK(input_kind IN
+    ('document','document_version','assertion','memory','code_unit','outcome','entity')),
+  input_id TEXT NOT NULL, input_version TEXT NOT NULL DEFAULT '',
+  source_hash TEXT NOT NULL DEFAULT '', extractor_version TEXT NOT NULL DEFAULT '',
+  derivation_policy_version TEXT NOT NULL DEFAULT '',
+  contribution TEXT NOT NULL DEFAULT 'supporting' CHECK(contribution IN ('essential','supporting')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(derived_kind,derived_memory_id,input_kind,input_id)
+);
+CREATE TABLE IF NOT EXISTS derived_rederivation_queue (
+  derived_kind TEXT NOT NULL, derived_memory_id TEXT NOT NULL, cause TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(derived_kind,derived_memory_id)
+);
+CREATE TABLE IF NOT EXISTS work_outcomes (
+  outcome_id TEXT PRIMARY KEY, retrieval_event_id TEXT NOT NULL,
+  query_fingerprint TEXT NOT NULL DEFAULT '', task_label TEXT NOT NULL DEFAULT '',
+  workflow TEXT NOT NULL DEFAULT '', scope_kind TEXT NOT NULL DEFAULT 'global',
+  scope_id TEXT NOT NULL DEFAULT '', subject_kind TEXT NOT NULL CHECK(subject_kind IN
+    ('memory','assertion','document','code_unit','derived')),
+  subject_id TEXT NOT NULL, resulting_action TEXT NOT NULL DEFAULT '',
+  authenticated_evaluator TEXT NOT NULL, outcome TEXT NOT NULL CHECK(outcome IN
+    ('useful','dead_end','corrected','misleading','outdated')),
+  correction_ref TEXT NOT NULL DEFAULT '', source_hash_at_eval TEXT NOT NULL DEFAULT '',
+  code_generation_at_eval INTEGER NOT NULL DEFAULT 0,
+  fault_kind TEXT NOT NULL DEFAULT '' CHECK(fault_kind IN ('','lane','source','feature','policy')),
+  fault_value TEXT NOT NULL DEFAULT '', occurred_at TEXT NOT NULL,
+  UNIQUE(retrieval_event_id,subject_kind,subject_id,authenticated_evaluator,outcome)
+);
+CREATE TABLE IF NOT EXISTS epistemic_annotations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL,
+  annotation TEXT NOT NULL, actor TEXT NOT NULL, changeset_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS epistemic_resolutions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL,
+  from_kind TEXT NOT NULL, to_kind TEXT NOT NULL, actor TEXT NOT NULL,
+  changeset_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS knowledge_corrections (
+  correction_id TEXT PRIMARY KEY, changeset_id TEXT NOT NULL, subject_kind TEXT NOT NULL,
+  subject_id TEXT NOT NULL, before_value TEXT NOT NULL, after_value TEXT NOT NULL,
+  actor TEXT NOT NULL, created_at TEXT NOT NULL, reverted_by_changeset TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS knowledge_review_decisions (
+  decision_id TEXT PRIMARY KEY, item_id TEXT NOT NULL, source_queue TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK(decision IN
+    ('accept','correct','retire','restore','promote','invalidate_source','purge',
+     'request_evidence','annotate','revoke','resolve')),
+  authenticated_actor TEXT NOT NULL, requested_value TEXT NOT NULL DEFAULT '',
+  evidence_snapshot TEXT NOT NULL DEFAULT '', resulting_authority TEXT NOT NULL DEFAULT '',
+  changeset_id TEXT NOT NULL, preview_token TEXT NOT NULL DEFAULT '',
+  head_at_decision TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_evidence_requests (
+  item_id TEXT PRIMARY KEY, condition TEXT NOT NULL, actor TEXT NOT NULL,
+  created_at TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'open'
+);
+CREATE TABLE IF NOT EXISTS ontology_packages (
+  package_id TEXT PRIMARY KEY, version INTEGER NOT NULL UNIQUE,
+  parent_version INTEGER NOT NULL DEFAULT 0, package_json TEXT NOT NULL,
+  author TEXT NOT NULL, review_record TEXT NOT NULL DEFAULT '', signature TEXT NOT NULL DEFAULT '',
+  verified INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'staged' CHECK(state IN ('staged','active','superseded','rejected')),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ontology_package_versions (
+  version INTEGER PRIMARY KEY, package_id TEXT NOT NULL REFERENCES ontology_packages(package_id),
+  parent_version INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 0,
+  activated_at TEXT NOT NULL DEFAULT '', activated_by TEXT NOT NULL DEFAULT '',
+  changeset_id TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ontology_package_relations (
+  package_id TEXT NOT NULL REFERENCES ontology_packages(package_id) ON DELETE CASCADE,
+  rel_type TEXT NOT NULL, head_kinds TEXT NOT NULL, tail_kinds TEXT NOT NULL,
+  is_symmetric INTEGER NOT NULL, inverse_rel_type TEXT NOT NULL, cardinality TEXT NOT NULL,
+  correction_behavior TEXT NOT NULL, category TEXT NOT NULL, sensitivity TEXT NOT NULL,
+  is_hierarchy_rel INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY(package_id,rel_type)
+);
+CREATE TABLE IF NOT EXISTS ontology_dry_runs (
+  preview_token TEXT PRIMARY KEY, package_id TEXT NOT NULL REFERENCES ontology_packages(package_id),
+  changeset_head TEXT NOT NULL, facts_invalid INTEGER NOT NULL DEFAULT 0,
+  correction_changes INTEGER NOT NULL DEFAULT 0, symmetry_changes INTEGER NOT NULL DEFAULT 0,
+  endpoint_narrowings INTEGER NOT NULL DEFAULT 0, widenings INTEGER NOT NULL DEFAULT 0,
+  sensitivity_lowerings INTEGER NOT NULL DEFAULT 0,
+  provisional_promotions INTEGER NOT NULL DEFAULT 0, derived_affected INTEGER NOT NULL DEFAULT 0,
+  widening_acknowledged INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL, consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ontology_migration_reports (
+  changeset_id TEXT PRIMARY KEY, package_id TEXT NOT NULL, prior_package_id TEXT NOT NULL DEFAULT '',
+  migrated INTEGER NOT NULL DEFAULT 0, retired INTEGER NOT NULL DEFAULT 0,
+  quarantined INTEGER NOT NULL DEFAULT 0, left_unchanged INTEGER NOT NULL DEFAULT 0,
+  report TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recall_traces (
+  trace_id TEXT PRIMARY KEY, retrieval_event_id TEXT NOT NULL UNIQUE,
+  turn_id TEXT NOT NULL DEFAULT '', query_fingerprint TEXT NOT NULL DEFAULT '',
+  scope_kind TEXT NOT NULL DEFAULT 'global', scope_id TEXT NOT NULL DEFAULT '',
+  sensitivity TEXT NOT NULL DEFAULT 'normal', persisted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recall_trace_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trace_id TEXT NOT NULL REFERENCES recall_traces(trace_id) ON DELETE CASCADE,
+  subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL, lane TEXT NOT NULL,
+  lane_rank INTEGER NOT NULL, final_rank INTEGER NOT NULL DEFAULT 0,
+  scope_decision TEXT NOT NULL, semantic_value REAL NOT NULL DEFAULT 0,
+  semantic_weight REAL NOT NULL DEFAULT 0, keyword_value REAL NOT NULL DEFAULT 0,
+  keyword_weight REAL NOT NULL DEFAULT 0, graph_value REAL NOT NULL DEFAULT 0,
+  graph_weight REAL NOT NULL DEFAULT 0, temporal_value REAL NOT NULL DEFAULT 0,
+  temporal_weight REAL NOT NULL DEFAULT 0, outcome_value REAL NOT NULL DEFAULT 0,
+  outcome_weight REAL NOT NULL DEFAULT 0, feature_values TEXT NOT NULL DEFAULT '{}',
+  feature_weights TEXT NOT NULL DEFAULT '{}', feature_contributions TEXT NOT NULL DEFAULT '{}',
+  final_score REAL NOT NULL DEFAULT 0, graph_path TEXT NOT NULL DEFAULT '',
+  relation_gravity REAL NOT NULL DEFAULT 0, gravity_relation TEXT NOT NULL DEFAULT '',
+  authority_class TEXT NOT NULL DEFAULT 'not-computed',
+  confidence_class TEXT NOT NULL DEFAULT 'not-computed',
+  epistemic_kind TEXT NOT NULL DEFAULT 'world_fact',
+  valid_time_match TEXT NOT NULL DEFAULT 'not-computed',
+  source_evidence TEXT NOT NULL DEFAULT 'not-computed',
+  document_state TEXT NOT NULL DEFAULT 'not-computed',
+  staleness_status TEXT NOT NULL DEFAULT 'not-computed', stale_input TEXT NOT NULL DEFAULT '',
+  rejected INTEGER NOT NULL DEFAULT 0, rejection_gate TEXT NOT NULL DEFAULT '',
+  UNIQUE(trace_id,subject_kind,subject_id,lane,rejected)
+);

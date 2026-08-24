@@ -6,12 +6,14 @@
 #include "kb_maintenance.h"
 #include "db_postgres.h"
 #include "modules/db2/c/db2_internal.h"
+#include "support/test_time.h"
 
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
@@ -31,7 +33,11 @@ static void close_db(void)
 static void exec_sql(const char *sql)
 {
    char err[512] = "";
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "exec_sql failed: %s\n  sql: %s\n", err, sql);
+      assert(0 && "exec_sql");
+   }
 }
 
 static double query_double(const char *sql)
@@ -74,15 +80,16 @@ static void seed_artifact(const char *id, double confidence, int age_days, int c
 {
    assert(db2_artifact_write(id, "claim", "committed", "global", "", "", confidence, "{}") == 0);
 
-   char sql[512];
+   char ts[TEST_TS_MAX], sql[512];
+   test_ts_days(ts, sizeof(ts), -age_days);
    snprintf(sql, sizeof(sql),
             "UPDATE artifacts"
-            "   SET created_at = datetime('now', '-%d days'),"
-            "       committed_at = datetime('now', '-%d days'),"
-            "       last_accessed_at = datetime('now', '-%d days'),"
+            "   SET created_at = '%s',"
+            "       committed_at = '%s',"
+            "       last_accessed_at = '%s',"
             "       last_decay_at = NULL"
             " WHERE id = '%s'",
-            age_days, age_days, age_days, id);
+            ts, ts, ts, id);
    exec_sql(sql);
 
    if (cited)
@@ -115,14 +122,12 @@ static void test_config_defaults_are_disabled_but_complete(void)
    assert(setenv("HOME", tmpdir, 1) == 0);
    assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
 
-   config_t cfg;
-   assert(config_load(&cfg) == 0);
-   assert(cfg.kb_maintenance_enabled == 0);
-   assert(cfg.kb_maintenance_interval_hours == 24);
-   assert(fabs(cfg.kb_maintenance_lambda - 0.005) < TOL);
-   assert(fabs(cfg.kb_maintenance_floor - 0.10) < TOL);
-   assert(cfg.kb_maintenance_min_age_days == 7);
-   assert(cfg.kb_maintenance_orphan_days == 90);
+   assert(config_kb_maintenance_enabled() == 0);
+   assert(config_kb_maintenance_interval_hours() == 24);
+   assert(fabs(config_kb_maintenance_lambda() - 0.005) < TOL);
+   assert(fabs(config_kb_maintenance_floor() - 0.10) < TOL);
+   assert(config_kb_maintenance_min_age_days() == 7);
+   assert(config_kb_maintenance_orphan_days() == 90);
 
    if (old_home_buf[0])
       assert(setenv("HOME", old_home_buf, 1) == 0);
@@ -140,7 +145,10 @@ static void test_decay_is_idempotent_after_first_run(void)
 
    kb_maintenance_config_t cfg = test_cfg();
    kb_maintenance_result_t first;
-   assert(kb_maintenance_run(&cfg, &first) == 0);
+   int frc = kb_maintenance_run(&cfg, &first);
+   if (frc != 0)
+      fprintf(stderr, "kb_maintenance_run: %s\n", first.error);
+   assert(frc == 0);
    assert(first.rows_decayed == 1);
    double after_first =
        query_double("SELECT confidence FROM artifacts WHERE id = 'artifact-idempotent'");

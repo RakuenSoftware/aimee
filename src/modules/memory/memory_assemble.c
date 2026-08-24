@@ -554,6 +554,16 @@ static double compute_term_overlap(char **query_terms, int term_count, const cha
    int matched = 0;
    for (int t = 0; t < term_count; t++)
    {
+      /* Substring, deliberately — do NOT convert this to the whole-word matcher the
+       * module's fixed keyword lists use. These are USER QUERY terms, and the prefix
+       * match is acting as a poor-man's stemmer: "cert" has to cover "certificate"
+       * and "auth" has to cover "authentication", or a query typed in abbreviations
+       * scores zero overlap against the very memories it is looking for
+       * (test_context_assembly.c:91 pins exactly that case). The cost is that an
+       * unrelated word sharing a prefix ("add" inside "address") also counts;
+       * removing that without losing the stemming needs a real stemmer, not a
+       * boundary check. A closed keyword list has no such tension, which is why
+       * those sites use memory_keyword_present() and this one does not. */
       if (strstr(lower, query_terms[t]))
          matched++;
    }
@@ -575,6 +585,38 @@ static double compute_graph_score(const boost_map_t *bmap, const char *key, cons
          boost += bmap->entries[b].score * 0.1;
    }
    return boost;
+}
+
+/* Age in days of a DB2 timestamp, or -1 when it is empty or unparseable
+ * (context_recency_from_age_days reads -1 as "unknown", not "stale").
+ *
+ * Via parse_utc_ts, which reads the separator as a character: these two columns
+ * genuinely disagree on spelling. last_used_at is stamped by pg_now_text() in
+ * canonical ISO ("...T..Z"), while memories.created_at defaults to
+ * to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS') — a space. A parser that
+ * hard-codes one spelling silently drops the time-of-day on the other, which is
+ * the exact failure parse_utc_ts exists to prevent. It returns 0 for both empty
+ * and malformed input, and rejects years before 1970, so 0 is an unambiguous
+ * "no usable stamp" rather than a real instant. */
+static double context_stamp_age_days(const char *stamp)
+{
+   time_t at = parse_utc_ts(stamp);
+   if (at <= 0)
+      return -1.0;
+   double days = difftime(time(NULL), at) / 86400.0;
+   return days < 0.0 ? 0.0 : days;
+}
+
+/* Recency factor for a candidate, measured from last_used_at — which the recall
+ * path stamps whenever a memory is actually injected into a turn, so a fact that
+ * keeps proving useful stays fresh no matter when it was first learned.
+ * created_at is the fallback for rows that have never been recalled. */
+static double context_recency_factor(const char *last_used_at, const char *created_at)
+{
+   double days = context_stamp_age_days(last_used_at);
+   if (days < 0.0)
+      days = context_stamp_age_days(created_at);
+   return context_recency_from_age_days(days);
 }
 
 static int context_tier_priority(const char *tier)
@@ -830,10 +872,21 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    if (term_count > 0)
       memory_graph_boost(query_terms, term_count, &bmap);
 
+   /* Classify intent and build the retrieval plan before scoring, not just
+    * before the section budgets: recency_weight is a scoring input, and
+    * retrieval_plan_for_intent reads nothing but task_hint. */
+   retrieval_plan_t rplan;
+   {
+      task_intent_t intent = classify_intent(task_hint);
+      retrieval_plan_for_intent(intent, &rplan);
+      if (temporal_query)
+         rplan.recency_weight = 0.85; /* contextual recency anchoring */
+   }
+
    /* 3. Load all L1/L2/L3/L5 candidates.  L3 = stable project/env facts,
     * L5 = synthesised cross-session patterns.  Both are eligible for dense
     * pgvector recall through the shared ranking path, weighted via
-    * confidence/use_count + graph signals. */
+    * confidence/use_count + recency + graph signals. */
    context_candidate_t candidates[MAX_CANDIDATES];
    int cand_count = 0;
 
@@ -869,6 +922,9 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
 
       c->score += c->scope_rank * 0.05;
       c->score += c->tier_priority * 0.03;
+      c->score = context_apply_recency(
+          c->score, context_recency_factor(cand_rows[ci].last_used_at, cand_rows[ci].created_at),
+          rplan.recency_weight);
 
       int key_len = (int)strlen(c->key);
       int content_len = (int)strlen(c->content);
@@ -942,6 +998,9 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
                        (c->use_count / 10.0) * 0.2;
             c->score += c->scope_rank * 0.05;
             c->score += c->tier_priority * 0.03;
+            c->score = context_apply_recency(
+                c->score, context_recency_factor(fb_rows[fi].last_used_at, fb_rows[fi].created_at),
+                rplan.recency_weight);
             c->estimated_tokens = ((int)strlen(c->key) + (int)strlen(c->content)) / 4 + 1;
             c->score_per_token = c->score / (double)c->estimated_tokens;
             new_count++;
@@ -988,15 +1047,6 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    if (answerability_withheld)
       cand_count = 0;
 
-   /* 5. Classify intent and build retrieval plan for dynamic budgets */
-   retrieval_plan_t rplan;
-   {
-      task_intent_t intent = classify_intent(task_hint);
-      retrieval_plan_for_intent(intent, &rplan);
-      if (temporal_query)
-         rplan.recency_weight = 0.85; /* contextual recency anchoring */
-   }
-
    /* Compute per-section char-budgets from plan (total = MAX_CONTEXT_TOTAL - overhead) */
    int section_budget = MAX_CONTEXT_TOTAL - 500; /* reserve for headers/structure */
 
@@ -1025,6 +1075,15 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
 
    /* In budget mode track overall token usage across sections. */
    int tokens_used = 0;
+
+   /* Memories actually emitted into the context this turn. Recall bumps
+    * use_count / last_used_at for these once the sections are built: both feed
+    * scoring (use_count through the base term, last_used_at through the recency
+    * factor), so a memory that keeps earning its place in the context stays
+    * ranked for the next turn. Collected rather than touched inline so the whole
+    * turn costs one batched UPDATE instead of one per memory. */
+   int64_t touched[MAX_CANDIDATES];
+   int touched_count = 0;
 
    for (int s = 0; s < nsections; s++)
    {
@@ -1098,6 +1157,8 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
             if (sid && sid[0] && db1_context_snapshot_insert)
                (void)db1_context_snapshot_insert(sid, c->id, c->score);
          }
+         if (touched_count < (int)(sizeof(touched) / sizeof(touched[0])))
+            touched[touched_count++] = c->id;
          pos += written;
          if (budget_mode)
             tokens_used += c->estimated_tokens;
@@ -1107,6 +1168,9 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
       if (items == 0)
          pos = section_start;
    }
+
+   if (touched_count > 0)
+      (void)memory_touch_many(touched, touched_count);
 
    pos = append_negative_context_block(buf, pos, cap, task_hint, negative_candidates, cand_count);
 
@@ -1396,6 +1460,16 @@ char *memory_assemble_context_explain(const char *task_hint,
    char project_label[MAX_PATH_LEN];
    memory_scope_labels_for_cwd(NULL, workspace_label, sizeof(workspace_label), project_label,
                                sizeof(project_label));
+   /* Mirror the assembly scorer's recency handling so the explain surface
+    * reports the score the real pass produced. */
+   retrieval_plan_t erplan;
+   {
+      task_intent_t intent = classify_intent(task_hint);
+      retrieval_plan_for_intent(intent, &erplan);
+      if (has_temporal_markers(task_hint))
+         erplan.recency_weight = 0.85;
+   }
+
    context_candidate_t scored[200];
    int scored_count = 0;
 
@@ -1429,6 +1503,9 @@ char *memory_assemble_context_explain(const char *task_hint,
       double overlap = (ko > co ? ko : co) * 0.3;
       double graph = compute_graph_score(&bmap, c->key, c->content) * 0.2;
       c->score = base + overlap + graph + c->scope_rank * 0.05 + c->tier_priority * 0.03;
+      c->score = context_apply_recency(
+          c->score, context_recency_factor(cand_rows[ci].last_used_at, cand_rows[ci].created_at),
+          erplan.recency_weight);
       c->score_per_token = c->score / (double)c->estimated_tokens;
       scored_count++;
    }

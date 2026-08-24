@@ -27,6 +27,7 @@
 #include "kb_module_stage_adapters.h"
 #include "kb_service_kb.h"
 #include "log.h"
+#include <aimee/audit/obs_bus.h>
 #include <aimee/workspace/workspace.h>
 
 #include <stdio.h>
@@ -55,7 +56,7 @@ extern kb_service_ctx_t *g_kb_ctx;
  * One helper, both callers, so the two cannot drift apart again. */
 static void kb_status_add_typed_facts_warning(cJSON *warnings)
 {
-   if (!warnings || !config_typed_facts_enabled())
+   if (!warnings)
       return;
    int facts_pending = db2_kb_async_count_kind_pending("memory_facts");
    char synth_endpoint[512];
@@ -376,6 +377,12 @@ static cJSON *kb_service_health_object(void)
       return NULL;
    /* No `status` here. It is derived from the blockers array at the bottom of this
     * function, once the evidence it summarises actually exists. */
+   obs_bus_capture_health_t capture;
+   obs_bus_capture_health(&capture);
+   cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
+   cJSON_AddStringToObject(resp, "capture_reason", capture.reason);
+   cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
+   cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
 
    /* DB2: generic schema + KB-specific tables */
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
@@ -532,7 +539,7 @@ static cJSON *kb_service_health_object(void)
    }
    /* TWO GATES THAT DO NOT AGREE.
     *
-    * memory.store enqueues a "memory_facts" job whenever typed_facts_enabled is on,
+    * memory.store enqueues a "memory_facts" job unconditionally,
     * which is the DEFAULT. The only consumer of those jobs is kb_memory_facts_drain,
     * which runs on the curator LLM lane -- and that lane deliberately does not start
     * without a synthesis endpoint ("NO SYNTHESIS PROVIDER => NO LLM LANE"). Both
@@ -642,8 +649,10 @@ static cJSON *kb_service_health_object(void)
 
    /* Typed-facts capability (proposal §8): the KB advertises its own typed-facts
     * state so aimee-server can gate per-turn fact injection on it WITHOUT owning
-    * the config. The server never reads typed_facts_enabled itself. */
-   cJSON_AddBoolToObject(resp, "typed_facts_enabled", config_typed_facts_enabled() ? 1 : 0);
+    * the config. The field stays in the payload -- an older server reads it and
+    * would treat its absence as "off" -- but the layer is unconditional now, so
+    * the answer is always true. */
+   cJSON_AddBoolToObject(resp, "typed_facts_enabled", 1);
 
    return resp;
 }

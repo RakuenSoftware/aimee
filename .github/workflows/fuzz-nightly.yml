@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q gcc make \
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev
 
@@ -27,7 +27,7 @@ jobs:
         run: |
           cd src
           make -j$(nproc) tests/fuzz_extractors tests/fuzz_json_parse \
-               tests/fuzz_config_load tests/fuzz_memory_search \
+               tests/fuzz_memory_search \
                tests/fuzz_message_frame tests/fuzz_acl_parse
 
       - name: Seed corpus smoke test
@@ -63,7 +63,7 @@ jobs:
           }
 
           for target in tests/fuzz_extractors tests/fuzz_json_parse \
-                        tests/fuzz_config_load tests/fuzz_memory_search \
+                        tests/fuzz_memory_search \
                         tests/fuzz_message_frame tests/fuzz_acl_parse; do
             fuzz_extended "$target"
           done

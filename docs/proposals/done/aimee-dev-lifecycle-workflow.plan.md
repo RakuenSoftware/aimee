@@ -1,5 +1,9 @@
 # Implementation plan: aimee workflow engine
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for [`aimee-dev-lifecycle-workflow.md`](aimee-dev-lifecycle-workflow.md)
 (roundtable-converged, user-approved). Delivered as **seven sequenced slices**, each
 its own PR → roundtable → testing, smallest-blast-radius first. The pure

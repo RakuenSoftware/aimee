@@ -2,6 +2,7 @@
 #define DEC_DB2_KB_SERVICE_BACKEND_H 1
 
 #include "vector_index_ops.h"
+#include "fact_lifecycle.h" /* fact_authority_t */
 #include "cJSON.h"
 
 #include <stddef.h>
@@ -156,6 +157,7 @@ extern "C"
     * fields in |req|.  Returns {"status":"ok","dispatch":{...}} or
     * {"status":"error","message":"..."}.  Caller frees. */
    cJSON *db2_kb_service_learning_propose_signal_json(const cJSON *req);
+   cJSON *db2_kb_service_learning_record_application_json(const cJSON *req);
 
    cJSON *db2_kb_service_agent_outcome_record_json(const char *agent_name, const char *role,
                                                    const char *outcome_kind, const char *reason,
@@ -200,6 +202,15 @@ extern "C"
    cJSON *db2_kb_service_memory_supersede_json(int64_t old_id, const char *new_content,
                                                double confidence, const char *session_id);
    cJSON *db2_kb_service_memory_fact_history_json(const char *key, int max);
+   /* Typed-fact §4 correction surface. `target` NULL/empty retracts every current
+    * value of (source, relation); `authority` is "user" or "model" (anything else
+    * reads as model). Reports the number of edges affected, so a request that
+    * matched nothing is distinguishable from one that was refused. */
+   cJSON *db2_kb_service_facts_retract_json(const char *source, const char *relation,
+                                            const char *target, const char *authority);
+   /* §3 entity merge/unmerge. merge returns the audit id needed to reverse it. */
+   cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id);
+   cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id);
    cJSON *db2_kb_service_memory_check_drift_json(int64_t task_id, const char *file_path,
                                                  const char *command);
    cJSON *db2_kb_service_memory_list_session_scope_priority_json(int max);
@@ -252,9 +263,22 @@ extern "C"
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,
                                                      const char *session_id);
-   cJSON *db2_kb_service_memory_delete_json(int64_t id);
+   /* `authority` decides destructiveness, not permission — the caller's
+    * capability was already checked at the entry point. It carries a
+    * memory_authority_t value: 0 (MEMORY_AUTHORITY_MODEL, and the default for a
+    * request that omits the field) retires/versions the old value, 1
+    * (MEMORY_AUTHORITY_USER) destroys it.
+    *
+    * Spelled `int` rather than the enum deliberately: DB2's outbound dependency
+    * surface is frozen (scripts/check_db2_source_boundary.py), and naming the
+    * type here would add an edge from a DB2 header to src/headers for a
+    * parameter whose contract is two documented values. The enum lives in
+    * memory_authority.h and is used either side of this seam; only the frozen
+    * header spells it as int. Note that 0 is the SAFE value, so a caller that
+    * passes nothing meaningful still gets the non-destructive path. */
+   cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority);
    cJSON *db2_kb_service_memory_touch_json(int64_t id);
-   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content);
+   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
    cJSON *db2_kb_service_memory_stats_json(void);
    cJSON *db2_kb_service_memory_list_conflicts_json(int max);
@@ -263,6 +287,7 @@ extern "C"
    cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max);
    cJSON *db2_kb_service_memory_compact_windows_json(void);
    cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint);
+   cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
    cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
    cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
                                                         const char *project, int limit);
@@ -278,12 +303,27 @@ extern "C"
    cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, const char *key,
                                             const char *content, double confidence,
                                             const char *session_id);
+   /* `authority` is persisted as the new row's provenance_category, which is what
+    * the typed-fact drain later reads to decide whether facts mined from this
+    * note may enter at Class A. The RPC handler derives it from the calling
+    * surface and the request's authentication — see memory.h's memory_insert_ex.
+    * Spelled `int` for the same frozen-boundary reason as the delete/update pair
+    * below, and with the same safe default: 0 is MEMORY_AUTHORITY_MODEL. */
    cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
                                                const char *content, const char *use_cases,
-                                               double confidence, const char *session_id);
+                                               double confidence, const char *session_id,
+                                               int authority);
+   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(
+       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
+       const char *content, const char *use_cases, double confidence, const char *session_id,
+       int authority);
    cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
+   /* `authority` is the typed-fact write authority for the §4 retraction this
+    * turn may perform; the RPC handler derives it from the request's
+    * authenticated actor, never from the request body. See db2_typed_fact_ingress
+    * (fact_ingest.h). */
    cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
-                                                   int limit);
+                                                   int limit, fact_authority_t authority);
    /* Read-only typed-fact recall for the turn: facts about entities named in the
     * query, PII-gated. Returns {status, facts} (facts="" when off/none). Lets the
     * server auto-inject facts without the full context-block assembly. */
@@ -293,6 +333,10 @@ extern "C"
    cJSON *db2_kb_service_memory_search_graph_json(const char *query, int limit);
    cJSON *db2_kb_service_memory_search_graph_as_of_json(const char *query, const char *as_of,
                                                         int limit);
+   cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const char *valid_at,
+                                                       const char *believed_at,
+                                                       int include_historical, int max_hops,
+                                                       int limit);
    cJSON *db2_kb_service_memory_get_episode_json(const char *episode_key);
    cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
                                          const char *scope_value, int limit);

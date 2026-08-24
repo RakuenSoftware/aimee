@@ -1,6 +1,6 @@
 /* agent_pipeline.c: autonomous end-to-end pipeline state machine */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "headers/agent_pipeline.h"
 #include "headers/agent_coord.h"
 #include "modules/git/git_verify.h"

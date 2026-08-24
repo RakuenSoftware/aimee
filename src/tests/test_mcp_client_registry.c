@@ -6,7 +6,8 @@
 
 #include "cJSON.h"
 #include "config.h"
-#include "mcp_osv_cache.h"
+#include "config_client.h"
+#include "db1_client/mcp_osv_cache.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include "agent_code_capabilities.h"
@@ -157,18 +158,56 @@ static void remove_package_manager_link(const char *dir, const char *path)
       rmdir(dir);
 }
 
-/* mcp_client_registry_boot reads config through accessors now instead of taking a
- * config_t. This suite links the real config module, so each case publishes the
- * config it built as the live snapshot -- the accessors then read exactly that, with
- * no file I/O and no dependence on the machine's aimee.yaml. Same fields, same
- * values, same assertions as when the struct was passed by hand. */
-static config_t cfg;
+typedef struct
+{
+   int mcp_client_count;
+   config_mcp_client_t mcp_clients[CONFIG_MCP_MAX_CLIENTS];
+   int mcp_osv_enabled;
+   int mcp_osv_enforce;
+   int mcp_osv_offline;
+   int mcp_osv_cache_ttl_hours;
+   char mcp_osv_endpoint[512];
+   int mcp_osv_allow_count;
+   char mcp_osv_allow[CONFIG_MCP_OSV_MAX_ALLOW][256];
+} mcp_registry_fixture_t;
+
+static mcp_registry_fixture_t cfg;
 
 /* Publish what this case just filled in. Call after the last cfg.* write and
  * before booting the registry. */
 static void publish_cfg(void)
 {
-   config_snapshot_init(&cfg);
+   cJSON *clients = cJSON_CreateArray();
+   for (int i = 0; i < cfg.mcp_client_count; i++)
+   {
+      cJSON *client = cJSON_CreateObject();
+      cJSON_AddStringToObject(client, "name", cfg.mcp_clients[i].name);
+      cJSON_AddStringToObject(client, "transport",
+                              cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_STDIO ? "stdio"
+                              : cfg.mcp_clients[i].transport == CONFIG_MCP_TRANSPORT_SSE ? "sse"
+                                                                                         : "");
+      cJSON_AddStringToObject(
+          client, "install", cfg.mcp_clients[i].install == CONFIG_MCP_INSTALL_KB ? "kb" : "server");
+      cJSON *command = cJSON_AddArrayToObject(client, "command");
+      for (int j = 0; j < cfg.mcp_clients[i].command_count; j++)
+         cJSON_AddItemToArray(command, cJSON_CreateString(cfg.mcp_clients[i].command[j]));
+      cJSON_AddStringToObject(client, "cwd", cfg.mcp_clients[i].cwd);
+      cJSON_AddStringToObject(client, "url", cfg.mcp_clients[i].url);
+      cJSON_AddStringToObject(client, "bearer_token_env", cfg.mcp_clients[i].bearer_token_env);
+      cJSON_AddItemToArray(clients, client);
+   }
+   assert(config_client_set_value("mcp_clients", clients) == 0);
+   assert(config_client_set_number("mcp_client_count", cfg.mcp_client_count) == 0);
+   assert(config_client_set_number("mcp_osv_enabled", cfg.mcp_osv_enabled) == 0);
+   assert(config_client_set_number("mcp_osv_enforce", cfg.mcp_osv_enforce) == 0);
+   assert(config_client_set_number("mcp_osv_offline", cfg.mcp_osv_offline) == 0);
+   assert(config_client_set_number("mcp_osv_cache_ttl_hours", cfg.mcp_osv_cache_ttl_hours) == 0);
+   assert(config_client_set_string("mcp_osv_endpoint", cfg.mcp_osv_endpoint) == 0);
+   cJSON *allow = cJSON_CreateArray();
+   for (int i = 0; i < cfg.mcp_osv_allow_count; i++)
+      cJSON_AddItemToArray(allow, cJSON_CreateString(cfg.mcp_osv_allow[i]));
+   assert(config_client_set_value("mcp_osv_allow", allow) == 0);
+   assert(config_client_set_number("mcp_osv_allow_count", cfg.mcp_osv_allow_count) == 0);
 }
 
 static void test_boot_and_lazy_tools(void)
@@ -510,7 +549,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 53
+#define MCP_TOOLS_GOLDEN_COUNT 54
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -520,14 +559,14 @@ static void test_osv_offline_cache_miss_allows(void)
    "call_tool {arguments,name} req:arguments,name\n"                                               \
    "clarify {answer,command,description,session_id} req:command\n"                                 \
    "dashboard_metrics {} req:\n"                                                                   \
-   "delegate {branch,cwd,persona,prompt,role,tools} req:persona,prompt,role\n"                     \
+   "delegate {branch,cwd,handoff_json,persona,prompt,role,scope,tools,via} "                       \
+   "req:persona,prompt,role\n"                                                                     \
    "delegate_reply {content,delegation_id} req:content,delegation_id\n"                            \
    "delegate_status {job_id} req:job_id\n"                                                         \
    "describe_tool {name} req:name\n"                                                               \
    "diagnose {command,content,diagnosis_id,hypothesis_id,rank,source,stance,symptom} "             \
    "req:command\n"                                                                                 \
-   "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} "              \
-   "req:command\n"                                                                                 \
+   "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} req:command\n" \
    "epistemic_directive "                                                                          \
    "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
    "id,state,suppress,topic,valid_until} req:command\n"                                            \
@@ -542,9 +581,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
-   "{command,file_path,file_paths,judge,line_end,line_start,max_results,node,paths,project,"       \
-   "queries,query,scope,spans,symbol,symbols} "                                                    \
-   "req:command\n"                                                                                 \
+   "{command,fallback,file_path,file_paths,include_code,judge,line_end,line_start,max_results,"    \
+   "node,paths,project,queries,query,scope,spans,symbol,symbols} req:command\n"                    \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
    "learning "                                                                                     \
    "{command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,"     \
@@ -553,8 +591,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "lsp {col,command,file,line,workspace} req:command\n"                                           \
    "memory "                                                                                       \
    "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
-   "project,"                                                                                      \
-   "query,reason,scope,tier,verb,workspace} req:command\n"                                         \
+   "project,query,reason,scope,tier,verb,workspace} req:command\n"                                 \
    "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \
@@ -565,9 +602,10 @@ static void test_osv_offline_cache_miss_allows(void)
    "pdf_open_neighbors {chunk_id,project} req:chunk_id,project\n"                                  \
    "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n"               \
    "pdf_search_chunks {max_results,project,query} req:project,query\n"                             \
+   "peer {command,conversation_id,expect_reply,max,reply_to,text,to} req:command\n"                \
    "pipeline "                                                                                     \
-   "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,"             \
-   "pipeline_id,questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"      \
+   "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,pipeline_id," \
+   "questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"                  \
    "preview_blast_radius {paths,project,scope} req:paths\n"                                        \
    "prospective_memory "                                                                           \
    "{action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_"  \
@@ -708,6 +746,7 @@ static void test_tool_profile_filter(void)
                                       "ask_user",
                                       "send_message",
                                       "note",
+                                      "peer",
                                       NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
@@ -743,6 +782,87 @@ static void test_tool_profile_filter(void)
       /* roundtable_review blocks and returns the verdict; a status tool on the
        * surface is an invitation to poll a call that has already finished. */
       assert(!have_status);
+   }
+
+   /* THE SAME CHECK FOR peer, FOR THE SAME REASON THE COMMENT ABOVE GIVES.
+    *
+    * Peer messaging shipped served-but-unreachable once already: four bus stages
+    * nothing called, then two MCP tools that worked and were not on the floor. A
+    * name in the mirror above proves only that this array was edited. What has
+    * to be true is that a client asking for the default profile is SHOWN it, and
+    * that both operations are reachable through the one entry -- a family whose
+    * enum lost a member is a capability silently withdrawn.
+    *
+    * There is no fallback here. An agent not shown this does not reach another
+    * session by some slower route; it does not reach one at all. */
+   {
+      cJSON *served = mcp_build_tools_list();
+      cJSON *peer = NULL, *t = NULL;
+      cJSON_ArrayForEach(t, served)
+      {
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(t, "name");
+         if (cJSON_IsString(nm) && strcmp(nm->valuestring, "peer") == 0)
+            peer = t;
+      }
+      assert(peer && "the peer family is not on the served surface at all");
+
+      cJSON *schema = cJSON_GetObjectItemCaseSensitive(peer, "inputSchema");
+      cJSON *props = schema ? cJSON_GetObjectItemCaseSensitive(schema, "properties") : NULL;
+      cJSON *cmd = props ? cJSON_GetObjectItemCaseSensitive(props, "command") : NULL;
+      cJSON *en = cmd ? cJSON_GetObjectItemCaseSensitive(cmd, "enum") : NULL;
+      int has_send = 0, has_inbox = 0, has_reply = 0;
+      cJSON *e = NULL;
+      cJSON_ArrayForEach(e, en)
+      {
+         if (!cJSON_IsString(e))
+            continue;
+         if (strcmp(e->valuestring, "send") == 0)
+            has_send = 1;
+         if (strcmp(e->valuestring, "inbox") == 0)
+            has_inbox = 1;
+         if (strcmp(e->valuestring, "reply") == 0)
+            has_reply = 1;
+      }
+      assert(has_send && "peer command=send is not offered");
+      assert(has_inbox && "peer command=inbox is not offered");
+      assert(has_reply && "peer command=reply is not offered");
+
+      /* The parameters each operation needs must survive the fold. The family
+         unions its members' properties, so a member that failed to attach takes
+         its arguments with it and leaves a command that cannot be called. */
+      assert(cJSON_GetObjectItemCaseSensitive(props, "to"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "text"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "conversation_id"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "expect_reply"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "max"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "reply_to"));
+
+      /* And the demux resolves both commands to real handlers. A family entry
+         whose command maps to a name mcp_tool_lookup does not know is an advert
+         for a tool that cannot run. */
+      char resolved[96];
+      cJSON *args = cJSON_CreateObject();
+      cJSON_AddStringToObject(args, "command", "send");
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == 1);
+      assert(strcmp(resolved, "peer_send") == 0);
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("inbox"));
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == 1);
+      assert(strcmp(resolved, "peer_inbox") == 0);
+      /* An unknown command must RESOLVE TO NOTHING rather than fall through to a
+         default. -1 is "this family does not serve that", which the caller turns
+         into a refusal; a 0 here would mean "not a family at all" and send the
+         call somewhere else entirely. */
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("reply"));
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == 1);
+      assert(strcmp(resolved, "peer_reply") == 0);
+      /* An unknown command must RESOLVE TO NOTHING rather than fall through to a
+         default. -1 is "this family does not serve that", which the caller turns
+         into a refusal; a 0 would mean "not a family at all" and send the call
+         somewhere else entirely. */
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("broadcast"));
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == -1);
+      cJSON_Delete(args);
+      cJSON_Delete(served);
    }
 
    /* An asynchronous tool whose poller is NOT core costs the agent a
@@ -893,6 +1013,13 @@ static int schema_has_property(cJSON *tool, const char *name)
    cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
    cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
    return cJSON_GetObjectItemCaseSensitive(properties, name) != NULL;
+}
+
+static cJSON *schema_property(cJSON *tool, const char *name)
+{
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+   cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   return cJSON_GetObjectItemCaseSensitive(properties, name);
 }
 
 static int schema_requires(cJSON *tool, const char *name)
@@ -1057,6 +1184,29 @@ static void test_agent_code_intelligence_contracts(void)
    assert(callers != NULL);
    assert(schema_has_property(callers, "project"));
    assert(schema_has_property(callers, "scope"));
+
+   /* Batch span reads used to advertise only `spans: array`, leaving clients to
+    * guess that its elements were strings. The handler expects structured
+    * ranges, so the plausible guess returned [] and forced a duplicate shell
+    * read. Pin the item schema on both the flat tool and collapsed index family. */
+   cJSON *span = tools_get(flat, "code_span_get");
+   cJSON *index = tools_get(collapsed, "index");
+   assert(span != NULL && index != NULL);
+   cJSON *span_arrays[] = {schema_property(span, "spans"), schema_property(index, "spans")};
+   for (size_t i = 0; i < sizeof(span_arrays) / sizeof(span_arrays[0]); i++)
+   {
+      cJSON *items = cJSON_GetObjectItemCaseSensitive(span_arrays[i], "items");
+      cJSON *item_type = cJSON_GetObjectItemCaseSensitive(items, "type");
+      cJSON *properties = cJSON_GetObjectItemCaseSensitive(items, "properties");
+      cJSON *required = cJSON_GetObjectItemCaseSensitive(items, "required");
+      assert(cJSON_IsString(item_type) && strcmp(item_type->valuestring, "object") == 0);
+      assert(cJSON_GetObjectItemCaseSensitive(properties, "file_path") != NULL);
+      assert(cJSON_GetObjectItemCaseSensitive(properties, "line_start") != NULL);
+      assert(cJSON_GetObjectItemCaseSensitive(properties, "line_end") != NULL);
+      cJSON *first_required = cJSON_GetArrayItem(required, 0);
+      assert(cJSON_IsString(first_required));
+      assert(strcmp(first_required->valuestring, "file_path") == 0);
+   }
 
    cJSON *args = cJSON_Parse("{\"cwd\":\"/work/aimee\"}");
    /* cwd is resolved to a stable identity at the server dispatch boundary;

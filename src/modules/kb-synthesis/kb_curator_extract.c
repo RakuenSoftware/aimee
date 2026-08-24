@@ -10,7 +10,7 @@
 #include "kb_curator_sidecar.h"
 #include "kb_curator_llm.h"
 #include "aimee.h"
-#include "config.h" /* config_current_mode, aimee_mode_t, config_load */
+#include "config.h" /* config_current_mode, aimee_mode_t, legacy_config_read */
 #include "cJSON.h"
 #include "log.h"
 #include "modules/db2/c/artifacts.h"

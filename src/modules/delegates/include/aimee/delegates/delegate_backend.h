@@ -35,11 +35,8 @@ extern "C"
     * allocation. */
 #define DELEGATE_BACKEND_MAX 16
 
-   /* acquire() return code for a HARD isolation refusal: the sandbox could not be
-    * proven network-isolated and delegate_sandbox_require_isolation is set, so the
-    * backend tore the container down and the delegate MUST NOT run. This is distinct
-    * from a generic -1 acquire failure (which falls back to in-process execution): a
-    * hard refusal must abort the delegation, never degrade to a less-isolated path. */
+   /* acquire() return code for a HARD isolation refusal. The backend tore the
+    * container down and the delegate MUST NOT run or degrade to a host path. */
 #define DELEGATE_ACQUIRE_REFUSED_ISOLATION (-2)
 
    /* Per-acquire configuration that the caller passes through. The
@@ -50,12 +47,9 @@ extern "C"
       const char *image;     /* docker image hint, NULL for default */
       const char *host;      /* ssh target host, NULL for local */
       int hibernate_on_exit; /* if 1, release() preserves workspace state */
-      /* Host directory to expose AS the workspace. NULL (the default) keeps the
-       * historical behaviour: the backend mints its own empty scratch dir under
-       * $XDG_CACHE_HOME/aimee/delegate/<task_id>.
-       *
-       * That empty dir is the whole reason a delegate could not read its own
-       * subject. Pointing this at the tree the delegate already has server-side
+      /* Host directory to expose AS the workspace. Required: an empty scratch
+       * checkout is not a source tree and is refused. Pointing this at the tree
+       * the delegate already has server-side
        * (its worktree, or the session cwd) gives the container the ENTIRE CURRENT
        * SOURCE TREE by bind-mount — no copy, no sync, no drift: it IS the tree.
        *
@@ -66,17 +60,14 @@ extern "C"
        * delegate's own: a delegate's changes must stay inside its container, so a
        * tree it shares with anything else must be unwritable at the MOUNT — not
        * merely guarded above it. A guard is a rule; a read-only bind is a property.
-       * Ignored when `workspace` is NULL (the backend's scratch dir is nobody
-       * else's). */
+       */
       int workspace_read_only;
       /* 1 when delegate_sandbox_package_access == "proxy": the docker backend arms the
        * in-container package forwarder + http_proxy env. The caller resolves the mode
        * (it already loads config) so the backend stays config-agnostic. */
       int pkg_proxy;
-      /* 1 when delegate_sandbox_require_isolation is set: after the sandbox starts, the
-       * docker backend probes it for network egress (a runtime may ignore --network
-       * none) and FAILS the acquire if the sandbox is not isolated. When 0 a breach is
-       * logged but the delegate still runs. Resolved by the caller (config-agnostic). */
+      /* Deprecated compatibility field. Enabled sandboxes always verify and
+       * fail closed; no caller value can weaken that invariant. */
       int require_isolation;
    } delegate_backend_config_t;
 

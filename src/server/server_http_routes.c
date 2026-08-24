@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "server_http_routes_workspace.h"
 #include "server_http.h"
 #include "shadow_mirror.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
@@ -88,12 +89,12 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
-#include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"     /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>      /* mkdir for the proposal artifact dir */
-#include <time.h>          /* unique proposal artifact filename */
+#include "router_advise.h"        /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"         /* wfe_approval_record/present — human-gate approval */
+#include "db1_client/wfe_store.h" /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>             /* mkdir for the proposal artifact dir */
+#include <time.h>                 /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -203,7 +204,7 @@ static server_mgmt_endpoint_jti_result_t management_jti(void *ctx,
        c->issued_at,
        c->expires_at,
    };
-   server_management_jti_result_t rc = server_management_jti_consume(&token, rq->now);
+   server_management_jti_result_t rc = db1_management_jti_consume(&token, rq->now);
    return rc == SERVER_MANAGEMENT_JTI_OK       ? SERVER_MGMT_JTI_OK
           : rc == SERVER_MANAGEMENT_JTI_REPLAY ? SERVER_MGMT_JTI_REPLAY
                                                : SERVER_MGMT_JTI_FAILED;
@@ -538,11 +539,6 @@ static int rh_roadmap(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
    return route_json_provider(g_roadmap_provider, resp, cap, "roadmap");
-}
-static int rh_curiosity(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   return route_json_provider(g_curiosity_provider, resp, cap, "curiosity");
 }
 static int rh_notes(const route_req_t *rq, char *resp, int cap)
 {
@@ -1482,129 +1478,6 @@ int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
  * rh_dispatch_op. The {id} segment is the workspace's absolute path, carried
  * percent-encoded so its '/'s survive as one path segment. */
 
-static int ws_hex(char c)
-{
-   if (c >= '0' && c <= '9')
-      return c - '0';
-   if (c >= 'a' && c <= 'f')
-      return c - 'a' + 10;
-   if (c >= 'A' && c <= 'F')
-      return c - 'A' + 10;
-   return -1;
-}
-
-/* Percent-decode `in` into `out` (cap bytes incl. NUL); a malformed %XX is
- * copied literally. Returns out. */
-static char *ws_pct_decode(const char *in, char *out, size_t cap)
-{
-   size_t o = 0;
-   for (size_t i = 0; in && in[i] && o + 1 < cap; i++)
-   {
-      int hi, lo;
-      if (in[i] == '%' && (hi = ws_hex(in[i + 1])) >= 0 && (lo = ws_hex(in[i + 2])) >= 0)
-      {
-         out[o++] = (char)((hi << 4) | lo);
-         i += 2;
-      }
-      else
-      {
-         out[o++] = in[i];
-      }
-   }
-   if (cap)
-      out[o] = '\0';
-   return out;
-}
-
-/* Build {"method":m,"args":[arg0, extra...]} and run it through the loopback
- * bridge (same path + conn caps as rh_dispatch_op). */
-static int ws_dispatch_args(const char *method, const char *arg0, const char *const *extra,
-                            int extra_n, char *resp, int cap)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return err_json(resp, cap, 500, "out of memory");
-   cJSON_AddStringToObject(req, "method", method);
-   cJSON *args = cJSON_AddArrayToObject(req, "args");
-   if (arg0)
-      cJSON_AddItemToArray(args, cJSON_CreateString(arg0));
-   for (int i = 0; i < extra_n; i++)
-      cJSON_AddItemToArray(args, cJSON_CreateString(extra[i]));
-   char *line = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   if (!line)
-      return err_json(resp, cap, 500, "out of memory");
-   int rc = loopback_rpc(line, (int)strlen(line), resp, cap, g_rpc_conn_caps);
-   free(line);
-   return rc;
-}
-
-/* POST /v1/workspaces — register {root_hint|root|path, provider?}. */
-static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
-{
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jroot = cJSON_GetObjectItemCaseSensitive(body, "root_hint");
-   if (!cJSON_IsString(jroot))
-      jroot = cJSON_GetObjectItemCaseSensitive(body, "root");
-   if (!cJSON_IsString(jroot))
-      jroot = cJSON_GetObjectItemCaseSensitive(body, "path");
-   const char *root = (cJSON_IsString(jroot) && jroot->valuestring) ? jroot->valuestring : "";
-   const cJSON *jprov = cJSON_GetObjectItemCaseSensitive(body, "provider");
-   const char *provider = (cJSON_IsString(jprov) && jprov->valuestring) ? jprov->valuestring : "";
-   /* A `mirror` workspace is seeded by fetching the client's head from its
-    * remote, so workspace.add requires both. Dropping them here (as this route
-    * did) meant a mirror registration over REST was rejected for a missing
-    * --remote, leaving the reverse channel no route to the sandboxed tier. */
-   const cJSON *jremote = cJSON_GetObjectItemCaseSensitive(body, "remote");
-   const char *remote =
-       (cJSON_IsString(jremote) && jremote->valuestring) ? jremote->valuestring : "";
-   const cJSON *jhead = cJSON_GetObjectItemCaseSensitive(body, "head");
-   const char *head = (cJSON_IsString(jhead) && jhead->valuestring) ? jhead->valuestring : "";
-   int rc;
-   if (!root[0])
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "missing root_hint");
-   }
-   if (provider[0])
-   {
-      const char *extra[WS_ADD_FLAG_ARGS_MAX];
-      int extra_n = workspace_add_flag_args(provider, remote, head, extra, WS_ADD_FLAG_ARGS_MAX);
-      rc = ws_dispatch_args("workspace.add", root, extra, extra_n, resp, cap);
-   }
-   else
-   {
-      rc = ws_dispatch_args("workspace.add", root, NULL, 0, resp, cap);
-   }
-   cJSON_Delete(body);
-   return rc;
-}
-
-/* GET /v1/workspaces/{id} — manifest for the percent-encoded path id. */
-static int rh_workspace_get(const route_req_t *rq, char *resp, int cap)
-{
-   char path[MAX_PATH_LEN];
-   ws_pct_decode(rq->id, path, sizeof(path));
-   if (!path[0])
-      return err_json(resp, cap, 400, "missing workspace id");
-   return ws_dispatch_args("workspace.get", path, NULL, 0, resp, cap);
-}
-
-/* DELETE /v1/workspaces/{id} — deregister the percent-encoded path id. */
-static int rh_workspace_remove(const route_req_t *rq, char *resp, int cap)
-{
-   char path[MAX_PATH_LEN];
-   ws_pct_decode(rq->id, path, sizeof(path));
-   if (!path[0])
-      return err_json(resp, cap, 400, "missing workspace id");
-   return ws_dispatch_args("workspace.remove", path, NULL, 0, resp, cap);
-}
-
 /* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
  * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
  * db1 webchat_live row as the answer streams; the browser tails it on a fixed
@@ -1765,10 +1638,13 @@ const http_route_t g_v1_routes[] = {
      rh_dashboard_reminders},
     {"GET", "/v1/kb/status", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_status},
     {"GET", "/v1/kb/ingest/status", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_kb_ingest_status},
-    /* Write-tier grant administration. UDS-only via v1_route_requires_uds, which refuses
-     * these over TCP regardless of bearer, tier or capability; CAP_GRANT_ADMIN is defence in
-     * depth. Not given an `op` twin, because there is no NDJSON socket method for grant
-     * administration and inventing one would create a second reachable path to it. */
+    /* There are no write-tier grant routes here, deliberately. This comment used
+     * to describe a UDS-only family that has since been removed: see
+     * v1_route_requires_uds, which kept the reason -- proxying grant
+     * administration meant aimee-server holding an administrative identity on
+     * aimee-kb, which a single-tenant data-plane service should not have.
+     * Grants are administered against aimee-kb's own /v1/write-tier-grants
+     * routes. The comment outlived the routes and read as if they were below. */
     {"GET", "/v1/kb/curator", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_curator},
     {"GET", "/v1/agents", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_agents},
     {"GET", "/v1/roadmap", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_roadmap},
@@ -1799,6 +1675,12 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/wm/set", NULL, RM_EXACT, "wm.set", 0, rh_dispatch_op},
     {"POST", "/v1/attempts/record", NULL, RM_EXACT, "attempt.record", 0, rh_dispatch_op},
     {"POST", "/v1/rules/delete", NULL, RM_EXACT, "rules.delete", 0, rh_dispatch_op},
+    /* Typed-fact correction surface (§3 / §4). Data-plane writes, so their ops are
+     * listed in g_v1_write_ops below — without that a caller holding only the
+     * shared bearer would reach them with no write grant at all. */
+    {"POST", "/v1/facts/retract", NULL, RM_EXACT, "facts.retract", 0, rh_dispatch_op},
+    {"POST", "/v1/entities/merge", NULL, RM_EXACT, "entities.merge", 0, rh_dispatch_op},
+    {"POST", "/v1/entities/unmerge", NULL, RM_EXACT, "entities.unmerge", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/approve", NULL, RM_EXACT, "collab_rules.approve", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/reject", NULL, RM_EXACT, "collab_rules.reject", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/retire", NULL, RM_EXACT, "collab_rules.retire", 0, rh_dispatch_op},
@@ -2080,6 +1962,15 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/worktree/gc", NULL, RM_EXACT, "worktree.gc", 0, rh_dispatch_op},
     {"POST", "/v1/aux/test", NULL, RM_EXACT, "aux.test", 0, rh_dispatch_op},
     {"GET", "/v1/eval/results", NULL, RM_EXACT, "eval.results", 0, rh_dispatch_op},
+    /* Synthesised regression candidates: bounded DB + filesystem work with no
+     * LLM step, so both the read and the write stay on the synchronous bridge. */
+    {"GET", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates", 0, rh_dispatch_op},
+    {"POST", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates-update", 0, rh_dispatch_op},
+    /* Learning surfaces: advisory recall, measured credit, bounded drain. */
+    {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", 0, rh_dispatch_op},
+    {"GET", "/v1/learning/attribution", NULL, RM_EXACT, "learning.attribution", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/resolve", NULL, RM_EXACT, "learning.resolve", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/fate", NULL, RM_EXACT, "learning.fate", 0, rh_dispatch_op},
     /* Roundtable authoring pipelines. Every one of these is a DB-backed state
      * machine (rtp_* accessors in server_pipeline.c) that returns the next action
      * for the caller to take -- none of them runs a panel or any other LLM work
@@ -2176,6 +2067,10 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/dev/ci-event", NULL, RM_EXACT, NULL, 0, rh_dev_ci_event},
     {"POST", "/v1/runs", NULL, RM_EXACT, NULL, CAP_CHAT, rh_runs_post},
     {"POST", "/v1/runs/", "/stop", RM_PREFIX, NULL, CAP_CHAT, rh_runs_stop},
+    /* Registry-declared commands, including a plugin module's. RM_PREFIX so the
+     * "<group>.<verb>" method rides in the path, matching what GET /v1/cli/manifest
+     * advertises for these rows. */
+    {"POST", "/v1/commands/", NULL, RM_PREFIX, NULL, CAP_CHAT, rh_command_invoke},
     {"GET", "/v1/runs/", "/events", RM_PREFIX, NULL, CAP_SESSION_READ, NULL},
     {"GET", "/v1/runs/", NULL, RM_PREFIX, NULL, CAP_SESSION_READ, rh_runs_get},
 
@@ -2427,6 +2322,9 @@ static const char *const g_v1_write_ops[] = {"memory.store",
                                              "wm.set",
                                              "attempt.record",
                                              "rules.delete",
+                                             "facts.retract",
+                                             "entities.merge",
+                                             "entities.unmerge",
                                              "collab_rules.approve",
                                              "collab_rules.reject",
                                              "collab_rules.retire",

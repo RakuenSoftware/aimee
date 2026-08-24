@@ -1,5 +1,9 @@
 # Proposal: Deterministic context folding — turn skeletons, identifier conservation, and cross-session episodes
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — §1–§8 shipped to `testing`, default-off (see "Shipped work").
 - **Completed:** 2026-06-29
 - **Author:** JBailes

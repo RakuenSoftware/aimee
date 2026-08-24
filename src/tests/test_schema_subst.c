@@ -156,7 +156,7 @@ static void test_all_columns_substituted(void)
    /* memory_embeddings, kb_embeddings, and the curator vector tables all carry a
     * vector embedding column; expect several substituted occurrences. */
    int count = 0;
-   for (const char *p = sql; (p = strstr(p, "vector(2560)")) != NULL; p += 13)
+   for (const char *p = sql; (p = strstr(p, "vector(2560)")) != NULL; p += 12)
       count++;
    assert(count >= 5);
 }

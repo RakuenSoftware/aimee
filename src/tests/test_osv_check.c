@@ -1,6 +1,6 @@
 /* test_osv_check.c: MCP package-manager OSV target inference. */
 #include "osv_check.h"
-#include "mcp_osv_cache.h"
+#include "db1_client/mcp_osv_cache.h"
 
 #include <assert.h>
 #include <stdio.h>

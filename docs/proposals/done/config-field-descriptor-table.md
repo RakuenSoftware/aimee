@@ -1,5 +1,9 @@
 # Proposal: Config field-descriptor table — collapse the parallel config plumbing
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. The remaining save-side objective is
 > [pending under Go ownership](../pending/config-field-descriptor-save-residual.md); PR #2655's
@@ -40,7 +44,7 @@ Only the structural finding below survives.
 
 ## Audit entry
 
-- **Scope:** `src/modules/config/config.h` (the `config_t` struct),
+- **Scope:** `src/modules/config/config.h` (the `legacy_config_record` struct),
   `src/modules/config/config_fields.c` (`config_fields[]`),
   `src/modules/config/config.c` (`config_schema[]` + `config_set_defaults` + the inline
   parse blocks), `src/modules/config/config_save.c` (the per-field writers).

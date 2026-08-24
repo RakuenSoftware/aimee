@@ -1,6 +1,6 @@
 # Configuration Reference
 
-> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
+> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config module, env vars scanned from `getenv()` in `src/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 This reference covers every configurable surface:
 
@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (92)
+## CLI-settable keys (86)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -37,6 +37,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
 | `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs: Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
+| `client_tool_transport_preference` | string | n/a |
 | `code_cochange_git_enabled` | bool | Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on. |
 | `code_trust_actuation_enabled` | bool | Use earned code-graph trust lessons only as an equal-score retrieval tiebreak (default off). |
 | `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
@@ -44,15 +45,13 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cross_verify` | bool | Enable cross-model verification of outputs. |
 | `css_render_command` | string | Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar). |
 | `css_style_graph_enabled` | bool | Enable the CSS migration assistant's style-graph write path during indexing. |
-| `db2_url` | string | Vault-backed DB2 connection URL; reads are redacted and writes bypass YAML. |
 | `dedup_enabled` | bool | Deduplicate near-identical responses. |
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
 | `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
 | `delegate_graph_context_enabled` | bool | Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off). |
 | `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build. It augments a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
-| `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host through aimee for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. |
-| `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory. A delegate always runs in its own container -- there is no in-process host path to fall back to -- and this additionally refuses on a breach or an unverifiable probe. |
-| `embedder_api_key` | string | Bearer token for an external embedder endpoint (blank if it needs none). |
+| `delegate_sandbox_package_access` | string | Runtime package access for a `--network none` delegate. The delegate has no outside socket: the Go egress module proxies only its immutable package registry allowlist, pins the validated numeric destination, and logs the transfer. `proxy` (default) enables that narrow path; `off` permits only build-time/pre-baked packages. Legacy `gated` and `governance` values cannot widen the live proxy allowlist. |
+| `delegate_sandbox_require_isolation` | bool | Deprecated compatibility key. Its value is ignored: every delegate is created with no network, its complete network/mount/environment posture is verified after every start or resume, and any breach or unverifiable fact destroys the container and refuses the delegation. There is no host fallback. |
 | `embedder_command` | string | Command that produces embeddings (overrides the endpoint). |
 | `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and refuses to start on drift. |
 | `embedder_model` | string | Embedder identity. Written for a bundled model too, not just an external one: it is the registry key pooling and prefixes resolve from, and the value recorded against the corpus. |
@@ -70,12 +69,9 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `ingress_max_raw_scans` | int | Max raw-content scans per ingress request. |
 | `ingress_preinject_assembly_budget` | int | Token budget for ingress context pre-injection. |
 | `ingress_preinject_enabled` | bool | Enable `<aimee-context>` pre-injection on ingress (memory/code preview envelope on primary ingress turns; default on). |
-| `ingress_trusted_proxy_secret` | string | Vault-backed shared secret for a trusted ingress proxy; reads are redacted. |
 | `integrity_dry_run` | bool | Run integrity checks without enforcing. |
 | `integrity_enabled` | bool | Enable the integrity gate. |
-| `kb_api_bearer_token` | string | Vault-backed bearer for the aimee-kb API; reads expose configured state only. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
-| `kb_client_bearer_token` | string | Vault-backed server-to-KB bearer; reads are redacted; restart required. |
 | `kb_client_url` | string | Remote aimee-kb API base URL used by aimee-server; restart required. |
 | `kb_curator_extract_code_workers` | int | Parallel curator code-extraction workers, bounded to the synthesis service slot count. |
 | `kb_curator_extract_docs_workers` | int | Parallel curator document-extraction workers, bounded to the synthesis service slot count. |
@@ -105,12 +101,10 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
 | `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
-| `synthesis_api_key` | string | Bearer token for the synthesis endpoint (blank for a keyless or loopback endpoint). |
 | `synthesis_endpoint` | string | The ONE synthesis endpoint, remote or loopback. Empty means synthesis is off, which is supported - embedding, search, recall and indexing never call it. On a *-llm image the container entrypoint sets this to loopback itself after starting the bundled model. |
 | `synthesis_model` | string | Synthesis model. On a *-llm image this selects the bundled model to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model label sent to the configured endpoint. |
 | `synthesis_thinking` | bool | Let the synthesis model think before answering (default on). It measured positive-to-neutral everywhere it was tried. Global rather than per-stage, and the operator's call: turn it off only for a model that reasons past its output budget without answering. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
-| `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cmd` | string | Command run after a delegated fix to verify it. |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
 | `verify_enabled` | bool | Master gate for `aimee git verify` (default off). |
@@ -121,9 +115,9 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`, `client_tool_transport_preference`
 
-### Advanced tuning keys (83)
+### Advanced tuning keys (85)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -206,6 +200,8 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `memory_scenes_enabled` | bool | Cluster memories into scenes. |
 | `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
 | `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
+| `memory_typed_facts_promote_threshold` | int | n/a |
+| `memory_typed_facts_speculative_ttl_days` | int | n/a |
 | `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
 | `pr_base_mode` | string | What a PR opened from a session targets. feature (default): the session's durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on one branch and reach the default branch through a single reviewed PR. default_branch: every PR aims at the repo's default branch. Any other value fails closed rather than guessing a base. |
 | `prompt_manager_block_enabled` | bool | n/a |
@@ -229,7 +225,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 
 ## Config-file sections (53)
 
-Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
+Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the external config module metadata; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
 - **`aimee`**: _Core API/runtime settings._ Keys: `api`
 - **`autonomy`**: `auto_resume_cap_parks`, `ci_retry_max`, `concurrency`, `fanout`, `max_resumes`, `max_turns`, `max_wall_secs`, `skeptics`, `stale_abandon_secs`, `unit_max`, `unit_retry`
@@ -258,7 +254,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`lsp_servers`**: _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
 - **`mcp`**: _MCP integration (e.g. OSV)._ Keys: `osv`
 - **`mcp_clients`**: _MCP client connections (array of objects)._ Keys: `bearer_token_env`, `command`, `cwd`, `install`, `name`, `transport`, `url`
-- **`memory`**: _Memory subsystem; most children (recall, lifecycle, …) are nested objects with their own keys._ Keys: `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_floor_scale`, `semantic_weight`
+- **`memory`**: _Memory subsystem; most children (recall, lifecycle, …) are nested objects with their own keys._ Keys: `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_floor_scale`, `semantic_weight`, `typed_facts`
 - **`memory_maintenance`**: _Memory maintenance scheduling._ Keys: `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
 - **`memory_negation`**: _Negation handling in memory._ Keys: `enabled`
 - **`memory_query_expansion`**: _Recall query expansion._ Keys: `k`, `mode`
@@ -285,11 +281,11 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`workspaces`**: _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
 - **`worktree_gc`**: `enabled`, `max_age_days`
 
-## Other top-level config-file keys (5)
+## Other top-level config-file keys (4)
 
 Scalar keys read directly from the config root (not via the CLI allowlist above):
 
-`db2_pool_size`, `economizer`, `modules`, `proxy_token`, `toolsets`
+`db2_pool_size`, `economizer`, `modules`, `toolsets`
 
 ## Environment variables
 
@@ -300,7 +296,7 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_BUNDLED_SKILLS_DIR` | Override directory for the bundled skills. |
-| `AIMEE_DB1_PATH` | SQLite database the DB1 module process opens. The module is a separate process and cannot read the config store, so it is told the path and refuses to start without it rather than guessing a default and serving a different, empty database. Set it whenever `db1_path` is overridden in the configuration; the container entrypoint otherwise defaults it to `<AIMEE_HOME>/aimee.db`, which is config's own default. |
+| `AIMEE_CAPTURE_DIR` | Directory for best-effort event-bus capture sessions. Defaults to `AIMEE_HOME`; capture failure is exposed in health and recorded in the WORM ledger. |
 | `AIMEE_FORENSICS_DIR` | Directory for shutdown-forensics dumps. |
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
@@ -309,7 +305,6 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
 | `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_RUNTIME_DIR` | Private runtime directory for sockets, temporary credentials, and process state. |
-| `AIMEE_TOOLSETS_CONFIG` | Path to a toolsets config file (overrides the default tool allowlists). |
 | `AIMEE_WORKSPACES_DIR` | Root directory for mirrored/registered workspaces. |
 
 ### Client & session
@@ -339,8 +334,6 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_API_MTLS` | Client-certificate mode: `off`, `optional`, or `required`. The managed server image defaults to `optional` so enrollment works before the durable roster promotes the listener to required. |
-| `AIMEE_API_REMOTE_WRITES` | Legacy value: `off`, `data`, or `full`. Still parsed, but no longer authorizes user writes; non-off values warn and feed `remote_writes.global_ignored`. |
 | `AIMEE_BACKGROUND_THREADS` | Background worker thread count. |
 | `AIMEE_COMPUTE_THREADS` | Compute-pool thread count. |
 | `AIMEE_DEPLOY_COMPOSE_FILE` | Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml). |
@@ -437,24 +430,23 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_VAULT_OPERATOR_ENABLED` | Enable the dedicated KB vault-operator runtime. |
 | `AIMEE_KB_VAULT_ORCHESTRATOR_URL` | Operator-configured vault orchestrator endpoint. |
 | `AIMEE_LLM_HOST` | DNS name of the synthesis sidecar container. Setting it makes aimee-kb issue the mTLS identities for the kb -> aimee-llm hop into $AIMEE_HOME/synthesis-tls at startup, from the kb's own CA. Unset for an external or absent synthesis provider, which needs none of them. The sidecar refuses to start without this material. |
-| `AIMEE_OCR_URL` | Structured-PDF OCR sidecar endpoint. |
 | `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
 | `AIMEE_SERVER_TEAM_ID` | The team this server serves, from the same registry row as AIMEE_SERVER_ID. Required for per-user /v1 write authorization: unset, the server still starts and serves reads but denies every write with no_team_configured. |
 | `AIMEE_TRANSPORT_KB_POOL_ENABLED` | Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections. |
-| `AIMEE_TSR_URL` | Structured-PDF table-recognition sidecar endpoint. |
 | `AIMEE_VECTOR_KB_BATCH_SIZE` | Embedding batch size for KB vector ingest. |
 
 ### Database & vectors
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_DB2_EVAL_URL` | Separate DB2 URL used by evaluation harnesses; never the production default. |
+| `AIMEE_DB2_EVAL_URL` | Separate DB2 URL used by evaluation harnesses; never the production default. The harness applies the DB2 schema into the named database: into its public schema when that schema is empty, otherwise into a throwaway schema beside it. Either way the copy is dropped on close, so point this at a disposable server. |
 | `AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS` | Per-connection `idle_in_transaction_session_timeout` in ms, defaulting to the same pool stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000). `statement_timeout` bounds a STATEMENT, so a unit of work that opens a transaction and then stalls before its next statement is invisible to it and holds its pool member indefinitely. This measured at about 4.5 hours against a five-minute ceiling. Postgres ends such a backend itself, so the stalled thread unwinds and the lease is returned without a restart. Same value grammar as `AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the statement bound. |
 | `AIMEE_DB2_POOL_SIZE` | DB2 connection-pool size override. |
 | `AIMEE_DB2_STATEMENT_TIMEOUT_MS` | Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not outlive the duration that defines a lease as stuck. The pool can report such a lease but cannot reclaim it. The value must be canonical decimal digits with no sign, surrounding whitespace or leading zero. Exactly `0` disables the bound. This is a deliberate opt-out for genuinely long work. Every other spelling of zero (`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or out-of-range falls back to the default and never to unlimited, so no typo can silently remove the bound. |
 | `AIMEE_DB2_URL` | Postgres (DB2) connection URL for the KB store. |
 | `AIMEE_DIM_PROBE_BUDGET_MS` | Time budget for probing an embedder's output dimension. |
 | `AIMEE_PGVEC_SLOW_QUERY_MS` | Slow-query log threshold (ms) for the pgvector transport. |
+| `AIMEE_TEST_DB2_TEMPLATE_URL` | Test-only. Postgres template database the DB2 test shim clones per test process, so unit tests run against the real engine instead of the sqlite shim (which translates DB2's SQL rather than executing it). Build the template with `make db2-test-template` and the suite with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test binaries; no production code path consults it. |
 
 ### Memory
 
@@ -481,7 +473,6 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_DELEGATE_DEPTH` | Current delegation depth (recursion guard). |
 | `AIMEE_DELEGATE_HEARTBEAT_MONITOR` | Enable the delegate heartbeat monitor. |
 | `AIMEE_DELEGATE_MAX_INFLIGHT` | Process-wide maximum number of admitted delegate attempts. |
-| `AIMEE_DELEGATE_SANDBOX` | Enable the configured delegate sandbox backend. |
 | `AIMEE_DELEGATE_SOURCE_AUTHORITY` | Enable source-authority gating for delegate edits. |
 | `AIMEE_DELEGATE_SOURCE_PATHS` | Allowed source paths for delegate edits. |
 | `AIMEE_DELEGATE_WORKTREE_ROOT` | Root directory for delegate worktrees. |
@@ -605,7 +596,7 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
+`AIMEE_CLI_PATH`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
 
 ## External & provider environment
 
@@ -768,6 +759,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `cost_tier` | Cost-tier label for routing. |
 | `credentials` | Credential block / reference. |
 | `default_agent` | Top-level: name of the default agent. |
+| `default_delegate` | Delegate this agent hands work to when a task arrives with no explicit delegate. Lets a project pin its own worker without every caller passing --delegate. |
 | `desc` | Human description of the agent. |
 | `enabled` | Whether the agent is active. |
 | `endpoint` | Provider endpoint URL. |

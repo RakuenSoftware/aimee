@@ -1,5 +1,9 @@
 # P4b implementation plan — keyed fixed-window rate limiter (P4 §2)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Slice P4b of P4. Branch off `testing` (P1, P3a, P2a, P3b, P4a, P10 s1/s2/s3b merged). The
 keyed rate limiter deferred from P4a. Replaces the single global bucket (`server_http_rate
 _check`) with a **shared-Postgres keyed fixed-window limiter** at kb egress: per-`(dimension,

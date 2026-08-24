@@ -350,12 +350,7 @@ const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind)
  * Static schema: (subject_kind, relation_id, object_kind) allowed triples.
  * NODE_OTHER = wildcard (any kind allowed for that position).
  */
-typedef struct
-{
-   memory_node_kind_t sk;
-   memory_relation_kind_t rel;
-   memory_node_kind_t ok;
-} schema_rule_t;
+typedef memory_ontology_rule_t schema_rule_t;
 
 static const schema_rule_t schema_rules[] = {{NODE_FILE, REL_CO_EDITED, NODE_FILE},
                                              {NODE_OTHER, REL_CO_DISCUSSED, NODE_OTHER},
@@ -377,6 +372,20 @@ static const schema_rule_t schema_rules[] = {{NODE_FILE, REL_CO_EDITED, NODE_FIL
                                              {NODE_OTHER, REL_SUMMARISES, NODE_OTHER},
                                              /* sentinel */
                                              {NODE_OTHER, REL_OTHER, NODE_OTHER}};
+
+int memory_ontology_rules(const memory_ontology_rule_t **out)
+{
+   /* The sentinel terminates the table and is not itself a rule, so it is
+    * excluded from the count -- publishing it would advertise
+    * (other, other, other), which reads as "anything goes". */
+   int n = 0;
+   while (!(schema_rules[n].sk == NODE_OTHER && schema_rules[n].rel == REL_OTHER &&
+            schema_rules[n].ok == NODE_OTHER))
+      n++;
+   if (out)
+      *out = schema_rules;
+   return n;
+}
 
 int memory_ontology_validate(memory_node_kind_t sk, memory_relation_kind_t rel,
                              memory_node_kind_t ok)
@@ -447,8 +456,8 @@ int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int m
       for (int f = 0; f < frontier_n && count < max; f++)
       {
          const char *node = frontier[f];
-         db2_entity_edge_typed_t buf[50];
-         int n = db2_entity_edge_walk_step_typed(node, buf, 50);
+         db2_entity_edge_with_kinds_t buf[50];
+         int n = db2_entity_edge_walk_step_with_kinds(node, buf, 50);
 
          for (int b = 0; b < n && count < max; b++)
          {

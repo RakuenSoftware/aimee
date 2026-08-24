@@ -200,7 +200,7 @@ class ModuleBusBoundaryTests(unittest.TestCase):
 
     def test_core_linked_reaches_name_a_core_linked_module(self) -> None:
         """The exception is only meaningful if the group actually holds it."""
-        core_linked = {"audit", "config", "execution-policy", "gateway", "ir",
+        core_linked = {"audit", "config", "gateway", "ir",
                        "module-runtime", "protocols", "translation", "vault"}
         for path, header in checker.CORE_LINKED_REACH:
             with self.subTest(path=path):

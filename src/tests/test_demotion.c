@@ -17,10 +17,10 @@
 #include <string.h>
 #include "demotion.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "support/json_canonical.h"
 #include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "config.h"
-#include "config_learning.h"
 
 static void open_db(void)
 {
@@ -63,7 +63,7 @@ static void test_retrieval_event_turn(void)
    assert(db2_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
                                                sizeof(payload)) == 1);
    assert(strcmp(got_id, ev_id) == 0);
-   assert(strstr(payload, "\"surfaced_ids\":[11,22]") != NULL);
+   assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22]") != NULL);
 
    /* an unknown turn -> no event (0), not an error. */
    assert(db2_demotion_retrieval_event_by_turn("turn-missing", got_id, sizeof(got_id), NULL, 0) ==
@@ -110,11 +110,11 @@ static void test_retrieval_event_merge_turn(void)
                                                   sizeof(ev_id)) == 0);
    char payload[8192];
    assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "\"surfaced_ids\":[11,22]") != NULL);
+   assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22]") != NULL);
    /* unified model (D3): the canonical surfaced_refs carries typed entries, and the
     * legacy surfaced_ids is a derived projection of the memory-typed ones. */
-   assert(strstr(payload, "\"surfaced_refs\":") != NULL);
-   assert(strstr(payload, "\"type\":\"memory\"") != NULL);
+   assert(strstr(json_canonical(payload), "\"surfaced_refs\":") != NULL);
+   assert(strstr(json_canonical(payload), "\"type\":\"memory\"") != NULL);
 
    /* Second writer on the SAME turn → merges new refs into the same event (22 is a
     * dup and is skipped; 33 is added). Returns the same canonical event id. */
@@ -124,16 +124,17 @@ static void test_retrieval_event_merge_turn(void)
                                                   sizeof(got)) == 0);
    assert(strcmp(got, ev_id) == 0); /* same event, not a new one */
    assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "\"surfaced_ids\":[11,22,33]") != NULL);
+   assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22,33]") != NULL);
    /* the merged ref also gets a surfaced_items entry (same shape as the writer) */
-   assert(strstr(payload, "\"surfaced_items\":") != NULL);
-   assert(strstr(payload, "{\"id\":33}") != NULL); /* id-only (no v: id 33 unresolved) */
+   assert(strstr(json_canonical(payload), "\"surfaced_items\":") != NULL);
+   assert(strstr(json_canonical(payload), "{\"id\":33}") !=
+          NULL); /* id-only (no v: id 33 unresolved) */
 
    /* Idempotent: re-merging refs already present changes nothing. */
    int64_t c[2] = {11, 33};
    assert(db2_demotion_retrieval_event_merge_turn("turn-m", "fp3", "Recall", c, 2, NULL, 0) == 0);
    assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "\"surfaced_ids\":[11,22,33]") != NULL); /* unchanged */
+   assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22,33]") != NULL); /* unchanged */
 
    /* bad arg. */
    assert(db2_demotion_retrieval_event_merge_turn("", "fp", "Recall", a, 2, NULL, 0) == -1);
@@ -154,9 +155,10 @@ static void test_retrieval_event_merge_turn(void)
              0);
       assert(db2_demotion_retrieval_event_by_turn("turn-leg", NULL, 0, payload, sizeof(payload)) ==
              1);
-      assert(strstr(payload, "\"surfaced_refs\":") != NULL);     /* back-filled */
-      assert(strstr(payload, "\"surfaced_ids\":[7,8]") != NULL); /* migrated 7 + merged 8 */
-      assert(strstr(payload, "\"v\":\"x\"") != NULL);            /* legacy v preserved */
+      assert(strstr(json_canonical(payload), "\"surfaced_refs\":") != NULL); /* back-filled */
+      assert(strstr(json_canonical(payload), "\"surfaced_ids\":[7,8]") !=
+             NULL);                                                   /* migrated 7 + merged 8 */
+      assert(strstr(json_canonical(payload), "\"v\":\"x\"") != NULL); /* legacy v preserved */
       printf("  retrieval_event_merge_turn: legacy migration ok\n");
    }
 
@@ -187,11 +189,11 @@ static void test_retrieval_event_merge_refs(void)
                                                        1, ev_id, sizeof(ev_id)) == 0);
    char payload[8192];
    assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "\"type\":\"code\"") != NULL);
-   assert(strstr(payload, "code:proj:src/a.c") != NULL);
-   assert(strstr(payload, "\"v\":\"h1\"") != NULL);
+   assert(strstr(json_canonical(payload), "\"type\":\"code\"") != NULL);
+   assert(strstr(json_canonical(payload), "code:proj:src/a.c") != NULL);
+   assert(strstr(json_canonical(payload), "\"v\":\"h1\"") != NULL);
    /* code refs do NOT populate the memory-only legacy projection */
-   assert(strstr(payload, "\"surfaced_ids\":[]") != NULL);
+   assert(strstr(json_canonical(payload), "\"surfaced_ids\":[]") != NULL);
 
    /* second call: a.c is a dup (skipped), b.c is added; same canonical event. */
    char got[64];
@@ -199,24 +201,25 @@ static void test_retrieval_event_merge_refs(void)
                                                        2, got, sizeof(got)) == 0);
    assert(strcmp(got, ev_id) == 0);
    assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "code:proj:src/b.c") != NULL);
-   assert(count_occurrences(payload, "code:proj:src/a.c") == 1); /* deduped, not duplicated */
+   assert(strstr(json_canonical(payload), "code:proj:src/b.c") != NULL);
+   assert(count_occurrences(json_canonical(payload), "code:proj:src/a.c") ==
+          1); /* deduped, not duplicated */
 
    /* idempotent: re-merging both refs changes nothing. */
    assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs, vers,
                                                        2, NULL, 0) == 0);
    assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(count_occurrences(payload, "code:proj:src/a.c") == 1);
-   assert(count_occurrences(payload, "code:proj:src/b.c") == 1);
+   assert(count_occurrences(json_canonical(payload), "code:proj:src/a.c") == 1);
+   assert(count_occurrences(json_canonical(payload), "code:proj:src/b.c") == 1);
 
    /* COEXISTENCE: a memory ref merged into the same turn lives alongside the code
     * refs in surfaced_refs; the legacy projection contains only the memory id. */
    int64_t mids[1] = {55};
    assert(db2_demotion_retrieval_event_merge_turn("turn-c", "fp", "Recall", mids, 1, NULL, 0) == 0);
    assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "\"type\":\"memory\"") != NULL);
-   assert(strstr(payload, "\"type\":\"code\"") != NULL);
-   assert(strstr(payload, "\"surfaced_ids\":[55]") != NULL);
+   assert(strstr(json_canonical(payload), "\"type\":\"memory\"") != NULL);
+   assert(strstr(json_canonical(payload), "\"type\":\"code\"") != NULL);
+   assert(strstr(json_canonical(payload), "\"surfaced_ids\":[55]") != NULL);
 
    /* empty turn_id rejected; empty type/ref entries skipped (no-op success). */
    assert(db2_demotion_retrieval_event_merge_refs_turn("", "fp", "Recall", types, refs, vers, 1,
@@ -232,7 +235,7 @@ static void test_retrieval_event_merge_refs(void)
    assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", t2, r2, NULL, 1,
                                                        NULL, 0) == 0);
    assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "code:proj:src/c.c") != NULL);
+   assert(strstr(json_canonical(payload), "code:proj:src/c.c") != NULL);
 
    /* n_refs==0 is a valid no-op on an existing turn. */
    assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", NULL, NULL, NULL,
@@ -244,7 +247,7 @@ static void test_retrieval_event_merge_refs(void)
    assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", tm, rm, NULL, 1,
                                                        NULL, 0) == 0);
    assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
-   assert(strstr(payload, "memory:99") == NULL); /* not added */
+   assert(strstr(json_canonical(payload), "memory:99") == NULL); /* not added */
 
    close_db();
    printf("  retrieval_event_merge_refs: ok\n");
@@ -388,16 +391,12 @@ static void test_demotion_candidates(void)
 /* ---- 8. config defaults ---- */
 static void test_config_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_demotion_settings(&cfg, NULL);
-
    /* Default flipped to 1 (shadow): scores/profiles are computed but no row is
-    * demoted until 2 (live). See config_apply_demotion_settings rationale. */
-   assert(cfg.demotion_enabled == 1);
-   assert(cfg.demotion_window == 64);
-   assert(fabs(cfg.demotion_half_life_days - 30.0) < 1e-9);
-   assert(cfg.demotion_n_min == 5);
+    * demoted until 2 (live). */
+   assert(config_demotion_enabled() == 1);
+   assert(config_demotion_window() == 64);
+   assert(fabs(config_demotion_half_life_days() - 30.0) < 1e-9);
+   assert(config_demotion_n_min() == 5);
 
    printf("  config_defaults: ok\n");
 }

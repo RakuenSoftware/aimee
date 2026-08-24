@@ -30,7 +30,12 @@ typedef enum
    RT_SEAT_OK = 0,             /* *out_idx holds a viable agent index in cfg */
    RT_SEAT_RANDOM_EXHAUSTED,   /* "$random": no eligible role agent remains (excl. `used`) */
    RT_SEAT_PINNED_UNAVAILABLE, /* pinned model absent/disabled/unroutable for the role */
-   RT_SEAT_INVALID             /* bad args */
+   /* "$random": the routing module refused to choose, so the roster was never
+    * consulted. Distinct from EXHAUSTED on purpose -- retrying with a smaller
+    * `used` set cannot help, and telling an operator the panel ran out of
+    * agents sends them to audit a roster that is fine. */
+   RT_SEAT_ROUTING_UNAVAILABLE,
+   RT_SEAT_INVALID /* bad args */
 } rt_seat_resolve_t;
 
 /* 1 iff `model` is the "$random" sentinel (NULL/empty is treated as random too,

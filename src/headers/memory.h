@@ -94,8 +94,10 @@ typedef struct
    double hybrid_total;   /* lexical+dense hybrid score, for the explain surface */
    double blended_total;  /* final score after the post-hybrid passes */
    double graph_score;    /* utility-weighted graph boost contribution */
+   double graph_weight;   /* weight actually applied to graph_score */
    double code_proximity; /* code-projection edge proximity score */
    double utility;        /* decayed utility signal from feedback */
+   double outcome;        /* P5 work-outcome overlay; default weight is zero */
    double source_fusion;  /* fused graph-vector-code ranking delta */
    double total;
 } memory_score_parts_t;
@@ -105,6 +107,22 @@ typedef struct
    memory_t memory;
    memory_score_parts_t parts;
 } memory_diagnostic_t;
+
+#define MEMORY_RECALL_TRACE_MAX_REJECTIONS 64
+typedef struct
+{
+   int64_t memory_id;
+   char lane[24];
+   char gate[64];
+} memory_recall_rejection_t;
+
+/* Per-thread, opt-in capture of candidates rejected by the real recall gates.
+ * Capture observes the live path and never participates in scoring. */
+void memory_recall_trace_capture_begin(void);
+void memory_recall_trace_capture_reset(void);
+void memory_recall_trace_capture_end(void);
+void memory_recall_trace_reject(int64_t memory_id, const char *lane, const char *gate);
+int memory_recall_trace_rejections(memory_recall_rejection_t *out, int max);
 
 #define MEMORY_ANSWER_MAX_CITATIONS 4
 #define MEMORY_ANSWER_TRACE_MAX_IDS 16
@@ -345,19 +363,67 @@ int memory_synthesize_l5_patterns(void);
  * gate and by the `memory approve` CLI / MCP tool. */
 int memory_approve_l4_promotion(int64_t memory_id, const char *approver, const char *note);
 
-/* --- Tiered Memory --- */
+/* memory_authority_t — who is asking for a destructive memory edit. Lives in its
+ * own dependency-free header so the kb_service backend contract can name it. */
+#include "memory_authority.h"
+
+/* --- Tiered Memory ---
+ *
+ * memory_insert_ex() takes the write's `authority`, which it PERSISTS as the
+ * row's provenance_category (MEMORY_PROVENANCE_FOR). It is not about this write's
+ * permissions — an insert destroys nothing — but about what the typed-fact drain
+ * may later mine out of the note: only text the user actually stated can produce
+ * a Class-A fact (typed-fact §5). It must therefore be derived from the calling
+ * SURFACE and the caller's authentication, never from a request field.
+ *
+ * memory_insert() is the MODEL-authority spelling, which is what its callers are:
+ * promotion, synthesis, learning, trace analysis and the benchmarks all write
+ * text the system produced, not text the user said. */
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out);
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
                      const char *use_cases, double confidence, const char *session_id,
-                     memory_t *out);
+                     memory_authority_t authority, memory_t *out);
+int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
+                               const char *key, const char *content, const char *use_cases,
+                               double confidence, const char *session_id,
+                               memory_authority_t authority, memory_t *out);
 int memory_get(int64_t id, memory_t *out);
 int memory_touch(int64_t id);
-int memory_update_content(int64_t id, const char *content);
+/* Batch memory_touch, for the recall path: one statement per chunk of ids
+ * rather than one UPDATE per memory injected into a turn. */
+int memory_touch_many(const int64_t *ids, int n);
 int memory_reject(int64_t id, const char *reason);
 int memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max);
-int memory_delete(int64_t id);
 int memory_stats(memory_stats_t *out);
+
+/* Replace a memory's content.
+ *
+ * memory_update_content_as() with MEMORY_AUTHORITY_MODEL routes to
+ * memory_supersede(), preserving the prior content as `key#vN` and linking the
+ * two; `new_id_out` (optional) receives the id of the row now holding the
+ * current value. With MEMORY_AUTHORITY_USER it overwrites in place, and
+ * new_id_out receives `id` unchanged.
+ *
+ * memory_update_content() is the USER-authority spelling, kept for the CLI /
+ * operator callers that predate the split. */
+/* Returns -2 for immutable episode/experience content (annotate instead) and
+ * -3 for instruction/policy content (revoke and replace instead). */
+int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
+                             int64_t *new_id_out);
+int memory_update_content(int64_t id, const char *content);
+
+/* Remove a memory.
+ *
+ * memory_delete_as() with MEMORY_AUTHORITY_MODEL routes to memory_retire() — the
+ * row survives under `key#vN` with valid_until stamped, so it stops answering
+ * recall for `key` but stays readable through memory_fact_history(). With
+ * MEMORY_AUTHORITY_USER it hard-deletes the row and its provenance, which is
+ * irreversible: the audit event carries the id only, never the content.
+ *
+ * memory_delete() is the USER-authority spelling. */
+int memory_delete_as(int64_t id, memory_authority_t authority);
+int memory_delete(int64_t id);
 
 /* Audit hook: notified after each memory MUTATION at the store — insert, an
  * exact-key or near-duplicate content overwrite ("memory.merge"), update, delete,
@@ -375,6 +441,13 @@ int memory_stats(memory_stats_t *out);
 typedef void (*memory_audit_hook_fn)(const char *op, int64_t id, const char *tier, const char *kind,
                                      const char *key, double confidence, const char *session_id);
 void memory_set_audit_hook(memory_audit_hook_fn fn);
+
+/* Fire the audit hook directly. INTERNAL to the memory module: mutation sites
+ * that live outside memory_core_crud.c (memory_retire in memory_advanced.c) use
+ * this so the hook still fires at the authoritative mutation site, as the
+ * contract above requires. Not for callers outside the module. */
+void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
+                       const char *key, double confidence, const char *session_id);
 int memory_rebuild_derived_indexes(int limit);
 int memory_repair_vector_index(int64_t memory_id, const char *command);
 int memory_repair_vector_index_failed_only(const char *command, int limit, int *failed_out);
@@ -892,9 +965,18 @@ int anti_pattern_extract_from_failures(void);
 int anti_pattern_escalate(int hit_threshold);
 
 /* --- Temporal Facts --- */
+/* Returns -2 when an episode/experience must be annotated and -3 when an
+ * instruction/policy must be revoked instead of corrected. */
 int memory_supersede(int64_t old_id, const char *new_content, double confidence,
                      const char *session_id, memory_t *out);
 int memory_fact_history(const char *key, memory_t *out, int max);
+
+/* Retire a memory without a replacement: rename the row to `key#vN` and stamp
+ * valid_until, so it no longer answers recall under `key` but remains readable
+ * via memory_fact_history(). This is the non-destructive half of supersede — the
+ * "this no longer holds, and nothing takes its place" case. Returns 0 on
+ * success, -1 if the id does not resolve or the rename fails. */
+int memory_retire(int64_t id, const char *session_id);
 
 /* --- Drift Detection --- */
 typedef struct

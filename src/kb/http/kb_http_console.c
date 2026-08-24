@@ -5,15 +5,20 @@
 
 #include "aimee.h" /* now_utc */
 #include "cJSON.h"
-#include "config.h"                           /* config_load / config_save (§8 tune) */
-#include "config_fields.h"                    /* typed get/set of the pipeline config keys */
+#include "config.h"
+#include "config_client.h"
 #include "kb_curator_drain.h"                 /* kb_curator_stages_json / _presets_json */
 #include "kb_service.h"                       /* kb_service_workers_json, kb_service_ctx_t */
+#include "kb_reqctx.h"                        /* verifier-derived trace scope */
 #include "kb_service_kb.h"                    /* kb_service_health_json */
 #include "modules/db2/c/kb_service_backend.h" /* async queue status */
 #include "modules/db2/c/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
+#include "modules/db2/c/fact_mutation.h"      /* assertion review/rollback/removal */
+#include "modules/db2/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
+#include "modules/db2/c/entity_registry.h"    /* entity merge/unmerge review */
 #include "rel_types.h"                        /* REL_TYPE_NAME_MAX */
-#include <openssl/crypto.h>                   /* wipe transient credential request copies */
+#include "runtime_secret.h"
+#include <openssl/crypto.h> /* wipe transient credential request copies */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -178,7 +183,7 @@ static int console_typed_facts(char *out_buf, int out_cap)
    cJSON_AddStringToObject(root, "generated_at", ts);
 
    cJSON *c = cJSON_AddObjectToObject(root, "config");
-   cJSON_AddBoolToObject(c, "typed_facts_enabled", config_typed_facts_enabled() ? 1 : 0);
+   cJSON_AddBoolToObject(c, "typed_facts_enabled", 1); /* unconditional; no master gate */
    cJSON_AddBoolToObject(c, "auto_promote", config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
    cJSON_AddNumberToObject(c, "promote_threshold", thr);
 
@@ -203,6 +208,67 @@ static int console_typed_facts(char *out_buf, int out_cap)
       cJSON_AddItemToArray(cands, o);
    }
    cJSON_AddNumberToObject(root, "candidate_count", nc < 0 ? 0 : nc);
+
+   /* Assertion candidates are quarantined from recall until this queue approves
+    * them.  Evidence count is independent of the graph weight. */
+   cJSON *assertions = cJSON_AddArrayToObject(root, "assertion_candidates");
+   fact_candidate_t fc[64];
+   int nfc = db2_fact_candidates(fc, 64);
+   for (int i = 0; i < nfc && assertions; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      if (!o)
+         continue;
+      cJSON_AddNumberToObject(o, "id", (double)fc[i].id);
+      cJSON_AddStringToObject(o, "subject", fc[i].source);
+      cJSON_AddStringToObject(o, "relation", fc[i].relation);
+      cJSON_AddStringToObject(o, "object", fc[i].target);
+      cJSON_AddStringToObject(o, "assertion_kind", fc[i].assertion_kind);
+      cJSON_AddStringToObject(o, "lifecycle", fc[i].lifecycle);
+      cJSON_AddNumberToObject(o, "authority_rank", fc[i].authority_rank);
+      cJSON_AddNumberToObject(o, "evidence_count", fc[i].evidence_count);
+      cJSON_AddStringToObject(o, "commit_id", fc[i].commit_id);
+      cJSON_AddItemToArray(assertions, o);
+   }
+   cJSON_AddNumberToObject(root, "assertion_candidate_count", nfc < 0 ? 0 : nfc);
+
+   /* Canonical entities and merge history share the typed-fact operator surface:
+    * merge is a graph mutation with the same commit/rollback/audit contract. */
+   cJSON *entities = cJSON_AddArrayToObject(root, "entities");
+   entity_summary_t es[128];
+   int nes = db2_entity_summaries(es, 128);
+   for (int i = 0; i < nes && entities; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      if (!o)
+         continue;
+      cJSON_AddNumberToObject(o, "canonical_id", (double)es[i].canonical_id);
+      cJSON_AddNumberToObject(o, "kind", es[i].kind);
+      cJSON_AddStringToObject(o, "status", es[i].status);
+      cJSON_AddNumberToObject(o, "merged_into", (double)es[i].merged_into);
+      cJSON_AddStringToObject(o, "name", es[i].name);
+      cJSON_AddItemToArray(entities, o);
+   }
+   cJSON_AddNumberToObject(root, "entity_count", nes < 0 ? 0 : nes);
+
+   cJSON *merges = cJSON_AddArrayToObject(root, "entity_merges");
+   entity_merge_summary_t ms[64];
+   int nms = db2_entity_merge_summaries(ms, 64);
+   for (int i = 0; i < nms && merges; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      if (!o)
+         continue;
+      cJSON_AddNumberToObject(o, "merge_id", (double)ms[i].merge_id);
+      cJSON_AddNumberToObject(o, "from_id", (double)ms[i].from_id);
+      cJSON_AddNumberToObject(o, "into_id", (double)ms[i].into_id);
+      cJSON_AddBoolToObject(o, "undone", ms[i].undone ? 1 : 0);
+      cJSON_AddStringToObject(o, "from_name", ms[i].from_name);
+      cJSON_AddStringToObject(o, "into_name", ms[i].into_name);
+      cJSON_AddStringToObject(o, "commit_id", ms[i].commit_id);
+      cJSON_AddItemToArray(merges, o);
+   }
+   cJSON_AddNumberToObject(root, "entity_merge_count", nms < 0 ? 0 : nms);
 
    char *s = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);
@@ -234,23 +300,37 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid request body\"}");
       return 400;
    }
-   /* KB-owned master enable/disable for the whole typed-facts layer. -1 means
-    * "not in this request", which config_set_typed_facts leaves unchanged. */
+   /* `enabled` IS NO LONGER ACCEPTED. The typed-fact layer has no master gate:
+    * it used to default OFF, which turned retraction, recall and class keying
+    * into silent no-ops on a stock install. An endpoint that can still switch it
+    * off would reintroduce exactly that, so a request carrying `enabled` is
+    * refused rather than quietly ignored -- a caller trying to disable the layer
+    * must be told it did not happen.
+    *
+    * The two real knobs stay: -1 means "not in this request", which
+    * config_set_typed_facts leaves unchanged. */
    const cJSON *en = cJSON_GetObjectItemCaseSensitive(req, "enabled");
+   if (en)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"the typed-fact layer is always enabled; `enabled` is not a "
+               "settable option\"}");
+      return 400;
+   }
    const cJSON *ap = cJSON_GetObjectItemCaseSensitive(req, "auto_promote");
    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(req, "promote_threshold");
-   int want_enabled = (en && cJSON_IsBool(en)) ? (cJSON_IsTrue(en) ? 1 : 0) : -1;
    int want_auto = (ap && cJSON_IsBool(ap)) ? (cJSON_IsTrue(ap) ? 1 : 0) : -1;
    int want_threshold = (pt && cJSON_IsNumber(pt) && pt->valueint > 0) ? pt->valueint : -1;
    cJSON_Delete(req);
-   if (config_set_typed_facts(want_enabled, want_auto, want_threshold) != 0)
+   if (config_set_typed_facts(want_auto, want_threshold) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config save failed\"}");
       return 500;
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
-   cJSON_AddBoolToObject(resp, "enabled", config_typed_facts_enabled() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "enabled", 1); /* unconditional; no master gate */
    cJSON_AddBoolToObject(resp, "auto_promote",
                          config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
    cJSON_AddNumberToObject(resp, "promote_threshold", config_kb_typed_facts_promote_threshold());
@@ -359,6 +439,476 @@ static int console_typed_facts_relation(const char *body, char *out_buf, int out
    return status;
 }
 
+/* POST /v1/console/typed_facts/assertion
+ * {action:"approve"|"reject"|"undo", assertion_id:N}.  Authority is resolved
+ * exclusively from the verified request context by the mutation seam. */
+static int console_typed_facts_assertion(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "assertion_id") : NULL;
+   int64_t id = cJSON_IsNumber(idj) && idj->valuedouble > 0 ? (int64_t)idj->valuedouble : 0;
+   fact_review_action_t review;
+   if (action && strcmp(action, "approve") == 0)
+      review = FACT_REVIEW_APPROVE;
+   else if (action && strcmp(action, "reject") == 0)
+      review = FACT_REVIEW_REJECT;
+   else if (action && strcmp(action, "undo") == 0)
+      review = FACT_REVIEW_UNDO;
+   else
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be approve, reject, or undo\"}");
+      return 400;
+   }
+   if (!id)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive assertion_id required\"}");
+      return 400;
+   }
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   fact_mutation_result_t result;
+   int rc = db2_fact_mutation_review(&actor, id, review, &result);
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fact review transition failed\"}");
+      return 409;
+   }
+   snprintf(out_buf, (size_t)out_cap,
+            "{\"ok\":true,\"assertion_id\":%lld,\"lifecycle\":\"%s\","
+            "\"commit_id\":\"%s\"}",
+            (long long)result.assertion_id, result.lifecycle, result.commit_id);
+   return 200;
+}
+
+/* POST /v1/console/typed_facts/entity
+ * {action:"merge",from_id:N,into_id:N} or {action:"unmerge",merge_id:N}.
+ * IDs select existing canonical rows only; actor identity and authority come
+ * exclusively from the verified console request context. */
+static int console_typed_facts_entity(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   fact_actor_t actor;
+   if (!action || (strcmp(action, "merge") != 0 && strcmp(action, "unmerge") != 0))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be merge or unmerge\"}");
+      return 400;
+   }
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   char cid[FACT_COMMIT_ID_MAX];
+   if (strcmp(action, "merge") == 0)
+   {
+      cJSON *fj = cJSON_GetObjectItemCaseSensitive(req, "from_id");
+      cJSON *tj = cJSON_GetObjectItemCaseSensitive(req, "into_id");
+      int64_t from = cJSON_IsNumber(fj) && fj->valuedouble > 0 ? (int64_t)fj->valuedouble : 0;
+      int64_t into = cJSON_IsNumber(tj) && tj->valuedouble > 0 ? (int64_t)tj->valuedouble : 0;
+      if (!from || !into || from == into || fj->valuedouble != (double)from ||
+          tj->valuedouble != (double)into)
+      {
+         cJSON_Delete(req);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"distinct positive integer from_id and into_id required\"}");
+         return 400;
+      }
+      int64_t mid = db2_entity_merge_as(&actor, from, into, cid);
+      cJSON_Delete(req);
+      if (mid <= 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"entities are not both active or merge would be invalid\"}");
+         return 409;
+      }
+      snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+               (long long)mid, cid);
+      return 200;
+   }
+   cJSON *mj = cJSON_GetObjectItemCaseSensitive(req, "merge_id");
+   int64_t mid = cJSON_IsNumber(mj) && mj->valuedouble > 0 ? (int64_t)mj->valuedouble : 0;
+   if (!mid || mj->valuedouble != (double)mid)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive integer merge_id required\"}");
+      return 400;
+   }
+   int rc = db2_entity_unmerge_as(&actor, mid, cid);
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"merge is unknown, already undone, or no longer current\"}");
+      return 409;
+   }
+   snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
+            (long long)mid, cid);
+   return 200;
+}
+
+/* POST /v1/console/typed_facts/commit
+ * preview/rollback accepts either one commit_id or one atomic ingest_run_id. */
+static int console_typed_facts_commit(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   const char *cid =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "commit_id")) : NULL;
+   const char *run =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "ingest_run_id")) : NULL;
+   int by_run = run && run[0];
+   if (!action || ((!cid || !cid[0]) && !by_run) || (cid && cid[0] && by_run))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"action and exactly one of commit_id or ingest_run_id required\"}");
+      return 400;
+   }
+   char selector[128];
+   const char *selected = by_run ? run : cid;
+   if (strlen(selected) >= sizeof(selector))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid commit_id\"}");
+      return 400;
+   }
+   snprintf(selector, sizeof(selector), "%s", selected);
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   if (strcmp(action, "rollback") == 0)
+   {
+      char rollback_id[FACT_COMMIT_ID_MAX];
+      int n = by_run ? db2_fact_ingest_run_rollback(&actor, selector, rollback_id)
+                     : db2_fact_commit_rollback(&actor, selector, rollback_id);
+      cJSON_Delete(req);
+      if (n < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"commit or ingest run is not reversible\"}");
+         return 409;
+      }
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"ok\":true,\"changes\":%d,\"rollback_commit_id\":\"%s\"}", n, rollback_id);
+      return 200;
+   }
+   if (strcmp(action, "preview") != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be preview or rollback\"}");
+      return 400;
+   }
+   fact_commit_change_t changes[64];
+   int n = by_run ? db2_fact_ingest_run_preview(selector, changes, 64)
+                  : db2_fact_commit_preview(selector, changes, 64);
+   cJSON_Delete(req);
+   if (n < 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"commit preview failed\"}");
+      return 404;
+   }
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddStringToObject(root, by_run ? "ingest_run_id" : "commit_id", selector);
+   cJSON *arr = cJSON_AddArrayToObject(root, "changes");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddNumberToObject(o, "assertion_id", (double)changes[i].assertion_id);
+      cJSON_AddStringToObject(o, "object_kind", changes[i].object_kind);
+      cJSON_AddStringToObject(o, "object_key", changes[i].object_key);
+      cJSON_AddStringToObject(o, "action", changes[i].action);
+      cJSON_AddStringToObject(o, "before", changes[i].before_lifecycle);
+      cJSON_AddStringToObject(o, "after", changes[i].after_lifecycle);
+      cJSON_AddNumberToObject(o, "before_authority", changes[i].before_authority_rank);
+      cJSON_AddNumberToObject(o, "after_authority", changes[i].after_authority_rank);
+      cJSON_AddBoolToObject(o, "existed_before", changes[i].existed_before);
+      cJSON_AddBoolToObject(o, "existed_after", changes[i].existed_after);
+      cJSON_AddStringToObject(o, "detail", changes[i].detail);
+      cJSON_AddItemToArray(arr, o);
+   }
+   char *rendered = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!rendered || strlen(rendered) >= (size_t)out_cap)
+   {
+      free(rendered);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"commit preview too large\"}");
+      return 500;
+   }
+   snprintf(out_buf, (size_t)out_cap, "%s", rendered);
+   free(rendered);
+   return 200;
+}
+
+/* POST /v1/console/typed_facts/erasure
+ * {action:"preview"|"erase",subject,relation?,object?}. */
+static int console_typed_facts_erasure(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   const char *source =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "subject")) : NULL;
+   const char *relation =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "relation")) : NULL;
+   const char *target =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "object")) : NULL;
+   if (!action || !source || !source[0] ||
+       (strcmp(action, "preview") != 0 && strcmp(action, "erase") != 0))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"action preview|erase and subject required\"}");
+      return 400;
+   }
+   char action_copy[16];
+   snprintf(action_copy, sizeof(action_copy), "%s", action);
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   fact_erasure_impact_t impact;
+   char cid[FACT_COMMIT_ID_MAX] = "";
+   int rc = strcmp(action_copy, "preview") == 0
+                ? db2_fact_erasure_preview(source, relation, target, &impact)
+                : db2_fact_erasure_execute(&actor, source, relation, target, &impact, cid);
+   cJSON_Delete(req);
+   if (rc < 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"erasure operation failed\"}");
+      return 409;
+   }
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddBoolToObject(root, "ok", 1);
+   cJSON_AddStringToObject(root, "action", action_copy);
+   cJSON_AddNumberToObject(root, "assertions", impact.assertion_count);
+   cJSON_AddNumberToObject(root, "evidence_mentions", impact.evidence_count);
+   cJSON_AddStringToObject(root, "residual_data", impact.residual_data);
+   if (cid[0])
+      cJSON_AddStringToObject(root, "commit_id", cid);
+   char *rendered = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!rendered || strlen(rendered) >= (size_t)out_cap)
+   {
+      free(rendered);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"erasure report too large\"}");
+      return 500;
+   }
+   snprintf(out_buf, (size_t)out_cap, "%s", rendered);
+   free(rendered);
+   return 200;
+}
+
+static const char *console_json_string(cJSON *req, const char *name)
+{
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(req, name);
+   return cJSON_IsString(v) ? v->valuestring : "";
+}
+
+/* POST /v1/console/evidence — one authenticated transport for the named P2-P9
+ * operations. SQL selection is enum-bound in evidence_lifecycle.c; request data
+ * can never select SQL or nominate actor/authority. */
+static int console_evidence(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action = req ? console_json_string(req, "action") : "";
+   fact_actor_t actor;
+   const char *verified_scope_kind = "global";
+   const char *verified_scope_id = "";
+   if (!req || !action[0])
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action is required\"}");
+      return 400;
+   }
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   (void)kb_reqctx_verified_scope(&verified_scope_kind, &verified_scope_id);
+   evidence_lifecycle_op_t op = 0;
+   const char *args[EL_MAX_ARGS] = {0};
+   char numbers[EL_MAX_ARGS][32];
+   char *owned[2] = {0};
+   int nargs = 0, owned_n = 0;
+#define EL_ARG(v) args[nargs++] = (v)
+#define EL_NUM(name, fallback)                                                                     \
+   do                                                                                              \
+   {                                                                                               \
+      cJSON *nv = cJSON_GetObjectItemCaseSensitive(req, (name));                                   \
+      int el_i = nargs;                                                                            \
+      snprintf(numbers[el_i], sizeof(numbers[el_i]), "%lld",                                       \
+               (long long)(cJSON_IsNumber(nv) ? nv->valuedouble : (fallback)));                    \
+      EL_ARG(numbers[el_i]);                                                                       \
+   } while (0)
+   if (strcmp(action, "changeset.show") == 0 || strcmp(action, "changeset.diff") == 0 ||
+       strcmp(action, "changeset.preview_revert") == 0)
+   {
+      op = strcmp(action, "changeset.show") == 0   ? EL_CHANGESET_SHOW
+           : strcmp(action, "changeset.diff") == 0 ? EL_CHANGESET_DIFF
+                                                   : EL_CHANGESET_PREVIEW_REVERT;
+      EL_ARG(console_json_string(req, "changeset_id"));
+   }
+   else if (strcmp(action, "changeset.revert") == 0)
+   {
+      op = EL_CHANGESET_REVERT;
+      EL_ARG(console_json_string(req, "changeset_id"));
+      EL_ARG(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force_partial")) ? "true"
+                                                                                  : "false");
+   }
+   else if (strcmp(action, "document.preview_lifecycle") == 0)
+   {
+      op = EL_DOCUMENT_PREVIEW;
+      EL_NUM("doc_id", 0);
+      EL_ARG(console_json_string(req, "operation"));
+   }
+   else if (strcmp(action, "document.apply_lifecycle") == 0)
+   {
+      op = EL_DOCUMENT_APPLY;
+      EL_NUM("doc_id", 0);
+      EL_ARG(console_json_string(req, "operation"));
+      EL_ARG(console_json_string(req, "preview_token"));
+      EL_ARG(console_json_string(req, "reason"));
+   }
+   else if (strcmp(action, "derived.status") == 0)
+   {
+      op = EL_DERIVED_STATUS;
+      EL_ARG(console_json_string(req, "derived_kind"));
+      EL_ARG(console_json_string(req, "derived_memory_id"));
+      EL_ARG(console_json_string(req, "input_kind"));
+      EL_ARG(console_json_string(req, "input_id"));
+   }
+   else if (strcmp(action, "review.list") == 0)
+   {
+      op = EL_REVIEW_LIST;
+      EL_NUM("limit", 100);
+   }
+   else if (strcmp(action, "review.decide") == 0)
+   {
+      op = EL_REVIEW_DECIDE;
+      EL_ARG(console_json_string(req, "item_id"));
+      EL_ARG(console_json_string(req, "item_head"));
+      EL_ARG(console_json_string(req, "decision"));
+      EL_ARG(console_json_string(req, "requested_value"));
+      EL_ARG(console_json_string(req, "preview_token"));
+   }
+   else if (strcmp(action, "ontology.export") == 0)
+      op = EL_ONTOLOGY_EXPORT;
+   else if (strcmp(action, "ontology.import") == 0)
+   {
+      op = EL_ONTOLOGY_IMPORT;
+      cJSON *package = cJSON_GetObjectItemCaseSensitive(req, "package");
+      owned[owned_n] = cJSON_PrintUnformatted(package);
+      EL_ARG(owned[owned_n++]);
+      EL_ARG(actor.principal); /* provenance is authenticated, never body-supplied */
+      EL_ARG(console_json_string(req, "review_record"));
+      EL_ARG(console_json_string(req, "signature"));
+   }
+   else if (strcmp(action, "ontology.dry_run") == 0)
+   {
+      op = EL_ONTOLOGY_DRY_RUN;
+      EL_ARG(console_json_string(req, "package_id"));
+      cJSON *ack = cJSON_GetObjectItemCaseSensitive(req, "acknowledge_widening");
+      EL_ARG(cJSON_IsTrue(ack) ? "true" : "false");
+   }
+   else if (strcmp(action, "ontology.migrate") == 0)
+   {
+      op = EL_ONTOLOGY_MIGRATE;
+      EL_ARG(console_json_string(req, "package_id"));
+      EL_ARG(console_json_string(req, "preview_token"));
+   }
+   else if (strcmp(action, "ontology.report") == 0)
+   {
+      op = EL_ONTOLOGY_REPORT;
+      EL_ARG(console_json_string(req, "changeset_id"));
+   }
+   else if (strcmp(action, "ontology.rollback") == 0)
+      op = EL_ONTOLOGY_ROLLBACK;
+   else if (strcmp(action, "outcome.record") == 0)
+   {
+      op = EL_OUTCOME_RECORD;
+      EL_ARG(console_json_string(req, "outcome_id"));
+      EL_ARG(console_json_string(req, "retrieval_event_id"));
+      EL_ARG(console_json_string(req, "subject_kind"));
+      EL_ARG(console_json_string(req, "subject_id"));
+      EL_ARG(console_json_string(req, "outcome"));
+      EL_ARG(console_json_string(req, "task_label"));
+      EL_ARG(console_json_string(req, "workflow"));
+      EL_ARG(verified_scope_kind);
+      EL_ARG(verified_scope_id);
+      EL_ARG(console_json_string(req, "resulting_action"));
+      EL_ARG(console_json_string(req, "correction_ref"));
+      EL_ARG(console_json_string(req, "source_hash"));
+      EL_NUM("code_generation", 0);
+      EL_ARG(console_json_string(req, "fault_kind"));
+      EL_ARG(console_json_string(req, "fault_value"));
+   }
+   else if (strcmp(action, "recall.trace_record") == 0)
+   {
+      op = EL_RECALL_TRACE_RECORD;
+      EL_ARG(console_json_string(req, "retrieval_event_id"));
+      EL_ARG(console_json_string(req, "turn_id"));
+      EL_ARG(console_json_string(req, "query_fingerprint"));
+      EL_ARG(verified_scope_kind);
+      EL_ARG(verified_scope_id);
+      EL_ARG(console_json_string(req, "sensitivity"));
+      owned[owned_n] = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(req, "results"));
+      EL_ARG(owned[owned_n++]);
+      EL_ARG(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "persist")) ? "true" : "false");
+   }
+   else if (strcmp(action, "recall.trace_get") == 0)
+   {
+      op = EL_RECALL_TRACE_GET;
+      EL_ARG(console_json_string(req, "trace_id"));
+      EL_ARG(verified_scope_kind);
+      EL_ARG(verified_scope_id);
+   }
+   if (!op)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown evidence action\"}");
+      return 400;
+   }
+   int rc = db2_evidence_lifecycle_json(&actor, op, args, nargs, out_buf, out_cap);
+   for (int i = 0; i < owned_n; i++)
+      free(owned[i]);
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"evidence operation refused or failed atomically\"}");
+      return 409;
+   }
+   if (strstr(out_buf, "\"stale\": true") || strstr(out_buf, "\"stale\":true"))
+      return 409;
+   return 200;
+#undef EL_ARG
+#undef EL_NUM
+}
+
 /* The curator-pipeline config keys the console may write, beyond the per-stage
  * enable flags (which are validated against the live registry, below): the
  * persisted stage order, the user presets, the composed custom stages, the tier
@@ -415,10 +965,9 @@ static cJSON *pipeline_config_json(void)
    cJSON *out = cJSON_CreateObject();
    for (size_t i = 0; i < sizeof(PIPELINE_CONFIG_KEYS) / sizeof(PIPELINE_CONFIG_KEYS[0]); i++)
    {
-      const config_field_t *f = config_field_lookup(PIPELINE_CONFIG_KEYS[i]);
-      if (f)
-         cJSON_AddItemToObject(out, PIPELINE_CONFIG_KEYS[i],
-                               config_field_public_value_json_current(f));
+      cJSON *value = config_client_value_copy(PIPELINE_CONFIG_KEYS[i]);
+      if (value)
+         cJSON_AddItemToObject(out, PIPELINE_CONFIG_KEYS[i], value);
    }
    cJSON *stages = kb_curator_stages_json();
    const cJSON *st = NULL;
@@ -427,9 +976,9 @@ static cJSON *pipeline_config_json(void)
       const char *ck = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(st, "config_key"));
       if (!ck || cJSON_GetObjectItemCaseSensitive(out, ck))
          continue; /* embedder-gated, or a key two stages share */
-      const config_field_t *f = config_field_lookup(ck);
-      if (f)
-         cJSON_AddItemToObject(out, ck, config_field_public_value_json_current(f));
+      cJSON *value = config_client_value_copy(ck);
+      if (value)
+         cJSON_AddItemToObject(out, ck, value);
    }
    cJSON_Delete(stages);
    return out;
@@ -465,7 +1014,7 @@ static int console_pipeline(char *out_buf, int out_cap)
    return console_send(resp, 200, "{\"error\":\"pipeline too large\"}", out_buf, out_cap);
 }
 
-/* Render a JSON value as the text config_field_set_value parses. Returns 0 and
+/* Render a JSON value as the text module mutation contract parses. Returns 0 and
  * fills `buf` on success, -1 for a type this config surface does not accept. */
 static int pipeline_value_text(const cJSON *v, char *buf, size_t cap)
 {
@@ -512,8 +1061,9 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not a pipeline config key\"}");
       return 403;
    }
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
+   const char *secret_name = config_client_secret_name(key);
+   cJSON *current = secret_name ? NULL : config_client_value_copy(key);
+   if (!secret_name && !current)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown config key\"}");
@@ -521,7 +1071,7 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
    }
    char key_copy[128];
    snprintf(key_copy, sizeof(key_copy), "%s", key);
-   const char *secret_name = config_field_secret_name(f);
+   cJSON_Delete(current);
    /* Sized for the largest pipeline value: the custom-stages / user-presets JSON
     * blobs, which config_field_set_value truncates to the field width anyway. */
    char text[8192];
@@ -553,7 +1103,7 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
    }
    /* config_set is the surgical single-field write: it validates against the
     * field descriptor, patches just that key in the document, and republishes
-    * the snapshot -- the same three steps this did by hand through a config_t. */
+    * the snapshot -- the same three steps this did by hand through a legacy_config_record. */
    if (config_set(key_copy, text) != 0)
    {
       OPENSSL_cleanse(text, sizeof(text));
@@ -563,7 +1113,8 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
    cJSON_AddStringToObject(resp, "key", key_copy);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
+   cJSON *updated = config_client_value_copy(key_copy);
+   cJSON_AddItemToObject(resp, "value", updated ? updated : cJSON_CreateNull());
    cJSON_AddBoolToObject(resp, "secret", 0);
    OPENSSL_cleanse(text, sizeof(text));
    return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
@@ -581,7 +1132,7 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
  *
  * `section` groups the fields for the console page; `restart` marks the ones
  * bound at startup (the kb API listener and the deploy topology), mirroring
- * their RELOAD_RESTART class in config_fields.c. */
+ * their restart behavior. */
 typedef struct
 {
    const char *key;
@@ -603,10 +1154,10 @@ static const kb_setting_t KB_SETTINGS[] = {
     {"kb_search_max_results", "Knowledge base", 0},
     {"kb_fusion_mode", "Knowledge base", 0},
     {"kb_mining_enabled", "Knowledge base", 0},
-    /* typed_facts_enabled is deliberately absent: the console's Typed Facts page
-     * owns it, next to the promotion queue it gates and the two knobs
-     * (auto-promote, threshold) that are not in config_fields at all and can only
-     * be set through /v1/console/typed_facts/config. One owner per option. */
+    /* typed_facts_enabled is deliberately absent, and now has no owner at all:
+     * the master gate is retired and the layer is unconditional. The Typed Facts
+     * page keeps the two real knobs (auto-promote, threshold), which are not in
+     * config_fields and are set through /v1/console/typed_facts/config. */
     {"kb_api_http_port", "Knowledge base", 1},
     {"kb_api_bearer_token", "Knowledge base", 1},
     /* Document ingest sidecars. */
@@ -638,15 +1189,17 @@ static int console_settings(char *out_buf, int out_cap)
    cJSON *arr = cJSON_AddArrayToObject(resp, "fields");
    for (size_t i = 0; i < sizeof(KB_SETTINGS) / sizeof(KB_SETTINGS[0]); i++)
    {
-      const config_field_t *f = config_field_lookup(KB_SETTINGS[i].key);
-      if (!f)
+      const char *secret_name = config_client_secret_name(KB_SETTINGS[i].key);
+      cJSON *value = secret_name ? cJSON_CreateBool(runtime_secret_has(secret_name))
+                                 : config_client_value_copy(KB_SETTINGS[i].key);
+      if (!value)
          continue;
       cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "key", KB_SETTINGS[i].key);
       cJSON_AddStringToObject(o, "section", KB_SETTINGS[i].section);
       cJSON_AddBoolToObject(o, "restart", KB_SETTINGS[i].restart);
-      cJSON_AddItemToObject(o, "value", config_field_public_value_json_current(f));
-      cJSON_AddBoolToObject(o, "secret", config_field_secret_name(f) ? 1 : 0);
+      cJSON_AddItemToObject(o, "value", value);
+      cJSON_AddBoolToObject(o, "secret", config_client_key_is_secret(KB_SETTINGS[i].key));
       cJSON_AddItemToArray(arr, o);
    }
    return console_send(resp, 200, "{\"error\":\"settings too large\"}", out_buf, out_cap);
@@ -676,8 +1229,9 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not a kb-owned setting\"}");
       return 403;
    }
-   const config_field_t *f = config_field_lookup(key);
-   if (!f)
+   const char *secret_name = config_client_secret_name(key);
+   cJSON *current = secret_name ? NULL : config_client_value_copy(key);
+   if (!secret_name && !current)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown config key\"}");
@@ -685,7 +1239,7 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
    }
    char key_copy[128];
    snprintf(key_copy, sizeof(key_copy), "%s", key);
-   const char *secret_name = config_field_secret_name(f);
+   cJSON_Delete(current);
    char text[8192];
    int vrc = pipeline_value_text(val, text, sizeof(text));
    if (secret_name && cJSON_IsString(val) && val->valuestring)
@@ -716,7 +1270,7 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
    }
    /* config_set is the surgical single-field write: it validates against the
     * field descriptor, patches just that key in the document, and republishes
-    * the snapshot -- the same three steps this did by hand through a config_t. */
+    * the snapshot -- the same three steps this did by hand through a legacy_config_record. */
    if (config_set(key_copy, text) != 0)
    {
       OPENSSL_cleanse(text, sizeof(text));
@@ -726,7 +1280,8 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
    cJSON_AddStringToObject(resp, "key", key_copy);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
+   cJSON *updated = config_client_value_copy(key_copy);
+   cJSON_AddItemToObject(resp, "value", updated ? updated : cJSON_CreateNull());
    cJSON_AddBoolToObject(resp, "secret", 0);
    cJSON_AddBoolToObject(resp, "restart", ks->restart);
    OPENSSL_cleanse(text, sizeof(text));
@@ -766,6 +1321,21 @@ int kb_http_console_route(const char *method, const char *path, const char *body
                                          : console_method_not_allowed(out_buf, out_cap);
    if (route_is(path, "/v1/console/typed_facts/relation"))
       return strcmp(method, "POST") == 0 ? console_typed_facts_relation(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/assertion"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_assertion(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/entity"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_entity(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/commit"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_commit(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/typed_facts/erasure"))
+      return strcmp(method, "POST") == 0 ? console_typed_facts_erasure(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/evidence"))
+      return strcmp(method, "POST") == 0 ? console_evidence(body, out_buf, out_cap)
                                          : console_method_not_allowed(out_buf, out_cap);
    return -1; /* not a console route — caller continues dispatch */
 }

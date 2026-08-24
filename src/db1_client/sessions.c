@@ -1,7 +1,16 @@
 /* db1_client/sessions.c: the sessions family, reached over the bus.
  *
- * GENERATED from src/modules/db1/eventcontract/operations.json by
- * scripts/gen_db1_contract.py. Do not edit.
+ * WAS GENERATED from the store catalog by scripts/gen_db1_contract.py. Both
+ * moved on: the catalog is now server-go/modules/aimee/operations.json, and the
+ * generator was deleted with the C module.
+ *
+ * So this is maintained BY HAND now, and the header used to say "Do not edit"
+ * while pointing at a generator that no longer exists and a path that no longer
+ * resolves -- which is a dead end at exactly the moment someone needs to change
+ * something. Edit it, and keep it agreeing with the catalog:
+ * scripts/check-db1-client-contract.py matches every call site here against the
+ * catalog by arity and reply width, and runs in lint on every pull request.
+ * That check is what replaced the generator.
  *
  * Same functions, same contract, different side of the boundary: the daemon
  * links this instead of the DB1 domain, so nothing that calls these had to
@@ -17,7 +26,7 @@
  * catalog permanently one reformat apart. */
 /* clang-format off */
 #include "primary_sessions.h"
-#include "server_sessions.h"
+#include "db1_client/server_sessions.h"
 #include "session_paths.h"
 #include "webchat_claude_sessions.h"
 #include "webchat_live.h"
@@ -168,6 +177,17 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          result = -1;
       else if (filled_out)
          *filled_out = fields_in;
+      /* Fewer values than the caller has slots for is the same contract
+         mismatch read from the other side, and it used to pass: the unfilled
+         slots keep the empty string cleared above, so the caller reads a row
+         whose last members are blank and cannot tell that from a row that is
+         blank. A list says how many rows it found through filled_out and is
+         variable by construction; every other shape has one arity, and a stage
+         answering with a different one is a stage built against a different
+         version of this contract. Two processes, two binaries, two deployment
+         times -- so say it rather than zero-fill. */
+      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
+         result = -1;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {
@@ -787,6 +807,30 @@ int db1_webchat_live_get(const char *session_id, long long since_rev, char **tur
    char *shrunk2 = realloc(held2, strlen(held2) + 1u);
    *status = shrunk2 ? shrunk2 : held2;
    return 1;
+}
+
+int db1_server_session_persona_delivery_claim(const char *id)
+{
+   if (!id || !id[0])
+      return -1;
+   const char *fields[] = {id};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM, fields, 1, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
+int db1_server_session_persona_delivery_finish(const char *id, int delivered)
+{
+   if (!id || !id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", delivered);
+   const char *fields[] = {id, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_FINISH, fields, 2, NULL, NULL, 0, NULL));
 }
 
 /* clang-format on */

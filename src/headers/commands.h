@@ -21,7 +21,7 @@ int subcmd_dispatch(const subcmd_t *table, const char *name, app_ctx_t *ctx, int
 void subcmd_usage(const char *parent, const subcmd_t *table);
 
 /* Load config and open DB1, aborting with `errmsg` on failure. Replaces the
- * repeated config_t + config_load + db1_init + fatal prolog in command handlers
+ * repeated legacy_config_record + legacy_config_read + db1_init + fatal prolog in command handlers
  * that only need DB1 (not other config fields). */
 void cmd_require_db1(const char *errmsg);
 
@@ -77,7 +77,6 @@ void cmd_import(app_ctx_t *ctx, int argc, char **argv);
 void cmd_workspace(app_ctx_t *ctx, int argc, char **argv);
 /* cli_workspace_serve.c: client-side detached-workspace runner serve loop. */
 int cmd_workspace_serve(const char *workspace_id);
-void cmd_db(app_ctx_t *ctx, int argc, char **argv);
 void cmd_session(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_session_subcmds(void);
 /* cmd_ensemble.c — multi-agent ensemble sessions (canonical `ensemble` verb;
@@ -227,7 +226,6 @@ const subcmd_t *get_mcp_subcmds(void);
 void cmd_autopilot(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_autopilot_subcmds(void);
 
-
 /* cmd_run.c */
 void cmd_run(app_ctx_t *ctx, int argc, char **argv);
 
@@ -272,7 +270,6 @@ void print_commands_for_tier(cmd_tier_t tier);
 const subcmd_t *get_memory_subcmds(void);
 const subcmd_t *get_agent_subcmds(void);
 const subcmd_t *get_index_subcmds(void);
-const subcmd_t *get_db_subcmds(void);
 
 /* cmd_wiki.c */
 void cmd_wiki(app_ctx_t *ctx, int argc, char **argv);

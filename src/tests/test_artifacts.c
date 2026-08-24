@@ -13,12 +13,14 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include <sqlite3.h>
 #include "artifacts.h"
 #include "anti_patterns.h"
 #include "evidence_vectors.h"
 #include "feature_rows.h"
+#include "modules/db2/c/db2_internal.h"
+#include "support/embedding_literal.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/db_postgres.h"
 #include <aimee/db2/host_contracts.h>
 #include "cJSON.h"
 #include "kb_mdl.h"
@@ -73,6 +75,36 @@ static void open_db(void)
 static void close_db(void)
 {
    db2_test_shim_close();
+}
+
+/* Scalar query through the DB2 connection. Up to two text binds cover every
+ * call site here; a NULL bind is simply not applied. */
+static int scalar_q(const char *sql, const char *b1, const char *b2)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   assert(st);
+   if (b1)
+      aimee_pg_bind_text(st, "?1", b1);
+   if (b2)
+      aimee_pg_bind_text(st, "?2", b2);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   int n = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return n;
+}
+
+/* Seed SQL through the DB2 connection rather than the shim's raw sqlite handle:
+ * db2_test_shim_handle() is NULL when the shim is backed by real Postgres, and
+ * these statements are plain SQL both engines accept. */
+static void exec_ok(const char *sql)
+{
+   char err[256] = "";
+   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "exec_ok failed: %s\n  sql: %s\n", err, sql);
+      assert(0 && "exec_ok");
+   }
 }
 
 static int score_mdl(const char *candidate, const char *evidence, double *l_candidate,
@@ -151,10 +183,22 @@ static void test_synthesis_commit_emits_mdl_features(void)
    aimee_db2_register_mdl_score_provider(score_mdl);
    assert(db2_artifact_set_state(id, "committed") == 0);
    assert(db2_feature_row_read(id, "artifact", "mdl-v1", features, sizeof(features)) == 0);
-   assert(strstr(features, "\"mdl.l_candidate\":") != NULL);
-   assert(strstr(features, "\"mdl.l_residual\":") != NULL);
-   assert(strstr(features, "\"mdl.total\":") != NULL);
-   assert(strstr(features, "\"mdl.rank_in_cluster\":2") != NULL);
+   /* Parse rather than substring-match. feature_rows.features is jsonb, and
+    * Postgres normalises jsonb on the way back out -- it reorders keys and prints a
+    * space after every colon, so a needle like "\"mdl.rank_in_cluster\":2" never
+    * matches what the server returns. Under the sqlite shim the column is plain text
+    * holding the exact bytes cJSON emitted, so the needle matched and the assertion
+    * was really testing the serializer's formatting, not the row's content. */
+   {
+      cJSON *feat = cJSON_Parse(features);
+      assert(feat != NULL);
+      assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(feat, "mdl.l_candidate")));
+      assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(feat, "mdl.l_residual")));
+      assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(feat, "mdl.total")));
+      cJSON *rank = cJSON_GetObjectItemCaseSensitive(feat, "mdl.rank_in_cluster");
+      assert(cJSON_IsNumber(rank) && rank->valueint == 2);
+      cJSON_Delete(feat);
+   }
 
    close_db();
    printf("  synthesis_commit_emits_mdl_features: ok\n");
@@ -406,8 +450,6 @@ static void test_artifact_invalidate_citing(void)
 static void test_artifact_invalidate_span_overlap(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
    char e[37], f[37];
    db2_artifact_gen_id(e, sizeof(e));
@@ -422,7 +464,7 @@ static void test_artifact_invalidate_span_overlap(void)
             "INSERT INTO artifact_citations (artifact_id, source_kind, source_id, span_start, "
             "span_end) VALUES ('%s','kb_doc','doc-9',10,20),('%s','kb_doc','doc-9',100,110)",
             e, f);
-   assert(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
+   exec_ok(sql);
 
    /* An edit at [5,15) overlaps e's span but not f's. */
    int n = db2_artifact_invalidate_citing("kb_doc", "doc-9", 5, 15);
@@ -505,16 +547,14 @@ static void test_artifact_filter_facets(void)
 static void test_artifact_filter_facets_release(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
-   /* Two docs; release 1 contains only doc 10. */
-   assert(sqlite3_exec(db,
-                       "INSERT INTO docs (id, content_hash, filename) VALUES "
-                       "(10,'h10','in.md'),(20,'h20','out.md');"
-                       "INSERT INTO doc_releases (id, name, state) VALUES (1,'r1','active');"
-                       "INSERT INTO release_docs (release_id, doc_id) VALUES (1,10);",
-                       NULL, NULL, NULL) == SQLITE_OK);
+   /* Two docs; release 1 contains only doc 10. Issued one statement at a time:
+    * libpq's prepared-statement path (unlike sqlite3_exec) takes a single command
+    * per call, so a semicolon-joined script is a syntax error there. */
+   exec_ok("INSERT INTO docs (id, content_hash, filename) VALUES "
+           "(10,'h10','in.md'),(20,'h20','out.md')");
+   exec_ok("INSERT INTO doc_releases (id, name, state) VALUES (1,'r1','active')");
+   exec_ok("INSERT INTO release_docs (release_id, doc_id) VALUES (1,10)");
 
    char in_rel[37], out_rel[37], other_project[37];
    db2_artifact_gen_id(in_rel, sizeof(in_rel));
@@ -600,8 +640,17 @@ static void test_evidence_write_event(void)
    assert(db2_artifact_read(id_tool, &row, NULL, 0, NULL) == 0);
    assert(strcmp(row.scope_kind, "project") == 0);
    assert(strcmp(row.scope_id, "p") == 0);
-   assert(strstr(row.payload_json, "\"content_hash\":\"") != NULL);
-   assert(strstr(row.payload_json, "\"source_kind\":\"tool_outcome\"") != NULL);
+   /* Parsed, not substring-matched: artifacts.payload is jsonb, so Postgres
+    * reorders keys and prints a space after every colon on the way out. */
+   {
+      cJSON *pay = cJSON_Parse(row.payload_json);
+      assert(pay != NULL);
+      cJSON *hash = cJSON_GetObjectItemCaseSensitive(pay, "content_hash");
+      assert(cJSON_IsString(hash) && hash->valuestring && hash->valuestring[0]);
+      cJSON *src = cJSON_GetObjectItemCaseSensitive(pay, "source_kind");
+      assert(cJSON_IsString(src) && strcmp(src->valuestring, "tool_outcome") == 0);
+      cJSON_Delete(pay);
+   }
 
    /* Unknown / doc-side kinds are rejected by the non-doc ingest path. */
    assert(learning_evidence_write_event("doc_summary", "project", "p", "x", "op", NULL, 0) == -1);
@@ -612,23 +661,24 @@ static void test_evidence_write_event(void)
 }
 
 /* ---- 16. learning_judge_commit: corroboration -> committed -> audit ---- */
-static int audit_count_for(sqlite3 *db, const char *artifact_id, char *surface_out, int surface_len)
+static int audit_count_for(const char *artifact_id, char *surface_out, int surface_len)
 {
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(db,
-                             "SELECT COUNT(*), MAX(target_surface) FROM audit_events"
-                             " WHERE source_artifact_id = ?1",
-                             -1, &st, NULL) == SQLITE_OK);
-   sqlite3_bind_text(st, 1, artifact_id, -1, SQLITE_STATIC);
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(),
+                                          "SELECT COUNT(*), COALESCE(MAX(target_surface), '')"
+                                          " FROM audit_events WHERE source_artifact_id = ?1",
+                                          err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", artifact_id);
    int n = 0;
-   if (sqlite3_step(st) == SQLITE_ROW)
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      n = sqlite3_column_int(st, 0);
-      const unsigned char *s = sqlite3_column_text(st, 1);
+      n = aimee_pg_column_int(st, 0);
+      const char *surface = aimee_pg_column_text(st, 1);
       if (surface_out && surface_len > 0)
-         snprintf(surface_out, (size_t)surface_len, "%s", s ? (const char *)s : "");
+         snprintf(surface_out, (size_t)surface_len, "%s", surface ? surface : "");
    }
-   sqlite3_finalize(st);
+   aimee_pg_finalize(st);
    return n;
 }
 
@@ -648,8 +698,6 @@ static void seed_candidate(const char *kind, int n_evidence, char *id_out)
 static void test_judge_commit(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
    const char *kinds[] = {"preference", "workflow", "anti_pattern", "mistake_pattern"};
    const char *surfaces[] = {"memory", "workflow_pattern", "anti_pattern", "anti_pattern"};
@@ -662,7 +710,7 @@ static void test_judge_commit(void)
       assert(learning_judge_commit(id, kinds[i], 2) == 1);
       assert(db2_artifact_count(kinds[i], "committed") == 1);
       char surface[64] = "";
-      assert(audit_count_for(db, id, surface, sizeof(surface)) == 1);
+      assert(audit_count_for(id, surface, sizeof(surface)) == 1);
       assert(strcmp(surface, surfaces[i]) == 0);
    }
 
@@ -670,7 +718,7 @@ static void test_judge_commit(void)
    char weak[37];
    seed_candidate("preference", 1, weak);
    assert(learning_judge_commit(weak, "preference", 2) == 0);
-   assert(audit_count_for(db, weak, NULL, 0) == 0);
+   assert(audit_count_for(weak, NULL, 0) == 0);
 
    /* Unknown kind is rejected. */
    char any[37];
@@ -685,8 +733,6 @@ static void test_judge_commit(void)
 static void test_review_rollback(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
    /* Commit a corroborated candidate, then thumbs-down to roll it back. */
    char id[37];
@@ -702,19 +748,21 @@ static void test_review_rollback(void)
    assert(db2_artifact_count("preference", "proposed") == 1);
 
    /* The thumbs-down verdict is captured in the audit columns. */
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(db,
-                             "SELECT verdict, verdict_tag, verdict_scope, counter_example"
-                             " FROM audit_events WHERE source_artifact_id = ?1 AND verdict <> ''"
-                             " ORDER BY id DESC LIMIT 1",
-                             -1, &st, NULL) == SQLITE_OK);
-   sqlite3_bind_text(st, 1, id, -1, SQLITE_STATIC);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   assert(strcmp((const char *)sqlite3_column_text(st, 0), "thumbs_down") == 0);
-   assert(strcmp((const char *)sqlite3_column_text(st, 1), "bad_preference") == 0);
-   assert(strcmp((const char *)sqlite3_column_text(st, 2), "user:project") == 0);
-   assert(strcmp((const char *)sqlite3_column_text(st, 3), "counter example here") == 0);
-   sqlite3_finalize(st);
+   char verdict_err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT verdict, verdict_tag, verdict_scope, counter_example"
+                        " FROM audit_events WHERE source_artifact_id = ?1 AND verdict <> ''"
+                        " ORDER BY id DESC LIMIT 1",
+                        verdict_err, sizeof(verdict_err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", id);
+   assert(aimee_pg_step(st, verdict_err, sizeof(verdict_err)) == AIMEE_PG_ROW);
+   assert(strcmp(aimee_pg_column_text(st, 0), "thumbs_down") == 0);
+   assert(strcmp(aimee_pg_column_text(st, 1), "bad_preference") == 0);
+   assert(strcmp(aimee_pg_column_text(st, 2), "user:project") == 0);
+   assert(strcmp(aimee_pg_column_text(st, 3), "counter example here") == 0);
+   aimee_pg_finalize(st);
 
    close_db();
    printf("  review_rollback: ok\n");
@@ -767,23 +815,25 @@ static void test_rejection_suppression(void)
 }
 
 /* ---- 19. learning_promote: anti_pattern target surface ---- */
-static int anti_pattern_audit(sqlite3 *db, const char *artifact_id, int *flagged_out)
+static int anti_pattern_audit(const char *artifact_id, int *flagged_out)
 {
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(db,
-                             "SELECT target_surface, flagged_for_review FROM audit_events"
-                             " WHERE source_artifact_id = ?1 AND target_surface = 'anti_pattern'"
-                             " ORDER BY id DESC LIMIT 1",
-                             -1, &st, NULL) == SQLITE_OK);
-   sqlite3_bind_text(st, 1, artifact_id, -1, SQLITE_STATIC);
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT target_surface, flagged_for_review FROM audit_events"
+                        " WHERE source_artifact_id = ?1 AND target_surface = 'anti_pattern'"
+                        " ORDER BY id DESC LIMIT 1",
+                        err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", artifact_id);
    int found = 0;
-   if (sqlite3_step(st) == SQLITE_ROW)
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       found = 1;
       if (flagged_out)
-         *flagged_out = sqlite3_column_int(st, 1);
+         *flagged_out = aimee_pg_column_int(st, 1);
    }
-   sqlite3_finalize(st);
+   aimee_pg_finalize(st);
    return found;
 }
 
@@ -796,8 +846,6 @@ static void make_committed(const char *kind, double confidence, const char *payl
 static void test_promote_anti_pattern(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
    /* High-confidence anti_pattern candidate auto-applies into anti_patterns. */
    char ap[37];
@@ -806,7 +854,7 @@ static void test_promote_anti_pattern(void)
    assert(learning_promote(ap, 0.85) == 1);
    assert(db2_anti_pattern_exists_exact("force_push_main") == 1);
    int flagged = -1;
-   assert(anti_pattern_audit(db, ap, &flagged) == 1 && flagged == 0);
+   assert(anti_pattern_audit(ap, &flagged) == 1 && flagged == 0);
 
    /* mistake_pattern also routes to the anti_pattern surface. */
    char mp[37];
@@ -820,7 +868,7 @@ static void test_promote_anti_pattern(void)
    assert(learning_promote(bd, 0.85) == 1);
    assert(db2_anti_pattern_exists_exact("borderline_one") == 1);
    flagged = -1;
-   assert(anti_pattern_audit(db, bd, &flagged) == 1 && flagged == 1);
+   assert(anti_pattern_audit(bd, &flagged) == 1 && flagged == 1);
 
    /* Well below the window: held for review, no surface row. */
    char low[37];
@@ -848,8 +896,6 @@ static void test_promote_anti_pattern(void)
 static void test_promote_memory(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
    g_mem_insert_calls = 0;
    g_mem_insert_kind[0] = '\0';
@@ -863,16 +909,10 @@ static void test_promote_memory(void)
    assert(g_mem_insert_calls == 1);
    assert(strcmp(g_mem_insert_kind, "preference") == 0);
 
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(db,
-                             "SELECT COUNT(*) FROM audit_events"
-                             " WHERE source_artifact_id = ?1 AND target_surface = 'memory'"
-                             "   AND target_id = '4242'",
-                             -1, &st, NULL) == SQLITE_OK);
-   sqlite3_bind_text(st, 1, id, -1, SQLITE_STATIC);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   assert(sqlite3_column_int(st, 0) == 1);
-   sqlite3_finalize(st);
+   assert(scalar_q("SELECT COUNT(*) FROM audit_events"
+                   " WHERE source_artifact_id = ?1 AND target_surface = 'memory'"
+                   "   AND target_id = '4242'",
+                   id, NULL) == 1);
 
    /* Below the borderline window: held, the store verb is not called. */
    char low[37];
@@ -889,8 +929,6 @@ static void test_promote_memory(void)
 static void test_four_kinds_end_to_end(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
    g_mem_insert_calls = 0;
 
    const char *kinds[] = {"preference", "workflow", "anti_pattern", "mistake_pattern"};
@@ -922,13 +960,10 @@ static void test_four_kinds_end_to_end(void)
    assert(g_mem_insert_calls == 1); /* preference -> memory store verb */
    assert(db2_anti_pattern_exists_exact("force_push_main") == 1);   /* anti_pattern */
    assert(db2_anti_pattern_exists_exact("commit_mid_verify") == 1); /* mistake_pattern */
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(
-              db, "SELECT COUNT(*) FROM workflow_patterns WHERE pattern = 'edit-build-verify-pr'",
-              -1, &st, NULL) == SQLITE_OK);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   assert(sqlite3_column_int(st, 0) == 1); /* workflow -> workflow_patterns */
-   sqlite3_finalize(st);
+   /* workflow -> workflow_patterns */
+   assert(scalar_q("SELECT COUNT(*) FROM workflow_patterns"
+                   " WHERE pattern = 'edit-build-verify-pr'",
+                   NULL, NULL) == 1);
 
    close_db();
    printf("  four_kinds_end_to_end: ok\n");
@@ -938,8 +973,6 @@ static void test_four_kinds_end_to_end(void)
 static void test_promote_remaining_surfaces(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
    const char *surfaces[] = {"rule", "epistemic_directive", "entity", "guardrail_exemplar"};
    for (int i = 0; i < 4; i++)
@@ -954,25 +987,14 @@ static void test_promote_remaining_surfaces(void)
       assert(db2_artifact_set_target_surface(id, surfaces[i]) == 0);
       assert(learning_promote(id, 0.85) == 1);
 
-      sqlite3_stmt *st;
-      assert(sqlite3_prepare_v2(db,
-                                "SELECT COUNT(*) FROM audit_events WHERE source_artifact_id = ?1"
-                                " AND target_surface = ?2",
-                                -1, &st, NULL) == SQLITE_OK);
-      sqlite3_bind_text(st, 1, id, -1, SQLITE_STATIC);
-      sqlite3_bind_text(st, 2, surfaces[i], -1, SQLITE_STATIC);
-      assert(sqlite3_step(st) == SQLITE_ROW);
-      assert(sqlite3_column_int(st, 0) == 1); /* promotion audit routed to the surface */
-      sqlite3_finalize(st);
+      /* promotion audit routed to the surface */
+      assert(scalar_q("SELECT COUNT(*) FROM audit_events WHERE source_artifact_id = ?1"
+                      " AND target_surface = ?2",
+                      id, surfaces[i]) == 1);
    }
 
    /* Spot-check the guardrail_exemplar registration landed an exemplar row. */
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM exemplar_vectors", -1, &st, NULL) ==
-          SQLITE_OK);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   assert(sqlite3_column_int(st, 0) == 1);
-   sqlite3_finalize(st);
+   assert(scalar_q("SELECT COUNT(*) FROM exemplar_vectors", NULL, NULL) == 1);
 
    close_db();
    printf("  promote_remaining_surfaces: ok\n");
@@ -982,8 +1004,6 @@ static void test_promote_remaining_surfaces(void)
 static void test_promote_working_profile(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
    g_wp_observe_calls = 0;
 
    char id[37];
@@ -995,15 +1015,9 @@ static void test_promote_working_profile(void)
    assert(g_wp_observe_calls == 1);
    assert(strcmp(g_wp_observe_field, "verbosity") == 0);
 
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(db,
-                             "SELECT COUNT(*) FROM audit_events WHERE source_artifact_id = ?1"
-                             " AND target_surface = 'working_profile'",
-                             -1, &st, NULL) == SQLITE_OK);
-   sqlite3_bind_text(st, 1, id, -1, SQLITE_STATIC);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   assert(sqlite3_column_int(st, 0) == 1);
-   sqlite3_finalize(st);
+   assert(scalar_q("SELECT COUNT(*) FROM audit_events WHERE source_artifact_id = ?1"
+                   " AND target_surface = 'working_profile'",
+                   id, NULL) == 1);
 
    close_db();
    printf("  promote_working_profile: ok\n");
@@ -1013,8 +1027,6 @@ static void test_promote_working_profile(void)
 static void test_evidence_vectors_queue(void)
 {
    open_db();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(db != NULL);
 
    /* An evidence artifact (FK target for the ops queue). */
    char a[37];
@@ -1033,15 +1045,11 @@ static void test_evidence_vectors_queue(void)
    assert(strcmp(pend[0].collection, "evidence") == 0);
 
    /* store the embedding → op moves to ok, a vector row exists. */
-   assert(db2_evidence_store_vector(a, "evidence", "[0.1,0.2,0.3]") == 0);
+   char vec[EMBEDDING_LITERAL_MAX];
+   assert(db2_evidence_store_vector(a, "evidence", embedding_literal(vec, sizeof(vec), 0.5)) == 0);
    assert(db2_evidence_ops_count("pending") == 0);
    assert(db2_evidence_ops_count("ok") == 1);
-   sqlite3_stmt *st;
-   assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM evidence_vectors WHERE artifact_id = ?1", -1,
-                             &st, NULL) == SQLITE_OK);
-   sqlite3_bind_text(st, 1, a, -1, SQLITE_STATIC);
-   assert(sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) == 1);
-   sqlite3_finalize(st);
+   assert(scalar_q("SELECT COUNT(*) FROM evidence_vectors WHERE artifact_id = ?1", a, NULL) == 1);
 
    /* mark_failed bumps attempts; reset_stuck returns it to pending. */
    char b[37];

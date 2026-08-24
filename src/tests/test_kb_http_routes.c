@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "command_registry.h"
 #include "cJSON.h"
 #include "kb_http.h"
 #include "kb_route_acl.h"
@@ -17,7 +18,6 @@
 #include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
 #include "modules/db2/c/code_project_lifecycle.h"
 #include "rel_types.h"        /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
-#include "config_fields.h"    /* config_field_t for the pipeline-console stubs below */
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
@@ -598,19 +598,6 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
       *out = 1024;
    return 0;
 }
-int config_resolve_embedder_dims(const config_t *cfg)
-{
-   (void)cfg;
-   return 0;
-}
-int config_embedder_dims_is_pinned(const config_t *cfg)
-{
-   (void)cfg;
-   return 0;
-}
-
-/* kb_http reads the pin through the no-arg form now; same answer as the
- * config_t stub above. */
 int config_embedder_dims_pinned_current(void)
 {
    return 0;
@@ -624,8 +611,8 @@ int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
    return 0;
 }
 
-/* Ontology-console db2 stubs + config_save: the typed_facts ontology console added
- * these refs into kb_http_console.o; the real defs pull the whole db2/config stack,
+/* Ontology-console db2 stubs: the typed_facts ontology console added
+ * these refs into kb_http_console.o; the real defs pull the whole db2 stack,
  * so stub them link-only (this test exercises routing, not the ontology backend). */
 long db2_ontology_eval_count(const char *rel_type)
 {
@@ -662,15 +649,8 @@ int db2_ontology_reject(const char *rel_type)
    (void)rel_type;
    return 0;
 }
-int config_save(const config_t *cfg)
-{
-   (void)cfg;
-   return 0;
-}
-
-/* The console writes through config_set / config_set_typed_facts now instead of
- * mutating a config_t and calling config_save. Same contract as the stub above:
- * report success without touching a real config file. */
+/* The console writes through the module client. Report success without touching
+ * a real config file; this route test owns only the HTTP-facing contract. */
 int config_set(const char *key, const char *value)
 {
    (void)key;
@@ -678,17 +658,16 @@ int config_set(const char *key, const char *value)
    return 0;
 }
 
-int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+int config_set_typed_facts(int auto_promote, int promote_threshold)
 {
-   (void)enabled;
    (void)auto_promote;
    (void)promote_threshold;
    return 0;
 }
 
 /* Pipeline-console stubs: the console's /v1/console/pipeline routes pull in the
- * curator registry and the typed config-field accessors. The real defs drag in
- * the whole curator + config stack, so stub them here — this test exercises
+ * curator registry and config module client. The real defs drag in
+ * the whole curator stack, so stub them here — this test exercises
  * routing and the route's own key allowlist, not the curator itself. Two stage
  * shapes are enough for that: one toggleable, one embedder-gated (null key). */
 cJSON *kb_curator_stages_json(void)
@@ -708,11 +687,6 @@ cJSON *kb_curator_presets_json(void)
 {
    return cJSON_CreateArray();
 }
-static const config_field_t g_stub_field = {"stub",         0,   0, 0, CFG_BOOL, RELOAD_HOT,
-                                            FGROUP_RUNTIME, NULL};
-static const config_field_t g_stub_secret_field = {
-    "kb_api_bearer_token",      0, 1, 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
-    "AIMEE_KB_API_BEARER_TOKEN"};
 static int g_stub_secret_configured;
 static int g_stub_secret_store_calls;
 static char g_stub_kb_api_bearer_token[4097] = "scope:service:aimee-server:token-one";
@@ -728,20 +702,16 @@ static int test_pam_check_credentials(const char *user, const char *password)
           (strcmp(user, "aimee-server") == 0 || strcmp(user, "other-service") == 0) &&
           strcmp(password, g_test_pam_password) == 0;
 }
-const char *config_kb_api_bearer_token(void)
-{
-   return g_stub_kb_api_bearer_token;
-}
-const config_field_t *config_field_lookup(const char *key)
+static int stub_config_key_known(const char *key)
 {
    /* Only the keys the pipeline route may touch resolve; anything else is
     * "unknown" so the route's own allowlist is what is under test. */
    if (!key)
-      return NULL;
+      return 0;
    if (strcmp(key, "kb_api_bearer_token") == 0)
-      return &g_stub_secret_field;
+      return 1;
    if (strncmp(key, "kb_curator_", 11) == 0 || strcmp(key, "kb_evidence_embed_enabled") == 0)
-      return &g_stub_field;
+      return 1;
    /* The KB-owned settings surface (KB_SETTINGS) plus the server-owned keys the
     * 403 cases probe — all real config keys, so the route's OWN allowlist is
     * what those assertions exercise, not a lookup miss. */
@@ -750,33 +720,33 @@ const config_field_t *config_field_lookup(const char *key)
        strncmp(key, "css_", 4) == 0 || strcmp(key, "typed_facts_enabled") == 0 ||
        strcmp(key, "ocr_command") == 0 || strcmp(key, "tsr_command") == 0 ||
        strcmp(key, "db2_url") == 0)
-      return &g_stub_field;
-   return NULL;
+      return 1;
+   return 0;
 }
-const char *config_field_secret_name(const config_field_t *f)
+
+cJSON *config_client_value_copy(const char *key)
 {
-   return f ? f->secret_name : NULL;
-}
-cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f)
-{
-   (void)cfg;
-   if (config_field_secret_name(f))
+   if (!stub_config_key_known(key))
+      return NULL;
+   if (!strcmp(key, "kb_api_bearer_token"))
       return cJSON_CreateBool(g_stub_secret_configured);
+   if (!strcmp(key, "kb_curator_stage_order"))
+      return cJSON_CreateString("extract_docs");
    return cJSON_CreateBool(0);
 }
 
-/* The console renders values through the live-config form now; same answer. */
-cJSON *config_field_public_value_json_current(const config_field_t *f)
+int config_client_key_is_secret(const char *key)
 {
-   return config_field_public_value_json(NULL, f);
+   return key && !strcmp(key, "kb_api_bearer_token");
 }
 
-/* Typed-facts knobs the console echoes back, read through accessors now.
- * Mirror the values this file's config_load stub sets (all zero/off). */
-int config_typed_facts_enabled(void)
+const char *config_client_secret_name(const char *key)
 {
-   return 0;
+   return config_client_key_is_secret(key) ? "AIMEE_KB_API_BEARER_TOKEN" : NULL;
 }
+
+/* Typed-facts knobs the console echoes back, read through accessors.
+ * config_typed_facts_enabled is gone: the layer has no master gate. */
 int config_kb_typed_facts_auto_promote_enabled(void)
 {
    return 0;
@@ -792,14 +762,6 @@ int config_secret_store(const char *name, const char *value)
    g_stub_secret_configured = value && value[0] ? 1 : 0;
    return 0;
 }
-int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
-{
-   (void)cfg;
-   (void)f;
-   /* Mirror the real parser's contract: bools accept only true/false text. */
-   return (value && (strcmp(value, "true") == 0 || strcmp(value, "false") == 0)) ? 0 : -1;
-}
-
 int index_find(const char *id, void *out, int max)
 {
    (void)id;
@@ -1390,46 +1352,18 @@ void kb_curator_queue_code_units_for_project(const char *project, const char *ro
 /* §2c: flips kb.reembed_on_dim_change for the /v1/reembed 403/proceed gate test. */
 static int g_test_reembed_enabled = 0;
 static double g_precision_floor = 0.0; /* §4 surprising self-suppress floor (0 = off) */
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->kb_reembed_on_dim_change = g_test_reembed_enabled;
-   cfg->kb_curator_extract_docs_enabled = 1;
-   cfg->kb_curator_extract_code_enabled = 1;
-   cfg->demotion_enabled = 1;
-   cfg->demotion_n_min = 2;
-   cfg->demotion_window = 64;
-   cfg->demotion_half_life_days = 30.0;
-   cfg->workspace_count = 1;
-   snprintf(cfg->workspaces[0], sizeof(cfg->workspaces[0]), "/workspace");
-   /* §5 hybrid RRF weights: mirror config_set_defaults so /v1/code/hybrid fuses
-    * both signals at equal weight (a 0 weight would disable a signal). */
-   cfg->code_hybrid_weight_code = 1.0;
-   cfg->code_hybrid_weight_graph = 1.0;
-   cfg->code_hybrid_weight_vector = 1.0;
-   cfg->code_hybrid_weight_memory = 1.0;
-   cfg->code_hybrid_rrf_k = 60.0;
-   cfg->code_surprising_precision_floor = g_precision_floor;
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. These return exactly what the stub above puts in the struct, so
- * the assertions below are unchanged. */
+/* Accessor stubs for route-local policy controls. */
 int config_present(void)
 {
-   return 1; /* the config_load stub above always succeeds */
+   return 1;
 }
 
-/* Ingress compression gate: memset-0 in the struct the stub above fills. */
 int config_ingress_compress_enabled(void)
 {
    return 0;
 }
 
-/* §4 surprising-links precision floor and judge command. The struct above leaves
- * both at zero/empty: floor <= 0 disables self-suppress, and an empty judge
- * command is what the hermetic judge stub below expects. */
+/* §4 surprising-links precision floor and judge command. */
 double config_code_surprising_precision_floor(void)
 {
    return g_precision_floor;
@@ -1442,14 +1376,13 @@ size_t config_kb_curator_judge_command_copy(char *out, size_t n)
    return n;
 }
 
-/* §2c reembed-on-dim-change gate: mirrors the struct the stub above fills, so a
- * case that flips g_test_reembed_enabled moves both seams together. */
+/* §2c reembed-on-dim-change gate. */
 int config_kb_reembed_on_dim_change(void)
 {
    return g_test_reembed_enabled;
 }
 
-/* §5 hybrid RRF weights + rank constant, mirroring the struct above. */
+/* §5 hybrid RRF weights + rank constant. */
 double config_code_hybrid_weight_code(void)
 {
    return 1.0;
@@ -1477,7 +1410,7 @@ double config_code_hybrid_rrf_k(void)
 
 int config_code_trust_actuation_enabled(void)
 {
-   return 0; /* §3 actuation gate: memset-0 in the struct above */
+   return 0;
 }
 
 int config_kb_curator_extract_docs_enabled(void)
@@ -1495,30 +1428,18 @@ const char *config_workspaces(int index)
    return index == 0 ? "/workspace" : "";
 }
 
-const char *config_embedder_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command_current(const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
    const char *url = getenv("EMBEDDER_URL");
    if (url && url[0])
       return url;
    url = getenv("SYNTHESIS_ENDPOINT");
-   if (url && url[0])
-      return url;
-   return ""; /* nothing selected: no embedder, no fabricated name */
+   return url && url[0] ? url : "";
 }
 
-/* The config_t-free form callers use now. Same resolution order, minus the
- * struct the caller no longer holds: request > env > nothing. */
-const char *config_embedder_command_current(const char *requested)
-{
-   return config_embedder_command(NULL, requested);
-}
-
-/* kb_intel_payload reads the demotion knobs through accessors now. Mirror the
- * values the config_load stub above sets, so both seams agree. */
+/* kb_intel_payload reads the demotion knobs through accessors. */
 int config_demotion_enabled(void)
 {
    return 1;
@@ -2111,6 +2032,23 @@ static void test_capabilities(void)
    assert(status == 200);
    assert(strstr(buf, "capabilities") != NULL);
    assert(strstr(buf, "memory") != NULL);
+   cJSON *root = cJSON_Parse(buf);
+   cJSON *surfaces = cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces");
+   assert(cJSON_IsObject(surfaces));
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only")));
+   cJSON_Delete(root);
+
+   aimee_command_registry_reset();
+   assert(aimee_agent_surface_register("kb_future", AIMEE_SURFACE_MCP, "kb-future") == 0);
+   status = kb_http_route("GET", "/v1/capabilities", NULL, NULL, buf, sizeof(buf));
+   assert(status == 200);
+   root = cJSON_Parse(buf);
+   surfaces = cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces");
+   cJSON *mcp_only = cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only");
+   assert(cJSON_GetArraySize(mcp_only) == 1);
+   assert(strcmp(cJSON_GetArrayItem(mcp_only, 0)->valuestring, "kb_future") == 0);
+   cJSON_Delete(root);
+   aimee_command_registry_reset();
 }
 
 /* ── db2_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +
@@ -2643,9 +2581,11 @@ static void test_console_settings(void)
    assert(kb_http_route_ex("GET", "/v1/console/settings/config", NULL, NULL, NULL, NULL, 0, b2,
                            sizeof(b2)) == 405);
 
-   /* typed_facts_enabled is KB-owned but belongs to the Typed Facts page, not
-    * this surface — so the settings route refuses it like any other key it does
-    * not own. */
+   /* typed_facts_enabled is refused here, and now for a second reason: the
+    * master gate is retired entirely, so there is no such option to set. The
+    * key stays in this surface's refusal list deliberately -- a stale caller
+    * that still sends it must be told no rather than have it silently accepted
+    * and dropped. */
    const char *tf = "{\"key\":\"typed_facts_enabled\",\"value\":true}";
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, tf,
                            (int)strlen(tf), b2, sizeof(b2)) == 403);
@@ -2680,6 +2620,26 @@ static void test_console_settings(void)
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, "{}", 2, b2,
                            sizeof(b2)) == 400);
    printf("  PASS: console settings (kb-owned key allowlist)\n");
+}
+
+static void test_console_evidence_operator_boundary(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   char buf[1024];
+   const char *body = "{\"action\":\"review.list\",\"limit\":25}";
+   test_kb_fact_actor_set(0);
+   int s = kb_http_route_ex("POST", "/v1/console/evidence", NULL, NULL, NULL, body,
+                            (int)strlen(body), buf, sizeof(buf));
+   assert(s == 403);
+   assert(strstr(buf, "authenticated operator required") != NULL);
+   test_kb_fact_actor_set(1);
+   s = kb_http_route_ex("POST", "/v1/console/evidence", NULL, NULL, NULL, body, (int)strlen(body),
+                        buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"ok\":true") != NULL);
+   s = kb_http_route_ex("GET", "/v1/console/evidence", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 405);
+   test_kb_fact_actor_set(0);
 }
 
 static void test_intelligence_calibration_readiness(void)
@@ -3070,6 +3030,7 @@ static void *mtls_pool_request_thread(void *opaque)
 
 static void test_mtls_serve(void)
 {
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
    kb_tls_set_pam_check_for_test(test_pam_check_credentials);
    extern void test_kb_enrollment_authority_set(int status);
    kb_pki_ca_t ca;
@@ -3102,7 +3063,7 @@ static void test_mtls_serve(void)
 
    /* A missing KB-side bearer authority is a retryable configuration failure,
     * never an open-auth downgrade. */
-   g_stub_kb_api_bearer_token[0] = '\0';
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
                     "Connection: close\r\n\r\n",
@@ -3110,8 +3071,7 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "503 Service Unavailable") &&
           strstr(resp, "service bearer authority is not configured"));
    assert(!strstr(resp, "\"status\":\"ok\""));
-   snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
-            "scope:service:aimee-server:token-one");
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
                     "Authorization: Bearer wrong-token\r\nConnection: close\r\n\r\n",
@@ -3464,10 +3424,8 @@ static void test_mtls_listener(void)
    rmdir(cp);
 
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   g_stub_kb_api_bearer_token[0] = '\0';
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
-   snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
-            "scope:service:aimee-server:token-one");
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);
@@ -7115,6 +7073,7 @@ int main(void)
    test_console_admin_requires_authorization_module();
    test_console_pipeline();
    test_console_settings();
+   test_console_evidence_operator_boundary();
    test_accounts_routes();
    test_mint_scope_restriction();
    test_team_routes();

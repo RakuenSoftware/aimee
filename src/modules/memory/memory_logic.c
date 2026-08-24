@@ -166,8 +166,8 @@ int memory_expire(void)
    int total = db2_memory_promotion_delete_l0();
 
    db2_memory_promotion_kind_t kinds[16];
-   int nkinds = db2_memory_promotion_list_kinds_in_tier("L1", kinds,
-                                                        (int)(sizeof(kinds) / sizeof(kinds[0])));
+   int nkinds = db2_memory_promotion_list_epistemic_kinds_in_tier(
+       "L1", kinds, (int)(sizeof(kinds) / sizeof(kinds[0])));
 
    for (int i = 0; i < nkinds; i++)
    {

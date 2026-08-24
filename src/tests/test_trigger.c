@@ -12,17 +12,7 @@
 
 #include "cJSON.h"
 #include "config.h"
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   /* Pluggable-module toggles default to -1 (unspecified) in production; a memset-0 would read
-    * as user-DISABLED and wrongly gate trigger workflow dispatch. */
-   cfg->module_memory = cfg->module_governance = cfg->module_delegates = cfg->module_workflows = -1;
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. module_workflows stays -1 (unspecified) exactly as the struct stub
+/* Accessor stubs: module_workflows stays -1 (unspecified); a zero would
  * sets it — a 0 would read as user-DISABLED and wrongly gate trigger workflow
  * dispatch, which is the same trap the comment above guards against.
  * wfe_proposals_autoscan_enabled was left zeroed by the stub. */
@@ -51,8 +41,8 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
    (void)fmt;
 }
 
-#include "modules/db1/wfe_store.h" /* db1_work_item_t for the list/cost-cap stubs */
-#include "db1_trigger.h"
+#include "db1_client/wfe_store.h" /* db1_work_item_t for the list/cost-cap stubs */
+#include "db1_client/db1_trigger.h"
 int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task,
                        const char *workspace, const char *metadata)
 {
@@ -1302,13 +1292,4 @@ int main(void)
    test_proposal_name_matches();
    printf("All tests passed.\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

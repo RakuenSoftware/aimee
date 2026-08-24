@@ -1,5 +1,9 @@
 # Implementation plan: Central agent-memory interception
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `central-agent-memory-interception.md` (design, converged R1–R4). This is the
 **build sequence**: concrete files, signatures, shared contracts, and tests per slice. Four
 slices, each its own branch + roundtable code review + PR + merge to `testing`, in order.

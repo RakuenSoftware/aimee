@@ -33,9 +33,8 @@ void client_session_worktree_key(const char *sid, char *out, size_t cap)
  * Every process of one agent session must agree on the session id, because the
  * worktree is keyed on it: disagree and the session gets TWO worktrees, and
  * whichever process holds the wrong one operates on an empty checkout. That is
- * not hypothetical -- a Claude Code session was landing its edits in the
- * hook's worktree while `aimee git` and every delegate were bound to the
- * proxy's, which refused the real one as "outside the session checkout".
+ * not hypothetical -- an older hook/MCP split landed host edits in one checkout
+ * while `aimee git` and delegates were bound to another.
  *
  * The rendezvous is a file named for a process both sides can name. `aimee mcp
  * serve` reads session-ppid-<its own ppid>, and its parent IS the host process
@@ -45,7 +44,9 @@ void client_session_worktree_key(const char *sid, char *out, size_t cap)
  * publishing under its immediate parent would name a shell that exits
  * immediately and that the proxy never asks about.
  *
- * So the hook walks up to the host and publishes there as well. Only as far as
+ * A host hook fallback therefore walks up to the host and publishes there as
+ * well. The universal launcher normally avoids this race entirely by exporting
+ * AIMEE_SESSION_ID before either child exists. Only walk as far as
  * the host: publishing under every ancestor would eventually name something
  * shared (a terminal, a service manager) and hand one session's id to an
  * unrelated one -- the precise collision the ppid key exists to avoid. */

@@ -57,6 +57,112 @@ int kb_client_memory_supersede(int64_t old_id, const char *new_content, double c
    return ok ? 0 : -1;
 }
 
+/* Typed-fact §4 retraction. Reports the number of edges affected via
+ * *out_retracted (0 is a legitimate success: nothing current matched), and
+ * distinguishes a refusal on an immutable relation from a generic failure so the
+ * caller can say which happened. */
+int kb_client_facts_retract(const char *source, const char *relation, const char *target,
+                            const char *authority, int *out_retracted, int *out_immutable)
+{
+   if (out_retracted)
+      *out_retracted = 0;
+   if (out_immutable)
+      *out_immutable = 0;
+   if (!source || !source[0] || !relation || !relation[0])
+      return -1;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "source", source);
+   cJSON_AddStringToObject(req, "relation", relation);
+   if (target && target[0])
+      cJSON_AddStringToObject(req, "target", target);
+   if (authority && authority[0])
+      cJSON_AddStringToObject(req, "authority", authority);
+   char *json = kb_v1_action_request("facts.retract", req);
+   if (!json)
+      return -1;
+
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return -1;
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   if (ok)
+   {
+      cJSON *n = cJSON_GetObjectItemCaseSensitive(resp, "retracted");
+      if (cJSON_IsNumber(n) && out_retracted)
+         *out_retracted = (int)n->valuedouble;
+   }
+   else if (out_immutable)
+   {
+      cJSON *reason = cJSON_GetObjectItemCaseSensitive(resp, "reason");
+      if (cJSON_IsString(reason) && strcmp(reason->valuestring, "immutable") == 0)
+         *out_immutable = 1;
+   }
+   cJSON_Delete(resp);
+   /* A retraction removes a belief from recall — as much a mutation as a store,
+    * and audited on the same terms (identifiers only, never fact content). */
+   kb_client_memory_audit_note("facts.retract", 0, NULL, relation, NULL, 0.0, NULL, ok);
+   return ok ? 0 : -1;
+}
+
+int kb_client_entities_merge(int64_t from_id, int64_t into_id, int64_t *out_merge_id)
+{
+   if (out_merge_id)
+      *out_merge_id = 0;
+   if (from_id <= 0 || into_id <= 0)
+      return -1;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddNumberToObject(req, "from_id", (double)from_id);
+   cJSON_AddNumberToObject(req, "into_id", (double)into_id);
+   char *json = kb_v1_action_request("entities.merge", req);
+   if (!json)
+      return -1;
+
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return -1;
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   if (ok && out_merge_id)
+   {
+      cJSON *mid = cJSON_GetObjectItemCaseSensitive(resp, "merge_id");
+      if (cJSON_IsNumber(mid))
+         *out_merge_id = (int64_t)mid->valuedouble;
+   }
+   cJSON_Delete(resp);
+   kb_client_memory_audit_note("entities.merge", from_id, NULL, NULL, NULL, 0.0, NULL, ok);
+   return ok ? 0 : -1;
+}
+
+int kb_client_entities_unmerge(int64_t merge_id)
+{
+   if (merge_id <= 0)
+      return -1;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddNumberToObject(req, "merge_id", (double)merge_id);
+   char *json = kb_v1_action_request("entities.unmerge", req);
+   if (!json)
+      return -1;
+
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return -1;
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   cJSON_Delete(resp);
+   kb_client_memory_audit_note("entities.unmerge", merge_id, NULL, NULL, NULL, 0.0, NULL, ok);
+   return ok ? 0 : -1;
+}
+
 int kb_client_memory_fact_history(const char *key, memory_t *out, int max)
 {
    if (!key || !out || max <= 0)
@@ -296,6 +402,14 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
                                const char *content, const char *use_cases, double confidence,
                                const char *session_id, memory_t *out)
 {
+   return kb_client_memory_insert_as(tier, kind, key, content, use_cases, confidence, session_id,
+                                     MEMORY_AUTHORITY_MODEL, out);
+}
+
+int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_authority_t authority, memory_t *out)
+{
    if (!key || !content)
       return -1;
 
@@ -311,6 +425,11 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
    cJSON_AddNumberToObject(req, "confidence", confidence);
    if (session_id && session_id[0])
       cJSON_AddStringToObject(req, "session_id", session_id);
+   /* Asks for the user provenance; the kb grants it only if this request
+    * authenticated as a person (kb_handle_memory_store). Omitted otherwise, so a
+    * caller that never thought about it records the agent provenance. */
+   if (authority == MEMORY_AUTHORITY_USER)
+      cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.store", req);
    if (!json)
       return -1;
@@ -553,13 +672,18 @@ int kb_client_memory_touch(int64_t id)
    return rc;
 }
 
-int kb_client_memory_update(int64_t id, const char *content)
+int kb_client_memory_update_as(int64_t id, const char *content, memory_authority_t authority,
+                               int64_t *new_id_out)
 {
+   if (new_id_out)
+      *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "id", (double)id);
    cJSON_AddStringToObject(req, "content", content);
+   if (authority == MEMORY_AUTHORITY_USER)
+      cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.update", req);
    if (!json)
       return -1;
@@ -569,9 +693,19 @@ int kb_client_memory_update(int64_t id, const char *content)
       return -1;
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
+   if (rc == 0 && new_id_out)
+   {
+      cJSON *nid = cJSON_GetObjectItemCaseSensitive(resp, "id");
+      *new_id_out = cJSON_IsNumber(nid) ? (int64_t)nid->valuedouble : id;
+   }
    cJSON_Delete(resp);
    kb_client_memory_audit_note("memory.update", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
+}
+
+int kb_client_memory_update(int64_t id, const char *content)
+{
+   return kb_client_memory_update_as(id, content, MEMORY_AUTHORITY_USER, NULL);
 }
 
 int kb_client_memory_reject(int64_t id, const char *reason)

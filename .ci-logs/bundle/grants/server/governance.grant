@@ -1,0 +1,9 @@
+version=1
+principal_class=1
+principal_ref=19
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-governance
+publish=
+subscribe=
+request=
+serve=8961

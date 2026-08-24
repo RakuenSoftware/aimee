@@ -2,8 +2,8 @@
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
-#include "db1.h"
-#include "modules/db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
+#include "db1_client/db1.h"
+#include "db1_client/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/delegates/delegate_launch_args.h>
 #include "role_templates.h"
@@ -21,6 +21,7 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include "config.h"
+#include "config_client.h"
 #include <aimee/delegates/delegate_driver.h>
 #include "http_retry.h"
 #include "log.h"
@@ -168,21 +169,22 @@ static void record_outcome(const char *agent_name, const char *role, const agent
 
 extern const char *delegation_active_id(void);
 
-/* Apply config -> the admission controller, re-applying only when the config file changes
- * (the acquire runs per turn, so this stays a cheap stat() on the hot path). Guarantees the
- * controller is configured before the first acquire, and picks up hot-reloaded limits. */
+/* Apply config -> the admission controller from the module's version contract.
+ * The acquire runs per turn, so the cheap version call avoids filesystem
+ * coupling while still picking up every committed module mutation. */
 static void admission_ensure_configured(void)
 {
-   static long long applied_mtime = -1;
+   static int configured;
    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
-   const char *path = config_default_path();
-   struct stat st;
-   long long mtime = (path && stat(path, &st) == 0)
-                         ? (long long)st.st_mtime * 1000000000LL + (long long)st.st_mtim.tv_nsec
-                         : 0;
+   int changed = config_client_changed();
    pthread_mutex_lock(&mu);
-   if (mtime != applied_mtime)
+   if (!configured || changed > 0)
    {
+      if (changed > 0 && config_client_refresh() != 0)
+      {
+         pthread_mutex_unlock(&mu);
+         return;
+      }
       int global_max = config_maximum_total_concurrent_agent_sessions() > 0
                            ? config_maximum_total_concurrent_agent_sessions()
                            : AGENT_ADMISSION_DEFAULT_GLOBAL_MAX;
@@ -200,7 +202,7 @@ static void admission_ensure_configured(void)
          n++;
       }
       agent_admission_configure(global_max, default_model, overrides, n);
-      applied_mtime = mtime;
+      configured = 1;
    }
    pthread_mutex_unlock(&mu);
 }
@@ -461,7 +463,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    }
 
    if (!out->error[0])
-      snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
+      agent_route_failure_message(role, out->error, sizeof(out->error));
    return -1;
 }
 
@@ -640,7 +642,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    agent_t *ag = agent_route(cfg, role);
    if (!ag)
    {
-      snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
+      agent_route_failure_message(role, out->error, sizeof(out->error));
       return -1;
    }
    agent_apply_runtime_config(ag);
@@ -1228,6 +1230,16 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
                   int max_tokens, double temperature, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+   /* A refused route arrives here as NULL, and the three reads below would fault
+    * on it. Routing can now refuse (a routing-module outage is not silently
+    * replaced by a local pick), so callers that used to be handed an agent by
+    * luck reach this with nothing. Say so instead of dying. */
+   if (!agent)
+   {
+      snprintf(out->error, sizeof(out->error), "%s",
+               "no agent was selected for this run; refusing to execute without one");
+      return -1;
+   }
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);

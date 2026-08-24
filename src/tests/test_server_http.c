@@ -3,6 +3,7 @@
 #include "server_http.h"
 #include "server_http_authz.h"
 #include "server_http_internal.h"
+#include "server_http_identity.h"
 #include "runtime_secret.h"
 #include "request_context.h"
 #include "http_content_encoding.h"
@@ -12,10 +13,11 @@
 #include <aimee/audit/obs_bus.h>
 #include "agent_config.h"
 #include "config.h"
+#include "command_registry.h"
 #include "role_templates.h"
 #include "delegate_permissions_stub.h"
 #include "cJSON.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -36,24 +38,12 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 
-extern int g_remote_writes;
-
-typedef struct
+static char *kb_agent_surfaces_stub(void)
 {
-   pthread_barrier_t *barrier;
-   int result;
-   char bearer[65];
-} wizard_bootstrap_thread_t;
-
-static void *wizard_bootstrap_thread(void *arg)
-{
-   wizard_bootstrap_thread_t *thread = arg;
-   int barrier_result = pthread_barrier_wait(thread->barrier);
-   assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
-   thread->result =
-       server_http_first_user_bootstrap("webuser:alice", thread->bearer, sizeof(thread->bearer));
-   return NULL;
+   return strdup("{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}");
 }
+
+extern int g_remote_writes;
 
 int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
 {
@@ -403,6 +393,80 @@ static void test_role_template_show_reports_what_the_role_came_to(void)
    printf("  PASS: test_role_template_show_reports_what_the_role_came_to\n");
 }
 
+/* TLS seams the identity capture reaches through. This suite drives capture
+ * with fd = -1 on a TCP-shaped request, so no connection is ever TLS and these
+ * only need to answer "not TLS" -- linking the real TLS stack here would pull in
+ * the whole connection layer to test header parsing. */
+#include "server_conn_io.h"
+#include "server_tls.h"
+
+int server_conn_io_has_ssl(int fd)
+{
+   (void)fd;
+   return 0;
+}
+
+SSL *server_conn_io_get_ssl(int fd)
+{
+   (void)fd;
+   return NULL;
+}
+
+int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
+                             size_t serial_len)
+{
+   (void)ssl;
+   if (cn_out && cn_len)
+      cn_out[0] = 0;
+   if (serial_out && serial_len)
+      serial_out[0] = 0;
+   return 0;
+}
+
+int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   (void)ssl;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int server_tls_local_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   (void)ssl;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+static int slow_stream_handler(const char *body, server_http_sse_event_emit emit, void *ctx)
+{
+   (void)body;
+   struct timespec ts;
+   ts.tv_sec = 17;
+   ts.tv_nsec = 0;
+   nanosleep(&ts, NULL);
+   emit(ctx, "done", "{}");
+   return 0;
+}
+
+static void test_sse_keepalive_slow_generation(void)
+{
+   int fds[2];
+   if (pipe(fds) != 0)
+      return;
+   server_http_sse_live_run(fds[1], "{}", slow_stream_handler);
+   close(fds[1]);
+   char buf[8192];
+   ssize_t n = read(fds[0], buf, 8191);
+   if (n < 1)
+      n = 0;
+   buf[n] = 0;
+   close(fds[0]);
+   assert(n != 0);
+   assert(strstr(buf, "keep-alive") != NULL);
+}
+
 int main(void)
 {
    test_role_template_show_reports_what_the_role_came_to();
@@ -535,6 +599,28 @@ int main(void)
       assert(strstr(resp, "\"personas\"") && strstr(resp, "\"sessions\""));
       assert(strstr(resp, "\"models\""));
       assert(strstr(resp, "\"version\":\""));
+      cJSON *caps = cJSON_Parse(resp);
+      cJSON *surfaces = cJSON_GetObjectItemCaseSensitive(caps, "agent_surfaces");
+      assert(cJSON_IsObject(surfaces));
+      assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "cli_only")));
+      assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only")));
+      cJSON_Delete(caps);
+
+      aimee_command_registry_reset();
+      assert(aimee_agent_surface_register("runtime_future", AIMEE_SURFACE_MCP, "runtime-future") ==
+             0);
+      server_http_set_kb_agent_surfaces_provider(kb_agent_surfaces_stub);
+      st = server_http_route("GET", "/v1/capabilities", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      caps = cJSON_Parse(resp);
+      surfaces = cJSON_GetObjectItemCaseSensitive(caps, "agent_surfaces");
+      cJSON *mcp_only = cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only");
+      assert(cJSON_GetArraySize(mcp_only) == 2);
+      assert(strcmp(cJSON_GetArrayItem(mcp_only, 0)->valuestring, "runtime_future") == 0);
+      assert(strcmp(cJSON_GetArrayItem(mcp_only, 1)->valuestring, "kb_future") == 0);
+      cJSON_Delete(caps);
+      server_http_set_kb_agent_surfaces_provider(NULL);
+      aimee_command_registry_reset();
    }
 
    /* --- GET /v1/models is an OpenAI-shaped model list with the aimee model --- */
@@ -697,6 +783,43 @@ int main(void)
    {
       int st = server_http_route("GET", "/v1/personas/does-not-exist", NULL, 0, resp, sizeof(resp));
       assert(st == 404);
+   }
+
+   /* --- users can add, edit, and remove a persona through the server API --- */
+   {
+      const char *created =
+          "{\"name\":\"ignored-body-name\",\"description\":\"First version\","
+          "\"delegates\":\"full\",\"roles\":[\"code\"],"
+          "\"persona\":\"You are a staff engineer in %s.\","
+          "\"principles\":\"# Principles\\n- Prefer evidence.\",\"brief\":\"Initial brief\"}";
+      int st = server_http_route("PUT", "/v1/personas/staff-engineer", created,
+                                 (int)strlen(created), resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"name\":\"staff-engineer\""));
+      assert(strstr(resp, "First version"));
+
+      st = server_http_route("GET", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "Prefer evidence"));
+
+      const char *edited =
+          "{\"description\":\"Edited version\",\"delegates\":\"readonly\","
+          "\"roles\":[\"review\"],\"persona\":\"Edited identity.\","
+          "\"principles\":\"# Principles\\n- Review carefully.\",\"brief\":\"Edited brief\"}";
+      st = server_http_route("PUT", "/v1/personas/staff-engineer", edited, (int)strlen(edited),
+                             resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "Edited version"));
+      assert(strstr(resp, "Edited identity"));
+
+      st = server_http_route("DELETE", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      st = server_http_route("GET", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 404);
+
+      st = server_http_route("PUT", "/v1/personas/bad%2Fname", created, (int)strlen(created), resp,
+                             sizeof(resp));
+      assert(st == 400 || st == 404);
    }
 
    /* --- session persona store: set/get + isolation --- */
@@ -1087,6 +1210,66 @@ int main(void)
 
    /* --- server_http_authorize: UDS vs TCP + bearer + session-key rule --- */
    {
+      char unbound[128], bound_sid[80];
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 1);
+      assert(strcmp(unbound, "secret") == 0);
+      assert(strcmp(bound_sid, "0123456789abcdef0123456789abcdef") == 0);
+      /* The binding is a strict terminal suffix. Invalid forms remain ordinary
+       * bearer text and never acquire a session identity. */
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcde", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(strcmp(unbound, "secret.aimee-session.0123456789abcdef0123456789abcde") == 0);
+      assert(bound_sid[0] == '\0');
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef0", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdeg", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(".aimee-session.0123456789abcdef0123456789abcdef",
+                                               unbound, sizeof(unbound), bound_sid,
+                                               sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef.trailing", unbound,
+                 sizeof(unbound), bound_sid, sizeof(bound_sid)) == 0);
+      assert(
+          server_http_session_bearer_unbind("secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                            unbound, 6, bound_sid, sizeof(bound_sid)) == 0);
+      assert(
+          server_http_session_bearer_unbind("secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                            unbound, sizeof(unbound), bound_sid, 32) == 0);
+
+      /* The connection bearer may ride in x-api-key while Authorization carries a
+       * caller identity JWT. The session binding has to be recovered from either
+       * header, or a client that scopes itself through x-api-key authenticates
+       * while presenting no session at all -- and everything keyed on the session
+       * (persona delivery, economizer session keys) then treats every request as
+       * a brand new session. */
+      {
+         const char *only_api_key =
+             "GET /v1/health HTTP/1.1\r\nHost: h\r\n"
+             "x-api-key: secret.aimee-session.fedcba9876543210fedcba9876543210\r\n\r\n";
+         server_http_identity_capture(-1, 1, only_api_key);
+         assert(strcmp(server_http_identity_session_hdr(), "fedcba9876543210fedcba9876543210") ==
+                0);
+
+         /* An explicit session header still wins over the bearer suffix. */
+         const char *explicit_hdr =
+             "GET /v1/health HTTP/1.1\r\nHost: h\r\naimee-session-id: explicit-sid\r\n"
+             "x-api-key: secret.aimee-session.fedcba9876543210fedcba9876543210\r\n\r\n";
+         server_http_identity_capture(-1, 1, explicit_hdr);
+         assert(strcmp(server_http_identity_session_hdr(), "explicit-sid") == 0);
+
+         /* An unsuffixed key leaves no session behind. */
+         const char *plain = "GET /v1/health HTTP/1.1\r\nHost: h\r\nx-api-key: secret\r\n\r\n";
+         server_http_identity_capture(-1, 1, plain);
+         assert(server_http_identity_session_hdr()[0] == 0);
+         printf("server_http:   PASS: x-api-key carries the session binding too\n");
+      }
+
       /* UDS is always authorized regardless of token, when no session key. */
       assert(server_http_authorize(0, "", NULL, NULL, 0) == 0);
       assert(server_http_authorize(0, "secret", NULL, NULL, 0) == 0);
@@ -1099,6 +1282,12 @@ int main(void)
       /* TCP with a bearer configured: Authorization or x-api-key exact match passes. */
       assert(server_http_authorize(1, "secret", "Bearer secret", NULL, 0) == 0);
       assert(server_http_authorize(1, "secret", NULL, "secret", 0) == 0);
+      assert(server_http_authorize(1, "secret",
+                                   "Bearer secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                   NULL, 0) == 0);
+      assert(server_http_authorize(1, "secret", NULL,
+                                   "secret.aimee-session.fedcba9876543210fedcba9876543210",
+                                   0) == 0);
       assert(server_http_authorize(1, "secret", "Bearer nope", "secret", 0) == 0);
       /* The caller identity JWT may occupy Authorization while the independent
        * rotating connection bearer occupies x-api-key. A valid identity-shaped
@@ -1449,6 +1638,26 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/help") ==
              server_capability_for_method("help.get"));
       assert(server_http_route_caps("POST", "/v1/mcp/call") == CAP_TOOL_EXECUTE);
+
+      /* Destroying a memory is graded apart from writing one, the way
+       * rules.delete is graded apart from rules.*: a grant that lets an agent
+       * remember must not, by itself, let it forget. */
+      assert(server_capability_for_method("memory.store") == CAP_MEMORY_WRITE);
+      assert(server_capability_for_method("memory.delete") == CAP_MEMORY_ADMIN);
+      assert(server_capability_for_method("memory.delete") !=
+             server_capability_for_method("memory.store"));
+      assert(server_http_route_caps("POST", "/v1/memory/delete") == CAP_MEMORY_ADMIN);
+      /* update overwrites content, so it must be a write — not the memory.*
+       * read-prefix default it used to fall through to. */
+      assert(server_capability_for_method("memory.update") == CAP_MEMORY_WRITE);
+      assert(server_capability_for_method("memory.update") != CAP_MEMORY_READ);
+      /* Mirrors the rules split this is modelled on. */
+      assert(server_capability_for_method("rules.delete") == CAP_RULES_ADMIN);
+      /* memory:admin must not leak into the read-only set, and must stay inside
+       * the authenticated set (the operator can still administer their store). */
+      assert((CAPS_READ_ONLY & CAP_MEMORY_ADMIN) == 0);
+      assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
+      assert((CAPS_ALL & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
 
       /* Reads sit within the read-only set; compute requires CAP_CHAT. */
       assert((server_http_route_caps("GET", "/v1/rules") & ~CAPS_READ_ONLY) == 0);
@@ -1859,16 +2068,15 @@ int main(void)
 
       /* Later write batches: session + rules/collab-rules + skill mutations, all
        * UDS-only at the default remote_writes=off. */
-      const char *write_paths[] = {"/v1/wm/set",
-                                   "/v1/attempts/record",
-                                   "/v1/rules/delete",
-                                   "/v1/collab_rules/approve",
-                                   "/v1/collab_rules/reject",
-                                   "/v1/collab_rules/retire",
-                                   "/v1/skills/create",
-                                   "/v1/skills/edit",
-                                   "/v1/skills/archive",
-                                   "/v1/skills/pin"};
+      const char *write_paths[] = {
+          "/v1/wm/set", "/v1/attempts/record", "/v1/rules/delete", "/v1/collab_rules/approve",
+          "/v1/collab_rules/reject", "/v1/collab_rules/retire", "/v1/skills/create",
+          "/v1/skills/edit", "/v1/skills/archive", "/v1/skills/pin",
+          /* Typed-fact correction surface (§3 / §4). These are
+           * data-plane writes; listing them here is what puts them
+           * behind the write-tier gate rather than leaving them
+           * reachable by anyone holding the shared bearer. */
+          "/v1/facts/retract", "/v1/entities/merge", "/v1/entities/unmerge"};
       for (size_t i = 0; i < sizeof(write_paths) / sizeof(write_paths[0]); i++)
       {
          assert(server_http_route_allowed(0, NULL, "POST", write_paths[i], 0) == 1); /* UDS ok */
@@ -1883,6 +2091,15 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/skills/create") == CAP_TOOL_WRITE);
       /* Skill reads remain TCP-reachable (only the mutations are write-gated). */
       assert(server_http_route_allowed(1, NULL, "GET", "/v1/skills", 0) == 1);
+
+      /* The typed-fact correction surface exists and carries the write capability.
+       * Before this it did not exist at all: the layer could learn a fact and had
+       * no route by which anyone could say it was wrong, and a recorded entity
+       * merge was reversible only from a test. A non-zero cap here is also what
+       * proves the route resolved — an unrouted path reports 0. */
+      assert(server_http_route_caps("POST", "/v1/facts/retract") == CAP_MEMORY_WRITE);
+      assert(server_http_route_caps("POST", "/v1/entities/merge") == CAP_MEMORY_WRITE);
+      assert(server_http_route_caps("POST", "/v1/entities/unmerge") == CAP_MEMORY_WRITE);
    }
 
    /* --- aimee.api.remote_writes lifts the TCP write deny under capability control --- */
@@ -2404,10 +2621,23 @@ int main(void)
       assert(server_http_request_framing_valid(pipelined, strlen(pipelined)) == 0);
    }
 
-   /* The wizard creates one durable identity transaction: additive bearer now,
-    * explicit full tier only after the CSR certificate is bound. */
+   /* Wizard enrollment with no store reachable.
+    *
+    * This suite stubs obs_bus_module_available() to 0 deliberately -- its
+    * subject is the HTTP layer with no module attached -- so every
+    * db1_remote_client_* call the enrollment path makes is refused before it
+    * reaches a module. That makes this the right place to pin the FAIL-CLOSED
+    * direction, and the wrong place to pin the happy path: a bootstrap that
+    * reported success here would be handing out an owner credential that no
+    * store has a record of.
+    *
+    * The happy path moved to where a store exists:
+    *   - claim semantics: server-go/modules/aimee/families/identity.go
+    *     (+ identity_test.go);
+    *   - two setup requests racing for the single owner row, which is what the
+    *     two threads here were really testing: scripts/test-family-identity.sql,
+    *     against a real server. */
    {
-      assert(db1_init(":memory:") == 0);
       assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "primary") == 0);
       assert(config_set_server_api_mtls(1) == 0);
       for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
@@ -2417,52 +2647,30 @@ int main(void)
          runtime_secret_remove(name);
       }
 
-      pthread_barrier_t barrier;
-      pthread_t workers[2];
-      wizard_bootstrap_thread_t attempts[2] = {{.barrier = &barrier}, {.barrier = &barrier}};
-      assert(pthread_barrier_init(&barrier, NULL, 3) == 0);
-      assert(pthread_create(&workers[0], NULL, wizard_bootstrap_thread, &attempts[0]) == 0);
-      assert(pthread_create(&workers[1], NULL, wizard_bootstrap_thread, &attempts[1]) == 0);
-      int barrier_result = pthread_barrier_wait(&barrier);
-      assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
-      assert(pthread_join(workers[0], NULL) == 0);
-      assert(pthread_join(workers[1], NULL) == 0);
-      assert(pthread_barrier_destroy(&barrier) == 0);
-      assert(attempts[0].result == 0 && attempts[1].result == 0);
-      assert(strcmp(attempts[0].bearer, attempts[1].bearer) == 0);
+      char bearer[65] = "";
+      assert(server_http_first_user_bootstrap("webuser:alice", bearer, sizeof(bearer)) != 0);
+      /* Nothing minted, nothing configured, nothing authorized: a refusal that
+       * still left a usable bearer behind would be worse than a crash. */
+      assert(bearer[0] == '\0');
+      assert(server_http_enrolled_bearer_count() == 0);
+      assert(config_server_api_bearer_extra_count() == 0);
 
-      char bearer[65], again[65], principal[128];
-      snprintf(bearer, sizeof(bearer), "%s", attempts[0].bearer);
-      assert(strlen(bearer) == 64 && server_http_enrolled_bearer_count() == 1);
-      assert(config_server_api_bearer_extra_count() == 1);
-      assert(strcmp(config_server_api_bearer_extra(0), bearer) == 0);
-      assert(server_http_authorize_enrolled(1, "primary", NULL, bearer, 0) == 0);
-      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 0);
-      assert(strcmp(again, bearer) == 0); /* refresh is idempotent */
-      assert(server_http_first_user_bootstrap("webuser:bob", again, sizeof(again)) == -2);
-
-      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 0);
+      /* And the certificate side refuses rather than inventing a tier. It only
+       * ever RAISES the caller's tier, so starting at OFF is what shows that an
+       * unreachable store cannot elevate one. */
+      char principal[128] = "unset";
       int effective_tier = SERVER_REMOTE_WRITES_OFF;
-      assert(server_http_first_user_apply_cert_grant(0, "A1B2", &effective_tier, principal,
-                                                     sizeof(principal)) == 0);
-      assert(effective_tier == SERVER_REMOTE_WRITES_OFF && !principal[0]);
-      assert(server_http_first_user_bind_cert(bearer, "A1B2") == 1);
-      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 2);
-      assert(strcmp(principal, "webuser:alice") == 0);
-      effective_tier = SERVER_REMOTE_WRITES_OFF;
       assert(server_http_first_user_apply_cert_grant(1, "A1B2", &effective_tier, principal,
-                                                     sizeof(principal)) == 2);
-      assert(effective_tier == SERVER_REMOTE_WRITES_FULL);
-      assert(strcmp(principal, "webuser:alice") == 0);
-      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 1);
+                                                     sizeof(principal)) < 0);
+      assert(effective_tier == SERVER_REMOTE_WRITES_OFF);
+      assert(principal[0] == '\0');
       runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
-      runtime_secret_remove("AIMEE_API_BEARER_TOKEN_EXTRA_0");
-      db1_shutdown();
    }
 
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
    g_test_server_ctx.orchestration_pool_initialized = 0;
    platform_test_rmrf(home);
+   test_sse_keepalive_slow_generation();
    printf("OK\n");
    return 0;
 }

@@ -16,6 +16,7 @@
  */
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
+#include "client_config.h"
 #include "aimee_home.h"
 #include "agent_code_capabilities.h"
 #include "platform_path.h"
@@ -145,6 +146,7 @@ attn_op_t attn_classify(const char *tool_name, const char *bash_cmd)
 #define ATTN_MAX_RECORDS    1024
 #define ATTN_PRUNE_AGE_SECS (24 * 3600)
 #define ATTN_RAW_SCAN_PATH  "__aimee_raw_scan__"
+#define ATTN_DISCOVERY_PATH "__aimee_discovery__"
 
 static void attn_log_path(const char *session_id, char *out, size_t cap)
 {
@@ -264,6 +266,110 @@ static void attn_record(cJSON *arr, const char *path, int weight, long now_ts)
    cJSON_AddItemToArray(arr, e);
 }
 
+static int attn_has_recent_marker(cJSON *arr, const char *marker, long now_ts)
+{
+   cJSON *e = NULL;
+   cJSON_ArrayForEach(e, arr)
+   {
+      const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "path"));
+      cJSON *ts = cJSON_GetObjectItemCaseSensitive(e, "ts");
+      if (!path || strcmp(path, marker) != 0 || !cJSON_IsNumber(ts))
+         continue;
+      long age = now_ts - (long)ts->valuedouble;
+      if (age >= 0 && age <= ATTN_PRUNE_AGE_SECS)
+         return 1;
+   }
+   return 0;
+}
+
+static int attn_cli_discovery(const char *tool_name, const char *command)
+{
+   if (!tool_name || !command || !command[0])
+      return 0;
+   if (strcasecmp(tool_name, "Bash") != 0 && strcasecmp(tool_name, "shell") != 0 &&
+       strcasecmp(tool_name, "command_execution") != 0)
+      return 0;
+   return strstr(command, "aimee index investigate") != NULL;
+}
+
+static int attn_contains_ci(const char *text, const char *needle)
+{
+   if (!text || !needle || !needle[0])
+      return 0;
+   size_t n = strlen(needle);
+   for (const char *p = text; *p; p++)
+      if (strncasecmp(p, needle, n) == 0)
+         return 1;
+   return 0;
+}
+
+static int attn_mcp_discovery(const char *tool_name, const char *command)
+{
+   if (!attn_contains_ci(tool_name, "aimee"))
+      return 0;
+   return attn_contains_ci(tool_name, "index") || attn_contains_ci(tool_name, "find_symbol") ||
+          attn_contains_ci(tool_name, "search_memory") || attn_contains_ci(tool_name, "context") ||
+          attn_contains_ci(command, "investigate");
+}
+
+int attn_discovery_gate(const char *tool_name, const char *command, const char *session_id,
+                        char *reason, size_t reason_len)
+{
+   if (reason && reason_len)
+      reason[0] = '\0';
+   const char *transport = getenv("AIMEE_HOOK_TRANSPORT");
+   int cli = transport && strcmp(transport, "cli") == 0;
+   int mcp = transport && strcmp(transport, "mcp") == 0;
+   if ((!cli && !mcp) || !tool_name || !tool_name[0])
+      return 0; /* legacy/unregistered hooks retain their existing behavior */
+
+   char path[1024];
+   attn_log_path(session_id, path, sizeof(path));
+   cJSON *arr = attn_load(path);
+   long now_ts = (long)time(NULL);
+   if (attn_has_recent_marker(arr, ATTN_DISCOVERY_PATH, now_ts))
+   {
+      cJSON_Delete(arr);
+      return 0;
+   }
+
+   int activated =
+       cli ? attn_cli_discovery(tool_name, command) : attn_mcp_discovery(tool_name, command);
+   if (activated)
+   {
+      attn_record(arr, ATTN_DISCOVERY_PATH, 1, now_ts);
+      attn_save(path, arr, now_ts);
+      cJSON_Delete(arr);
+      return 0;
+   }
+   cJSON_Delete(arr);
+
+   if (reason && reason_len)
+   {
+      if (cli)
+      {
+         const char *cli_path = getenv("AIMEE_CLI_PATH");
+         if (!cli_path || !cli_path[0])
+            cli_path = "aimee";
+         snprintf(reason, reason_len,
+                  "Aimee discovery is the required first repository action for this session. "
+                  "Retry through the registered CLI before reading, searching, editing, or "
+                  "running repository commands: `%s index investigate \"<plain-language "
+                  "summary of the task>\"`. If the command reports unavailable, you may "
+                  "continue after that attempted call.",
+                  cli_path);
+      }
+      else
+         snprintf(reason, reason_len,
+                  "Aimee discovery is the required first repository action for this session. "
+                  "Retry through the registered Aimee MCP surface with index/investigate (or "
+                  "another indexed discovery operation) before using ordinary repository "
+                  "tools. If the MCP call reports unavailable, you may continue after that "
+                  "attempted call.");
+   }
+   return 2;
+}
+
 static int attn_raw_scan_count(cJSON *arr, long now_ts)
 {
    int count = 0;
@@ -280,75 +386,6 @@ static int attn_raw_scan_count(cJSON *arr, long now_ts)
          count++;
    }
    return count;
-}
-
-static int attn_parse_nonnegative_int(const char *s, int *out)
-{
-   if (!s || !out)
-      return 0;
-
-   while (isspace((unsigned char)*s))
-      s++;
-   if (*s == '+')
-      s++;
-   if (!isdigit((unsigned char)*s))
-      return 0;
-
-   errno = 0;
-   char *end = NULL;
-   long value = strtol(s, &end, 10);
-   if (errno || end == s || value < 0 || value > INT_MAX)
-      return 0;
-   *out = (int)value;
-   return 1;
-}
-
-static int attn_parse_ingress_max_raw_scans(const char *buf, int *out)
-{
-   if (!buf || !out)
-      return 0;
-
-   const char *line = buf;
-   while (*line)
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-
-      if (*p && *p != '#')
-      {
-         char quote = 0;
-         if (*p == '"' || *p == '\'')
-            quote = *p++;
-
-         size_t key_len = strlen("ingress_max_raw_scans");
-         if (strncmp(p, "ingress_max_raw_scans", key_len) == 0)
-         {
-            p += key_len;
-            if (quote)
-            {
-               if (*p != quote)
-                  goto next_line;
-               p++;
-            }
-            while (*p && isspace((unsigned char)*p))
-               p++;
-            if (*p == ':' || *p == '=')
-            {
-               p++;
-               return attn_parse_nonnegative_int(p, out);
-            }
-         }
-      }
-
-   next_line:
-      while (*line && *line != '\n')
-         line++;
-      if (*line == '\n')
-         line++;
-   }
-
-   return 0;
 }
 
 static int attn_read_file(const char *path, char **out)
@@ -392,78 +429,7 @@ static int attn_read_file(const char *path, char **out)
 
 static int attn_config_ingress_max_raw_scans(void)
 {
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 0;
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 0;
-
-   int value = 0;
-   if (!attn_parse_ingress_max_raw_scans(buf, &value))
-      value = 0;
-   free(buf);
-   return value;
-}
-
-/* Parse a boolean `<key>:` line from an aimee.yaml buffer. Accepts
- * true/1/yes/on (case-insensitive) as true; anything else (incl. a missing
- * key) leaves *out untouched. Mirrors attn_parse_ingress_max_raw_scans' lean,
- * link-free YAML-line scan so the guard need not pull in the full config. */
-static int attn_parse_bool_key(const char *buf, const char *key, int *out)
-{
-   if (!buf || !key || !out)
-      return 0;
-
-   const char *line = buf;
-   while (*line)
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-
-      if (*p && *p != '#')
-      {
-         char quote = 0;
-         if (*p == '"' || *p == '\'')
-            quote = *p++;
-
-         size_t key_len = strlen(key);
-         if (strncmp(p, key, key_len) == 0)
-         {
-            p += key_len;
-            if (quote)
-            {
-               if (*p != quote)
-                  goto next_line;
-               p++;
-            }
-            while (*p && isspace((unsigned char)*p))
-               p++;
-            if (*p == ':' || *p == '=')
-            {
-               p++;
-               while (*p && (isspace((unsigned char)*p) || *p == '"' || *p == '\''))
-                  p++;
-               *out = (strncasecmp(p, "true", 4) == 0 || strncasecmp(p, "yes", 3) == 0 ||
-                       strncasecmp(p, "on", 2) == 0 || *p == '1');
-               return 1;
-            }
-         }
-      }
-
-   next_line:
-      while (*line && *line != '\n')
-         line++;
-      if (*line == '\n')
-         line++;
-   }
-
-   return 0;
+   return client_config_int("ingress_max_raw_scans", 0);
 }
 
 static int attn_config_require_session_worktree(void)
@@ -474,21 +440,7 @@ static int attn_config_require_session_worktree(void)
     * `git checkout <branch>` moves the branch the other is mutating, cross-
     * contaminating commits. Failing closed to isolation (each session in its own
     * `.aimee/worktrees/...` worktree+branch) is the only safe default. */
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 1; /* no resolvable home -> fail closed to isolation */
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 1; /* no config file -> default ON */
-
-   int value = 1; /* default ON; only an explicit key overrides */
-   (void)attn_parse_bool_key(buf, "require_session_worktree", &value);
-   free(buf);
-   return value;
+   return client_config_bool("require_session_worktree", 1);
 }
 
 static int attn_config_require_aimee_memory(void)
@@ -497,21 +449,7 @@ static int attn_config_require_aimee_memory(void)
     * system (`aimee memory store`), where they are indexed, recalled, and
     * audited — not in per-harness markdown files aimee never sees. Only an
     * explicit `require_aimee_memory: false` opts out. */
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 1; /* no resolvable home -> fail closed to enforcement */
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 1; /* no config file -> default ON */
-
-   int value = 1; /* default ON; only an explicit key overrides */
-   (void)attn_parse_bool_key(buf, "require_aimee_memory", &value);
-   free(buf);
-   return value;
+   return client_config_bool("require_aimee_memory", 1);
 }
 
 /* Public wrapper so other client TUs (e.g. the remote/thin session-start path)
@@ -1530,6 +1468,15 @@ int handle_attention_guard(void)
    const char *bash_cmd =
        ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "command")) : NULL;
 
+   char discovery_reason[1024];
+   if (attn_discovery_gate(tool, bash_cmd, sid, discovery_reason, sizeof(discovery_reason)) != 0)
+   {
+      fprintf(stderr, "aimee attention-guard: %s\n", discovery_reason);
+      cJSON_Delete(hook);
+      free(stdin_data);
+      return 2;
+   }
+
    long now_ts = (long)time(NULL);
    attn_op_t op = attn_classify(tool, bash_cmd);
 
@@ -1568,11 +1515,10 @@ int handle_attention_guard(void)
       }
    }
 
-   /* Session-isolation guard (OPT-IN via require_session_worktree). Fails closed
-    * on a mutating op outside an aimee-managed worktree, so a session that never
-    * ran `session-start` (e.g. a missing SessionStart hook) cannot mutate the
-    * primary checkout / default branch. This is the aimee-level backstop for the
-    * worktree+branch isolation that the SessionStart hook would otherwise set up. */
+   /* Session-isolation guard (default on via require_session_worktree). Fails
+    * closed on a mutating op outside an aimee-managed worktree, so a client that
+    * bypassed `aimee launch` cannot mutate the primary checkout/default branch.
+    * A SessionStart hook supplies context only and is never treated as cwd state. */
    if ((op == ATTN_OP_SOFT || op == ATTN_OP_HARD) && attn_config_require_session_worktree())
    {
       char cwd[1024];

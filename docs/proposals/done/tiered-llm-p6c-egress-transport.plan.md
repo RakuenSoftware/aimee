@@ -1,5 +1,9 @@
 # P6c-egress transport plan — strict Bedrock HTTPS + CT260 composition
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** complete; roundtable-converged and CT260 validated.
 - **Depends on:** merged P6c catalog/authority, P6a SigV4, P6b eventstream,
   P6c IR/stream, and P6c egress engine.

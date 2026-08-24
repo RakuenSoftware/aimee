@@ -8,9 +8,9 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "db.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "support/json_canonical.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/db2_tenant.h"
@@ -535,7 +535,7 @@ static void test_minhash_shadow_signatures_persist(void)
    int saw_supersedes = 0;
    for (int i = 0; i < pn; i++)
       if (strcmp(proposed[i].kind, "kb_near_duplicate") == 0 &&
-          strstr(proposed[i].payload_json, "\"proposed_relation\":\"supersedes\""))
+          strstr(json_canonical(proposed[i].payload_json), "\"proposed_relation\":\"supersedes\""))
          saw_supersedes = 1;
    assert(saw_supersedes);
 

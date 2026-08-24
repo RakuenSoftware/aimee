@@ -32,8 +32,15 @@ KNOWN_GAPS: set[str] = set()
 
 
 def main() -> int:
-    routed = set(re.findall(r'^\s*\{"([a-z0-9-]+)",\s*"', ROUTES.read_text(encoding="utf-8"), re.M))
-    helped = set(re.findall(r'\{"([a-z0-9-]+)",\s*"', HELP.read_text(encoding="utf-8")))
+    # The verb is quoted OR the bare token NULL, the latter meaning the group is
+    # itself the command (`aimee use`, `aimee presence`, `aimee git`). Requiring
+    # a quote exempted precisely those rows -- the commands MOST likely to want
+    # a help entry, since a bare group name is what an operator types first.
+    # A gate that silently skips part of its domain reads as coverage it does
+    # not have, which is the failure this whole script exists to prevent.
+    routed = set(re.findall(r'^\s*\{"([a-z0-9_-]+)"\s*,\s*(?:"|NULL)',
+                            ROUTES.read_text(encoding="utf-8"), re.M))
+    helped = set(re.findall(r'\{"([a-z0-9_-]+)",\s*"', HELP.read_text(encoding="utf-8")))
     if not routed or not helped:
         print("check-cli-help-coverage: FAIL — could not parse the route or help table; "
               "the patterns in this script have drifted from the source.")

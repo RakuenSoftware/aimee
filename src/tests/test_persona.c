@@ -186,6 +186,10 @@ int main(void)
                        "---\n\n"
                        "## Persona\n"
                        "You are a hard-boiled detective novelist working in %s.\n\n"
+                       "## Workflow\n"
+                       "Investigate the clues before drafting.\n\n"
+                       "## Rules\n"
+                       "Do not reveal the culprit early.\n\n"
                        "## Principles\n"
                        "# Craft Principles\n"
                        "- Keep the voice clipped.\n\n"
@@ -200,10 +204,22 @@ int main(void)
       assert(has_role(&p, "prose") && has_role(&p, "line-edit") && has_role(&p, "continuity"));
       assert(p.persona_text && strstr(p.persona_text, "hard-boiled detective novelist") != NULL);
       assert(p.persona_text && strstr(p.persona_text, "%s") != NULL); /* cwd placeholder kept */
+      assert(p.persona_text && strstr(p.persona_text, "## Workflow") != NULL);
+      assert(p.persona_text && strstr(p.persona_text, "Investigate the clues") != NULL);
+      assert(p.persona_text && strstr(p.persona_text, "## Rules") != NULL);
       assert(p.principles_text && strstr(p.principles_text, "clipped") != NULL);
       assert(p.brief_text && strstr(p.brief_text, "case facts") != NULL);
       assert(strcmp(p.delegates, "full") == 0); /* unset -> default full */
       persona_free(&p);
+
+      char *primary = persona_compose_primary_instructions("noir", "/tmp/noir-worktree");
+      assert(primary);
+      assert(strstr(primary, "<aimee-persona schema=\"1\" name=\"noir\">") != NULL);
+      assert(strstr(primary, "hard-boiled detective novelist") != NULL);
+      assert(strstr(primary, "/tmp/noir-worktree") != NULL);
+      assert(strstr(primary, "Keep the voice clipped") != NULL);
+      assert(strstr(primary, "Recall the case facts") != NULL);
+      free(primary);
 
       /* a custom persona with an explicit readonly policy */
       snprintf(path, sizeof(path), "%s/critic.md", dir);
@@ -378,7 +394,17 @@ int main(void)
       assert(r.builtin == 1); /* still recognized as the engineer built-in */
       assert(r.persona_text && strstr(r.persona_text, "CUSTOM ENGINEER PROSE") != NULL);
       assert(r.principles_text && strstr(r.principles_text, "Edited Principles") != NULL);
+      char *identity = persona_identity_prose(&r, "/tmp/edited-worktree");
+      assert(identity &&
+             strstr(identity, "CUSTOM ENGINEER PROSE for /tmp/edited-worktree") != NULL);
+      free(identity);
       persona_free(&r);
+
+      char *primary = persona_compose_primary_instructions("engineer", "/tmp/edited-worktree");
+      assert(primary);
+      assert(strstr(primary, "Edited Principles") != NULL);
+      assert(strstr(primary, "CUSTOM ENGINEER PROSE for /tmp/edited-worktree") != NULL);
+      free(primary);
 
       /* an engineer-persona delegate still gets principles-only framing even
        * when engineer.md exists (no identity prose injected). */

@@ -1,5 +1,9 @@
 # Proposal: aimee-server web GUI — first-run setup wizard + per-tab tutorials
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done — shipped to `testing` across two slices. Slice 1 (per-tab tutorial
   overlays + "?" re-opener + "Replay tutorials") and Slice 2 (client-side readiness +
   header "Setup — N left" chip + wizard modal writing through the existing

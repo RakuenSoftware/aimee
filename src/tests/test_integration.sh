@@ -21,6 +21,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AIMEE="$REPO_ROOT/aimee"
 AIMEE_SERVER="$REPO_ROOT/aimee-server"
 export PATH="$REPO_ROOT:$PATH"
+# Keep the real HOME's Go caches. HOME is about to become a temp dir, and a Go
+# build under it would re-download the module graph on every run and then leave
+# a read-only module cache behind that the teardown cannot remove.
+INTEG_REAL_HOME="$HOME"
+export GOCACHE="${GOCACHE:-$INTEG_REAL_HOME/.cache/go-build}"
+export GOMODCACHE="${GOMODCACHE:-$INTEG_REAL_HOME/go/pkg/mod}"
+export GOFLAGS="${GOFLAGS:--mod=mod}"
 export HOME=$(mktemp -d /tmp/aimee-integ-XXXXXX)
 export AIMEE_HOME="$HOME/.config/aimee"
 unset AIMEE_PROFILE
@@ -48,6 +55,330 @@ HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 # while the server it started is running perfectly well two lines away.
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 
+
+# ---------------------------------------------------------------
+# The DB1 module.
+#
+# Most of DB1 is served by a separate process now, and the daemon has no
+# in-process fallback: with nothing attached, every migrated call answers
+# "capability absent" and the operation fails. In a container the module
+# supervisor starts it from server.modules; this harness has no supervisor, so
+# it does what the supervisor does -- install the module beside the socket,
+# write the grant the daemon's policy loader reads, and attach it once the
+# daemon is up.
+#
+# Without this the harness exercises a daemon that cannot reach its own store,
+# and reports it as "failed to create session" rather than as a missing module.
+#
+# The grant is written only when the module is actually there. A grant naming an
+# executable that does not resolve is not one the daemon ignores: it refuses to
+# start the module bus, and the server exits before it listens. The make target
+# builds the module, so the ordinary path has one; a hand-run without it
+# degrades to the old behaviour rather than to a server that will not come up.
+# ---------------------------------------------------------------
+# One Go binary serves every module; which one it is comes from argv[0], so the
+# harness stages it under the name the grant pins.
+DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module"
+DB1_MODULE="$AIMEE_HOME/aimee-module-aimee"
+# The same multicall binary under the postgres name: it derives its
+# identity from argv[0], and the grant pins the resolved path.
+PG_MODULE="$AIMEE_HOME/aimee-module-postgres"
+PG_MODULE_PID=""
+MODULE_POLICY_DIR="$AIMEE_HOME/modules.d/server"
+MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
+DB1_MODULE_PID=""
+
+# Configuration is served by its own pure-Go process. The daemon validates its
+# startup snapshot before opening HTTP, so this module must attach as soon as
+# the bus socket exists; waiting for HTTP first is a circular dependency.
+CONFIG_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module-config"
+CONFIG_MODULE="$AIMEE_HOME/aimee-module-config"
+CONFIG_MODULE_PID=""
+
+install_config_module() {
+    if [ ! -x "$CONFIG_MODULE_BUILT" ]; then
+        echo "ABORT: the config module is not built at $CONFIG_MODULE_BUILT."
+        echo "       Run this harness through 'make integration-tests'."
+        exit 1
+    fi
+    cp "$CONFIG_MODULE_BUILT" "$CONFIG_MODULE"
+    chmod 0755 "$CONFIG_MODULE"
+    mkdir -p "$MODULE_POLICY_DIR"
+    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/config.grant"
+    if [ ! -r "$generated" ]; then
+        python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+            --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+    fi
+    if [ ! -r "$generated" ]; then
+        echo "ABORT: no generated config module grant at $generated."
+        exit 1
+    fi
+    sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$generated" \
+        >"$MODULE_POLICY_DIR/config.grant"
+}
+
+start_config_module() {
+    [ -x "$CONFIG_MODULE" ] || return 1
+    stop_config_module
+    "$CONFIG_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-config.log" 2>&1 &
+    CONFIG_MODULE_PID=$!
+}
+
+stop_config_module() {
+    if [ -n "$CONFIG_MODULE_PID" ]; then
+        kill "$CONFIG_MODULE_PID" 2>/dev/null || true
+        wait "$CONFIG_MODULE_PID" 2>/dev/null || true
+        CONFIG_MODULE_PID=""
+    fi
+}
+
+install_db1_module() {
+    # Missing module: stop, do not degrade. This used to return 0 and let the
+    # run continue, from a time when the daemon still had an in-process store to
+    # fall back to. It has none now, so a skipped install does not produce a
+    # weaker run -- it produces a run where every store-backed check fails as
+    # "failed to create session", which reads like a product bug and is not one.
+    # The make target builds the module, so this only fires on a hand-run, which
+    # is exactly the case that needs telling.
+    if [ ! -x "$DB1_MODULE_BUILT" ]; then
+        echo "ABORT: the DB1 module is not built at $DB1_MODULE_BUILT."
+        echo "       Every store-backed check needs it: nothing serves the store"
+        echo "       without it. Build it with:"
+        echo "           make -C src build/obj/aimee-module"
+        echo "       or run this harness through 'make integration-tests', which"
+        echo "       builds it as a prerequisite."
+        exit 1
+    fi
+    # Copied beside the socket rather than granted where it was built: a grant
+    # pins a resolved path, and a build tree is not where a deployed module
+    # lives.
+    cp "$DB1_MODULE_BUILT" "$DB1_MODULE"
+    chmod 0755 "$DB1_MODULE"
+    cp "$DB1_MODULE_BUILT" "$PG_MODULE"
+    chmod 0755 "$PG_MODULE"
+    mkdir -p "$MODULE_POLICY_DIR"
+
+    # Both extra grants come from the SAME generated bundle the store's own
+    # grant does, rather than being written out here. The refs and kinds in
+    # them are derived from src/modules/process-contracts.json, and a copy
+    # transcribed into this file is a copy that goes stale silently: the
+    # store's outbound ref moved from 68 to 69 in a merge, and a hand-written
+    # heredoc would still have said 68 while every other site said 69.
+    install_generated_grant() {
+        local name="$1" exe="$2"
+        local src="$REPO_ROOT/src/build/obj/module-bundle/grants/server/$name.grant"
+        if [ ! -r "$src" ]; then
+            python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+                --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+        fi
+        if [ ! -r "$src" ]; then
+            echo "no generated $name grant at $src" >&2
+            return 1
+        fi
+        sed "s|^executable=.*|executable=$exe|" "$src" \
+            >"$MODULE_POLICY_DIR/$name.grant"
+    }
+    # The postgres module serves the SQL stage the store calls; the store's
+    # OUTBOUND principal is what is allowed to call it. A serve grant admits
+    # what a module answers, not what it asks for, so the second is not
+    # implied by the first -- without it the store attaches and then finds no
+    # backend, which reads exactly like a broken store.
+    install_generated_grant postgres "$PG_MODULE" || exit 1
+    install_generated_grant aimee-postgres "$DB1_MODULE" || exit 1
+
+    # The serve list comes from the grant the exporter generates, so it cannot
+    # drift from what the module actually serves. It is a build artifact, so
+    # generate it when it is not there rather than guessing: the guess this
+    # replaced was a hardcoded list of eight kinds, written when the module
+    # served eight families. It serves nineteen. A short list does not fail
+    # loudly -- the daemon starts, eleven families are simply unserved, and
+    # their checks fail as if the code were broken.
+    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/aimee.grant"
+    if [ ! -r "$generated" ]; then
+        python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+            --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+    fi
+    local serve="" ref=""
+    if [ -r "$generated" ]; then
+        serve=$(sed -n 's/^serve=//p' "$generated" || true)
+        # From the file for the same reason the serve list is: a ref restated
+        # here can drift from the one the module registers under, and the
+        # failure that produces is a module nobody can reach.
+        ref=$(sed -n 's/^principal_ref=//p' "$generated" || true)
+    fi
+    if [ -z "$serve" ]; then
+        echo "ABORT: no generated store grant at $generated, and it could not be"
+        echo "       generated. Without it there is no honest serve list to"
+        echo "       install: run"
+        echo "           python3 scripts/export_c_repositories.py \\"
+        echo "               --runtime-bundle src/build/obj/module-bundle"
+        exit 1
+    fi
+    cat >"$MODULE_POLICY_DIR/aimee.grant" <<GRANT
+version=1
+principal_class=1
+principal_ref=${ref:-30}
+uid=self
+executable=$DB1_MODULE
+publish=
+subscribe=
+request=
+serve=$serve
+GRANT
+}
+
+start_db1_module() {
+    [ -x "$DB1_MODULE" ] || return 0
+    # The store is a Go module against PostgreSQL and reads AIMEE_STORE_URL; it
+    # opened a SQLite file named by AIMEE_DB1_PATH until it moved. Skip the same
+    # way an unbuilt module is skipped, but SAY so -- starting it without a DSN
+    # would fork a process that exits immediately and leave the wait below to
+    # burn ten seconds discovering a socket that is never coming.
+    if [ -z "${AIMEE_STORE_URL:-}" ]; then
+        echo "integration: AIMEE_STORE_URL unset; skipping the store module" >&2
+        return 0
+    fi
+    # One schema per run. Without it the run inherits every row the last one
+    # wrote -- the harness used to get a fresh SQLite file each time and the
+    # isolation came free. The module creates the schema it is pointed at, so
+    # this needs no CREATE DATABASE right and no postgres client here.
+    if [ -z "${AIMEE_STORE_SCHEMA:-}" ]; then
+        AIMEE_STORE_SCHEMA="integ_$$"
+        case "$AIMEE_STORE_URL" in
+            *\?*) AIMEE_STORE_URL="$AIMEE_STORE_URL&search_path=$AIMEE_STORE_SCHEMA" ;;
+            *)    AIMEE_STORE_URL="$AIMEE_STORE_URL?search_path=$AIMEE_STORE_SCHEMA" ;;
+        esac
+        export AIMEE_STORE_URL AIMEE_STORE_SCHEMA
+    fi
+    stop_db1_module
+    # Postgres first: the store looks for its backend as it comes up, so a store
+    # started into an empty bus fails immediately rather than waiting.
+    if [ -x "$PG_MODULE" ] && [ -z "$PG_MODULE_PID" ]; then
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" "$PG_MODULE" "$MODULE_BUS_SOCK" \
+            >"$AIMEE_HOME/pg-module.log" 2>&1 &
+        PG_MODULE_PID=$!
+    fi
+    # Its output goes to a file, not /dev/null: a module that refuses to start
+    # says why exactly once, and discarding that leaves the failure looking like
+    # a socket that never appeared.
+    AIMEE_STORE_URL="$AIMEE_STORE_URL" "$DB1_MODULE" "$MODULE_BUS_SOCK"         >"$AIMEE_HOME/db1-module.log" 2>&1 &
+    DB1_MODULE_PID=$!
+    # Wait for the store to be SERVING, not for the bus socket: the daemon owns
+    # that socket and creates it before the module is forked, so polling it fell
+    # through immediately and the harness ran on against a store that had not
+    # attached. The module now also opens a connection pool and applies its
+    # schema before it serves, which made that window wide enough to fail a
+    # health assertion.
+    #
+    # The daemon's own health state is the condition every caller depends on, so
+    # that is what this waits for.
+    local i
+    for i in $(seq 1 200); do
+        if [ -S "$HTTP_SOCK" ] && curl -s --max-time 2 --unix-socket "$HTTP_SOCK" \
+                http://localhost/v1/server/health 2>/dev/null | grep -q '"state":"ok"'; then
+            return 0
+        fi
+        if ! kill -0 "$DB1_MODULE_PID" 2>/dev/null; then
+            echo "integration: the store module exited before it served:" >&2
+            sed 's/^/    /' "$AIMEE_HOME/db1-module.log" 2>/dev/null | head -5 >&2
+            return 1
+        fi
+        sleep 0.1
+    done
+    echo "integration: the store module never reached serving; its log was:" >&2
+    sed 's/^/    /' "$AIMEE_HOME/db1-module.log" 2>/dev/null | head -5 >&2
+    return 1
+}
+
+stop_db1_module() {
+    if [ -n "$DB1_MODULE_PID" ]; then
+        kill "$DB1_MODULE_PID" 2>/dev/null || true
+        wait "$DB1_MODULE_PID" 2>/dev/null || true
+        DB1_MODULE_PID=""
+    fi
+}
+
+
+# ---------------------------------------------------------------
+# The workflow control module. Every /v1/workflow route and /v1/dev/submit is
+# dispatched to it over the bus -- the daemon holds no workflow logic and
+# answers 503 when nothing is attached -- so without this the entire workflow
+# surface is untested, which is exactly how it went untested until now.
+#
+# It is the Go binary (deployed as aimee-wfe) and it needs TWO grants for the
+# same executable: one serving identity for the control kinds it answers, and a
+# separate outbound identity for the store kinds it calls. A module's serving
+# grant requests nothing, so a single grant cannot do both.
+# ---------------------------------------------------------------
+WFE_MODULE_SRC="$REPO_ROOT/server-go"
+WFE_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-wfe"
+WFE_MODULE="$AIMEE_HOME/aimee-wfe"
+WFE_MODULE_PID=""
+WORKFLOW_MODULE_READY=0
+
+install_workflow_module() {
+    [ -d "$WFE_MODULE_SRC" ] || return 1
+    command -v go >/dev/null 2>&1 || return 1
+    ( cd "$WFE_MODULE_SRC" && go build -buildvcs=false -o "$WFE_MODULE_BUILT" ./cmd/aimee-server ) \
+        >/dev/null 2>&1 || return 1
+    cp "$WFE_MODULE_BUILT" "$WFE_MODULE"
+    chmod 0755 "$WFE_MODULE"
+    # The definitions a deployment ships. Without them the engine starts with an
+    # empty registry, and every submit fails to resolve its workflow -- which
+    # looks like a broken intake rather than an empty install.
+    mkdir -p "$AIMEE_HOME/workflows"
+    cp "$REPO_ROOT"/config/workflows/*.yaml "$AIMEE_HOME/workflows/" 2>/dev/null || return 1
+    mkdir -p "$MODULE_POLICY_DIR"
+    # Same rule as the DB1 grant: take the generated one so the serve/request
+    # lists cannot drift from what the module actually serves, and rewrite only
+    # the executable, because a grant pins a resolved path and this one is
+    # installed beside the socket rather than at its deployed location.
+    local bundle="$REPO_ROOT/src/build/obj/module-bundle/grants/server"
+    local g
+    for g in wfe workflows; do
+        [ -r "$bundle/$g.grant" ] || return 1
+        sed "s|^executable=.*|executable=$WFE_MODULE|" "$bundle/$g.grant" \
+            >"$MODULE_POLICY_DIR/$g.grant"
+    done
+    return 0
+}
+
+start_workflow_module() {
+    [ -x "$WFE_MODULE" ] || return 1
+    stop_workflow_module
+    "$WFE_MODULE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
+        --module-bus-socket "$MODULE_BUS_SOCK" >"$HOME/aimee-wfe.log" 2>&1 &
+    WFE_MODULE_PID=$!
+    # Attachment is what matters, not the process: poll the seam itself until it
+    # stops answering "not attached". A fixed sleep here would be a flake.
+    local i
+    for i in $(seq 1 100); do
+        [ "$(http_status GET /v1/workflow/defs 2>/dev/null)" = "200" ] && return 0
+        kill -0 "$WFE_MODULE_PID" 2>/dev/null || break
+        sleep 0.1
+    done
+    return 1
+}
+
+stop_workflow_module() {
+    if [ -n "$WFE_MODULE_PID" ]; then
+        kill "$WFE_MODULE_PID" 2>/dev/null || true
+        wait "$WFE_MODULE_PID" 2>/dev/null || true
+        WFE_MODULE_PID=""
+    fi
+}
+
+install_db1_module
+install_config_module
+# Grants are read by the daemon at startup, so this has to happen BEFORE the
+# server is started even though the module itself is not launched until the
+# workflow section. Installing it later produced a module that ran, attached to
+# nothing, and left the whole workflow surface answering 503.
+WORKFLOW_MODULE_INSTALLED=0
+if install_workflow_module; then
+    WORKFLOW_MODULE_INSTALLED=1
+fi
+
 PASS=0
 FAIL=0
 SKIP=0
@@ -66,8 +397,40 @@ check() {
         PASS=$((PASS + 1))
     else
         echo "FAIL: $desc"
+        dump_server_log
         FAIL=$((FAIL + 1))
     fi
+}
+
+# What the server was doing when a check failed. Bounded, and only for the
+# first few failures: enough to diagnose, not enough to bury the summary.
+# Without this a server-side stall is invisible -- the client reports only that
+# it gave up, which reads as "the server is down" even while the checks either
+# side of it are served fine.
+SERVER_LOG=""
+SERVER_LOG_DUMPS=0
+dump_server_log() {
+    [ "$SERVER_LOG_DUMPS" -lt 3 ] || return 0
+    SERVER_LOG_DUMPS=$((SERVER_LOG_DUMPS + 1))
+    # Say which case this is rather than going quiet. A silent helper here would
+    # repeat, in miniature, the bug it exists to fix: the reader cannot tell
+    # "the server said nothing" from "nobody looked".
+    # Two different files, and the useful one is not the obvious one. The
+    # redirect on start_server captures only what the server writes to
+    # stdout/stderr, which for a healthy boot is nothing; the request log --
+    # every route, its status and its timing -- goes to AIMEE_HOME/server.log.
+    # Prefer that, and fall back to the capture so a server that dies before it
+    # can open its log still gets to say why.
+    local shown=0
+    local f
+    for f in "$AIMEE_HOME/server.log" "$SERVER_LOG"; do
+        [ -n "$f" ] && [ -s "$f" ] || continue
+        echo "  aimee-server log (last 20 lines of $f):"
+        tail -20 "$f" 2>/dev/null | sed 's/^/    /'
+        shown=1
+        break
+    done
+    [ "$shown" -eq 1 ] || echo "  aimee-server log: nothing recorded in $AIMEE_HOME/server.log or ${SERVER_LOG:-(no capture path)}"
 }
 
 check_output() {
@@ -80,6 +443,7 @@ check_output() {
         PASS=$((PASS + 1))
     else
         echo "FAIL: $desc (expected '$expected', got '$(echo "$output" | head -1)')"
+        dump_server_log
         FAIL=$((FAIL + 1))
     fi
 }
@@ -106,6 +470,39 @@ require_binary "$AIMEE_SERVER"
 # kept as thin aliases over the http_rpc helper (defined below), which maps each
 # {method} to its dedicated route, so the existing assertions keep working — the
 # local HTTP UDS is filesystem-trusted, so no separate auth step is needed.
+# Speak a verb and a path directly, and report the STATUS as well as the body.
+# The workflow control plane answers with distinct codes for distinct outcomes
+# -- 429 for a capped principal, 503 for a store that could not answer -- and a
+# helper that returned only the body could not tell those apart, which is the
+# one distinction that section is there to check.
+http_call() {
+    python3 -c "
+import socket, sys
+verb, path, body = sys.argv[1], sys.argv[2], sys.argv[3]
+req = ('%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n'
+       'Content-Length: %d\r\nConnection: close\r\n\r\n%s' % (verb, path, len(body), body))
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect('$HTTP_SOCK')
+s.settimeout(20)
+s.sendall(req.encode())
+data = b''
+while True:
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    data += chunk
+s.close()
+head, _, payload = data.partition(b'\r\n\r\n')
+status = head.split(b'\r\n')[0].split(b' ')[1].decode() if head else '000'
+sys.stdout.write(status + ' ' + payload.decode(errors='replace').strip())
+" "$1" "$2" "${3:-}"
+}
+
+# The status alone, for checks that care only about the outcome code.
+http_status() {
+    http_call "$1" "$2" "${3:-}" | cut -d' ' -f1
+}
+
 srv_req() {
     http_rpc "$1"
 }
@@ -202,14 +599,26 @@ if err:
 PY
 }
 
+# mcp-serve runs from MCP_CWD, never from the source tree it was built in.
+#
+# A `git` tool call makes the client ship its CWD's working-tree diff to the
+# server. Run from src/, that diff is whatever the developer happens to have
+# uncommitted -- so this suite's result depended on the state of the checkout it
+# was invoked from, and six mirror checks failed for anyone carrying more than a
+# few megabytes of unpushed work. The tool calls below all pass absolute paths,
+# so the cwd is not otherwise load-bearing.
+MCP_CWD="$AIMEE_HOME/mcp-cwd"
+mkdir -p "$MCP_CWD"
+
 mcp_initialized_req() {
-    python3 - "$AIMEE" "$1" <<'PY'
+    python3 - "$AIMEE" "$1" "$MCP_CWD" <<'PY'
 import subprocess
 import sys
 
 cmd = [sys.argv[1], "mcp-serve"]
 request = sys.argv[2]
-p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                     cwd=sys.argv[3])
 
 def send(payload):
     body = payload.encode()
@@ -273,12 +682,21 @@ PY
 # socket-present means ready to serve. Polling also returns as soon as it is up,
 # which is faster than the sleep it replaces on a machine that is not loaded.
 start_server() {
-    local log="$HOME/aimee-server.$$.log"
+    # Global, not local: a failing CHECK needs this as much as a failing bind.
+    # A server that answers slowly, or not at all, says why here and nowhere
+    # else, and every check that reads only the client's side has to guess.
+    SERVER_LOG="$HOME/aimee-server.$$.log"
+    local log="$SERVER_LOG"
     "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
+    local config_started=0
     local i
     for i in $(seq 1 300); do
-        [ -S "$HTTP_SOCK" ] && return 0
+        if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
+            start_config_module
+            config_started=1
+        fi
+        [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
         # A dead process will never bind; fail fast rather than waiting out the
         # full window for a server that has already exited.
         kill -0 "$SERVER_PID" 2>/dev/null || break
@@ -301,7 +719,19 @@ ABORT_CMD=""
 # hunting with; bash already knows the line and the command, so ask it.
 trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
+stop_pg_module() {
+    if [ -n "$PG_MODULE_PID" ]; then
+        kill "$PG_MODULE_PID" 2>/dev/null || true
+        wait "$PG_MODULE_PID" 2>/dev/null || true
+        PG_MODULE_PID=""
+    fi
+}
+
 cleanup() {
+    stop_workflow_module
+    stop_db1_module
+    stop_pg_module
+    stop_config_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -381,6 +811,70 @@ check_output "no-arg path remains local help" 'Server is started automatically' 
 RESP=$(srv_req '{"method":"server.health"}') || true
 check_output "server.health status" '"status":"ok"' echo "$RESP"
 check_output "server.health uptime" '"uptime"' echo "$RESP"
+# The DB1 state is the server's answer to "can I reach the store", and since
+# the store became a module that is a question about the module being
+# attached rather than about a file this process opened. Asserted because
+# nothing else here would notice it answering "unavailable" forever: every
+# other check in this suite goes through a handler that would simply fail,
+# and "status":"ok" above stays ok either way.
+check_output "server.health reports the DB1 store reachable" '"state":"ok"' echo "$RESP"
+
+# ... and stops reporting it once the store is gone, promptly.
+#
+# "Promptly" is the whole point. This used to be read from module availability,
+# which is registry state the bus corrects on a 30s heartbeat with a reap every
+# 7.5s -- so health kept answering "ok" for ~37s after the module died while
+# every store call was already failing. Measured twice on a clean container at
+# 36.5s and 37s before the fix, 1s after it.
+#
+# Five seconds is the budget here: the probe caches for one, and the rest is
+# slack for a loaded CI box. A regression to inferring availability rather than
+# probing it fails this by twenty seconds, not by a hair.
+if [ -x "$DB1_MODULE" ]; then
+    stop_db1_module
+    HEALTH_GONE=""
+    for _i in $(seq 1 25); do
+        HEALTH_GONE=$(http_rpc '{"method":"server.health"}') || true
+        case "$HEALTH_GONE" in
+        *'"state":"ok"'*) sleep 0.2 ;;
+        *) break ;;
+        esac
+    done
+    case "$HEALTH_GONE" in
+    *'"state":"ok"'*)
+        echo "FAIL: server.health still reported the store ok 5s after the module was killed"
+        echo "  health: $HEALTH_GONE"
+        FAIL=$((FAIL + 1))
+        ;;
+    *)
+        PASS=$((PASS + 1)) # server.health notices the store is gone
+        ;;
+    esac
+    # Put it back: every check after this one needs a store.
+    start_db1_module
+    for _i in $(seq 1 50); do
+        case "$(http_rpc '{"method":"server.health"}' || true)" in
+        *'"state":"ok"'*) break ;;
+        *) sleep 0.2 ;;
+        esac
+    done
+fi
+
+# index.investigate refuses rather than guessing when no project is in scope:
+# an unscoped investigation would silently search the wrong repository.
+RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper"}') || true
+check_output "index.investigate refuses without a project scope" 'scope_required' echo "$RESP"
+
+# With a scope, it must distinguish an OUTAGE from an index with no evidence.
+# The integration server runs without a reachable knowledge service, so this is
+# exactly the condition that used to answer "no evidence" and send the agent off
+# to search the tree by hand. It is the call the session guidance tells every
+# agent to make FIRST, so a silent outage costs the whole opening move.
+RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper","project":"integration-scope"}') || true
+check_output "index.investigate names the dependency that failed" '"dependency":"kb"' echo "$RESP"
+check_output "index.investigate reports an outage, not empty evidence" \
+    'not an index with no evidence' echo "$RESP"
+check_output "index.investigate marks the outage retryable" '"retryable":true' echo "$RESP"
 
 # The /v1 HTTP surface is the only transport now (the NDJSON RPC socket was
 # removed). Confirm the local /v1 UDS is bound and an allowlisted read returns a
@@ -406,14 +900,27 @@ fi
 # TCP listener (gated by aimee.api.{http_port,bearer_token}). Use an isolated
 # second server so the main harness server (UDS-only) is undisturbed.
 TCP_HOME=$(mktemp -d /tmp/aimee-tcp-XXXXXX) || true
-mkdir -p "$TCP_HOME/.config/aimee"
+mkdir -p "$TCP_HOME/.config/aimee/modules.d/server"
 TCP_PORT=18897
 TCP_BEARER="integ-tcp-bearer"
-printf 'aimee:\n  api:\n    http_port: %s\n    bearer_token: %s\n' \
-    "$TCP_PORT" "$TCP_BEARER" >"$TCP_HOME/.config/aimee/aimee.yaml"
+printf 'aimee:\n  api:\n    http_port: %s\n' \
+    "$TCP_PORT" >"$TCP_HOME/.config/aimee/aimee.yaml"
+sed "s|^executable=.*|executable=$CONFIG_MODULE_BUILT|" \
+    "$REPO_ROOT/src/build/obj/module-bundle/grants/server/config.grant" \
+    >"$TCP_HOME/.config/aimee/modules.d/server/config.grant"
 env -u AIMEE_PROFILE HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
+    AIMEE_API_BEARER_TOKEN="$TCP_BEARER" \
     "$AIMEE_SERVER" --foreground >"$TCP_HOME/server.log" 2>&1 &
 TCP_SRV_PID=$!
+TCP_BUS_SOCK="$TCP_HOME/.config/aimee/server-module-bus.sock"
+for _ in $(seq 1 300); do
+    [ -S "$TCP_BUS_SOCK" ] && break
+    kill -0 "$TCP_SRV_PID" 2>/dev/null || break
+    sleep 0.1
+done
+env HOME="$TCP_HOME" AIMEE_HOME="$TCP_HOME/.config/aimee" \
+    "$CONFIG_MODULE_BUILT" "$TCP_BUS_SOCK" >"$TCP_HOME/config.log" 2>&1 &
+TCP_CONFIG_PID=$!
 # Wait for the bind rather than guessing at it, for the same reason as
 # start_server above: on a loaded runner two seconds is not reliably enough, and
 # a probe that fires early fails the assertions of a server that was about to
@@ -464,11 +971,13 @@ fi
 # point, on every CI run of this harness. That line was in the log from the
 # first failing run and read as noise; it was the cause.
 kill "$TCP_SRV_PID" 2>/dev/null || true
+kill "$TCP_CONFIG_PID" 2>/dev/null || true
 # Reap before removing its HOME. kill only requests exit, so without this the
 # server can still be writing under $TCP_HOME while rm -rf walks it, and rm
 # fails with ENOTEMPTY when a directory gains entries between unlinking its
 # children and removing it. Under 'set -e' that aborts the whole harness.
 wait "$TCP_SRV_PID" 2>/dev/null || true
+wait "$TCP_CONFIG_PID" 2>/dev/null || true
 # `|| true` regardless: teardown of a temporary directory must never decide
 # whether the suite continues. Even with the wait, anything else holding a file
 # open here would abort a run that has nothing left to do but report.
@@ -512,7 +1021,33 @@ RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":4,"method":"resources/read","p
 check_output "mcp resources/read config" '"mimeType":"application/json"' echo "$RESP"
 check_output "mcp resources/read config text" '\"protocolVersion\":\"2024-11-05\"' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}') || true
+# Retry ONCE when the bridge reports the server unreachable.
+#
+# A tools/call is a POST, and cli_mcp_serve.c deliberately never retries those:
+# "a lost response must not duplicate a mutation whose first attempt may have
+# completed." That is right, and it makes this check single-shot -- one slow
+# response on a loaded runner fails it. It has failed twice now for two
+# different reasons, which makes it the flakiest check here.
+#
+# So retry the CHECK, not the request. Safe precisely because git_status is a
+# read: a second attempt cannot duplicate anything, which is the whole reason
+# the product refuses to retry the general case. Anything other than "server
+# unavailable" is a real answer and is asserted on as-is, so a genuine
+# regression still fails on the first attempt.
+mcp_git_status() {
+    local out
+    out=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}' 2>/dev/null) || true
+    case "$out" in
+        *"unavailable after retries"*)
+            echo "  (mcp git_status: bridge reported the server unreachable; retrying once)" >&2
+            sleep 2
+            out=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}' 2>/dev/null) || true
+            ;;
+    esac
+    printf '%s' "$out"
+}
+
+RESP=$(mcp_git_status) || true
 check_output "mcp git_status tool call" '"content"' echo "$RESP"
 check_output "mcp git_status result text" 'branch:' echo "$RESP"
 
@@ -556,6 +1091,108 @@ else
     PASS=$((PASS + 1)) # tool.execute reachable over the trusted local /v1 socket
 fi
 
+# The argument specs, as the REAL server actually serves them.
+#
+# Three things were proven separately and never joined up: the differential test
+# reads the data file directly, the end-to-end proof drives a hand-written stub
+# manifest, and nothing checked that the server's emitter puts those specs into
+# the manifest at all. cli_argspec_defs_to_json() drops a row whose spec fails
+# to parse --
+#
+#     cJSON *spec = cJSON_Parse(d->spec);
+#     if (!spec)
+#        continue;
+#
+# -- so a typo in one spec string would silently stop that method being served,
+# the client would fall back to its compiled marshaller, and every existing test
+# would still pass. Ask the running server what it serves.
+# GET, directly. Not via http_rpc: that maps an unmapped method to a POST, and
+# the manifest route is GET-only -- so the first version of this check POSTed,
+# got a non-empty ERROR body, and its "if the answer was empty, try a GET"
+# fallback never fired. It then parsed the error as a manifest and reported
+# zero specs, blaming the server for the check's own bug.
+MANIFEST=$(python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect('$HTTP_SOCK')
+s.settimeout(20)
+s.sendall(b'GET /v1/cli/manifest HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+data = b''
+while True:
+    c = s.recv(65536)
+    if not c:
+        break
+    data += c
+s.close()
+sys.stdout.write(data.partition(b'\r\n\r\n')[2].decode().strip())
+" 2>/dev/null) || true
+
+# Every served body, not just the one that prompted this.
+#
+# The manifest carries four: routes, commands, dispatch, marshal. A broken
+# emitter for any of the last three makes the client fall back to its compiled
+# copy SILENTLY -- the same failure the marshal check below exists for. (routes
+# is the exception: losing it fails loudly with "has no /v1 route".)
+#
+# Checked by SHAPE, not by naming commands: a count floor catches an emitter
+# that returns nothing, and the expected keys on one row catch a rename that
+# would keep the count and break every client. Neither breaks when a command is
+# added or retired, which a "contains init.run" assertion would.
+MANIFEST_BODIES=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    print('unparseable'); raise SystemExit
+want = {
+    'routes':   {'op', 'verb', 'path'},
+    'commands': {'name'},
+    'dispatch': {'cmd', 'method'},
+    'marshal':  {'method', 'args'},
+}
+bad = []
+for key, keys in want.items():
+    rows = doc.get(key)
+    if not isinstance(rows, list) or len(rows) < 10:
+        bad.append(key + ':empty')
+        continue
+    if not any(keys <= set(r) for r in rows if isinstance(r, dict)):
+        bad.append(key + ':shape')
+print(','.join(bad) if bad else 'ok')
+" 2>/dev/null) || true
+check_output "every served manifest body is present and shaped" "ok" echo "$MANIFEST_BODIES"
+
+MANIFEST_SPECS=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    print('0'); raise SystemExit
+rows = doc.get('marshal') or []
+# An argument spec is a marshal row whose args is an OBJECT; the no-argument
+# rows carry the string 'none'.
+print(sum(1 for r in rows if isinstance(r.get('args'), dict)))
+" 2>/dev/null) || true
+check_output "server serves argument specs in the manifest" "yes" \
+    echo "$([ "${MANIFEST_SPECS:-0}" -gt 0 ] && echo yes || echo "no (got ${MANIFEST_SPECS:-none})")"
+
+# And that a known spec arrives INTACT -- not merely that some rows exist. A
+# renamed key in the emitter would keep the count and break every client.
+CATALOG_SPEC=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+for r in (doc.get('marshal') or []):
+    if r.get('method') == 'catalog.list' and isinstance(r.get('args'), dict):
+        names = [f.get('json') for f in (r['args'].get('fields') or [])]
+        print(','.join(sorted(n for n in names if n)))
+        break
+" 2>/dev/null) || true
+check_output "a served spec arrives with its fields" "capability,json,open_weights_only" \
+    echo "$CATALOG_SPEC"
+
 # ============================================================
 # 4. Session management
 # ============================================================
@@ -563,17 +1200,14 @@ fi
 # Sessions are persisted through the DB1 sessions stage, which the db1/db2
 # event-bus conversion has moved OUT of this process: db1_client/sessions.c
 # calls obs_bus_module_available() first and answers "failed to create session"
-# with nothing serving the stage. This harness starts aimee-server alone —
-# module processes are launched by the container's module-supervisor, not by the
-# server — so the stage is absent here by construction, exactly like aimee-kb
-# above. That composition is covered where it belongs: unit-test-db1-module-bus
-# execs the real module binary against a live bus ("a failure to start the
-# module is a failure of this test, never a skip"), and the Docker E2E matrix
-# runs the supervised stack.
+# with nothing serving the stage. The server does not launch modules; a
+# container's module-supervisor does, and start_db1_module above now does the
+# same thing here, so the stage IS reachable and these run as ordinary checks.
 #
-# Probe once and skip rather than reporting an absent dependency as a server
-# regression. If the stage ever does answer here, these run as ordinary checks
-# with no edit — the probe is the switch, not a hardcoded expectation.
+# The probe stays. It was written when the stage was absent by construction, and
+# it is still the right shape: it is the switch rather than a hardcoded
+# expectation, so a run without a built module degrades to skips instead of to
+# a wall of failures. What changed is which way it answers.
 RESP=$(srv_auth_req '{"method":"session.create","client_type":"test"}') || true
 if echo "$RESP" | grep -qF '"status":"ok"'; then
     DB1_SESSIONS_AVAILABLE=1
@@ -602,7 +1236,10 @@ check_output "client session list via server" "$SID" echo "$RESP"
 RESP=$($AIMEE session show "$SID" 2>&1) || true
 check_output "client session show via server" "client:      test" echo "$RESP"
 
-RESP=$($AIMEE --json session list --limit 1 2>&1) || true
+# Not --limit 1: that asserts this session is the NEWEST, and an mcp session
+# created in the same second wins the tie. The claim being tested is that the
+# session is listed and the output is JSON, neither of which is about recency.
+RESP=$($AIMEE --json session list --limit 20 2>&1) || true
 check_output "client session list json" "$SID" echo "$RESP"
 
 RESP=$(srv_auth_req '{"method":"session.create","client_type":"test-close"}') || true
@@ -619,7 +1256,16 @@ RESP=$(srv_auth_req "{\"method\":\"session.close\",\"session_id\":\"$SID\"}") ||
 check_output "session.close" '"status":"ok"' echo "$RESP"
 
 RESP=$(srv_auth_req '{"method":"session.list"}') || true
-check_output "session.list empty after close" '"sessions":[]' echo "$RESP"
+# The sessions this block opened are gone -- not "the list is empty". The MCP
+# checks above open a session of their own and never close it, so an empty list
+# is only true when sessions do not actually persist. That was the case while
+# nothing served the DB1 sessions stage and this whole block was skipped; with
+# the module attached the leftover is real, and asserting emptiness tested the
+# absence of persistence rather than the behaviour of close.
+check "session.list drops the closed session" \
+    sh -c "! echo '$RESP' | grep -q \"$SID\""
+check "session.list drops the client-closed session" \
+    sh -c "! echo '$RESP' | grep -q \"$CLOSE_SID\""
 fi  # DB1_SESSIONS_AVAILABLE
 
 # ============================================================
@@ -654,9 +1300,85 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     else
         check_output "memory.get without --as-of emits no verdict" "ok" echo "ok"
     fi
+
+    # ------------------------------------------------------------------
+    # The MCP mutate verbs must not destroy a stored memory.
+    #
+    # tool_memory_mutate's `forget` reached a hard DELETE (row AND provenance,
+    # with the audit event carrying only the id, so the content was gone for
+    # good) and `update` overwrote content with no prior value kept -- neither
+    # behind any capability check. Both verbs now carry MODEL authority: forget
+    # retires, update supersedes.
+    #
+    # The unit tests cover the routing and the capability grading. Only a live
+    # server shows the thing that actually matters: after the model forgets it,
+    # the memory is still there. Assert it on the real wire.
+    # ------------------------------------------------------------------
+    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-forget","content":"value that must survive forget","tier":"L2","kind":"fact"}') || true
+    check_output "memory.store (mcp forget subject)" '"status":"ok"' echo "$RESP"
+    FORGET_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
+
+    if [ -n "${FORGET_ID:-}" ]; then
+        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"verb\":\"forget\",\"id\":$FORGET_ID}}}") || true
+        check_output "mcp mutate forget is allowed for an authorized caller" '"content"' echo "$RESP"
+        check_output "mcp mutate forget retires rather than destroys" 'retired, not destroyed' echo "$RESP"
+
+        # The row survives with its content intact -- a mistaken forget is
+        # recoverable. This is the assertion the whole change exists for.
+        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$FORGET_ID}") || true
+        check_output "a forgotten memory still exists" '"status":"ok"' echo "$RESP"
+        check_output "a forgotten memory kept its content" "value that must survive forget" echo "$RESP"
+    else
+        echo "SKIP: mcp forget round-trip (no id from memory.store)"
+        SKIP=$((SKIP + 4))
+    fi
+
+    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-update","content":"the original value","tier":"L2","kind":"fact"}') || true
+    UPDATE_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
+
+    if [ -n "${UPDATE_ID:-}" ]; then
+        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"verb\":\"update\",\"id\":$UPDATE_ID,\"content\":\"the corrected value\"}}}") || true
+        check_output "mcp mutate update versions the previous value" 'previous content kept as a version' echo "$RESP"
+
+        # The row the model edited still holds the OLD content; the new value
+        # lives on a new row. An overwrite would have lost the original.
+        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$UPDATE_ID}") || true
+        check_output "the superseded row kept the original content" "the original value" echo "$RESP"
+    else
+        echo "SKIP: mcp update round-trip (no id from memory.store)"
+        SKIP=$((SKIP + 2))
+    fi
+
+    # memory_maintain's prune mode bulk-deletes (every L0 row and its provenance,
+    # stale L1 rows, retention-expired restricted/sensitive memories) and had no
+    # gate at all. It is now graded, so confirm the gate admits an authorized
+    # caller rather than bricking ordinary upkeep -- a gate that refuses everyone
+    # would pass every unit test and break the running system.
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"memory_maintain","arguments":{"modes":"replay","dry_run":true}}}') || true
+    check_output "mcp memory_maintain still runs for an authorized caller" '"content"' echo "$RESP"
+    if echo "$RESP" | grep -qF 'insufficient capabilities'; then
+        check_output "mcp memory_maintain was not refused" "ok" echo "REFUSED an authorized caller"
+    else
+        check_output "mcp memory_maintain was not refused" "ok" echo "ok"
+    fi
+
+    # ...but prune -- which hard-deletes in bulk -- must not run from the model's
+    # door at all. Grading it was not enough: reaching any MCP tool requires
+    # CAP_TOOL_EXECUTE, which only CAPS_AUTHENTICATED and CAPS_ALL carry, and
+    # both of those also carry CAP_MEMORY_ADMIN. So every caller that can reach
+    # this tool already clears an admin gate, and only removing prune actually
+    # stops it. A bare `{}` call is the dangerous one: modes 0 means
+    # MODES_DEFAULT, which includes prune.
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"memory_maintain","arguments":{"modes":"prune"}}}') || true
+    check_output "mcp memory_maintain refuses an explicit prune" 'not available through this tool' echo "$RESP"
+
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"memory_maintain","arguments":{"dry_run":true}}}') || true
+    check_output "mcp memory_maintain drops prune from a bare call and says so" 'prune was NOT run' echo "$RESP"
 else
     echo "SKIP: memory write/read round-trip (aimee-kb is not configured)"
     SKIP=$((SKIP + 6))
+    echo "SKIP: mcp mutate forget/update non-destruction (aimee-kb is not configured)"
+    SKIP=$((SKIP + 12))
 fi
 
 # ============================================================
@@ -871,7 +1593,136 @@ check "clean snapshot worktree remains clean" test -z \
 fi  # MIRROR_SHA256
 
 # ============================================================
-# 10. Server shutdown
+# 10. Workflow control plane
+# ============================================================
+# The daemon no longer owns lifecycle state -- every read and write below
+# crosses the module bus and is answered by aimee-module-db. That makes these
+# checks the end-to-end proof of the migration: not "the store works" (the unit
+# suite covers that in isolation) but "the routes a client actually calls still
+# behave when their state lives in another process".
+
+WF_STEP=""
+if [ "$WORKFLOW_MODULE_INSTALLED" -ne 1 ]; then
+    WF_STEP="install (go toolchain, build, or generated grants)"
+elif ! start_workflow_module; then
+    WF_STEP="attach (the module did not answer /v1/workflow/defs with 200; last: $(http_call GET /v1/workflow/defs))"
+else
+    WORKFLOW_MODULE_READY=1
+fi
+
+if [ "$WORKFLOW_MODULE_READY" -ne 1 ]; then
+    echo "SKIP: the workflow control module could not be started here: $WF_STEP"
+    echo "      (needs a Go toolchain and the generated wfe/workflows grants);"
+    echo "      the workflow surface is covered by the full-stack E2E instead."
+    # Only ask what the module SAID when it actually ran. On the install path it
+    # never started, and "the module wrote nothing" would report silence from a
+    # process that was never there -- which is the reader's next hour wasted.
+    if [ -s "$HOME/aimee-wfe.log" ]; then
+        echo "      what the module said:"
+        tail -15 "$HOME/aimee-wfe.log" | sed 's/^/      /'
+    elif [ -f "$HOME/aimee-wfe.log" ]; then
+        echo "      the module started and wrote nothing to $HOME/aimee-wfe.log"
+    fi
+    SKIP=$((SKIP + 32))
+else
+
+check_output "workflow defs list" '"defs"' echo "$(http_call GET /v1/workflow/defs)"
+check_output "the shipped definitions are served" 'build' echo "$(http_call GET /v1/workflow/defs)"
+check_output "workflow items list answers" '200' echo "$(http_status GET /v1/workflow/items)"
+check_output "workflow triggers list answers" '200' echo "$(http_status GET /v1/workflow/triggers)"
+check_output "workflow blocks list answers" '200' echo "$(http_status GET /v1/workflow/blocks)"
+
+# Intake refuses before it records. Both halves are required: a run with nothing
+# to work on, and a run with nowhere to do it, are equally unstartable.
+check_output "submit without a proposal is refused" '400' \
+    echo "$(http_status POST /v1/dev/submit '{"repo":"integ/repo"}')"
+check_output "submit without a repo is refused too" '400' \
+    echo "$(http_status POST /v1/dev/submit '{"proposal_md":"# no repo"}')"
+
+WF_SUB1=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ one\n\ndo the first thing","workflow":"build","repo":"integ/repo"}')
+check_output "a submit is admitted" '200' echo "${WF_SUB1%% *}"
+check_output "and it names the run it started" '"work_item_id"' echo "$WF_SUB1"
+WI1=$(echo "$WF_SUB1" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
+check "the submit returned an id" test -n "$WI1"
+
+WF_SUB2=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ two\n\ndo the second thing","workflow":"build","repo":"integ/repo"}')
+check_output "a second submit is admitted" '200' echo "${WF_SUB2%% *}"
+WI2=$(echo "$WF_SUB2" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
+check "the two runs are distinct" test -n "$WI2" -a "$WI1" != "$WI2"
+
+# Each run owns its proposal. Two runs sharing one artifact would mean the later
+# submit silently replaced the earlier one's instructions, and the first run
+# would then execute work nobody asked for -- a wrong answer, not an error.
+check "the first run's proposal was stored" test -s "$AIMEE_HOME/wfe-artifacts/$WI1/proposal.md"
+check "the second run's proposal was stored separately" \
+    test -s "$AIMEE_HOME/wfe-artifacts/$WI2/proposal.md"
+check_output "and the first still says what it said" 'do the first thing' \
+    cat "$AIMEE_HOME/wfe-artifacts/$WI1/proposal.md"
+check_output "while the second says its own thing" 'do the second thing' \
+    cat "$AIMEE_HOME/wfe-artifacts/$WI2/proposal.md"
+
+# Admission is capped. Submit until something refuses rather than assuming which
+# attempt crosses the line -- the cap is a policy value, and a test that hard-codes
+# "the third one" fails for the wrong reason the day the default moves.
+WF_CAP_CODE="" ; WF_CAP_BODY=""
+for i in 1 2 3 4 5 6 7 8; do
+    WF_C=$(http_call POST /v1/dev/submit "{\"proposal_md\":\"# cap probe $i\",\"workflow\":\"build\",\"repo\":\"integ/repo\"}")
+    WF_CAP_CODE="${WF_C%% *}"
+    WF_CAP_BODY="$WF_C"
+    [ "$WF_CAP_CODE" != "200" ] && break
+done
+check_output "admission is capped, and refuses rather than admitting forever" '409' echo "$WF_CAP_CODE"
+check_output "and the refusal says the cap refused it" 'admission full' echo "$WF_CAP_BODY"
+
+# The read side. Written through the bus, read back through the bus.
+check_output "the run is listed" "$WI1" echo "$(http_call GET /v1/workflow/items)"
+check_output "the run can be fetched by id" "$WI1" echo "$(http_call GET /v1/workflow/items/$WI1)"
+check_output "the run reports a stage" '"stage"' echo "$(http_call GET /v1/workflow/items/$WI1)"
+check_output "the run reports its submitter" '"submitter"' echo "$(http_call GET /v1/workflow/items/$WI1)"
+check_output "the run's events are served" '200' echo "$(http_status GET /v1/workflow/items/$WI1/events)"
+check_output "the run's proposal is served" '200' echo "$(http_status GET /v1/workflow/items/$WI1/proposal)"
+check_output "an unknown run is not found" '404' echo "$(http_status GET /v1/workflow/items/wi_no_such_run)"
+
+# How far a run gets with no runner configured, which is the state of this
+# harness: it is admitted, it is driven, and it PARKS naming what it lacked. That
+# is the behaviour worth pinning -- an intake that admitted a run and then left it
+# silently "active" forever would look identical from the outside on the day the
+# runner really was broken.
+WF_PARKED=0
+for i in $(seq 1 50); do
+    case "$(http_call GET /v1/workflow/items/$WI1)" in
+        *runner_unavailable*) WF_PARKED=1; break ;;
+    esac
+    sleep 0.2
+done
+check "with no runner configured the run parks instead of stalling silently" \
+    test "$WF_PARKED" -eq 1
+check_output "and it parks naming what it was waiting for" 'runner_unavailable' \
+    echo "$(http_call GET /v1/workflow/items/$WI1)"
+
+# Resume is not a blanket override. A park the operator did not cause, and cannot
+# clear by deciding, is refused rather than quietly re-arming a run whose blocker
+# is still there.
+check_output "resuming a park the operator cannot clear is refused" '409' \
+    echo "$(http_status POST /v1/workflow/items/$WI1/resume '{}')"
+
+# Stopping ends the run and frees the admission slot it held -- the observable
+# consequence that matters, since a cap that never released would wedge intake.
+check_output "the run can be stopped" '200' \
+    echo "$(http_status POST /v1/workflow/items/$WI1/stop '{}')"
+WF_SUB4=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ four\n\nafter a slot freed","workflow":"build","repo":"integ/repo"}')
+check_output "stopping a run frees the admission slot it held" '200' echo "${WF_SUB4%% *}"
+
+check_output "a run can be deleted" '200' echo "$(http_status DELETE /v1/workflow/items/$WI2)"
+check_output "and it is gone from the read side" '404' \
+    echo "$(http_status GET /v1/workflow/items/$WI2)"
+
+stop_workflow_module
+
+fi  # WORKFLOW_MODULE_READY
+
+# ============================================================
+# 11. Server shutdown
 # ============================================================
 
 kill "$SERVER_PID" 2>/dev/null

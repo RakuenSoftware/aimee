@@ -74,8 +74,10 @@ extern "C"
    /* #2-UPGRADE: promote the machine-derivable conventions (naming scheme, token
     * strategy) from the exemplar's style graph into TYPED FACTS — assertions
     * like (project, naming_convention, "BEM") with provenance + contradiction
-    * detection, via the typed-fact layer. Gated by typed_facts_enabled (returns
-    * 0, a no-op, when off — the degraded rules-doc remains the spec). Idempotent:
+    * detection, via the typed-fact layer. Gated by css_style_graph_enabled only
+    * (returns 0, a no-op, when off — the degraded rules-doc remains the spec);
+    * it also required typed_facts_enabled until that master gate was retired.
+    * Idempotent:
     * a re-run supersedes only changed conventions. Returns the number of
     * conventions asserted (or already-current), -1 on error. */
    int db2_css_migration_assert_conventions(const char *project, const char *now_iso);

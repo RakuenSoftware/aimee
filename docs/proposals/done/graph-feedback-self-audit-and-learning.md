@@ -1,5 +1,9 @@
 # Proposal: Graph feedback and coverage expansion — self-audit, snapshot diffing, retrieval that learns, and broader language coverage
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **DONE — the full feedback-loop core (§1–§3), the cache-correctness
   hardening (§5), and all six §6a Tier-1 language grammars shipped to `testing`;
   proposal filed.** Delivered slice-by-slice, each PR build-verified, `make lint`-clean,
@@ -142,7 +146,7 @@ tags + community membership):
   concrete refactor signal the current hub/centrality list does not produce.
 - **Bridge symbols.** High edge-betweenness nodes that are *not* file hubs —
   the cross-cutting concerns that connect otherwise-separate modules. *"Why does
-  `config_load` connect the auth module to the curator?"* **Exact Brandes below
+  `legacy_config_read` connect the auth module to the curator?"* **Exact Brandes below
   a node/edge threshold; deterministic-seed sampling above it**, marked
   `approximate:true`, so the audit stays cheap on large graphs.
 - **Low-cohesion modules.** Communities scored by **conductance / modularity

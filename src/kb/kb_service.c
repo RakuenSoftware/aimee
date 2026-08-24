@@ -1,5 +1,5 @@
 #include "aimee.h"
-#include "config.h" /* config_load — reembed default embedder */
+#include "config.h" /* legacy_config_read — reembed default embedder */
 #include "kb_background.h"
 #include "kb_service.h"
 #include "kb_service_code_embed.h"
@@ -12,6 +12,9 @@
 #include "modules/db2/c/pgvec_kb_service.h"
 #include "modules/db2/c/vector_verify.h"
 #include <aimee/learning/learning.h>
+#include "curiosity_resolve.h"
+#include "kb_bandit.h"
+#include <aimee/learning/policy_arms.h>
 #include "log.h"
 #include "memory.h"
 #include "lifecycle.h"
@@ -866,6 +869,205 @@ static int kb_handle_learning_list(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to list learning proposals");
 }
 
+/* The endogeneity gate (recursive-self-improvement S0).
+ *
+ * It has to be answered HERE. The gate reads the learning ledger, which is
+ * DB2, and the daemon builds with DB2 compiled out — so a daemon computing it
+ * locally always answered "nothing observed" no matter how self-referential
+ * the ledger had become. A live run with both services up is what showed that:
+ * four committed proposals in Postgres, and the daemon reporting none. */
+static int kb_handle_learning_endogeneity(int fd, cJSON *req)
+{
+   cJSON *window_j = cJSON_GetObjectItemCaseSensitive(req, "window_days");
+   int window = cJSON_IsNumber(window_j) ? (int)window_j->valuedouble : 0;
+
+   learning_endogeneity_t endo;
+   learning_gate_state_t gate = learning_gate_check_with(
+       window > 0 ? window : LEARNING_METRICS_DEFAULT_WINDOW_DAYS,
+       LEARNING_ENDOGENEITY_MIN_EXOGENOUS_RATIO, LEARNING_ENDOGENEITY_MIN_SAMPLE, &endo);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return kb_send_error(fd, "out of memory");
+   cJSON_AddStringToObject(resp, "gate",
+                           gate == LEARNING_GATE_OPEN                ? "open"
+                           : gate == LEARNING_GATE_CLOSED_ENDOGENOUS ? "closed"
+                                                                     : "unavailable");
+   cJSON_AddNumberToObject(resp, "exogenous_ratio", endo.exogenous_ratio);
+   cJSON_AddNumberToObject(resp, "committed_total", (double)endo.committed_total);
+   cJSON_AddNumberToObject(resp, "committed_exogenous", (double)endo.committed_exogenous);
+   cJSON_AddNumberToObject(resp, "committed_endogenous", (double)endo.committed_endogenous);
+   cJSON_AddNumberToObject(resp, "window_days", endo.window_days);
+   return kb_reply_or_error(fd, resp, "failed to compute endogeneity");
+}
+
+/* S5: enter a verdict the router cannot infer.
+ *
+ * Supersession and post-commit rejection are observable in the router itself.
+ * CONTRADICTED is not — deciding that a later fact contradicts an earlier one
+ * is a judgement, and guessing it would put a detector's bar in the hands of a
+ * heuristic nobody reviewed. So it is entered here, deliberately, by whoever
+ * made that judgement. */
+/* S4: the evidence probe, installed where the corpus is.
+ *
+ * The pass deliberately takes an installed probe rather than assuming one, and
+ * until now NOTHING installed it — so `learning resolve` could only ever report
+ * "no probe" and close nothing. This is that probe: it asks the knowledge base
+ * whether the subject is covered now.
+ *
+ * Conservative by construction. A search that errors returns UNKNOWN, not
+ * NONE, so a broken query never reads as "the gap still stands"; and only a
+ * non-empty result set counts as coverage. Both directions of doubt leave the
+ * item open. */
+static curiosity_evidence_t kb_curiosity_probe(const char *gap_type, const char *subject,
+                                               const char *evidence)
+{
+   (void)gap_type;
+   (void)evidence;
+   if (!subject || !subject[0])
+      return CURIOSITY_EVIDENCE_UNKNOWN;
+
+   cJSON *found = db2_kb_service_memory_search_graph_json(subject, 3);
+   if (!found)
+      return CURIOSITY_EVIDENCE_UNKNOWN;
+
+   /* The payload shape varies by surface; what matters is whether it carries
+    * any row at all. An object with no array, or an empty one, is no coverage. */
+   curiosity_evidence_t verdict = CURIOSITY_EVIDENCE_NONE;
+   const cJSON *child = NULL;
+   cJSON_ArrayForEach(child, found)
+   {
+      if (cJSON_IsArray(child) && cJSON_GetArraySize(child) > 0)
+      {
+         verdict = CURIOSITY_EVIDENCE_FOUND;
+         break;
+      }
+   }
+   if (cJSON_IsArray(found) && cJSON_GetArraySize(found) > 0)
+      verdict = CURIOSITY_EVIDENCE_FOUND;
+   cJSON_Delete(found);
+   return verdict;
+}
+
+static int kb_handle_learning_resolve(int fd, cJSON *req)
+{
+   cJSON *budget_j = cJSON_GetObjectItemCaseSensitive(req, "budget");
+   curiosity_resolve_register_probe(kb_curiosity_probe);
+
+   curiosity_resolve_stats_t stats;
+   int resolved =
+       curiosity_resolve_pass(cJSON_IsNumber(budget_j) ? (int)budget_j->valuedouble : 0, &stats);
+   if (resolved < 0)
+      return kb_send_error(fd, "failed to read the curiosity backlog");
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return kb_send_error(fd, "out of memory");
+   cJSON_AddNumberToObject(resp, "resolved", stats.resolved);
+   cJSON_AddNumberToObject(resp, "considered", stats.considered);
+   cJSON_AddNumberToObject(resp, "still_open", stats.still_open);
+   cJSON_AddNumberToObject(resp, "unknown", stats.unknown);
+   cJSON_AddNumberToObject(resp, "skipped", stats.skipped);
+   cJSON_AddNumberToObject(resp, "budget", stats.budget);
+   cJSON_AddBoolToObject(resp, "no_probe", stats.no_probe);
+   return kb_reply_or_error(fd, resp, "failed to resolve the backlog");
+}
+
+/* S6: the sampler, installed where the bandit is.
+ *
+ * The policy registry deliberately falls back to the shipped default when no
+ * sampler is installed, and until now NOTHING installed one — so no arm was
+ * ever sampled and the registry only ever described a decision nobody made.
+ * kb_bandit lives in this binary, so this is where it gets wired.
+ *
+ * A sampler that cannot answer returns a negative index, which the registry
+ * reads as declining. That is the honest response when the bandit sidecar is
+ * absent: use the default rather than pretend a choice was measured. */
+static int kb_policy_sampler(const char *decision_point,
+                             const char (*arms)[LEARNING_POLICY_ARM_LEN], int n)
+{
+   if (!decision_point || n <= 0)
+      return -1;
+
+   char ids[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
+   int count = n < KB_BANDIT_MAX_ARMS ? n : KB_BANDIT_MAX_ARMS;
+   for (int i = 0; i < count; i++)
+      snprintf(ids[i], sizeof(ids[i]), "%s", arms[i]);
+
+   char decision_id[KB_BANDIT_MAX_DECISION] = "";
+   int idx = kb_bandit_sample(decision_point, NULL, ids, count, decision_id);
+   if (idx < 0 || idx >= count)
+      return -1; /* no sidecar, or it declined: the default stands */
+   return idx;
+}
+
+static void kb_policy_reward_sink(const char *decision_point, const char *arm, double reward)
+{
+   /* The decision id is minted per sample; without a carried id the posterior
+    * cannot be attributed, so this records against the arm directly and lets
+    * kb_bandit reject what it cannot key. Losing a sample is better than
+    * crediting the wrong arm. */
+   (void)kb_bandit_reward(decision_point, "", arm, reward);
+}
+
+/* Register the arms this build declares, so the bandit knows the surface
+ * before anything samples it. Called once at service start. */
+void kb_policy_arms_init(void)
+{
+   char arms[LEARNING_POLICY_MAX_ARMS][LEARNING_POLICY_ARM_LEN];
+   int n = learning_policy_arms(LEARNING_POLICY_PLAN_ADVISORY, arms, LEARNING_POLICY_MAX_ARMS);
+   for (int i = 0; i < n; i++)
+      (void)kb_bandit_arm_register(LEARNING_POLICY_PLAN_ADVISORY, arms[i], NULL, NULL);
+   learning_policy_register_sampler(kb_policy_sampler);
+   learning_policy_register_reward_sink(kb_policy_reward_sink);
+}
+
+/* Selection, asked of the service that has the bandit. The daemon renders the
+ * fragment but cannot sample it, so it asks here and applies the answer. */
+static int kb_handle_learning_policy_select(int fd, cJSON *req)
+{
+   cJSON *point_j = cJSON_GetObjectItemCaseSensitive(req, "decision_point");
+   const char *point = (cJSON_IsString(point_j) && point_j->valuestring[0])
+                           ? point_j->valuestring
+                           : LEARNING_POLICY_PLAN_ADVISORY;
+
+   char arm[LEARNING_POLICY_ARM_LEN] = "";
+   if (learning_policy_select(point, arm, sizeof(arm)) != 0)
+      return kb_send_error(fd, "unknown decision point");
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return kb_send_error(fd, "out of memory");
+   cJSON_AddStringToObject(resp, "decision_point", point);
+   cJSON_AddStringToObject(resp, "arm", arm);
+   const char *dflt = learning_policy_default_arm(point);
+   cJSON_AddStringToObject(resp, "default_arm", dflt ? dflt : "");
+   return kb_reply_or_error(fd, resp, "failed to select an arm");
+}
+
+static int kb_handle_learning_fate(int fd, cJSON *req)
+{
+   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
+   cJSON *fate_j = cJSON_GetObjectItemCaseSensitive(req, "fate");
+   if (!cJSON_IsNumber(id_j))
+      return kb_send_error(fd, "missing id");
+   if (!cJSON_IsString(fate_j) || !learning_fate_is_valid(fate_j->valuestring))
+      return kb_send_error(fd, "fate must be standing, superseded, contradicted, or reverted");
+
+   cJSON *reason_j = cJSON_GetObjectItemCaseSensitive(req, "reason");
+   if (learning_fate_record((int)id_j->valuedouble, fate_j->valuestring,
+                            cJSON_IsString(reason_j) ? reason_j->valuestring : "operator") != 0)
+      return kb_send_error(fd, "failed to record the fate");
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return kb_send_error(fd, "out of memory");
+   cJSON_AddNumberToObject(resp, "id", id_j->valuedouble);
+   cJSON_AddStringToObject(resp, "fate", fate_j->valuestring);
+   cJSON_AddBoolToObject(resp, "counts_as_regret", learning_fate_is_regret(fate_j->valuestring));
+   return kb_reply_or_error(fd, resp, "failed to record the fate");
+}
+
 static int kb_handle_learning_mutate(int fd, cJSON *req, const char *verb)
 {
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
@@ -977,6 +1179,7 @@ static const struct
     {"collab_rules.retire", kb_handle_collab_rules_retire},
     {"collab_rules.inject", kb_handle_collab_rules_inject},
     {"learning.propose_signal", kb_handle_learning_propose_signal},
+    {"learning.record_application", kb_handle_learning_record_application},
     {"agent.outcome_record", kb_handle_agent_outcome_record},
     {"agent.hint_consume", kb_handle_agent_hint_consume},
     {"maintenance.anti_pattern_extract_from_feedback",
@@ -1043,6 +1246,7 @@ static const struct
     {"memory.query_edges", kb_handle_memory_query_edges},
     {"memory.compact_windows", kb_handle_memory_compact_windows},
     {"memory.assemble_context", kb_handle_memory_assemble_context},
+    {"memory.assemble_typed_context", kb_handle_memory_assemble_typed_context},
     {"memory.search", kb_handle_memory_search},
     {"memory.export_jsonl", kb_handle_memory_export_jsonl},
     {"memory.decisions_export_jsonl", kb_handle_memory_decisions_export_jsonl},
@@ -1068,6 +1272,9 @@ static const struct
     {"memory.search_facts_patterns_by_keyword", kb_handle_memory_search_facts_patterns_by_keyword},
     {"memory.supersede", kb_handle_memory_supersede},
     {"memory.fact_history", kb_handle_memory_fact_history},
+    {"facts.retract", kb_handle_facts_retract},
+    {"entities.merge", kb_handle_entities_merge},
+    {"entities.unmerge", kb_handle_entities_unmerge},
     {"memory.check_drift", kb_handle_memory_check_drift},
     {"memory.list_session_scope_priority", kb_handle_memory_list_session_scope_priority},
     {"memory.list_session_scope_priority_like", kb_handle_memory_list_session_scope_priority_like},
@@ -1094,6 +1301,7 @@ static const struct
     {"memory.entity_edges", kb_handle_memory_entity_edges},
     {"memory.search_graph", kb_handle_memory_search_graph},
     {"memory.search_graph_as_of", kb_handle_memory_search_graph_as_of},
+    {"memory.search_assertions", kb_handle_memory_search_assertions},
     {"memory.get_episode", kb_handle_memory_get_episode},
     {"memory.ask", kb_handle_memory_ask},
     {"artifacts.list_proposed", kb_handle_artifacts_list_proposed},
@@ -1105,6 +1313,10 @@ static const struct
     {"roadmap.rebuild", kb_handle_roadmap_rebuild},
     {"roadmap.report", kb_handle_roadmap_report},
     {"learning.list_proposals", kb_handle_learning_list},
+    {"learning.endogeneity", kb_handle_learning_endogeneity},
+    {"learning.fate", kb_handle_learning_fate},
+    {"learning.resolve", kb_handle_learning_resolve},
+    {"learning.policy_select", kb_handle_learning_policy_select},
 };
 
 static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)

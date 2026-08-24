@@ -1,7 +1,16 @@
 /* db1_client/git_ownership.c: the git_ownership family, reached over the bus.
  *
- * GENERATED from src/modules/db1/eventcontract/operations.json by
- * scripts/gen_db1_contract.py. Do not edit.
+ * WAS GENERATED from the store catalog by scripts/gen_db1_contract.py. Both
+ * moved on: the catalog is now server-go/modules/aimee/operations.json, and the
+ * generator was deleted with the C module.
+ *
+ * So this is maintained BY HAND now, and the header used to say "Do not edit"
+ * while pointing at a generator that no longer exists and a path that no longer
+ * resolves -- which is a dead end at exactly the moment someone needs to change
+ * something. Edit it, and keep it agreeing with the catalog:
+ * scripts/check-db1-client-contract.py matches every call site here against the
+ * catalog by arity and reply width, and runs in lint on every pull request.
+ * That check is what replaced the generator.
  *
  * Same functions, same contract, different side of the boundary: the daemon
  * links this instead of the DB1 domain, so nothing that calls these had to
@@ -21,7 +30,7 @@
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
-#include "git_ownership.h"
+#include "db1_client/git_ownership.h"
 
 #include "db1_module_api.h"
 
@@ -169,6 +178,17 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          result = -1;
       else if (filled_out)
          *filled_out = fields_in;
+      /* Fewer values than the caller has slots for is the same contract
+         mismatch read from the other side, and it used to pass: the unfilled
+         slots keep the empty string cleared above, so the caller reads a row
+         whose last members are blank and cannot tell that from a row that is
+         blank. A list says how many rows it found through filled_out and is
+         variable by construction; every other shape has one arity, and a stage
+         answering with a different one is a stage built against a different
+         version of this contract. Two processes, two binaries, two deployment
+         times -- so say it rather than zero-fill. */
+      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
+         result = -1;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {

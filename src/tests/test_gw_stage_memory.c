@@ -26,7 +26,8 @@
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
  * (the "pre-injection off / recall empty" path). */
 static int g_no_recall = 0;
-static int g_test_placement = 0; /* drives ingress_cache_placement_enabled in config_load stub */
+static int g_test_placement =
+    0; /* drives ingress_cache_placement_enabled in legacy_config_read stub */
 
 /* --- stubs: make ingress_preinject_build deterministic without the kb graph --- */
 char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)
@@ -41,13 +42,14 @@ char *kb_client_memory_facts(const char *query)
    (void)query;
    return NULL;
 }
+char *kb_client_memory_assemble_typed_context(const char *query)
+{
+   (void)query;
+   return NULL;
+}
 
 /* Typed-facts gate stub (typed_facts feature added this call to ingress_preinject.c;
  * the test link needs the symbol). Off -> the builder's facts path stays inert. */
-int kb_client_typed_facts_enabled(void)
-{
-   return 0;
-}
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len)
 {
@@ -78,9 +80,16 @@ kb_client_result_status_t kb_client_last_result_status(void)
 {
    return KB_CLIENT_RESULT_OK;
 }
+/* Recall is QUERY-SENSITIVE on purpose. A stub that ignores its query cannot
+ * tell "the stage asked the right thing" from "the stage asked the persona
+ * blob", which is precisely the regression test_ir_stage_prefers_supplied_query
+ * exists to catch -- and with (void)query it passed with the fix reverted.
+ * Anything that does not mention the subject recalls nothing, exactly as the
+ * real kb did when handed 5773 characters of persona. */
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
-   (void)query;
+   if (query && (!strstr(query, "deploy") || strstr(query, "aimee-persona")))
+      return 0;
    (void)limit;
    if (g_no_recall || !out || max <= 0)
       return 0;
@@ -105,21 +114,7 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    snprintf(out[0].snippet, sizeof(out[0].snippet), "builder emits a bounded context envelope");
    return 1;
 }
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->ingress_preinject_enabled = 1;
-      cfg->ingress_preinject_assembly_budget = 1200;
-      cfg->ingress_cache_placement_enabled = g_test_placement;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values match what this file's config_load stub produced, so the
- * assertions below are unchanged. */
+/* Accessor stubs expose the fixture values used by the assertions below. */
 int config_ingress_cache_placement_enabled(void)
 {
    return g_test_placement;
@@ -293,6 +288,40 @@ static void test_ir_stage_appends_system_block(void)
    printf("ir_stage_appends_system_block OK\n");
 }
 
+/* The query must be the USER's, not whatever else has been prepended to their
+ * message by the time this stage runs.
+ *
+ * aimee_ir_apply_request_stages() inserts the persona onto the first user
+ * message BEFORE the stage list runs, so reading the message here recalls
+ * against the persona text. On the box that turned a question which recalls one
+ * row into one that recalls none: the block assembled empty and
+ * ingress_preinject_build returned NULL, killing pre-injection on the opening
+ * turn of every session with no error logged anywhere. The caller now hands the
+ * pristine query through `ud`. */
+static void test_ir_stage_prefers_supplied_query(void)
+{
+   aimee_request_t ir;
+   /* The message as it looks AFTER a persona prepend: the real question is in
+    * there, buried, exactly as the stage would otherwise read it. */
+   mk_user_ir(&ir, "<aimee-persona>lots of persona guidance here</aimee-persona> deploy matrix");
+   assert(ir_stage_memory(&ir, (void *)"deploy matrix") == 1);
+
+   /* The envelope must be the one the CLEAN query produces. */
+   char *direct = ingress_preinject_build("deploy matrix", 0);
+   assert(direct && ir.system[0].text && strstr(ir.system[0].text, direct) != NULL);
+   free(direct);
+   aimee_request_free(&ir);
+
+   /* And a NULL/empty ud still falls back to the message, so callers that supply
+    * nothing behave exactly as before. */
+   aimee_request_t ir2;
+   mk_user_ir(&ir2, "deploy matrix");
+   assert(ir_stage_memory(&ir2, NULL) == 1);
+   assert(ir2.n_system == 1);
+   aimee_request_free(&ir2);
+   printf("ir_stage_prefers_supplied_query OK\n");
+}
+
 /* Mid-session with empty recall: nothing to say, so nothing is injected. The
  * guidance already shipped on the opening turn and is not repeated per turn. */
 static void test_ir_stage_no_recall_midsession_noop(void)
@@ -398,6 +427,39 @@ static void test_ir_stage_guidance_not_repeated_midsession(void)
    printf("ir_stage_guidance_not_repeated_midsession OK\n");
 }
 
+/* PERSONA PLACEMENT on the IR seam -- the DEFAULT path, and the half that was
+ * untested: the flat legacy entry point had coverage, this did not.
+ *
+ * Two independent guards stop a second delivery. The marker catches a caller
+ * that echoes our mutated first turn back; the assistant-turn scan catches the
+ * caller that does NOT, which is the case a marker check alone would miss and
+ * would re-personify mid-conversation. */
+static void test_persona_prepends_first_user_message_once(void)
+{
+   static const char persona[] =
+       "<aimee-persona schema=\"1\" name=\"user-edited\">\ncustom\n</aimee-persona>\n";
+   aimee_request_t ir;
+   mk_user_ir(&ir, "fix the cache");
+   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 1);
+   assert(ir.messages[0].n_blocks == 2);
+   assert(strcmp(ir.messages[0].blocks[0].text, persona) == 0);
+   assert(strcmp(ir.messages[0].blocks[1].text, "fix the cache") == 0);
+   /* Marker present -> terminal. */
+   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 0);
+   assert(ir.messages[0].n_blocks == 2);
+   aimee_request_free(&ir);
+
+   /* A later request can carry the original user text WITHOUT the marker. Prior
+    * assistant history is on its own sufficient to prevent a second prefix. */
+   mk_user_ir(&ir, "fix the cache");
+   mk_assistant_turn(&ir);
+   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 0);
+   assert(ir.messages[0].n_blocks == 1);
+   assert(strcmp(ir.messages[0].blocks[0].text, "fix the cache") == 0);
+   aimee_request_free(&ir);
+   printf("persona_prepends_first_user_message_once OK\n");
+}
+
 int main(void)
 {
    printf("test_gw_stage_memory:\n");
@@ -405,11 +467,13 @@ int main(void)
    test_system_prompt_raw_env();
    test_disabled_noop();
    test_ir_stage_appends_system_block();
+   test_ir_stage_prefers_supplied_query();
    test_ir_stage_no_recall_midsession_noop();
    test_ir_stage_session_start_guidance_without_recall();
    test_ir_stage_guidance_not_repeated_midsession();
    test_first_turn_withholds_shell();
    test_shell_returns_after_first_turn();
+   test_persona_prepends_first_user_message_once();
    printf("all gw_stage_memory tests passed\n");
    return 0;
 }

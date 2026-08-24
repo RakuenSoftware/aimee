@@ -1,6 +1,6 @@
 /* server_session.c: session lifecycle handlers */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "server.h"
 #include "log.h"
 #include "cJSON.h"

@@ -1,11 +1,12 @@
 /* server_auth.c: authentication, capability tokens, and per-method capability checks */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "server.h"
 #include "log.h"
 #include "platform_process.h"
 #include "cJSON.h"
-#include "json_fluent.h" /* jo_ok */
+#include "json_fluent.h"     /* jo_ok */
+#include "request_context.h" /* request_context_caller_subject: the account ingress proved */
 #include <aimee/core/connection/auth.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -41,8 +42,25 @@ const method_policy_t method_registry[] = {
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
-    {"memory.delete", CAP_MEMORY_WRITE, "delete a memory"},
+    /* Destructive: hard-deletes the row and its provenance, and the audit event
+     * carries only the id — the content is not recoverable afterwards. Graded
+     * memory:admin, not memory:write, for the same reason rules.delete is graded
+     * rules:admin below: writing and destroying are different privileges. */
+    {"memory.delete", CAP_MEMORY_ADMIN, "delete a memory"},
     {"memory.supersede", CAP_MEMORY_WRITE, "supersede a memory"},
+    /* update overwrites content with no prior value kept, so it is a write and
+     * must not fall through to the memory.* read prefix below. */
+    {"memory.update", CAP_MEMORY_WRITE, "update memory content"},
+    {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
+    /* Typed-fact corrections sit at WRITE, not the ADMIN tier memory.delete was
+     * just moved to, and for exactly the reason given there: writing and
+     * destroying are different privileges. None of these destroys anything.
+     * Retraction stamps superseded_at or sets the tombstone flag and the row is
+     * RETAINED and auditable either way, and unmerge flips an audit flag. They
+     * belong with the correcting write. */
+    {"facts.retract", CAP_MEMORY_WRITE, "retract a typed fact"},
+    {"entities.merge", CAP_MEMORY_WRITE, "merge two entities"},
+    {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */
@@ -445,4 +463,27 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddItemToObject(resp, "session", s);
 
    return server_send_ok(conn, resp);
+}
+
+/* --- Authenticated identity: who, not what-may-they-do. See server.h. --- */
+
+int server_account_is_person(const char *account)
+{
+   /* No re-verification here, deliberately. The channel, the session and the
+    * account were each verified once at message receipt; a request that failed
+    * any of them never reached a handler. This reads the result ingress already
+    * carried on the request -- checking it again at every surface would cost
+    * work to re-learn something already proven. */
+   return account && account[0] ? 1 : 0;
+}
+
+memory_authority_t server_account_memory_authority(const char *account)
+{
+   return server_account_is_person(account) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+}
+
+const char *server_request_account(void)
+{
+   const char *account = request_context_caller_subject();
+   return account ? account : "";
 }

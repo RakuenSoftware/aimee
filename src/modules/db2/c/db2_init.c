@@ -1349,8 +1349,10 @@ void db2_shutdown(void)
 static sqlite3 *g_eval_temp_store_handle = NULL;
 #endif
 
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
-/* ---- Real-Postgres eval scratch store (libpq build; no sqlite shim here) ----------
+/* ---- Real-Postgres eval scratch store -------------------------------------------
+ * Compiled unconditionally, chosen at RUNTIME by aimee_pg_is_shim(). The backend is a
+ * link-time choice (see tests/Rules.mk DB2_TEST_BACKEND_OBJ), so a test binary built
+ * against real libpq compiles the sqlite branch below and must not take it.
  * Instead of an in-memory sqlite, carve an ISOLATED throwaway SCHEMA in a DISPOSABLE
  * Postgres, apply the full DB2 schema (incl. the memory_negation_fts_tsv FTS projection
  * and pgvector columns) into it, and pin this process's db2 connection (g_conn -- what
@@ -1372,6 +1374,16 @@ static void db2_eval_pg_drop_schema(void *conn, const char *schema)
    if (!conn || !schema || !schema[0])
       return;
    char sql[128], err[256] = {0};
+   if (strcmp(schema, "public") == 0)
+   {
+      /* The eval copy went into `public` because `public` was empty (see
+       * db2_eval_open_temp_store_pg). Empty it again rather than dropping the
+       * schema: a database with no `public` is not a database anything else can
+       * use, and the contract here is a disposable database, not a destroyed one. */
+      (void)aimee_pg_exec(conn, "DROP SCHEMA public CASCADE", err, sizeof(err));
+      (void)aimee_pg_exec(conn, "CREATE SCHEMA public", err, sizeof(err));
+      return;
+   }
    snprintf(sql, sizeof(sql), "DROP SCHEMA IF EXISTS \"%s\" CASCADE", schema);
    (void)aimee_pg_exec(conn, sql, err, sizeof(err));
 }
@@ -1396,21 +1408,50 @@ static int db2_eval_open_temp_store_pg(void)
       fprintf(stderr, "aimee: eval temp store: connect failed: %s\n", err);
       return -1;
    }
+   /* Carving a schema beside `public` only works while `public` still holds the
+    * tables the schema's ~950 public.<table> qualifiers name. Those qualifiers are
+    * absolute: no search_path puts the eval copy in front of them, so on a database
+    * whose `public` is EMPTY the apply reaches `INSERT INTO public.db3_projection`
+    * and fails. An empty `public` is also the case where there is nothing to shadow
+    * and nothing to protect, so apply straight into it -- the eval copy then IS
+    * public and every qualifier resolves to it. A database that already carries a
+    * schema keeps the carve, and keeps being left alone. */
    char sql[192];
-   snprintf(sql, sizeof(sql), "CREATE SCHEMA \"%s\"", schema);
-   if (aimee_pg_exec(conn, sql, err, sizeof(err)) != 0)
+   int public_is_empty = 0;
    {
-      fprintf(stderr, "aimee: eval temp store: CREATE SCHEMA failed: %s\n", err);
-      aimee_pg_close(conn);
-      return -1;
+      aimee_pg_stmt_t *probe = aimee_pg_prepare(conn,
+                                                "SELECT COUNT(*) FROM information_schema.tables"
+                                                " WHERE table_schema = 'public'",
+                                                err, sizeof(err));
+      if (probe)
+      {
+         if (aimee_pg_step(probe, err, sizeof(err)) == AIMEE_PG_ROW)
+            public_is_empty = aimee_pg_column_int(probe, 0) == 0;
+         aimee_pg_finalize(probe);
+      }
    }
-   snprintf(sql, sizeof(sql), "SET search_path TO \"%s\", public", schema);
-   if (aimee_pg_exec(conn, sql, err, sizeof(err)) != 0)
+
+   if (public_is_empty)
    {
-      fprintf(stderr, "aimee: eval temp store: SET search_path failed: %s\n", err);
-      db2_eval_pg_drop_schema(conn, schema);
-      aimee_pg_close(conn);
-      return -1;
+      snprintf(schema, sizeof(schema), "public");
+   }
+   else
+   {
+      snprintf(sql, sizeof(sql), "CREATE SCHEMA \"%s\"", schema);
+      if (aimee_pg_exec(conn, sql, err, sizeof(err)) != 0)
+      {
+         fprintf(stderr, "aimee: eval temp store: CREATE SCHEMA failed: %s\n", err);
+         aimee_pg_close(conn);
+         return -1;
+      }
+      snprintf(sql, sizeof(sql), "SET search_path TO \"%s\", public", schema);
+      if (aimee_pg_exec(conn, sql, err, sizeof(err)) != 0)
+      {
+         fprintf(stderr, "aimee: eval temp store: SET search_path failed: %s\n", err);
+         db2_eval_pg_drop_schema(conn, schema);
+         aimee_pg_close(conn);
+         return -1;
+      }
    }
    /* The schema qualifies references as public.<table> in ~950 places, deliberately:
     * kb_principal_is_admin() is an RLS admin gate, and an unqualified lookup there
@@ -1445,12 +1486,29 @@ static int db2_eval_open_temp_store_pg(void)
    snprintf(g_eval_pg_schema, sizeof(g_eval_pg_schema), "%s", schema);
    return 0;
 }
-#endif
+
+/* DROP the throwaway schema (CASCADE removes every table, index and the negation FTS
+ * projection) and close the dedicated connection. */
+static void db2_eval_close_temp_store_pg(void)
+{
+   if (!g_eval_pg_schema[0])
+      return;
+   db2_set_ephemeral(0);
+   db2_eval_pg_drop_schema(g_conn, g_eval_pg_schema);
+   aimee_pg_close(g_conn);
+   g_conn = NULL;
+   g_eval_pg_schema[0] = '\0';
+}
 
 int db2_eval_open_temp_store(void)
 {
+   if (!aimee_pg_is_shim())
+      return db2_eval_open_temp_store_pg();
+
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
-   return db2_eval_open_temp_store_pg();
+   /* Production libpq build: the sqlite symbols below are not linked, and
+    * aimee_pg_is_shim() is a constant 0 there, so this is unreachable. */
+   return -1;
 #else
    db2_eval_close_temp_store();
    if (!sqlite3_open || !sqlite3_close || !sqlite3_exec)
@@ -1474,35 +1532,27 @@ int db2_eval_open_temp_store(void)
    db2_register_shared_sqlite(raw);
    db2_set_ephemeral(1);
    g_eval_temp_store_handle = raw;
-   /* In test builds the aimee_pg_* shim resolves "shim" to the
-    * registered sqlite handle; in production with real libpq this
-    * would attempt a network connection, so skip it there. */
-   if (aimee_pg_is_shim())
-      (void)db2_init("shim");
+   /* The aimee_pg_* shim resolves "shim" to the registered sqlite handle. */
+   (void)db2_init("shim");
    return 0;
 #endif
 }
 
 void db2_eval_close_temp_store(void)
 {
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
-   /* Real-Postgres eval store: DROP the throwaway schema (CASCADE removes every table,
-    * index and the negation FTS projection) and close the dedicated connection. */
-   if (!g_eval_pg_schema[0])
+   if (!aimee_pg_is_shim())
+   {
+      db2_eval_close_temp_store_pg();
       return;
-   db2_set_ephemeral(0);
-   db2_eval_pg_drop_schema(g_conn, g_eval_pg_schema);
-   aimee_pg_close(g_conn);
-   g_conn = NULL;
-   g_eval_pg_schema[0] = '\0';
-#else
+   }
+
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
    if (!g_eval_temp_store_handle)
       return;
    /* Restore non-ephemeral when the eval scratch store goes away, so the flag
     * can never outlive the eval that set it. */
    db2_set_ephemeral(0);
-   if (aimee_pg_is_shim())
-      db2_shutdown();
+   db2_shutdown();
    db2_maybe_clear_sqlite_cache(g_eval_temp_store_handle);
    db2_register_shared_sqlite(NULL);
    if (sqlite3_close)

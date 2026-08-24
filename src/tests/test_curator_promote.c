@@ -79,6 +79,9 @@ static void test_pick_seeded(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_promote"))
+      return 0;
+
    test_scope_lattice();
    test_drain_graceful();
    test_pick_seeded();

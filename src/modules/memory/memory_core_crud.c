@@ -54,13 +54,19 @@ void memory_set_audit_hook(memory_audit_hook_fn fn)
 
 /* Fire the audit hook (if installed) with the mutation's NON-CONTENT identity.
  * Never receives memory content; the key/kind are fingerprinted downstream. */
-static void mem_audit(const char *op, int64_t id, const char *tier, const char *kind,
-                      const char *key, double confidence, const char *session_id)
+void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
+                       const char *key, double confidence, const char *session_id)
 {
    memory_audit_hook_fn h = g_mem_audit_hook;
    if (h)
       h(op, id, tier ? tier : "", kind ? kind : "", key ? key : "", confidence,
         session_id ? session_id : "");
+}
+
+static void mem_audit(const char *op, int64_t id, const char *tier, const char *kind,
+                      const char *key, double confidence, const char *session_id)
+{
+   memory_audit_emit(op, id, tier, kind, key, confidence, session_id);
 }
 
 /* gate_check_sensitive, gate_check_ephemeral, and gate_has_evidence_markers
@@ -229,11 +235,19 @@ static int memory_keys_have_different_numeric_tokens(const char *a, const char *
    return (n_a != n_b) || (n_a > 0 && strcmp(sig_a, sig_b) != 0);
 }
 
-int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
-                     const char *use_cases, double confidence, const char *session_id,
-                     memory_t *out)
+int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
+                               const char *key, const char *content, const char *use_cases,
+                               double confidence, const char *session_id,
+                               memory_authority_t authority, memory_t *out)
 {
-   if (!tier || !kind || !key)
+   static const char *const epistemic_kinds[] = {"world_fact",   "episode",    "experience",
+                                                 "mental_model", "preference", "instruction",
+                                                 "policy",       "hypothesis", NULL};
+   int epistemic_ok = 0;
+   for (int i = 0; epistemic_kinds[i]; i++)
+      if (epistemic_kind && strcmp(epistemic_kind, epistemic_kinds[i]) == 0)
+         epistemic_ok = 1;
+   if (!tier || !kind || !key || !epistemic_ok)
       return -1;
 
    /* Eval scratch stores are throwaway. Skip cross-cutting write-side work
@@ -377,11 +391,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          add_provenance(existing_id, session_id, "merge",
                         same_semantic_value ? "semantic profile dedupe" : "exact key match");
 
-         {
-            platform_memory_background_embed(existing_id, config_embedder_command_field()[0]
-                                                              ? config_embedder_command_field()
-                                                              : "builtin");
-         }
+         platform_memory_background_embed(existing_id, config_embedder_command_current(NULL));
 
          if (out)
             memory_get(existing_id, out);
@@ -471,10 +481,11 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
 
    /* Truly new: INSERT */
    {
-      int64_t new_id = db2_memory_row_insert_ex(
-          tier, kind, norm_key, content, use_cases, confidence, session_id, ts, sensitivity,
-          memory_base_evidence_strength(norm_key, content, confidence),
-          memory_content_salience(content), memory_content_surprise(session_id, content));
+      int64_t new_id = db2_memory_row_insert_epistemic_ex(
+          tier, kind, epistemic_kind, norm_key, content, use_cases, confidence, session_id, ts,
+          sensitivity, memory_base_evidence_strength(norm_key, content, confidence),
+          memory_content_salience(content), memory_content_surprise(session_id, content),
+          MEMORY_PROVENANCE_FOR(authority));
       if (new_id < 0)
       {
          aimee_log(LOG_ERROR, "memory", "memory insert failed");
@@ -503,10 +514,19 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    }
 }
 
+int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
+                     const char *use_cases, double confidence, const char *session_id,
+                     memory_authority_t authority, memory_t *out)
+{
+   return memory_insert_epistemic_ex(tier, kind, "world_fact", key, content, use_cases, confidence,
+                                     session_id, authority, out);
+}
+
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out)
 {
-   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
+   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id,
+                           MEMORY_AUTHORITY_MODEL, out);
 }
 
 int memory_get(int64_t id, memory_t *out)
@@ -519,15 +539,58 @@ int memory_touch(int64_t id)
    return db2_memory_touch(id);
 }
 
-int memory_update_content(int64_t id, const char *content)
+int memory_touch_many(const int64_t *ids, int n)
 {
+   return db2_memory_touch_many(ids, n);
+}
+
+int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
+                             int64_t *new_id_out)
+{
+   if (new_id_out)
+      *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
+   char epistemic_kind[32] = "world_fact";
+   (void)db2_memory_epistemic_kind(id, epistemic_kind, sizeof(epistemic_kind));
+   if (strcmp(epistemic_kind, "episode") == 0 || strcmp(epistemic_kind, "experience") == 0)
+      return -2;
+   if (strcmp(epistemic_kind, "instruction") == 0 || strcmp(epistemic_kind, "policy") == 0)
+      return -3;
+
+   /* A model correction versions the old value instead of overwriting it. The
+    * store's own write path already makes this choice — memory_store() routes a
+    * materially-different L2 write to memory_supersede() rather than merging
+    * over the existing value — and the update verb has to make the same one, or
+    * it simply becomes the way around it. */
+   if (authority != MEMORY_AUTHORITY_USER)
+   {
+      memory_t old_mem;
+      double confidence = (memory_get(id, &old_mem) == 0) ? old_mem.confidence : 1.0;
+      memory_t sup;
+      memset(&sup, 0, sizeof(sup));
+      int supersede_rc = memory_supersede(id, content, confidence, NULL, &sup);
+      if (supersede_rc != 0)
+         return supersede_rc;
+      if (new_id_out)
+         *new_id_out = sup.id;
+      return 0;
+   }
+
    int changes = db2_memory_update_content(id, content);
    int rc = changes > 0 ? 0 : -1;
    if (rc == 0)
+   {
+      if (new_id_out)
+         *new_id_out = id;
       mem_audit("memory.update", id, NULL, NULL, NULL, 0.0, NULL);
+   }
    return rc;
+}
+
+int memory_update_content(int64_t id, const char *content)
+{
+   return memory_update_content_as(id, content, MEMORY_AUTHORITY_USER, NULL);
 }
 
 int memory_reject(int64_t id, const char *reason)
@@ -548,6 +611,17 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
    if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived())
       hide_archived = 1;
    return db2_memory_list(tier, kind, hide_archived, limit, out, max);
+}
+
+int memory_delete_as(int64_t id, memory_authority_t authority)
+{
+   /* Model-initiated forgetting is a retirement, not a destruction: the content
+    * stops answering recall under its key but stays recoverable. Only a
+    * user/operator — who must clear the separate CAP_MEMORY_ADMIN gate to reach
+    * this at all — gets the irreversible path below. */
+   if (authority != MEMORY_AUTHORITY_USER)
+      return memory_retire(id, NULL);
+   return memory_delete(id);
 }
 
 int memory_delete(int64_t id)

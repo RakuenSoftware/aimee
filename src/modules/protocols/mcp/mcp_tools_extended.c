@@ -30,13 +30,14 @@ static cJSON *ext_tool(cJSON *tools, const char *name, const char *desc)
    return t;
 }
 
-static void ext_prop(cJSON *tool, const char *key, const char *type, const char *desc)
+static cJSON *ext_prop(cJSON *tool, const char *key, const char *type, const char *desc)
 {
    cJSON *s = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
    cJSON *props = cJSON_GetObjectItemCaseSensitive(s, "properties");
    cJSON *p = cJSON_AddObjectToObject(props, key);
    cJSON_AddStringToObject(p, "type", type);
    cJSON_AddStringToObject(p, "description", desc);
+   return p;
 }
 
 static void ext_require(cJSON *tool, const char *key)
@@ -102,11 +103,23 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "line_start", "integer", "First line to read (1-based; default 1).");
    ext_prop(t, "line_end", "integer",
             "Last line to read (1-based, inclusive; default line_start).");
-   ext_prop(t, "spans", "array",
-            "Read several ranges in ONE call: [{\"file_path\":..., \"line_start\":..., "
-            "\"line_end\":...}, ...]. Prefer this whenever you want more than one range -- a "
-            "round trip costs far more than the extra range. Replaces file_path/line_start/"
-            "line_end when present; returns one span object per entry, in order.");
+   cJSON *spans =
+       ext_prop(t, "spans", "array",
+                "Read several ranges in ONE call: [{\"file_path\":..., \"line_start\":..., "
+                "\"line_end\":...}, ...]. Prefer this whenever you want more than one range -- a "
+                "round trip costs far more than the extra range. Replaces file_path/line_start/"
+                "line_end when present; returns one span object per entry, in order.");
+   cJSON *span_item = cJSON_AddObjectToObject(spans, "items");
+   cJSON_AddStringToObject(span_item, "type", "object");
+   cJSON *span_props = cJSON_AddObjectToObject(span_item, "properties");
+   cJSON *span_path = cJSON_AddObjectToObject(span_props, "file_path");
+   cJSON_AddStringToObject(span_path, "type", "string");
+   cJSON *span_start = cJSON_AddObjectToObject(span_props, "line_start");
+   cJSON_AddStringToObject(span_start, "type", "integer");
+   cJSON *span_end = cJSON_AddObjectToObject(span_props, "line_end");
+   cJSON_AddStringToObject(span_end, "type", "integer");
+   cJSON *span_required = cJSON_AddArrayToObject(span_item, "required");
+   cJSON_AddItemToArray(span_required, cJSON_CreateString("file_path"));
    ext_require(t, "project");
 
    t = ext_tool(tools, "index_blast_radius",
@@ -145,6 +158,9 @@ void mcp_add_extended_tools(cJSON *tools)
             "one {query, result} per entry, in order.");
    ext_prop(t, "symbol", "string", "Seed symbol, if you already have one (optional).");
    ext_prop(t, "project", "string", "Project to search. Required; this call never broadens scope.");
+   ext_prop(t, "fallback", "boolean",
+            "Automatically fall back to hybrid retrieval on abstention (default true).");
+   ext_prop(t, "include_code", "boolean", "Attach bounded source windows (default true).");
 
    t = ext_tool(tools, "index_graph_hubs",
                 "Rank a project's most-connected symbols by degree centrality over the code "
@@ -263,6 +279,47 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "asset_id", "integer", "Opaque asset_id from a pdf_list_assets entry.");
    ext_require(t, "project");
    ext_require(t, "asset_id");
+
+   /* ── Peer messaging: one aimee session talking to another ────────────────── */
+   /* There is deliberately no `from`. The sender is the calling session, taken
+      from the call itself, so a message's origin is a fact the server stamps
+      rather than a field the caller fills in. Advertising one would invite
+      exactly the impersonation the registry's provenance stamping prevents. */
+   t = ext_tool(tools, "peer_send",
+                "Send a message to another aimee session — including a session running a "
+                "different model (Claude, Codex). The recipient receives it in their peer "
+                "inbox; delivery is asynchronous and this call does not wait for a reply. "
+                "You are identified as the sender automatically.");
+   ext_prop(t, "to", "string", "Recipient's session id.");
+   ext_prop(t, "text", "string", "Message body (up to 8192 bytes).");
+   ext_prop(t, "conversation_id", "string",
+            "Thread this message onto an existing conversation. Omit to start a new one.");
+   ext_prop(t, "expect_reply", "boolean",
+            "Mark that you are waiting on an answer. Does not block this call.");
+   ext_require(t, "to");
+   ext_require(t, "text");
+
+   t = ext_tool(tools, "peer_inbox",
+                "Take messages other aimee sessions have sent you. Taken messages are REMOVED "
+                "from the inbox, so a message is delivered once. The reply reports how many "
+                "remain: keep calling while that is above zero. Each message carries a "
+                "'reply_to' token for answering it.");
+   ext_prop(t, "max", "integer", "Most messages to take in one call (default and maximum 8).");
+
+   /* Answering is a different operation from sending, and the difference is the
+      HOP COUNT. A send always starts at hop 0, so two sessions answering each
+      other with send reset the count every time and the conversation's loop
+      ceiling could never be reached. A reply carries hop + 1. */
+   t = ext_tool(tools, "peer_reply",
+                "Answer a message another aimee session sent you. Prefer this over 'send' when "
+                "responding: it threads the answer onto the same conversation and advances the "
+                "hop count, which is what bounds a back-and-forth between two sessions.");
+   ext_prop(t, "reply_to", "string",
+            "The 'reply_to' token printed beside the message in your inbox. Pass it back "
+            "unchanged.");
+   ext_prop(t, "text", "string", "Your answer (up to 8192 bytes).");
+   ext_require(t, "reply_to");
+   ext_require(t, "text");
 }
 
 /* ── Tool-family multiplexing (P4) ────────────────────────────────────────────
@@ -361,6 +418,18 @@ static const struct fam_def MCP_FAMILIES[] = {
      "command",
      "Investigation notes. Set 'command'.",
      {{"create", "create_note"}, {"list", "list_notes"}, {"search", "search_notes"}, {NULL, NULL}}},
+    /* Folded into ONE family so peer messaging can sit on the core floor at the
+     * cost of a single entry. Two flat tools would have been two, and the floor
+     * is kept short deliberately -- but a capability an agent is never shown is
+     * a capability it does not have, and unlike retrieval there is no clumsier
+     * fallback it would reach for instead. There is no way to message another
+     * session except this. */
+    {"peer",
+     "command",
+     "Talk to another aimee session, including one running a different model. Set 'command': "
+     "'send' to deliver a message, 'inbox' to take the messages sent to you, 'reply' to answer "
+     "one you were sent.",
+     {{"send", "peer_send"}, {"inbox", "peer_inbox"}, {"reply", "peer_reply"}, {NULL, NULL}}},
     {"prospective_memory",
      "command",
      "'When X, surface Y' reminders. Set 'command'.",

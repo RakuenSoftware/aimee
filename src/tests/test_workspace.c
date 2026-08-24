@@ -8,7 +8,7 @@
 #include "aimee.h"
 
 /* workspace_active_root reads the configured workspaces through accessors now
- * instead of taking a config_t, so a case that wants specific workspaces has to
+ * instead of taking a legacy_config_record, so a case that wants specific workspaces has to
  * write them to a config file it owns. Per-pid dir rather than mkdtemp on a
  * static buffer, which fails on a second call. */
 static void write_test_config(const char *yaml)

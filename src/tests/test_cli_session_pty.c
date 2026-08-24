@@ -32,11 +32,24 @@ static void *stream_thread(void *p)
 }
 
 /* Read SSE frames from fd for up to ~timeout_ms; base64-decode each `data:`
- * frame and return 1 if the decoded bytes ever contain `needle`. */
+ * frame and return 1 if the decoded bytes ever contain `needle`.
+ *
+ * The accumulator is scanned FROM A CURSOR and never mutated. Both halves of
+ * that matter, and the earlier version did the opposite on each:
+ *
+ * It NUL-terminated each frame in place to bound the base64 (`*eol = 0`), and
+ * it restarted every scan at the top of the buffer. So the second pass found
+ * the first frame again, and strchr for its '\n' -- now a '\0' -- returned
+ * NULL and broke out of the scan. Every byte that arrived after the first
+ * COMPLETE frame was therefore never examined: the test passed only when the
+ * needle happened to land in the same read() as that frame, and otherwise sat
+ * out its whole timeout. On a loaded runner the echo splits across reads, and
+ * that is one flake with no timing in it at all -- the data had arrived and was
+ * sitting unscanned. */
 static int await_decoded_contains(int fd, const char *needle, int timeout_ms)
 {
    char acc[16384];
-   size_t acc_len = 0;
+   size_t acc_len = 0, scanned = 0;
    int waited = 0;
    while (waited < timeout_ms && acc_len < sizeof(acc) - 1)
    {
@@ -49,26 +62,30 @@ static int await_decoded_contains(int fd, const char *needle, int timeout_ms)
       if (n <= 0)
          break;
       acc_len += (size_t)n;
-      acc[acc_len] = '\0';
 
-      /* Scan complete "data: <b64>\n" frames. */
-      char *p = acc;
-      char *line;
-      while ((line = strstr(p, "data: ")) != NULL)
+      /* Complete "data: <b64>\n" frames from where the last scan stopped. */
+      for (;;)
       {
-         char *eol = strchr(line, '\n');
-         if (!eol)
+         char *line = memmem(acc + scanned, acc_len - scanned, "data: ", 6);
+         if (!line)
             break;
-         *eol = '\0';
-         unsigned char decoded[8192];
-         size_t dn = aimee_base64_decode(line + 6, decoded, sizeof(decoded) - 1);
-         if (dn != (size_t)-1)
+         char *eol = memchr(line, '\n', acc_len - (size_t)(line - acc));
+         if (!eol)
+            break; /* frame still in flight; leave the cursor for the next read */
+         /* Copied out rather than terminated in place, so the buffer this scan
+            walks is the same one the next scan will walk. */
+         size_t b64n = (size_t)(eol - line) - 6;
+         char b64[8192];
+         if (b64n < sizeof(b64))
          {
-            decoded[dn] = '\0';
-            if (memmem(decoded, dn, needle, strlen(needle)))
+            memcpy(b64, line + 6, b64n);
+            b64[b64n] = '\0';
+            unsigned char decoded[8192];
+            size_t dn = aimee_base64_decode(b64, decoded, sizeof(decoded) - 1);
+            if (dn != (size_t)-1 && memmem(decoded, dn, needle, strlen(needle)))
                return 1;
          }
-         p = eol + 1;
+         scanned = (size_t)(eol - acc) + 1;
       }
    }
    return 0;

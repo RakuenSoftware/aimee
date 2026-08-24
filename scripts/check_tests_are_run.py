@@ -26,10 +26,53 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 RULES = Path("src/tests/Rules.mk")
 
+# Test sources that no target in Rules.mk builds.
+#
+# Found while chasing a stale allowlist entry: it claimed two bus-plugin tests
+# were "run by `make plugin-e2e`", and neither the targets nor that make target
+# existed. Removing the entry fixed the checker and would have buried the real
+# finding, which is that the SOURCES are still there and nothing compiles them.
+#
+# Recorded rather than deleted, and rather than silently exempted, because which
+# of these is retired and which is an accident is a question for whoever owns
+# each subsystem -- and inventing that answer to make a check pass is how a gap
+# becomes a blessing. Each is dead coverage until someone decides: it cannot
+# fail, so it cannot tell anyone anything.
+#
+# Shrinking this list is the fix. An entry that stops being orphaned must be
+# removed, which the check below enforces so the list cannot rot into a place
+# things hide.
+UNBUILT_SOURCES = {
+    "test_audit_action.c",
+    "test_audit_action_log.c",
+    "test_audit_ledger.c",
+    "test_bus_arena_tsan.c",
+    "test_bus_plugin_process.c",
+    "test_bus_plugin_scale.c",
+    "test_git_oauth_device.c",
+    "test_git_oauth_gh.c",
+    "test_git_oauth_github.c",
+    "test_git_org_repos.c",
+    "test_identity_authority_facade_pg.c",
+    "test_kb_mgmt_status_peer.c",
+    "test_kb_mgmt_token_authority_client_commit.c",
+    "test_kb_mgmt_token_authority_daemon_stop.c",
+    "test_panel_ir_contract.c",
+    "test_plugin_grant_provisioning.c",
+    "test_self_update.c",
+}
+
 # Targets the ordinary suite cannot run, and the reason. A -pg target needs a
 # live Postgres; a -live target needs a running service. Both are covered by
 # their own CI jobs, which is why they are exempt here rather than missing.
 INFRASTRUCTURE = {
+    # Not a test: the emitter half of unit-test-bus-guardrail-durability, which
+    # the shell half runs. It cannot check its own work -- it stops the bus, and
+    # the store is reached over that bus -- so the verification is SQL, run
+    # after this exits. Listed here rather than added to a run list, because
+    # running it alone would emit events and assert nothing about the store.
+    "unit-test-bus-guardrail-durability-emit":
+        "the emitter half; unit-test-bus-guardrail-durability runs it and verifies in SQL",
     "unit-test-bus-db2-process": "needs Postgres and the packaged DB2 executable",
     "unit-test-content-scope-pg": "needs Postgres",
     "unit-test-css-projection-pg": "needs Postgres",
@@ -66,9 +109,39 @@ def main(argv: list[str] | None = None) -> int:
     text = (args.root / RULES).read_text(encoding="utf-8")
     joined = re.sub(r"\\\n", " ", text)
 
-    defined = set(re.findall(r"^\$\(TESTPREFIX\)/(unit-test-[a-z0-9-]+)\s*:", joined, re.M))
+    # Targets are declared in TWO shapes, and matching only one hid four.
+    #
+    #   $(TESTPREFIX)/unit-test-foo:  ...   the binary
+    #   unit-test-foo: $(TESTPREFIX)/...    the convenience name people type
+    #
+    # This originally matched only the first, so a target declared ONLY in the
+    # bare shape was invisible to the check written to find unrun targets. Four
+    # were hiding there -- and all four were bus fixtures, the same category
+    # this script's own history says was the expensive miss. A blind spot in a
+    # guard is worth more than the thing it guards, because it makes the tree
+    # look checked.
+    prefixed = set(re.findall(r"^\$\(TESTPREFIX\)/(unit-test-[a-z0-9-]+)\s*:", joined, re.M))
+    bare = set(re.findall(r"^(unit-test-[a-z0-9-]+)\s*:", joined, re.M))
+    defined = prefixed | bare
     if not defined:
         return fail(f"no test targets found in {RULES}; the pattern stopped matching")
+
+    # A bare target whose recipe is `$<` and which declares no prerequisite runs
+    # NOTHING and reports success -- strictly worse than not being run at all,
+    # because adding it to a run list would then pass trivially. Three were in
+    # that state; every other bare target names its binary as a prerequisite.
+    empty = sorted(
+        name for name, prereq in re.findall(r"^(unit-test-[a-z0-9-]+)\s*:([^\n=]*)$", joined, re.M)
+        if not prereq.strip()
+    )
+    if empty:
+        listing = "\n".join(f"    {name}" for name in empty)
+        return fail(
+            f"{len(empty)} test target(s) declare no prerequisite, so `$<` is empty "
+            f"and the recipe does nothing:\n{listing}\n"
+            "  Give each its binary: `unit-test-foo: $(TESTPREFIX)/unit-test-foo`.\n"
+            "  A target that runs nothing and succeeds is worse than one nobody runs."
+        )
 
     # TEST_TARGETS is what the suite builds and runs. BUS_TEST_TARGETS is NOT a
     # run list -- it exists to order an archive dependency -- which is exactly
@@ -98,8 +171,42 @@ def main(argv: list[str] | None = None) -> int:
             "Remove them, so the list keeps meaning what it says."
         )
 
+    # The same defect one layer down: a test SOURCE that no target builds.
+    #
+    # Everything above checks target -> run list. A file with no target at all
+    # never reaches that check, so it is invisible to it while looking exactly
+    # like coverage: it sits in src/tests/, it is read in review, it is cited,
+    # and nothing compiles it. That is a weaker position than an unrun target,
+    # which at least still builds.
+    sources = sorted((args.root / "src/tests").glob("test_*.c"))
+    orphans = sorted(
+        path.name for path in sources
+        if path.stem not in joined and path.name not in joined
+    )
+    unexpected = [name for name in orphans if name not in UNBUILT_SOURCES]
+    if unexpected:
+        listing = "\n".join(f"    src/tests/{name}" for name in unexpected)
+        return fail(
+            f"{len(unexpected)} test source(s) that no target builds:\n{listing}\n"
+            "  Give each a target, delete it, or record it in UNBUILT_SOURCES with\n"
+            "  the reason. A source nothing compiles cannot fail, so it is not a test."
+        )
+
+    # And the stale-entry rule the allowlist above already has: an entry naming a
+    # file that is now built, or gone, is recording something that stopped being
+    # true.
+    resolved = sorted(name for name in UNBUILT_SOURCES if name not in orphans)
+    if resolved:
+        return fail(
+            f"UNBUILT_SOURCES names test(s) that are no longer orphaned: "
+            f"{', '.join(resolved)}. Remove them, so the list keeps meaning what it says."
+        )
+
     exempt = len(INFRASTRUCTURE) + sum(1 for n in defined if SANITIZE.fullmatch(n))
-    print(f"check_tests_are_run: ok ({len(run)} run, {exempt} exempt of {len(defined)} defined)")
+    print(
+        f"check_tests_are_run: ok ({len(run)} run, {exempt} exempt of {len(defined)} "
+        f"defined; {len(orphans)} source(s) unbuilt)"
+    )
     return 0
 
 

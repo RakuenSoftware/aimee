@@ -274,7 +274,10 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
 
    for (int i = 0; shared_keywords[i]; i++)
    {
-      if (strstr(lower_buf, shared_keywords[i]))
+      /* Whole-word: as a bare substring "auth" matched "author"/"authored" and
+       * "cert" matched "certain", tagging ordinary memories as shared
+       * cross-cutting infrastructure. */
+      if (memory_keyword_present(lower_buf, shared_keywords[i]))
       {
          memory_tag_workspace(memory_id, SHARED_WORKSPACE);
          return 0;
@@ -607,8 +610,7 @@ int memory_embed(int64_t memory_id, const char *command)
    snprintf(text, sizeof(text), "%s: %s", key, content);
 
    float vec[EMBED_MAX_DIM];
-   const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, command, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return -1;
 

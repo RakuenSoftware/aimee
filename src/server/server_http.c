@@ -8,12 +8,14 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "command_registry.h"
 #include <aimee/core/connection/auth.h>
 #include "server_http.h"
-#include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
+#include "delegate_egress_adapter.h" /* fd handoff to the Go sole-egress module */
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h"
+#include "db1_client/db1.h" /* db1_store_probe — the mTLS ramp needs a live store */
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
@@ -260,9 +262,8 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    /* TCP requires a configured bearer and a matching Authorization header. */
    if (!have_bearer)
       return 503;
-   authorized = server_ct_equal(aimee_core_bearer_token(auth_header), bearer_cfg);
-   if (api_key_header && api_key_header[0])
-      authorized |= server_ct_equal(api_key_header, bearer_cfg);
+   authorized = server_http_bearer_matches(aimee_core_bearer_token(auth_header), bearer_cfg);
+   authorized |= server_http_bearer_matches(api_key_header, bearer_cfg);
    if (!authorized)
       return 401;
    return 0;
@@ -533,18 +534,6 @@ int route_health(char *resp, int cap)
 int route_version(char *resp, int cap)
 {
    snprintf(resp, (size_t)cap, "{\"version\":\"%s\",\"service\":\"aimee-server\"}", AIMEE_VERSION);
-   return 200;
-}
-
-int route_capabilities(char *resp, int cap)
-{
-   /* The resources this HTTP surface currently serves; grows with the API. */
-   snprintf(resp, (size_t)cap,
-            "{\"capabilities\":[\"personas\",\"sessions\",\"models\",\"chat\",\"embeddings\","
-            "\"responses\",\"rules\",\"kb\",\"memory\",\"notes\",\"dashboard\",\"agents\","
-            "\"roadmap\",\"curiosity\",\"runs\",\"openapi\"],"
-            "\"version\":\"%s\",\"service\":\"aimee-server\"}",
-            AIMEE_VERSION);
    return 200;
 }
 
@@ -1160,31 +1149,13 @@ int server_http_sse_event_format(const char *event, const char *data_json, char 
    return (int)pos;
 }
 
-/* Typed-event emit for the Responses API: `event: <name>\ndata: <json>\n\n`. */
-static void sse_event_emit(void *ctx, const char *event, const char *data_json)
-{
-   int fd = *(int *)ctx;
-   int need;
-   char *frame;
-
-   if (!data_json)
-      return;
-   need = server_http_sse_event_format(event, data_json, NULL, 0);
-   frame = malloc((size_t)need + 1);
-   if (!frame)
-      return;
-   server_http_sse_event_format(event, data_json, frame, (size_t)need + 1);
-   write_all_fd(fd, frame, need);
-   free(frame);
-}
-
 /* Run a streaming /v1/responses request: write event-stream headers, let the
  * handler emit typed events; the Responses protocol has no `data: [DONE]`
  * terminator (it ends with the handler's `response.completed`). */
 static void handle_responses_stream(int fd, const char *body, const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   g_responses_stream_handler(body ? body : "", sse_event_emit, &fd);
+   server_http_sse_live_run(fd, body, g_responses_stream_handler);
 }
 
 /* SSE for POST /v1/messages (Anthropic Messages API, stream:true). Emits the
@@ -1194,7 +1165,7 @@ static void handle_responses_stream(int fd, const char *body, const char *reques
 static void handle_messages_stream(int fd, const char *body, const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   g_messages_stream_handler(body ? body : "", sse_event_emit, &fd);
+   server_http_sse_live_run(fd, body, g_messages_stream_handler);
 }
 
 static void handle_cli_session_stream(int fd, const char *id, const char *request_id)
@@ -1442,11 +1413,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
    {
       /* Defense in depth beyond !is_tcp: confirm the socket really is AF_UNIX before
        * exposing the forward proxy, so a future is_tcp regression cannot open egress on
-       * the public TCP/TLS listener. sandbox_pkg_proxy_serve also refuses if !is_uds. */
+       * the public TCP/TLS listener. The adapter also refuses if !is_uds. */
       struct sockaddr_storage ss;
       socklen_t sl = sizeof(ss);
       int is_uds = getsockname(fd, (struct sockaddr *)&ss, &sl) == 0 && ss.ss_family == AF_UNIX;
-      sandbox_pkg_proxy_serve(fd, is_uds, buf, NULL, "sandbox");
+      delegate_egress_adapter_serve(fd, is_uds, buf, total, "sandbox");
       return;
    }
 
@@ -1706,12 +1677,22 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * caller with nowhere to go: following QUICKSTART end to end now lands here
        * on the first kb write, and nothing on screen says a write-tier grant is
        * what is missing or who issues it. The mechanism is already public
-       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
+       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing.
+       *
+       * It named `aimee kb grant set`, which does not dispatch: the server-side
+       * proxy for grant administration was removed deliberately (see
+       * v1_route_requires_uds -- proxying it meant aimee-server holding an
+       * administrative identity on aimee-kb), but this message was left pointing
+       * at it. An operator who hit this 403 followed it to a command that does
+       * not exist. Grants are administered against aimee-kb itself, by a
+       * principal with admin or team-lead authority in the target team. */
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
                     "presented token's scope. Over the network a bearer is read/query only "
-                    "until your subject holds a write-tier grant on this server; an operator "
-                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
+                    "until your subject holds a write-tier grant on this server. Grants are "
+                    "administered on aimee-kb (POST /v1/write-tier-grants/set) by a principal "
+                    "with admin or team-lead authority in that team; aimee-server does not "
+                    "issue them. See docs/UPGRADING.md.\","
                     "\"type\":\"permission_error\"}}",
                     request_id);
       /* Count the requests the retired global would formerly have allowed, so an
@@ -2002,7 +1983,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * reused by ingress_preinject_build for the emitted retrieval_event. Gated
     * on the endpoint + flag so flag-off / non-ingress requests are byte-
     * identical on the wire (config is read only for these three paths, which
-    * already pay a config_load inside the ingress builder). */
+    * already pay a legacy_config_read inside the ingress builder). */
    if (strcmp(method, "POST") == 0 &&
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))
@@ -2374,13 +2355,18 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
     * vault's attested write path. */
    if (tls_port > 0)
    {
-      if (server_tls_init_default() == 0)
+      server_tls_wait_for_store(db1_store_probe);
+      int tls_rc = server_tls_init_default();
+      if (tls_rc == SERVER_TLS_INIT_OK)
          g_tls_fd = tcp_listen(tls_port, bearer_token, 1 /* TLS: may bind 0.0.0.0 */);
       else
-         /* This is the vault's attested write path — make a misconfigured cert/key
-          * loud (the UDS listener still comes up; the operator must fix the cert). */
-         LOG_ERROR("server.http", "tls_port=%d set but TLS cert/key not loadable; TLS DISABLED",
-                   tls_port);
+         /* This is the vault's attested write path, so the failure is loud (the UDS
+          * listener still comes up). It now names WHICH failure: this line said
+          * "cert/key not loadable" for all three, including a ramp self-test that
+          * could not reach DB1, sending the operator to inspect a certificate that
+          * was never the problem. */
+         LOG_ERROR("server.http", "tls_port=%d set but TLS could not start: %s; TLS DISABLED",
+                   tls_port, server_tls_init_result_str(tls_rc));
    }
 
    if (management.enabled)

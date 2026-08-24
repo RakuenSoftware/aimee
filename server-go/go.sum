@@ -1,3 +1,13 @@
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260822003140-4d9b33e4a791 h1:c7xO751r+Kig1Kcczg9/RirC+n5/DYP+XK2CJ2jCyPo=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260822003140-4d9b33e4a791/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260823142543-069668854db9 h1:E8Eb13BZVuyH6mOVsZXWXAT5XYlFQ2uK5EOGxgwXU+4=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260823142543-069668854db9/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260823144536-49c66bb3259e h1:QG+KgCMiTsXNVH9VUmmvOLVAbELzYrH5/ZsVA+sYjqc=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260823144536-49c66bb3259e/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260823170200-a9894485200d h1:IG1lgf9PLbPHBxunZ8ogp0YXVxFgftRVhxyanr1/56Q=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260823170200-a9894485200d/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260824205422-3d2964383b91 h1:ib6EVMHZNmGqhryJBDKwNHJAz61b3qZs16TBxHiMvBw=
+github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260824205422-3d2964383b91/go.mod h1:YEkFYNjoTSWEWJYITpXmtFoO2Y0sBaF9D5ibbWerdXQ=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

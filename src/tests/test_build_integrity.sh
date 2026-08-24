@@ -364,6 +364,12 @@ else
     pass "Go is the exclusive WFE runtime owner"
 fi
 
+if grep -qE 'aimee-wfe.*--config([ =]|$)' ../deploy/container/server-entrypoint.sh; then
+    fail "server entrypoint still passes the retired direct config-file flag to the Go WFE"
+else
+    pass "server entrypoint leaves WFE configuration behind the event-bus config module"
+fi
+
 if grep -qF '[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME/workflows"' \
     ../deploy/container/server-entrypoint.sh; then
     pass "server entrypoint makes the workflow registry writable by the Go WFE"
@@ -565,12 +571,14 @@ while IFS= read -r line; do
     fi
 done < tests/Rules.mk
 
-# 5. Every test target linking config.o must also link platform_random.o
+# 5. Every test target linking the retired, exact config.o token must also link
+# platform_random.o. Do not match client_config.o or config_client_contract.o:
+# those are event-bus callers and intentionally have no random dependency.
 # Join continuation lines, then check each target rule
 bad_targets=$(sed ':a; /\\$/N; s/\\\n//; ta' tests/Rules.mk | grep 'unit-test-' | while IFS= read -r rule; do
     target=$(echo "$rule" | cut -d: -f1 | tr -d ' ')
     deps=$(echo "$rule" | cut -d: -f2-)
-    if echo "$deps" | grep -q 'config\.o' && \
+    if echo "$deps" | grep -Eq '(^|[[:space:]])(\$\(OBJDIR\)/)?config\.o([[:space:]]|$)' && \
        ! echo "$deps" | grep -q 'platform_random\.o' && \
        ! echo "$deps" | grep -q 'TEST_CORE_OBJS\|TEST_DATA_OBJS\|CORE_OBJS\|PLATFORM_BASIC_OBJS'; then
         echo "$target"

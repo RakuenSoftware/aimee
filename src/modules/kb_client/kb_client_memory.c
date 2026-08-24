@@ -16,7 +16,7 @@
 
 #include "kb_client.h"
 #include "kb_client_memory_internal.h"
-#include "modules/db1/user_memory.h"
+#include "db1_client/user_memory.h"
 #include "cJSON.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"
@@ -650,6 +650,32 @@ char *kb_client_memory_assemble_context(const char *task_hint)
    return out;
 }
 
+char *kb_client_memory_assemble_typed_context(const char *query)
+{
+   if (!query || !query[0])
+      return NULL;
+
+   cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
+   cJSON_AddStringToObject(req, "query", query);
+   char *json = kb_v1_action_request("memory.assemble_typed_context", req);
+   if (!json)
+      return NULL;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return NULL;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   cJSON *used = cJSON_GetObjectItemCaseSensitive(resp, "used_tokens");
+   cJSON *body = cJSON_GetObjectItemCaseSensitive(resp, "rendered_context");
+   char *out = NULL;
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(used) &&
+       used->valuedouble > 0 && cJSON_IsString(body) && body->valuestring[0])
+      out = strdup(body->valuestring);
+   cJSON_Delete(resp);
+   return out;
+}
+
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count)
 {
    if (summary_count)
@@ -819,10 +845,14 @@ int kb_client_memory_query_health(memory_health_t *out)
    return 0;
 }
 
-int kb_client_memory_delete(int64_t id)
+int kb_client_memory_delete_as(int64_t id, memory_authority_t authority)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "id", (double)id);
+   /* Only ever sent for a user/operator caller. The KB treats an absent field as
+    * model authority, so a stale client cannot destroy anything. */
+   if (authority == MEMORY_AUTHORITY_USER)
+      cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.delete", req);
    if (!json)
       return -1;
@@ -833,8 +863,15 @@ int kb_client_memory_delete(int64_t id)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
-   kb_client_memory_audit_note("memory.delete", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
+   kb_client_memory_audit_note(authority == MEMORY_AUTHORITY_USER ? "memory.delete"
+                                                                  : "memory.retire",
+                               id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
+}
+
+int kb_client_memory_delete(int64_t id)
+{
+   return kb_client_memory_delete_as(id, MEMORY_AUTHORITY_USER);
 }
 
 int kb_client_memory_stats(memory_stats_t *out)

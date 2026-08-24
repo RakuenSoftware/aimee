@@ -73,6 +73,13 @@
           "type": "array",
           "uniqueItems": true
         },
+        "shared_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "system_libraries": {
           "items": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:+-]*$",
@@ -123,6 +130,26 @@
     },
     "enabled_by_default": {
       "type": "boolean"
+    },
+    "external_source": {
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "module",
+        "package",
+        "repository"
+      ],
+      "type": "object"
     },
     "go_sources": {
       "items": {

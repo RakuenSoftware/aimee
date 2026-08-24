@@ -82,8 +82,10 @@
  * instead of N. That is why the CLI leads here and MCP is named as the fallback:
  * not preference, arithmetic. */
 #define AIMEE_GUIDANCE_EXPLORE_WITH_LINE                                                           \
-   "explore-with: aimee answers CODE questions from its index. When a lookup is "                  \
-   "available as a COMMAND, chain it: several `aimee ...` commands joined with && "                \
+   "explore-with: aimee answers CODE questions from its index. Prefer the registered "             \
+   "Aimee CLI when a shell is available; use the equivalent Aimee MCP capability when "            \
+   "the CLI is not registered. When a lookup is available as a COMMAND, chain it: "                \
+   "several `aimee ...` commands joined with && "                                                  \
    "cost ONE round trip, where the same lookups as separate tool calls cost one "                  \
    "turn each. Fold them into a shell call you are already making. "                               \
    "definition -> aimee index find <symbol>; callers of a symbol -> aimee index "                  \
@@ -91,12 +93,14 @@
    "<file>; a file's shape -> aimee index structure <file>; what was decided "                     \
    "before -> aimee memory search <terms>. "                                                       \
    "read a file or line range -> aimee index span <file> <start> <end>; where do "                 \
-   "I even start -> aimee index investigate \"<question>\" (pass several "                         \
-   "questions to answer them in one call). "                                                       \
+   "I even start -> aimee index investigate \"<question>\" (it automatically falls "               \
+   "back when the bounded context packet abstains and includes analogues, callers, "               \
+   "blast radius, shared boundaries, and likely tests; pass several questions to "                 \
+   "answer them in one call). "                                                                    \
    "a phrase rather than a symbol -> aimee index hybrid \"<phrase>\" (several "                    \
    "phrases in one call; --scope all to widen). "                                                  \
-   "Only this one has no command form: a pattern or repeated shape "                               \
-   "-> " AIMEE_CODE_TOOL_AST_GREP_SEARCH ". "                                                      \
+   "a pattern or repeated shape -> aimee index ast-grep --lang <language> "                        \
+   "[--path <path>] '<pattern>'. "                                                                 \
    "These commands take PLURAL arguments -- several spans, questions or phrases "                  \
    "in one invocation -- so ask once rather than repeating the call. "                             \
    "Shell stays right for building, running tests, and editing.\n"
@@ -108,12 +112,19 @@
  * investigate and preview_blast_radius and got a correct "dependents: []" --
  * siblings are not callers, so no dependency tool can reach them.
  * ast_grep_search was in explore-with the whole time and was called in zero
- * cells. Naming the situation is what makes the tool reachable. */
+ * cells. Naming the situation and its chainable CLI form is what makes the
+ * capability reachable. */
 #define AIMEE_GUIDANCE_FIX_SCOPE_LINE                                                              \
    "fix-scope: a defect that is a PATTERN (unsafe join, missing check, raw "                       \
    "concatenation) usually repeats where nothing calls it -- callers and "                         \
-   "blast-radius will correctly report nothing; match the shape "                                  \
-   "with " AIMEE_CODE_TOOL_AST_GREP_SEARCH " before reporting done\n"
+   "blast-radius will correctly report nothing; before reporting done, match "                     \
+   "the shape with `aimee index ast-grep --lang <language> [--path <path>] "                       \
+   "'<pattern>'` (or the equivalent Aimee MCP capability when CLI is unavailable). "               \
+   "A named file or function is the starting point, not permission to knowingly leave "            \
+   "the same defect elsewhere: repair every confirmed production instance within the "             \
+   "requested repository unless its contract materially differs or the user explicitly "           \
+   "narrows scope. Do not list known matching defects as optional follow-up or ask whether "       \
+   "to fix them; fix and validate them before completing.\n"
 
 /* The whole standing block, in the order an agent reads it. */
 #define AIMEE_GUIDANCE_BLOCK AIMEE_GUIDANCE_EXPLORE_WITH_LINE AIMEE_GUIDANCE_FIX_SCOPE_LINE

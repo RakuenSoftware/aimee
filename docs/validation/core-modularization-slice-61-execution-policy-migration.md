@@ -3,7 +3,8 @@
 ## Scope
 
 This slice migrates the required `execution-policy` module by extracting the tool-action policy
-**decision** from `src/server/agent_policy.c` into `src/modules/execution-policy/execution_policy.c`
+**decision** from `src/server/agent_policy.c` into the current Go owner at
+`server-go/modules/execution-policy/execution_policy.go`
 and latching the descriptor. It moves the contiguous policy section — `policy_load` (reads the operator
 policy `.aimee-policy.json`) and `policy_check_tool` (the fail-closed allow/deny decision), plus the
 `g_policy_json` static — and nothing else. No production symbol, behaviour, storage, or configuration

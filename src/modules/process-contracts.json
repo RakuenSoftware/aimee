@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "principal_class": 1,
   "components": [
     {
@@ -12,10 +12,22 @@
     },
     {
       "id": "config",
-      "execution": "core",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 2,
       "placements": [
         "server",
         "kb"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "config-store",
+          "event_kind": 4609,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        }
       ]
     },
     {
@@ -56,38 +68,55 @@
       "runtime": "go",
       "principal_ref": 7,
       "placements": [
-        "server"
+        "server",
+        "kb"
       ],
       "stages": [
         {
           "id": 1,
           "name": "structured-extraction-indexing",
-          "event_kind": 5889
+          "event_kind": 5889,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 2,
           "name": "memory-write",
-          "event_kind": 5890
+          "event_kind": 5890,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
           "name": "embedding",
-          "event_kind": 5891
+          "event_kind": 5891,
+          "durability": "capture",
+          "durability_reason": "pure embedding transform; replay fidelity is sufficient"
         },
         {
           "id": 4,
           "name": "candidate-retrieval",
-          "event_kind": 5892
+          "event_kind": 5892,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 5,
           "name": "reranking",
-          "event_kind": 5893
+          "event_kind": 5893,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 6,
           "name": "command-declaration",
-          "event_kind": 5894
+          "event_kind": 5894,
+          "durability": "capture",
+          "durability_reason": "command metadata declaration; the resulting command execution is audited separately"
         }
       ]
     },
@@ -97,13 +126,17 @@
       "runtime": "go",
       "principal_ref": 8,
       "placements": [
-        "server"
+        "server",
+        "kb"
       ],
       "stages": [
         {
           "id": 1,
           "name": "learning-observation",
-          "event_kind": 6145
+          "event_kind": 6145,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -119,7 +152,10 @@
         {
           "id": 1,
           "name": "route-selection",
-          "event_kind": 6401
+          "event_kind": 6401,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -135,112 +171,178 @@
         {
           "id": 1,
           "name": "delegate-invocation",
-          "event_kind": 6657
+          "event_kind": 6657,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 2,
           "name": "delegate-capability-inference",
-          "event_kind": 6658
+          "event_kind": 6658,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
           "name": "delegate-chain-depth",
-          "event_kind": 6659
+          "event_kind": 6659,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 4,
           "name": "delegate-named-paths",
-          "event_kind": 6660
+          "event_kind": 6660,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 5,
           "name": "delegate-handoff-validation",
-          "event_kind": 6661
+          "event_kind": 6661,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 6,
           "name": "delegate-tool-call-rescue",
-          "event_kind": 6662
+          "event_kind": 6662,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 7,
           "name": "delegate-verify-outcome",
-          "event_kind": 6663
+          "event_kind": 6663,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 8,
           "name": "delegate-economics-report",
-          "event_kind": 6664
+          "event_kind": 6664,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 9,
           "name": "delegate-patch-coordination",
-          "event_kind": 6665
+          "event_kind": 6665,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 10,
           "name": "delegate-role-policy",
-          "event_kind": 6666
+          "event_kind": 6666,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 11,
           "name": "delegate-worktree-plan",
-          "event_kind": 6667
+          "event_kind": 6667,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 12,
           "name": "delegate-launch-args",
-          "event_kind": 6668
+          "event_kind": 6668,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 13,
           "name": "delegate-image-spec",
-          "event_kind": 6669
+          "event_kind": 6669,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 14,
           "name": "delegate-isolation-verdict",
-          "event_kind": 6670
+          "event_kind": 6670,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 15,
           "name": "delegate-permissions",
-          "event_kind": 6671
+          "event_kind": 6671,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 16,
           "name": "delegate-image-gc",
-          "event_kind": 6672
+          "event_kind": 6672,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 17,
           "name": "delegate-route-filter",
-          "event_kind": 6673
+          "event_kind": 6673,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 18,
           "name": "delegate-noop-write",
-          "event_kind": 6674
+          "event_kind": 6674,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 19,
           "name": "delegate-launch-plan",
-          "event_kind": 6675
+          "event_kind": 6675,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 20,
           "name": "delegate-review-evidence",
-          "event_kind": 6676
+          "event_kind": 6676,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 21,
           "name": "delegate-named-file-drift",
-          "event_kind": 6677
+          "event_kind": 6677,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 22,
           "name": "delegate-group-plan",
-          "event_kind": 6678
+          "event_kind": 6678,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -256,7 +358,10 @@
         {
           "id": 1,
           "name": "tool-dispatch",
-          "event_kind": 6913
+          "event_kind": 6913,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -272,17 +377,26 @@
         {
           "id": 1,
           "name": "workspace-access",
-          "event_kind": 7169
+          "event_kind": 7169,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 2,
           "name": "workspace-runner",
-          "event_kind": 7170
+          "event_kind": 7170,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
           "name": "workspace-runner-io",
-          "event_kind": 7171
+          "event_kind": 7171,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -298,32 +412,50 @@
         {
           "id": 1,
           "name": "git-operation",
-          "event_kind": 7425
+          "event_kind": 7425,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 2,
           "name": "git-ref-validation",
-          "event_kind": 7426
+          "event_kind": 7426,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
           "name": "git-ci-grade",
-          "event_kind": 7427
+          "event_kind": 7427,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 4,
           "name": "git-forge-request",
-          "event_kind": 7428
+          "event_kind": 7428,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 5,
           "name": "git-credential-resolve",
-          "event_kind": 7429
+          "event_kind": 7429,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 6,
           "name": "git-verify-run",
-          "event_kind": 7430
+          "event_kind": 7430,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -339,12 +471,17 @@
         {
           "id": 1,
           "name": "skill-context",
-          "event_kind": 7681
+          "event_kind": 7681,
+          "durability": "capture",
+          "durability_reason": "context assembly is diagnostic; trigger decisions use the ledger class"
         },
         {
           "id": 2,
           "name": "skill-trigger-match",
-          "event_kind": 7682
+          "event_kind": 7682,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -360,7 +497,9 @@
         {
           "id": 1,
           "name": "response-composition",
-          "event_kind": 7937
+          "event_kind": 7937,
+          "durability": "capture",
+          "durability_reason": "pure response rendering; governed actions and policy decisions are audited at their seams"
         }
       ]
     },
@@ -374,10 +513,21 @@
     },
     {
       "id": "execution-policy",
-      "execution": "core",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 17,
       "placements": [
-        "server",
-        "kb"
+        "server"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "tool-policy-decision",
+          "event_kind": 8449,
+          "durability": "ledger",
+          "durability_reason": "final fail-closed authorization before tool execution",
+          "emitter": "obs_bus_emit_durable_event"
+        }
       ]
     },
     {
@@ -400,7 +550,10 @@
         {
           "id": 1,
           "name": "governance-evaluation",
-          "event_kind": 8961
+          "event_kind": 8961,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -417,22 +570,34 @@
         {
           "id": 1,
           "name": "workflow-advance-decision",
-          "event_kind": 9217
+          "event_kind": 9217,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 2,
           "name": "workflow-control",
-          "event_kind": 9218
+          "event_kind": 9218,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
           "name": "workflow-gate-decision",
-          "event_kind": 9219
+          "event_kind": 9219,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 4,
           "name": "workflow-autonomous-route",
-          "event_kind": 9220
+          "event_kind": 9220,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -448,17 +613,24 @@
         {
           "id": 1,
           "name": "roundtable-deliberation",
-          "event_kind": 9473
+          "event_kind": 9473,
+          "durability": "capture",
+          "durability_reason": "deliberation transcript belongs to ordered replay; promotion decisions are audited separately"
         },
         {
           "id": 2,
           "name": "roundtable-review",
-          "event_kind": 9474
+          "event_kind": 9474,
+          "durability": "capture",
+          "durability_reason": "review transcript belongs to ordered replay; gate decisions are audited separately"
         },
         {
           "id": 3,
           "name": "roundtable-chunk-plan",
-          "event_kind": 9475
+          "event_kind": 9475,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -474,7 +646,10 @@
         {
           "id": 1,
           "name": "kb-grounding-decision",
-          "event_kind": 9729
+          "event_kind": 9729,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -490,7 +665,9 @@
         {
           "id": 1,
           "name": "rpc-fault-http-status",
-          "event_kind": 9985
+          "event_kind": 9985,
+          "durability": "capture",
+          "durability_reason": "pure protocol fault classification with no state or policy effect"
         }
       ]
     },
@@ -506,7 +683,10 @@
         {
           "id": 1,
           "name": "proxy-route-authorization",
-          "event_kind": 10241
+          "event_kind": 10241,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -523,12 +703,16 @@
         {
           "id": 1,
           "name": "benchmark-run",
-          "event_kind": 10497
+          "event_kind": 10497,
+          "durability": "capture",
+          "durability_reason": "diagnostic benchmark execution"
         },
         {
           "id": 2,
           "name": "benchmark-latency-summary",
-          "event_kind": 10498
+          "event_kind": 10498,
+          "durability": "capture",
+          "durability_reason": "diagnostic benchmark summary"
         }
       ]
     },
@@ -544,22 +728,34 @@
         {
           "id": 1,
           "name": "sandbox-learned-observe",
-          "event_kind": 10753
+          "event_kind": 10753,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 2,
           "name": "sandbox-learned-load",
-          "event_kind": 10754
+          "event_kind": 10754,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
           "name": "sandbox-proxy-request-policy",
-          "event_kind": 10755
+          "event_kind": 10755,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 4,
           "name": "sandbox-proxy-address-policy",
-          "event_kind": 10756
+          "event_kind": 10756,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -575,37 +771,51 @@
         {
           "id": 1,
           "name": "economizer-reduce",
-          "event_kind": 11009
+          "event_kind": 11009,
+          "durability": "capture",
+          "durability_reason": "pure payload reduction"
         },
         {
           "id": 2,
           "name": "economizer-json-compact",
-          "event_kind": 11010
+          "event_kind": 11010,
+          "durability": "capture",
+          "durability_reason": "pure JSON compaction"
         },
         {
           "id": 3,
           "name": "economizer-tool-recall",
-          "event_kind": 11011
+          "event_kind": 11011,
+          "durability": "capture",
+          "durability_reason": "diagnostic tool recall"
         },
         {
           "id": 4,
           "name": "economizer-tool-stats",
-          "event_kind": 11012
+          "event_kind": 11012,
+          "durability": "capture",
+          "durability_reason": "diagnostic tool statistics"
         },
         {
           "id": 5,
           "name": "economizer-record-build",
-          "event_kind": 11013
+          "event_kind": 11013,
+          "durability": "capture",
+          "durability_reason": "pure record construction"
         },
         {
           "id": 6,
           "name": "economizer-post-status",
-          "event_kind": 11014
+          "event_kind": 11014,
+          "durability": "capture",
+          "durability_reason": "diagnostic status projection"
         },
         {
           "id": 7,
           "name": "economizer-stats",
-          "event_kind": 11015
+          "event_kind": 11015,
+          "durability": "capture",
+          "durability_reason": "diagnostic economizer statistics"
         }
       ]
     },
@@ -638,12 +848,16 @@
         {
           "id": 1,
           "name": "postgres-health",
-          "event_kind": 11265
+          "event_kind": 11265,
+          "durability": "capture",
+          "durability_reason": "read-only PostgreSQL health probe"
         },
         {
           "id": 2,
           "name": "postgres-sql",
-          "event_kind": 11266
+          "event_kind": 11266,
+          "durability": "capture",
+          "durability_reason": "internal high-volume SQL transport; owning domain stages record semantic decisions durably"
         }
       ]
     },
@@ -659,14 +873,75 @@
         {
           "id": 1,
           "name": "db2-health",
-          "event_kind": 11521
+          "event_kind": 11521,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        }
+      ],
+      "durability_declarations": [
+        {
+          "id": 2,
+          "name": "db2-tenancy",
+          "event_kind": 11522,
+          "durability": "ledger",
+          "durability_reason": "reserved DB2 tenancy family; durable when activated",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 3,
+          "name": "db2-memory",
+          "event_kind": 11523,
+          "durability": "ledger",
+          "durability_reason": "reserved DB2 memory family; durable when activated",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 4,
+          "name": "db2-index",
+          "event_kind": 11524,
+          "durability": "ledger",
+          "durability_reason": "reserved DB2 index family; durable when activated",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 5,
+          "name": "db2-learning",
+          "event_kind": 11525,
+          "durability": "ledger",
+          "durability_reason": "reserved DB2 learning family; durable when activated",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 6,
+          "name": "db2-organization",
+          "event_kind": 11526,
+          "durability": "ledger",
+          "durability_reason": "reserved DB2 organization family; durable when activated",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 7,
+          "name": "db2-custody",
+          "event_kind": 11527,
+          "durability": "ledger",
+          "durability_reason": "reserved DB2 custody family; durable when activated",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 8,
+          "name": "db2-maintenance",
+          "event_kind": 11528,
+          "durability": "ledger",
+          "durability_reason": "reserved DB2 maintenance family; durable when activated",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
     {
-      "id": "db1",
+      "id": "aimee",
       "execution": "process",
-      "runtime": "c",
+      "runtime": "go",
       "principal_ref": 30,
       "placements": [
         "server"
@@ -674,43 +949,187 @@
       "stages": [
         {
           "id": 1,
-          "name": "db1-economizer-state",
-          "event_kind": 11777
+          "name": "aimee-economizer-state",
+          "event_kind": 11777,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 2,
-          "name": "db1-git-ownership",
-          "event_kind": 11778
+          "name": "aimee-git-ownership",
+          "event_kind": 11778,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
-          "name": "db1-conversation",
-          "event_kind": 11779
+          "name": "aimee-conversation",
+          "event_kind": 11779,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 4,
-          "name": "db1-agent-work",
-          "event_kind": 11780
+          "name": "aimee-agent-work",
+          "event_kind": 11780,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 5,
-          "name": "db1-delegation",
-          "event_kind": 11781
+          "name": "aimee-delegation",
+          "event_kind": 11781,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 6,
-          "name": "db1-sessions",
-          "event_kind": 11782
+          "name": "aimee-sessions",
+          "event_kind": 11782,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 7,
-          "name": "db1-runtime",
-          "event_kind": 11783
+          "name": "aimee-runtime",
+          "event_kind": 11783,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 8,
-          "name": "db1-telemetry",
-          "event_kind": 11784
+          "name": "aimee-telemetry",
+          "event_kind": 11784,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 9,
+          "name": "aimee-guardrail-state",
+          "event_kind": 11785,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 10,
+          "name": "aimee-ensemble",
+          "event_kind": 11786,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 11,
+          "name": "aimee-workflow",
+          "event_kind": 11787,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 12,
+          "name": "aimee-roundtable",
+          "event_kind": 11788,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 13,
+          "name": "aimee-identity",
+          "event_kind": 11789,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 14,
+          "name": "aimee-checkpoints",
+          "event_kind": 11790,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 15,
+          "name": "aimee-jti-replay",
+          "event_kind": 11791,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 16,
+          "name": "aimee-lifecycle",
+          "event_kind": 11792,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 17,
+          "name": "aimee-mgmt-jwks",
+          "event_kind": 11793,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 18,
+          "name": "aimee-mgmt-nonce",
+          "event_kind": 11794,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 19,
+          "name": "aimee-pki",
+          "event_kind": 11795,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 20,
+          "name": "aimee-peer-delivery",
+          "event_kind": 11796,
+          "durability": "ledger",
+          "durability_reason": "peer delivery changes externally visible message state",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 21,
+          "name": "aimee-peer-inbox",
+          "event_kind": 11797,
+          "durability": "ledger",
+          "durability_reason": "peer inbox reads and acknowledgements are reviewable message operations",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 22,
+          "name": "aimee-peer-grant",
+          "event_kind": 11798,
+          "durability": "ledger",
+          "durability_reason": "peer grant decisions change authorization state",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 23,
+          "name": "aimee-peer-channel",
+          "event_kind": 11799,
+          "durability": "ledger",
+          "durability_reason": "peer channel operations change durable communication state",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     }
@@ -724,9 +1143,11 @@
         "server"
       ],
       "request": [
+        4609,
         6657,
         6678,
-        9474
+        9474,
+        11792
       ]
     },
     {
@@ -753,8 +1174,42 @@
       ]
     },
     {
-      "id": "control-plane-postgres",
+      "id": "aimee-db1",
+      "principal_ref": 67,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-aimee",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11782
+      ]
+    },
+    {
+      "id": "server-peer",
+      "principal_ref": 68,
+      "executable": "/usr/local/bin/aimee-server",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11796,
+        11797
+      ]
+    },
+    {
+      "id": "aimee-postgres",
       "principal_ref": 69,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-aimee",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11266
+      ]
+    },
+    {
+      "id": "control-plane-postgres",
+      "principal_ref": 70,
       "executable": "/usr/local/libexec/aimee-modules/aimee-module-control-plane",
       "placements": [
         "kb"
@@ -765,7 +1220,7 @@
     },
     {
       "id": "db2-postgres",
-      "principal_ref": 70,
+      "principal_ref": 71,
       "executable": "/usr/local/libexec/aimee-modules/aimee-module-db2",
       "placements": [
         "kb"

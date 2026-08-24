@@ -31,10 +31,9 @@
 
 struct cJSON;
 
-/* Which surfaces a command is exposed on. A command is normally on all of them;
- * the mask exists for the genuine exceptions (an MCP-only tool about an external
- * client's own session has nothing to say to the CLI), and every exception has to
- * be written down here rather than implied by absence from a list. */
+/* Which surfaces a command is exposed on. CLI is the capability floor: anything
+ * exposed through MCP must also be callable from the CLI. The mask still permits
+ * CLI/RPC-only commands, but there is deliberately no valid MCP-only shape. */
 typedef enum
 {
    AIMEE_SURFACE_CLI = 1u << 0, /* `aimee <group> <verb>` */
@@ -77,16 +76,41 @@ typedef struct
    const char *module; /* registering module id, for diagnostics */
 } aimee_command_t;
 
-/* Register one command. Returns 0 on success, -1 on a duplicate (group, verb) or
- * a malformed entry. Duplicate registration is an ERROR rather than a silent
- * overwrite: two modules claiming one name is a build-order-dependent bug, and
- * the whole purpose of this table is that a name resolves one way. */
+/* Register one command. Returns 0 on success, -1 on a duplicate (group, verb),
+ * malformed entry, or any MCP exposure without CLI exposure.
+ * Duplicate registration is an ERROR rather than a silent overwrite: two
+ * modules claiming one name is a build-order-dependent bug, and the whole
+ * purpose of this table is that a name resolves one way. */
 int aimee_command_register(const aimee_command_t *cmd);
 
 /* Register a contiguous array in one call, for a module declaring its set at bus
  * connect. Stops and returns -1 at the first failure, having registered the
  * entries before it -- the caller is expected to treat that as fatal. */
 int aimee_command_register_many(const aimee_command_t *cmds, size_t n);
+
+/* Drop every command registered by `module`, returning how many were removed.
+ *
+ * Registration is otherwise append-only, which was right while every registrant
+ * was a compiled-in module whose command set could not change. A PLUGIN module
+ * can: its commands are whatever the plugin it hosts advertises, so a plugin
+ * that disconnects has to take its commands with it. Leaving them registered
+ * would advertise capabilities to every surface that answer only "unavailable",
+ * and would block the same plugin re-registering on reconnect, since a duplicate
+ * (group, verb) is refused.
+ *
+ * INVALIDATES pointers previously returned by aimee_command_find/_at: entries
+ * after the removed ones shift down. Every surface enumerates synchronously and
+ * does not hold one across a mutation, which is the property this relies on. */
+size_t aimee_command_unregister_module(const char *module);
+
+/* Bumped on every registration, withdrawal, and reset.
+ *
+ * A surface that caches a view of the table (an MCP tools/list, a CLI manifest)
+ * needs to know the table changed WITHOUT diffing it. It is also what makes a
+ * push notification possible at all: MCP advertises tools.listChanged, and a
+ * client that trusts that capability and is never notified simply never re-lists.
+ * Monotonic within a process; not meaningful across restarts. */
+unsigned long aimee_command_registry_generation(void);
 
 /* Lookup. NULL when absent -- which is the same answer every surface must give,
  * so an unregistered command is unroutable everywhere alike. */
@@ -100,7 +124,21 @@ const aimee_command_t *aimee_command_find_method(const char *method);
 size_t aimee_command_count(void);
 const aimee_command_t *aimee_command_at(size_t index);
 
-/* Test/teardown only: drop every registration. */
+/* Register a capability supplied by an external Runtime/Control-Plane module
+ * that genuinely has only one transport. This is deliberately separate from
+ * the command table: internal commands must keep CLI as their capability floor,
+ * while a future module may expose only MCP (or only CLI) because the other
+ * transport cannot be registered in the client. `surface` must be exactly one
+ * of AIMEE_SURFACE_CLI or AIMEE_SURFACE_MCP. Strings remain owned by the caller,
+ * like aimee_command_t registration. */
+int aimee_agent_surface_register(const char *name, unsigned surface, const char *module);
+
+/* Build the agent-facing one-surface projection from CLI-only commands plus
+ * explicitly registered one-surface external module capabilities:
+ * {"cli_only":[...],"mcp_only":[...]}. The caller owns the cJSON object. */
+struct cJSON *aimee_command_agent_surfaces_json(void);
+
+/* Test/teardown only: drop every command and external-surface registration. */
 void aimee_command_registry_reset(void);
 
 #endif /* DEC_COMMAND_REGISTRY_H */

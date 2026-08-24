@@ -14,7 +14,7 @@
 #include "server.h"
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
-#include "config.h"      /* config_t / config_load for api.status, api.enable */
+#include "config.h"      /* legacy_config_record / legacy_config_read for api.status, api.enable */
 #include <aimee/delegates/delegate_backend_docker.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
@@ -36,7 +36,7 @@
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"

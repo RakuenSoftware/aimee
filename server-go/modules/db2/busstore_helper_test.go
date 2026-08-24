@@ -34,7 +34,7 @@ func liveBusBackedStore(t *testing.T) (Store, func()) {
 		StageID: modulepg.StageSQL, PrincipalRef: 29, SrcHandle: 1}
 	client := storage.New(func(ctx context.Context, body []byte) ([]byte, error) {
 		wireCalls.Add(1)
-		reply, status := handler.Handle(invocation, body)
+		reply, status := handler(invocation, body)
 		if status != bus.ModuleStatusOK {
 			t.Fatalf("postgres module status = %v", status)
 		}

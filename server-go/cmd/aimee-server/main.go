@@ -16,9 +16,10 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	appconfig "github.com/JBailes/aimee/server-go/config"
+	db1contract "github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
@@ -51,7 +52,6 @@ func main() {
 	}
 	home := flag.String("home", homeDefault, "aimee state directory")
 	socket := flag.String("socket", "", "Unix socket path")
-	dbPath := flag.String("db", "", "DB1 SQLite path")
 	runnerURL := flag.String("runner-url", os.Getenv("AIMEE_WFE_RUNNER_URL"),
 		"typed WFE runner endpoint; empty keeps execution disabled")
 	runnerSocket := flag.String("runner-socket", os.Getenv("AIMEE_WFE_RUNNER_SOCKET"),
@@ -63,31 +63,72 @@ func main() {
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
 	moduleBusSocket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"),
 		"daemon module bus socket; reviews are requested over it")
-	configPath := flag.String("config", "", "aimee.yaml path")
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
 	flag.Parse()
-	if *dbPath == "" {
-		*dbPath = filepath.Join(*home, "aimee.db")
-	}
 	if *socket == "" {
 		*socket = filepath.Join(*home, "aimee-server.sock")
 	}
 	if *workflowDir == "" {
 		*workflowDir = filepath.Join(*home, "workflows")
 	}
-	if *configPath == "" {
-		*configPath = filepath.Join(*home, "aimee.yaml")
-	}
 	if err := os.MkdirAll(*home, 0o700); err != nil {
 		log.Fatalf("create aimee home: %v", err)
 	}
 
-	store, err := db1.Open(*dbPath)
+	// The store is the DB1 module now, not a file. This process used to open
+	// $home/aimee.db directly -- the module's own file -- which made two
+	// processes with two schema authorities on one store. It reaches the module
+	// over the bus instead, which is why the attach happens here, before
+	// anything that needs a store, rather than further down beside the runner.
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+	if *moduleBusSocket == "" {
+		log.Fatal("the workflow engine needs --module-bus-socket " +
+			"(or AIMEE_MODULE_BUS_SOCKET): DB1 is reached through the module, not a file")
+	}
+	// Wait rather than race the supervisor. The daemon owns the bus socket and
+	// the DB1 module attaches to it on its own schedule, so a WFE that started
+	// first would otherwise exit on a boot ordering it cannot control -- and a
+	// crash-looping engine is a worse failure than a slow one.
+	attached, err := attachWithRetry(rootCtx, *moduleBusSocket, 60*time.Second)
+	if err != nil {
+		log.Fatalf("attach to the module bus: %v", err)
+	}
+	caller, err := bus.NewConcurrentModuleCaller(rootCtx, attached)
+	if err != nil {
+		log.Fatalf("module bus caller: %v", err)
+	}
+	// Shutdown must cancel and drain callers before unmapping their shared bus
+	// region. Detaching first races scheduler/config calls already inside emit
+	// and can turn an ordinary SIGTERM into a use-after-unmap SIGSEGV.
+	defer func() {
+		rootCancel()
+		caller.CloseAndWait()
+		attached.Detach()
+	}()
+	storeClient, err := db1contract.NewClient(caller, 0)
+	if err != nil {
+		log.Fatalf("db1 bus client: %v", err)
+	}
+	store, err := db1.OpenBus(storeClient)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	// Attached is not the same as served: the module may still be starting. Wait
+	// for it to answer before anything asks it a question it would report as a
+	// failure rather than as a delay.
+	if err := waitForStore(rootCtx, store, 60*time.Second); err != nil {
+		log.Fatalf("DB1 module did not answer: %v", err)
+	}
+	configClient, err := appconfig.NewClient(caller, 0)
+	if err != nil {
+		log.Fatalf("config bus client: %v", err)
+	}
+	if err := waitForConfig(rootCtx, configClient, 60*time.Second); err != nil {
+		log.Fatalf("config module did not answer: %v", err)
+	}
 	artifacts, err := wfe.NewArtifactStore(filepath.Join(*home, "wfe-artifacts"))
 	if err != nil {
 		log.Fatal(err)
@@ -96,17 +137,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	configStore, err := appconfig.NewStore(*configPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	handler.SetConfigStore(configStore)
+	handler.SetConfigStore(configClient)
 	// The WFE control plane is deliberately Unix-socket-only. Credentials must
 	// never be carried in this long-lived process's argv or environment; the
 	// socket's ownership and 0600 mode are the authentication boundary.
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 15 * time.Second}
-	rootCtx, rootCancel := context.WithCancel(context.Background())
-	defer rootCancel()
 	var runner engine.Runner
 	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
@@ -116,17 +151,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-	} else if *moduleBusSocket != "" {
-		attached, clientErr := bus.ConnectClient(rootCtx, *moduleBusSocket,
-			engine.BusPrincipalClass, engine.WFEBusPrincipalRef)
-		if clientErr != nil {
-			log.Fatal(clientErr)
-		}
-		defer attached.Detach()
-		caller, clientErr := bus.NewConcurrentModuleCaller(rootCtx, attached)
-		if clientErr != nil {
-			log.Fatal(clientErr)
-		}
+	} else {
+		// One attach, one caller: the store above already holds it, and a second
+		// attach under the same principal is a second slot the bus has to reap.
 		agents, clientErr := delegatecontract.NewBusClient(caller, 0)
 		if clientErr != nil {
 			log.Fatal(clientErr)
@@ -195,7 +222,7 @@ func main() {
 		lastConcurrency := *concurrency
 		lastPolicy := engine.RunPolicy{MaxTurns: 300, MaxWall: 1800 * time.Second, AutoResumeWall: true, MaxResumes: 50}
 		readInt := func(key string, fallback int) int {
-			value, ok, err := configStore.IntValue(key)
+			value, ok, err := configClient.IntValue(key)
 			if err != nil {
 				log.Printf("invalid live config %s: %v", key, err)
 				return fallback
@@ -225,7 +252,7 @@ func main() {
 			lastPolicy.MaxWall = time.Duration(readInt("autonomy.max_wall_secs", int(lastPolicy.MaxWall/time.Second))) * time.Second
 			lastPolicy.MaxResumes = readInt("autonomy.max_resumes", lastPolicy.MaxResumes)
 			lastPolicy.StaleAbandon = time.Duration(readInt("autonomy.stale_abandon_secs", int(lastPolicy.StaleAbandon/time.Second))) * time.Second
-			if value, ok, err := configStore.BoolValue("autonomy.auto_resume_cap_parks"); err != nil {
+			if value, ok, err := configClient.BoolValue("autonomy.auto_resume_cap_parks"); err != nil {
 				log.Printf("invalid live config autonomy.auto_resume_cap_parks: %v", err)
 			} else if ok {
 				lastPolicy.AutoResumeWall = value
@@ -243,7 +270,7 @@ func main() {
 		go func() {
 			for {
 				handler.ScanTriggers(rootCtx)
-				interval := configStore.Int("trigger.scan_interval_secs", 5)
+				interval := configClient.Int("trigger.scan_interval_secs", 5)
 				if interval < 1 {
 					interval = 1
 				}
@@ -278,9 +305,16 @@ func main() {
 	// it. The engine and its stores stay here -- only the way in moves -- so this
 	// deletes src/server/wfe_http_proxy.c without relocating any state.
 	//
-	// A missing bus socket is not fatal: this process still serves its own
-	// listener, and reporting the stage as unserved is more honest than exiting.
-	if busSocket := os.Getenv("AIMEE_MODULE_BUS_SOCKET"); busSocket != "" {
+	// The socket comes from the SAME value the store attach used, not from the
+	// environment again. --module-bus-socket already defaults to
+	// AIMEE_MODULE_BUS_SOCKET, so reading the variable here served the env case
+	// and silently declined the flag case: an operator who passed the documented
+	// flag got a process that attached its store, logged one line, and left every
+	// /v1/workflow route and /v1/dev/submit answering 503. There is no missing
+	// case left to tolerate -- the flag is checked above and the process does not
+	// get this far without it.
+	{
+		busSocket := *moduleBusSocket
 		go func() {
 			err := bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{
 				SocketPath:     busSocket,
@@ -299,8 +333,6 @@ func main() {
 				log.Printf("workflow control stage stopped: %v", err)
 			}
 		}()
-	} else {
-		log.Print("AIMEE_MODULE_BUS_SOCKET is unset; the workflow control stage is not served")
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -328,4 +360,79 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+// attachWithRetry dials the module bus until it answers or the deadline passes.
+// The socket is created by the daemon and the engine may be started beside it,
+// so "not there yet" is an ordinary boot state rather than a misconfiguration.
+func attachWithRetry(ctx context.Context, socket string, within time.Duration) (*bus.Client, error) {
+	deadline := time.Now().Add(within)
+	var last error
+	for {
+		attached, err := bus.ConnectClient(ctx, socket, engine.BusPrincipalClass,
+			engine.WFEBusPrincipalRef)
+		if err == nil {
+			return attached, nil
+		}
+		last = err
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("after %s: %w", within, last)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+// waitForStore blocks until the DB1 module answers a trivial read. Logged once
+// when it has to wait, because a slow start and a store that never arrives look
+// identical from outside until something asks.
+func waitForStore(ctx context.Context, store *db1.Store, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	announced := false
+	for {
+		if _, err := store.ActiveRootCount(ctx); err == nil {
+			if announced {
+				log.Printf("DB1 module is serving; workflow engine starting")
+			}
+			return nil
+		} else if !announced {
+			log.Printf("waiting for the DB1 module to serve the store: %v", err)
+			announced = true
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no answer within %s", within)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func waitForConfig(ctx context.Context, client *appconfig.Client, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	announced := false
+	for {
+		if _, err := client.Values(); err == nil {
+			if announced {
+				log.Printf("config module is serving; workflow engine starting")
+			}
+			return nil
+		} else if !announced {
+			log.Printf("waiting for the config module to serve configuration: %v", err)
+			announced = true
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no answer within %s", within)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }

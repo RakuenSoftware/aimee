@@ -147,7 +147,7 @@ read_jti(void *ctx, const server_mgmt_endpoint_request_t *rq, const server_mgmt_
        c->issued_at,
        c->expires_at,
    };
-   server_management_jti_result_t rc = server_management_jti_consume(&token, rq->now);
+   server_management_jti_result_t rc = db1_management_jti_consume(&token, rq->now);
    return rc == SERVER_MANAGEMENT_JTI_OK       ? SERVER_MGMT_JTI_OK
           : rc == SERVER_MANAGEMENT_JTI_REPLAY ? SERVER_MGMT_JTI_REPLAY
                                                : SERVER_MGMT_JTI_FAILED;
@@ -283,4 +283,14 @@ int server_http_mgmt_read_agents(char *resp, int cap)
 int server_http_mgmt_read_config(char *resp, int cap)
 {
    return server_http_mgmt_read(SERVER_MGMT_READ_SELECTOR_CONFIG, resp, cap);
+}
+
+/* Relocated from server_http_routes.c to stay under the line-check ceiling
+ * (same precedent as the git surface): the route TABLE stays there, the handler
+ * lives here with external linkage. A dashboard read belongs with the other
+ * management reads regardless. Pure relocation -- no behaviour change. */
+int rh_curiosity(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_json_provider(g_curiosity_provider, resp, cap, "curiosity");
 }

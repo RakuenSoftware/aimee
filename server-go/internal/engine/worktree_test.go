@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 )
 
 func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
@@ -30,7 +31,7 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 	run("-C", repo, "remote", "add", "origin", repo)
 	run("-C", repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	run("-C", repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 
 func TestCleanupIsIdempotentAfterManagedPathWasRemoved(t *testing.T) {
 	root := t.TempDir()
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestCleanupRemovesOrphanedWorktreeWhenTheRepoIsGone(t *testing.T) {
 	// forever and the work item never reached a terminal state -- observed on a
 	// live server retrying one item ~92 times a minute.
 	root := t.TempDir()
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestEnsureMigratesLegacySliceWorktreeAfterReplayLosesDBPath(t *testing.T) {
 	run("-C", path, "add", "implemented.txt")
 	run("-C", path, "commit", "-m", "implementation")
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +242,7 @@ func TestEnsureMigratesLegacySliceWhenIdenticalTargetRefAlreadyExists(t *testing
 	path := filepath.Join(trees, id)
 	run("-C", repo, "worktree", "add", "--lock", path, legacy)
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,7 @@ func TestEnsureRestoresDurableBranchFromIdenticalDelegateAlias(t *testing.T) {
 	path := filepath.Join(trees, id)
 	run("-C", repo, "worktree", "add", "--lock", path, alias)
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +419,7 @@ func TestSliceWorktreeBranchesFromMergedRemoteFeatureTip(t *testing.T) {
 	run("-C", landed, "commit", "-m", "slice g0.0")
 	run("-C", landed, "push", "origin", feature)
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}

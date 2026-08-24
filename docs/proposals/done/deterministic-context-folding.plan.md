@@ -1,5 +1,9 @@
 # Implementation plan: Deterministic context folding
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `deterministic-context-folding.md` (PR #881). This plan grounds each
 proposal phase in the actual `testing`-branch code, names the seams, the config
 wiring, the tests, and the per-slice PR/roundtable gate. **Nothing here changes the
@@ -120,7 +124,7 @@ gates regenerated where touched.
 ### P1.5 — Pipeline-order spike + per-model budget resolver (§7) — *prereq for P2*
 
 - **New:** `src/fold_budget.c` + `src/headers/fold_budget.h`:
-  `fold_budget_resolve(const char *model_id, const config_t *cfg, fold_budget_t *out)`
+  `fold_budget_resolve(const char *model_id, const legacy_config_record *cfg, fold_budget_t *out)`
   — pure function of `(model, config)`; fields: `context_window`,
   `retained_band_tokens`, `tail_cap_tokens`, `pressure_ceiling_tokens`,
   `prefix_saturation_tokens`, `closet_budget_tokens`, eviction policy. Seeds from
@@ -138,7 +142,7 @@ gates regenerated where touched.
 
 - **New:** `src/context_fold.c` + `src/headers/context_fold.h`:
   `context_fold_view(cJSON *messages, const char *sys, const fold_budget_t *b,
-  const config_t *cfg, fold_result_t *out)` — produces the synthetic skeleton
+  const legacy_config_record *cfg, fold_result_t *out)` — produces the synthetic skeleton
   assistant/user pair + closet (reusing P1), **non-destructive** (never mutates
   `messages`).
 - **Atomic tool pairs:** a `tool_use`+`tool_result` fold as one unit or not at all;
@@ -201,7 +205,7 @@ gates regenerated where touched.
 
 ## §D Cross-cutting recipes
 
-- **Config flag (5 files, lockstep):** declare in `config_t` (`src/headers/config.h`);
+- **Config flag (5 files, lockstep):** declare in `legacy_config_record` (`src/headers/config.h`);
   default + parse in `src/config.c`; allowlist row in `src/config_fields.c`
   (`{name, offsetof, sizeof, 0, CFG_BOOL|CFG_INT|...}`); schema row in
   `src/config_schema.inc` (`{name, SCHEMA_BOOL|SCHEMA_INT, 0}`); save in

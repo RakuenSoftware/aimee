@@ -45,8 +45,15 @@ static int select_via_module(int randomized, uint32_t candidate_count, uint32_t 
    if (result != AIMEE_MODULE_CALL_OK ||
        aimee_routing_response_decode(response, response_len, candidate_count, selected_index) != 0)
    {
-      aimee_log(LOG_WARN, "routing", "local routing module call failed: %s",
-                aimee_module_call_result_name(result));
+      /* ERROR, not WARN: the caller turns this into a NULL agent, which reads
+       * downstream as "no eligible agent" -- the wrong diagnosis entirely. The
+       * module being absent or slow is a deployment fault and has to say so in
+       * its own words, or an operator hunts the agent roster while the routing
+       * module is what is down. */
+      aimee_log(LOG_ERROR, "routing",
+                "routing module call failed (%s): refusing to select among %u candidates; this is "
+                "a routing-module fault, not an empty agent roster",
+                aimee_module_call_result_name(result), candidate_count);
       return -1;
    }
    return 0;

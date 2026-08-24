@@ -9,7 +9,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/anti_patterns.h"
 #include "modules/db2/c/bandit.h"
@@ -25,6 +25,7 @@
 #include "kb_reasoning.h"
 #include "log.h"
 #include "memory.h"
+#include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
 #include <ctype.h>
@@ -59,6 +60,13 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    (void)confidence;
    (void)session_id;
    (void)out;
+   return -1;
+}
+
+int memory_retire(int64_t id, const char *session_id)
+{
+   (void)id;
+   (void)session_id;
    return -1;
 }
 
@@ -284,6 +292,12 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    memory_t old_mem;
    if (memory_get(old_id, &old_mem) != 0)
       return -1;
+   char epistemic_kind[32] = "world_fact";
+   (void)db2_memory_epistemic_kind(old_id, epistemic_kind, sizeof(epistemic_kind));
+   if (strcmp(epistemic_kind, "episode") == 0 || strcmp(epistemic_kind, "experience") == 0)
+      return -2; /* immutable observation: caller must offer annotation */
+   if (strcmp(epistemic_kind, "instruction") == 0 || strcmp(epistemic_kind, "policy") == 0)
+      return -3; /* normative content is revoked, never silently corrected */
 
    int version = db2_memory_count_versions(old_mem.key) + 1;
 
@@ -295,8 +309,9 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    if (db2_memory_set_versioned_key(old_id, versioned_key, ts) != 0)
       return -1;
 
-   int rc = memory_insert(old_mem.tier, old_mem.kind, old_mem.key, new_content, confidence,
-                          session_id, out);
+   int rc = memory_insert_epistemic_ex(old_mem.tier, old_mem.kind, epistemic_kind, old_mem.key,
+                                       new_content, "", confidence, session_id,
+                                       MEMORY_AUTHORITY_MODEL, out);
    if (rc != 0)
       return -1;
 
@@ -311,6 +326,34 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
       memory_link_create(out->id, old_id, "supersedes");
    }
 
+   return 0;
+}
+
+int memory_retire(int64_t id, const char *session_id)
+{
+   if (id <= 0)
+      return -1;
+
+   memory_t old_mem;
+   if (memory_get(id, &old_mem) != 0)
+      return -1;
+
+   /* Same versioning move as the first half of memory_supersede(), minus the
+    * replacement insert: the row keeps its content but is renamed out of the
+    * live key and stamped valid_until, so recall for `key` no longer returns it
+    * while memory_fact_history() still does. */
+   int version = db2_memory_count_versions(old_mem.key) + 1;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+
+   char versioned_key[560];
+   snprintf(versioned_key, sizeof(versioned_key), "%s#v%d", old_mem.key, version);
+   if (db2_memory_set_versioned_key(id, versioned_key, ts) != 0)
+      return -1;
+
+   add_provenance(id, session_id, "retire", "retired without replacement");
+   memory_audit_emit("memory.retire", id, NULL, NULL, NULL, 0.0, session_id);
    return 0;
 }
 
@@ -471,7 +514,10 @@ static const style_dimension_t style_dimensions[] = {
 static int match_keywords(const char *text, const char *const keywords[])
 {
    for (int k = 0; keywords[k]; k++)
-      if (strstr(text, keywords[k]))
+      /* Whole-word: as a bare substring the positive marker "structured" matched
+       * inside the negative marker "unstructured", so any text complaining about
+       * unstructured output scored BOTH sides of the structure dimension. */
+      if (memory_keyword_present(text, keywords[k]))
          return 1;
    return 0;
 }

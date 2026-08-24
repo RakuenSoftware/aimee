@@ -274,7 +274,6 @@ typedef enum
 {
    DELEGATE_ROOT_NAMED = 0,     /* the workspace the caller named */
    DELEGATE_ROOT_RECONSTRUCTED, /* server-side mirror of a detached workspace */
-   DELEGATE_ROOT_EPHEMERAL,     /* scratch directory, no repository in it */
 } delegate_root_kind_t;
 
 /* Build a "## Working root" block naming the root this turn is bound to and what

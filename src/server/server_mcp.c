@@ -9,7 +9,7 @@
 #include "memory.h"
 #include "index.h"
 #include "code_span.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
@@ -407,11 +407,22 @@ cJSON *tool_memory_mutate(cJSON *args)
    }
    else if (strcmp(verb, "update") == 0)
    {
+      /* MODEL authority: this seam is reached only by an agent calling the MCP
+       * tool, never by the user directly, so the prior content is versioned
+       * rather than overwritten. `update` is the verb an LLM naturally reaches
+       * for when a fact changed, so it fires more often than `forget` does. */
       if (id <= 0 || !content)
          return text_content("error: update requires 'id' and 'content'");
-      if (kb_client_memory_update(id, content) != 0)
+      int64_t new_id = 0;
+      if (kb_client_memory_update_as(id, content, MEMORY_AUTHORITY_MODEL, &new_id) != 0)
          return text_content("error: update failed");
-      snprintf(buf, sizeof(buf), "updated memory id=%lld", (long long)id);
+      if (new_id > 0 && new_id != id)
+         snprintf(buf, sizeof(buf),
+                  "updated memory id=%lld (previous content kept as a version; "
+                  "current value is now id=%lld)",
+                  (long long)id, (long long)new_id);
+      else
+         snprintf(buf, sizeof(buf), "updated memory id=%lld", (long long)id);
    }
    else if (strcmp(verb, "supersede") == 0)
    {
@@ -426,11 +437,18 @@ cJSON *tool_memory_mutate(cJSON *args)
    }
    else if (strcmp(verb, "forget") == 0)
    {
+      /* MODEL authority: retire, do not destroy. The memory stops answering
+       * recall under its key but stays readable through fact history, so a
+       * mistaken forget is recoverable. Only a user/operator path — which must
+       * additionally clear CAP_MEMORY_ADMIN — hard-deletes. */
       if (id <= 0)
          return text_content("error: forget requires 'id'");
-      if (kb_client_memory_delete(id) != 0)
+      if (kb_client_memory_delete_as(id, MEMORY_AUTHORITY_MODEL) != 0)
          return text_content("error: forget failed");
-      snprintf(buf, sizeof(buf), "forgot memory id=%lld", (long long)id);
+      snprintf(buf, sizeof(buf),
+               "forgot memory id=%lld (retired, not destroyed: it no longer "
+               "answers recall but remains in fact history)",
+               (long long)id);
    }
    else if (strcmp(verb, "affirm") == 0)
    {

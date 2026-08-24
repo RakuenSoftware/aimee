@@ -20,13 +20,13 @@
 
 #include "aimee_home.h"
 #include "cJSON.h"
-#include "config.h" /* trigger_rule_t / config_load — surface configured trigger rules */
+#include "config.h" /* trigger_rule_t / legacy_config_read — surface configured trigger rules */
 #include "server_http_identity.h" /* server_http_identity_principal — ownership scoping */
 #include "wfe_def.h"
 #include "wfe_engine.h" /* wfe_load_workflow — roundtable-park resume check */
 #include "yaml.h"       /* yaml_emit — write blocks.yaml */
 #include "wfe_iface.h"
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 

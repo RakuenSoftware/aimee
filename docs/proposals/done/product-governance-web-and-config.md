@@ -1,5 +1,9 @@
 # Proposal: split Runtime and Control Plane governance, web modules, and config surfaces
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — archived 2026-08-04 as partially implemented. Runtime/control web ownership and
   initial decision surfaces landed. Product naming, separately hosted processes, optional lifecycle,
   truthful effective-config parity, transport, and packaging remain in the restored

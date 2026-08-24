@@ -188,6 +188,9 @@ static void test_semantic_below_threshold(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_link_artifacts"))
+      return 0;
+
    test_empty();
    test_seeded_links();
    test_normalized_links();

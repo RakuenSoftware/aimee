@@ -1,5 +1,9 @@
 # P3a implementation plan — cost-attribution schema + pricing (the P3 schema half)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Plan for the **P3a** slice of `tiered-llm-p3-cost-attribution.md` (schema +
 authoritative pricing; the org-row WRITE rides with P2b, the READ/rollup surfaces
 are P3b). Branch off `testing` (P1 already merged). Reuses P1's proven tenancy

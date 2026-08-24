@@ -1,15 +1,16 @@
 # Proposal: session_state wants the keyed-blob wire, not a flattened row
 
-- **State:** OPEN — the shape is the question, and choosing it wrong loses
-  guardrail state silently.
+- **State:** RESOLVED against its own recommendation — the flattened row was
+  taken, because the objection to it was fixable and got fixed. The family is
+  migrated and served.
 
 `session_state` was one of six sources in the `sessions` family. The other five
 are what that family's doc describes — "server and webchat session rows" — and
 they have migrated. This one is the hook's guardrail state for a session, which
-is a different thing that happened to have "session" in its name, so it now sits
-in a reserved family of its own rather than holding five ready sources back.
+is a different thing that happened to have "session" in its name, so it sits in
+a family of its own rather than holding five ready sources back.
 
-## Why it does not fit the fields wire
+## Why it looked like it did not fit the fields wire
 
 `session_state_t` is not a row. It is a scalar record plus five collections:
 
@@ -23,40 +24,66 @@ in a reserved family of its own rather than holding five ready sources back.
 and `db1_session_state_save` writes it as a scalar upsert plus a delete-and-
 reinsert of each child table, inside one transaction.
 
-Flattening that onto `db1-fields-v2` means several hundred cells per call, most
-of them empty most of the time, with the arity fixed at the declared maxima. The
-wire would carry it. The cost is that every future field added to any of those
-six structs is a silent change to the frame's width, and the failure mode when
-somebody forgets is that a guardrail's memory of what it has seen comes back
-short — which reads as "this session has not touched that file yet".
+Flattening that onto `db1-fields-v2` means several hundred cells per call (386,
+as declared), most of them empty most of the time, with the arity fixed at the
+declared maxima. The wire carries it. The stated cost was that every future
+field added to any of those six structs is a silent change to the frame's
+width, and the failure mode when somebody forgets is that a guardrail's memory
+of what it has seen comes back short — which reads as "this session has not
+touched that file yet".
 
-## What the survey says, and why it is not the answer
+## Two claims in this doc were wrong
 
-The wire survey reports `guardrail_state 5 / 5` — every operation fits. That
-count is right about the SIGNATURES and wrong about the shape: it inspects the
-parameters, and `const session_state_t *in` is one parameter whether the struct
-holds three members or three hundred. The same over-count has appeared before
-in this migration, always in the flattering direction, and it is why the survey
-is a starting point rather than a verdict.
+**The transaction was not a cross-call transaction.** This family was also
+written up as blocked on `db1-transactions-across-the-boundary`. It is not: the
+begin and the commit are both inside `db1_session_state_save`, nine lines apart
+from the top of the function and 218 lines apart from each other, with no
+return to the caller between them. One call, one transaction — which is exactly
+the case the boundary already serves. The blocker was asserted from the shape of
+the problem rather than checked against the code, and checking it took minutes.
 
-## The shape that fits
+**The silent-width fear was real, and is now structural rather than remembered.**
+The objection above is the correct objection, and it is the reason this doc
+recommended the blob. But "somebody forgets" is a property of the generator, not
+of the wire, and the generator can be made incapable of it. It now is: declared
+struct members are validated against the members actually parsed out of the
+header, exactly and in order, for all 63 carried structs. Adding a field to
+`file_read_hash_t` and not declaring it does not produce a short frame — it
+fails the build with the member named. The failure mode the blob was chosen to
+avoid cannot occur on either wire now.
 
-`db1-keyed-blob-v1` already exists and `economizer_state` already uses it:
-state_load and state_save carry an opaque document under a key. That is what
-this is — a per-session document that only the guardrail interprets.
+With that gone, the blob's remaining advantage is frame size, and its cost is a
+hand-written serialiser and its inverse — the one piece of code in the design
+whose bugs are silent, since a flattening that drops the last element of one
+array passes every test that does not specifically fill that slot.
 
-The work is a serialisation of `session_state_t` and its inverse, with a test
-that round-trips a fully-populated struct member by member. That test is the
-whole point: a flattening that silently drops the last element of one array
-would otherwise pass everything else.
+## What the survey said, and why it was still not a verdict
 
-Where that serialisation should live is the open question. It is not storage,
-so by the rule the rest of this migration has followed it belongs outside the
-module -- but the module has to write the child tables from it, which means the
-module needs to read it too. `delegate_learning` hit the same shape and was
-resolved by moving the conversion to the caller and passing the converted value
-across; whether that works here depends on whether the child tables are worth
-keeping as tables at all, or whether the document should simply be stored whole.
+The wire survey reported `guardrail_state 5 / 5` — every operation fits. That
+count was right about the SIGNATURES and uninformative about the shape: it
+inspects parameters, and `const session_state_t *in` is one parameter whether
+the struct holds three members or three hundred. The survey remains a starting
+point rather than a verdict; it happened to agree with the outcome here.
 
-That last question is a schema decision, not a wire one, which is why this is
-written down rather than answered.
+## What was built
+
+Seven operations over a 386-cell row, on `db1-fields-v2`. `uint64` was added to
+the generator for `file_read_hash_t.content_hash`, since a hash is not a signed
+quantity and the decimal-text wire had no unsigned 64-bit kind.
+
+The round-trip test the doc asked for exists, and fills the *ends* of every
+collection — `seen_paths[63]`, `read_paths[63]`, `worktrees[15]`,
+`tdd_writes[7]`, `file_hashes[63]`, `ap_hits[31]` — because a truncation that
+loses one trailing element is precisely what a test filling the first two slots
+of each array would miss. `content_hash` is stored as `UINT64_MAX - i`, every
+value above `INT64_MAX`, so a signed round-trip anywhere on the path lands
+negative and fails loudly.
+
+One finding from writing it: the domain's load of `session_state_file_hashes`
+has no `ORDER BY`, unlike `seen_paths` which orders by `seq`. Rows come back in
+SQLite's order (lexical by path, as it happens: `/hashed/0, /hashed/1,
+/hashed/10 … /hashed/9`). That predates and is unaffected by the migration, so
+it was left alone and the test asserts the set rather than the positions. If any
+caller does depend on hash order, it depended on an accident before this change
+and still does — worth a look by whoever owns the guardrail, which is why it is
+recorded here.

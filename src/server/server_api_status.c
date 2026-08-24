@@ -43,7 +43,7 @@ static int api_bearer_extra_count(void);
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -197,7 +197,7 @@ int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)req;
 
    int http_port = config_server_api_http_port();
-   /* Vault, not config: config_load scrubs the bearer fields after migrating any
+   /* Vault, not config: legacy_config_read scrubs the bearer fields after migrating any
     * legacy value out, so asking config would report an enabled API as unkeyed. */
    char probe[256];
    int bearer_configured = api_bearer_primary(probe, sizeof(probe));
@@ -226,7 +226,7 @@ int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 /* /v1 connections are handled concurrently. Serialize every aimee.api
  * read-modify-save sequence in this file: otherwise two enrollments can select
  * the same slot, or enable/disable can overwrite a just-enrolled credential.
- * Each mutation also reads DISK rather than config_load's immutable live
+ * Each mutation also reads DISK rather than legacy_config_read's immutable live
  * snapshot. The snapshot is intentionally stable between reloads; using it for
  * two back-to-back enrollments made the second overwrite the first on disk and
  * in the live auth set. */
@@ -251,9 +251,9 @@ static int server_api_mint_bearer(char *out, size_t out_cap)
 }
 
 /* The enrolled-bearer picture is VAULT state, not config. config_save persists
- * neither the primary nor the extras, and config_load migrates any legacy values
+ * neither the primary nor the extras, and legacy_config_read migrates any legacy values
  * out to Vault and scrubs them from the struct. These two helpers read that state
- * where it actually lives, instead of staging it through a config_t. */
+ * where it actually lives, instead of staging it through a legacy_config_record. */
 static int api_bearer_primary(char *out, size_t out_n)
 {
    if (out && out_n)
@@ -381,7 +381,7 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return handle_api_error(conn, "failed to generate bearer token");
    }
    /* Rotation is the explicit revoke-all operation. Deleting the Vault secrets IS
-    * the persistence: config_save never wrote the enrolled set (config_load
+    * the persistence: config_save never wrote the enrolled set (legacy_config_read
     * migrates any legacy values out to Vault and scrubs them), so the config
     * write this used to do persisted nothing. */
    for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
@@ -429,7 +429,7 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    /* Both the primary's presence and the enrolled count are VAULT state. Reading
     * either from config would report "unset" for a live credential -- the config
-    * fields are legacy migration staging that config_load scrubs. */
+    * fields are legacy migration staging that legacy_config_read scrubs. */
    char primary[256];
    int have_primary = api_bearer_primary(primary, sizeof(primary));
    runtime_secret_wipe(primary, sizeof(primary));

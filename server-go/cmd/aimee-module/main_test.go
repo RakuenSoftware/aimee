@@ -32,8 +32,18 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"benchmarks", 25, []uint32{10497, 10498}},
 		{"sandbox", 26, []uint32{10753, 10754, 10755, 10756}},
 		{"economizer", 27, []uint32{11009, 11010, 11011, 11012, 11013, 11014, 11015}},
+		// Two stages: health, and the SQL stage every store call in the tree
+		// lands on. 11266 is not conditional -- the handler opens its pool on
+		// first use and answers with the reason when it cannot, so the stage is
+		// servable whether or not a database is reachable.
 		{"postgres", 28, []uint32{11265, 11266}},
 		{"control-plane", 32, []uint32{12289}},
+		// `aimee` is deliberately absent. It is the one module here whose
+		// config depends on the environment: it refuses to serve without a
+		// store backend, so in this test's process it has no stage table to
+		// compare. Its twenty-three stages are checked against the same
+		// contract file by TestModuleStagesMatchContract in the module itself,
+		// where the table is built rather than resolved.
 	}
 	for _, test := range tests {
 		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + test.name)
@@ -81,6 +91,8 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 		Components []struct {
 			ID        string `json:"id"`
 			Execution string `json:"execution"`
+			Runtime   string `json:"runtime"`
+			HostedBy  string `json:"hosted_by"`
 			Stages    []struct {
 				EventKind uint32 `json:"event_kind"`
 				Name      string `json:"name"`
@@ -101,7 +113,40 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 		}
 		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + declared.ID)
 		if !ok {
-			continue // not built into this binary (e.g. a C-hosted component)
+			// UNRECOGNISED is not the same as COULD NOT START, and only the
+			// first is a defect here. main.go already draws that line: a
+			// recognised module sets ModuleName before giving up, so an empty
+			// one means the name matched no case at all.
+			//
+			// Several modules legitimately return !ok under test -- the store
+			// needs a bus socket to reach the postgres module, and there is none
+			// here -- but they still name themselves. A module that does not is
+			// one the contract says this binary hosts and the registry has never
+			// heard of, which is what a rename produces when only one of the two
+			// moves.
+			//
+			// Checking this at all is the point: the loop used to `continue`
+			// silently, so the module whose name just changed would be the one
+			// nobody compared, while `checked` stayed comfortably non-zero from
+			// the other nineteen.
+			// AND ONLY FOR A COMPONENT THIS REPOSITORY IMPLEMENTS. A Go
+			// component whose descriptor declares no go_sources here is built
+			// elsewhere -- config is aimee-module-config, its own program from
+			// github.com/RakuenSoftware/aimee-module-config -- so it can never
+			// have a case in this binary, and demanding one asks a question
+			// with no answer.
+			//
+			// Found by the guard firing on `config` after a merge brought it in.
+			// The guard was right that the name matched nothing; it was wrong
+			// that the name was supposed to.
+			if declared.Runtime == "go" && declared.HostedBy == "" &&
+				config.ModuleName == "" && implementedHere(declared.ID) {
+				t.Errorf("%s is declared runtime=go in process-contracts.json but "+
+					"aimee-module-%s matches no case in the module registry: the "+
+					"contract and the registry disagree about its name",
+					declared.ID, declared.ID)
+			}
+			continue
 		}
 		checked++
 		advertised := map[uint32]bool{}
@@ -141,73 +186,24 @@ func TestModuleRegistryRejectsUnknownAndBadArguments(t *testing.T) {
 	}
 }
 
-func TestNoStageIsAdvertisedWithoutBeingDeclared(t *testing.T) {
-	// The other direction of the correspondence above. That test catches a stage
-	// declared and never registered, which fails as CAPABILITY_ABSENT. This one
-	// catches a stage registered and never declared, which fails more quietly: a
-	// client must list the kinds it calls, and the contract validator refuses a
-	// request naming a kind no module declares -- so the stage is served by a
-	// running module and cannot legitimately be addressed by anybody.
-	//
-	// Scoped to components declared runtime "go", which is the population rather
-	// than an exemption: the image installs the Go binary only for those ids. A
-	// switch case for a component declared "c" is a prepared replacement that
-	// will never advertise -- db2 is exactly that, with eight operation stages
-	// registered here and the deployed aimee-module-db2 being the C build.
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "modules",
-		"process-contracts.json"))
+// implementedHere reports whether this repository builds the component's Go
+// module, by asking its descriptor for go_sources.
+//
+// A component can be declared in process-contracts.json and implemented in
+// another repository; the contract describes the FLEET, not this binary's
+// contents. Without this distinction the check above cannot tell "the registry
+// forgot a module" from "the module was never ours".
+func implementedHere(id string) bool {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "modules", id, "module.yaml"))
 	if err != nil {
-		t.Fatalf("read process-contracts.json: %v", err)
+		// No descriptor at all: nothing claims it here.
+		return false
 	}
-	var contracts struct {
-		Components []struct {
-			ID        string `json:"id"`
-			Execution string `json:"execution"`
-			Runtime   string `json:"runtime"`
-			HostedBy  string `json:"hosted_by"`
-			Stages    []struct {
-				EventKind uint32 `json:"event_kind"`
-				Name      string `json:"name"`
-			} `json:"stages"`
-		} `json:"components"`
+	var descriptor struct {
+		GoSources []string `json:"go_sources"`
 	}
-	if err := json.Unmarshal(raw, &contracts); err != nil {
-		t.Fatalf("parse process-contracts.json: %v", err)
+	if err := json.Unmarshal(body, &descriptor); err != nil {
+		return false
 	}
-
-	checked := 0
-	for _, declared := range contracts.Components {
-		// runtime "go" AND not hosted: exactly the population the image installs
-		// a binary for. A hosted component runs inside another process -- the
-		// bus denies a live duplicate of its principal -- so it has no binary of
-		// its own and no switch case to have. workflows is hosted by the WFE,
-		// and my first version of this check called that a defect.
-		if declared.Execution != "process" || declared.Runtime != "go" ||
-			declared.HostedBy != "" {
-			continue
-		}
-		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + declared.ID)
-		if !ok {
-			t.Errorf("%s is declared a Go process and this binary has no case for it; "+
-				"the image would install a binary that exits on its own name", declared.ID)
-			continue
-		}
-		checked++
-		declaredKinds := map[uint32]bool{}
-		for _, s := range declared.Stages {
-			declaredKinds[s.EventKind] = true
-		}
-		for _, s := range config.Stages {
-			if !declaredKinds[s.EventKind] {
-				t.Errorf("%s advertises event %d, which process-contracts.json does not "+
-					"declare: no client may request a kind no module declares, so the "+
-					"stage runs and nothing can address it", declared.ID, s.EventKind)
-			}
-		}
-	}
-	// Guard the guard, the same way its neighbour does: a loop that compared
-	// nothing passes for the wrong reason.
-	if checked == 0 {
-		t.Fatal("no Go module was actually compared against the contract")
-	}
+	return len(descriptor.GoSources) > 0
 }

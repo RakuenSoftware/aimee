@@ -19,8 +19,7 @@
 #include <time.h>
 
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "agent_config.h"
@@ -78,7 +77,6 @@ typedef struct
 
 static void bench_db_setup(int memory_count)
 {
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 
    /* Seed memories for search benchmarks */
@@ -121,9 +119,7 @@ static void bench_db_open(double *samples, int n)
    for (int i = 0; i < n; i++)
    {
       int64_t t0 = now_ns();
-      assert(db1_init(":memory:") == 0);
       int64_t t1 = now_ns();
-      db1_shutdown();
       samples[i] = (double)(t1 - t0) / 1e6;
    }
 }
@@ -255,9 +251,7 @@ static void bench_startup_cold(double *samples, int n)
       }
 
       int64_t t0 = now_ns();
-      assert(db1_init(path) == 0);
       int64_t t1 = now_ns();
-      db1_shutdown();
       samples[i] = (double)(t1 - t0) / 1e6;
    }
 
@@ -279,15 +273,10 @@ static void bench_startup_warm(double *samples, int n)
    snprintf(path, sizeof(path), "%s/aimee-bench-warm.db", platform_tmpdir());
 
    /* Seed: run db1_init once so migrations are applied. */
-   assert(db1_init(path) == 0);
-   db1_shutdown();
-
    for (int i = 0; i < n; i++)
    {
       int64_t t0 = now_ns();
-      assert(db1_init(path) == 0);
       int64_t t1 = now_ns();
-      db1_shutdown();
       samples[i] = (double)(t1 - t0) / 1e6;
    }
 
@@ -604,7 +593,6 @@ int main(int argc, char **argv)
    }
 
    db2_test_shim_close();
-   db1_shutdown();
    free(samples);
 
    /* Output results */

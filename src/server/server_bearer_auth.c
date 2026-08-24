@@ -16,13 +16,14 @@
 #include <openssl/sha.h>
 
 #include "config.h"
-#include "modules/db1/remote_client_grant.h"
+#include "db1_client/remote_client_grant.h"
 #include "log.h"
 #include "platform_random.h"
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
 #include "server.h"
 #include "server_http.h"
+#include "server_http_identity.h" /* server_http_bearer_matches */
 #include <aimee/core/connection/auth.h>
 
 /* Additional bearers accepted alongside the primary. HTTP connections and
@@ -194,14 +195,14 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
 
    char configured[AIMEE_API_BEARER_EXTRA_MAX][256];
    int configured_count = configured_bearer_snapshot(configured);
-   if (configured_count < 0 || !config_server_api_bearer_token()[0] ||
-       config_server_api_mtls() <= 0)
+   int primary_present = runtime_secret_has("AIMEE_API_BEARER_TOKEN");
+   if (configured_count < 0 || !primary_present || config_server_api_mtls() <= 0)
    {
       /* Name the specific precondition: all three used to fail identically and
        * silently, which is what made a clean-install failure undiagnosable. */
       aimee_log(LOG_ERROR, "first_user",
                 "bootstrap rejected: extras_snapshot=%d primary_bearer=%s mtls=%d",
-                configured_count, config_server_api_bearer_token()[0] ? "present" : "MISSING",
+                configured_count, primary_present ? "present" : "MISSING",
                 config_server_api_mtls());
       return -1;
    }
@@ -368,9 +369,8 @@ int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *
 
    const char *presented_bearer = aimee_core_bearer_token(auth_header);
 
-   int authorized = presented_bearer ? server_ct_equal(presented_bearer, bearer_cfg) : 0;
-   if (api_key_header && api_key_header[0])
-      authorized |= server_ct_equal(api_key_header, bearer_cfg);
+   int authorized = server_http_bearer_matches(presented_bearer, bearer_cfg);
+   authorized |= server_http_bearer_matches(api_key_header, bearer_cfg);
 
    /* Do not return after a primary match: compare the same configured set for
     * primary, enrolled and invalid credentials alike. */
@@ -378,10 +378,8 @@ int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *
    {
       if (!extra[i] || !extra[i][0])
          continue;
-      if (presented_bearer)
-         authorized |= server_ct_equal(presented_bearer, extra[i]);
-      if (api_key_header && api_key_header[0])
-         authorized |= server_ct_equal(api_key_header, extra[i]);
+      authorized |= server_http_bearer_matches(presented_bearer, extra[i]);
+      authorized |= server_http_bearer_matches(api_key_header, extra[i]);
    }
    return authorized ? 0 : 401;
 }

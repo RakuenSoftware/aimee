@@ -1,7 +1,7 @@
 /* learning_router.c: explicit-signal capture, proposal gate, and sink routing. */
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/collab_rules.h"
 #include "modules/db2/c/db2_learning.h"
@@ -258,11 +258,38 @@ static int learning_commit_proposal(int id, learning_proposal_t *out)
    return learning_get_proposal(id, out ? out : &proposal);
 }
 
+/* S5: record what became of a commit.
+ *
+ * The regret controls consumed a fate that nothing ever wrote — the loop was
+ * complete except that no verdict was ever entered. These are the two verdicts
+ * the router itself can observe without asking anyone:
+ *
+ *   - SUPERSEDED: a new proposal commits for a target that already had a
+ *     committed one. The older commit is, by definition, what this replaced.
+ *   - REVERTED: an operator rejects a proposal that had already committed.
+ *
+ * CONTRADICTED needs a judgement the router cannot make, so it is entered
+ * through the operator surface rather than guessed at here. */
+static void learning_mark_superseded(const char *sink, const char *target_key,
+                                     int64_t target_memory_id, int new_id)
+{
+   int older = db2_learning_proposal_find_committed(sink, target_key, target_memory_id, new_id);
+   if (older > 0)
+      (void)learning_fate_record(older, LEARNING_FATE_SUPERSEDED, "replaced by a later commit");
+}
+
 static int learning_queue_sink(int signal_id, const char *sink, const char *target_key,
                                int64_t target_memory_id, const char *action_json,
                                const char *evidence_refs, int high_confidence,
-                               learning_dispatch_result_t *out)
+                               const char *signal_type, learning_dispatch_result_t *out)
 {
+   /* S5: a detector whose commits keep failing to hold needs more agreement
+    * before the next one lands, and loses the fast path once half of them do
+    * not hold. Both only ever tighten. */
+   const int required = learning_detector_corroboration_required(signal_type);
+   if (high_confidence && !learning_detector_may_fast_commit(signal_type))
+      high_confidence = 0;
+
    int proposal_id = db2_learning_proposal_find_pending(sink, target_key, target_memory_id);
    if (proposal_id > 0)
    {
@@ -270,12 +297,16 @@ static int learning_queue_sink(int signal_id, const char *sink, const char *targ
       if (out && out->proposal_count < LEARNING_MAX_PROPOSAL_IDS)
          out->proposal_ids[out->proposal_count++] = proposal_id;
       learning_proposal_t proposal;
-      if (learning_get_proposal(proposal_id, &proposal) == 0 && proposal.corroboration_count >= 2)
+      if (learning_get_proposal(proposal_id, &proposal) == 0 &&
+          proposal.corroboration_count >= required)
       {
          if (learning_commit_proposal(proposal_id, &proposal) == 0 &&
-             strcmp(proposal.state, "committed") == 0 && out &&
-             out->committed_count < LEARNING_MAX_PROPOSAL_IDS)
-            out->committed_ids[out->committed_count++] = proposal_id;
+             strcmp(proposal.state, "committed") == 0)
+         {
+            learning_mark_superseded(sink, target_key, target_memory_id, proposal_id);
+            if (out && out->committed_count < LEARNING_MAX_PROPOSAL_IDS)
+               out->committed_ids[out->committed_count++] = proposal_id;
+         }
       }
       return proposal_id;
    }
@@ -295,9 +326,12 @@ static int learning_queue_sink(int signal_id, const char *sink, const char *targ
    {
       learning_proposal_t proposal;
       if (learning_commit_proposal(proposal_id, &proposal) == 0 &&
-          strcmp(proposal.state, "committed") == 0 && out &&
-          out->committed_count < LEARNING_MAX_PROPOSAL_IDS)
-         out->committed_ids[out->committed_count++] = proposal_id;
+          strcmp(proposal.state, "committed") == 0)
+      {
+         learning_mark_superseded(sink, target_key, target_memory_id, proposal_id);
+         if (out && out->committed_count < LEARNING_MAX_PROPOSAL_IDS)
+            out->committed_ids[out->committed_count++] = proposal_id;
+      }
    }
    return proposal_id;
 }
@@ -482,7 +516,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
                                         input.target_memory_id, input.evidence_refs_json, action,
                                         sizeof(action)) == 0)
          learning_queue_sink(signal_id, "reranker", input.target_key, input.target_memory_id,
-                             action, input.evidence_refs_json, 0, out);
+                             action, input.evidence_refs_json, 0, input.signal_type, out);
    }
    if (sink_mask & AIMEE_LEARNING_SINK_SUPERSEDE)
    {
@@ -491,7 +525,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
           learning_make_supersede_action(input.target_memory_id, input.correction_text, action,
                                          sizeof(action)) == 0)
          learning_queue_sink(signal_id, "supersede", input.target_key, input.target_memory_id,
-                             action, input.evidence_refs_json, 0, out);
+                             action, input.evidence_refs_json, 0, input.signal_type, out);
    }
    if (sink_mask & AIMEE_LEARNING_SINK_RULE)
    {
@@ -513,7 +547,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
          snprintf(reason, sizeof(reason), "Repeated correction captured by learning router");
          if (learning_make_rule_action(rule_text, reason, action, sizeof(action)) == 0)
             learning_queue_sink(signal_id, "rule", input.target_key, input.target_memory_id, action,
-                                input.evidence_refs_json, 0, out);
+                                input.evidence_refs_json, 0, input.signal_type, out);
       }
       else if (strcmp(input.signal_type, "preference_statement") == 0 ||
                strcmp(input.signal_type, "mark_rule") == 0)
@@ -524,10 +558,11 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
                   strcmp(input.signal_type, "mark_rule") == 0 ? "Explicit rule capture"
                                                               : "Explicit user preference");
          if (learning_make_rule_action(rule_text, reason, action, sizeof(action)) == 0)
-            learning_queue_sink(
-                signal_id, "rule", input.target_key, input.target_memory_id, action,
-                input.evidence_refs_json,
-                input.high_confidence || strcmp(input.signal_type, "mark_rule") == 0, out);
+            learning_queue_sink(signal_id, "rule", input.target_key, input.target_memory_id, action,
+                                input.evidence_refs_json,
+                                input.high_confidence ||
+                                    strcmp(input.signal_type, "mark_rule") == 0,
+                                input.signal_type, out);
       }
    }
    if ((sink_mask & AIMEE_LEARNING_SINK_WORKFLOW) && input.workflow_project[0] &&
@@ -537,7 +572,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
       if (learning_make_workflow_action(input.workflow_project, input.workflow_signal_type,
                                         input.description, action, sizeof(action)) == 0)
          learning_queue_sink(signal_id, "workflow", input.workflow_project, 0, action,
-                             input.evidence_refs_json, 0, out);
+                             input.evidence_refs_json, 0, input.signal_type, out);
    }
 
    clock_gettime(CLOCK_MONOTONIC, &t1);
@@ -602,6 +637,14 @@ int learning_reject_proposal(int id, learning_proposal_t *out)
 
    if (strcmp(proposal.state, "committed") != 0 && strcmp(proposal.state, "archived") != 0)
       db2_learning_proposal_archive(id, "rejected");
+   else if (strcmp(proposal.state, "committed") == 0)
+   {
+      /* S5: rejecting something that ALREADY COMMITTED is the clearest regret
+       * signal there is — a human looked at what the loop did and undid it.
+       * The row stays committed (the effect was applied and is not being
+       * rewritten here); what changes is the verdict recorded against it. */
+      (void)learning_fate_record(id, LEARNING_FATE_REVERTED, "rejected after committing");
+   }
    return learning_get_proposal(id, out ? out : &proposal);
 #endif
 }

@@ -1,5 +1,9 @@
 # Proposal: synthesis as an mTLS sidecar, and a kb image matrix on one axis
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** DONE — sidecar topology delivered and archived 2026-08-04; residual measurement extracted.
 
 > **Archived after partial delivery.** The independent `aimee-llm-e2b/e4b` images, input-keyed

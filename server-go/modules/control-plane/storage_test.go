@@ -146,7 +146,7 @@ func TestLiveTheSchemaLandsInARealDatabaseThroughTheModule(t *testing.T) {
 	calls := 0
 	client := storage.New(func(_ context.Context, body []byte) ([]byte, error) {
 		calls++
-		reply, status := handler.Handle(invocation, body)
+		reply, status := handler(invocation, body)
 		if status != bus.ModuleStatusOK {
 			t.Fatalf("postgres module status = %v", status)
 		}

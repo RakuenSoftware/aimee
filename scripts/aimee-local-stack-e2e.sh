@@ -75,11 +75,21 @@ check() {
 }
 
 # --- build ----------------------------------------------------------------
-bold "==> Building aimee client + server + kb"
-make -C src ../aimee ../aimee-server ../aimee-kb >/dev/null
+bold "==> Building aimee client + server + kb + required modules"
+make -C src ../aimee ../aimee-server ../aimee-kb \
+  build/obj/aimee-module build/obj/aimee-module-config \
+  build/obj/aimee-module >/dev/null
+cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
+RUN_ROOT="$(mktemp -d)"
+BUNDLE="$RUN_ROOT/module-bundle"
+cleanup_run_root() { rm -rf "$RUN_ROOT"; }
+trap cleanup_run_root EXIT INT TERM
+python3 scripts/export_c_repositories.py \
+  --runtime-bundle "$BUNDLE" >/dev/null
 
 # --- scratch home ---------------------------------------------------------
-SCRATCH="$(mktemp -d)"
+SCRATCH="$RUN_ROOT/stack"
+mkdir -p "$SCRATCH"
 export AIMEE_HOME="$SCRATCH"
 mkdir -p "$AIMEE_HOME/.config/aimee"
 # Server config: move both /v1 listeners to the requested scratch ports. The
@@ -88,11 +98,13 @@ mkdir -p "$AIMEE_HOME/.config/aimee"
 # bearer is injected only into the server's first-boot process below.
 sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/" \
     deploy/container/aimee-server.yaml > "$AIMEE_HOME/aimee.yaml"
-# kb config: the baked container config points sidecar commands at the in-image
-# /opt/aimee/scripts/ path; for a NATIVE local run rewrite them to the repo's
-# scripts/ so the kb can actually popen embed-remote.py etc.
+# The config provider owns one document for this installation. Append the kb's
+# disjoint sections to that document rather than putting a second file at the
+# retired in-process loader path. Both daemons read the same document through
+# their own config-module connection.
 sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
-    deploy/container/aimee.yaml > "$AIMEE_HOME/.config/aimee/aimee.yaml"
+    deploy/container/aimee.yaml >> "$AIMEE_HOME/aimee.yaml"
+chmod 0600 "$AIMEE_HOME/aimee.yaml"
 # Optional: point memory embedding at a REAL small embedder so the semantic
 # vector path is actually exercised (see scripts/test-embedder-qwen.sh, which
 # serves Qwen3-Embedding-0.6B at 1024-d). Without this the kb falls back to the
@@ -100,9 +112,8 @@ sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
 # URL is used directly (aimee POSTs raw text to {url}/embed).
 if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${EMBEDDER_DIMS:-unset})"
-  # The SERVER forwards its own embedding_command to the kb on memory.store /
-  # memory search (server/server_api.c); the kb also reads its own for direct
-  # embedding. Set it in BOTH configs (replace an existing line, else append).
+  # The server forwards embedding_command to the kb on memory.store / memory
+  # search, and the kb reads the same installation document for direct embedding.
   set_embed_cmd() {  # $1 = config file
     if grep -qE '^embedding_command:' "$1"; then
       sed -i "s#^embedding_command:.*#embedding_command: \"${AIMEE_E2E_EMBEDDER_URL}\"#" "$1"
@@ -111,7 +122,6 @@ if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
     fi
   }
   set_embed_cmd "$AIMEE_HOME/aimee.yaml"                     # server config
-  set_embed_cmd "$AIMEE_HOME/.config/aimee/aimee.yaml"      # kb config
   [[ -n "${EMBEDDER_DIMS:-}" ]] && export EMBEDDER_DIMS
 fi
 export AIMEE_SERVER_HTTP_BIND=1
@@ -119,11 +129,62 @@ export AIMEE_DEPLOY_ENABLED=1
 export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
+DB1_MODULE="$REPO/src/build/obj/aimee-module-aimee"
+[ -x "$DB1_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
+PG_MODULE="$REPO/src/build/obj/aimee-module-postgres"
+[ -x "$PG_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
+CONFIG_MODULE="$REPO/src/build/obj/aimee-module-config"
+POSTGRES_MODULE="$REPO/src/build/obj/aimee-module-postgres"
+SERVER_POLICY="$AIMEE_HOME/modules.d/server"
+KB_POLICY="$AIMEE_HOME/modules.d/kb"
+mkdir -p "$SERVER_POLICY" "$KB_POLICY"
+sed "s|^executable=.*|executable=$DB1_MODULE|" \
+  "$BUNDLE/grants/server/aimee.grant" > "$SERVER_POLICY/aimee.grant"
+sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
+  "$BUNDLE/grants/server/config.grant" > "$SERVER_POLICY/config.grant"
+sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
+  "$BUNDLE/grants/kb/config.grant" > "$KB_POLICY/config.grant"
+sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
+  "$BUNDLE/grants/kb/postgres.grant" > "$KB_POLICY/postgres.grant"
+chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
+
 kb_pid=""; server_pid=""
+server_db1_pid=""; server_config_pid=""
+kb_config_pid=""; kb_postgres_pid=""
+
+arm_module() { # executable socket policy log pid-variable [environment...]
+  local executable="$1" socket="$2" policy="$3" log="$4" pid_var="$5"
+  shift 5
+  (
+    local deadline=$((SECONDS + WAIT_SECONDS))
+    while (( SECONDS < deadline )); do
+      if [[ -S "$socket" ]]; then
+        exec env AIMEE_HOME="$AIMEE_HOME" AIMEE_MODULE_POLICY_DIR="$policy" \
+          "$@" "$executable" "$socket"
+      fi
+      sleep 0.1
+    done
+    echo "module: bus socket never appeared: $socket" >&2
+  ) >>"$log" 2>&1 &
+  printf -v "$pid_var" '%s' "$!"
+}
+
+stop_modules() {
+  local pid
+  for pid in "$server_db1_pid" "$server_config_pid" "$kb_config_pid" "$kb_postgres_pid"; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  server_db1_pid=""; server_config_pid=""
+  kb_config_pid=""; kb_postgres_pid=""
+}
+
 cleanup() {
+  stop_modules
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
   [[ -n "$kb_pid" ]] && kill "$kb_pid" 2>/dev/null || true
-  rm -rf "$SCRATCH"
+  rm -rf "$RUN_ROOT"
 }
 trap cleanup EXIT
 
@@ -136,32 +197,36 @@ if [[ "$MODE" == "full" ]]; then
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
+  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-config-module.log" kb_config_pid
+  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-postgres-module.log" kb_postgres_pid \
+    "AIMEE_DB2_URL=$AIMEE_DB2_URL"
   # Capture kb output so the embedder-fidelity gate below can see whether pgvec
   # accepted the memory vectors or refused them on a dim mismatch.
   "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
   kb_pid=$!
   export AIMEE_KB_API_URL="http://127.0.0.1:8741"
-  # The kb has to finish sealing its first-boot credentials before the server
-  # starts sealing its own. Both bootstrap the same Vault under the same
-  # AIMEE_HOME, and started together they fail each other closed -- the kb
-  # reports "credential environment bootstrap failed closed" and the server
-  # "first-boot credential Vault bootstrap failed", and neither survives it.
-  # Waiting on the kb's own listener is the readiness signal; the timeout is a
-  # backstop so a kb that cannot start is reported as that rather than as a
-  # server failure.
-  bold "==> Waiting for the kb to seal its credentials (up to 60s)"
-  kb_deadline=$((SECONDS + 60))
+  # The server and kb deliberately share the scratch Vault in this single-host
+  # topology.  Let the kb finish its first-boot credential transaction before
+  # starting the server; launching both writers concurrently can make one fail
+  # closed on the Vault's atomic-replace checks even though both inputs are
+  # identical.
+  bold "==> Waiting for aimee-kb first-boot initialization"
+  deadline=$((SECONDS + WAIT_SECONDS))
   while ! curl -fsS --max-time 3 "${AIMEE_KB_API_URL}/v1/health" >/dev/null 2>&1; do
     if ! kill -0 "$kb_pid" 2>/dev/null; then
-      red "    aimee-kb exited during startup"; sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2; exit 1
+      red "    aimee-kb exited during startup"
+      sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2
+      exit 1
     fi
-    if (( SECONDS >= kb_deadline )); then
-      red "    aimee-kb did not answer /v1/health within 60s"
-      sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2; exit 1
+    if (( SECONDS >= deadline )); then
+      red "    aimee-kb did not become healthy within ${WAIT_SECONDS}s"
+      sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2
+      exit 1
     fi
-    sleep 2
+    sleep 1
   done
-  green "    kb is up"
 elif [[ "$MODE" == "hybrid" ]]; then
   bold "==> Mode HYBRID (T6): local server + external kb at ${KB_URL}"
   export AIMEE_KB_API_URL="$KB_URL"
@@ -176,6 +241,11 @@ else
 fi
 
 bold "==> Starting aimee-server"
+arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+  "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
+  "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
+arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+  "$AIMEE_HOME/server-config-module.log" server_config_pid
 AIMEE_API_BEARER_TOKEN="$BEARER" \
   "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
@@ -196,7 +266,7 @@ deadline=$((SECONDS + WAIT_SECONDS))
 while true; do
   status="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' \
     "${SERVER_URL}/v1/health" 2>/dev/null || true)"
-  [[ -S "$OPERATOR_SOCK" && "$status" != 000 ]] && break
+  [[ -S "$AIMEE_HOME/aimee-http.sock" && "$status" != 000 ]] && break
   if ! kill -0 "$server_pid" 2>/dev/null; then red "    aimee-server exited during startup"; exit 1; fi
   if (( SECONDS >= deadline )); then red "    server listeners did not start within ${WAIT_SECONDS}s"; exit 1; fi
   sleep 2
@@ -209,7 +279,7 @@ done
 CLIENT_HOME="$SCRATCH/client"
 mkdir -p "$CLIENT_HOME"
 bold "==> Claiming the first wizard user"
-deploy_status="$(curl -sS --unix-socket "$OPERATOR_SOCK" \
+deploy_status="$(curl -sS --unix-socket "$AIMEE_HOME/aimee-http.sock" \
   -H 'X-Aimee-Webuser: local-stack-e2e' \
   -H 'content-type: application/json' -X POST -d '{}' -o "$SCRATCH/deploy-apply.json" \
   -w '%{http_code}' http://localhost/v1/deploy/apply)"
@@ -270,7 +340,7 @@ check "GET /v1/kb/status -> vector" '"vector"' "${SERVER_URL}/v1/kb/status"
 # never have returned hits. A smoke check has no working directory worth
 # resolving and no project of its own, which makes scope=all the honest one.
 check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: application/json' \
-                                               -d '{"query":"local e2e","max_results":3,"scope":"all"}' \
+                                               -d '{"query":"local e2e","scope":"all","max_results":3}' \
                                                "${SERVER_URL}/v1/kb/search"
 
 bold "==> Write→read round-trip (store a memory, read it back)"

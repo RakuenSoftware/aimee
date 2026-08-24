@@ -62,7 +62,8 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if identity != "" {
 		if existing, findErr := s.db.WorkItemByProposal(r.Context(), repo, identity); findErr == nil {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "work_item_id": existing.ID, "deduplicated": true})
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "work_item_id": existing.ID,
+				"workflow": existing.WorkflowName, "state": existing.State, "deduplicated": true})
 			return
 		} else if !errors.Is(findErr, sql.ErrNoRows) && !strings.Contains(findErr.Error(), "no rows") {
 			writeError(w, http.StatusInternalServerError, findErr)
@@ -112,7 +113,8 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 		_ = s.artifacts.DeleteWorkItem(id)
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			if existing, findErr := s.db.WorkItemByProposal(r.Context(), repo, identity); findErr == nil {
-				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "work_item_id": existing.ID, "deduplicated": true})
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "work_item_id": existing.ID,
+					"workflow": existing.WorkflowName, "state": existing.State, "deduplicated": true})
 				return
 			}
 		}
@@ -122,7 +124,12 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 	if s.notify != nil {
 		s.notify()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "work_item_id": id})
+	// work_item_id, workflow and state, because that is the shape the CLI has
+	// always printed. The C intake this replaced returned all three; this one
+	// returned the id alone, so `aimee workflow run` printed a filled id and then
+	// two empty lines -- on every run, for anyone who used the command.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "work_item_id": id,
+		"workflow": definition.Name, "state": "active"})
 }
 
 func validateManualProposalSource(ctx context.Context, repo, source, proposal string) (string, error) {

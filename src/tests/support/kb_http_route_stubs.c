@@ -6,6 +6,8 @@
 #include "kb/http/kb_http_servers.h"
 #include "kb_http_telemetry.h"
 #include "modules/db2/c/server_registry.h"
+#include "modules/db2/c/evidence_lifecycle.h"
+#include "modules/db2/c/entity_registry.h"
 #include "modules/db2/c/management_identity_journal.h"
 #include "modules/db2/c/write_tier_grant.h"
 #include "kb_oidc_token_exchange.h"
@@ -319,5 +321,155 @@ int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const ch
    (void)team_id;
    (void)subject;
    (void)out;
+   return -1;
+}
+
+/* Typed-fact console storage seams.  The focused HTTP route suite does not open
+ * DB2.  Keep reads empty and mutations fail-closed; lifecycle/entity integration
+ * is exercised by its dedicated DB2 tests and the real full-stack browser E2E. */
+int db2_fact_candidates(fact_candidate_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_summaries(entity_summary_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_entity_merge_summaries(entity_merge_summary_t *out, int max)
+{
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+static int g_fact_actor_enabled;
+
+void test_kb_fact_actor_set(int enabled)
+{
+   g_fact_actor_enabled = enabled;
+}
+
+int db2_fact_actor_from_request(int require_operator, fact_actor_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!g_fact_actor_enabled || !out)
+      return -1;
+   snprintf(out->principal, sizeof(out->principal), "test:operator");
+   snprintf(out->role, sizeof(out->role), "%s", require_operator ? "operator" : "user");
+   snprintf(out->transport_identity, sizeof(out->transport_identity), "test-transport");
+   out->rank = require_operator ? FACT_ACTOR_OPERATOR : FACT_ACTOR_USER;
+   out->authenticated = 1;
+   return 0;
+}
+
+int db2_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op_t op,
+                                const char *const *args, int nargs, char *out, int out_cap)
+{
+   (void)actor;
+   (void)op;
+   (void)args;
+   (void)nargs;
+   if (out && out_cap > 0)
+      snprintf(out, (size_t)out_cap, "{\"ok\":true}");
+   return 0;
+}
+
+int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
+                             fact_review_action_t action, fact_mutation_result_t *out)
+{
+   (void)actor;
+   (void)assertion_id;
+   (void)action;
+   (void)out;
+   return -1;
+}
+
+int64_t db2_entity_merge_as(const fact_actor_t *actor, int64_t from_id, int64_t into_id,
+                            char commit_id[FACT_COMMIT_ID_MAX])
+{
+   (void)actor;
+   (void)from_id;
+   (void)into_id;
+   if (commit_id)
+      commit_id[0] = '\0';
+   return -1;
+}
+
+int db2_entity_unmerge_as(const fact_actor_t *actor, int64_t merge_id,
+                          char commit_id[FACT_COMMIT_ID_MAX])
+{
+   (void)actor;
+   (void)merge_id;
+   if (commit_id)
+      commit_id[0] = '\0';
+   return -1;
+}
+
+int db2_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, int max)
+{
+   (void)commit_id;
+   (void)out;
+   (void)max;
+   return -1;
+}
+
+int db2_fact_commit_rollback(const fact_actor_t *actor, const char *commit_id,
+                             char rollback_commit_id[FACT_COMMIT_ID_MAX])
+{
+   (void)actor;
+   (void)commit_id;
+   if (rollback_commit_id)
+      rollback_commit_id[0] = '\0';
+   return -1;
+}
+
+int db2_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t *out, int max)
+{
+   (void)ingest_run_id;
+   (void)out;
+   (void)max;
+   return -1;
+}
+
+int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_run_id,
+                                 char rollback_commit_id[FACT_COMMIT_ID_MAX])
+{
+   (void)actor;
+   (void)ingest_run_id;
+   if (rollback_commit_id)
+      rollback_commit_id[0] = '\0';
+   return -1;
+}
+
+int db2_fact_erasure_preview(const char *source, const char *relation, const char *target,
+                             fact_erasure_impact_t *out)
+{
+   (void)source;
+   (void)relation;
+   (void)target;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_fact_erasure_execute(const fact_actor_t *actor, const char *source, const char *relation,
+                             const char *target, fact_erasure_impact_t *out,
+                             char commit_id[FACT_COMMIT_ID_MAX])
+{
+   (void)actor;
+   (void)source;
+   (void)relation;
+   (void)target;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (commit_id)
+      commit_id[0] = '\0';
    return -1;
 }

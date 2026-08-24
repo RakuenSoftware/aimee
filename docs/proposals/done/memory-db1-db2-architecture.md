@@ -1,5 +1,9 @@
 # Proposal: Memory architecture — retire `.md` memory; db1 = user, db2 = organization
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** shipped — Phase 1 (db1 user store + recall merge + capture), migration Slices 1/3/4,
   and §2 Slice 5 (harness-memory subsystem removal + CI guard) are all merged on `testing`. Every
   acceptance criterion is met; §4 Phase-4 auto-population (OQ5) is deferred to a follow-up. See

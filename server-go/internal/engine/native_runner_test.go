@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
+	appconfig "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
@@ -1564,7 +1565,7 @@ func TestForeachRespawnsIdenticalPacketsInALaterGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2077,7 +2078,7 @@ func (raceForge) Merge(context.Context, string, string, string) error {
 // engine authority to merge into the repository base.
 func TestMergeStepRejectsRootFinalPR(t *testing.T) {
 	root := t.TempDir()
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2139,7 +2140,7 @@ func TestMergeStepFailsTerminallyOnConflictButStillPendsOnLostRace(t *testing.T)
 			// merge() resolves the slice worktree from its parent feature branch.
 			git(repo, "branch", "aimee/feat/wi_parent")
 
-			store, err := db1.Open(filepath.Join(root, "aimee.db"))
+			store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

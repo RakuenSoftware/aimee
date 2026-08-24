@@ -117,16 +117,26 @@ case "$AIMEE_WFE_ENGINE" in
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
-# The DB1 module is a separate process and cannot read the daemon's config, so
-# it is told which database to open and refuses to start without it. That is
-# deliberate: a module that guessed a default would serve a DIFFERENT, empty
-# store whenever an operator moved the database, and an empty store answers
-# every read with "no such row" rather than an error.
+# THE STORE MODULE OPENS NO DATABASE, so this exports no path for it.
 #
-# This default matches config's own default. An operator who overrides db1_path
-# in the configuration MUST set AIMEE_DB1_PATH to match, or the module will
-# refuse to start -- loudly, which is the point.
-export AIMEE_DB1_PATH="${AIMEE_DB1_PATH:-$AIMEE_HOME/aimee.db}"
+# It used to. `export AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db"` lived here, naming a
+# SQLite file, from when the store was a C module that opened one. Nothing has
+# read that variable since the store became a Go module talking to the postgres
+# module over the bus -- so it was seeding a defaulted SQLite path into every
+# deployment for a module that could not have used it, and the comment above it
+# told an operator the module would "refuse to start" without it, which was no
+# longer true in either direction.
+#
+# What actually needs configuring is AIMEE_STORE_URL, the PostgreSQL DSN, and it
+# is read by the POSTGRES module (server-go/modules/postgres/health.go) rather
+# than by the store. It is deliberately NOT defaulted here: the reasoning in the
+# old comment was sound even though its subject was wrong, and it applies with
+# more force to a DSN. A guessed default would connect to a DIFFERENT, empty
+# database, and an empty store answers every read with "no such row" rather than
+# an error -- so it fails as silent data loss rather than as a startup failure.
+# Unset, the module says so and stops. An operator sets it in the environment
+# and it inherits; there is nothing for this script to do but stay out of the
+# way.
 MODULE_MANIFEST="${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/server.modules}"
 # Existing appliances may need to recover SQLite WAL state and refresh seeded
 # workflow definitions before the C resource socket appears.  A real upgraded
@@ -533,39 +543,6 @@ if [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.so
     unset _self _map 2>/dev/null || true
 fi
 
-# Derive the managed compose `.env` from config, every start.
-#
-# The managed deployment's identity -- which kb image variant, which embedder --
-# used to live ONLY in the running container's Config.Env, put there by whichever
-# shell first ran compose. A reboot is safe (restart=unless-stopped restarts the
-# same container object with its env intact); a RECREATE is not, and a recreate is
-# what every image upgrade does. Recreating with a different caller environment
-# silently reinterpolates AIMEE_KB_VARIANT to nothing, which resolves the kb image
-# to the EMBEDDERLESS aimee-kb -- a working deployment losing its embedder with no
-# error anywhere.
-#
-# Compose reads `.env` from the project directory on its own, so writing it here
-# makes every later `docker compose up -d` correct without the caller supplying
-# anything: swapping an image becomes a restart rather than a reconfiguration.
-#
-# WRITTEN FRESH RATHER THAN PERSISTED. /opt/aimee/deploy is image content, not a
-# mount, so this file cannot survive to contradict a config changed while the
-# container was down. Config is the single source of truth; this is only its
-# projection. A failure here is not fatal -- the server's own deploy path builds
-# its child environment directly and still works -- so warn and carry on rather
-# than refuse to start a server over a file only compose reads.
-DEPLOY_ENV_DIR="${AIMEE_DEPLOY_COMPOSE_DIR:-/opt/aimee/deploy}"
-if [ -d "$DEPLOY_ENV_DIR" ]; then
-    if aimee-server --emit-deploy-env >"$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null; then
-        chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
-        mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"
-        log "wrote managed compose env ($DEPLOY_ENV_DIR/.env) from config"
-    else
-        rm -f "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
-        log "WARNING: could not derive $DEPLOY_ENV_DIR/.env; a manual 'docker compose up -d' may recreate the kb with the wrong image variant"
-    fi
-fi
-
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
@@ -585,6 +562,41 @@ runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
     module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
 module_pid=$!
 
+# Wait for the resource-plane socket unconditionally. The server starts the bus,
+# the supervisor attaches the required Go config process, and only then can the
+# server finish startup and expose config routes.
+_wait=0
+while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
+    kill -0 "$server_pid" 2>/dev/null || break
+    _wait=$((_wait + 1))
+    sleep 0.1
+done
+if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
+    if kill -0 "$server_pid" 2>/dev/null; then
+        log "fatal: aimee-server is running but never created $AIMEE_HOME/aimee-http.sock after $((_wait / 10))s"
+    else
+        log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
+    fi
+    shutdown
+    exit 1
+fi
+
+# Derive the managed compose `.env` through the live server config route. The
+# old pre-start one-shot had no daemon event bus and therefore could not reach
+# the extracted config process.
+DEPLOY_ENV_DIR="${AIMEE_DEPLOY_COMPOSE_DIR:-/opt/aimee/deploy}"
+if [ -d "$DEPLOY_ENV_DIR" ]; then
+    if runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" aimee config deploy-env \
+        >"$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null; then
+        chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
+        mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"
+        log "wrote managed compose env ($DEPLOY_ENV_DIR/.env) from config"
+    else
+        rm -f "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
+        log "WARNING: could not derive $DEPLOY_ENV_DIR/.env; a manual 'docker compose up -d' may recreate the kb with the wrong image variant"
+    fi
+fi
+
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
     if [ ! -x /usr/local/bin/aimee-wfe ]; then
         log "fatal: AIMEE_WFE_ENGINE=go but /usr/local/bin/aimee-wfe is unavailable"
@@ -595,38 +607,15 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
     # HTTP API. This particular Unix resource-plane socket is passed to the Go
     # WFE only for credentialed forge operations; delegate execution uses the
     # Go delegates process over the module bus.
-    _wait=0
-    while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
-        kill -0 "$server_pid" 2>/dev/null || break
-        _wait=$((_wait + 1))
-        sleep 0.1
-    done
-    if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
-        # Say which of the two it was and how long we waited. These fail for very
-        # different reasons -- a dead process means the server exited (its own log
-        # says why), while a live process with no socket means startup is blocked
-        # before it listens, typically on a dependency such as an unresponsive kb.
-        # The bare message sent me looking at the wrong one for some time.
-        if kill -0 "$server_pid" 2>/dev/null; then
-            log "fatal: aimee-server is running but never created $AIMEE_HOME/aimee-http.sock after $((_wait / 10))s"
-            log "  startup is blocked before the listener; check $AIMEE_HOME/server.log for the last"
-            log "  step reached, and whether a dependency (e.g. aimee-kb) is reachable"
-        else
-            log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
-        fi
-        shutdown
-        exit 1
-    fi
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
     # The WFE is the workflows bus principal: it serves the advance decision and
     # the control stage the C resource plane calls. The module supervisor does
     # not spawn a workflows process (the contract marks it hosted_by=wfe), because
     # the bus denies a live duplicate of a principal. Pass the bus socket
     # explicitly rather than relying on runuser's environment handling.
-    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$6"; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --forge-service-socket "$5"' sh \
-        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
-        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" \
-        "$AIMEE_MODULE_BUS_SOCKET" &
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$5"; exec aimee-wfe --home "$1" --socket "$2" --workflow-dir "$3" --forge-service-socket "$4"' sh \
+        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/workflows" \
+        "$AIMEE_HOME/aimee-http.sock" "$AIMEE_MODULE_BUS_SOCKET" &
     wfe_pid=$!
 
     # Start this only after the resource plane owns the current pid file.  On a

@@ -1,5 +1,9 @@
 # Aimee as the universal LLM gateway: dual-API surface, model-derived proxy/translate, and a general inspect/alter pipeline
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** ✅ **COMPLETE — all phases shipped; proposal done.** P1 (derive
   proxy/translate, delete the `claude_proxy_parity` flag) is complete (#658); P2a
   (request pipeline scaffold over a canonical IR) is complete (#669); P2b (model-pin

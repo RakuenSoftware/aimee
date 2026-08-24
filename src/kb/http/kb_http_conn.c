@@ -47,6 +47,15 @@ extern char g_bearer_token[];
  * this line carries. RFC 9110: the colon may be followed by zero or more spaces
  * or tabs, and trailing whitespace is not part of the value. Returns 1 on a
  * match (even for an empty value), 0 when the line is a different header. */
+/* Returns 1 when the header matched and FITS, 0 when the line is a different
+ * header, and -1 when it matched but was too long for `out`.
+ *
+ * The over-long case used to be indistinguishable from a clean parse: the value
+ * was silently truncated to out_cap-1 and returned 1. For Authorization that
+ * turned a valid credential into a mangled one, which then failed verification
+ * and was reported as `unauthorized` -- a credential error for what is really a
+ * request the server declined to read in full. The TLS front end already answers
+ * 400 for this; this one could not, because it had no way to say so. */
 static int header_value(const char *line, const char *name, char *out, size_t out_cap)
 {
    size_t nlen = strlen(name);
@@ -62,7 +71,10 @@ static int header_value(const char *line, const char *name, char *out, size_t ou
       end--;
    size_t len = (size_t)(end - v);
    if (len >= out_cap)
-      len = out_cap - 1;
+   {
+      out[0] = '\0';
+      return -1;
+   }
    memcpy(out, v, len);
    out[len] = '\0';
    return 1;
@@ -145,18 +157,41 @@ void handle_connection(int fd)
     * for a route that requires JSON turns a legitimate request into a 415. The
     * TLS front end already parsed optional whitespace; this one did not, and the
     * inconsistency was invisible because the route-level tests bypass both. */
-   char auth_val[512] = {0};
+   /* Sized for a real OIDC bearer, not a hand-issued token. At 512 this silently
+    * truncated every RS256 JWT an IdP actually mints: a 2048-bit signature is 342
+    * base64url characters on its own, and ordinary claims (nbf, azp, scope,
+    * email, name) push a routine token past 700 bytes. Measured on the box, same
+    * key and same JWKS both times: a 338-byte token authenticated, a 509-byte one
+    * did not.
+    *
+    * The consequence was not a slow path or a warning. OIDC bearer auth over this
+    * listener was unusable for essentially every real token, and it failed as
+    * `unauthorized` -- so it read as a rejected credential rather than a request
+    * that was never read in full. aimee-server has always sized its own bearer
+    * buffer for this (server_http_identity.c, tl_bearer[4097]); this side had
+    * not. */
+   char auth_val[4097] = {0};
    char ctype_val[128] = {0};
+   int auth_too_long = 0;
    const char *p = buf;
    while ((p = strstr(p, "\r\n")) != NULL)
    {
       p += 2;
-      if (!auth_val[0])
-         header_value(p, "Authorization", auth_val, sizeof(auth_val));
+      if (!auth_val[0] && !auth_too_long &&
+          header_value(p, "Authorization", auth_val, sizeof(auth_val)) < 0)
+         auth_too_long = 1;
       if (!ctype_val[0])
-         header_value(p, "Content-Type", ctype_val, sizeof(ctype_val));
-      if (auth_val[0] && ctype_val[0])
+         (void)header_value(p, "Content-Type", ctype_val, sizeof(ctype_val));
+      if ((auth_val[0] || auth_too_long) && ctype_val[0])
          break;
+   }
+   /* Say so, rather than letting a truncated credential fail as `unauthorized`.
+    * This is what the TLS front end already answers for the same condition. */
+   if (auth_too_long)
+   {
+      aimee_log(LOG_WARN, "kb.http", "Authorization header too long for this listener");
+      send_response(fd, 400, "{\"error\":\"authorization header too long\"}");
+      return;
    }
    kb_reqctx_set_content_type(ctype_val);
 

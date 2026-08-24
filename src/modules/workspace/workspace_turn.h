@@ -29,11 +29,10 @@ const char *workspace_turn_git_target(const char *tool, const char *path, const 
  * td_bash / read / write / list through it. `image` may be NULL for the backend's
  * default; `workspace` is the host directory to expose AS the container's
  * workspace — normally the tree the delegate already has server-side, so it gets
- * the entire current source tree by bind-mount rather than the backend's empty
- * scratch dir. NULL keeps that historical empty dir. `workspace_read_only` mounts
- * it :ro — required whenever the tree is not the delegate's own, because a
- * delegate's changes must not leave its container: a shared tree must be
- * unwritable at the MOUNT, not merely guarded above it.
+ * the entire current source tree by bind-mount. NULL or empty is refused.
+ * `workspace_read_only` mounts it :ro — required whenever the tree is not the
+ * delegate's own, because a delegate's changes must not leave its container: a
+ * shared tree must be unwritable at the MOUNT, not merely guarded above it.
  *
  * Returns 1 if bound (pair it with workspace_turn_unbind_active, which also
  * RELEASES the container), 0 only when `task_id` is empty and there is therefore
@@ -69,6 +68,10 @@ int workspace_turn_container_bound(void);
 /* Test seam: force workspace_turn_container_bound()'s result. -1 restores the real
  * thread-bound state; 0/1 pin it. For tests exercising the container-delegate exemption. */
 void workspace_turn_set_container_bound_for_test(int bound);
+
+/* Test-only fallback for legacy unit requests that omit cwd. Production never
+ * calls this; an explicit workspace always wins. */
+void workspace_turn_set_default_workspace_for_test(const char *workspace);
 
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */
