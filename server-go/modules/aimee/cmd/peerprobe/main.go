@@ -27,17 +27,22 @@ import (
 
 const (
 	principalClass = 1
-	// 69, NOT 67. Ref 67 is reserved for the module's own OUTBOUND identity
-	// (aimee-db1, for reading the session directory out of db1). A probe sharing
-	// it would be a duplicate principal the moment that client exists, and the
-	// bus refuses the second attach -- so the failure would appear only after
-	// DirectorySource was wired, in whichever of the two attached second.
+	// 200, and the distance from the client range is the point.
 	//
-	// This ref is validation-only and deliberately NOT declared in
-	// process-contracts.json: its grant is written by hand into a validation
-	// container, never shipped. See
-	// docs/validation/aimee-module-on-a-clean-container.md.
-	principalRef = 69
+	// It was 69, chosen only because 67 belongs to the module's own OUTBOUND
+	// identity (aimee-db1) and a probe sharing that would be a duplicate
+	// principal the bus refuses on the second attach. But 69 is inside the range
+	// real clients are allocated from, and the control-plane module has since
+	// taken it. Two principals at one ref is a live collision: the bus admits
+	// whichever attaches first and denies the other, so the failure surfaces in
+	// the innocent process rather than at the cause.
+	//
+	// A validation-only ref must therefore sit somewhere the contract will never
+	// allocate, not merely somewhere unused TODAY. This ref is deliberately NOT
+	// declared in process-contracts.json -- its grant is written by hand into a
+	// validation container and never shipped -- which is exactly why it cannot
+	// rely on the validator to keep it clear of anyone else.
+	principalRef = 200
 	callDeadline = 5 * time.Second
 )
 

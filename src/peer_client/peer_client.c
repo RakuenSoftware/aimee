@@ -195,6 +195,30 @@ static void reply_free(struct reply *r)
    r->count = 0;
 }
 
+/* Say WHICH protocol disagreement, once per distinct one.
+ *
+ * Same lesson as warn_unreachable, one level down: "the reply was unreadable"
+ * covers a short header, a cell count past the ceiling, a length running off
+ * the end, trailing bytes the frame never declared, and a row of the wrong
+ * width. Five disagreements, five different things to go and look at, and a
+ * reader given only "protocol" has to reproduce the failure to learn which.
+ *
+ * This is not hypothetical tidiness: a `protocol` verdict with no detail is
+ * exactly where the CT 9101 diagnosis stopped, and the next question -- which
+ * part of the frame -- needed another container to answer. */
+static void warn_protocol(const char *what, uint32_t got, uint32_t want)
+{
+   static const char *seen[8];
+   static unsigned count;
+   for (unsigned i = 0; i < count; i++)
+      if (seen[i] == what)
+         return;
+   if (count < sizeof(seen) / sizeof(seen[0]))
+      seen[count++] = what;
+   LOG_WARN("peer.client", "aimee peer reply is unreadable: %s (got %u, want %u)", what, got,
+            want);
+}
+
 /* Returns 0 when the whole frame parsed, -1 otherwise. A partial parse is NOT
  * a partial success: a truncated reply and a short reply read the same once the
  * cells are handed on, so the frame is accepted whole or not at all. */
@@ -203,11 +227,17 @@ static int reply_decode(const uint8_t *body, uint32_t len, struct reply *out)
    out->cells = NULL;
    out->count = 0;
    if (len < 8u)
+   {
+      warn_protocol("reply shorter than its header", len, 8u);
       return -1;
+   }
    out->status = aimee_db1_get_u32(body);
    uint32_t count = aimee_db1_get_u32(body + 4u);
    if (count > AIMEE_DB1_FIELDS_MAX)
+   {
+      warn_protocol("declared cell count above the ceiling", count, AIMEE_DB1_FIELDS_MAX);
       return -1;
+   }
    if (count == 0)
       return 0;
    char **cells = calloc(count, sizeof(*cells));
@@ -217,14 +247,20 @@ static int reply_decode(const uint8_t *body, uint32_t len, struct reply *out)
    for (uint32_t i = 0; i < count; ++i)
    {
       if (at + 4u > len)
+      {
+         warn_protocol("frame ended where a cell length was expected", len, at + 4u);
          goto bad;
+      }
       uint32_t n = aimee_db1_get_u32(body + at);
       at += 4u;
       /* A declared length running past what arrived is not a cell to read part
          of -- and the addition is checked for wrap before the comparison, so a
          hostile length cannot make `at + n` fold back inside the buffer. */
       if (n > len || at > len - n)
+      {
+         warn_protocol("cell length runs past the end of the frame", n, len - at);
          goto bad;
+      }
       cells[i] = malloc((size_t)n + 1u);
       if (!cells[i])
          goto bad;
@@ -236,7 +272,13 @@ static int reply_decode(const uint8_t *body, uint32_t len, struct reply *out)
       disagree about the frame, which is not something to ignore because the
       part we understood looked fine. */
    if (at != len)
+   {
+      /* Trailing bytes the frame never declared. Worth naming precisely: it is
+         the one disagreement that looks like success right up until the counts
+         are compared, because every cell before it read correctly. */
+      warn_protocol("trailing bytes the frame never declared", len, at);
       goto bad;
+   }
    out->cells = cells;
    out->count = count;
    return 0;
@@ -370,9 +412,17 @@ static int row_take(char **cells, peer_client_message_t *m)
    if (!end || *end != '\0' || end == cells[7] || hop < 0 || hop > 1000000)
       return -1;
    m->hop = (int)hop;
-   if (strcmp(cells[8], "true") == 0)
+   /* The wire's boolean grammar is peerwire.Atob's, mirrored EXACTLY.
+      peerwire.Btoa writes "1"/"0" and Atob reads "1"/"true" and "0"/"false"/"",
+      and this reader once accepted only "true"/"false" -- so it rejected every
+      row the module has ever sent, because Btoa never writes those words.
+      The asymmetry is what hid it: Atob's leniency accepted this client's
+      requests, so half the exchange worked and only the reply direction broke,
+      which reads at the caller as the module failing rather than as a grammar
+      this side got wrong. */
+   if (strcmp(cells[8], "1") == 0 || strcmp(cells[8], "true") == 0)
       m->is_reply = 1;
-   else if (strcmp(cells[8], "false") == 0)
+   else if (strcmp(cells[8], "0") == 0 || strcmp(cells[8], "false") == 0 || cells[8][0] == '\0')
       m->is_reply = 0;
    else
       return -1;
@@ -399,8 +449,12 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
       return PEER_CLIENT_TRANSPORT;
    }
    /* from, to, text, conversation_id, hop, expect_reply */
+   /* "1"/"0", which is what peerwire.Btoa writes. Atob accepts "true"/"false"
+      too, so this cell worked either way -- and that is precisely why writing
+      the other spelling was not caught: one lenient reader kept a second
+      grammar alive on the wire until the strict direction met it. */
    const char *fields[6] = {from, to, text, conversation_id ? conversation_id : "", "0",
-                            expect_reply ? "true" : "false"};
+                            expect_reply ? "1" : "0"};
    struct reply r;
    peer_client_result_t rc = call_stage(PEER_STAGE_DELIVERY, PEER_OP_SEND, fields, 6, &r, transport);
    if (rc == PEER_CLIENT_REFUSED && status)
@@ -411,6 +465,8 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
    {
       /* The module answered OK with a shape this build does not know. Reading a
          prefix of it would be reading a different contract's row. */
+      warn_protocol("send reply is not one whole message row", r.count,
+                    (uint32_t)PEER_CLIENT_MESSAGE_WIDTH);
       reply_free(&r);
       if (transport)
          *transport = AIMEE_MODULE_CALL_PROTOCOL;
@@ -458,6 +514,7 @@ peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, in
       return rc;
    if (r.count != 2)
    {
+      warn_protocol("inbox_len reply is not two cells", r.count, 2u);
       reply_free(&r);
       if (transport)
          *transport = AIMEE_MODULE_CALL_PROTOCOL;
@@ -509,6 +566,8 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
       a final row whose tail is whatever the next row's head was. */
    if (r.count < 1 || (r.count - 1) % PEER_CLIENT_MESSAGE_WIDTH != 0)
    {
+      warn_protocol("take reply is not a remaining-count plus whole rows", r.count,
+                    (uint32_t)PEER_CLIENT_MESSAGE_WIDTH);
       reply_free(&r);
       if (transport)
          *transport = AIMEE_MODULE_CALL_PROTOCOL;

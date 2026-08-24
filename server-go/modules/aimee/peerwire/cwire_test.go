@@ -4,8 +4,22 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 )
+
+// cImplText is the C client's implementation, where the parsing lives. The
+// header carries the contract; this carries whether it is honoured.
+const cImpl = "../../../../src/peer_client/peer_client.c"
+
+func cImplText(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(cImpl)
+	if err != nil {
+		t.Fatalf("cannot read the C client at %s: %v", cImpl, err)
+	}
+	return string(b)
+}
 
 // The C client in src/peer_client transcribes this package's status numbers and
 // row width, because those integers cross a process boundary and C cannot import
@@ -112,5 +126,48 @@ func TestCClientPinsTheMessageWidth(t *testing.T) {
 	if got != MessageWidth {
 		t.Errorf("PEER_CLIENT_MESSAGE_WIDTH is %d and peerwire.MessageWidth is %d",
 			got, MessageWidth)
+	}
+}
+
+// TestCClientSpeaksTheSameBooleanGrammar is the guard that was missing.
+//
+// This file pinned the status numbers and the row width and stopped there, so
+// the two sides agreed about how many cells a row has and disagreed about what
+// is IN one. Btoa writes "1"/"0"; the C reader accepted only "true"/"false",
+// which Btoa NEVER writes -- so it rejected every message row the module has
+// ever sent, and both test suites stayed green because each had been written
+// from its own side's assumption. The C fixture even spelled the cell "false",
+// confirming the misreading it was supposed to catch.
+//
+// Atob's leniency is what let it survive undetected: it accepts "true"/"false"
+// as well, so the C client's REQUESTS were understood and only the reply
+// direction broke. Half a conversation working is worse than none, because at
+// the caller it reads as the far side failing rather than as a grammar this
+// side got wrong.
+func TestCClientSpeaksTheSameBooleanGrammar(t *testing.T) {
+	body := cImplText(t)
+
+	// Whatever Btoa can WRITE, the C side must be able to READ. Asserted against
+	// Btoa's real output rather than a hand-copied list, so a change to Btoa
+	// fails here instead of quietly leaving the C reader behind.
+	for _, v := range []bool{true, false} {
+		lit := `"` + Btoa(v) + `"`
+		if !strings.Contains(body, "strcmp(cells[8], "+lit+")") {
+			t.Errorf("peerwire.Btoa(%v) writes %s and the C client never compares against it, "+
+				"so every row carrying that value is rejected as malformed", v, lit)
+		}
+	}
+
+	// And whatever the C side WRITES for a bool, Atob must accept -- otherwise
+	// the module refuses the request and the caller is told its own well-formed
+	// call was wrong.
+	if !strings.Contains(body, `expect_reply ? "1" : "0"`) {
+		t.Error(`the C client no longer writes expect_reply as "1"/"0"; if the spelling ` +
+			`changed, check peerwire.Atob still accepts what it now writes`)
+	}
+	for _, spelled := range []string{"1", "0"} {
+		if _, err := Atob(spelled); err != nil {
+			t.Errorf("Atob rejects %q, which the C client writes for a bool: %v", spelled, err)
+		}
 	}
 }

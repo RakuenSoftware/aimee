@@ -659,3 +659,118 @@ CT 9100 destroyed and purged, watchdog stopped, every rig file removed from
 `/root`, verified afterwards. The containers left on the host (9001, 9078–9080)
 belong to other sessions and were not touched. The 30s-deadline edit and the
 module's DIAG logging existed only inside the container and are not in the tree.
+
+## Root cause, and the feature working (2026-08-24, CT 9101)
+
+The previous section reported a `peer_send` that "enters the module handler and
+never returns", and named the bus host as the likely owner. **That reading was
+wrong, and it was wrong because of a defect in the diagnostic rather than in the
+reasoning.**
+
+Two of the measurements behind it had broken:
+
+- The timing harness printed `0.00s` for every call because `bc` was not
+  installed in that image. "Fast" was read off a timer that was not running.
+- The conclusion "only one obs_bus failure was logged" came from a log captured
+  BEFORE the runs it was applied to. `obs_bus_log_module_call_failure` is not
+  rate-limited; the lines were simply not there yet.
+
+With both fixed, the answer took one run.
+
+### The client could not say which failure it had
+
+`peer_client` collapsed five conditions into one sentence — "the module did not
+answer" — and logged them once per PROCESS. The first failure claimed the single
+warning and every later one was silent, including a DIFFERENT failure needing a
+different repair. That is why an absent module and a rejected reply were
+indistinguishable for six container runs.
+
+Fixed: the `aimee_module_call_result_t` is carried out through a `transport`
+out-param, named (`capability_absent`, `deadline_exceeded`, `capability_denied`,
+`protocol`, …), reported in the text a model reads, and warned once per DISTINCT
+code. A reply that arrived but could not be decoded reports `protocol` rather
+than an absent module — the module demonstrably replied, so sending the reader
+to check whether it is running is the wrong instruction.
+
+The very next run said `protocol`, **in 24 milliseconds**. Not a hang. The
+module replies and the client rejects the reply.
+
+### The defect
+
+`peerwire.Btoa` writes `"1"`/`"0"`. The C row reader accepted only `"true"` and
+`"false"` — words `Btoa` NEVER writes — so it rejected **every message row the
+module has ever sent**.
+
+`peerwire.Atob` is lenient and accepts `"true"`/`"false"` as well, so the C
+client's REQUESTS were understood and only the reply direction broke. Half a
+conversation working is worse than none: at the caller it reads as the far side
+failing rather than as a grammar this side got wrong.
+
+Both test suites were green throughout. The C fixture spelled the cell
+`"false"` — it had been written from the same misreading as the code it was
+meant to check, so every assertion passed against a row that cannot come off the
+wire. And `cwire_test.go`, the cross-language pin, checked the status numbers and
+the row width and stopped there: the two sides agreed on how many cells a row
+has and disagreed about what is IN one.
+
+### The guards that now exist
+
+- `TestCClientSpeaksTheSameBooleanGrammar` asserts, against `Btoa`'s real output
+  rather than a copied list, that whatever the module can write the C side can
+  read — and that whatever the C side writes, `Atob` accepts. Demonstrated red by
+  changing the C literal.
+- Five C checks drive every spelling `Atob` accepts through the reader.
+- The C fixture now carries the row the module actually sends.
+- Mutation: reverting the reader to `"true"`/`"false"` turns `a zero status with
+  a full row is a delivery` red.
+
+### The feature, working
+
+Through `POST /v1/mcp/call` — the request `aimee mcp-serve` posts for a real MCP
+client — with sessions the server registered itself:
+
+```
+gamma -> delta:   Delivered to delta (message pmsg-3, conversation conv-4).
+delta drains:     1 msg; 'gamma speaking' from gamma
+delta -> gamma:   Delivered to gamma (message pmsg-5, conversation conv-6).
+gamma drains:     1 msg; 'delta answering' from delta
+delivered ONCE:   0 message(s) taken; 0 still waiting.
+```
+
+Three sessions, not two, so the pair is not a special case: `epsilon drains: 2
+msg from ['delta', 'gamma']`. An 8192-byte body arrives with all 8192 bytes
+intact and 8193 is refused `too_long`. `self` refuses. peerprobe passes twice
+with **exit 0 captured before any pipe** — the earlier `probe exit=$?` after
+`| tail` had been reading tail's status.
+
+Negative control: with the module stopped the same send answers
+`deadline_exceeded` and with it back it delivers, so the success is not an
+absence of checking. `FLEET server=1 kb=1 pg=1 db1=1 aimee=1 config=2`,
+`db2_ok True`, `warnings []`, zero knowledge-unreachable lines, and exactly one
+`peer.client` line in the whole log — the negative control's own.
+
+### Known and NOT fixed here
+
+**A send to a session that does not exist answers `unavailable`, not
+`no_peer`.** That is correct given the store: `db1_server_session_get` returns
+`-1` for both "no row" and "store broken", and db1's own stage comment says
+mapping that to MISSING "would report a broken store as nothing recorded". The
+conservative answer is the right one, and its cost is that a caller is told to
+retry for a peer that will never exist. The repair belongs to db1's read
+contract — changing that return would touch every caller — and db1 is being
+absorbed into Go by another session, so it is raised there rather than patched
+around here.
+
+**peerprobe moved from principal ref 69 to 200.** 69 collided with the
+control-plane module's outbound identity, allocated by another session, and the
+collision surfaced as `attach denied` in the probe — a validation run reporting
+a bus problem that was really bookkeeping two repositories away. The guard that
+was supposed to prevent this read the contract for refs already DECLARED, which
+cannot see a ref someone is about to take; it now enforces a floor far above the
+range the contract allocates from, and fails if the contract ever grows into it.
+
+### Teardown
+
+CT 9101 destroyed and purged, watchdog stopped, every rig file removed from
+`/root`, verified. Containers 9001 and 9078–9080 belong to other sessions and
+were not touched.

@@ -330,27 +330,37 @@ registry's own wrapping was reasonable. Only running the two together shows what
 a caller receives, which is the argument for testing across a seam rather than on
 both sides of it.
 
-### A daemon-originated send wedges the module (open, CT 9100)
+### The wire has ONE boolean grammar, and it is peerwire's
 
-`peer_send` reached this module from aimee-server for the first time on
-2026-08-24, and the handler ENTERS and never returns. Instrumented to log every
-invocation, a server-originated send logs its arrival and then nothing: no
-success, no refusal, no encode error. It is wedged inside `Registry.Send`, whose
-first act is the nested db1 lookup that resolves the sender.
+`peerwire.Btoa` writes `"1"`/`"0"`; `Atob` reads those and `"true"`/`"false"`.
+The C client in `src/peer_client` accepted only the two words `Btoa` never
+writes, so it rejected every message row this module has ever sent -- while
+`Atob`'s leniency accepted the client's REQUESTS, so the send direction worked
+and only replies broke. Half a conversation working is worse than none: at the
+caller it reads as this module failing.
 
-The control that makes it specific: `aimee-peerprobe`, an external bus client,
-ran the same operation against the same module process in the same second and
-delivered. Ruled out by measurement: the deadline (raised 5s to 30s, still fails
-in about a second), the frame (logged at the declared arity), availability (the
-module logged the arrival), and grant admission (`self` and `too_long` refusals
-cross the same grant and stage).
+Both suites stayed green. The C fixture spelled the cell `"false"`, having been
+written from the same misreading as the code it checked, and `cwire_test.go`
+pinned the status numbers and the row width but nothing about what is IN a cell.
+`TestCClientSpeaksTheSameBooleanGrammar` now asserts that against `Btoa`'s real
+output, in both directions.
 
-`peer_inbox`, one nested lookup, succeeds until the first send hangs, after
-which later lookups hang or return `unavailable`. So the wedge appears to poison
-the directory path rather than failing in isolation.
+The lesson is not about booleans. Two sides agreeing on a frame's SHAPE and
+disagreeing about a cell's spelling produces no error anywhere -- the reply is
+well-formed, the count is right, and the value is unreadable.
 
-The mechanism belongs to the bus host rather than to peer messaging, and is not
-yet established. See docs/validation/aimee-module-on-a-clean-container.md.
+### The earlier "daemon-originated send wedges the module" reading was wrong
+
+An earlier revision of this document reported a send that entered the handler
+and never returned, and pointed at the bus host. That was a defect in the
+diagnostic, not in the module: the timing harness printed `0.00s` for every call
+because `bc` was absent, and the "only one bus failure was logged" claim came
+from a log captured before the runs it was applied to. The handler was returning
+normally the whole time; the client was rejecting its reply.
+
+Recorded because the wrong reading was confident and specific, and the thing
+that corrected it was making the client NAME its failure rather than summarise
+five of them.
 
 ### The module as deployed has no session directory
 

@@ -66,14 +66,35 @@ func TestProbeRefDoesNotCollideWithDeclaredPrincipals(t *testing.T) {
 			"BOTH parties attach, long after this line was written.", principalRef, owner)
 	}
 
-	// 67 specifically: reserved for this module's outbound identity, which is
-	// agreed but not yet declared, so the loop above cannot see it. Refs that are
-	// spoken for but unwritten are exactly the ones a contract file cannot warn
-	// about, which is why this one is named.
-	const reservedOutbound = 67
-	if principalRef == reservedOutbound {
-		t.Fatalf("probe ref %d is reserved for aimee's outbound client (aimee-db1). "+
-			"It is not in the contract yet, so nothing else would have told you.",
-			principalRef)
+	// Not colliding TODAY is the wrong bar, and this test learned it the hard
+	// way: the probe sat at 69, the loop above was green because nothing in THIS
+	// contract declared 69, and another session allocated 69 to the control-plane
+	// module's outbound identity. The collision then appeared on hardware as
+	// "attach denied" in whichever process started second -- which is the probe,
+	// so a validation run reported a bus problem that was really a bookkeeping
+	// one two repositories away.
+	//
+	// A contract file cannot warn about a ref someone else is about to take, so
+	// the invariant is not "unused" but "somewhere the contract will never
+	// allocate from". Clients live just above the module refs and are handed out
+	// in ascending order, so a validation-only ref must sit far above the
+	// high-water mark with room for the range to grow into.
+	const probeRefFloor = 128
+	if principalRef < probeRefFloor {
+		t.Fatalf("probe ref %d is inside the range the contract allocates from. "+
+			"Use one at or above %d: a validation ref has to be somewhere nothing "+
+			"will EVER be declared, not merely somewhere nothing is declared yet.",
+			principalRef, probeRefFloor)
+	}
+	highest := uint32(0)
+	for ref := range taken {
+		if ref > highest {
+			highest = ref
+		}
+	}
+	if highest >= probeRefFloor {
+		t.Fatalf("the contract now declares ref %d, at or above the probe floor of %d. "+
+			"The floor has to move up and this probe with it, or the next client "+
+			"allocated lands on top of it.", highest, probeRefFloor)
 	}
 }

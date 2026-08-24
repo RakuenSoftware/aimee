@@ -120,9 +120,14 @@ static const char *seen_cell(uint32_t want, char *buf, size_t cap)
 }
 
 /* A well-formed 11-cell message row. */
+/* The row the MODULE actually sends. is_reply is "0", because peerwire.Btoa
+   writes "1"/"0" and never the words -- this fixture used to say "false", which
+   agreed with the client's bug and made every check pass against a row that
+   cannot come off the wire. A fixture written from the same misreading as the
+   code under test confirms the misreading. */
 static const char *ROW[PEER_CLIENT_MESSAGE_WIDTH] = {
-    "msg-1", "corr-1", "conv-1", "sess-a", "uid:1000", "alpha", "sess-a", "0", "false",
-    "2026-08-24T07:00:00Z", "hello from a"};
+    "msg-1", "corr-1", "conv-1", "sess-a", "uid:1000", "alpha", "sess-a", "0", "0",
+    "1787554800000000000", "hello from a"};
 
 static int checks;
 static void ok(int cond, const char *what)
@@ -187,7 +192,8 @@ static void test_three_outcomes(void)
    ok(get_u32(g_seen + 4) == 6u, "send sends exactly six fields");
    ok(strcmp(seen_cell(0, buf, sizeof buf), "sess-a") == 0, "cell 0 is the sender");
    ok(strcmp(seen_cell(1, buf, sizeof buf), "sess-b") == 0, "cell 1 is the recipient");
-   ok(strcmp(seen_cell(5, buf, sizeof buf), "false") == 0, "expect_reply travels as text");
+   ok(strcmp(seen_cell(5, buf, sizeof buf), "0") == 0,
+      "expect_reply travels in peerwire's grammar (\"0\"), not a second spelling");
    ok(g_seen_kind == 4096u + 31u * 256u + 1u && g_seen_stage == 1u,
       "the kind is the bus formula for ref 31 stage 1, not a transcribed 12033");
 }
@@ -275,7 +281,49 @@ static void test_malformed(void)
       reply_set(PEER_CLIENT_STATUS_OK, bad, PEER_CLIENT_MESSAGE_WIDTH);
    }
    ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
-      "an is_reply cell that is neither true nor false is refused, not read as false");
+      "an is_reply cell outside peerwire's grammar is refused, not read as false");
+
+   /* Every spelling peerwire.Atob accepts must be accepted here, because the two
+      sides have to share ONE grammar. This client accepted only the two words
+      Btoa NEVER writes, so it rejected every real row while its own tests stayed
+      green -- the fixture had been written from the same misreading. These are
+      the checks that would have caught it. */
+   {
+      const char *const truthy[] = {"1", "true"};
+      const char *const falsy[] = {"0", "false", ""};
+      for (size_t i = 0; i < sizeof truthy / sizeof truthy[0]; i++)
+      {
+         const char *row[PEER_CLIENT_MESSAGE_WIDTH];
+         for (int j = 0; j < PEER_CLIENT_MESSAGE_WIDTH; j++)
+            row[j] = ROW[j];
+         row[8] = truthy[i];
+         reset();
+         reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+         peer_client_message_t got;
+         int good =
+             peer_client_send("a", "b", "hi", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
+             got.is_reply == 1;
+         if (good)
+            peer_client_message_free(&got);
+         ok(good, "peerwire's truthy spellings are read as a reply");
+      }
+      for (size_t i = 0; i < sizeof falsy / sizeof falsy[0]; i++)
+      {
+         const char *row[PEER_CLIENT_MESSAGE_WIDTH];
+         for (int j = 0; j < PEER_CLIENT_MESSAGE_WIDTH; j++)
+            row[j] = ROW[j];
+         row[8] = falsy[i];
+         reset();
+         reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+         peer_client_message_t got;
+         int good =
+             peer_client_send("a", "b", "hi", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
+             got.is_reply == 0;
+         if (good)
+            peer_client_message_free(&got);
+         ok(good, "peerwire's falsy spellings are read as not-a-reply");
+      }
+   }
 }
 
 /* ── the inbox ────────────────────────────────────────────────────────────── */
