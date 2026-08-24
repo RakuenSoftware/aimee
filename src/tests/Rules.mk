@@ -2171,7 +2171,7 @@ $(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o 
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
+	$(TESTLINK) -o $@ $^ $(L_CORE) -lm -lcrypto
 
 $(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
                                     $(OBJDIR)/server/web_search_breaker.o
