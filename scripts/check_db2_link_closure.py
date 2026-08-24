@@ -36,6 +36,21 @@ DISPOSITIONS = {
     "private-implementation",
     "remove/dead",
 }
+# db2 sources OUTSIDE the c/ boundary, and the symbol prefix each defines.
+#
+# The boundary directory is db2's data layer. The module also owns its protocol
+# surface, which lives one level up because it is not a data-layer file -- and
+# its symbols are therefore reported as undefined by every TU that calls it.
+#
+# They are not undefined by the module: they are defined in a source the
+# descriptor lists, so the standalone bundle carries them, exactly as it carries
+# the vendored cJSON. Checked against the descriptor at run time so a moved or
+# deleted source fails here instead of leaving the evidence describing a file
+# that no longer exists.
+MODULE_OWNED_SOURCES = {
+    "aimee_vector_": "src/modules/db2/vector_route.c",
+}
+
 SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$@]*$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
 # Measure source-level ABI dependencies, not distro-specific compiler hardening
@@ -1292,6 +1307,13 @@ def classify(symbol: str) -> tuple[str, str]:
             "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned "
             "vendored source rather than inherit a monolithic-core object.",
         )
+    for prefix, source in MODULE_OWNED_SOURCES.items():
+        if symbol.startswith(prefix):
+            return (
+                "descriptor-owned-copy/generated-input",
+                f"Implemented by {source}, a DB2 source outside the c/ data-layer boundary; the "
+                "standalone DB2 bundle packages it rather than inheriting it from the monolith.",
+            )
     if symbol.startswith(INJECTED_PREFIXES):
         return (
             "injected-module-contract",
@@ -1424,8 +1446,20 @@ def build_contract(root: Path) -> dict[str, object]:
     unresolved = probe(root, sources, support_units)
     rows: list[dict[str, object]] = []
     counts = {name: 0 for name in sorted(DISPOSITIONS)}
+    descriptor_sources = descriptor.get("sources") if isinstance(descriptor, dict) else None
     for symbol, references in unresolved.items():
         disposition, evidence = classify(symbol)
+        # Only when the attribution is actually made. A root with no such symbol
+        # has nothing to check, which is every synthetic fixture.
+        for prefix, owned in sorted(MODULE_OWNED_SOURCES.items()):
+            if symbol.startswith(prefix) and (
+                not isinstance(descriptor_sources, list) or owned not in descriptor_sources
+            ):
+                fail(
+                    "module-owned-source",
+                    f"classify() attributes {symbol} to {owned}, "
+                    "which the descriptor does not list",
+                )
         counts[disposition] += 1
         rows.append({
             "symbol": symbol,

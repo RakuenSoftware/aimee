@@ -220,6 +220,12 @@
     {
       "ctest": false,
       "make": true,
+      "module": "db2",
+      "test": "src/tests/test_vector_route_pgvec.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "delegates",
       "test": "src/tests/test_aimee_ir_rescue.c"
     },

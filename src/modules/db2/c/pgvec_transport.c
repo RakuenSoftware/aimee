@@ -550,6 +550,86 @@ int pgvec_scroll(const char *table, int64_t offset, int64_t *ids_out, int max,
  * Search
  * ---------------------------------------------------------------------- */
 
+/* Append the scope restriction shared by the memory search and the per-point
+ * visibility check.
+ *
+ * Active requests use the canonical memory scope tables, including legacy
+ * memory_workspaces rows, rather than stale denormalized embedding columns:
+ * old rows can carry only a legacy workspace tag, and scope tags can change
+ * after the embedding was written. Legacy direct callers without request
+ * context keep their existing column-filter behaviour.
+ *
+ * Both callers share this because a visibility check laxer than the search
+ * would admit rows the search would never return -- which is precisely what
+ * the check exists to prevent, and drift between two copies is invisible until
+ * it matters. */
+static int append_memory_scope_clause(char *where, size_t cap, int scope_active, int has_scope)
+{
+   size_t wpos = strlen(where);
+   const char *clause = NULL;
+   if (scope_active)
+      clause = PGVEC_MEMORY_SCOPE_FILTER_SQL;
+   else if (has_scope)
+      /* Empty identity components are not wildcards: otherwise a project-only
+       * request would admit every row whose workspace column is empty. */
+      clause = " AND (e.primary_scope = 'global' OR e.workspace = '_shared'"
+               " OR (:ws <> '' AND e.workspace = :ws) OR (:pj <> '' AND e.project = :pj))";
+   else
+      return 0;
+
+   int nw = snprintf(where + wpos, cap - wpos, "%s", clause);
+   if (nw < 0 || (size_t)nw >= cap - wpos)
+      return -1;
+   return 0;
+}
+
+/* Is this point visible to the caller's current scope? 1 yes, 0 no, -1 error.
+ *
+ * This authorises candidates that came from an EXTERNAL vector provider: a
+ * separate process holding embeddings, which is not trusted to enforce this
+ * deployment's tenancy. Candidates from the search below need no such check --
+ * the clause that produced them is the clause here.
+ *
+ * A point the provider invented, or one deleted since it indexed, fails the
+ * point_id equality and is refused, so this is also the staleness check.
+ *
+ * The column-filter branch is unreachable from here by construction: has_scope
+ * is 0, so an inactive scope appends nothing and every point is visible. That
+ * is the right answer for a legacy direct caller, which is a caller that did
+ * not scope its search either. */
+int pgvec_memory_point_visible(int64_t point_id)
+{
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+
+   db2_memory_scope_context_t scope_ctx;
+   db2_memory_scope_context_get(&scope_ctx);
+
+   char where[4096] = "WHERE e.point_id = :pid";
+   if (append_memory_scope_clause(where, sizeof(where), scope_ctx.active, 0) < 0)
+      return -1;
+
+   char sql[8192];
+   int sql_len = snprintf(sql, sizeof(sql), "SELECT 1 FROM memory_embeddings e %s LIMIT 1", where);
+   if (sql_len < 0 || (size_t)sql_len >= sizeof(sql))
+      return -1;
+
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_int64(stmt, "pid", point_id);
+   if (scope_ctx.active)
+      db2_memory_scope_bind_current(stmt);
+
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   if (rc == AIMEE_PG_ERR)
+      return -1;
+   return rc == AIMEE_PG_ROW;
+}
+
 int pgvec_memory_search(const float *vec, int dim, const char *record_type,
                         const char *const *kinds, int n_kinds, const char *workspace,
                         const char *project, int limit, int64_t *ids, double *scores, int max)
@@ -572,32 +652,12 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
       project = scope_ctx.project;
    }
 
-   /* Build the WHERE clause. Active requests use the canonical memory scope
-    * tables, including legacy memory_workspaces rows, rather than stale
-    * denormalized embedding columns. Legacy direct callers without request
-    * context retain their existing column-filter behavior. */
    char where[4096] = "WHERE e.record_type = :record_type";
-   size_t wpos = strlen(where);
-
    int has_scope = (workspace && workspace[0]) || (project && project[0]);
-   if (scope_ctx.active)
+   if (append_memory_scope_clause(where, sizeof(where), scope_ctx.active, has_scope) < 0)
    {
-      int nw = snprintf(where + wpos, sizeof(where) - wpos, "%s", PGVEC_MEMORY_SCOPE_FILTER_SQL);
-      if (nw < 0 || (size_t)nw >= sizeof(where) - wpos)
-      {
-         free(vec_text);
-         return -1;
-      }
-      wpos += (size_t)nw;
-   }
-   else if (has_scope)
-   {
-      /* Empty identity components are not wildcards: otherwise a project-only
-       * request would admit every row whose workspace column is empty. */
-      snprintf(where + wpos, sizeof(where) - wpos,
-               " AND (e.primary_scope = 'global' OR e.workspace = '_shared'"
-               " OR (:ws <> '' AND e.workspace = :ws) OR (:pj <> '' AND e.project = :pj))");
-      wpos = strlen(where);
+      free(vec_text);
+      return -1;
    }
 
    /* Build kinds IN clause inline (values are not user input, they come from

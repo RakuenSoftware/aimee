@@ -93,17 +93,27 @@ static void test_default_external_and_authorization(void)
    aimee_vector_search_request_t req = request(vec);
    aimee_vector_search_outcome_t out;
 
+   /* Internal results are NOT authorised: they came from a query that applied
+    * the scope filter, so the callback would be a round trip per candidate to
+    * re-derive it. Point 11 is what proves it -- the callback rejects that id,
+    * and it is still here. Asserting only the count would also pass against a
+    * route that had dropped authorisation entirely. */
    assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_OK);
    assert(out.route == AIMEE_VECTOR_ROUTE_DEFAULT_PGVECTOR && out.selected_principal == 0);
-   assert(internal.calls == 1 && external.calls == 0 && out.reply.count == 2);
-   assert(out.reply.candidates[0].point_id == 10 && out.reply.candidates[1].point_id == 12);
+   assert(internal.calls == 1 && external.calls == 0 && out.reply.count == 3);
+   assert(out.reply.candidates[0].point_id == 10 && out.reply.candidates[1].point_id == 11 &&
+          out.reply.candidates[2].point_id == 12);
+   assert(auth.calls == 0);
 
    auth.reject_id = 21;
    assert(aimee_vector_route_select(&route, 1001, 1, 0, search, &external) == 0);
    assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_OK);
    assert(out.route == AIMEE_VECTOR_ROUTE_EXTERNAL && out.selected_principal == 1001);
+   /* A provider IS authorised: it is a separate process holding embeddings and
+    * is not trusted to enforce tenancy. Point 21 is rejected and absent. */
    assert(internal.calls == 1 && external.calls == 1 && out.reply.count == 2);
    assert(out.reply.candidates[0].point_id == 20 && out.reply.candidates[1].point_id == 22);
+   assert(auth.calls == 3);
 
    aimee_vector_route_clear(&route);
    assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_OK);

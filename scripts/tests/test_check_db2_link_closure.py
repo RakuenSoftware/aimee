@@ -730,10 +730,19 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 139)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 141)
+        # Two, and both are db2's own: memory_vectors.c calls the vector route,
+        # which lives at src/modules/db2/vector_route.c rather than under c/, so
+        # the probe -- which compiles only the c/ boundary -- cannot see its
+        # definitions. The standalone bundle packages that file; nothing is owed
+        # to the monolith. Pinned at 2 so a THIRD such row has to be argued for.
         self.assertEqual(
-            contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
+            contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 2
         )
+        self.assertEqual(sorted(
+            row["symbol"] for row in contract["unresolved"]
+            if row["disposition"] == "descriptor-owned-copy/generated-input"
+        ), ["aimee_vector_memory_candidates_search", "aimee_vector_route_init"])
         self.assertEqual(contract["summary"]["dispositions"]["system-link"], 139)
         self.assertEqual(
             contract["summary"]["dispositions"]["portable-core-promotion"], 0

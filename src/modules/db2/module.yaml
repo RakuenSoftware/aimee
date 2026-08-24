@@ -387,7 +387,8 @@
     "src/tests/test_db2_sketch_support.c",
     "src/tests/test_db2_text_support.c",
     "src/tests/test_db2_time_support.c",
-    "src/tests/test_vector_route.c"
+    "src/tests/test_vector_route.c",
+    "src/tests/test_vector_route_pgvec.c"
   ],
   "docs": [
     "docs/modules/db2.md"

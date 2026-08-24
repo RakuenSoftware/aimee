@@ -214,9 +214,24 @@ and they gate every search rather than four of them.
 ## Trust boundary
 
 A vector store is a separate process holding embeddings. It is not trusted to
-enforce tenancy: `aimee_vector_memory_candidates_search()` runs every returned
-candidate through an authorize callback before the result is used. A provider
-that returned another workspace's point ids would have them dropped.
+enforce tenancy: `aimee_vector_memory_candidates_search()` runs every candidate a
+PROVIDER returned through an authorize callback before the result is used. A
+provider that returned another workspace's point ids would have them dropped, and
+so would ids for points that do not exist or were deleted since it indexed them.
+
+**Candidates from the internal path are not re-authorised**, and the asymmetry is
+deliberate. They came from a query whose `WHERE` clause applied the scope filter,
+so they are authorised by construction; checking them again would be a round trip
+per candidate to re-derive what the database had just decided, paid by every
+search in every deployment. Getting this wrong in either direction costs
+something real -- authorising internal results makes every search pay for a
+guarantee it already has, and skipping external ones lets another process choose
+which rows a deployment may see.
+
+The callback for memory is `pgvec_memory_point_visible()`, and it shares its
+scope clause with `pgvec_memory_search()` through one builder. Written twice they
+would drift, and drift here is silent and one-directional: a check laxer than the
+search admits rows the search would never have returned.
 
 Scores are validated finite, point ids positive, and duplicates in a reply are
 refused, so a provider cannot make one point appear repeatedly to crowd out
@@ -245,9 +260,37 @@ rediscovered.
 
 ## State
 
-The contract, its codec and the route are implemented and tested. No provider
-module exists yet, which is why the struct layout could still change: once one
-exists it cannot.
+The contract, its codec and the route are implemented, tested, and **called**.
+
+`pgvec_memory_vector_search_record_type()` and `..._with_kinds()` -- the two entry
+points behind every semantic memory query in the product -- go through
+`aimee_vector_memory_candidates_search()`. With no provider selected the route's
+default leg calls straight back into `pgvec_memory_search()` with the caller's own
+arguments, so today's behaviour is unchanged; when a provider is selected it
+receives those searches.
+
+That sentence is here because the previous version of this section said
+"implemented and tested" about a module with zero callers, which a reader would
+reasonably have read as "a provider would receive searches". It would not have.
+
+**What is not expressible takes the direct path**: a `top_k` above 256, a
+`record_type` longer than the field, or -- most often -- a search with no scope
+hint at all, which carries no tenancy statement and must therefore never leave the
+deployment. `pgvec_memory_vector_routed_searches()` counts what went through the
+route, which is the only way to tell the two paths apart from outside, since they
+return identical results by design. An operator uses it to answer "is the provider
+we attached actually seeing traffic"; `unit-test-vector-route-pgvec` uses it to
+prove that the route was taken at all.
+
+**Still missing before a provider is useful**: nothing yet receives a CAPABILITIES
+announcement and calls `aimee_vector_route_select()`, so no provider can be
+selected; and the apply path does not yet write the multi-valued `visibility` and
+`generation` labels the searches filter on -- `db3_projection_labels()` builds a
+JSONB object via `jsonb_object_agg`, which is single-valued, and the Go outbox
+parses labels into `map[string]string`.
+
+No provider module exists yet, which is why the struct layout could still change:
+once one exists it cannot.
 
 Related: [postgres](postgres.md) owns the default path and the detection,
 [memory](memory.md) is the largest consumer of vector search.

@@ -82,6 +82,13 @@ int pgvec_scroll(const char *table, int64_t offset, int64_t *ids_out, int max,
  * kinds/n_kinds: optional IN filter on the kind column (NULL/0 = no filter).
  * workspace/project: optional scope OR filter; pass "" to skip.
  * Returns number of results written (<= max), -1 on error. */
+/* Is point_id visible to the caller's current memory scope? 1 yes, 0 no, -1 error.
+ *
+ * For authorising candidates from an external vector provider, which is not
+ * trusted to enforce tenancy. Applies the same scope restriction as
+ * pgvec_memory_search, from the same thread-local scope context. */
+int pgvec_memory_point_visible(int64_t point_id);
+
 int pgvec_memory_search(const float *vec, int dim, const char *record_type,
                         const char *const *kinds, int n_kinds, const char *workspace,
                         const char *project, int limit, int64_t *ids, double *scores, int max);

@@ -460,10 +460,13 @@ wire and Merkle inputs, validates every provider verdict and encoded length, and
 signatures, identities, and partial frames after absence or failure. This moves total debt from 151
 to 139 and injected-contract debt from 12 to zero.
 
-The remaining 139 unresolved rows are declared system links. The standalone C closure therefore
-has zero packaging, injection, promotion, private-implementation, or dead-code debt. This completes
-the S2 C closure gate; it does not activate the process owner or complete the S4/S6 ownership and Go
-provider transitions.
+Of the 141 unresolved rows, 139 are declared system links and 2 are db2's own:
+`memory_vectors.c` calls the vector route, which lives at `src/modules/db2/vector_route.c` rather
+than under `c/`, so the probe -- which compiles only the `c/` boundary -- cannot see its
+definitions. The standalone bundle packages that file. The C closure therefore has zero injection,
+promotion, private-implementation, or dead-code debt, and its only packaging requirement is one of
+db2's own sources rather than a copy of anybody else's. This completes the S2 C closure gate; it
+does not activate the process owner or complete the S4/S6 ownership and Go provider transitions.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the

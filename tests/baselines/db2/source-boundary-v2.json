@@ -6,12 +6,12 @@
     "c_files": 138,
     "headers": 138,
     "sql_files": 6,
-    "consumer_files": 306,
+    "consumer_files": 307,
     "production_consumers": 151,
-    "test_consumers": 155,
-    "include_directives": 1004,
-    "outbound_dependency_rows": 575,
-    "outbound_include_directives": 575
+    "test_consumers": 156,
+    "include_directives": 1005,
+    "outbound_dependency_rows": 578,
+    "outbound_include_directives": 578
   },
   "source_files": {
     "c": [
@@ -5897,6 +5897,16 @@
       ]
     },
     {
+      "path": "src/tests/test_vector_route_pgvec.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/tests/test_wiki_render.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -9177,8 +9187,29 @@
     },
     {
       "source": "src/modules/db2/c/memory_vectors.c",
+      "header": "aimee/db2/vector_route.h",
+      "resolved": "src/modules/db2/include/aimee/db2/vector_route.h",
+      "classification": "module-public-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_vectors.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_vectors.c",
       "header": "stdio.h",
       "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/stdio.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_vectors.c",
+      "header": "string.h",
+      "resolved": "src/vendor/tree-sitter/crates/language/wasm/include/string.h",
       "classification": "vendored-system-api",
       "count": 1
     },
@@ -10184,5 +10215,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "f150588b35c53139afb73580ca31bdee8ee8d9f199137a893b794dd98c9208f1"
+  "fingerprint": "1d1594a6e67f415b6b12fcd8c7dbb24f6d3f9cbecdee5ebc372220e62eac1632"
 }

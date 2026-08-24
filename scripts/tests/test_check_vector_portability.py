@@ -38,7 +38,7 @@ class PortabilityTests(unittest.TestCase):
 
     def test_production_audit_covers_every_pgvector_declaration(self) -> None:
         summary = checker.run(REPO_ROOT)
-        self.assertEqual(sum(summary.values()), 74)
+        self.assertEqual(sum(summary.values()), 76)
         self.assertEqual(summary, {
             # All fourteen, and all portable now: search version 2 carries a
             # collection and a conjunction of eq/ne/in predicates over labels
@@ -46,7 +46,13 @@ class PortabilityTests(unittest.TestCase):
             "portable-search": 14,
             "committed-mutation": 32,
             "provider-control": 13,
-            "db2-authority": 12,
+            # Two more than before wiring the route: pgvec_memory_point_visible,
+            # which reads the canonical scope tables to decide whether a
+            # PROVIDER's answer may be shown -- handing that to a provider would
+            # ask the untrusted party to certify itself -- and
+            # pgvec_memory_vector_routed_searches, process-local state whose
+            # whole value is being measured on this side.
+            "db2-authority": 14,
             "portable-analytics": 3,
         })
         source = checker.source_symbols(self.ledger())
@@ -192,7 +198,7 @@ class PortabilityTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("total=74", result.stdout)
+            self.assertIn("total=76", result.stdout)
             fingerprint = subprocess.run(
                 [sys.executable, "-I", "-S", str(CHECKER), "--root", str(root),
                  "--print-source-fingerprint"],
@@ -204,7 +210,7 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(fingerprint.returncode, 0, fingerprint.stderr)
             self.assertEqual(
                 fingerprint.stdout.strip(),
-                f"{self.audit()['source_symbols_sha256']}  pgvec-symbols=74",
+                f"{self.audit()['source_symbols_sha256']}  pgvec-symbols=76",
             )
 
 

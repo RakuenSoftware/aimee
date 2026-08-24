@@ -1026,7 +1026,17 @@ aimee_vector_memory_candidates_search(aimee_vector_route_t *route,
       outcome->result = call_and_validate(route->internal_pgvector_search, route->internal_context,
                                           request, &outcome->reply, 0);
    }
-   if (outcome->result == AIMEE_VECTOR_OK)
+   /* Only what a PROVIDER returned. The callback exists because a vector store
+    * is a separate process that is not trusted to enforce tenancy; the internal
+    * path's candidates came from a query whose WHERE clause applied the scope
+    * filter, so they are authorised by construction and re-checking them is a
+    * round trip per candidate to re-derive what the database just decided.
+    *
+    * The distinction is free to state and expensive to get wrong in either
+    * direction: authorising internal results makes every search pay for a
+    * guarantee it already has, and NOT authorising external ones lets another
+    * process choose which rows this deployment may see. */
+   if (outcome->result == AIMEE_VECTOR_OK && outcome->route == AIMEE_VECTOR_ROUTE_EXTERNAL)
       outcome->result = authorize(route, request, &outcome->reply);
    return outcome->result;
 }

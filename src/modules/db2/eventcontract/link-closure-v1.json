@@ -2,7 +2,7 @@
   "schema_version": 2,
   "module": "db2",
   "source_revision": "60f7ba00126df97e70a67794d1c49dd0006055d5",
-  "source_fingerprint": "fb5bbc310542a94789e79164308831f124d400b3bc77d026572ad82696f75a4d",
+  "source_fingerprint": "8f45ff25f925078f181719d8faac9b3365af1290eeb4bfe157896095e864fa81",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2041,6 +2041,22 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
+      "symbol": "aimee_vector_memory_candidates_search",
+      "references": [
+        "src/modules/db2/c/memory_vectors.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/modules/db2/vector_route.c, a DB2 source outside the c/ data-layer boundary; the standalone DB2 bundle packages it rather than inheriting it from the monolith."
+    },
+    {
+      "symbol": "aimee_vector_route_init",
+      "references": [
+        "src/modules/db2/c/memory_vectors.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/modules/db2/vector_route.c, a DB2 source outside the c/ data-layer boundary; the standalone DB2 bundle packages it rather than inheriting it from the monolith."
+    },
+    {
       "symbol": "atoi",
       "references": [
         "src/modules/db2/c/db_postgres.c",
@@ -2487,7 +2503,8 @@
     {
       "symbol": "pthread_once",
       "references": [
-        "src/modules/db2/c/db2_init.c"
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/memory_vectors.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2940,6 +2957,7 @@
         "src/modules/db2/c/management_status_provision.c",
         "src/modules/db2/c/management_token_roots.c",
         "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_vectors.c",
         "src/modules/db2/c/org_egress.c",
         "src/modules/db2/c/org_model_catalog.c",
         "src/modules/db2/c/org_telemetry_fmt.c",
@@ -3182,9 +3200,9 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 139,
+    "unresolved_symbols": 141,
     "dispositions": {
-      "descriptor-owned-copy/generated-input": 0,
+      "descriptor-owned-copy/generated-input": 2,
       "injected-module-contract": 0,
       "portable-core-promotion": 0,
       "private-implementation": 0,
@@ -3192,5 +3210,5 @@
       "system-link": 139
     }
   },
-  "fingerprint": "1d1ec383e5cef51b131fb6c9be30162b239a36b6ebbb1df5bc54f963833ebf08"
+  "fingerprint": "b9ed754267d335d2f38225da081fa3f94ce6588abeb44057169c16b0f3000153"
 }

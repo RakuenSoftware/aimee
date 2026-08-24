@@ -344,6 +344,10 @@ DB2_SRCS = modules/db2/c/db2_init.c modules/db2/c/db2_reembed.c modules/db2/c/db
            modules/db2/c/cross_repo_route.c modules/db2/c/cross_repo_build.c \
            modules/db2/c/vault_pg.c modules/db2/c/org_vault_rewrap.c modules/db2/c/org_vault_rotation.c modules/db2/c/org_vault_key_use.c modules/db2/c/org_model_catalog.c modules/db2/c/org_spend.c modules/db2/c/org_budget.c modules/db2/c/org_rate.c modules/db2/c/org_egress.c modules/db2/c/org_telemetry.c modules/db2/c/org_telemetry_fmt.c
 DB2_SRCS += modules/db2/c/server_registry.c modules/db2/c/management_client_instance.c modules/db2/c/management_action_journal.c modules/db2/c/management_identity_journal.c modules/db2/c/management_read_journal.c modules/db2/c/management_jwks_runtime.c
+# The vector route: chosen provider, fallback, and candidate authorisation.
+# Not under c/ like the rest -- it is the module's protocol surface rather than
+# its data layer, and it compiles against db2's public include directory.
+DB2_SRCS += modules/db2/vector_route.c
 DB2_SRCS += modules/db2/c/db2_witness_checkpoint.c
 DB2_SRCS += modules/db2/c/db2_witness_emit.c
 DB2_HOST_ADAPTER_SRCS = kb/db2_adapters/kb_service_backend_agent.c \
@@ -355,6 +359,9 @@ DB2_HOST_ADAPTER_TEST_OBJS = $(DB2_HOST_ADAPTER_SRCS:kb/db2_adapters/%.c=$(OBJDI
 # the module boundary. tests/Rules.mk names these objects directly and relies on
 # make de-duplicating them with DB2_OBJS in composite fixtures.
 DB2_OBJS = $(DB2_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o) $(DB2_HOST_ADAPTER_TEST_OBJS)
+# vector_route.c is not under c/, so the substitution above leaves its path
+# unchanged; name the object it should become instead.
+DB2_OBJS := $(DB2_OBJS:modules/db2/%.c=$(OBJDIR)/modules/db2/%.o)
 
 # Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
 # (in SERVER_SRCS above, compiled as $(OBJDIR)/modules/vault/*.o) and aimee-kb (linked
@@ -605,6 +612,14 @@ DB2_CLIENT_OBJS := $(DB2_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 KB_SRCS += $(DB2_CLIENT_SRCS)
 $(OBJDIR)/kb/kb_module_stage_adapters.o $(DB2_CLIENT_OBJS): C_FLAGS += \
     -Imodules/db2/include
+# The route and its one caller compile against db2's public API. Named here
+# rather than added to the global flags because that is what "public API" means:
+# the files that use it say so.
+# tests/Rules.mk already names $(OBJDIR)/modules/db2/vector_route.o, and it is
+# included unconditionally, so that one is not repeated here.
+$(OBJDIR)/kb/modules/db2/vector_route.o \
+$(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/modules/db2/c/memory_vectors.o \
+$(OBJDIR)/kb/modules/db2/c/memory_vectors.o: C_FLAGS += -Imodules/db2/include
 KB_SRCS += kb/managed_server_identity.c kb/managed_server_identity_install.c
 KB_SRCS += kb/http/kb_http_content_policy.c
 KB_SRCS += kb/http/kb_http_entry.c
