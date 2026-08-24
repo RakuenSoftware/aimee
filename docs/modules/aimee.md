@@ -270,7 +270,7 @@ No handler here blocks, specifically so that ceiling is never reached by waiting
 
 ## Compatibility
 
-## Every guard here has been made to fail
+### Every guard here has been made to fail
 
 Each check in this module was mutation-verified: the property it asserts was
 broken deliberately and the guard watched to fire. That is recorded because a
@@ -287,7 +287,7 @@ admission tests fail without directory admission, and the sender remap fails
 separately from it, so "I do not know you" and "there is no such peer" are held
 apart by something rather than by coincidence.
 
-## A caller can name what to retry
+### A caller can name what to retry
 
 Twenty-one statuses cross this wire and every one of them is a named constant, so
 a caller can test for any single one. That is not the same as being able to
@@ -308,7 +308,7 @@ is classified, because an unrecognised status returning "do not retry" is safe
 for the caller and wrong for the work -- it silently drops what would have
 succeeded.
 
-## A refusal is not an outage
+### A refusal is not an outage
 
 The directory has FOUR outcomes, not three, and the fourth was found on the last
 pass of the night. `directory_refused` is db1 understanding a request and
@@ -330,7 +330,7 @@ registry's own wrapping was reasonable. Only running the two together shows what
 a caller receives, which is the argument for testing across a seam rather than on
 both sides of it.
 
-## The module as deployed has no session directory
+### The module as deployed has no session directory
 
 `aimee-module` builds the capability with `NoDirectory{}`, and that is accurate
 rather than provisional. There is no `DirectorySource` yet -- it needs db1's

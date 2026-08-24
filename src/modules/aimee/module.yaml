@@ -28,6 +28,7 @@
     "server-go/modules/aimee/arity_test.go",
     "server-go/modules/aimee/fanout_test.go",
     "server-go/modules/aimee/peerwire/wire_test.go",
+    "server-go/modules/aimee/peerwire/cwire_test.go",
     "server-go/modules/aimee/peer/peer_test.go",
     "server-go/modules/aimee/peer/channel_test.go",
     "server-go/modules/aimee/peer/http_test.go",

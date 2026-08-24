@@ -279,6 +279,31 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "asset_id", "integer", "Opaque asset_id from a pdf_list_assets entry.");
    ext_require(t, "project");
    ext_require(t, "asset_id");
+
+   /* ── Peer messaging: one aimee session talking to another ────────────────── */
+   /* There is deliberately no `from`. The sender is the calling session, taken
+      from the call itself, so a message's origin is a fact the server stamps
+      rather than a field the caller fills in. Advertising one would invite
+      exactly the impersonation the registry's provenance stamping prevents. */
+   t = ext_tool(tools, "peer_send",
+                "Send a message to another aimee session — including a session running a "
+                "different model (Claude, Codex). The recipient receives it in their peer "
+                "inbox; delivery is asynchronous and this call does not wait for a reply. "
+                "You are identified as the sender automatically.");
+   ext_prop(t, "to", "string", "Recipient's session id.");
+   ext_prop(t, "text", "string", "Message body (up to 8192 bytes).");
+   ext_prop(t, "conversation_id", "string",
+            "Thread this message onto an existing conversation. Omit to start a new one.");
+   ext_prop(t, "expect_reply", "boolean",
+            "Mark that you are waiting on an answer. Does not block this call.");
+   ext_require(t, "to");
+   ext_require(t, "text");
+
+   t = ext_tool(tools, "peer_inbox",
+                "Take messages other aimee sessions have sent you. Taken messages are REMOVED "
+                "from the inbox, so a message is delivered once. The reply reports how many "
+                "remain: keep calling while that is above zero.");
+   ext_prop(t, "max", "integer", "Most messages to take in one call (default and maximum 8).");
 }
 
 /* ── Tool-family multiplexing (P4) ────────────────────────────────────────────

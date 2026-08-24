@@ -827,6 +827,29 @@
       "request": [
         11777
       ]
+    },
+    {
+      "id": "aimee-db1",
+      "principal_ref": 67,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-aimee",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11782
+      ]
+    },
+    {
+      "id": "server-peer",
+      "principal_ref": 68,
+      "executable": "/usr/local/bin/aimee-server",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        12033,
+        12034
+      ]
     }
   ]
 }
