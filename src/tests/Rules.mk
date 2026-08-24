@@ -85,7 +85,12 @@ OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o \
                     $(OBJDIR)/core/event_bus/bus_runtime.o \
                     $(OBJDIR)/core/event_bus/bus_endpoint.o \
                     $(OBJDIR)/core/event_bus/module_client.o \
-                    $(OBJDIR)/core/event_bus/module_protocol.o
+                    $(OBJDIR)/core/event_bus/module_protocol.o \
+                    $(OBJDIR)/aimee_sha256.o
+TEST_WORM_OBJS = $(OBJDIR)/modules/audit/audit_worm.o \
+                 $(OBJDIR)/modules/audit/audit_worm_chain.o \
+                 $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                 $(OBJDIR)/aimee_sha256.o
 
 .PHONY: unit-test-server-management-tls
 unit-test-server-management-tls: $(TESTPREFIX)/unit-test-server-management-tls
@@ -712,7 +717,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-corpus-jobs \
                $(TESTPREFIX)/unit-test-corpus-terms-gaps \
                $(TESTPREFIX)/unit-test-kb-maintenance \
-               $(TESTPREFIX)/unit-test-agent-policy-intercept \
                $(TESTPREFIX)/unit-test-delegate-dispatch-reliability \
                $(TESTPREFIX)/unit-test-curator-code-unit \
                $(TESTPREFIX)/unit-test-curator-resolve-entities \
@@ -746,6 +750,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-bus-audit-replay \
                $(TESTPREFIX)/unit-test-bus-audit-replay-tool \
                $(TESTPREFIX)/unit-test-bus-audit-retention \
+               $(TESTPREFIX)/unit-test-bus-capture-gaps \
+               $(TESTPREFIX)/unit-test-execution-policy-bus \
                $(TESTPREFIX)/unit-test-bus-config-autonomy \
                $(TESTPREFIX)/unit-test-git-verify-state-bus \
                $(TESTPREFIX)/unit-test-bus-audit-durability \
@@ -1569,6 +1575,7 @@ $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o $(OBJDIR)/
                             $(OBJDIR)/tests/support/db1_init_mock.o \
                             $(OBJDIR)/tests/support/session_state_stub.o $(OBJDIR)/tests/support/guardrail_events_stub.o $(OBJDIR)/tests/support/git_ownership_stub.o \
                             $(OBJDIR)/server/obs_bus_adapter.o \
+                            $(TEST_WORM_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1589,7 +1596,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
-                      $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/server/cli_session.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1598,7 +1605,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
 $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                      $(OBJDIR)/db1_store_ready.o \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
-                      $(OBJDIR)/modules/execution-policy/execution_policy.o \
+                      $(OBJDIR)/server/execution_policy_bus.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                       $(OBJDIR)/server/tool_call_args.o \
@@ -1607,7 +1614,7 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
-                      $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/server/cli_session.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2164,7 +2171,7 @@ $(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o 
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
+	$(TESTLINK) -o $@ $^ $(L_CORE) -lm -lcrypto
 
 $(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
                                     $(OBJDIR)/server/web_search_breaker.o
@@ -2811,7 +2818,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                      $(OBJDIR)/db1_store_ready.o \
                       $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
-                      $(OBJDIR)/modules/execution-policy/execution_policy.o \
+                      $(OBJDIR)/server/execution_policy_bus.o \
                       $(OBJDIR)/modules/workflows/tool_egress.o \
                       $(OBJDIR)/tests/test_agent_responses.o \
                       $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
@@ -2826,7 +2833,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
-                      $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/server/cli_session.o \
                       $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
                       $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
                       $(OBJDIR)/server/mistral_profile.o $(OBJDIR)/server/openrouter_profile.o \
@@ -3010,14 +3017,24 @@ $(TESTPREFIX)/unit-test-bus-route: $(OBJDIR)/tests/test_bus_route.o \
 # Event-bus flow control (feature tree slice 7).
 $(OBJDIR)/tests/test_bus_flow.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-flow: $(OBJDIR)/tests/test_bus_flow.o \
+                                  $(OBS_BUS_LINK_OBJS) \
+                                  $(OBJDIR)/modules/audit/audit_ledger.o \
+                                  $(TEST_WORM_OBJS) \
+                                  $(OBJDIR)/aimee_home.o \
+                                  $(OBJDIR)/dstr.o \
+                                  $(OBJDIR)/log.o \
+                                  $(OBJDIR)/cJSON.o \
+                                  $(OBJDIR)/core/event_bus/bus_client.o \
                                   $(OBJDIR)/core/event_bus/bus_attach.o \
                                   $(OBJDIR)/core/event_bus/bus_host.o \
                                   $(OBJDIR)/core/event_bus/bus_route.o \
                                   $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
                                   $(OBJDIR)/core/event_bus/bus_ring.o \
                                   $(OBJDIR)/core/event_bus/bus_arena.o \
-                                  $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+                                  $(OBJDIR)/core/event_bus/bus_wire.o \
+                                  $(OBJDIR)/core/event_bus/bus_capture.o \
+                                  $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
 # Event-bus C reference client (feature tree slice 8).
 $(OBJDIR)/tests/test_bus_client.o: C_FLAGS += -Icore/event_bus/include
@@ -3534,6 +3551,41 @@ $(TESTPREFIX)/unit-test-bus-audit-retention: $(OBJDIR)/tests/test_bus_audit_rete
 unit-test-bus-audit-retention: $(TESTPREFIX)/unit-test-bus-audit-retention
 	$<
 
+# Capture absence and pruning must be readable back from the real SQLite WORM
+# ledger, not merely observed through a test callback.
+$(OBJDIR)/tests/test_bus_capture_gaps.o: C_FLAGS += -Icore/event_bus/include
+$(TESTPREFIX)/unit-test-bus-capture-gaps: $(OBJDIR)/tests/test_bus_capture_gaps.o \
+                                             $(OBS_BUS_LINK_OBJS) \
+                                             $(OBJDIR)/modules/audit/audit_ledger.o \
+                                             $(TEST_WORM_OBJS) \
+                                             $(OBJDIR)/aimee_home.o \
+                                             $(OBJDIR)/core/event_bus/bus_client.o \
+                                             $(OBJDIR)/core/event_bus/bus_attach.o \
+                                             $(OBJDIR)/core/event_bus/bus_host.o \
+                                             $(OBJDIR)/core/event_bus/bus_route.o \
+                                             $(OBJDIR)/core/event_bus/bus_region.o \
+                                             $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                             $(OBJDIR)/core/event_bus/bus_ring.o \
+                                             $(OBJDIR)/core/event_bus/bus_arena.o \
+                                             $(OBJDIR)/core/event_bus/bus_wire.o \
+                                             $(OBJDIR)/core/event_bus/bus_capture.o \
+                                             $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-capture-gaps
+unit-test-bus-capture-gaps: $(TESTPREFIX)/unit-test-bus-capture-gaps
+	$<
+
+$(OBJDIR)/tests/test_execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/include
+$(TESTPREFIX)/unit-test-execution-policy-bus: $(OBJDIR)/tests/test_execution_policy_bus.o \
+                                             $(OBJDIR)/server/execution_policy_bus.o \
+                                             $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+.PHONY: unit-test-execution-policy-bus
+unit-test-execution-policy-bus: $(TESTPREFIX)/unit-test-execution-policy-bus
+	$<
+
 # The operator replay TOOL (audit_replay.c, behind aimee-server --audit-replay):
 # render a capture file's governed-action rows. Adds audit_replay.o to the set.
 $(OBJDIR)/tests/test_bus_audit_replay_tool.o: C_FLAGS += -Icore/event_bus/include
@@ -3682,6 +3734,7 @@ unit-test-bus-memory-audit: $(TESTPREFIX)/unit-test-bus-memory-audit
 $(OBJDIR)/tests/test_bus_shutdown_race.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_race.o \
                                            $(OBJDIR)/server/obs_bus_adapter.o \
+                                           $(TEST_WORM_OBJS) \
                                            $(OBS_BUS_LINK_OBJS) \
                                            $(OBJDIR)/modules/audit/audit_ledger.o \
                                            $(OBJDIR)/aimee_home.o \
@@ -3767,6 +3820,7 @@ BUS_TEST_TARGETS := $(addprefix $(TESTPREFIX)/, \
    unit-test-bus-sandbox-audit unit-test-bus-tool-completion \
    unit-test-bus-memory-audit unit-test-bus-shutdown-race unit-test-bus-capture \
    unit-test-bus-client unit-test-bus-flow unit-test-bus-route unit-test-bus-host \
+   unit-test-execution-policy-bus \
    unit-test-bus-arena unit-test-bus-region unit-test-bus-ring unit-test-bus-wire)
 
 $(BUS_TEST_TARGETS): | $(CORE_CONNECTION_LIB)
@@ -4004,12 +4058,6 @@ $(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transp
 # The generator that used to refresh that corpus from the C parser is gone with
 # it: C no longer implements the dialects, so regenerating would have quietly
 # emptied the very corpus the port is pinned against.
-
-$(TESTPREFIX)/unit-test-agent-policy-intercept: $(OBJDIR)/tests/test_agent_policy_intercept.o \
-                                                $(OBJDIR)/server/agent_policy_intercept.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
-
 
 # Restored. It was deleted with the C store on the grounds of being
 # store-coupled, and the source is not: its only two matches for /db1/ were a
@@ -8083,7 +8131,7 @@ $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o $(OB
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
-                      $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/server/cli_session.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

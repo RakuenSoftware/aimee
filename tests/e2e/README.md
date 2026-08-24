@@ -75,7 +75,10 @@ result below section 0 means nothing until section 0 is green.
 # Module liveness and provider registration
 
 `module-liveness-pg-e2e.sh` answers a different question: does a deployed daemon
-come up with its modules attached and its code paths live?
+come up with its modules attached and its code paths live? It also points the
+KB capture layer at a real read-only filesystem while leaving PostgreSQL
+available, proving that health rejects a completeness claim and the WORM ledger
+retains the gap.
 
 The gap it was written for. Signal capture is served by `aimee-kb` -- that is
 where the learning tables live -- and the router it calls needs a signal
@@ -92,7 +95,7 @@ tell you a deployed daemon actually attached its modules.
 The harness that originally found the bug started **two** modules, and that is
 part of why it hid: a module which is granted but never attached fails exactly
 like a module that was never placed. This suite attaches every module each
-daemon is granted and has a binary for -- 7 on the KB, 17 on the server -- and
+daemon is granted and has a binary for -- 7 on the KB, 19 on the server -- and
 reports any it could not start rather than skipping it quietly.
 
 ## Running it
@@ -118,6 +121,7 @@ does not contradict itself this way.
 | Section | Behaviour |
 | --- | --- |
 | 0 | Every module the KB is granted deploys, attaches, and is still alive |
+| 0a | Disabled capture is false in health and leaves a PostgreSQL `bus.capture.gap` row |
 | 1 | The same for the server, with the KB reachable |
 | 2 | The surfaces answer; a probe naming a command that does not exist fails the run |
 | 3 | Signal capture is recorded, and a later commit supersedes the earlier one |

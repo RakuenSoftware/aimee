@@ -14,7 +14,8 @@
 #include "approach_store.h"
 #include <aimee/learning/attribution.h>
 #include "curiosity_resolve.h"
-#include "kb_client.h"       /* kb_health_t for the stub below */
+#include "kb_client.h" /* kb_health_t for the stub below */
+#include <aimee/audit/obs_bus.h>
 #include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
 #include "config_client.h"
@@ -29,6 +30,19 @@
 #include "vault_config_bootstrap.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
+
+/* server.c exposes capture completeness in server.health.  This dispatch test
+ * does not start the observability bus, so give it a deterministic health
+ * snapshot just as the KB health seam below does for its external service. */
+void obs_bus_capture_health(obs_bus_capture_health_t *out)
+{
+   assert(out);
+   memset(out, 0, sizeof(*out));
+   out->capture_ok = 1;
+   out->reason = "ok";
+   snprintf(out->session_id, sizeof(out->session_id), "%s", "test-session");
+   out->last_seq = 7;
+}
 
 int hud_gather(hud_status_t *out)
 {

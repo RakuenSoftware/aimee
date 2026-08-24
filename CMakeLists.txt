@@ -100,6 +100,7 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/roundtable/include"
     "${AIMEE_SRC_DIR}/modules/benchmarks/include"
     "${AIMEE_SRC_DIR}/modules/governance/include"
+    "${AIMEE_SRC_DIR}/modules/execution-policy/include"
     "${AIMEE_SRC_DIR}/modules/workflows/include"
     "${AIMEE_SRC_DIR}/modules/kb-synthesis/include"
     "${AIMEE_SRC_DIR}/modules/runtime-web/include"
@@ -705,7 +706,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/primary_session_adapter.c
     ${AIMEE_SRC_DIR}/server/primary_cli_ingestor.c
     ${AIMEE_SRC_DIR}/server/agent_policy.c
-    ${AIMEE_SRC_DIR}/server/agent_policy_intercept.c
+    ${AIMEE_SRC_DIR}/server/execution_policy_bus.c
     ${AIMEE_SRC_DIR}/server/agent_tasks.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_support.c
@@ -925,6 +926,7 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
     ${AIMEE_SRC_DIR}/server/server.c
@@ -1072,6 +1074,7 @@ list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
+    ${AIMEE_SRC_DIR}/kb/kb_obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/kb/kb_background.c
     ${AIMEE_SRC_DIR}/kb/kb_service.c
     ${AIMEE_SRC_DIR}/kb/kb_service_workers.c

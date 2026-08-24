@@ -57,6 +57,7 @@
 #include "runtime_secret.h"           /* wipe Vault-sourced runtime cache at exit */
 #include "kb_memory_audit_bridge.h"   /* record memory mutations on aimee-kb's own obs bus */
 #include "kb_module_stage_adapters.h" /* process-module calls over aimee-kb's event bus */
+#include "kb_obs_bus_adapter.h"       /* bus durability rows -> PostgreSQL WORM */
 #include <aimee/audit/obs_bus.h>
 #include "log.h" /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
@@ -1761,7 +1762,8 @@ int main(int argc, char **argv)
     * bus. Bring up that bus before the first accessor, then wait only during
     * startup for the supervisor (already running in the entrypoint) to attach. */
    audit_log_open();
-   if (obs_bus_configure_daemon_module_runtime("kb", kb_default_config_dir()) != 0 ||
+   if (kb_obs_bus_configure() != 0 ||
+       obs_bus_configure_daemon_module_runtime("kb", kb_default_config_dir()) != 0 ||
        obs_bus_start() != 0)
    {
       fputs("aimee-kb: module bus failed to start\n", stderr);

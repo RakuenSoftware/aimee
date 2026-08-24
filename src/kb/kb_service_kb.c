@@ -27,6 +27,7 @@
 #include "kb_module_stage_adapters.h"
 #include "kb_service_kb.h"
 #include "log.h"
+#include <aimee/audit/obs_bus.h>
 #include <aimee/workspace/workspace.h>
 
 #include <stdio.h>
@@ -376,6 +377,12 @@ static cJSON *kb_service_health_object(void)
       return NULL;
    /* No `status` here. It is derived from the blockers array at the bottom of this
     * function, once the evidence it summarises actually exists. */
+   obs_bus_capture_health_t capture;
+   obs_bus_capture_health(&capture);
+   cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
+   cJSON_AddStringToObject(resp, "capture_reason", capture.reason);
+   cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
+   cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
 
    /* DB2: generic schema + KB-specific tables */
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;

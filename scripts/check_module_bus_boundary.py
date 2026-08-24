@@ -45,7 +45,6 @@ IR_SHARED_TYPE = {
 PENDING_BUS_MIGRATION = {
     ("src/modules/delegates/delegate_openai.c", "aimee/tools/agent_tools.h"),
     ("src/modules/delegates/delegate_run_phases.c", "aimee/workspace/workspace.h"),
-    ("src/modules/execution-policy/execution_policy.c", "aimee/protocols/mcp/mcp_client_registry.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_action.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_worm.h"),
     ("src/modules/guardrails/guardrails_orchestrator.c", "aimee/skills/skill.h"),
@@ -130,7 +129,6 @@ FLAT_ROOT_REACH = {
     ("src/modules/delegates/delegate_sandbox_image.c", "guardrails/guardrails.h"),
     ("src/modules/delegates/delegate_sandbox_image.c", "sandbox/sandbox_learned.h"),
     ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "roundtable/roundtable_types.h"),
-    ("src/modules/execution-policy/execution_policy.c", "kb_client/kb_client.h"),
     ("src/modules/git/git_ssh_agent.c", "webuser/webuser_runtime.h"),
     ("src/modules/git/git_verify_ops.c", "guardrails/guardrails.h"),
     ("src/modules/git/mcp_git_pr.c", "guardrails/guardrails.h"),

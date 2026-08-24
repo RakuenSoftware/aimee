@@ -250,10 +250,6 @@
           "sha256": "7f3e5e102a0fa02f4ddfb4c213d8be02e8f888e994d79c34aec5d648485f29cf"
         },
         {
-          "path": "src/headers/agent_policy_intercept.h",
-          "sha256": "aefb8380d92ecdff76aba285f0936c6a9a0c5860368a9ed680f8d11e782378a4"
-        },
-        {
           "path": "src/headers/agent_protocol.h",
           "sha256": "b16e225be9dd915d9b11d13981db066ea8b4224c53b93c07cf61a33ba6722603"
         },

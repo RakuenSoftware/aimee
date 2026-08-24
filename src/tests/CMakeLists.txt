@@ -147,7 +147,8 @@ set(AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES
   ../core/event_bus/bus_runtime.c
   ../core/event_bus/bus_endpoint.c
   ../core/event_bus/module_client.c
-  ../core/event_bus/module_protocol.c)
+  ../core/event_bus/module_protocol.c
+  ../aimee_sha256.c)
 aimee_add_test(test_bus_wire test_bus_wire.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_compile_definitions(test_bus_wire PRIVATE
@@ -169,8 +170,9 @@ target_include_directories(test_bus_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../
 aimee_add_test(test_bus_route test_bus_route.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 
-aimee_add_test(test_bus_flow test_bus_flow.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
-target_include_directories(test_bus_flow PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+aimee_add_test(test_bus_flow test_bus_flow.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c ../modules/audit/audit_worm.c ../modules/audit/audit_worm_chain.c ../modules/workflows/wfe_canonical.c)
+target_include_directories(test_bus_flow PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_flow PRIVATE Threads::Threads)
 
 aimee_add_test(test_bus_client test_bus_client.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
@@ -271,6 +273,14 @@ target_link_libraries(test_bus_audit_replay PRIVATE Threads::Threads)
 aimee_add_test(test_bus_audit_retention test_bus_audit_retention.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
 target_include_directories(test_bus_audit_retention PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_retention PRIVATE Threads::Threads)
+
+aimee_add_test(test_bus_capture_gaps test_bus_capture_gaps.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c ../modules/audit/audit_worm.c ../modules/audit/audit_worm_chain.c ../modules/workflows/wfe_canonical.c)
+target_include_directories(test_bus_capture_gaps PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_capture_gaps PRIVATE Threads::Threads)
+
+aimee_add_test(test_execution_policy_bus test_execution_policy_bus.c ../server/execution_policy_bus.c)
+target_include_directories(test_execution_policy_bus PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/execution-policy/include)
 
 # The operator replay tool (aimee-server --audit-replay): render a capture file.
 aimee_add_test(test_bus_audit_replay_tool test_bus_audit_replay_tool.c ../modules/audit/obs_bus.c ../modules/audit/audit_replay.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)

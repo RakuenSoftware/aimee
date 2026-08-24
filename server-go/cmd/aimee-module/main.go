@@ -26,6 +26,7 @@ import (
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	"github.com/JBailes/aimee/server-go/modules/economizer"
+	executionpolicy "github.com/JBailes/aimee/server-go/modules/execution-policy"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
@@ -400,6 +401,11 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		config.PrincipalRef = 15
 		config.Stages = []bus.ModuleStage{{EventKind: responsecomposition.EventKind, StageID: responsecomposition.StageCompose}}
 		config.Handler = responsecomposition.Handle
+	case "execution-policy":
+		config.ModuleName = name
+		config.PrincipalRef = 17
+		config.Stages = []bus.ModuleStage{{EventKind: executionpolicy.EventTool, StageID: executionpolicy.StageTool}}
+		config.Handler = executionpolicy.Handle
 	case "governance":
 		config.ModuleName = name
 		config.PrincipalRef = 19

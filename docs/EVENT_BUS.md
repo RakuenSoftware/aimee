@@ -32,10 +32,10 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
-Sixteen production C-to-Go process batches now cover every supervised process:
+Eighteen production C-to-Go process batches now cover every supervised process:
 `memory`, `learning`,
 `routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
-`response-composition`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
+`response-composition`, `execution-policy`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
 `runtime-web`, `control-web`, and `benchmarks`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters serve as parity
@@ -71,6 +71,10 @@ local signal-to-sink table.
 Memory pre-injection confidence comes only from event `5893`. The server does
 not replace an unavailable or malformed response with a locally selected tier;
 it omits the context envelope, and the formatter rejects missing confidence.
+The final tool authorization decision comes only from the required Go
+`execution-policy` process on event `8449`. The C enforcement caller applies
+the verdict and fails closed on absence, timeout, cancellation, or malformed
+output; it contains no local policy decision fallback.
 
 ## What is on it now
 
@@ -93,10 +97,17 @@ authoritative binding, current stage/state, and replay nonce to the supervised w
 Only an explicit successful module decision can reach the workflow engine; bus failure returns an
 error without advancing the work item.
 
-Those bridges use two wire kinds: governed actions and semantic guardrail events. The action row is
-PII-bounded; memory identities are fingerprinted before publication. The consumer drains accepted
-events to their durable sinks. Graceful shutdown stops publishers, drains the rings, flushes
-capture, then tears down the host.
+The observability bridge uses three wire kinds: governed actions, semantic guardrail events, and
+generic durability events. The action row is PII-bounded; memory identities are fingerprinted before
+publication. The consumer drains accepted events to their durable sinks. Graceful shutdown stops
+publishers, drains the rings, flushes capture, then tears down the host.
+
+Every supervised event kind declares `ledger`, `capture`, or `sampled` durability in
+`src/modules/process-contracts.json`. `make lint` resolves the public `module_api.h` declarations,
+requires a durability decision for every stage, verifies that every `ledger` kind reaches the generic
+WORM emitter, and fails if it resolves zero kinds. Ledger-classified module requests and replies keep
+event/stage/trace identity, body sizes, result, and a response digest. They do not keep raw request or
+response bodies.
 
 A full queue is never a silent success. Publishers retry bounded backpressure; a stuck consumer
 increments a visible drop counter and logs the failure.
@@ -118,7 +129,8 @@ any partial request or reply.
 
 Each client has its own queue pair. One slow consumer does not create an unbounded host queue.
 Kinds declare whether they block or may shed under pressure. Sheds become typed overflow records in
-the ordered tap.
+the ordered tap and rare durable `bus.overflow` rows. Reaping a producer with blocked work similarly
+records `bus.producer_reaped` with the discarded sequence, event kind, and source slot.
 
 ## Payloads
 
@@ -142,16 +154,29 @@ handler.
 
 ## Capture and replay
 
-The host tap writes CRC-checked, length-framed capture files under the aimee config directory. A
-record contains the original frame and materialized payload. Retention keeps the newest capture
-sessions and prunes older files when a new capture starts.
+The host tap writes CRC-checked, length-framed capture files under `AIMEE_CAPTURE_DIR` when set, or
+the aimee config directory otherwise. A record contains the original frame and materialized payload.
+Retention keeps the newest 16 capture sessions and prunes older files when a new capture starts.
 
 Replay is observational: it presents the exact accepted stream to an inspector. It does not execute
 tools or drive a module again.
 
 The durable WORM audit ledger remains the security record. Capture is the ordered diagnostic and
-replay layer above it. An off-host witness or anchor is still required for evidence against a fully
-compromised host.
+replay layer above it; it may be disabled, abandoned after an I/O or allocation failure, or pruned.
+Each transition to `no_home`, `open_failed`, `write_failed`, or `sink_broken` writes a durable
+`bus.capture.gap` row naming the capture session and last flushed sequence. Each pruned session writes
+`bus.capture.pruned`. Server and KB health expose `capture_ok`, plus the reason, session, and last
+sequence when capture is unavailable. Absence therefore does not masquerade as an empty period.
+
+An off-host witness or anchor is still required for evidence against a fully compromised host.
+
+## Completeness boundary
+
+The durable coverage claim is exactly "what crossed the bus," not "every function call in the
+daemon." Seven components remain `execution: core`: `module-runtime`, `ir`, `translation`,
+`protocols`, `gateway`, `vault`, and `audit`. Calls among those components are ordinary in-process
+calls and are not made observable merely by this bus record. Their existing explicit audit bridges
+still apply, but this mechanism cannot claim to observe calls that never use the transport.
 
 ## Trust boundary
 
@@ -220,6 +245,7 @@ answers "which workspace owns this checkout" is the module itself.
 Keep the contract small:
 
 - assign a stable event kind and bounded schema;
+- declare `ledger`, `capture`, or `sampled` durability and its reason in the process contract;
 - choose notification or correlated request/reply;
 - declare block or shed behavior;
 - register only the observers that need the kind;

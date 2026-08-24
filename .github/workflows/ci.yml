@@ -354,14 +354,13 @@ jobs:
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+            libpq-dev curl
       - name: Build
         run: cd src && make -j$(nproc) all server build/obj/aimee-module-config
       - name: Skill lint
         run: |
-          sock=/tmp/aimee-ci-skill-lint.sock
           app_home=$(mktemp -d)
-          rm -f "$sock"
+          sock="$app_home/aimee-ci-skill-lint.sock"
           cp deploy/container/aimee-server.yaml "$app_home/aimee.yaml"
           python3 scripts/export_c_repositories.py --runtime-bundle src/build/obj/module-bundle >/dev/null
           mkdir -p "$app_home/modules.d/server"
@@ -375,15 +374,27 @@ jobs:
           trap 'kill "$pid" ${module_pid:-} 2>/dev/null || true; rm -rf "$app_home"' EXIT
           for i in $(seq 1 100); do
             [ -S "$app_home/server-module-bus.sock" ] && break
+            kill -0 "$pid" 2>/dev/null || { wait "$pid"; exit 1; }
             sleep 0.1
           done
+          test -S "$app_home/server-module-bus.sock"
           AIMEE_HOME="$app_home" src/build/obj/aimee-module-config \
             "$app_home/server-module-bus.sock" &
           module_pid=$!
-          for i in $(seq 1 100); do
-            [ -S "$app_home/aimee-http.sock" ] && break
+          # A socket node appears as soon as bind(2) succeeds, before the HTTP
+          # accept loop is necessarily serving requests. Wait for the endpoint
+          # this test actually needs instead of racing the first client request.
+          http_ready=0
+          for i in $(seq 1 300); do
+            if curl --fail --silent --noproxy '*' --unix-socket "$app_home/aimee-http.sock" \
+              http://localhost/v1/cli/manifest >/dev/null 2>&1; then
+              http_ready=1
+              break
+            fi
+            kill -0 "$pid" 2>/dev/null || { wait "$pid"; exit 1; }
             sleep 0.1
           done
+          test "$http_ready" -eq 1
           # The client only ever talks to an EXPLICITLY configured endpoint; it
           # no longer discovers a co-located server. aimee-server publishes its
           # /v1 socket under its config dir (config_default_dir()/aimee-http.sock),

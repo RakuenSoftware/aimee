@@ -89,6 +89,18 @@
 \endif
 
 BEGIN;
+-- The production column is UTC TEXT.  Force a non-UTC session so every
+-- certificate-validity read proves it does not inherit the database timezone.
+SET LOCAL TIME ZONE 'Europe/Amsterdam';
+
+DO $$ BEGIN
+  IF public.aimee_utc_text_timestamptz('2026-01-02 03:04:05') IS DISTINCT FROM
+       TIMESTAMPTZ '2026-01-02 03:04:05+00' OR
+     public.aimee_utc_text_timestamptz('2026-01-02T03:04:05Z') IS DISTINCT FROM
+       TIMESTAMPTZ '2026-01-02 03:04:05+00' THEN
+    RAISE EXCEPTION 'UTC enrollment timestamp parsing inherited session timezone';
+  END IF;
+END $$;
 
 -- Pin a transcript vector independently generated from the canonical network-
 -- order length framing, then prove any CT-supplied B2a vectors agree with SQL.
