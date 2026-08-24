@@ -72,6 +72,24 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    printf("  PASS: provider-unavailable is classified apart from job failure\n");
 }
 
+static void test_memory_fact_evidence_spans(void)
+{
+   const char *content = "prefix exact support suffix";
+   char span[64], hash1[65], hash2[65];
+   assert(kb_memory_fact_evidence_span(content, 7, 20, span, sizeof(span), hash1, sizeof(hash1)) ==
+          0);
+   assert(strcmp(span, "bytes:7-20") == 0 && strlen(hash1) == 64);
+   assert(kb_memory_fact_evidence_span("exact support", 0, 13, span, sizeof(span), hash2,
+                                       sizeof(hash2)) == 0);
+   assert(strcmp(hash1, hash2) == 0); /* region hash, independent of surrounding note */
+   assert(kb_memory_fact_evidence_span(content, -1, 5, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+   assert(kb_memory_fact_evidence_span(content, 20, 7, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+   assert(kb_memory_fact_evidence_span(content, 0, 999, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+}
+
 static void test_provider_outage_arms_global_backoff(void)
 {
    kb_curator_provider_backoff_recovered();
@@ -381,11 +399,13 @@ int main(void)
    if (db2_test_shim_skip_on_postgres("curator_queue"))
       return 0;
 
-   /* Deterministic config: HOME with no aimee.yaml -> legacy_config_read (called inside
-    * the queue) returns built-in defaults (extract_docs default-ON). */
+   /* The queue reads through the config module. Set the gate explicitly so this
+    * test does not depend on a legacy file default that the production caller no
+    * longer reads. */
    platform_setenv("HOME", "/tmp");
    platform_unsetenv("AIMEE_HOME");
    platform_setenv("AIMEE_NO_CACHE", "1");
+   assert(config_set_kb_curator_extract_docs_enabled(1) == 0);
 
    printf("test_curator_queue:\n");
    sqlite3 *db = open_db();
@@ -431,10 +451,12 @@ int main(void)
    test_retry_backoff_defers_reclaim(db);
    test_retry_backoff_ignores_fresh_jobs(db);
    test_provider_unavailable_is_not_a_job_failure();
+   test_memory_fact_evidence_spans();
    test_provider_outage_arms_global_backoff();
    test_provider_outage_requeues(db);
    test_only_current_document_generation_queues(db);
 
+   assert(config_set_kb_curator_extract_docs_enabled(0) == 0);
    printf("test_curator_queue: all tests passed\n");
    return 0;
 }

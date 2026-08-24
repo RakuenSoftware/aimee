@@ -367,6 +367,7 @@ DB2_SRCS = modules/db2/c/db2_init.c modules/db2/c/db2_reembed.c modules/db2/c/db
 DB2_SRCS += modules/db2/c/server_registry.c modules/db2/c/management_client_instance.c modules/db2/c/management_action_journal.c modules/db2/c/management_identity_journal.c modules/db2/c/management_read_journal.c modules/db2/c/management_jwks_runtime.c
 DB2_SRCS += modules/db2/c/db2_witness_checkpoint.c
 DB2_SRCS += modules/db2/c/db2_witness_emit.c
+DB2_SRCS += modules/db2/c/kb_service_backend_context.c
 DB2_HOST_ADAPTER_SRCS = kb/db2_adapters/kb_service_backend_agent.c \
                         kb/db2_adapters/kb_service_backend_export.c \
                         kb/db2_adapters/kb_service_backend_memory.c \
