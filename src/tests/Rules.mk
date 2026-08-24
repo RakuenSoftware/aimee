@@ -377,7 +377,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-module-runtime \
                $(TESTPREFIX)/unit-test-module-json-call \
                $(TESTPREFIX)/unit-test-economizer-module-client \
-               $(TESTPREFIX)/unit-test-sandbox-pkg-proxy-adapter \
+               $(TESTPREFIX)/unit-test-delegate-egress-adapter \
                $(TESTPREFIX)/unit-test-sandbox-learned-observe \
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
@@ -485,7 +485,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-delegate-token-budget \
                $(TESTPREFIX)/unit-test-delegate-context-shed \
                $(TESTPREFIX)/unit-test-agent-error-retryable \
-               $(TESTPREFIX)/unit-test-delegate-ephemeral-ws \
                $(TESTPREFIX)/unit-test-delegate-handoff \
                $(TESTPREFIX)/unit-test-delegate-economics \
                $(TESTPREFIX)/unit-test-delegate-patch-coordinator \
@@ -3080,7 +3079,6 @@ $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 $(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
-$(OBJDIR)/tests/test_sandbox_pkg_proxy_adapter.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
 $(OBJDIR)/tests/test_module_json_call.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.o \
                                         $(OBJDIR)/module_json_call.o \
@@ -3090,14 +3088,13 @@ $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.
 unit-test-module-json-call: $(TESTPREFIX)/unit-test-module-json-call
 	$<
 
-$(TESTPREFIX)/unit-test-sandbox-pkg-proxy-adapter: \
-                                        $(OBJDIR)/tests/test_sandbox_pkg_proxy_adapter.o \
-                                        $(OBJDIR)/modules/sandbox/sandbox_pkg_proxy.o \
-                                        $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-delegate-egress-adapter: \
+                                        $(OBJDIR)/tests/test_delegate_egress_adapter.o \
+                                        $(OBJDIR)/server/delegate_egress_adapter.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
-.PHONY: unit-test-sandbox-pkg-proxy-adapter
-unit-test-sandbox-pkg-proxy-adapter: $(TESTPREFIX)/unit-test-sandbox-pkg-proxy-adapter
+.PHONY: unit-test-delegate-egress-adapter
+unit-test-delegate-egress-adapter: $(TESTPREFIX)/unit-test-delegate-egress-adapter
 	$<
 
 $(OBJDIR)/tests/test_economizer_module_client.o: C_FLAGS += -Icore/event_bus/include
@@ -4591,12 +4588,6 @@ $(TESTPREFIX)/unit-test-delegate-context-shed: $(OBJDIR)/tests/test_delegate_con
 
 $(TESTPREFIX)/unit-test-agent-error-retryable: $(OBJDIR)/tests/test_agent_error_retryable.o \
                                        $(OBJDIR)/server/agent_fallback.o \
-                                       $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-delegate-ephemeral-ws: $(OBJDIR)/tests/test_delegate_ephemeral_ws.o \
-                                       $(OBJDIR)/modules/delegates/delegate_ephemeral_ws.o \
-                                       $(OBJDIR)/aimee_home.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

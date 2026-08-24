@@ -40,7 +40,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
-#include <aimee/delegates/delegate_launch_args.h>
 #include "log.h"
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -117,12 +116,6 @@ typedef struct
    char image[256];
    char workspace_host[MAX_PATH_LEN]; /* host-side mount point */
    char cwd[MAX_PATH_LEN];            /* in-container cwd, defaults to /workspace */
-   /* 1 when workspace_host is the CALLER's real tree rather than our own scratch
-    * dir. It changes who the container must run as: files written into a scratch
-    * dir we own are ours to clean up, but files written into the user's checkout
-    * must not land root-owned. */
-   int mount_host_tree;
-   int mount_read_only; /* :ro — the tree is not this delegate's to change */
    /* The in-container working directory, and what relative tool paths resolve
     * against. Per-state, not the global resolve_docker_workdir(): a caller-provided
     * tree is mounted at its OWN absolute host path (see docker_build_mounts), so
@@ -130,17 +123,10 @@ typedef struct
     * the mount moved is how a tool would read the wrong tree and report it as
     * missing. */
    char workdir[MAX_PATH_LEN];
-   /* Bind mounts for `docker create`, already in "<src>:<dst>[:ro]" form. */
-   char mounts[3][MAX_PATH_LEN * 2 + 8];
-   int mount_count;
 } docker_state_t;
 
 /* The in-container forwarder the package proxy bridges through. */
-#define DELEGATE_PKG_PROXY_URL "http://127.0.0.1:3129"
-/* The module's response buffer. The argv points into it, and the last entry is
- * NUL-terminated one byte past the response, so it carries slack. */
-#define DELEGATE_LAUNCH_BUF (1u << 18)
-
+#define DELEGATE_PKG_PROXY_URL  "http://127.0.0.1:3129"
 #define DOCKER_DEFAULT_IMAGE    "ubuntu:22.04"
 #define DOCKER_WORKDIR_DEFAULT  "/workspace"
 #define DOCKER_PROBE_TIMEOUT_MS 15000
@@ -261,46 +247,6 @@ static int docker_host_path_for_self(const char *container_path, char *out, size
 static int server_runs_in_container(void)
 {
    return access("/.dockerenv", F_OK) == 0 || access("/run/.containerenv", F_OK) == 0;
-}
-
-/* Build the host-side workspace path: $XDG_CACHE_HOME/aimee/delegate/
- * <task_id>/ (falls back to $HOME/.cache/...). The dir is mounted
- * read/write into the container at DOCKER_WORKDIR so files survive
- * `docker rm` on hibernate=0. */
-static int compute_workspace_host(const char *task_id, char *out, size_t outsz)
-{
-   const char *xdg = getenv("XDG_CACHE_HOME");
-   int n;
-   if (xdg && xdg[0])
-      n = snprintf(out, outsz, "%s/aimee/delegate/%s", xdg, task_id);
-   else
-   {
-      const char *home = getenv("HOME");
-      if (!home || !home[0])
-         return -1;
-      n = snprintf(out, outsz, "%s/.cache/aimee/delegate/%s", home, task_id);
-   }
-   return (n < 0 || (size_t)n >= outsz) ? -1 : 0;
-}
-
-/* mkdir -p — same shape as the local backend. */
-static int docker_mkdir_p(const char *path)
-{
-   char buf[MAX_PATH_LEN];
-   snprintf(buf, sizeof(buf), "%s", path);
-   for (char *p = buf + 1; *p; p++)
-   {
-      if (*p == '/')
-      {
-         *p = '\0';
-         if (mkdir(buf, 0700) != 0 && errno != EEXIST)
-            return -1;
-         *p = '/';
-      }
-   }
-   if (mkdir(buf, 0700) != 0 && errno != EEXIST)
-      return -1;
-   return 0;
 }
 
 /* Run `docker <args>` synchronously, returning the child's exit code.
@@ -453,45 +399,6 @@ int delegate_backend_docker_reap_aged(int max_age_secs)
    }
    free(out);
    return removed;
-}
-
-/* Determine whether the running sandbox `container` was actually isolated by the
- * runtime, i.e. whether `--network none` was honoured. Asks the HOST daemon (not a
- * binary inside the untrusted image, so distroless/scratch images are fine) for the
- * container's attached networks and their IPs:
- *   0  = isolated   (no attached network, or only the "none" network with no IP)
- *   1  = has network (a non-"none" network is attached OR some network has an IP —
- *                     the runtime gave the sandbox real egress; ANY assigned address
- *                     counts, so a subnet-only/link-local route cannot slip past)
- *  -1  = undetermined (the inspect probe could not run)
- * The caller decides what an undetermined result means (fail-closed under enforce). */
-/* Run the network probe and hand back its RAW report.
- *
- * What the report means is not decided here: reading it and judging it are one
- * rule, and it lives in the module. This half is the part that must stay --
- * inspecting a container is I/O.
- *
- * Returns 0 with *out set to a malloc'd report (caller frees), or -1 when the
- * probe could not run at all. Those are different answers: a failed probe is
- * UNKNOWN, and unknown is not isolated. */
-static int docker_sandbox_network_report(const char *container, char **out)
-{
-   const char *argv[] = {
-       resolve_docker_bin(),
-       "inspect",
-       "--format",
-       "{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}};{{end}}",
-       container,
-       NULL};
-   char *report = NULL;
-   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &report, 65536,
-                                         DOCKER_PROBE_TIMEOUT_MS) != 0)
-   {
-      free(report);
-      return -1;
-   }
-   *out = report;
-   return 0;
 }
 
 /* Read a linked worktree's `.git` pointer file: "gitdir: <absolute path>".
@@ -786,272 +693,159 @@ static void docker_pkg_forwarder_setup(const char *container)
              container);
 }
 
+static const char *resolve_delegate_egress_bin(void)
+{
+   const char *override = getenv("AIMEE_DELEGATE_EGRESS_BIN");
+   return override && override[0] ? override : "aimee-delegate-egress";
+}
+
+/* C discovers canonical filesystem/socket facts. The Go egress module alone
+ * decides the container shape, creates or resumes it, and verifies its complete
+ * runtime posture before returning a name. There is deliberately no network or
+ * isolation-policy argument at this boundary. */
 static int docker_acquire(delegate_backend_t *self, const char *task_id,
                           const delegate_backend_config_t *cfg, void **state_out)
 {
    (void)self;
    if (state_out)
       *state_out = NULL;
-   if (!task_id || !task_id[0] || !state_out)
-      return -1;
+   if (!task_id || !task_id[0] || !state_out || !cfg || !cfg->workspace || !cfg->workspace[0])
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "a full source workspace is required; refusing an empty sandbox");
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
+   }
 
    docker_state_t *st = calloc(1, sizeof(*st));
    if (!st)
       return -1;
-   /* The container's NAME comes back with its argv: the name folds in the mounts
-    * so a task id reused against a different tree cannot resume the old
-    * container, and the mounts are the module's decision. Computing it here from
-    * a different set of mounts is the bug that rule exists to prevent. */
-   aimee_delegates_launch_spec_t launch;
-   memset(&launch, 0, sizeof(launch));
-   char repo[MAX_PATH_LEN] = "", gitdir[MAX_PATH_LEN] = "", real[MAX_PATH_LEN] = "";
-   char userflag[64] = "";
-   const char *image = (cfg && cfg->image && cfg->image[0]) ? cfg->image : DOCKER_DEFAULT_IMAGE;
-   snprintf(st->image, sizeof(st->image), "%s", image);
-   if (cfg && cfg->workspace && cfg->workspace[0])
+
+   char real[MAX_PATH_LEN] = "", repo[MAX_PATH_LEN] = "", gitdir[MAX_PATH_LEN] = "";
+   if (!realpath(cfg->workspace, real))
    {
-      /* Caller-provided tree: mount it so the delegate gets the entire current
-       * source tree — by bind-mount, so it IS the tree, not a copy that can drift.
-       *
-       * Canonicalize FIRST: stat() follows symlinks and so does the docker daemon,
-       * so validating the path as given and mounting the same string would let a
-       * symlinked component point the mount somewhere the checks never saw. */
-      if (!realpath(cfg->workspace, real))
-      {
-         aimee_log(LOG_ERROR, "delegate-backend-docker",
-                   "workspace '%s' does not resolve (%s); refusing to mount it — a delegate "
-                   "would see an empty tree and conclude the code is missing",
-                   cfg->workspace, strerror(errno));
-         free(st);
-         return -1;
-      }
-      struct stat wst;
-      if (stat(real, &wst) != 0 || !S_ISDIR(wst.st_mode))
-      {
-         aimee_log(LOG_ERROR, "delegate-backend-docker",
-                   "workspace '%s' is not an existing directory; refusing to mount it", real);
-         free(st);
-         return -1;
-      }
-      /* Refuse truncation: a path that passed the checks but does not fit would
-       * mount a different directory than the one that was validated. */
-      if ((size_t)snprintf(st->workspace_host, sizeof(st->workspace_host), "%s", real) >=
-          sizeof(st->workspace_host))
-      {
-         aimee_log(LOG_ERROR, "delegate-backend-docker",
-                   "workspace path '%s' is too long for the mount buffer; refusing rather than "
-                   "mounting a truncated path",
-                   real);
-         free(st);
-         return -1;
-      }
-      if (docker_discover_repo(real, repo, sizeof(repo), gitdir, sizeof(gitdir)) != 0)
-      {
-         free(st);
-         return -1;
-      }
-      /* Mounted at its own absolute path, so paths inside the container match
-       * the host's and a tool that reports a path reports a real one. */
-      snprintf(st->workdir, sizeof(st->workdir), "%s", real);
-      launch.repo_root = repo;
-      launch.worktree = real;
-      launch.gitdir = gitdir[0] ? gitdir : NULL;
-      launch.is_git_checkout = 1;
-      launch.writes_allowed = (cfg->workspace_read_only == 0);
-      /* Run as the server's uid:gid: the container would otherwise write into
-       * the caller's checkout as root, and the user could not then edit or
-       * delete their own files. Only for a caller tree -- nobody else owns our
-       * scratch dir. */
-      snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
-      launch.run_as_user = userflag;
+      aimee_log(LOG_ERROR, "delegate-sandbox", "workspace '%s' does not resolve: %s",
+                cfg->workspace, strerror(errno));
+      free(st);
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
-   else if (compute_workspace_host(task_id, st->workspace_host, sizeof(st->workspace_host)) != 0 ||
-            docker_mkdir_p(st->workspace_host) != 0)
+   struct stat wst;
+   if (stat(real, &wst) != 0 || !S_ISDIR(wst.st_mode) ||
+       docker_discover_repo(real, repo, sizeof(repo), gitdir, sizeof(gitdir)) != 0)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "workspace '%s' is not a complete git checkout; refusing", real);
+      free(st);
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
+   }
+   if ((size_t)snprintf(st->workspace_host, sizeof(st->workspace_host), "%s", real) >=
+           sizeof(st->workspace_host) ||
+       (size_t)snprintf(st->workdir, sizeof(st->workdir), "%s", real) >= sizeof(st->workdir))
    {
       free(st);
-      return -1;
-   }
-   else
-   {
-      /* Our own scratch dir: keep the historical /workspace contract. */
-      snprintf(st->workdir, sizeof(st->workdir), "%s", resolve_docker_workdir());
-      launch.scratch_dir = st->workspace_host;
-      launch.scratch_target = st->workdir;
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
    snprintf(st->cwd, sizeof(st->cwd), "%s", st->workdir);
+   snprintf(st->image, sizeof(st->image), "%s",
+            cfg->image && cfg->image[0] ? cfg->image : DOCKER_DEFAULT_IMAGE);
 
-   /* Runtime package-access policy: "proxy" (default) arms the in-container forwarder
-    * + http_proxy so a --network none delegate can install via aimee's egress. The
-    * caller resolved the mode (it already loads config); the backend stays
-    * config-agnostic. */
-   int pkg_proxy = cfg && cfg->pkg_proxy;
-
-   /* The server UDS is the delegate's only outward channel (see the
-    * DELEGATE_SOCK_PATH note). Docker resolves bind sources in the daemon's
-    * namespace, so translate the path when aimee-server itself is containerized. */
    char container_sock[MAX_PATH_LEN + 32] = "";
    char host_sock[MAX_PATH_LEN + 32] = "";
-   char sock_bind[MAX_PATH_LEN + 96] = "";
    const char *aimee_h = aimee_home();
    if (aimee_h && aimee_h[0])
       snprintf(container_sock, sizeof(container_sock), "%s/aimee-http.sock", aimee_h);
-   struct stat sock_st;
-   int socket_path_result = -1;
-   const int socket_exists =
-       container_sock[0] && stat(container_sock, &sock_st) == 0 && S_ISSOCK(sock_st.st_mode);
-   if (socket_exists)
-      socket_path_result = docker_host_path_for_self(container_sock, host_sock, sizeof(host_sock));
-
-   /* In a container the daemon cannot use an un-translated in-container path.
-    * Fail here instead of asking Docker to create a directory at that path and
-    * starting a sandbox whose every aimee tool call will time out. A host-native
-    * server legitimately has no self container to inspect, so result 0 is valid. */
-   if (socket_exists && server_runs_in_container() && socket_path_result != 1)
+   struct stat socket_stat;
+   if (!container_sock[0] || lstat(container_sock, &socket_stat) != 0 ||
+       !S_ISSOCK(socket_stat.st_mode))
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
-                "cannot map server socket %s into the Docker daemon namespace; refusing "
-                "to start a sandbox with a broken tool channel",
-                container_sock);
+                "required sole-egress socket '%s' is missing or not a Unix socket",
+                container_sock[0] ? container_sock : "<unresolved>");
       free(st);
-      return -1;
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
-   const int have_sock = socket_exists && socket_path_result >= 0;
-   if (have_sock)
-      snprintf(sock_bind, sizeof(sock_bind), "%s:%s", host_sock, DELEGATE_SOCK_PATH);
+   int socket_path_result = docker_host_path_for_self(container_sock, host_sock, sizeof(host_sock));
+   if (socket_path_result < 0 || (server_runs_in_container() && socket_path_result != 1))
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "cannot map sole-egress socket into the Docker daemon namespace; refusing");
+      free(st);
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
+   }
 
-   /* Ask the module for this container: its name and the command that creates
-    * it, decided together from one set of mounts.
-    *
-    * host_sock is already in the daemon's namespace -- it was resolved by
-    * inspecting THIS container, which is better information than the mount
-    * table and exists for that path alone. The module leaves the control socket
-    * untranslated for exactly that reason. */
    char mount_table[8192];
    docker_mount_table(mount_table, sizeof(mount_table));
+   char userflag[64];
+   snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
 
-   static const char *const sleep_forever[] = {"sleep", "infinity", NULL};
-   launch.task_id = task_id;
-   launch.image = st->image;
-   launch.workdir = st->workdir;
-   launch.mount_table = mount_table[0] ? mount_table : NULL;
-   launch.command = sleep_forever;
-   if (have_sock)
+   const char *argv[40];
+   int n = 0;
+   argv[n++] = resolve_delegate_egress_bin();
+   argv[n++] = "acquire";
+   argv[n++] = "--docker";
+   argv[n++] = resolve_docker_bin();
+   argv[n++] = "--task";
+   argv[n++] = task_id;
+   argv[n++] = "--image";
+   argv[n++] = st->image;
+   argv[n++] = "--workdir";
+   argv[n++] = st->workdir;
+   argv[n++] = "--repo-root";
+   argv[n++] = repo;
+   argv[n++] = "--worktree";
+   argv[n++] = real;
+   if (gitdir[0])
    {
-      launch.parent_socket_host = host_sock;
-      launch.parent_socket_target = DELEGATE_SOCK_PATH;
-      /* Only with the socket present: the forwarder bridges to it, so pointing
-       * package managers at a proxy with no channel behind it would hang them. */
-      if (pkg_proxy)
-         launch.egress_proxy = DELEGATE_PKG_PROXY_URL;
+      argv[n++] = "--gitdir";
+      argv[n++] = gitdir;
    }
-
-   /* One slot per argument plus the NULL. The buffer is the module's response
-    * and the argv points into it, so both live until the container is created. */
-   const char *create_argv[128];
-   uint8_t *argv_buf = malloc(DELEGATE_LAUNCH_BUF);
-   if (!argv_buf)
+   argv[n++] = "--user";
+   argv[n++] = userflag;
+   argv[n++] = "--socket-source";
+   argv[n++] = host_sock;
+   argv[n++] = "--socket-check";
+   argv[n++] = container_sock;
+   if (!cfg->workspace_read_only)
+      argv[n++] = "--writes-allowed";
+   if (cfg->pkg_proxy)
+      argv[n++] = "--proxy";
+   if (mount_table[0])
    {
+      argv[n++] = "--mount-table";
+      argv[n++] = mount_table;
+   }
+   assert(n < (int)(sizeof(argv) / sizeof(argv[0])));
+   argv[n] = NULL;
+
+   char *out = NULL;
+   int rc = safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 4096, 70000);
+   if (rc != 0 || !out)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "Go egress module could not establish and verify delegate %s; refusing", task_id);
+      free(out);
       free(st);
-      return -1;
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
-   create_argv[0] = "docker";
-   int argc = delegate_launch_args_resolve(
-       &launch, st->container_name, sizeof(st->container_name), create_argv + 1,
-       sizeof(create_argv) / sizeof(create_argv[0]) - 1, argv_buf, DELEGATE_LAUNCH_BUF);
-   if (argc < 0)
+   size_t len = strlen(out);
+   while (len && isspace((unsigned char)out[len - 1]))
+      out[--len] = '\0';
+   char *name = out;
+   while (*name && isspace((unsigned char)*name))
+      name++;
+   if (!name[0] || strpbrk(name, " \t\r\n") ||
+       (size_t)snprintf(st->container_name, sizeof(st->container_name), "%s", name) >=
+           sizeof(st->container_name))
    {
-      free(argv_buf);
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "Go egress module returned an invalid container name");
+      free(out);
       free(st);
-      return -1;
+      return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
+   free(out);
 
-   /* Try `docker start` first — if a container with this name already
-    * exists (operator opted hibernate=1 last release), starting it
-    * resumes the same workspace. If start fails, create + start. */
-   const char *start_argv[] = {"docker", "start", st->container_name, NULL};
-   int started = run_docker(start_argv) == 0;
-   if (started && have_sock)
-   {
-      char resumed_socket[MAX_PATH_LEN + 32] = "";
-      int resumed_socket_result = docker_host_path_for_container(
-          st->container_name, DELEGATE_SOCK_PATH, resumed_socket, sizeof(resumed_socket));
-      if (resumed_socket_result != 1 || strcmp(resumed_socket, host_sock) != 0)
-      {
-         aimee_log(LOG_WARN, "delegate-sandbox",
-                   "container %s has a stale or missing server socket bind; recreating it",
-                   st->container_name);
-         const char *rm_argv[] = {"docker", "rm", "-f", st->container_name, NULL};
-         (void)run_docker(rm_argv);
-         started = 0;
-      }
-   }
-   if (!started)
-   {
-      if (run_docker(create_argv) != 0)
-      {
-         free(argv_buf);
-         free(st);
-         return -1;
-      }
-      const char *start2_argv[] = {"docker", "start", st->container_name, NULL};
-      if (run_docker(start2_argv) != 0)
-      {
-         free(argv_buf);
-         free(st);
-         return -1;
-      }
-   }
-   free(argv_buf);
-
-   /* Verify the runtime honoured --network none. Some container runtimes (e.g.
-    * SmoothNAS/tierd, which attaches a primary veth that cannot be disconnected) ignore
-    * it, giving the sandbox real egress and silently defeating the package-access proxy
-    * and its allowlist. Probe now that the container is up (covers create AND resume). */
-   {
-      char *report = NULL;
-      int probe_failed = docker_sandbox_network_report(st->container_name, &report) != 0;
-      int refuse = 0, warn = 0, is_error = 0;
-      char reason[512] = "";
-      int judged = delegate_isolation_judge(report ? report : "", probe_failed,
-                                            cfg && cfg->require_isolation, &refuse, &warn,
-                                            &is_error, reason, sizeof(reason));
-      free(report);
-
-      /* No verdict is not a pass. The judgement's own reasoning applies to the
-       * judgement itself: a sandbox nobody could assess is not an assessed
-       * sandbox, so an unanswered call refuses exactly as a failed probe under
-       * require_isolation would. */
-      if (judged != 0)
-      {
-         aimee_log(LOG_ERROR, "delegate-sandbox",
-                   "container %s: isolation could not be judged; refusing to run",
-                   st->container_name);
-         refuse = 1;
-         is_error = 1;
-      }
-
-      /* Severity comes from the verdict: a breach that runs anyway is an ERROR
-       * even though it does not refuse, while an unverifiable probe on a box
-       * that does not require isolation is only a warning. */
-      if (refuse || warn || is_error)
-         aimee_log((refuse || is_error) ? LOG_ERROR : LOG_WARN, "delegate-sandbox",
-                   "container %s: %s", st->container_name,
-                   reason[0] ? reason : "isolation unverified");
-
-      if (refuse)
-      {
-         const char *rm_argv[] = {"docker", "rm", "-f", st->container_name, NULL};
-         (void)run_docker(rm_argv);
-         free(st);
-         return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-      }
-   }
-
-   /* Container is running (resumed or freshly created): (re)arm the package forwarder.
-    * A docker exec -d process does not survive a stop, so this runs on every acquire. */
-   if (pkg_proxy)
+   if (cfg->pkg_proxy)
       docker_pkg_forwarder_setup(st->container_name);
-
    *state_out = st;
    return 0;
 }

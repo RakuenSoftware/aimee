@@ -1,6 +1,9 @@
 package delegates
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Whether a container that was asked for no network actually got none, and what
 // to do when that cannot be established.
@@ -31,15 +34,6 @@ const (
 type IsolationVerdict struct {
 	// Refuse means do not run this delegate, and destroy the container.
 	Refuse bool
-	// Warn means the result is worth reporting but not fatal here.
-	Warn bool
-	// Error means the condition is an ERROR even when it does not refuse.
-	//
-	// A breach that runs anyway is not a caution: the sandbox is not a sandbox,
-	// and the only reason it proceeds is that the operator has not opted in to
-	// refusing. Reporting that at the same level as "the probe was flaky" is how
-	// it gets scrolled past.
-	Error bool
 	// Reason is operator-facing and states what was observed and why it
 	// matters, never just "failed".
 	Reason string
@@ -47,39 +41,20 @@ type IsolationVerdict struct {
 
 // JudgeIsolation decides whether a delegate may run.
 //
-// A confirmed breach is always an ERROR worth surfacing -- the container can
-// reach the network regardless of what was asked for, so the egress allowlist
-// is not in force -- but it only REFUSES when isolation is required. Refusing
-// unconditionally would turn a runtime that quietly ignores the flag into a
-// total outage on boxes that have run that way all along; the operator opts in
-// to that with the setting.
-//
-// An UNKNOWN result is judged the same way, and for a sharper reason. That is
-// the point of the setting: an operator who requires isolation will not run a
-// delegate that cannot be PROVEN isolated, because "the probe failed" and "the
-// sandbox is open" are indistinguishable from here. Without the requirement, an
-// unknown result is a warning -- refusing every unprobeable container would
-// make a flaky runtime look like a broken delegate.
-func JudgeIsolation(probe IsolationProbe, requireIsolation bool) IsolationVerdict {
+// A breach and an unknown result both refuse unconditionally. An enabled
+// sandbox is never advisory: "the probe failed" and "the sandbox is open" are
+// indistinguishable at this boundary.
+func JudgeIsolation(probe IsolationProbe) IsolationVerdict {
 	switch probe {
 	case IsolationBreached:
 		reason := "container has network egress despite being created with no network: " +
 			"the runtime did not honour isolation, so the delegate can reach the network " +
 			"directly and bypass the egress proxy and its allowlist"
-		if requireIsolation {
-			return IsolationVerdict{Refuse: true, Error: true, Reason: reason + " -- refusing to run"}
-		}
-		// Still an error worth surfacing: the sandbox is not a sandbox.
-		return IsolationVerdict{Warn: true, Error: true,
-			Reason: reason + " -- set delegate_sandbox_require_isolation to refuse"}
+		return IsolationVerdict{Refuse: true, Reason: reason + " -- refusing to run"}
 
 	case IsolationUnknown:
-		if requireIsolation {
-			return IsolationVerdict{Refuse: true, Error: true,
-				Reason: "could not verify network isolation and isolation is required -- " +
-					"refusing to run a delegate that cannot be proven isolated"}
-		}
-		return IsolationVerdict{Warn: true, Reason: "could not verify network isolation"}
+		return IsolationVerdict{Refuse: true,
+			Reason: "could not verify network isolation -- refusing to run a delegate that cannot be proven isolated"}
 	}
 	return IsolationVerdict{}
 }
@@ -105,6 +80,21 @@ func ParseIsolationProbe(report string, probeFailed bool) IsolationProbe {
 	if trimmed == "" {
 		// No networks at all is a legitimate isolated result: docker prints
 		// nothing when the map is empty.
+		return IsolationConfirmed
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		var networks map[string]struct {
+			IPAddress         string `json:"IPAddress"`
+			GlobalIPv6Address string `json:"GlobalIPv6Address"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &networks); err != nil {
+			return IsolationUnknown
+		}
+		for name, network := range networks {
+			if name != "none" || network.IPAddress != "" || network.GlobalIPv6Address != "" {
+				return IsolationBreached
+			}
+		}
 		return IsolationConfirmed
 	}
 

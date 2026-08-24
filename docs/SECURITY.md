@@ -134,8 +134,8 @@ Write-capable delegates use isolated worktrees. Container delegates default to:
 Custom images and packages expand the trusted computing base. Build them outside the agent's
 control, pin what you can, scan them, and keep the Docker socket out of the container.
 
-If the requested isolation cannot be applied, the default is to fail. An explicitly configured
-degraded path emits a sandbox degradation audit record.
+If the requested isolation cannot be applied or proved after start/resume, the delegate is refused
+and its container is destroyed. There is no degraded host fallback.
 
 See [Delegate sandbox](DELEGATE_SANDBOX.md).
 

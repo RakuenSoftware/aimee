@@ -172,9 +172,8 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * while that client is connected nothing here is used — the live tree is
     * better than any reconstruction of it. But a background delegate runs after
     * the dispatching client has gone, and then the alternative is not a stale
-    * tree, it is no tree at all: the turn lands in a scratch directory holding no
-    * repository. Recording the coordinates lets that case fall back to the
-    * server-side reconstruction instead, which is what
+    * tree, it is no tree at all and the delegate is refused. Recording the
+    * coordinates lets that case use the server-side reconstruction instead, which is what
     * workspace_turn_resolve_detached_mirror_cwd exists to do. Nothing could set
     * them before, so that fallback was unreachable. */
    int wants_vcs = is_mirror || is_detached;
@@ -393,7 +392,7 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    /* A `mirror` workspace always has a server-side tree to mirror. A `detached`
     * one does too once it has recorded a remote — its client serves the live tree
     * while connected, but a background delegate arrives after that client is gone
-    * and would otherwise get a scratch directory with no repository in it. Both
+    * and would otherwise be refused for having no complete server-side tree. Both
     * reconstruct through the same path, so both may sync into it; a workspace
     * with no remote recorded has nothing to reconstruct from and is refused. */
    int syncable = 0, has_remote = 0;
