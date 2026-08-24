@@ -602,7 +602,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "pdf_open_neighbors {chunk_id,project} req:chunk_id,project\n"                                  \
    "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n"               \
    "pdf_search_chunks {max_results,project,query} req:project,query\n"                             \
-   "peer {command,conversation_id,expect_reply,max,text,to} req:command\n"                         \
+   "peer {command,conversation_id,expect_reply,max,reply_to,text,to} req:command\n"                \
    "pipeline "                                                                                     \
    "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,pipeline_id," \
    "questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"                  \
@@ -810,7 +810,7 @@ static void test_tool_profile_filter(void)
       cJSON *props = schema ? cJSON_GetObjectItemCaseSensitive(schema, "properties") : NULL;
       cJSON *cmd = props ? cJSON_GetObjectItemCaseSensitive(props, "command") : NULL;
       cJSON *en = cmd ? cJSON_GetObjectItemCaseSensitive(cmd, "enum") : NULL;
-      int has_send = 0, has_inbox = 0;
+      int has_send = 0, has_inbox = 0, has_reply = 0;
       cJSON *e = NULL;
       cJSON_ArrayForEach(e, en)
       {
@@ -820,9 +820,12 @@ static void test_tool_profile_filter(void)
             has_send = 1;
          if (strcmp(e->valuestring, "inbox") == 0)
             has_inbox = 1;
+         if (strcmp(e->valuestring, "reply") == 0)
+            has_reply = 1;
       }
       assert(has_send && "peer command=send is not offered");
       assert(has_inbox && "peer command=inbox is not offered");
+      assert(has_reply && "peer command=reply is not offered");
 
       /* The parameters each operation needs must survive the fold. The family
          unions its members' properties, so a member that failed to attach takes
@@ -832,6 +835,7 @@ static void test_tool_profile_filter(void)
       assert(cJSON_GetObjectItemCaseSensitive(props, "conversation_id"));
       assert(cJSON_GetObjectItemCaseSensitive(props, "expect_reply"));
       assert(cJSON_GetObjectItemCaseSensitive(props, "max"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "reply_to"));
 
       /* And the demux resolves both commands to real handlers. A family entry
          whose command maps to a name mcp_tool_lookup does not know is an advert
@@ -849,6 +853,13 @@ static void test_tool_profile_filter(void)
          into a refusal; a 0 here would mean "not a family at all" and send the
          call somewhere else entirely. */
       cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("reply"));
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == 1);
+      assert(strcmp(resolved, "peer_reply") == 0);
+      /* An unknown command must RESOLVE TO NOTHING rather than fall through to a
+         default. -1 is "this family does not serve that", which the caller turns
+         into a refusal; a 0 would mean "not a family at all" and send the call
+         somewhere else entirely. */
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("broadcast"));
       assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == -1);
       cJSON_Delete(args);
       cJSON_Delete(served);

@@ -35,6 +35,7 @@
 #define PEER_STAGE_INBOX    2u
 
 #define PEER_OP_SEND       1u
+#define PEER_OP_REPLY      2u
 #define PEER_OP_INBOX_LEN  1u
 #define PEER_OP_INBOX_TAKE 3u
 
@@ -522,6 +523,146 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
             *transport = AIMEE_MODULE_CALL_PROTOCOL;
          return PEER_CLIENT_TRANSPORT;
       }
+   }
+   reply_free(&r);
+   return PEER_CLIENT_OK;
+}
+
+/* ── reply ────────────────────────────────────────────────────────────────── */
+
+/* The five cells Registry.Reply actually reads off the answered message, in the
+ * order the handle carries them. Everything else in a row is re-stamped, so
+ * carrying it would be carrying a claim nobody reads. */
+#define REPLY_HANDLE_FIELDS 5
+
+int peer_client_reply_handle(const peer_client_message_t *m, char *out, size_t out_len)
+{
+   if (!m || !out || out_len == 0)
+      return -1;
+   out[0] = '\0';
+   const char *parts[REPLY_HANDLE_FIELDS] = {
+       m->id ? m->id : "", m->correlation_id ? m->correlation_id : "",
+       m->conversation_id ? m->conversation_id : "", m->from_session ? m->from_session : "",
+       m->origin_session ? m->origin_session : ""};
+   for (int i = 0; i < REPLY_HANDLE_FIELDS; i++)
+      if (strchr(parts[i], '|'))
+         return -1; /* refused, not escaped: see the header */
+   int written = snprintf(out, out_len, "%s|%s|%s|%s|%s|%d", parts[0], parts[1], parts[2], parts[3],
+                          parts[4], m->hop);
+   if (written < 0 || (size_t)written >= out_len)
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
+
+/* Split a handle back into its fields. Returns 0, or -1 on a handle that is not
+ * one -- refused rather than partially believed, because a half-parsed handle
+ * addresses a reply at whatever the remaining fields happened to be. */
+static int reply_handle_split(const char *handle, char *scratch, size_t scratch_len,
+                              const char *out[REPLY_HANDLE_FIELDS], int *hop)
+{
+   if (!handle || !handle[0] || !scratch || !hop)
+      return -1;
+   size_t n = strlen(handle);
+   if (n + 1 > scratch_len)
+      return -1;
+   memcpy(scratch, handle, n + 1);
+   char *at = scratch;
+   for (int i = 0; i < REPLY_HANDLE_FIELDS; i++)
+   {
+      char *bar = strchr(at, '|');
+      if (!bar)
+         return -1;
+      *bar = '\0';
+      out[i] = at;
+      at = bar + 1;
+   }
+   /* The tail is the hop, and it must be a number: defaulting it to zero would
+      restore exactly the bug this field exists to fix -- a reply that resets the
+      loop count. */
+   char *end = NULL;
+   long parsed = strtol(at, &end, 10);
+   if (!at[0] || !end || *end != '\0' || parsed < 0 || parsed > 1000000)
+      return -1;
+   *hop = (int)parsed;
+   return 0;
+}
+
+peer_client_result_t peer_client_reply(const char *from, const char *handle, const char *text,
+                                       peer_client_message_t *stamped, uint32_t *status,
+                                       int *transport)
+{
+   if (status)
+      *status = PEER_CLIENT_STATUS_OK;
+   if (transport)
+      *transport = AIMEE_MODULE_CALL_OK;
+   if (stamped)
+      memset(stamped, 0, sizeof(*stamped));
+   if (!from || !handle || !text)
+   {
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+      return PEER_CLIENT_TRANSPORT;
+   }
+
+   char scratch[PEER_CLIENT_REPLY_HANDLE_MAX];
+   const char *part[REPLY_HANDLE_FIELDS];
+   int hop = 0;
+   if (reply_handle_split(handle, scratch, sizeof(scratch), part, &hop) != 0)
+   {
+      /* A malformed handle is the CALLER's error, not a transport fault, and
+         saying "the module did not answer" would send them to check the module.
+         It never reached one. */
+      if (status)
+         *status = PEER_CLIENT_STATUS_BAD_REQUEST;
+      return PEER_CLIENT_REFUSED;
+   }
+
+   char hopbuf[16];
+   snprintf(hopbuf, sizeof(hopbuf), "%d", hop);
+   /* from, then the answered message as a full row. The reply's TEXT rides in
+      the row's text cell -- that is the module's contract, and the registry
+      re-stamps provenance either way, so a forged row cannot impersonate. The
+      cells Reply does not read travel empty rather than invented. */
+   const char *fields[1 + PEER_CLIENT_MESSAGE_WIDTH] = {
+       from,    /* replying session */
+       part[0], /* id */
+       part[1], /* correlation_id */
+       part[2], /* conversation_id */
+       part[3], /* from_session -- who the reply goes to */
+       "",      /* from_owner: re-stamped */
+       "",      /* from_label: re-stamped */
+       part[4], /* origin_session */
+       hopbuf,  /* hop: the reply carries hop + 1, computed by the module */
+       "0",     /* is_reply on the ANSWERED message */
+       "",      /* sent_at: empty is a zero time */
+       text};   /* the reply itself */
+
+   struct reply r;
+   peer_client_result_t rc = call_stage(PEER_STAGE_DELIVERY, PEER_OP_REPLY, fields,
+                                        1 + PEER_CLIENT_MESSAGE_WIDTH, &r, transport);
+   if (rc == PEER_CLIENT_REFUSED && status)
+      *status = r.status;
+   if (rc != PEER_CLIENT_OK)
+      return rc;
+   if (r.count != PEER_CLIENT_MESSAGE_WIDTH)
+   {
+      warn_protocol("reply is not one whole message row", r.count,
+                    (uint32_t)PEER_CLIENT_MESSAGE_WIDTH);
+      reply_free(&r);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+      return PEER_CLIENT_TRANSPORT;
+   }
+   if (stamped && row_take(r.cells, stamped) != 0)
+   {
+      peer_client_message_free(stamped);
+      reply_free(&r);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_PROTOCOL;
+      return PEER_CLIENT_TRANSPORT;
    }
    reply_free(&r);
    return PEER_CLIENT_OK;

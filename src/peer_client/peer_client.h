@@ -100,6 +100,36 @@ extern "C"
                                          peer_client_message_t *stamped, uint32_t *status,
                                          int *transport);
 
+   /* An opaque handle identifying the message a reply answers.
+    *
+    * peer_client_reply needs five things from the answered message -- its id,
+    * correlation, conversation, origin session and HOP -- and a model-facing
+    * tool cannot sensibly be asked for five fields. So the inbox emits one
+    * token and the reply takes it back verbatim.
+    *
+    * HOP is the field that makes this worth having. `peer send` always declares
+    * hop 0, so before a reply existed, two sessions answering each other with
+    * `send` reset the count every time and DefaultMaxHops (16) could never be
+    * reached -- a loop ceiling that no caller could trip. A reply carries
+    * hop + 1, which is what makes the bound real.
+    *
+    * `|` separated, and a field containing `|` is refused rather than escaped:
+    * an escape scheme is a second grammar, and this one already crosses a model. */
+#define PEER_CLIENT_REPLY_HANDLE_MAX 640
+
+   /* Build the handle for a message, into `out`. Returns 0, or -1 if the
+    * message cannot be represented (a field holds the separator, or it does not
+    * fit) -- in which case the caller must not offer a reply for it rather than
+    * offering a broken one. */
+   int peer_client_reply_handle(const peer_client_message_t *m, char *out, size_t out_len);
+
+   /* Answer the message a handle names. `from` is the replying session; the
+    * registry re-stamps provenance, so a forged handle cannot impersonate --
+    * it can only misdirect the reply, which is the caller's own business. */
+   peer_client_result_t peer_client_reply(const char *from, const char *handle, const char *text,
+                                          peer_client_message_t *stamped, uint32_t *status,
+                                          int *transport);
+
    /* PEER_CLIENT_INBOX_TAKE_MAX bounds ONE drain, not an inbox.
     *
     * The reply is a single bus message whose size this client must predict to

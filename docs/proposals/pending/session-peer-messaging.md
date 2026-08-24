@@ -381,11 +381,11 @@ container validation passed over a module no client could reach.
 | D1 labels and lookup | **done** in-module; directory moves to `db1` (see below) | no — no caller sets a label |
 | D2 pull-based delivery, inbox lifetime | **done** | **YES** — `peer command=inbox`, drained once |
 | D3 live announcement (`Notify` seam) | **done** in the registry; Runtime wiring outstanding | no — nothing to announce, and no subscriber |
-| D4 `Send` / `Reply` | `Send` **done**; `OpReply` served by the module, **not implemented in the C client** | `Send` **YES**; reply no — threading uses `conversation_id` |
+| D4 `Send` / `Reply` | **done** — both; `peer command=send` and `command=reply` | **YES** — a live model replied via the inbox handle, arriving at hop 1 with `is_reply` true |
 | D4 channels | **done** — `peer/channel.go`, stage `peer-channel`, per-recipient outcomes | no — no caller joins a channel |
 | D5 envelope, provenance, grants | **done** | **YES** — the envelope is stamped and returned; `from_owner` comes from db1 |
 | D6 bus tap / `execution-policy` verdict | **not started** — attaches at the `Notify` seam | no |
-| D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** | partly — `too_long` and `self` refuse a real caller; hop and cycle need multi-hop traffic |
+| D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** | `too_long`/`self` refuse a real caller, and the HOP BUDGET is now reachable: `send` always declares hop 0, so until `reply` existed two sessions answering each other reset the count and `DefaultMaxHops` could never be hit. Cycle refusal still needs an `Ask`. |
 | D8 bus stages | **done** — 12033/12034/12035/12036 | **YES** — both delivery and inbox serve real callers |
 | D8 `/v1` routes | **done** and MOUNTED BY NOTHING — no caller constructs `Registry.Handler` | no — superseded by the MCP surface, which is what callers use |
 | D8 MCP surface | **done** — `peer_send`/`peer_inbox`, `peer` family, on the core floor, `src/peer_client` | **YES** — this is the reachable path |

@@ -1087,3 +1087,60 @@ assertion caught it. Nothing now reads beta's inbox except beta.
 
 CT 9107 destroyed and purged, key shredded, `/root` verified free of `sk-cp-`
 material and every rig file.
+
+## peer_reply, and a loop ceiling that could not fire (2026-08-24, CT 9108)
+
+`OpReply` had been recorded here twice as "served by the module, not implemented
+in the C client", with the note that threading works via `conversation_id` so
+the gap was cosmetic. That was wrong, and the reason is worth stating.
+
+**`peer send` always declares hop 0.** So two sessions answering each other with
+`send` reset the count on every message, and `DefaultMaxHops` (16) — the bound
+that stops a conversation looping forever — **could never be reached by any
+caller that existed.** A guard that cannot fire, in the middle of a feature
+whose whole risk is two agents talking past each other indefinitely.
+
+`Reply` sets `hop = answered.Hop + 1`. Implementing it is what makes the ceiling
+real, and that is why the gap was not cosmetic.
+
+### The handle
+
+`Registry.Reply` reads five things off the answered message — id, correlation,
+conversation, origin session, and hop — and a model-facing tool cannot sensibly
+ask for five fields. So `peer inbox` prints one opaque token beside each message
+and `peer reply` takes it back verbatim:
+
+```
+[1] from alpha (conversation conv-2)
+   reply_to: pmsg-1||conv-2|alpha|alpha|0
+handle probe
+```
+
+A field containing the separator refuses the handle rather than escaping it: an
+escape scheme is a second grammar, and this one crosses a model. A handle that
+will not parse is refused as `bad_request` — the caller's error — rather than as
+a transport failure, which would send them to check a module the call never
+reached.
+
+### Verified on hardware, with the properties a send cannot produce
+
+Two live models. alpha asked, beta read its inbox and used `command=reply` with
+the token — never told what the token means:
+
+```
+from beta | conv conv-4 | hop 1 | is_reply True
+text: 'The capital of France is Paris.'
+
+ANSWERS THE QUESTION (mentions Paris): True
+IS A REPLY (is_reply true):            True
+HOP ADVANCED (hop >= 1):               True
+```
+
+The last two are the assertion. A `send` always produces hop 0 and
+`is_reply` false, so a "reply" that quietly behaved like a send would satisfy
+every other check in this run — including the Paris one. This is also the first
+time `is_reply` has ever been true in production; it was previously a field that
+could only ever read false.
+
+Pinned in `test_peer_client.c` (70 checks) and mutation-verified: making the
+reply send hop 0 turns *the answered message's HOP travels* red.

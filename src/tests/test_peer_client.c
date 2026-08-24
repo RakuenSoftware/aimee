@@ -534,8 +534,113 @@ static void test_transport_names(void)
       "a code this build does not know is 'unknown' rather than mislabelled");
 }
 
+/* ── reply ────────────────────────────────────────────────────────────────── */
+
+/* THE POINT OF REPLY IS THE HOP COUNT.
+ *
+ * peer_send always declares hop 0. Before reply existed, two sessions answering
+ * each other with send reset the count on every message, so DefaultMaxHops (16)
+ * could never be reached -- a loop ceiling no caller could trip. A reply carries
+ * the answered message's hop, and the module adds one.
+ *
+ * So the check that matters is not "a reply was sent" but "the hop travelled".
+ * A reply that silently restored hop 0 would pass every other assertion here. */
+static void test_reply_carries_the_hop(void)
+{
+   char buf[128];
+   uint32_t status = 0;
+
+   /* A message that has already travelled. */
+   const char *row[PEER_CLIENT_MESSAGE_WIDTH];
+   for (int i = 0; i < PEER_CLIENT_MESSAGE_WIDTH; i++)
+      row[i] = ROW[i];
+   row[7] = "4"; /* hop */
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, row, PEER_CLIENT_MESSAGE_WIDTH);
+   peer_client_message_t got;
+   ok(peer_client_send("x", "y", "t", NULL, 0, &got, &status, NULL) == PEER_CLIENT_OK &&
+          got.hop == 4,
+      "a message at hop 4 decodes as hop 4");
+
+   char handle[PEER_CLIENT_REPLY_HANDLE_MAX];
+   ok(peer_client_reply_handle(&got, handle, sizeof handle) == 0,
+      "a reply handle can be built for it");
+   peer_client_message_free(&got);
+
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
+   peer_client_message_t out;
+   ok(peer_client_reply("me", handle, "answering", &out, &status, NULL) == PEER_CLIENT_OK,
+      "the reply is accepted");
+   peer_client_message_free(&out);
+
+   ok(get_u32(g_seen) == 2u, "reply uses op 2 on the delivery stage");
+   ok(get_u32(g_seen + 4) == 1u + PEER_CLIENT_MESSAGE_WIDTH,
+      "reply sends the sender plus one whole row");
+   ok(strcmp(seen_cell(0, buf, sizeof buf), "me") == 0, "cell 0 is the replying session");
+   /* THE ASSERTION. Cell 8 is the row's hop, and it must be the ANSWERED
+      message's 4 -- not 0. The module adds one to it; a 0 here is the bug this
+      whole operation exists to remove. */
+   ok(strcmp(seen_cell(8, buf, sizeof buf), "4") == 0,
+      "the answered message's HOP travels, so the loop ceiling can be reached");
+   ok(strcmp(seen_cell(4, buf, sizeof buf), "sess-a") == 0,
+      "the answered message's sender travels: that is who the reply goes to");
+   ok(strcmp(seen_cell(3, buf, sizeof buf), "conv-1") == 0,
+      "and its conversation, so the answer threads onto the same exchange");
+   ok(strcmp(seen_cell(11, buf, sizeof buf), "answering") == 0,
+      "the reply text rides in the row's text cell, which is the module's contract");
+}
+
+static void test_reply_handle_is_refused_not_guessed(void)
+{
+   uint32_t status = 0;
+   peer_client_message_t out;
+
+   /* A handle that is not one. Refused as a BAD REQUEST -- the caller's error --
+      rather than as a transport failure, which would send them to check a module
+      the call never reached. */
+   reset();
+   status = 0;
+   ok(peer_client_reply("me", "not-a-handle", "t", &out, &status, NULL) == PEER_CLIENT_REFUSED &&
+          status == PEER_CLIENT_STATUS_BAD_REQUEST,
+      "a malformed handle is the caller's error, not the module being unreachable");
+   ok(g_seen_len == 0, "and nothing was sent: a handle that cannot be parsed is not dialled");
+
+   /* A non-numeric hop. Defaulting it to zero would restore exactly the defect
+      the field exists to fix. */
+   reset();
+   status = 0;
+   ok(peer_client_reply("me", "id|corr|conv|from|origin|x", "t", &out, &status, NULL) ==
+          PEER_CLIENT_REFUSED,
+      "a hop that does not parse is refused, not read as hop 0");
+
+   /* Too few fields. */
+   reset();
+   status = 0;
+   ok(peer_client_reply("me", "id|corr|conv", "t", &out, &status, NULL) == PEER_CLIENT_REFUSED,
+      "a short handle is refused rather than partially believed");
+
+   /* A message whose fields contain the separator cannot be represented, and the
+      handle is REFUSED rather than escaped -- an escape scheme would be a second
+      grammar, and this one crosses a model. */
+   peer_client_message_t m;
+   memset(&m, 0, sizeof m);
+   char idbuf[] = "has|bar";
+   char other[] = "x";
+   m.id = idbuf;
+   m.correlation_id = other;
+   m.conversation_id = other;
+   m.from_session = other;
+   m.origin_session = other;
+   char handle[PEER_CLIENT_REPLY_HANDLE_MAX];
+   ok(peer_client_reply_handle(&m, handle, sizeof handle) == -1 && handle[0] == '\0',
+      "a field containing the separator refuses the handle rather than escaping it");
+}
+
 int main(void)
 {
+   test_reply_carries_the_hop();
+   test_reply_handle_is_refused_not_guessed();
    test_three_outcomes();
    test_transport_names();
    test_row_width();

@@ -302,8 +302,24 @@ void mcp_add_extended_tools(cJSON *tools)
    t = ext_tool(tools, "peer_inbox",
                 "Take messages other aimee sessions have sent you. Taken messages are REMOVED "
                 "from the inbox, so a message is delivered once. The reply reports how many "
-                "remain: keep calling while that is above zero.");
+                "remain: keep calling while that is above zero. Each message carries a "
+                "'reply_to' token for answering it.");
    ext_prop(t, "max", "integer", "Most messages to take in one call (default and maximum 8).");
+
+   /* Answering is a different operation from sending, and the difference is the
+      HOP COUNT. A send always starts at hop 0, so two sessions answering each
+      other with send reset the count every time and the conversation's loop
+      ceiling could never be reached. A reply carries hop + 1. */
+   t = ext_tool(tools, "peer_reply",
+                "Answer a message another aimee session sent you. Prefer this over 'send' when "
+                "responding: it threads the answer onto the same conversation and advances the "
+                "hop count, which is what bounds a back-and-forth between two sessions.");
+   ext_prop(t, "reply_to", "string",
+            "The 'reply_to' token printed beside the message in your inbox. Pass it back "
+            "unchanged.");
+   ext_prop(t, "text", "string", "Your answer (up to 8192 bytes).");
+   ext_require(t, "reply_to");
+   ext_require(t, "text");
 }
 
 /* ── Tool-family multiplexing (P4) ────────────────────────────────────────────
@@ -411,8 +427,9 @@ static const struct fam_def MCP_FAMILIES[] = {
     {"peer",
      "command",
      "Talk to another aimee session, including one running a different model. Set 'command': "
-     "'send' to deliver a message, 'inbox' to take the messages sent to you.",
-     {{"send", "peer_send"}, {"inbox", "peer_inbox"}, {NULL, NULL}}},
+     "'send' to deliver a message, 'inbox' to take the messages sent to you, 'reply' to answer "
+     "one you were sent.",
+     {{"send", "peer_send"}, {"inbox", "peer_inbox"}, {"reply", "peer_reply"}, {NULL, NULL}}},
     {"prospective_memory",
      "command",
      "'When X, surface Y' reminders. Set 'command'.",

@@ -1867,6 +1867,42 @@ static cJSON *mcph_peer_send(struct mcp_call *c)
    return content;
 }
 
+static cJSON *mcph_peer_reply(struct mcp_call *c)
+{
+   const char *self = peer_self(c);
+   if (!self)
+      return text_content("error: peer_reply needs a session id and this call carries none");
+   cJSON *jh = cJSON_GetObjectItemCaseSensitive(c->jargs, "reply_to");
+   cJSON *jtext = cJSON_GetObjectItemCaseSensitive(c->jargs, "text");
+   if (!cJSON_IsString(jh) || !jh->valuestring[0])
+      return text_content("error: peer_reply requires 'reply_to' (the token printed beside the "
+                          "message in your inbox)");
+   if (!cJSON_IsString(jtext) || !jtext->valuestring[0])
+      return text_content("error: peer_reply requires 'text'");
+
+   peer_client_message_t stamped;
+   uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
+   peer_client_result_t rc =
+       peer_client_reply(self, jh->valuestring, jtext->valuestring, &stamped, &status, &transport);
+   if (rc != PEER_CLIENT_OK)
+      return peer_outcome_text("reply", rc, status, transport);
+   cJSON *j = peer_message_json(&stamped);
+   char msg[320];
+   /* The hop is reported because it is the point of replying rather than
+      sending: it is what makes the conversation's loop ceiling reachable. */
+   snprintf(msg, sizeof msg, "Replied to %s (message %s, conversation %s, hop %d).",
+            stamped.from_session ? "the sender" : "the sender", stamped.id ? stamped.id : "",
+            stamped.conversation_id ? stamped.conversation_id : "", stamped.hop);
+   peer_client_message_free(&stamped);
+   cJSON *content = text_content(msg);
+   if (c->structured)
+      *c->structured = j;
+   else
+      cJSON_Delete(j);
+   return content;
+}
+
 static cJSON *mcph_peer_inbox(struct mcp_call *c)
 {
    const char *self = peer_self(c);
@@ -1910,9 +1946,19 @@ static cJSON *mcph_peer_inbox(struct mcp_call *c)
       const peer_client_message_t *m = &msgs[i];
       /* Sender and conversation travel with the text because a reply needs
          both: who to answer, and which thread to answer on. */
-      dstr_appendf(&body, "\n\n[%zu] from %s (conversation %s)\n%s", i + 1,
+      dstr_appendf(&body, "\n\n[%zu] from %s (conversation %s)", i + 1,
                    m->from_session ? m->from_session : "?",
-                   m->conversation_id ? m->conversation_id : "?", m->text ? m->text : "");
+                   m->conversation_id ? m->conversation_id : "?");
+      /* The reply handle rides with the message because a reply needs the hop
+         count, and `peer send` cannot carry it -- send always declares hop 0, so
+         two sessions answering each other with send reset the loop count every
+         time and DefaultMaxHops could never be reached. Offered only when the
+         message can actually be represented; a handle that would be malformed is
+         omitted rather than printed broken. */
+      char handle[PEER_CLIENT_REPLY_HANDLE_MAX];
+      if (peer_client_reply_handle(m, handle, sizeof handle) == 0)
+         dstr_appendf(&body, "\n   reply_to: %s", handle);
+      dstr_appendf(&body, "\n%s", m->text ? m->text : "");
    }
    peer_client_messages_free(msgs, count);
    cJSON *content = text_content(body.data ? body.data : "0 message(s) taken.");
@@ -2062,6 +2108,7 @@ static const struct
      * would have asserted the opposite of the reason they exist. */
     {"peer_send", mcph_peer_send, "core"},
     {"peer_inbox", mcph_peer_inbox, "core"},
+    {"peer_reply", mcph_peer_reply, "core"},
 };
 
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
