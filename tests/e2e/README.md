@@ -1,5 +1,8 @@
 # Postgres end-to-end suite
 
+Two suites live here: `typed-facts-pg-e2e.sh` (below) and
+`module-liveness-pg-e2e.sh` (at the end).
+
 `make unit-tests` runs every C test against the in-memory sqlite shim
 (`db2_test_shim_open`). Production is Postgres via libpq, and sqlite accepts SQL
 that Postgres rejects, so a green unit run is not evidence that this
@@ -66,3 +69,73 @@ result below section 0 means nothing until section 0 is green.
 | E | Retract and entity merge/unmerge, including authority, immutable and hard-delete behaviour |
 | F | PII-tier relations still participate in the walk, per the section 7 decision |
 | G | The lifecycle still runs with `typed_facts_enabled: false` |
+
+# Module liveness and provider registration
+
+`module-liveness-pg-e2e.sh` answers a different question: does a deployed daemon
+come up with its modules attached and its code paths live?
+
+The gap it was written for. Signal capture is served by `aimee-kb` -- that is
+where the learning tables live -- and the router it calls needs a signal
+classifier to decide which sinks a signal reaches. Only `aimee-server` ever
+registered one. In the KB the pointer was null, every signal was refused with a
+single WARN, and the route answered `200` carrying an error document while
+writing nothing. Signal ingest through the KB had never worked.
+
+No unit test could have caught it: every test registers its own provider, so
+none can observe that production does not. `make lint` now gates the shape
+(`scripts/check_provider_registration.py`), but a gate reads source. It cannot
+tell you a deployed daemon actually attached its modules.
+
+The harness that originally found the bug started **two** modules, and that is
+part of why it hid: a module which is granted but never attached fails exactly
+like a module that was never placed. This suite attaches every module each
+daemon is granted and has a binary for -- 7 on the KB, 17 on the server -- and
+reports any it could not start rather than skipping it quietly.
+
+## Running it
+
+```
+# in a throwaway box, with Postgres up and an empty aimee_shared database
+cd src && make -j$(nproc) all
+make build/obj/aimee-module build/obj/aimee-module-config build/obj/aimee-module-db1
+
+AIMEE_ROOT=/path/to/aimee AIMEE_SRC=/path/to/aimee/src \
+  tests/e2e/module-liveness-pg-e2e.sh
+```
+
+`AIMEE_DB2_URL` must reach the same database. The **postgres module** connects
+by that URL rather than by the libpq defaults `aimee-kb` itself uses, and with
+it unset the KB publishes the blocker *"store unavailable: the KB database
+schema is not ready"* while it is visibly storing and retrieving. That is an
+under-configured environment, not a defect, and section 5 asserts the service
+does not contradict itself this way.
+
+## What it covers
+
+| Section | Behaviour |
+| --- | --- |
+| 0 | Every module the KB is granted deploys, attaches, and is still alive |
+| 1 | The same for the server, with the KB reachable |
+| 2 | The surfaces answer; a probe naming a command that does not exist fails the run |
+| 3 | Signal capture is recorded, and a later commit supersedes the earlier one |
+| 4 | Neither log reports a missing provider, unserved stage, or rejected grant |
+| 5 | The service does not contradict itself about its own store; nothing crashed |
+
+## It is tested against the bug
+
+Deleting the KB's `learning_router_register_signal_classifier` line reproduces
+the original defect, and four independent assertions catch it -- both captures
+refused, no supersession recorded, and the log sweep quoting the original WARN:
+
+```
+  FAIL  signal 1 was refused -- the classifier is null again
+  FAIL  no supersession was recorded by this run (was 1, now 1)
+  FAIL  kb.log: 2 line(s) report a missing provider or stage
+          WARN  learning: signal classification unavailable; refusing signal type=mark_rule
+```
+
+Section 3 judges the **delta** a run produces, not the state it inherits. The
+first version asked "is there a superseded row?", which passed on a row left by
+an earlier run -- and did exactly that in a run where every capture was refused
+and nothing was written.
