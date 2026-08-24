@@ -874,6 +874,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_guardrails.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_index.c"
     },
     {
@@ -2988,7 +2992,8 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_agent.c"
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
+        "src/tests/test_guardrails.c"
       ],
       "locations": [
         {
@@ -3038,6 +3043,7 @@
         "src/modules/learning/learning_evidence.c",
         "src/modules/memory/memory_advanced.c",
         "src/tests/test_context_assembly.c",
+        "src/tests/test_guardrails.c",
         "src/trace_analysis.c"
       ],
       "locations": [
@@ -3054,7 +3060,8 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
-        "src/modules/memory/memory_assemble.c"
+        "src/modules/memory/memory_assemble.c",
+        "src/tests/test_guardrails.c"
       ],
       "locations": [
         {
@@ -21737,6 +21744,7 @@
         "src/tests/test_fidelity.c",
         "src/tests/test_graph_fusion.c",
         "src/tests/test_graph_scoring.c",
+        "src/tests/test_guardrails.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm.c",
@@ -21872,6 +21880,7 @@
         "src/tests/test_fact_recall.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
+        "src/tests/test_guardrails.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm.c",
@@ -25747,7 +25756,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a8d35d68aba6c3307b082a2ae2686d2c138fba89b699ed476b1a09bfcc311b95",
+  "fingerprint": "060c326ffa19a6f119cdd3e39312547faa183d80a27e948916944bf9cc6f317f",
   "module": "db2",
   "schema_version": 1,
   "summary": {

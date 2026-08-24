@@ -305,6 +305,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-sandbox-learned-observe \
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
+               $(TESTPREFIX)/unit-test-guardrails \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-conn-accept \
@@ -695,20 +696,30 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
 TEST_TARGETS += $(TESTPREFIX)/unit-test-command-registry
 TEST_TARGETS += $(TESTPREFIX)/unit-test-config-accessors
 
-# Three bus fixtures that were built but never run.
+# RETIRED: unit-test-bus-memory-recall, unit-test-bus-memory-upsert and
+# unit-test-bus-guardrail-durability. Their sources went with the C store.
 #
-# They were named in BUS_TEST_TARGETS, which is an ORDER-ONLY dependency list
-# for the core archive rather than a run list -- so they looked listed, built on
-# every run, and executed on none. Each also declared no prerequisite on its
-# bare convenience target, so `make unit-test-bus-memory-recall` matched a rule
-# whose `$<` was empty and reported success having run nothing.
+# Each drove the real bus and then read the SQLite table the consumer wrote to
+# -- "requires the real db1 guardrail_events table to hold exactly N". There is
+# no such table now: the sink is the Go module on PostgreSQL. They could not be
+# repointed, only rewritten against a different sink.
 #
-# They are exactly the class this tree has paid for twice: the only proofs that
-# a module process actually SERVES what its clients ask for, rather than
-# attaching and answering from in-process code. All three pass.
-TEST_TARGETS += $(TESTPREFIX)/unit-test-bus-memory-recall \
-                $(TESTPREFIX)/unit-test-bus-memory-upsert \
-                $(TESTPREFIX)/unit-test-bus-guardrail-durability
+# They reached this list because an earlier pass found them BUILT BUT NEVER RUN,
+# named only in BUS_TEST_TARGETS -- an order-only dependency list for the core
+# archive, not a run list -- so they looked listed, built every time, and
+# executed never. The comment added then ended "All three pass."
+#
+# Deleting the sources left this entry naming three binaries nothing builds, and
+# the runner reported "not found" for each. That was invisible for a while,
+# because the STALE BINARIES from before the deletion were still on disk and
+# still passing: `make unit-tests` was green on artifacts of deleted code until a
+# version bump cleaned the object tree. Twice invisible, in opposite directions
+# -- first listed but never run, then run but never built.
+#
+# THE PROPERTY THEY GUARDED IS STILL REAL and nothing here covers it: every
+# guardrail event the bus accepts reaches the store exactly once, and a graceful
+# stop drains those in flight. That wants a test against the Go sink. Its absence
+# is a gap, not a decision.
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-custody \
                 $(TESTPREFIX)/unit-test-management-status-key-ctx \
                 $(TESTPREFIX)/unit-test-kb-mgmt-status-provision \
@@ -1432,6 +1443,22 @@ $(TESTPREFIX)/unit-test-cli-server-compat: $(OBJDIR)/tests/test_cli_server_compa
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 
+
+# Restored. Deleted with the C store as "store-coupled", which was true of
+# seven lines out of 673 assertions: db1_init/db1_shutdown for the fixture and
+# five db1_session_state_delete calls that are TEARDOWN between cases, not
+# subject. Nothing here asserts anything about the store.
+#
+# db1_init_mock.c supplies the lifecycle as no-ops -- there is no connection to
+# open now -- and session_state_stub.c the one teardown call. The operation
+# itself lives on as session_state_delete in the Go catalog, exercised by the
+# sessions family suite, so nothing was lost by not reaching a real store here.
+$(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o $(OBJDIR)/tests/support/git_module_fixture.o \
+                            $(OBJDIR)/tests/support/db1_init_mock.o \
+                            $(OBJDIR)/tests/support/session_state_stub.o \
+                            $(OBJDIR)/server/obs_bus_adapter.o \
+                            $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o \
                              $(OBJDIR)/cmd_hooks_scope.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -3127,15 +3154,6 @@ $(TESTPREFIX)/bus-bench: $(OBJDIR)/tests/bus_bench.o \
 .PHONY: bus-bench
 bus-bench: $(TESTPREFIX)/bus-bench
 
-# First real module-on-bus integration (memory recall over the bus). Links the
-# real DB1 user-memory path (against the pg/sqlite test shim, like the memory
-# harness) plus the bus. A test/integration binary; not a shipping target.
-$(OBJDIR)/tests/test_bus_memory_recall.o: C_FLAGS += -Icore/event_bus/include
-
-.PHONY: unit-test-bus-memory-recall
-unit-test-bus-memory-recall: $(TESTPREFIX)/unit-test-bus-memory-recall
-	$<
-
 # The verify ledger across the real bus, against the real Go module.
 #
 # git_verify_state.c is now a seam: it asks the git module rather than touching
@@ -3171,14 +3189,6 @@ $(TESTPREFIX)/unit-test-git-verify-state-bus: $(OBJDIR)/tests/test_git_verify_st
 .PHONY: unit-test-git-verify-state-bus
 unit-test-git-verify-state-bus: $(TESTPREFIX)/unit-test-git-verify-state-bus $(OBJDIR)/aimee-module
 	$< $(OBJDIR)/aimee-module
-
-# Real mutating memory op over the bus (upsert insert + update, verified by a
-# direct read-back of the store). Same DB1 path + bus objects as the recall test.
-$(OBJDIR)/tests/test_bus_memory_upsert.o: C_FLAGS += -Icore/event_bus/include
-
-.PHONY: unit-test-bus-memory-upsert
-unit-test-bus-memory-upsert: $(TESTPREFIX)/unit-test-bus-memory-upsert
-	$<
 
 # A second, distinct module over the bus: the real config_autonomy_lookup served
 # as a request/reply and checked against a direct call (proves the RPC pattern is
@@ -3343,15 +3353,6 @@ $(TESTPREFIX)/unit-test-bus-audit-replay-tool: $(OBJDIR)/tests/test_bus_audit_re
 
 .PHONY: unit-test-bus-audit-replay-tool
 unit-test-bus-audit-replay-tool: $(TESTPREFIX)/unit-test-bus-audit-replay-tool
-	$<
-
-# Second module on the bus: the guardrail-semantic event. Emits N over the bus and
-# requires the real db1 guardrail_events table to hold exactly N. guardrail_events.o
-# is in BUS_MEM_OBJS; obs_bus dispatches this kind to db1.
-$(OBJDIR)/tests/test_bus_guardrail_durability.o: C_FLAGS += -Icore/event_bus/include
-
-.PHONY: unit-test-bus-guardrail-durability
-unit-test-bus-guardrail-durability: $(TESTPREFIX)/unit-test-bus-guardrail-durability
 	$<
 
 # Vault credential-access audit, end-to-end through the REAL server bridge
@@ -3554,12 +3555,12 @@ unit-test-module-protocol: $(TESTPREFIX)/unit-test-module-protocol
 # Order-only: the archive must EXIST before these link, but relinking it must not
 # force every bus test to relink.
 BUS_TEST_TARGETS := $(addprefix $(TESTPREFIX)/, \
-   unit-test-bus-endpoint unit-test-bus-runtime unit-test-bus-memory-recall \
+   unit-test-bus-endpoint unit-test-bus-runtime \
    unit-test-git-verify-state-bus \
-   unit-test-bus-memory-upsert unit-test-bus-config-autonomy \
+   unit-test-bus-config-autonomy \
    unit-test-bus-audit-durability unit-test-bus-audit-replay \
    unit-test-bus-audit-retention unit-test-bus-audit-replay-tool \
-   unit-test-bus-guardrail-durability unit-test-bus-vault-audit \
+   unit-test-bus-vault-audit \
    unit-test-bus-sandbox-audit unit-test-bus-tool-completion \
    unit-test-bus-memory-audit unit-test-bus-shutdown-race unit-test-bus-capture \
    unit-test-bus-client unit-test-bus-flow unit-test-bus-route unit-test-bus-host \

@@ -121,6 +121,10 @@
       "decls": 1,
       "loads": 1
     },
+    "src/tests/test_guardrails.c": {
+      "decls": 1,
+      "loads": 1
+    },
     "src/tests/test_gw_stage_memory.c": {
       "decls": 1,
       "loads": 1

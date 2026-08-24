@@ -511,3 +511,69 @@ gate's own scope excluded it and said nothing about the exclusion. "Everything
 passes" and "everything was checked" are different claims, and only the second
 one is worth anything — which is the same lesson as the record guard vouching
 for one file out of eighty-eight, arriving from the opposite direction.
+
+## test_guardrails restored, and what restoring it uncovered
+
+673 assertions about guardrail classification, deleted for seven lines: the
+`db1_init`/`db1_shutdown` fixture pair, and five `db1_session_state_delete`
+calls that are teardown between cases.
+
+The store dependency is cut at the call, in `tests/support/session_state_stub.c`,
+and **two of its five functions do real work** because two tests genuinely
+depend on a round trip:
+
+- Session state saves and loads through one in-memory slot. A load that always
+  misses is not a neutral stand-in for a store — it is a store that forgets,
+  which is a behaviour, and code under test may read back what it just wrote.
+- Guardrail events are **counted** by `final_action`, because
+  `test_semantic_advisory_pre_tool_check` takes a baseline, drives two tool
+  checks and asserts `prompt == before + 2` with the other three buckets
+  unchanged. That assertion's subject is the guardrail deciding *prompt* twice;
+  the store is only the medium it is read through. A no-op insert with a zeroed
+  count would fail the assertion outright, and a fixed count would pass it while
+  measuring nothing.
+
+The delete and the ownership upsert return success and do nothing — their
+results are never examined. That is the opposite choice from
+`wfe_store_stub.c`, whose functions return failure, and the difference is
+whether a future test might start *reading* them.
+
+### `make unit-tests` had been green on binaries of deleted code
+
+Registering the restored test surfaced three failures that had nothing to do
+with it: `unit-test-bus-memory-recall`, `unit-test-bus-memory-upsert` and
+`unit-test-bus-guardrail-durability` reported `not found`. Their sources were
+deleted with the C store and their `TEST_TARGETS` entries were not, so the
+runner was trying to execute binaries nothing builds.
+
+It had been passing because the **stale binaries from before the deletion were
+still on disk**. A version bump cleaned the object tree and the gap appeared.
+Every earlier green reading of `make unit-tests` in this work was, for these
+three, a reading of artifacts of code that no longer existed.
+
+`check_tests_are_run` cannot catch this: it verifies that every test SOURCE has
+a target, which is the other direction. A target naming a source that is gone is
+outside its question.
+
+Retiring them is correct — each drove the real bus and then read the SQLite
+table the consumer wrote to, and that sink does not exist. But the property they
+guarded does: every guardrail event the bus accepts reaches the store exactly
+once, and a graceful stop drains those in flight. Nothing tests that against the
+Go sink. Recorded at the retirement in `src/tests/Rules.mk` as a gap rather than
+a decision.
+
+They had been invisible twice, in opposite directions: first listed in an
+order-only dependency list so they built every run and executed never, then
+executed every run and built never.
+
+### Two edits that made the same mistake as the guards
+
+Removing those entries by regex on the bare target names clipped one out of the
+*prose* above the block — `` so `make ` matched a rule `` — which is precisely
+the defect this work spent the night removing from its guards, reproduced by the
+script doing the removing. The second attempt matched the `.PHONY` pair exactly
+and left its recipe line orphaned, which make rejects outright.
+
+Both are one error: **a target is not its name.** It is a comment, an object
+rule, a `.PHONY`, a target line and a recipe, and editing by the part you can
+grep for leaves the rest.
