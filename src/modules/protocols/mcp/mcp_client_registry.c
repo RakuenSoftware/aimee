@@ -7,6 +7,7 @@
 
 #include "log.h"
 #include "mcp_osv_cache.h"
+#include "aimee/protocols/mcp/mcp_osv_gate.h"
 #include "osv_check.h"
 #include "platform.h"
 #include "runtime_secret.h"
@@ -136,78 +137,19 @@ static cJSON *registry_copy_tool_locked(const char *client_name, const char *too
    return NULL;
 }
 
-static int registry_target_allowlisted(const osv_target_t *target)
-{
-   if (!target || !target->ecosystem[0] || !target->name[0])
-      return 0;
-
-   char key[256];
-   snprintf(key, sizeof(key), "%s:%s", target->ecosystem, target->name);
-   for (int i = 0; i < config_mcp_osv_allow_count(); i++)
-   {
-      if (strcmp(config_mcp_osv_allow(i), key) == 0)
-         return 1;
-   }
-   return 0;
-}
-
+/* The OSV gate now lives in mcp_osv_gate.c so the plugin-module admission path
+ * runs the SAME policy rather than a second copy of it. This wrapper only
+ * unpacks a config client into the argv the gate takes. */
 static int registry_osv_blocks_client(const config_mcp_client_t *client)
 {
-   if (!client || !config_mcp_osv_enabled() || client->transport != CONFIG_MCP_TRANSPORT_STDIO ||
-       client->command_count <= 0)
+   if (!client || client->transport != CONFIG_MCP_TRANSPORT_STDIO || client->command_count <= 0)
       return 0;
 
    const char *argv[CONFIG_MCP_MAX_COMMAND_ARGS + 1];
    for (int i = 0; i < client->command_count; i++)
       argv[i] = client->command[i];
    argv[client->command_count] = NULL;
-
-   osv_target_t target;
-   if (osv_infer_target_from_argv(client->command_count, argv, &target) != 0)
-      return 0;
-
-   osv_result_t result =
-       osv_check_cached(config_mcp_osv_endpoint(), &target, config_mcp_osv_cache_ttl_hours(),
-                        config_mcp_osv_offline(), 10000);
-   int allowlisted = registry_target_allowlisted(&target);
-   if (allowlisted)
-   {
-      if (result.verdict == OSV_VERDICT_MALWARE)
-         registry_warn(client->name, "OSV allowlist permits %s:%s despite advisories: %s",
-                       target.ecosystem, target.name,
-                       result.advisory_ids[0] ? result.advisory_ids : "MAL-*");
-      (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version,
-                              result.verdict == OSV_VERDICT_MALWARE ? "malware"
-                              : result.verdict == OSV_VERDICT_CLEAN ? "clean"
-                                                                    : "unknown",
-                              result.verdict == OSV_VERDICT_MALWARE ? "allow_allowlisted" : "allow",
-                              result.advisory_ids);
-      return 0;
-   }
-
-   if (result.verdict == OSV_VERDICT_MALWARE)
-   {
-      registry_warn(client->name, "%s %s:%s has malware advisories: %s",
-                    config_mcp_osv_enforce() ? "blocked" : "shadow-block", target.ecosystem,
-                    target.name, result.advisory_ids[0] ? result.advisory_ids : "MAL-*");
-      (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version,
-                              "malware", config_mcp_osv_enforce() ? "block" : "shadow_block",
-                              result.advisory_ids);
-      return config_mcp_osv_enforce() ? 1 : 0;
-   }
-   (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version,
-                           result.verdict == OSV_VERDICT_CLEAN ? "clean" : "unknown", "allow",
-                           result.advisory_ids);
-   if (result.verdict == OSV_VERDICT_UNKNOWN)
-   {
-      if (config_mcp_osv_offline())
-         registry_warn(client->name, "OSV offline/cache miss: allowing %s:%s", target.ecosystem,
-                       target.name);
-      else
-         registry_warn(client->name, "OSV check unavailable: allowing %s:%s", target.ecosystem,
-                       target.name);
-   }
-   return 0;
+   return mcp_osv_gate_blocks_argv(client->name, client->command_count, argv);
 }
 
 static int registry_start_client(const config_mcp_client_t *client)

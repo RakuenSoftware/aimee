@@ -11,6 +11,16 @@
  * module_bus_stub_absent(). */
 void module_bus_stub_reply(const char *json);
 
+/* Answer every module call with these exact bytes.
+ *
+ * module_bus_stub_reply() takes a C string, which can only carry a JSON body --
+ * the db1 operation wire is length-prefixed binary and contains zero bytes, so
+ * strlen would truncate it at the first field length. A test standing in for
+ * the store module needs this one.
+ *
+ * The bytes are not copied; they must outlive the calls that read them. */
+void module_bus_stub_reply_bytes(const void *body, uint32_t len);
+
 /* No module attached: calls short-circuit before reaching the bus. This is the
  * default, so a seam that must fail closed proves it without any setup. */
 void module_bus_stub_absent(void);

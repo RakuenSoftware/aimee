@@ -14,8 +14,12 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
 
-// fakeCaller answers one canned reply, and records what it was asked.
-type fakeCaller struct {
+// fakeDirectoryCaller answers one canned reply, and records what it was asked.
+//
+// Named for the directory rather than sharing the store client tests' fakeCaller:
+// the two absorbed into one package with the same name and different shapes,
+// and this one records the decoded op and cells the directory sent.
+type fakeDirectoryCaller struct {
 	reply []byte
 	err   error
 
@@ -25,7 +29,7 @@ type fakeCaller struct {
 	gotCells []string
 }
 
-func (f *fakeCaller) Call(_ context.Context, kind, stage uint32, _ uint64,
+func (f *fakeDirectoryCaller) Call(_ context.Context, kind, stage uint32, _ uint64,
 	_ time.Duration, request []byte) ([]byte, error) {
 	f.gotKind, f.gotStage = kind, stage
 	f.gotOp, f.gotCells, _ = peerwire.DecodeRequest(request)
@@ -74,31 +78,37 @@ func TestDB1DirectoryAddressesTheDeclaredStage(t *testing.T) {
 		t.Fatalf("parse contracts: %v", err)
 	}
 
+	// The component is `aimee` and the stage is `aimee-sessions`: db1 absorbed
+	// into this module, so the session family this directory reads is now
+	// served by the same principal that serves the directory's caller. The ref
+	// and stage id did not move -- that was the point of keeping ref 30 through
+	// the rename -- so what this test pins is unchanged; only the names it
+	// looks them up by are.
 	var found bool
 	for _, c := range doc.Components {
-		if c.ID != "db1" {
+		if c.ID != "aimee" {
 			continue
 		}
 		if c.PrincipalRef != DB1PrincipalRef {
-			t.Errorf("db1 principal_ref = %d; this module addresses %d",
+			t.Errorf("aimee principal_ref = %d; this module addresses %d",
 				c.PrincipalRef, DB1PrincipalRef)
 		}
 		for _, s := range c.Stages {
-			if s.Name != "db1-sessions" {
+			if s.Name != "aimee-sessions" {
 				continue
 			}
 			found = true
 			if s.ID != DB1SessionsStage {
-				t.Errorf("db1-sessions stage id = %d; this module addresses %d",
+				t.Errorf("aimee-sessions stage id = %d; this module addresses %d",
 					s.ID, DB1SessionsStage)
 			}
 			if got := peerwire.EventKind(DB1PrincipalRef, DB1SessionsStage); got != s.EventKind {
-				t.Errorf("addressing kind %d; db1 declares %d", got, s.EventKind)
+				t.Errorf("addressing kind %d; the contract declares %d", got, s.EventKind)
 			}
 		}
 	}
 	if !found {
-		t.Fatal("db1 declares no db1-sessions stage; the directory addresses a stage that is gone")
+		t.Fatal("no aimee-sessions stage is declared; the directory addresses a stage that is gone")
 	}
 }
 
@@ -142,7 +152,7 @@ func TestDB1DirectoryMapsEveryOutcome(t *testing.T) {
 		{name: "transport failure", callErr: errors.New("bus down"), wantErr: peer.ErrDirectoryUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeCaller{err: tc.callErr}
+			f := &fakeDirectoryCaller{err: tc.callErr}
 			if tc.callErr == nil {
 				f.reply = db1Reply(t, tc.status, tc.cells)
 			}
@@ -171,7 +181,7 @@ func TestDB1DirectoryMapsEveryOutcome(t *testing.T) {
 
 // The request db1 receives is the one its catalog describes: op 2, one field.
 func TestDB1DirectorySendsTheCatalogedRequest(t *testing.T) {
-	f := &fakeCaller{reply: db1Reply(t, db1StatusOK, tenCells("uid:1000"))}
+	f := &fakeDirectoryCaller{reply: db1Reply(t, db1StatusOK, tenCells("uid:1000"))}
 	d, err := NewDB1Directory(f, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +204,7 @@ func TestDB1DirectorySendsTheCatalogedRequest(t *testing.T) {
 // asking spends a round trip to be told what is already known -- and the refusal
 // must not read as absence.
 func TestDB1DirectoryRefusesAnEmptyIDWithoutCalling(t *testing.T) {
-	f := &fakeCaller{reply: db1Reply(t, db1StatusMissing, nil)}
+	f := &fakeDirectoryCaller{reply: db1Reply(t, db1StatusMissing, nil)}
 	d, err := NewDB1Directory(f, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +294,7 @@ func TestDB1DirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
 // only running the two together shows what a caller gets.
 func TestARefusalSurvivesTheRegistryAsARefusal(t *testing.T) {
 	r := peer.New(peer.Options{})
-	d, err := NewDB1Directory(&fakeCaller{reply: db1Reply(t, db1StatusInvalid, nil)}, time.Second)
+	d, err := NewDB1Directory(&fakeDirectoryCaller{reply: db1Reply(t, db1StatusInvalid, nil)}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

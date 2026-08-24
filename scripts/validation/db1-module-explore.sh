@@ -14,11 +14,24 @@
 # A command failing for an unrelated reason (no model configured, kb offline) is
 # not interesting and is not counted against the store. What is interesting is
 # any sign that a call went to the module and did not come back correctly.
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
 # Overridable so this can run against a build tree as well as an install.
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/db1.grant}
+MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
+GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
 HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-explore-XXXXXX")
 export HOME
 export AIMEE_HOME="$HOME/.config/aimee"
@@ -29,7 +42,12 @@ BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-cp "$GRANT" "$AIMEE_HOME/modules.d/server/db1.grant"
+# The grant's executable= is what the daemon pins the peer against, so it must
+# name the module this rig actually starts. In a container the two are the same
+# path and a plain copy works; against a build tree they are not, and a grant
+# naming an uninstalled path makes the daemon reject the whole policy and exit.
+sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
+    >"$AIMEE_HOME/modules.d/server/aimee.grant"
 
 state() {
    curl -s --unix-socket "$HTTP_SOCK" http://localhost/v1/server/health |
@@ -40,7 +58,8 @@ aimee-server --foreground >"$HOME/server.log" 2>&1 &
 SPID=$!
 i=0
 while [ $i -lt 300 ]; do [ -S "$HTTP_SOCK" ] && break; sleep 0.1; i=$((i + 1)); done
-AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
+require_store_url
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0
 while [ $i -lt 100 ]; do [ "$(state)" = "ok" ] && break; sleep 0.2; i=$((i + 1)); done
@@ -117,14 +136,24 @@ try runtime         aimee hud
 
 echo
 echo "=== writes: does the store actually grow ==="
-BEFORE=$(sqlite3 "$DB" "select sum(1) from sqlite_master where type='table'" 2>/dev/null)
+# Asked through the front door. The store is PostgreSQL behind the module and
+# nothing else opens it, so counting rows here would mean connecting around the
+# very boundary this rig is exploring. Reading the sessions back over /v1
+# exercises the whole path the writes took.
+CREATED=0
 for n in 1 2 3; do
-   curl -s --unix-socket "$HTTP_SOCK" -X POST -H 'Content-Type: application/json' \
-      -d "{\"title\":\"sweep $n\"}" http://localhost/v1/sessions/create >/dev/null
+   OUT=$(curl -s --unix-socket "$HTTP_SOCK" -X POST -H 'Content-Type: application/json' \
+      -d "{\"title\":\"sweep $n\"}" http://localhost/v1/sessions/create)
+   case "$OUT" in *'"session_id"'*) CREATED=$((CREATED + 1)) ;; esac
 done
-ROWS=$(sqlite3 "$DB" "select count(*) from server_sessions" 2>/dev/null)
-echo "  server_sessions rows after three creates: ${ROWS:-0}"
-if [ "${ROWS:-0}" -ge 3 ]; then echo "  PASS  writes land in the module's store"
+# POST /v1/sessions/list, not GET /v1/sessions: the GET form is capability-gated
+# and this rig carries no token, so it would answer 403 and look like a store
+# that lost the writes.
+LISTED=$(curl -s --unix-socket "$HTTP_SOCK" -X POST -H 'Content-Type: application/json' \
+         -d '{}' http://localhost/v1/sessions/list | grep -o '"client_type"' | wc -l)
+echo "  sessions created: $CREATED, sessions listed back: ${LISTED:-0}"
+if [ "$CREATED" -eq 3 ] && [ "${LISTED:-0}" -ge 3 ]; then
+   echo "  PASS  writes land in the module's store"
 else echo "  FAIL  writes did not land"; SUSPECT=$((SUSPECT + 1)); fi
 
 # Which tables the run actually touched, as a coarse check that more than one

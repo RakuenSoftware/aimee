@@ -174,6 +174,13 @@ def inventory(root: Path) -> tuple[set[str], set[str]]:
         "optional",
         "principal_refs",
         "retired_principal_refs",
+        # Bands of refs reserved for DYNAMICALLY provisioned processes. Kinds are
+        # carved from a ref as 4096 + ref*256 + stage, so a band keeps a future
+        # module from being handed a ref whose kinds a deployed instance already
+        # serves. check_module_inventory.py enforces the rule; this only has to
+        # accept the keys.
+        "plugin_principal_ref_band",
+        "db3_provider_principal_ref_band",
     }:
         fail("inventory-structure", "canonical inventory has an invalid envelope", path)
     if type(value["schema_version"]) is not int or value["schema_version"] != 2:

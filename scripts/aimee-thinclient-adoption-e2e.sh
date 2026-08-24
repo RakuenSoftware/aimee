@@ -60,11 +60,12 @@ fi
 # family failing makes the mTLS ramp self-test fail, TLS is then disabled, and
 # this harness times out waiting for a listener that was never coming.
 # `make all` does not build the module, so build it here.
-DB1_MODULE_BUILT="$REPO/src/build/obj/aimee-module-db1"
+# The multicall binary; the store and postgres are two names for it.
+DB1_MODULE_BUILT="$REPO/src/build/obj/aimee-module"
 CONFIG_MODULE_BUILT="$REPO/src/build/obj/aimee-module-config"
 if [[ ! -x "$DB1_MODULE_BUILT" || ! -x "$CONFIG_MODULE_BUILT" ]]; then
-  bold "==> Building the DB1 and config modules"
-  make -C src build/obj/aimee-module-db1 build/obj/aimee-module-config >/dev/null
+  bold "==> Building the store and config modules"
+  make -C src build/obj/aimee-module build/obj/aimee-module-config >/dev/null
 fi
 
 # --- server: scratch home, TLS listener, first-boot Vault bearer ------------
@@ -77,7 +78,8 @@ sed "s/8740/${HTTP_PORT}/; s/8743/${TLS_PORT}/" \
 
 # The grant the supervisor would write, taken from the generated bundle so the
 # served kinds cannot drift from what the module actually serves.
-DB1_MODULE="$SERVER_HOME/aimee-module-db1"
+DB1_MODULE="$SERVER_HOME/aimee-module-aimee"
+PG_MODULE="$SERVER_HOME/aimee-module-postgres"
 CONFIG_MODULE="$SERVER_HOME/aimee-module-config"
 MODULE_BUS_SOCK="$SERVER_HOME/server-module-bus.sock"
 module_pid=""
@@ -85,17 +87,44 @@ config_module_pid=""
 install -m0755 "$DB1_MODULE_BUILT" "$DB1_MODULE"
 install -m0755 "$CONFIG_MODULE_BUILT" "$CONFIG_MODULE"
 mkdir -p "$SERVER_HOME/modules.d/server"
-DB1_GRANT="$REPO/src/build/obj/module-bundle/grants/server/db1.grant"
+DB1_GRANT="$REPO/src/build/obj/module-bundle/grants/server/aimee.grant"
 if [[ ! -r "$DB1_GRANT" ]]; then
   python3 "$REPO/scripts/export_c_repositories.py" \
     --runtime-bundle "$REPO/src/build/obj/module-bundle" >/dev/null 2>&1 || true
 fi
 if [[ ! -r "$DB1_GRANT" ]]; then
-  red "no generated DB1 grant at $DB1_GRANT; run scripts/export_c_repositories.py"
+  red "no generated store grant at $DB1_GRANT; run scripts/export_c_repositories.py"
   exit 1
 fi
 sed "s|^executable=.*|executable=$DB1_MODULE|" "$DB1_GRANT" \
-  >"$SERVER_HOME/modules.d/server/db1.grant"
+  >"$SERVER_HOME/modules.d/server/aimee.grant"
+install -m0755 "$DB1_MODULE_BUILT" "$PG_MODULE"
+# Both grants come from the SAME generated bundle the store's grant above
+# does, rather than being written out here: the refs and kinds are derived from
+# src/modules/process-contracts.json, and a copy transcribed into this file
+# goes stale silently. The store's outbound ref moved from 68 to 69 in a merge;
+# a heredoc here would still say 68 while every other site said 69.
+#
+# The postgres module serves the SQL stage the store calls; the store's OUTBOUND
+# principal is what is allowed to call it. A serve grant admits what a module
+# answers, not what it asks for, so the second is not implied by the first --
+# without it the store attaches and then finds no backend, which reads exactly
+# like a broken store.
+BUNDLE_GRANTS="$REPO/src/build/obj/module-bundle/grants/server"
+for grant_name in postgres aimee-postgres; do
+  if [[ "$grant_name" == postgres ]]; then
+    grant_exe="$PG_MODULE"
+  else
+    grant_exe="$DB1_MODULE"
+  fi
+  if [[ ! -r "$BUNDLE_GRANTS/$grant_name.grant" ]]; then
+    red "no generated $grant_name grant at $BUNDLE_GRANTS/$grant_name.grant"
+    exit 1
+  fi
+  sed "s|^executable=.*|executable=$grant_exe|" \
+    "$BUNDLE_GRANTS/$grant_name.grant" \
+    >"$SERVER_HOME/modules.d/server/$grant_name.grant"
+done
 CONFIG_GRANT="$REPO/src/build/obj/module-bundle/grants/server/config.grant"
 if [[ ! -r "$CONFIG_GRANT" ]]; then
   red "no generated config grant at $CONFIG_GRANT"
@@ -113,7 +142,8 @@ start_module() {
     deadline=$((SECONDS + WAIT_SECONDS))
     while (( SECONDS < deadline )); do
       if [[ -S "$MODULE_BUS_SOCK" ]]; then
-        AIMEE_DB1_PATH="$SERVER_HOME/aimee.db" exec "$DB1_MODULE" "$MODULE_BUS_SOCK"
+        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" "$PG_MODULE" "$MODULE_BUS_SOCK" &
+        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" exec "$DB1_MODULE" "$MODULE_BUS_SOCK"
       fi
       sleep 0.1
     done

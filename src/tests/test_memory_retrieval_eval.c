@@ -9,7 +9,6 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../db1/db.h"
 #include "agent_eval.h"
 #include "modules/db2/c/db2.h"
 #include "../modules/db2/c/db2_internal.h"

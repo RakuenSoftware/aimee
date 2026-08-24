@@ -2,8 +2,11 @@
 #include "server.h"
 #include "server_mcp_surface.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_group_tool.h"
+#include "command_registry.h"
+#include "headers/module_commands.h"
 #include "osv_check.h"
 #include "toolset.h"
 #include "cJSON.h"
@@ -190,6 +193,45 @@ cJSON *mcp_build_full_served_list(void)
    return tools;
 }
 
+/* Append one multiplexed tool per registry group not already in `tools`.
+ *
+ * A group whose name already appears in the served list is skipped rather than
+ * duplicated: a native tool of the same name wins, and two entries sharing a
+ * name is a surface that answers two ways. */
+static void mcp_append_registry_group_tools(cJSON *tools)
+{
+   if (!tools)
+      return;
+
+   /* A plugin instance may have attached since the last refresh. */
+   aimee_module_commands_refresh(2000);
+
+   for (size_t i = 0; i < aimee_command_count(); i++)
+   {
+      const aimee_command_t *c = aimee_command_at(i);
+      if (!c || !(c->surfaces & AIMEE_SURFACE_MCP))
+         continue;
+
+      int seen = 0;
+      cJSON *existing = NULL;
+      cJSON_ArrayForEach(existing, tools)
+      {
+         const cJSON *nm = cJSON_GetObjectItemCaseSensitive(existing, "name");
+         if (cJSON_IsString(nm) && strcmp(nm->valuestring, c->group) == 0)
+         {
+            seen = 1;
+            break;
+         }
+      }
+      if (seen)
+         continue; /* already emitted this group, or a native tool owns the name */
+
+      cJSON *tool = mcp_group_tool_build(c->group, c->summary);
+      if (tool)
+         cJSON_AddItemToArray(tools, tool);
+   }
+}
+
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -210,6 +252,16 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_Delete(resp);
       return server_send_error(conn, "out of memory", NULL);
    }
+
+   /* Registry-declared groups, including every plugin module's.
+    *
+    * Without this a plugin's commands reached the CLI manifest and nothing else:
+    * they were registered, listed for a human, and invisible to the MCP clients
+    * that are the point of hosting a plugin at all. One tool per GROUP rather
+    * than per verb is the shape mcp_group_tool.c already chose (matching `git`
+    * and `index`), and it is what keeps ~15 plugin modules from each adding N
+    * entries to a list mcp_tool_profile.c measured as a per-session tax. */
+   mcp_append_registry_group_tools(tools);
 
    /* Presentation profile: shrink the initial tools/list for external MCP
     * clients. Default "core" (lean) remains complete — find_tools/describe_tool
@@ -243,6 +295,10 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddItemToObject(resp, "tools", tools);
+   /* The registry generation this list was built from. A bridge holding an MCP
+    * session polls it to decide whether to send notifications/tools/list_changed
+    * -- a capability the server advertises and, before this, never honoured. */
+   cJSON_AddNumberToObject(resp, "generation", (double)aimee_command_registry_generation());
    return server_send_ok(conn, resp);
 }
 

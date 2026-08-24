@@ -2,14 +2,12 @@
 #include "mgmt_jwks_cache.h"
 
 #include "cJSON.h"
-#include "modules/db1/db1_internal.h"
 
 #include <math.h>
 #include <fcntl.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <pthread.h>
-#include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

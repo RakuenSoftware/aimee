@@ -58,7 +58,7 @@ int wfe_bind_health_warned(void)
 {
    return atomic_load(&g_health_warned);
 }
-#include "wfe_store.h" /* db1_lifecycle_event_add */
+#include "db1_client/wfe_store.h" /* db1_lifecycle_event_add */
 
 static void audit_bind(const char *wi, const char *workflow, const char *stage, int resumed)
 {

@@ -18,6 +18,19 @@
 # Every check prints PASS or FAIL and the run keeps going, so one failure does
 # not hide the rest.
 
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 PASS=0
 FAIL=0
 
@@ -68,7 +81,7 @@ PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
 
 # Overridable so this runs against a build tree as well as an install.
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
+MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
 WFE=${AIMEE_WFE_BIN:-/usr/local/bin/aimee-wfe}
 GRANT_DIR=${AIMEE_GRANT_DIR:-/opt/payload/grants}
 WORKFLOW_SRC=${AIMEE_WORKFLOW_DIR:-/opt/workflows}
@@ -104,7 +117,20 @@ for g in db1 wfe workflows; do
       echo "ABORT: no $g grant at $GRANT_DIR/$g.grant."
       exit 1
    fi
-   cp "$GRANT_DIR/$g.grant" "$AIMEE_HOME/modules.d/server/$g.grant"
+   # Each grant must name the binary THIS tree runs, not the installed
+   # path baked into the generated bundle.
+   case "$g" in
+   db1) _exe="$MODULE" ;;
+   wfe | workflows) _exe="${WFE:-${AIMEE_WFE_BIN:-}}" ;;
+   *) _exe="" ;;
+   esac
+   if [ -n "$_exe" ]; then
+      sed "s|^executable=.*|executable=$_exe|" "$GRANT_DIR/$g.grant" \
+         >"$AIMEE_HOME/modules.d/server/$g.grant"
+   else
+      install -m0644 "$GRANT_DIR/$g.grant" \
+         "$AIMEE_HOME/modules.d/server/$g.grant"
+   fi
 done
 
 SERVER_PID=""
@@ -139,7 +165,8 @@ while [ $i -lt 300 ]; do
    sleep 0.1
    i=$((i + 1))
 done
-AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
+require_store_url
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MODULE_PID=$!
 sleep 1
 
@@ -280,10 +307,15 @@ echo "=============================================================="
 # The migration's standing claim, re-asserted on the shape that drives the most
 # store traffic: everything above went through the module, not through a file
 # the daemon opened.
+# Holding the store is a connection now, not an open file -- it is PostgreSQL
+# behind the module. The daemon's half is unchanged: it must have no database
+# descriptor of any kind.
 DAEMON_FDS=$(ls -l "/proc/$SERVER_PID/fd" 2>/dev/null | grep -c 'aimee\.db')
 ck_eq "the daemon holds no aimee.db descriptor" 0 "$DAEMON_FDS"
-MODULE_FDS=$(ls -l "/proc/$MODULE_PID/fd" 2>/dev/null | grep -c 'aimee\.db')
-ck "the module is the one holding it" test "$MODULE_FDS" -ge 1
+# grep -c prints 0 AND exits 1 when nothing matches, so take the count and
+# swallow the status rather than appending a second number with || echo.
+MODULE_CONNS=$(ss -tnp 2>/dev/null | grep -c "pid=$MODULE_PID,") || true
+ck "the module is the one holding it" test "${MODULE_CONNS:-0}" -ge 1
 
 echo
 echo "      --- engine log, anything that looks wrong ---"

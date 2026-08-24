@@ -1,6 +1,6 @@
 /* server_auth.c: authentication, capability tokens, and per-method capability checks */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "server.h"
 #include "log.h"
 #include "platform_process.h"

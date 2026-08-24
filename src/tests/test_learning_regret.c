@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "db.h"
 #include "db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_learning.h"

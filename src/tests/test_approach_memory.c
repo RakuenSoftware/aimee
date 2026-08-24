@@ -11,11 +11,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "db.h"
 #include "db1.h"
 #include "modules/db2/c/anti_patterns.h"
 #include "approach_failures.h"
 #include "approach_store.h"
+#include "support/store_module_fixture.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 
@@ -104,6 +104,12 @@ static void test_overlap_scoring(void)
 
 static void test_recall_surfaces_the_dead_end(void)
 {
+   /* Reads the store back, so it needs one attached. main() has started the
+      module when a database was named; without one there is nothing to assert
+      against and the pure tests above still ran. */
+   if (!store_module_fixture_available())
+      return;
+
    const char *goal = "Rebuild the search index for the docs project";
 
    assert(approach_store_record(goal, "drop and re-ingest every document",
@@ -145,6 +151,10 @@ static void test_recall_surfaces_the_dead_end(void)
 
 static void test_render_reports_and_never_instructs(void)
 {
+   /* Renders what the recall test recorded, so it needs the same store. */
+   if (!store_module_fixture_available())
+      return;
+
    char out[2048];
    int n = approach_store_render("Rebuild the search index for the docs project", out, sizeof(out),
                                  NULL, 0);
@@ -168,6 +178,12 @@ static void test_render_reports_and_never_instructs(void)
 
 static void test_never_touches_the_blocking_path(void)
 {
+   /* Asserts that recording created no anti-pattern rows. With no store
+      nothing was recorded, so the assertion would hold without proving
+      anything -- gate it rather than let it read as a pass. */
+   if (!store_module_fixture_available())
+      return;
+
    /* Recording approach failures must not create anti-pattern rows: that
     * table's hot rows drive a path that REFUSES work, and a fuzzy goal match
     * has no business there. */
@@ -187,6 +203,12 @@ static void test_never_touches_the_blocking_path(void)
  * returning 0 rather than -1. */
 static void test_absent_store_means_nothing_known(void)
 {
+   /* Reads the store back, so it needs one attached. main() has started the
+      module when a database was named; without one there is nothing to assert
+      against and the pure tests above still ran. */
+   if (!store_module_fixture_available())
+      return;
+
    /* An empty store answers "nothing known" rather than failing. */
    learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
    assert(approach_store_recall("a goal nobody has ever attempted here", hits,
@@ -201,7 +223,8 @@ int main(void)
 {
    printf("approach_memory: ");
 
-   assert(db1_init(":memory:") == 0);
+   if (store_module_fixture_available())
+      store_module_fixture_start();
    db2_test_shim_open();
 
    test_tokenisation();

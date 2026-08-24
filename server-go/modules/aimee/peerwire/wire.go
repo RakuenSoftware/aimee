@@ -73,11 +73,17 @@ var (
 // written by hand: the bus formula is 4096 + principal_ref*256 + stage, so a
 // module's identity and the kinds it answers on are one fact. Deriving them
 // here means the two cannot drift.
+//
+// 20..23, not 1..4. The store owns stages 1..19 of this principal, and the two
+// stage tables meet in one module after the absorption: a peer stage numbered 1
+// would advertise the same kind as the store's `state` family, and the loser is
+// silently unreachable rather than refused. Peer messaging starts above the
+// store's range so the two can grow without meeting again.
 const (
-	StageDelivery uint32 = 1
-	StageInbox    uint32 = 2
-	StageGrant    uint32 = 3
-	StageChannel  uint32 = 4
+	StageDelivery uint32 = 20
+	StageInbox    uint32 = 21
+	StageGrant    uint32 = 22
+	StageChannel  uint32 = 23
 )
 
 // EventKind returns the bus event kind for a stage under a principal ref.

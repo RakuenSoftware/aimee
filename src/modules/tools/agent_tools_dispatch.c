@@ -134,7 +134,7 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "process_mgr.h"
 #include "agent_exec.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "sandbox.h"
 #include "slop_detect.h"

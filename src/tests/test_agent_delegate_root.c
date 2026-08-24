@@ -6,7 +6,9 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include "db1.h"
+#include "db1_client/db1.h"
+#include "support/store_module_fixture.h"
+#include "db1_client/agent_jobs.h"
 #include "agent_tasks.h"
 #include <aimee/tools/agent_tools.h>
 #include "modules/workspace/workspace_provider.h"
@@ -17,6 +19,11 @@
 
 void test_cancelled_durable_job_blocks_tool_dispatch(void)
 {
+   /* main() has already started the fixture when a database was named; this
+      only decides whether the store-backed body below can run at all. */
+   if (!store_module_fixture_available())
+      return;
+
    db1_shutdown();
    assert(db1_init(":memory:") == 0);
 
@@ -203,6 +210,11 @@ static void *cancel_job_soon(void *arg)
 
 void test_delegate_bash_cancel_kills_running_tool(void)
 {
+   /* main() has already started the fixture when a database was named; this
+      only decides whether the store-backed body below can run at all. */
+   if (!store_module_fixture_available())
+      return;
+
    db1_shutdown();
    assert(db1_init(":memory:") == 0);
 

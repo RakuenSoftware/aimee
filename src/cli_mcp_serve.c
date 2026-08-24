@@ -16,6 +16,8 @@
 #include <aimee/protocols/mcp/mcp_tools.h> /* mcp_compact_tool_prose */
 #include <ctype.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,11 +94,20 @@ static int mcp_filter_tool_allowlist(cJSON *tools)
    return removed;
 }
 
+/* Serialises writes to stdout.
+ *
+ * The list-changed watcher below emits notifications from its own thread while
+ * the main loop may be writing a response. Two interleaved writes produce one
+ * corrupt frame and the client drops the session, so every frame goes out under
+ * this lock. */
+static pthread_mutex_t g_out_lock = PTHREAD_MUTEX_INITIALIZER;
+
 static void mcp_send(cJSON *msg)
 {
    char *s = cJSON_PrintUnformatted(msg);
    if (s)
    {
+      pthread_mutex_lock(&g_out_lock);
       size_t len = strlen(s);
       if (g_output_ndjson)
       {
@@ -109,6 +120,7 @@ static void mcp_send(cJSON *msg)
          fwrite(s, 1, len, stdout);
       }
       fflush(stdout);
+      pthread_mutex_unlock(&g_out_lock);
       free(s);
    }
    cJSON_Delete(msg);
@@ -1299,6 +1311,120 @@ static int read_mcp_message(FILE *in, char **out)
    return read_framed_json(in, ch, out);
 }
 
+/* --- tools/list_changed watcher ---------------------------------------------
+ *
+ * handle_initialize advertises tools.listChanged, which tells a client "I will
+ * tell you when the list changes, you need not re-poll". Nothing ever sent that
+ * notification, so a client that trusted the capability never re-listed: a
+ * plugin module could attach, register its commands, and remain invisible for
+ * the life of the session.
+ *
+ * The list is owned by aimee-server, not by this bridge, so the change signal
+ * has to travel. mcp.tools_list now returns the command-registry `generation`;
+ * this thread samples it and emits notifications/tools/list_changed whenever it
+ * moves. Polling rather than a server push because the bridge has no inbound
+ * channel of its own -- and from the CLIENT's side this is still push, which is
+ * what the capability actually promises.
+ *
+ * A server that does not return `generation` (an older one) simply never
+ * triggers a notification, which is exactly the behaviour before this existed. */
+static atomic_int g_watch_stop;
+static pthread_t g_watch_thread;
+static int g_watch_running;
+
+/* Seconds between samples. Slow on purpose: this costs one tools_list build per
+ * tick per connected bridge, and a plugin appearing a few seconds late is not a
+ * cost anyone can perceive.
+ *
+ * A variable rather than a constant so the watcher is testable at all -- a
+ * 15-second loop cannot be driven by a unit test, and an untested background
+ * thread in a shipped path is exactly the thing to avoid. Also lets an operator
+ * tighten or loosen it without a rebuild. */
+static int g_tools_watch_interval_sec = 15;
+
+static void tools_watch_read_interval(void)
+{
+   const char *env = getenv("AIMEE_MCP_TOOLS_WATCH_SECONDS");
+   if (!env || !env[0])
+      return;
+   int v = atoi(env);
+   if (v > 0)
+      g_tools_watch_interval_sec = v;
+}
+
+static int tools_generation_now(double *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "mcp.tools_list");
+   cJSON *resp = server_request(req, DEFAULT_TIMEOUT_MS);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1;
+   cJSON *gen = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   int ok = cJSON_IsNumber(gen);
+   if (ok && out)
+      *out = gen->valuedouble;
+   cJSON_Delete(resp);
+   return ok ? 0 : -1;
+}
+
+static void *tools_watch_run(void *unused)
+{
+   (void)unused;
+   double last = 0;
+   int have_last = 0;
+
+   while (!atomic_load(&g_watch_stop))
+   {
+      /* Sleep in short slices so stop() is prompt even on a long interval: a
+       * thread that only checks its stop flag once per interval makes shutdown
+       * wait out the whole tick. */
+      for (int i = 0; i < g_tools_watch_interval_sec * 10 && !atomic_load(&g_watch_stop); i++)
+         usleep(100000);
+      if (atomic_load(&g_watch_stop))
+         break;
+
+      double now = 0;
+      if (tools_generation_now(&now) != 0)
+         continue; /* server down or too old to report it; try again next tick */
+      if (!have_last)
+      {
+         last = now;
+         have_last = 1;
+         continue; /* the first sample is a baseline, not a change */
+      }
+      if (now == last)
+         continue;
+      last = now;
+
+      cJSON *note = cJSON_CreateObject();
+      if (!note)
+         continue;
+      cJSON_AddStringToObject(note, "jsonrpc", "2.0");
+      cJSON_AddStringToObject(note, "method", "notifications/tools/list_changed");
+      mcp_send(note); /* a notification carries no id */
+   }
+   return NULL;
+}
+
+static void tools_watch_start(void)
+{
+   tools_watch_read_interval();
+   atomic_store(&g_watch_stop, 0);
+   g_watch_running = pthread_create(&g_watch_thread, NULL, tools_watch_run, NULL) == 0;
+}
+
+static void tools_watch_stop(void)
+{
+   if (!g_watch_running)
+      return;
+   atomic_store(&g_watch_stop, 1);
+   pthread_join(g_watch_thread, NULL);
+   g_watch_running = 0;
+}
+
 /* --- Entry point --- */
 
 int cli_mcp_serve(void)
@@ -1307,6 +1433,9 @@ int cli_mcp_serve(void)
     * by cli_main so write() to a dead server socket surfaces EPIPE rather
     * than killing the bridge. */
    setvbuf(stdout, NULL, _IONBF, 0);
+
+   /* Honour the tools.listChanged capability handle_initialize advertises. */
+   tools_watch_start();
 
    char *message = NULL;
    int rc;
@@ -1329,6 +1458,7 @@ int cli_mcp_serve(void)
    free(message);
    if (rc < 0)
       mcp_error(NULL, -32700, "Parse error");
+   tools_watch_stop();
    cli_workspace_reverse_channel_stop();
    cli_close(&g_conn);
    return 0;

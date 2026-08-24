@@ -4,7 +4,6 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "dashboard.h"
-#include "db.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"

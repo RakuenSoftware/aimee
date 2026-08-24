@@ -15,6 +15,19 @@
 # Every check prints PASS or FAIL and the run keeps going, so one failure does
 # not hide the rest.
 
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 PASS=0
 FAIL=0
 
@@ -65,8 +78,8 @@ PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
 
 # Overridable so this can run against a build tree as well as an install.
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/db1.grant}
+MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
+GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
 HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-e2e-XXXXXX")
 export HOME
 export AIMEE_HOME="$HOME/.config/aimee"
@@ -74,14 +87,18 @@ export AIMEE_SESSION_ID="e2e$$"
 mkdir -p "$AIMEE_HOME/modules.d/server"
 HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
-DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 
 # The grant the supervisor would write. Copied from the build's generated grant
 # so the served kinds cannot drift from what the module actually serves.
-cp "$GRANT" "$AIMEE_HOME/modules.d/server/db1.grant"
-SERVE=$(sed -n 's/^serve=//p' "$AIMEE_HOME/modules.d/server/db1.grant")
+# The grant's executable= is what the daemon pins the peer against, so it must
+# name the module this rig actually starts. In a container the two are the same
+# path and a plain copy works; against a build tree they are not, and a grant
+# naming an uninstalled path makes the daemon reject the whole policy and exit.
+sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
+    >"$AIMEE_HOME/modules.d/server/aimee.grant"
+SERVE=$(sed -n 's/^serve=//p' "$AIMEE_HOME/modules.d/server/aimee.grant")
 echo "grant serves: $SERVE"
 echo
 
@@ -89,7 +106,8 @@ SERVER_PID=""
 MODULE_PID=""
 
 start_module() {
-   AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
+   require_store_url
+   AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
    MODULE_PID=$!
    i=0
    while [ $i -lt 100 ]; do
@@ -229,22 +247,34 @@ else
    FAIL=$((FAIL + 1))
 fi
 
-ck "module created the database" test -s "$DB"
-TABLES=$(sqlite3 "$DB" "select count(*) from sqlite_master where type='table'" 2>/dev/null)
-echo "      tables in the module's store: ${TABLES:-0}"
-if [ "${TABLES:-0}" -gt 50 ]; then
-   echo "PASS  module created its full schema"
+# The store is PostgreSQL and the module applies its own schema on connect, so
+# there is no file to stat and no sqlite_master to count. The module reports what
+# it applied; that is the same claim, from the side that would know.
+APPLIED=$(sed -n 's/.*store: schema applied (\([0-9]*\) files).*/\1/p' \
+              "$HOME/module.log" 2>/dev/null | tail -1)
+echo "      schema files the module applied: ${APPLIED:-0}"
+if [ "${APPLIED:-0}" -gt 15 ]; then
+   echo "PASS  module applied its full schema"
    PASS=$((PASS + 1))
 else
-   echo "FAIL  module schema looks short (${TABLES:-0} tables)"
+   echo "FAIL  module schema looks short (${APPLIED:-0} files applied)"
    FAIL=$((FAIL + 1))
 fi
 
-# The module owns the file; the daemon still must not have opened it.
+# The module holds the store; the daemon still must not. Holding it is a socket
+# now rather than an open file -- the store is PostgreSQL -- so the daemon's half
+# is unchanged (it must have no database descriptor of any kind) and the
+# module's half looks for the connection instead.
 DBFDS2=$(ls -l /proc/"$SERVER_PID"/fd 2>/dev/null | grep -c '\.db')
 ck_eq "daemon still holds no database descriptor" "0" "$DBFDS2"
-MODFDS=$(ls -l /proc/"$MODULE_PID"/fd 2>/dev/null | grep -c 'aimee\.db')
-if [ "${MODFDS:-0}" -ge 1 ]; then
+STORE_PORT=$(printf '%s' "${AIMEE_STORE_URL:-}" | sed -n 's|.*:\([0-9][0-9]*\)/.*|\1|p')
+[ -n "$STORE_PORT" ] || STORE_PORT=5432
+# grep -c prints 0 AND exits 1 when nothing matches, so the count is taken as-is
+# and the non-zero exit swallowed -- an || echo here appends a second number.
+MODCONNS=$(ss -tnp 2>/dev/null | grep -c "pid=$MODULE_PID,") || true
+SRVCONNS=$(ss -tnp 2>/dev/null | grep "pid=$SERVER_PID," | grep -c ":$STORE_PORT") || true
+ck_eq "daemon holds no connection to the store" "0" "${SRVCONNS:-0}"
+if [ "${MODCONNS:-0}" -ge 1 ]; then
    echo "PASS  the module is the process holding the store open"
    PASS=$((PASS + 1))
 else
@@ -276,15 +306,12 @@ else
    FAIL=$((FAIL + 1))
 fi
 
-# ... and it is genuinely in the module's file, not in daemon memory.
-if [ -n "$SID" ]; then
-   echo "      server_sessions columns: $(sqlite3 "$DB" \
-      "select group_concat(name,',') from pragma_table_info('server_sessions')" 2>/dev/null)"
-   ONDISK=$(sqlite3 "$DB" "select count(*) from server_sessions where id='$SID'" 2>/dev/null)
-   [ "${ONDISK:-0}" = "1" ] || ONDISK=$(sqlite3 "$DB" \
-      "select count(*) from server_sessions where session_id='$SID'" 2>/dev/null)
-   ck_eq "session is on disk in the module's store" "1" "${ONDISK:-0}"
-fi
+# ... and that it is genuinely IN THE STORE rather than in daemon memory is what
+# section 6 proves, by reading it back through a module process that did not
+# exist when it was written. This used to open $AIMEE_HOME/aimee.db with sqlite3;
+# the store is PostgreSQL now, on a host this rig has no client for and no
+# business connecting to -- nothing outside the module opens the store, which is
+# the property the module exists to have.
 
 echo
 echo "=============================================================="

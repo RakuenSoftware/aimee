@@ -215,9 +215,9 @@ static int kb_handle_memory_repair(int fd, cJSON *req)
    if (!db2_is_initialized())
       return kb_send_error(fd, "failed to open knowledge service store");
    /* Size the memory retrieval index at the deployment's embedding dimension —
-    * the same runtime dim the halfvec memory_embeddings column was created at
+    * the same runtime dim the vector memory_embeddings column was created at
     * (db2_set_embedding_dim at startup: 2560 GPU / 1024 CPU / external cap 4000).
-    * A hardcoded 384 never matched the halfvec column, so the index was wrong. */
+    * A hardcoded 384 never matched the vector column, so the index was wrong. */
    int mem_embed_dim = db2_embedding_dim();
    if (mem_embed_dim <= 0 || mem_embed_dim > EMBED_MAX_DIM)
       mem_embed_dim = 1024;
@@ -634,7 +634,7 @@ static int kb_handle_memory_reembed_start(int fd, cJSON *req)
    const char *version = ver_j->valuestring;
    /* Resolve via the shared policy: request override, then the server's
     * CONFIGURED embedder, then builtin. Never silently builtin in production:
-    * builtin emits 384-dim vectors that a real halfvec(1024)/(2560) column
+    * builtin emits 384-dim vectors that a real vector(1024)/(2560) column
     * rejects, leaving memory_embeddings empty. */
    const char *embed_cmd = config_embedder_command_current(
        (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);

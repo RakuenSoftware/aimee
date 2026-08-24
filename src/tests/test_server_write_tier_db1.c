@@ -5,8 +5,7 @@
  * as fresh. Saturation, a storage fault and a malformed record all mean the jti
  * was not recorded, so treating any of them as "not replayed" would let the
  * same token be presented again for as long as the condition lasts. */
-#include "db1.h"
-#include "db1_internal.h"
+#include "db1_client/db1.h"
 #include "server.h"
 #include "server_write_tier_db1.h"
 #include "server_write_tier.h"
@@ -19,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "support/store_module_fixture.h"
 
 static int g_managed_identity;
 
@@ -156,6 +156,13 @@ static void test_audience_storage_outlives_the_assembler(void)
 
 int main(void)
 {
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    unsetenv("AIMEE_SERVER_TEAM_ID");
    unsetenv("AIMEE_SERVER_ID");
    unsetenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
@@ -200,8 +207,6 @@ int main(void)
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);
-   assert(db1_init(path) == 0);
-
    /* Fresh, then replayed. */
    server_identity_token_claims_t c = claims("id-jti-00000001", KB_IDENTITY_TIER_DATA);
    assert(server_write_tier_replay_db1(NULL, &c, 150) == 0);
@@ -240,7 +245,6 @@ int main(void)
 
    test_audience_storage_outlives_the_assembler();
 
-   db1_shutdown();
    unlink(path);
    printf("  PASS: only an explicit store OK counts as fresh\n");
    return 0;

@@ -13,6 +13,7 @@
 #include "log.h"
 #endif
 #include "memory.h"
+#include "memory_context_internal.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -80,7 +81,7 @@ int memory_detect_commitment_shape(const char *content, char *shape_out, size_t 
        "by next week", "by 2026",    "by 2027",       NULL};
    for (int i = 0; date_markers[i]; i++)
    {
-      if (strstr(lc, date_markers[i]))
+      if (memory_keyword_present(lc, date_markers[i]))
       {
          if (shape_out && shape_out_len > 0)
             snprintf(shape_out, shape_out_len, "%s", "date");
@@ -95,7 +96,7 @@ int memory_detect_commitment_shape(const char *content, char *shape_out, size_t 
                                             "next month", "this month", "in a few days", NULL};
    for (int i = 0; relative_markers[i]; i++)
    {
-      if (strstr(lc, relative_markers[i]))
+      if (memory_keyword_present(lc, relative_markers[i]))
       {
          if (shape_out && shape_out_len > 0)
             snprintf(shape_out, shape_out_len, "%s", "relative");

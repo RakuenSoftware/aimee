@@ -1,6 +1,6 @@
 /* mcp_git_query.c: MCP git read-only handlers and shared state */
 #include "aimee.h"
-#include "modules/db1/git_ownership.h"
+#include "db1_client/git_ownership.h"
 #include "cJSON.h"
 #include "config.h"
 #include "guardrails.h"

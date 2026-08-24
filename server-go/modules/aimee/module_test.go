@@ -124,24 +124,56 @@ func TestAdvertisedStagesMatchTheContract(t *testing.T) {
 		t.Errorf("runtime = %q; want go", declared.Runtime)
 	}
 
+	// The module built here carries the PEER capability alone. The store is the
+	// other capability under this principal, and it cannot be constructed in
+	// this package -- families imports this one, so importing it back would be
+	// a cycle, and NewMux needs a database besides. So this test owns the peer
+	// half of the contract and families/process_contract_test.go owns the
+	// store half; between them every declared stage is checked exactly once.
+	//
+	// The seam is not a hole. Both halves are checked against the SAME file,
+	// and each one fails on a stage that belongs to neither: a kind advertised
+	// here but undeclared is caught below, and a declared kind neither
+	// capability serves is caught there.
 	advertised := map[uint32]uint32{}
 	for _, s := range newModule(t).Stages() {
 		advertised[s.EventKind] = s.StageID
 	}
-	if len(advertised) != len(declared.Stages) {
-		t.Errorf("advertises %d stages, contract declares %d", len(advertised), len(declared.Stages))
+	declaredByKind := map[uint32]string{}
+	for _, s := range declared.Stages {
+		declaredByKind[s.EventKind] = s.Name
+		if want := peerwire.EventKind(PrincipalRef, s.ID); want != s.EventKind {
+			t.Errorf("%s: contract kind %d breaks the bus formula (want %d)", s.Name, s.EventKind, want)
+		}
 	}
+	// Advertised but undeclared: no grant permits the kind, so the bus refuses
+	// every call and the capability is dead code that looks live.
+	for kind, stage := range advertised {
+		if _, ok := declaredByKind[kind]; !ok {
+			t.Errorf("advertises stage %d (event %d), which the contract does not declare",
+				stage, kind)
+		}
+	}
+	// Declared and advertised: the stage id has to agree, or the module answers
+	// on a kind the daemon routes somewhere else.
 	for _, s := range declared.Stages {
 		stage, ok := advertised[s.EventKind]
 		if !ok {
-			t.Errorf("declares %s (event %d) but never advertises it", s.Name, s.EventKind)
-			continue
+			continue // the store's; see above
 		}
 		if stage != s.ID {
 			t.Errorf("%s: advertises stage %d, contract says %d", s.Name, stage, s.ID)
 		}
-		if want := peerwire.EventKind(PrincipalRef, s.ID); want != s.EventKind {
-			t.Errorf("%s: contract kind %d breaks the bus formula (want %d)", s.Name, s.EventKind, want)
+	}
+	// Every peer stage the wire defines is declared. Derived from the wire
+	// rather than counted, so a fifth peer stage that nobody adds to the
+	// contract fails here instead of being quietly unreachable.
+	for _, stage := range []uint32{
+		peerwire.StageDelivery, peerwire.StageInbox,
+		peerwire.StageGrant, peerwire.StageChannel,
+	} {
+		if _, ok := advertised[peerwire.EventKind(PrincipalRef, stage)]; !ok {
+			t.Errorf("peer stage %d is not advertised", stage)
 		}
 	}
 }

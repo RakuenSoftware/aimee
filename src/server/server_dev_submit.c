@@ -5,12 +5,12 @@
  * server_http.h. */
 #include "server_http.h" /* dev_submit_run contract */
 #include "cJSON.h"
-#include "aimee_home.h"    /* aimee_home */
-#include "router_advise.h" /* router_autonomous_pick / router_autonomous_audit */
-#include "wfe_autonomy.h"  /* wfe_autonomy_default_max_cost_usd — shared intake cap policy */
-#include "wfe_engine.h"    /* wfe_work_item_resolve */
-#include "wfe_scheduler.h" /* wfe_scheduler_notify */
-#include "wfe_store.h"     /* db1_work_item_submit_capped / _set_terminal / _set_cost_cap */
+#include "aimee_home.h"           /* aimee_home */
+#include "router_advise.h"        /* router_autonomous_pick / router_autonomous_audit */
+#include "wfe_autonomy.h"         /* wfe_autonomy_default_max_cost_usd — shared intake cap policy */
+#include "wfe_engine.h"           /* wfe_work_item_resolve */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify */
+#include "db1_client/wfe_store.h" /* db1_work_item_submit_capped / _set_terminal / _set_cost_cap */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

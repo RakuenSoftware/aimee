@@ -10,7 +10,7 @@
  * was always stored as, so the conversion happens once, here, on the side that
  * has the enum.
  */
-#include "interaction_events.h"
+#include "db1_client/interaction_events.h"
 
 const char *ie_event_type_name(ie_event_type_t type)
 {

@@ -119,6 +119,22 @@ def main() -> int:
         return 0
 
     baseline = load_baseline()
+
+    # An empty scan does not mean the debt was paid.
+    #
+    # With `found` empty and a non-empty baseline, every baselined file lands in
+    # `stale`, and the success path reports "the debt fell; run --update-baseline
+    # to record it". Following that instruction would then overwrite a real
+    # baseline with nothing, discarding the record of every remaining site. So
+    # the most likely cause of an empty scan -- the tests moved, or the walk
+    # stopped matching them -- produces a congratulatory message and an
+    # invitation to destroy the evidence.
+    if baseline and not found:
+        print("check_test_tmpdir: scanned no test sources while the baseline lists "
+              f"{len(baseline)} file(s). That is the tests moving, not the debt "
+              "being paid; do NOT --update-baseline from this state.", file=sys.stderr)
+        return 2
+
     regressions = []
     for path, count in sorted(found.items()):
         allowed = baseline.get(path, 0)

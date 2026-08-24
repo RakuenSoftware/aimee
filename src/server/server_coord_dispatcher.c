@@ -12,7 +12,7 @@
 #include <aimee/delegates/gw_orch_delegates.h>
 #include <aimee/delegates/delegate_role.h> /* delegate_role_is_write — force tools for coord write tasks */
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "log.h"
 #include "platform_random.h"
 #include "cJSON.h"

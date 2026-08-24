@@ -11,7 +11,6 @@
 #include <string.h>
 
 #include "curiosity_resolve.h"
-#include "db.h"
 #include "db1.h"
 #include "modules/db2/c/curiosity.h"
 #include "modules/db2/c/db2.h"

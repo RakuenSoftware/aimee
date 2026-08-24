@@ -23,7 +23,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Feature | State | Boundary |
 | --- | --- | --- |
 | Persistent typed memory | Done | Facts, rules, decisions, episodes, provenance, contradiction, and staleness. |
-| DB1/DB2 ownership | Done | Server owns SQLite; KB owns PostgreSQL and pgvector; thin clients own neither. |
+| DB1/DB2 ownership | Done | The store module owns DB1's PostgreSQL; KB owns DB2's PostgreSQL and pgvector; the server and thin clients own neither. |
 | Embedded KB PostgreSQL | Done | Default container path; external PostgreSQL remains supported. |
 | Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |

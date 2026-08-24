@@ -10,7 +10,7 @@
  * which one is present and another is not -- which is why this asks about one
  * rather than pretending to check them all.
  */
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "db1_module_api.h"
 
 #include <aimee/audit/obs_bus.h>

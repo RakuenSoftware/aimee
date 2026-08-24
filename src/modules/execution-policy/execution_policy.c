@@ -11,7 +11,7 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/tool_registry.h"
 #include "agent.h"
 #include "kb_client.h"

@@ -12,14 +12,15 @@
   },
   "ownership_complete": true,
   "sources": [
+    "src/modules/learning/learning_approach_memory.c",
+    "src/modules/learning/learning_attribution.c",
     "src/modules/learning/learning_bundle.c",
     "src/modules/learning/learning_endogeneity.c",
     "src/modules/learning/learning_eval_synthesis.c",
     "src/modules/learning/learning_evidence.c",
-    "src/modules/learning/learning_attribution.c",
+    "src/modules/learning/learning_implicit.c",
     "src/modules/learning/learning_policy_arms.c",
     "src/modules/learning/learning_regret.c",
-    "src/modules/learning/learning_implicit.c",
     "src/modules/learning/learning_router.c",
     "src/modules/learning/learning_signal_policy.c",
     "src/modules/learning/module_adapter.c"

@@ -1,6 +1,6 @@
 /* cmd_infra.c: infrastructure commands (git, worktree, dashboard, webchat, workspace) */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "agent_exec.h"
 #include "agent_config.h"
 #include "aux_router.h"
@@ -9,7 +9,7 @@
 #include <aimee/workspace/workspace.h>
 #include "commands.h"
 #include "dashboard.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "memory.h"
 #include "platform_process.h"
 #include "platform_random.h"

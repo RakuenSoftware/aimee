@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "commands.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 
 /* --- cmd_require_db1 --- */
 

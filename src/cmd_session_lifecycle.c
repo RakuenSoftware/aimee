@@ -5,7 +5,7 @@
  * Extracted from cmd_hooks.c to keep file sizes tractable. Hooks-scope
  * helpers shared with cmd_hooks.c live in cmd_hooks_scope.c. */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/rules.h"
 #include "kb_client.h"
@@ -829,21 +829,15 @@ typedef struct
    int index_count;
 } session_changelog_t;
 
-/* Startup-only DB1 integrity gate: quick-check and auto-recover, aborting the
- * hook if the database cannot be opened or is unrecoverable. */
-static void session_startup_db_check(void)
-{
-   int rc = db1_diag_quick_check_recover(config_db1_path());
-   if (rc == -2)
-      fatal("cannot open database");
-   if (rc == -1)
-   {
-      LOG_ERROR("db", "database corruption detected");
-      fatal("database corrupted, run: aimee db recover --force");
-   }
-   if (rc == 1)
-      LOG_INFO("db", "database recovered successfully");
-}
+/* The startup integrity gate is gone.
+ *
+ * It ran a SQLite quick-check on a database file and tried to recover it in
+ * place, aborting the hook if it could not. None of that is available against a
+ * database server, and none of it is this process's business: a PostgreSQL
+ * server checks its own consistency, and a client that found it unreachable
+ * could not repair it anyway. Reachability shows up where it is actionable --
+ * the first operation that needs the store fails and says so.
+ */
 
 /* Enforce the max-sessions cap: prune idle sessions when at the cap, then warn
  * (never refuse — a hook failure would block the user) if still over. */
@@ -1271,7 +1265,6 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
     * otherwise — a major source of CPU storms. */
    if (is_startup)
    {
-      session_startup_db_check();
       session_enforce_session_cap();
       session_enforce_worktree_cap();
    }

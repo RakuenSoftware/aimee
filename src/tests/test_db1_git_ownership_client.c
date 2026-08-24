@@ -16,8 +16,8 @@
 #include <string.h>
 
 #include <aimee/core/event_bus/module_client.h>
-#include "db1_module_api.h"
-#include "git_ownership.h"
+#include "db1_client/db1_module_api.h"
+#include "db1_client/git_ownership.h"
 
 /* --- the stubbed bus ------------------------------------------------------ */
 

@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "roundtable_pipeline.h"
+#include "db1_client/roundtable_pipeline.h"
 #include "roundtable_pipeline_eval.h"
 
 /* A baseline valid REVIEW envelope: captured, parsed, converged, no blocking. */

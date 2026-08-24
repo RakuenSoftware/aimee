@@ -5,7 +5,7 @@
 #include "aimee.h"
 #include "agent.h"
 #include "log.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "otel.h"
 #include "platform_path.h"
 #include "platform_process.h"
