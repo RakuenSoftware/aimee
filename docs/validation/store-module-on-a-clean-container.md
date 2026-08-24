@@ -45,6 +45,9 @@ call sites in the script, and the count it compares against is 10.
     BLOCKED  the store module attached and stopped at its one missing dependency
     PASS=8 FAIL=0        (2 of 10 checks not reached -- see above)
 
+**SUPERSEDED. The gap is closed and the run below was repeated in full; see
+"Run two" at the end of this document.**
+
 ## The one gap, isolated
 
 The store module attaches, builds its store client, and stops here:
@@ -818,3 +821,94 @@ it: somewhere fast for events to go. That makes the accounting claim **exact**
 rather than inferred — the sink reports what it was handed. 54,241 events raced
 the stop, all accounted for. The store-durability property is stated in the file
 as belonging elsewhere, with the retired `test_bus_guardrail_durability`.
+
+---
+
+# Run two: the whole thing, working
+
+The run at the top of this document was taken while the store module could not
+attach. This one was taken after the SQL stage landed, on a **fresh container**
+built for it, with `aimee-server` and `aimee-kb` both running and the full fleet
+under the supervisor.
+
+    == the module fleet ==
+            module processes: 17
+    PASS  the supervisor started modules (17)
+    PASS  the store module is running
+
+    == the store schema ==
+            store tables: 93
+    PASS  the store module created its schema (93)
+            recorded migrations: 21
+    PASS  migrations were recorded (21)
+
+    PASS=11 FAIL=0
+
+Exploratory checks on the same live system: 21 rows in the ledger under owner
+`db1` at version 21, and **21 distinct checksums** — one recorded per version
+rather than one repeated, which is what proves each migration was hashed as
+applied rather than copied from the first.
+
+## The store wire was exercised, not just the schema
+
+Applying the schema proves MIGRATE and CURRENT_VERSION. Those are two of seven
+operations, and they take their own path in the stage — `h.migrate` and
+`h.currentVersion` use the pool directly. **EXEC and QUERY go through
+`h.statement`, which none of that touches**, and a broken statement path would
+let the schema apply and fail everything afterwards.
+
+Guessing which HTTP endpoint reads which table was going nowhere, so the
+database was measured instead. Driving the daemon moved
+`pg_stat_database.xact_commit` from 163 to 168 and `tup_returned` by 242, the
+store module held **two connections as `root`** — its pool — and
+`pg_stat_activity` showed a real family query mid-flight:
+
+    SELECT id, schedule, mode, script, prompt, workdir, context_from, ...
+
+That is `opStoreQuery` crossing the wire and returning rows.
+
+## Four things the run found, in order
+
+**The supervisor gives no ordering guarantee.** It starts every module in the
+manifest back to back and each registers asynchronously, so the store made its
+first call before postgres had claimed 11266 and exited:
+
+    [module-supervisor:server] starting postgres
+    store: schema: read the applied schema version: ... capability absent
+    aimee-module: module "aimee" could not start
+
+Fixed with a bounded wait — thirty attempts, one second apart, retrying only
+`ErrStoreUnavailable`. Ordering the manifest would not fix it: registration is
+asynchronous, so starting postgres first narrows the window, and a window that
+closes on a fast machine reopens on a loaded one.
+
+**The first version of that wait ran zero times.** It wrapped `storeBackend`,
+which talks to nothing — it opens a bus client and constructs a `Store`.
+Construction succeeded and the failure was one line later in `ApplySchema`, the
+first call that leaves the process. The run failed identically, which is how it
+was caught: *a fix that changes nothing looks exactly like a fix that was not
+deployed*, and this work had just been bitten by the second twice.
+
+**The rig never created the role the daemon connects as.** The DSN carries no
+user, so libpq uses the process's OS name — `root`, since that is what the
+supervisor runs modules as — and PostgreSQL answered SQLSTATE 28000, `role
+"root" does not exist`. It could not have come up before: the C store was a
+SQLite file with no roles at all. Added to `e2e-252-dbsetup.sh`.
+
+That error is also the first proof the stage worked. A real SQLSTATE and a real
+message came back through the reply frame, which is the whole point of carrying
+them rather than collapsing everything into "failed".
+
+**`install-modules` only creates missing names.** Redeploying a rebuilt binary
+left all seventeen module names on the old one and reported
+`0 module name(s) installed / names present: 18`, which reads like success. The
+third instance of this trap in this work, and the reason the checksum of the
+running binary is now compared against the local one rather than assumed.
+
+## What is still not covered
+
+`unit-test-bus-guardrail-durability`'s property: every guardrail event the bus
+accepts reaches the store exactly once, and a graceful stop drains those in
+flight. It needs a test against the Go sink that does not depend on the bus it
+is verifying, and `test_bus_shutdown_race` cannot host it for the same reason.
+Recorded here and at both sites rather than left to be rediscovered.

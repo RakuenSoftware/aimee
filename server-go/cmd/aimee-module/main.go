@@ -113,6 +113,61 @@ func economizerStore(ctx context.Context, moduleBusSocket string) economizer.Sta
 // db1 opens no database. The postgres module owns the connection, the DSN and
 // the pooling policy, and this is the client that asks it -- the same shape as
 // economizerStore above, under db1's outbound identity.
+// applySchemaWaiting applies the schema, giving the postgres module time to
+// finish attaching first.
+//
+// THE SUPERVISOR GIVES NO ORDERING GUARANTEE. It starts every module in its
+// manifest back to back and each registers its stages asynchronously, so the
+// store routinely makes its first call before postgres has claimed kind 11266.
+// Without this the store exits at startup and the daemon comes up storeless:
+//
+//	[module-supervisor:server] starting postgres
+//	store: schema: read the applied schema version: ... capability absent
+//	aimee-module: module "aimee" could not start
+//
+// Observed on a sixteen-module fleet, where the two start one line apart.
+// Ordering the manifest would not fix it -- registration is asynchronous, so
+// starting postgres first only narrows the window, and a window that closes on
+// a fast machine reopens on a loaded one.
+//
+// A BOUNDED WAIT. If postgres is genuinely absent -- not installed, refused by
+// its grant, unable to open the database -- the store must still fail and say
+// so rather than hang forever looking healthy. The ceiling is what separates
+// "not up yet" from "not coming".
+//
+// Retrying ONLY ErrStoreUnavailable, which is the transport reporting it could
+// not reach the module at all. A store that answers and refuses is a different
+// thing, and retrying that would turn one clear error into the same error
+// thirty times.
+func applySchemaWaiting(ctx context.Context, db store.Store) error {
+	const (
+		attempts = 30
+		gap      = time.Second
+	)
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err = families.ApplySchema(ctx, db)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("store: the postgres module answered after %ds", attempt-1)
+			}
+			return nil
+		}
+		if !errors.Is(err, store.ErrStoreUnavailable) {
+			return err
+		}
+		if attempt == attempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(gap):
+		}
+	}
+	return fmt.Errorf("the postgres module did not answer within %ds: %w", attempts, err)
+}
+
 func storeBackend(ctx context.Context, moduleBusSocket string) (store.Store, error) {
 	if ctx == nil || moduleBusSocket == "" {
 		return nil, errors.New("store: no module bus to reach the postgres module on")
@@ -427,7 +482,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// otherwise come up empty and fail every call against tables that were
 		// never created.
 		schemaCtx, cancelSchema := context.WithTimeout(context.Background(), 2*time.Minute)
-		err = families.ApplySchema(schemaCtx, db)
+		err = applySchemaWaiting(schemaCtx, db)
 		cancelSchema()
 		if err != nil {
 			log.Printf("store: schema: %v", err)

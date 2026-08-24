@@ -615,8 +615,8 @@
       "runtime": "go",
       "principal_ref": 28,
       "placements": [
-        "kb",
-        "server"
+        "server",
+        "kb"
       ],
       "stages": [
         {
@@ -795,7 +795,7 @@
     {
       "id": "aimee-postgres",
       "principal_ref": 68,
-      "executable": "/usr/local/bin/aimee-module-aimee",
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-aimee",
       "placements": [
         "server"
       ],

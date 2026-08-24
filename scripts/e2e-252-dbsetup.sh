@@ -13,6 +13,17 @@ set -eu
 
 psql() { su postgres -c "psql $*"; }
 
+# THE ROLE THE DAEMON CONNECTS AS. The DSN below has no user, so libpq uses the
+# operating-system name of the process -- root here, since that is what the
+# supervisor runs modules as. PostgreSQL answers an absent role with SQLSTATE
+# 28000, which crosses the store wire correctly and reads as
+# "the store refused current_version: role \"root\" does not exist".
+#
+# It had no way to come up before: the C store was a SQLite file with no roles
+# at all, so this is new ground rather than a step that was dropped.
+su postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='root'\"" | grep -q 1 ||
+   su postgres -c "psql -q -c \"CREATE ROLE root LOGIN SUPERUSER\""
+
 psql '-q -c "DROP DATABASE IF EXISTS aimee_e2e_store"'
 psql '-q -c "DROP DATABASE IF EXISTS aimee_e2e_kb"'
 

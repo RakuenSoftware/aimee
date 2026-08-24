@@ -487,8 +487,15 @@ func (h *sqlHandler) finish(ctx context.Context, op uint32, r *reader) ([]byte, 
 // been done to it, not any one client's: aimee records as "db1", and a second
 // client with its own tables records under its own owner without either of them
 // being able to see or renumber the other's history.
+//
+// NAMED schema_migrations because that is what was already written down. Nothing
+// had ever created this table -- the stage that owns it did not exist -- so the
+// only statement of its name was the end-to-end probe's
+// "SELECT count(*) FROM schema_migrations WHERE owner='db1'", written against a
+// contract rather than against a database. Choosing a different name here would
+// have made that probe wrong about a table it was waiting for.
 const versionTableDDL = `
-CREATE TABLE IF NOT EXISTS store_schema_version (
+CREATE TABLE IF NOT EXISTS schema_migrations (
     owner       TEXT   NOT NULL,
     version     BIGINT NOT NULL,
     checksum    TEXT   NOT NULL,
@@ -507,7 +514,7 @@ func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *
 	var version int64
 	var checksum string
 	err = pool.QueryRow(ctx,
-		`SELECT version, checksum FROM store_schema_version
+		`SELECT version, checksum FROM schema_migrations
 		  WHERE owner = $1 ORDER BY version DESC LIMIT 1`, owner).
 		Scan(&version, &checksum)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -590,7 +597,7 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 	var applied int64
 	var appliedSum string
 	err = tx.QueryRow(ctx,
-		`SELECT version, checksum FROM store_schema_version
+		`SELECT version, checksum FROM schema_migrations
 		  WHERE owner = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE`, owner).
 		Scan(&applied, &appliedSum)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -599,7 +606,7 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 
 	var recordedSum string
 	err = tx.QueryRow(ctx,
-		`SELECT checksum FROM store_schema_version WHERE owner = $1 AND version = $2`,
+		`SELECT checksum FROM schema_migrations WHERE owner = $1 AND version = $2`,
 		owner, int64(version)).Scan(&recordedSum)
 	switch {
 	case err == nil:
@@ -632,7 +639,7 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 		}
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO store_schema_version (owner, version, checksum) VALUES ($1, $2, $3)`,
+		`INSERT INTO schema_migrations (owner, version, checksum) VALUES ($1, $2, $3)`,
 		owner, int64(version), sum); err != nil {
 		return failure(err, "migrate"), bus.ModuleStatusOK
 	}
