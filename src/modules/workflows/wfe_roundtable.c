@@ -10,7 +10,7 @@
 #include "cJSON.h"
 #include "log.h"  /* degraded-gate WARN carries wfe_gate_decide's reason */
 #include "util.h" /* safe_exec_capture — compute the change-under-review diff */
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"

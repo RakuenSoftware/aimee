@@ -825,6 +825,7 @@
       "runtime": "go",
       "principal_ref": 28,
       "placements": [
+        "server",
         "kb"
       ],
       "stages": [
@@ -834,6 +835,13 @@
           "event_kind": 11265,
           "durability": "capture",
           "durability_reason": "read-only PostgreSQL health probe"
+        },
+        {
+          "id": 2,
+          "name": "postgres-sql",
+          "event_kind": 11266,
+          "durability": "capture",
+          "durability_reason": "internal high-volume SQL transport; owning domain stages record semantic decisions durably"
         }
       ]
     },
@@ -848,7 +856,7 @@
       "stages": [
         {
           "id": 1,
-          "name": "db2-lifecycle",
+          "name": "db2-health",
           "event_kind": 11521,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -915,9 +923,9 @@
       ]
     },
     {
-      "id": "db1",
+      "id": "aimee",
       "execution": "process",
-      "runtime": "c",
+      "runtime": "go",
       "principal_ref": 30,
       "placements": [
         "server"
@@ -925,7 +933,7 @@
       "stages": [
         {
           "id": 1,
-          "name": "db1-economizer-state",
+          "name": "aimee-economizer-state",
           "event_kind": 11777,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -933,7 +941,7 @@
         },
         {
           "id": 2,
-          "name": "db1-git-ownership",
+          "name": "aimee-git-ownership",
           "event_kind": 11778,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -941,7 +949,7 @@
         },
         {
           "id": 3,
-          "name": "db1-conversation",
+          "name": "aimee-conversation",
           "event_kind": 11779,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -949,7 +957,7 @@
         },
         {
           "id": 4,
-          "name": "db1-agent-work",
+          "name": "aimee-agent-work",
           "event_kind": 11780,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -957,7 +965,7 @@
         },
         {
           "id": 5,
-          "name": "db1-delegation",
+          "name": "aimee-delegation",
           "event_kind": 11781,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -965,7 +973,7 @@
         },
         {
           "id": 6,
-          "name": "db1-sessions",
+          "name": "aimee-sessions",
           "event_kind": 11782,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -973,7 +981,7 @@
         },
         {
           "id": 7,
-          "name": "db1-runtime",
+          "name": "aimee-runtime",
           "event_kind": 11783,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -981,7 +989,7 @@
         },
         {
           "id": 8,
-          "name": "db1-telemetry",
+          "name": "aimee-telemetry",
           "event_kind": 11784,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -989,7 +997,7 @@
         },
         {
           "id": 9,
-          "name": "db1-guardrail-state",
+          "name": "aimee-guardrail-state",
           "event_kind": 11785,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -997,7 +1005,7 @@
         },
         {
           "id": 10,
-          "name": "db1-ensemble",
+          "name": "aimee-ensemble",
           "event_kind": 11786,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1005,7 +1013,7 @@
         },
         {
           "id": 11,
-          "name": "db1-workflow",
+          "name": "aimee-workflow",
           "event_kind": 11787,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1013,7 +1021,7 @@
         },
         {
           "id": 12,
-          "name": "db1-roundtable",
+          "name": "aimee-roundtable",
           "event_kind": 11788,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1021,7 +1029,7 @@
         },
         {
           "id": 13,
-          "name": "db1-identity",
+          "name": "aimee-identity",
           "event_kind": 11789,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1029,7 +1037,7 @@
         },
         {
           "id": 14,
-          "name": "db1-checkpoints",
+          "name": "aimee-checkpoints",
           "event_kind": 11790,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1037,7 +1045,7 @@
         },
         {
           "id": 15,
-          "name": "db1-jti-replay",
+          "name": "aimee-jti-replay",
           "event_kind": 11791,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1045,7 +1053,7 @@
         },
         {
           "id": 16,
-          "name": "db1-lifecycle",
+          "name": "aimee-lifecycle",
           "event_kind": 11792,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1053,7 +1061,7 @@
         },
         {
           "id": 17,
-          "name": "db1-mgmt-jwks",
+          "name": "aimee-mgmt-jwks",
           "event_kind": 11793,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1061,7 +1069,7 @@
         },
         {
           "id": 18,
-          "name": "db1-mgmt-nonce",
+          "name": "aimee-mgmt-nonce",
           "event_kind": 11794,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
@@ -1069,51 +1077,40 @@
         },
         {
           "id": 19,
-          "name": "db1-pki",
+          "name": "aimee-pki",
           "event_kind": 11795,
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
           "emitter": "obs_bus_emit_durable_event"
-        }
-      ]
-    },
-    {
-      "execution": "process",
-      "id": "aimee",
-      "placements": [
-        "server"
-      ],
-      "principal_ref": 31,
-      "runtime": "go",
-      "stages": [
+        },
         {
-          "event_kind": 12033,
-          "id": 1,
-          "name": "peer-delivery",
+          "id": 20,
+          "name": "aimee-peer-delivery",
+          "event_kind": 11796,
           "durability": "ledger",
           "durability_reason": "peer delivery changes externally visible message state",
           "emitter": "obs_bus_emit_durable_event"
         },
         {
-          "event_kind": 12034,
-          "id": 2,
-          "name": "peer-inbox",
+          "id": 21,
+          "name": "aimee-peer-inbox",
+          "event_kind": 11797,
           "durability": "ledger",
           "durability_reason": "peer inbox reads and acknowledgements are reviewable message operations",
           "emitter": "obs_bus_emit_durable_event"
         },
         {
-          "event_kind": 12035,
-          "id": 3,
-          "name": "peer-grant",
+          "id": 22,
+          "name": "aimee-peer-grant",
+          "event_kind": 11798,
           "durability": "ledger",
           "durability_reason": "peer grant decisions change authorization state",
           "emitter": "obs_bus_emit_durable_event"
         },
         {
-          "event_kind": 12036,
-          "id": 4,
-          "name": "peer-channel",
+          "id": 23,
+          "name": "aimee-peer-channel",
+          "event_kind": 11799,
           "durability": "ledger",
           "durability_reason": "peer channel operations change durable communication state",
           "emitter": "obs_bus_emit_durable_event"
@@ -1179,8 +1176,19 @@
         "server"
       ],
       "request": [
-        12033,
-        12034
+        11796,
+        11797
+      ]
+    },
+    {
+      "id": "aimee-postgres",
+      "principal_ref": 69,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-aimee",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11266
       ]
     }
   ]

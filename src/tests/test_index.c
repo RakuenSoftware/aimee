@@ -5,7 +5,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db.h"
 #include "modules/db2/c/db2.h"
 #include "canonical_index.h"
 #include "entity_edges.h"

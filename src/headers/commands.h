@@ -77,7 +77,6 @@ void cmd_import(app_ctx_t *ctx, int argc, char **argv);
 void cmd_workspace(app_ctx_t *ctx, int argc, char **argv);
 /* cli_workspace_serve.c: client-side detached-workspace runner serve loop. */
 int cmd_workspace_serve(const char *workspace_id);
-void cmd_db(app_ctx_t *ctx, int argc, char **argv);
 void cmd_session(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_session_subcmds(void);
 /* cmd_ensemble.c — multi-agent ensemble sessions (canonical `ensemble` verb;
@@ -271,7 +270,6 @@ void print_commands_for_tier(cmd_tier_t tier);
 const subcmd_t *get_memory_subcmds(void);
 const subcmd_t *get_agent_subcmds(void);
 const subcmd_t *get_index_subcmds(void);
-const subcmd_t *get_db_subcmds(void);
 
 /* cmd_wiki.c */
 void cmd_wiki(app_ctx_t *ctx, int argc, char **argv);

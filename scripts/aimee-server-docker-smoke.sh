@@ -164,7 +164,18 @@ if [[ "$DO_UP" == 1 ]]; then
   # both owners against the base file before creating either long-lived service.
   bootstrap_compose="${COMPOSE_FILE%% *}"
   scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" all
-  "${DC[@]}" up -d --no-build
+  # `up` failing is where the stack's own words are the only diagnosis, and
+  # the EXIT trap tears everything down a moment later -- so dump them HERE,
+  # while the containers still exist. A store database that aborts during
+  # initdb exits before its first healthcheck, and compose reports only
+  # "dependency failed to start: container ... is unhealthy", which names the
+  # service and says nothing about the cause.
+  if ! "${DC[@]}" up -d --no-build; then
+    red "==> the stack did not come up; container logs follow"
+    "${DC[@]}" ps -a || true
+    "${DC[@]}" logs --no-color --tail=80 || true
+    exit 1
+  fi
 
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-server to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))

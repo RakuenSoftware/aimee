@@ -65,10 +65,9 @@ func mountsFingerprint(spec SandboxSpec, mountTable string) uint32 {
 
 // ContainerName is the name to create or resume this delegate's container under.
 //
-// The mount fingerprint is appended only when a host tree is actually mounted.
-// A delegate with no workspace runs in the backend's scratch dir, which is
-// derived from the task id already — there resuming by task id is the point,
-// and a fingerprint would defeat it.
+// The mount fingerprint is appended when a workspace is present. Valid live
+// sandbox specs always have one; the no-workspace behavior remains deterministic
+// for this pure naming helper but cannot be acquired by the runtime.
 //
 // When the name would overflow, the BODY is truncated and the suffix kept.
 // Dropping the suffix instead would collide two different mount sets onto one

@@ -3,7 +3,7 @@
 #include "commands.h"
 #include "config.h"
 #include "util.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <unistd.h>

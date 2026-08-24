@@ -3,9 +3,10 @@
  *
  * Validates the two acceptance criteria:
  *  1. Drop rate — many concurrent token_audit inserts from multiple threads (the
- *     request-thread + /v1/runs-worker pattern) all land: DB1's single
- *     SQLITE_OPEN_FULLMUTEX handle serializes writers, so internal contention
- *     never triggers SQLITE_BUSY and no row is silently dropped.
+ *     request-thread + /v1/runs-worker pattern) all land: the writers no
+ *     longer share a handle -- each call reaches the store module over the bus,
+ *     and that module's pool serialises them -- and no row is silently
+ *     dropped.
  *  2. Async mode does not block the request thread — handing a row to the
  *     background writer (agent_audit_async_enqueue_row) is materially cheaper than
  *     the synchronous DB insert, and after a flush every enqueued row has landed
@@ -22,11 +23,10 @@
 #include "config.h"
 #include "request_context.h"
 #include "db1.h"
+#include "token_audit.h"
+#include "support/store_module_fixture.h"
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <sqlite3.h>
-
-extern sqlite3 *db1_conn(void);
 
 static long now_ns(void)
 {
@@ -46,16 +46,19 @@ static long thread_cpu_ns(void)
    return (long)ts.tv_sec * 1000000000L + ts.tv_nsec;
 }
 
+/* The store is a module now, so the count comes back over the bus rather than
+   from a local handle. by_source answers what the raw COUNT(*) did: since_hours
+   of 0 is all-time, and a source with no rows is absent from the summary, which
+   is a count of zero. */
 static int count_source(const char *src)
 {
-   sqlite3_stmt *st = NULL;
-   assert(sqlite3_prepare_v2(db1_conn(), "SELECT COUNT(*) FROM token_audit WHERE source = ?", -1,
-                             &st, NULL) == SQLITE_OK);
-   sqlite3_bind_text(st, 1, src, -1, SQLITE_TRANSIENT);
-   assert(sqlite3_step(st) == SQLITE_ROW);
-   int n = sqlite3_column_int(st, 0);
-   sqlite3_finalize(st);
-   return n;
+   db1_token_audit_source_summary_t rows[32];
+   int n = db1_token_audit_by_source(0, rows, (int)(sizeof rows / sizeof rows[0]));
+   assert(n >= 0);
+   for (int i = 0; i < n; i++)
+      if (strcmp(rows[i].source, src) == 0)
+         return rows[i].calls;
+   return 0;
 }
 
 #define SYNC_THREADS    8
@@ -346,12 +349,17 @@ static void enable_async_config(void)
 int main(void)
 {
    printf("token_audit load: DB1 write-concurrency acceptance\n");
-   assert(db1_init(":memory:") == 0);
+
+   /* Every case below writes rows and counts them back, so this needs a store
+      attached. The store is a module: bring the real one up, or skip saying
+      why on a machine with no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
    test_sync_concurrency_no_drops();
    test_async_nonblocking_no_drops();
    enable_async_config();
    test_real_ingress_writer_concurrency();
-   db1_shutdown();
    printf("All token_audit load tests passed.\n");
    return 0;
 }

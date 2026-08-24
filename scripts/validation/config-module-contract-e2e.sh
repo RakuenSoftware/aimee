@@ -41,7 +41,7 @@ write_grant() {
    chmod 0600 "$file"
 }
 
-write_grant "$POLICY/db1.grant" 30 "$DB1" \
+write_grant "$POLICY/aimee.grant" 30 "$DB1" \
    "11777,11778,11779,11780,11781,11782,11783,11784,11785,11786,11787,11788,11789,11790,11791,11792,11793,11794,11795"
 write_grant "$POLICY/config.grant" 2 "$CONFIG" "4609"
 
@@ -76,7 +76,7 @@ SERVER_PID=$!
 PIDS="$PIDS $SERVER_PID"
 wait_socket "$BUS_SOCK"
 
-AIMEE_MODULE_POLICY_DIR="$POLICY" AIMEE_DB1_PATH="$DB" \
+AIMEE_MODULE_POLICY_DIR="$POLICY" AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" \
    "$DB1" "$BUS_SOCK" >"$ROOT/db1.log" 2>&1 &
 DB1_PID=$!
 PIDS="$PIDS $DB1_PID"

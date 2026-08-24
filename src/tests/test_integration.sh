@@ -76,8 +76,14 @@ export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 # builds the module, so the ordinary path has one; a hand-run without it
 # degrades to the old behaviour rather than to a server that will not come up.
 # ---------------------------------------------------------------
-DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module-db1"
-DB1_MODULE="$AIMEE_HOME/aimee-module-db1"
+# One Go binary serves every module; which one it is comes from argv[0], so the
+# harness stages it under the name the grant pins.
+DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module"
+DB1_MODULE="$AIMEE_HOME/aimee-module-aimee"
+# The same multicall binary under the postgres name: it derives its
+# identity from argv[0], and the grant pins the resolved path.
+PG_MODULE="$AIMEE_HOME/aimee-module-postgres"
+PG_MODULE_PID=""
 MODULE_POLICY_DIR="$AIMEE_HOME/modules.d/server"
 MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB1_MODULE_PID=""
@@ -138,7 +144,7 @@ install_db1_module() {
         echo "ABORT: the DB1 module is not built at $DB1_MODULE_BUILT."
         echo "       Every store-backed check needs it: nothing serves the store"
         echo "       without it. Build it with:"
-        echo "           make -C src build/obj/aimee-module-db1"
+        echo "           make -C src build/obj/aimee-module"
         echo "       or run this harness through 'make integration-tests', which"
         echo "       builds it as a prerequisite."
         exit 1
@@ -148,7 +154,38 @@ install_db1_module() {
     # lives.
     cp "$DB1_MODULE_BUILT" "$DB1_MODULE"
     chmod 0755 "$DB1_MODULE"
+    cp "$DB1_MODULE_BUILT" "$PG_MODULE"
+    chmod 0755 "$PG_MODULE"
     mkdir -p "$MODULE_POLICY_DIR"
+
+    # Both extra grants come from the SAME generated bundle the store's own
+    # grant does, rather than being written out here. The refs and kinds in
+    # them are derived from src/modules/process-contracts.json, and a copy
+    # transcribed into this file is a copy that goes stale silently: the
+    # store's outbound ref moved from 68 to 69 in a merge, and a hand-written
+    # heredoc would still have said 68 while every other site said 69.
+    install_generated_grant() {
+        local name="$1" exe="$2"
+        local src="$REPO_ROOT/src/build/obj/module-bundle/grants/server/$name.grant"
+        if [ ! -r "$src" ]; then
+            python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+                --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+        fi
+        if [ ! -r "$src" ]; then
+            echo "no generated $name grant at $src" >&2
+            return 1
+        fi
+        sed "s|^executable=.*|executable=$exe|" "$src" \
+            >"$MODULE_POLICY_DIR/$name.grant"
+    }
+    # The postgres module serves the SQL stage the store calls; the store's
+    # OUTBOUND principal is what is allowed to call it. A serve grant admits
+    # what a module answers, not what it asks for, so the second is not
+    # implied by the first -- without it the store attaches and then finds no
+    # backend, which reads exactly like a broken store.
+    install_generated_grant postgres "$PG_MODULE" || exit 1
+    install_generated_grant aimee-postgres "$DB1_MODULE" || exit 1
+
     # The serve list comes from the grant the exporter generates, so it cannot
     # drift from what the module actually serves. It is a build artifact, so
     # generate it when it is not there rather than guessing: the guess this
@@ -156,27 +193,31 @@ install_db1_module() {
     # served eight families. It serves nineteen. A short list does not fail
     # loudly -- the daemon starts, eleven families are simply unserved, and
     # their checks fail as if the code were broken.
-    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/db1.grant"
+    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/aimee.grant"
     if [ ! -r "$generated" ]; then
         python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
             --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
     fi
-    local serve=""
+    local serve="" ref=""
     if [ -r "$generated" ]; then
         serve=$(sed -n 's/^serve=//p' "$generated" || true)
+        # From the file for the same reason the serve list is: a ref restated
+        # here can drift from the one the module registers under, and the
+        # failure that produces is a module nobody can reach.
+        ref=$(sed -n 's/^principal_ref=//p' "$generated" || true)
     fi
     if [ -z "$serve" ]; then
-        echo "ABORT: no generated DB1 grant at $generated, and it could not be"
+        echo "ABORT: no generated store grant at $generated, and it could not be"
         echo "       generated. Without it there is no honest serve list to"
         echo "       install: run"
         echo "           python3 scripts/export_c_repositories.py \\"
         echo "               --runtime-bundle src/build/obj/module-bundle"
         exit 1
     fi
-    cat >"$MODULE_POLICY_DIR/db1.grant" <<GRANT
+    cat >"$MODULE_POLICY_DIR/aimee.grant" <<GRANT
 version=1
 principal_class=1
-principal_ref=30
+principal_ref=${ref:-30}
 uid=self
 executable=$DB1_MODULE
 publish=
@@ -188,17 +229,65 @@ GRANT
 
 start_db1_module() {
     [ -x "$DB1_MODULE" ] || return 0
+    # The store is a Go module against PostgreSQL and reads AIMEE_STORE_URL; it
+    # opened a SQLite file named by AIMEE_DB1_PATH until it moved. Skip the same
+    # way an unbuilt module is skipped, but SAY so -- starting it without a DSN
+    # would fork a process that exits immediately and leave the wait below to
+    # burn ten seconds discovering a socket that is never coming.
+    if [ -z "${AIMEE_STORE_URL:-}" ]; then
+        echo "integration: AIMEE_STORE_URL unset; skipping the store module" >&2
+        return 0
+    fi
+    # One schema per run. Without it the run inherits every row the last one
+    # wrote -- the harness used to get a fresh SQLite file each time and the
+    # isolation came free. The module creates the schema it is pointed at, so
+    # this needs no CREATE DATABASE right and no postgres client here.
+    if [ -z "${AIMEE_STORE_SCHEMA:-}" ]; then
+        AIMEE_STORE_SCHEMA="integ_$$"
+        case "$AIMEE_STORE_URL" in
+            *\?*) AIMEE_STORE_URL="$AIMEE_STORE_URL&search_path=$AIMEE_STORE_SCHEMA" ;;
+            *)    AIMEE_STORE_URL="$AIMEE_STORE_URL?search_path=$AIMEE_STORE_SCHEMA" ;;
+        esac
+        export AIMEE_STORE_URL AIMEE_STORE_SCHEMA
+    fi
     stop_db1_module
-    AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db" "$DB1_MODULE" "$MODULE_BUS_SOCK" >/dev/null 2>&1 &
+    # Postgres first: the store looks for its backend as it comes up, so a store
+    # started into an empty bus fails immediately rather than waiting.
+    if [ -x "$PG_MODULE" ] && [ -z "$PG_MODULE_PID" ]; then
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" "$PG_MODULE" "$MODULE_BUS_SOCK" \
+            >"$AIMEE_HOME/pg-module.log" 2>&1 &
+        PG_MODULE_PID=$!
+    fi
+    # Its output goes to a file, not /dev/null: a module that refuses to start
+    # says why exactly once, and discarding that leaves the failure looking like
+    # a socket that never appeared.
+    AIMEE_STORE_URL="$AIMEE_STORE_URL" "$DB1_MODULE" "$MODULE_BUS_SOCK"         >"$AIMEE_HOME/db1-module.log" 2>&1 &
     DB1_MODULE_PID=$!
-    # Wait for the module to answer rather than guessing, for the reason
-    # start_server does: a fixed sleep is either a stall or a flake.
+    # Wait for the store to be SERVING, not for the bus socket: the daemon owns
+    # that socket and creates it before the module is forked, so polling it fell
+    # through immediately and the harness ran on against a store that had not
+    # attached. The module now also opens a connection pool and applies its
+    # schema before it serves, which made that window wide enough to fail a
+    # health assertion.
+    #
+    # The daemon's own health state is the condition every caller depends on, so
+    # that is what this waits for.
     local i
-    for i in $(seq 1 100); do
-        [ -S "$MODULE_BUS_SOCK" ] && break
-        kill -0 "$DB1_MODULE_PID" 2>/dev/null || break
+    for i in $(seq 1 200); do
+        if [ -S "$HTTP_SOCK" ] && curl -s --max-time 2 --unix-socket "$HTTP_SOCK" \
+                http://localhost/v1/server/health 2>/dev/null | grep -q '"state":"ok"'; then
+            return 0
+        fi
+        if ! kill -0 "$DB1_MODULE_PID" 2>/dev/null; then
+            echo "integration: the store module exited before it served:" >&2
+            sed 's/^/    /' "$AIMEE_HOME/db1-module.log" 2>/dev/null | head -5 >&2
+            return 1
+        fi
         sleep 0.1
     done
+    echo "integration: the store module never reached serving; its log was:" >&2
+    sed 's/^/    /' "$AIMEE_HOME/db1-module.log" 2>/dev/null | head -5 >&2
+    return 1
 }
 
 stop_db1_module() {
@@ -630,9 +719,18 @@ ABORT_CMD=""
 # hunting with; bash already knows the line and the command, so ask it.
 trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
+stop_pg_module() {
+    if [ -n "$PG_MODULE_PID" ]; then
+        kill "$PG_MODULE_PID" 2>/dev/null || true
+        wait "$PG_MODULE_PID" 2>/dev/null || true
+        PG_MODULE_PID=""
+    fi
+}
+
 cleanup() {
     stop_workflow_module
     stop_db1_module
+    stop_pg_module
     stop_config_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then

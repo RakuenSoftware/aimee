@@ -8,9 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "web_egress.h"
-#include "web_page_cache.h"
+#include "db1_client/web_page_cache.h"
 
 void agent_http_init(void);
 char *tool_web_read(const char *ref, const char *query, int span, const char *mode);
@@ -20,7 +20,6 @@ static int has(const char *h, const char *n){ return h && n && strstr(h,n)!=NULL
 
 int main(void){
   int fail = 0;
-  assert(db1_init(":memory:") == 0);
   agent_http_init();   /* the server does this at startup; without it s_ssl_ctx
                         * is NULL and every HTTPS connection fails */
 

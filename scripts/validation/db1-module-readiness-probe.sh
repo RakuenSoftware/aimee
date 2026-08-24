@@ -5,11 +5,24 @@
 # is latched rather than live -- the exact failure the readiness fix existed to
 # prevent. This isolates it: confirm the module process is really gone, then
 # poll health with timestamps and watch what the daemon says.
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
 # Overridable so this can run against a build tree as well as an install.
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/db1.grant}
+MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
+GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
 HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-probe-XXXXXX")
 export HOME
 export AIMEE_HOME="$HOME/.config/aimee"
@@ -18,7 +31,12 @@ HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-cp "$GRANT" "$AIMEE_HOME/modules.d/server/db1.grant"
+# The grant's executable= is what the daemon pins the peer against, so it must
+# name the module this rig actually starts. In a container the two are the same
+# path and a plain copy works; against a build tree they are not, and a grant
+# naming an uninstalled path makes the daemon reject the whole policy and exit.
+sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
+    >"$AIMEE_HOME/modules.d/server/aimee.grant"
 
 health() { curl -s --unix-socket "$HTTP_SOCK" http://localhost/v1/server/health; }
 state() { health | sed -n 's/.*"state":"\([a-z]*\)".*/\1/p'; }
@@ -29,7 +47,8 @@ i=0; while [ $i -lt 300 ]; do [ -S "$HTTP_SOCK" ] && break; sleep 0.1; i=$((i+1)
 echo "server pid $SPID, state with no module: $(state)"
 echo "bus socket present before the module starts: $([ -S "$BUS_SOCK" ] && echo yes || echo no)"
 
-AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
+require_store_url
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0; while [ $i -lt 100 ]; do [ "$(state)" = "ok" ] && break; sleep 0.2; i=$((i+1)); done
 echo "module pid $MPID, state once attached: $(state)"
@@ -54,7 +73,7 @@ else
    echo "module process is gone after $(echo "$i" | awk '{print $1/10}')s"
 fi
 # And nothing else is serving in its place.
-echo "processes still matching the module binary: $(pgrep -c -f aimee-module-db1 2>/dev/null || echo 0)"
+echo "processes still matching the module binary: $(pgrep -c -f aimee-module-aimee 2>/dev/null || echo 0)"
 
 echo
 echo "--- health after the module is gone ---"

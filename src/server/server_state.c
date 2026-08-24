@@ -7,6 +7,7 @@
 #include "token_audit.h"              /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "embedder_catalog.h"
 #include "server.h"
+#include "headers/module_commands.h"
 #include "dashboard.h"
 #include "render.h"                   /* decision_to_json + db2_decision_log_list */
 #include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
@@ -19,7 +20,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "modules/workspace/workspace_handle.h"
 #include "modules/workspace/workspace_runner_registry.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "compute_pool.h"
@@ -1508,6 +1509,10 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             cJSON_AddNumberToObject(ir, aimee_ir_metric_name((aimee_ir_metric_t)m),
                                     (double)aimee_ir_metric_total((aimee_ir_metric_t)m));
    }
+
+   /* One row per attached plugin instance. Serialised by module_commands,
+    * which owns the snapshot this reads -- see aimee_module_commands_report. */
+   aimee_module_commands_report(resp);
 
    /* Shadow-traffic mirror: sent vs dropped-at-cap. Dropped is not a failure (the
     * mirror is best-effort) but it must be visible — a high drop rate means the

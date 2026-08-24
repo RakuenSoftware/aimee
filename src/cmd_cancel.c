@@ -1,6 +1,6 @@
 /* cmd_cancel.c: unified workflow cancellation (aimee cancel) */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "commands.h"
 
 /* ---- Active workflow detection ---- */

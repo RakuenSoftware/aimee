@@ -5,7 +5,7 @@
 #include "server_compute_internal.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
@@ -28,17 +28,16 @@
 #include <openssl/crypto.h>
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/delegate_run_phases.h>
-#include "modules/db1/delegate_learning.h"
-#include "modules/db1/delegate_reservation.h"
+#include "db1_client/delegate_learning.h"
+#include "db1_client/delegate_reservation.h"
 #include "request_context.h" /* execution key carried as the idempotency key */
 #include "kb_client.h"
 #include "kb_bandit.h"
-#include "modules/db1/interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_role.h>
 #include "delegate_ensemble.h"
 #include "evidence_replay.h"
-#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "guardrails.h"
 #include "liveness.h"
 #include "log.h"
@@ -1572,81 +1571,13 @@ void delegate_worker(void *arg)
     * cwd, worktree, shell -- is server-side by then. */
    int detached_bound = (cwd[0] && !turn_root[0]) ? workspace_turn_bind_active(cwd) : 0;
    /* A background/durable delegate has no live client connection to serve a
-    * DETACHED (client-served) workspace: by the time the worker runs, the
-    * dispatching client has disconnected, so the reverse channel is dead and every
-    * shell/file tool marshalled to it fails (previously a silent exit_code:-1).
-    * Create a server-side ephemeral workspace FIRST; only on success unbind the
-    * detached provider and run tools there. On failure keep the detached binding
-    * so the dead-channel path surfaces a clear error (fail CLOSED — never run in
-    * an undefined cwd). The ephemeral workspace does NOT contain the client's repo
-    * (it drops an AIMEE_WORKSPACE_NOTE.txt saying so); a background *code* delegate
-    * that must edit the client tree needs it provisioned server-side (follow-up). */
-   /* The mirror reconstruction is resolved far above, where rebinding the root
-    * still moves the whole turn. Reaching here means there was none: a detached
-    * workspace with no recorded remote/head, i.e. one that has never been synced.
-    * The only tree left to offer is a repo-less scratch dir. */
-   char ephemeral_ws[MAX_PATH_LEN] = "";
-   if (detached_bound && cctx->background_job_id > 0)
-   {
-      if (delegate_ephemeral_ws_create(deleg_id, ephemeral_ws, sizeof(ephemeral_ws)) == 0 &&
-          ephemeral_ws[0])
-      {
-         /* The ephemeral workspace holds no repository, so a WRITE delegate
-          * redirected here can still edit the tree through its file tools (they
-          * resolve the registered workspace, not this cwd) while every shell
-          * command runs somewhere that has no checkout. It can change code and
-          * cannot build, test, or diff what it changed -- and nothing tells it so.
-          * Observed: a delegate asked to add one comment line to a 2157-line file
-          * truncated it to 5 lines and reported no error.
-          *
-          * Writing without any means of verification is not a degraded mode, it is
-          * an unsafe one, so refuse the dispatch and say why. Read-only delegates
-          * are unaffected: inspection in a repo-less cwd is merely useless, not
-          * destructive, and their file tools still reach the real workspace. */
-         if (delegate_allows_writes)
-         {
-            char errmsg[1024];
-            snprintf(errmsg, sizeof(errmsg),
-                     "refusing to run write-capable delegate %s: its detached (client) workspace "
-                     "cannot be served by a background job, so its shell would run in ephemeral "
-                     "workspace '%s', which contains no checkout. The delegate could edit the "
-                     "repository through its file tools but could not build or test the result. "
-                     "A detached workspace is served by its client, so a background job cannot "
-                     "reach it at all. Either keep the client serving it -- run this delegate in "
-                     "the foreground with `aimee workspace serve` -- or register the repository "
-                     "as a mirror workspace (`aimee workspace add <path> --provider mirror "
-                     "--remote <url>`), which the server reconstructs from its own bare mirror at "
-                     "the recorded head and can therefore serve with no client present.",
-                     deleg_id, ephemeral_ws);
-            aimee_log(LOG_ERROR, "delegate", "%s", errmsg);
-            delegate_ephemeral_ws_remove(ephemeral_ws);
-            ephemeral_ws[0] = '\0';
-            delegation_compute_error(cctx, errmsg);
-            goto delegate_fail;
-         }
-         workspace_turn_unbind_active();
-         detached_bound = 0;
-         run_cmd_set_cwd(ephemeral_ws);
-         aimee_log(LOG_WARN, "delegate",
-                   "delegate %s: background job cannot serve its detached (client) workspace; "
-                   "running tools in server-side ephemeral workspace %s",
-                   deleg_id, ephemeral_ws);
-      }
-      else
-      {
-         /* Fail closed: detached binding stays, so shell tools return the clear
-          * reverse-channel-unavailable error rather than running in a stray cwd. */
-         aimee_log(LOG_ERROR, "delegate",
-                   "delegate %s: background job on a detached workspace but could not create a "
-                   "server-side ephemeral workspace; shell tools will report the reverse channel "
-                   "is unavailable",
-                   deleg_id);
-      }
-   }
-
+    * detached workspace. Mirror reconstruction is resolved above while rebinding
+    * can still move the whole turn. If there is no reconstructed full source tree,
+    * the mandatory sandbox decision below refuses the delegate. It never
+    * substitutes the historical empty checkout or a host execution path. */
    /* Every root decision for this turn is now final, so tell the delegate where
     * it is standing and what kind of place that is. Placed HERE and not with the
-    * other prompt blocks above: up there the ephemeral fallback had not run yet,
+    * other prompt blocks above: up there final root resolution had not run yet,
     * and a notice that names the wrong root is worse than none. The delegate is
     * the one that has to decide whether its evidence means what it appears to
     * mean, and it cannot do that while having to infer its own location from
@@ -1655,14 +1586,12 @@ void delegate_worker(void *arg)
       const char *shell_root = run_cmd_get_cwd();
       const char *file_root =
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : NULL);
-      delegate_root_kind_t root_kind = ephemeral_ws[0] ? DELEGATE_ROOT_EPHEMERAL
-                                       : turn_root[0]  ? DELEGATE_ROOT_RECONSTRUCTED
-                                                       : DELEGATE_ROOT_NAMED;
+      delegate_root_kind_t root_kind =
+          turn_root[0] ? DELEGATE_ROOT_RECONSTRUCTED : DELEGATE_ROOT_NAMED;
       aimee_log(LOG_INFO, "delegate", "delegate %s: bound root %s (%s)%s%s", deleg_id,
                 shell_root ? shell_root : (file_root ? file_root : "(none)"),
-                root_kind == DELEGATE_ROOT_EPHEMERAL       ? "ephemeral workspace, no repository"
-                : root_kind == DELEGATE_ROOT_RECONSTRUCTED ? "server-side reconstruction"
-                                                           : "caller's workspace",
+                root_kind == DELEGATE_ROOT_RECONSTRUCTED ? "server-side reconstruction"
+                                                         : "caller's workspace",
                 (shell_root && file_root && strcmp(shell_root, file_root) != 0)
                     ? "; DIVERGED from file-tool root "
                     : "",
@@ -1671,28 +1600,21 @@ void delegate_worker(void *arg)
                                   delegate_bound_root_notice(shell_root, file_root, root_kind));
    }
 
-   /* Delegate sandbox (default OFF): run this delegate's shell and file ops INSIDE
-    * its own container rather than in-process here.
+   /* Every delegate runs its shell and file ops inside its own verified container.
     *
-    * Mutually exclusive with the detached binding above, and that is not a policy
-    * choice — a DETACHED workspace's files live on the CLIENT, served over the
-    * reverse channel, so a server-side container cannot see them. Binding both
-    * would silently replace the client's tree with an unrelated empty one. So the
-    * sandbox only applies where the files are already server-side: a shared
-    * workspace, or the ephemeral fallback above (whose client has disconnected).
+    * A detached workspace's files live on the client, so a server-side container
+    * cannot see them. That condition refuses below unless mirror reconstruction
+    * has already produced a complete server-side tree.
     *
-    * Bound AFTER the write guards and the detached/ephemeral resolution: those
+    * Bound after the write guards and root resolution: those
     * decide policy and WHICH tree, identical for every provider; this only changes
-    * WHERE the already-resolved I/O runs. Off — or if no container can be acquired
-    * — it returns 0 and the turn runs in-process exactly as today; the failure
-    * paths log at ERROR rather than falling back silently.
+    * WHERE the already-resolved I/O runs. If no verified container can be acquired,
+    * the turn refuses; there is no off switch or in-process fallback.
     *
     * Keyed by deleg_id, so each delegation gets its own container. */
    /* Mount the tree the delegate already has server-side, so the container gets
     * the ENTIRE CURRENT SOURCE TREE — by bind-mount, so it IS that tree rather
-    * than a copy that can drift from it. Without it the backend mints an empty
-    * scratch dir, and the delegate opens the file named in its task to find
-    * nothing.
+    * than a copy that can drift from it. Without it the delegation refuses.
     *
     * A DELEGATE'S CHANGES MUST NOT LEAVE ITS CONTAINER. That is what decides the
     * mode here, and aimee already draws the line this needs: write-capable
@@ -1748,28 +1670,13 @@ void delegate_worker(void *arg)
         delegate_sandbox_resolve_image(container_ws, sbx_image, sizeof(sbx_image)) == 0)
            ? sbx_image
            : NULL;
-   /* container_ws == NULL has two causes, and they end differently.
-    *
-    * For a WRITE delegate it is the no-worktree-of-its-own case resolved above, and
-    * it REFUSES. It must never become a bind with a NULL workspace: that mints an
-    * EMPTY scratch tree and mounts THAT, so the delegate edits files the engine
-    * never sees ("write role reported success but produced no diff"). A WFE
-    * implement slice is NOT this case: its cwd already IS a dedicated per-slice
-    * worktree it owns, so delegate_resolve_worktree marks it dedicated and
-    * container_ws points at that tree read-write (above).
-    *
-    * For a READ-ONLY delegate it means there is no repository in play at all. That
-    * still gets a container — the backend's scratch dir — because the mount is a
-    * parameter of the single container path, not a second path. An empty tree is
-    * harmless to a delegate that was never going to write one.
-    *
-    * A DETACHED workspace is still exempt. It is served by the connected client
-    * over the reverse channel, not by this host, so there is no local tree to put
-    * in a container. That is a separate execution model from the in-process host
-    * path this change removed, and collapsing it is not this change's business. */
+   /* A missing full local source tree and a detached/client-served tree both
+    * refuse. This applies equally to writers and reviewers: an empty checkout is
+    * not the requested subject, and no delegate is exempt from the container path.
+    * A WFE implement slice normally owns a dedicated per-slice worktree, so
+    * container_ws points at that tree read-write. */
    int container_bound =
-       detached_bound ? 0
-       : (!container_ws || !container_ws[0]) && delegate_allows_writes
+       detached_bound
            ? -1
            : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
@@ -1784,9 +1691,17 @@ void delegate_worker(void *arg)
        * no un-sandboxed path to fall back to, so the delegation fails. The specific
        * cause was logged where it was detected. */
       memset(&result, 0, sizeof(result));
-      snprintf(result.error, sizeof(result.error),
-               "delegate could not be given a sandboxed container; refusing to run it "
-               "un-sandboxed (see the delegate-sandbox log for the cause)");
+      if (detached_bound)
+         snprintf(result.error, sizeof(result.error),
+                  "delegate's detached client workspace could not be given a sandboxed container; "
+                  "refusing to substitute an empty checkout or run un-sandboxed. Keep the client "
+                  "connected and run the delegate in the foreground with `aimee workspace serve`, "
+                  "or register/sync a server-side mirror with `aimee workspace add <path> "
+                  "--provider mirror --remote <url>`");
+      else
+         snprintf(result.error, sizeof(result.error),
+                  "delegate could not be given a sandboxed container with a complete source tree; "
+                  "refusing to run it un-sandboxed (see the delegate-sandbox log for the cause)");
       rc = -1;
    }
    else
@@ -1816,14 +1731,6 @@ void delegate_worker(void *arg)
     * isolation refusal (<0) already tore the container down and set no active binding. */
    if (container_bound > 0)
       workspace_turn_unbind_active();
-   if (ephemeral_ws[0])
-   {
-      /* Clear the thread-local cwd BEFORE removing the workspace so any post-run
-       * teardown exec (transcript capture, etc.) does not try to `cd` into a
-       * directory we just deleted (a harmless-but-noisy "cd: can't cd" error). */
-      run_cmd_set_cwd(NULL);
-      delegate_ephemeral_ws_remove(ephemeral_ws);
-   }
    (void)db1_delegation_spawn_complete(deleg_id);
 
    /* Post-run named-file drift check: verify named existing paths appear in response. */

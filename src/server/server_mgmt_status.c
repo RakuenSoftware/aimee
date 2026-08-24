@@ -1,9 +1,7 @@
 #include "server_mgmt_status.h"
 #include "mgmt_nonce.h"
-#include "db1_internal.h"
 
 #include <openssl/rand.h>
-#include <sqlite3.h>
 #include <string.h>
 
 #define NONCE_CAP 128

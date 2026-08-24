@@ -7,7 +7,7 @@
 
 #include "oauth_pkce.h"
 #include "oauth_flow.h"
-#include "db1.h" /* db1_secret_* — plant/verify legacy plaintext for the migration test */
+#include "db1_client/db1.h" /* db1_secret_* — plant/verify legacy plaintext for the migration test */
 #include "aimee.h"
 #include "platform_test_util.h"
 

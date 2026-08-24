@@ -19,14 +19,13 @@ CORE = {
 PROCESS_REQUIRED = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition",
-    # db1 is the server's store. Required because a deployment without it is not
-    # a smaller deployment, and a process because state belongs behind the bus.
-    # It is deliberately absent from GO_PROCESSES below: its implementation is
-    # still C, which the contract permits and which no other process is yet.
-    "db1",
-    # aimee is the home for aimee-server-specific functionality. Required for the
-    # same reason db1 is: a server without it is not a smaller server. Being
-    # optional was also actively wrong -- an optional module with
+    # aimee is the core server module: everything specific to aimee-server,
+    # including the nineteen store families it absorbed from db1 and the peer
+    # messaging that was written against it while it was still its own module.
+    # Required because a deployment without it is not a smaller deployment, and
+    # a process because state belongs behind the bus.
+    #
+    # Being optional was also actively wrong -- an optional module with
     # enabled_by_default false is declared and never spawned, which is how peer
     # messaging came to be green in every test and absent from server.modules.
     "aimee",
@@ -36,8 +35,17 @@ GO_PROCESSES = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
     "runtime-web", "control-web", "benchmarks", "sandbox", "economizer", "postgres",
-    # aimee is Go-only from the start: it was created after the Go-first ruling
-    # in docs/dev/GO_REWRITE.md, so it never had a C implementation to migrate.
+    # The core server module. Its code is server-go/modules/aimee, and it is
+    # Go-only: the store families were rewritten rather than migrated, and peer
+    # messaging was created after the Go-first ruling in docs/dev/GO_REWRITE.md
+    # so it never had a C implementation at all.
+    #
+    # It keeps principal ref 30 through the rename from db1: the ref is the
+    # identity every grant matches on and the value the kind formula carves
+    # from, so moving it would renumber all nineteen store event kinds and every
+    # AIMEE_DB1_EVENT_* constant its 461 C call sites compile against. Peer
+    # messaging renumbered instead -- it had no C callers to break, which is why
+    # its stages are 20..23 rather than 1..4.
     "aimee",
     "execution-policy",
 }

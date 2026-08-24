@@ -1,8 +1,21 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import importlib.util
 import unittest
 
-from scripts.check_go_module_boundary import violations
+# Loaded BY PATH, the way every other test in this directory loads its subject.
+#
+# This used to be `from scripts.check_go_module_boundary import violations`,
+# which needs the repository root on sys.path and therefore cannot run under
+# `python3 -I` -- isolated mode drops the working directory. Every workflow here
+# invokes these tests with -I, so this one could not be wired in the ordinary
+# way, and it was not: it ran nowhere at all. The import style was the reason
+# the test was unreachable, not an incidental difference.
+_SOURCE = Path(__file__).resolve().parent.parent / "check_go_module_boundary.py"
+_SPEC = importlib.util.spec_from_file_location("check_go_module_boundary", _SOURCE)
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+violations = _MODULE.violations
 
 
 class GoModuleBoundaryTest(unittest.TestCase):

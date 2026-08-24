@@ -117,16 +117,26 @@ case "$AIMEE_WFE_ENGINE" in
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
-# The DB1 module is a separate process and cannot read the daemon's config, so
-# it is told which database to open and refuses to start without it. That is
-# deliberate: a module that guessed a default would serve a DIFFERENT, empty
-# store whenever an operator moved the database, and an empty store answers
-# every read with "no such row" rather than an error.
+# THE STORE MODULE OPENS NO DATABASE, so this exports no path for it.
 #
-# This default matches config's own default. An operator who overrides db1_path
-# in the configuration MUST set AIMEE_DB1_PATH to match, or the module will
-# refuse to start -- loudly, which is the point.
-export AIMEE_DB1_PATH="${AIMEE_DB1_PATH:-$AIMEE_HOME/aimee.db}"
+# It used to. `export AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db"` lived here, naming a
+# SQLite file, from when the store was a C module that opened one. Nothing has
+# read that variable since the store became a Go module talking to the postgres
+# module over the bus -- so it was seeding a defaulted SQLite path into every
+# deployment for a module that could not have used it, and the comment above it
+# told an operator the module would "refuse to start" without it, which was no
+# longer true in either direction.
+#
+# What actually needs configuring is AIMEE_STORE_URL, the PostgreSQL DSN, and it
+# is read by the POSTGRES module (server-go/modules/postgres/health.go) rather
+# than by the store. It is deliberately NOT defaulted here: the reasoning in the
+# old comment was sound even though its subject was wrong, and it applies with
+# more force to a DSN. A guessed default would connect to a DIFFERENT, empty
+# database, and an empty store answers every read with "no such row" rather than
+# an error -- so it fails as silent data loss rather than as a startup failure.
+# Unset, the module says so and stops. An operator sets it in the environment
+# and it inherits; there is nothing for this script to do but stay out of the
+# way.
 MODULE_MANIFEST="${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/server.modules}"
 # Existing appliances may need to recover SQLite WAL state and refresh seeded
 # workflow definitions before the C resource socket appears.  A real upgraded

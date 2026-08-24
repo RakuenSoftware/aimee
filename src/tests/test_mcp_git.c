@@ -6,7 +6,6 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <sqlite3.h>
 #include "aimee.h"
 #include "modules/git/mcp_git.h"
 #include "session_worktree_key.h"
@@ -15,8 +14,8 @@
 #include "branch_ownership.h"
 #include "tests/support/git_pr_api_stub.h"
 #include "cJSON.h"
-#include "db_schema.h"
-#include "../db1/db1.h"
+#include "db1_client/db1.h"
+#include "db1_client/git_ownership.h" /* ownership_get_owner -- the per-repo claim assertion */
 #include "../modules/db2/c/db2.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "support/git_module_fixture.h"

@@ -9,8 +9,17 @@ Small, finished changes are easiest to review.
 3. Check [docs/proposals](docs/proposals/) for an accepted design or an owner already doing the work.
 4. Preview the blast radius for shared symbols, routes, config, storage, and wire contracts.
 
-Do not cross the DB1/DB2 boundary. `aimee-server` owns SQLite. `aimee-kb` owns PostgreSQL and
-pgvector. The thin client owns neither.
+Do not cross the DB1/DB2 boundary. The server's store and `aimee-kb` are separate databases with
+separate owners, and the thin client owns neither.
+
+This used to read "`aimee-server` owns SQLite", which is no longer true and would send you to the
+wrong place. The server's store is PostgreSQL, served by the `aimee` module, which opens no database
+itself: it reaches the `postgres` module over the event bus, and that module owns the connection and
+the DSN (`AIMEE_STORE_URL`). `aimee-kb` owns DB2 and pgvector, also PostgreSQL.
+
+`aimee-server` does still link libsqlite3, for the audit WORM ledger, PKI and kb-synthesis. Those are
+the remaining SQLite users and they are unrelated to the store. `aimee` and `aimee-kb` link none:
+`make -C src check-linking` asserts each binary's boundary and prints what it found.
 
 ## Build and test
 
@@ -125,9 +134,27 @@ When promoting `testing` into `main`:
 
     make -C src refactor-baseline-check              # what changed on the surface?
     python3 -I -S scripts/refactor_baselines.py freeze
+    make -C src script-tests                         # every scripts/tests test
 
 That diff is the point. One review of everything a release changes on the public
 surface beats a mechanical re-freeze per PR that nobody reads.
+
+`script-tests` discovers `scripts/tests/test_*.py` by wildcard and runs each one,
+rather than naming them. The workflows invoke these individually, so the set that
+runs is an enumerated list: eleven of forty-four were named by no workflow and
+ran nowhere at all. All eleven passed once run, so it was idle coverage rather
+than rot, and one of them could not run under `python3 -I` at all, because it
+imported its subject as a package instead of loading it by path, which is why it
+could never have been wired in the ordinary way.
+
+It belongs HERE rather than in `make lint` on purpose. Some of these tests are
+promote-time gates by deliberate design. `.github/workflows/module-inventory.yml`
+says so outright, that the module boundary and the frozen DB2 consumer surface
+are "promote-time questions, decided when work is promoted to `main`", and that
+running them on `testing` would block ordinary feature work on a decision nobody
+is making at that point. Pulling the whole set into the PR gate would override
+that on the quiet. Run it when you promote, which is when those questions are
+being asked.
 
 If you do hit a conflict in a generated baseline anyway, do not merge two
 digests by hand. Take either side and re-derive it:

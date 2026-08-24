@@ -12,7 +12,7 @@
  */
 #include <stdlib.h>
 
-#include "agent_jobs.h"
+#include "db1_client/agent_jobs.h"
 
 void db1_agent_job_free(db1_agent_job_t *job)
 {

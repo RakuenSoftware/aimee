@@ -59,7 +59,7 @@ func TestDockerArgsReadOnlyRoleGetsReadOnlyBind(t *testing.T) {
 		if strings.HasSuffix(bind, ":ro") {
 			continue
 		}
-		if !strings.Contains(bind, "aimee.sock") {
+		if !strings.Contains(bind, ControlSocketBasename) {
 			t.Errorf("writable bind for a read-only role: %q", bind)
 		}
 	}
@@ -149,7 +149,7 @@ func TestTranslateMountPath(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/srv/repo", "/host/data/repo"},
 		{"/srv/repo/sub/file.c", "/host/data/repo/sub/file.c"},
-		{"/run/aimee/server.sock", "/host/run/aimee/server.sock"},
+		{"/run/aimee/aimee-http.sock", "/host/run/aimee/aimee-http.sock"},
 		// No mapping: unchanged, which is right for a host-native process.
 		{"/elsewhere/path", "/elsewhere/path"},
 	}

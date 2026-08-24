@@ -85,6 +85,19 @@ typedef struct durable_pending
  * gateway makes per request plus room for a few long-running ones. */
 #define OBS_BUS_MODULE_CLIENTS 8
 
+/* The guardrail writer's queue.
+ *
+ * BOUNDED, and a full queue drops rather than blocks: blocking would put the
+ * consumer back to waiting on the store, which is the whole defect this queue
+ * exists to remove. A drop is counted and visible in obs_bus_dropped(); a stall
+ * would be neither.
+ *
+ * 4096 is well past any burst the ring itself can hold, so reaching it means
+ * the store has stopped answering rather than that the queue is small. */
+#define AB_WRITER_QUEUE 4096
+/* One guardrail payload, as it arrives off the ring. */
+#define AB_GUARDRAIL_MAX 2048
+
 static struct
 {
    bus_host_t host;
@@ -115,7 +128,9 @@ static struct
    bus_runtime_t *runtime;
    bus_runtime_policy_t *runtime_policy;
    atomic_int emitting;        /* 1 while accepting emits */
-   atomic_int stop;            /* 1 tells the consumer to final-drain and exit */
+   atomic_int stop;            /* 1 tells the consumer to final-drain */
+   atomic_int consumer_exit;   /* 1 tells it to leave, once the writer is done */
+   atomic_int drain_done;      /* set by the consumer when its final drain is complete */
    atomic_int publishers;      /* # producers inside the emit window (see enter_emit) */
    atomic_int accepting_calls; /* module RPC admission during daemon lifetime */
    atomic_int module_stop;     /* cancels an in-flight module RPC on shutdown */
@@ -140,6 +155,28 @@ static struct
    uint64_t durable_retry_after_ns;
    int started;
    int terminated; /* set by stop; blocks lazy resurrection after shutdown */
+
+   /* The guardrail writer. See guardrail_writer_main: the sink is a module call
+    * now, and it may not be made from the thread that pumps the host. */
+   pthread_t writer;
+   int writer_running;
+   pthread_mutex_t writer_lock;
+   pthread_cond_t writer_ready; /* work arrived, or finishing */
+   pthread_cond_t writer_drained;
+   atomic_int writer_finish; /* 1 tells the writer to exit once the queue empties */
+   struct
+   {
+      uint8_t payload[AB_GUARDRAIL_MAX];
+      uint32_t len;
+   } writer_q[AB_WRITER_QUEUE];
+   unsigned writer_head;
+   unsigned writer_count;
+   /* 1 between taking an event off the queue and finishing its write. The queue
+    * being empty does NOT mean the writer is idle: it decrements the count under
+    * the lock and then writes outside it, so there is a window where the event
+    * is in neither place. A waiter that watched only the count would return in
+    * that window, which is the whole failure obs_bus_flush exists to avoid. */
+   int writer_busy;
 } g;
 
 /* Guards start/stop transitions and the started/terminated fields. Separate from
@@ -437,6 +474,106 @@ static int write_durable(const uint8_t *p, uint32_t len)
    return persist_or_queue_durable(action, subject, verdict, detail);
 }
 
+/* ------------------------------------------------------- guardrail writer -- */
+
+/* Queue one guardrail payload for the writer. Returns 1 when it was taken.
+ *
+ * A payload too large for the slot, or a full queue, is DROPPED and counted --
+ * never blocked on. Blocking here would return the consumer to waiting on the
+ * store, which is exactly what this queue exists to prevent. */
+static int guardrail_enqueue(const uint8_t *payload, uint32_t len)
+{
+   if (len > AB_GUARDRAIL_MAX)
+   {
+      atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+      return 0;
+   }
+   pthread_mutex_lock(&g.writer_lock);
+   if (!g.writer_running || g.writer_count == AB_WRITER_QUEUE)
+   {
+      pthread_mutex_unlock(&g.writer_lock);
+      atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+      return 0;
+   }
+   unsigned slot = (g.writer_head + g.writer_count) % AB_WRITER_QUEUE;
+   memcpy(g.writer_q[slot].payload, payload, len);
+   g.writer_q[slot].len = len;
+   g.writer_count++;
+   pthread_cond_signal(&g.writer_ready);
+   pthread_mutex_unlock(&g.writer_lock);
+   return 1;
+}
+
+/* The writer thread: the only place the guardrail sink is called.
+ *
+ * It exists because that sink makes a module call and the consumer thread pumps
+ * the host, so a call from there waits for a reply it is itself responsible for
+ * routing. Any thread that is not the consumer will do; this one is dedicated so
+ * a slow store cannot delay the ring. */
+static void *guardrail_writer_main(void *arg)
+{
+   (void)arg;
+   for (;;)
+   {
+      pthread_mutex_lock(&g.writer_lock);
+      while (g.writer_count == 0 && !atomic_load_explicit(&g.writer_finish, memory_order_acquire))
+         pthread_cond_wait(&g.writer_ready, &g.writer_lock);
+      if (g.writer_count == 0)
+      {
+         pthread_mutex_unlock(&g.writer_lock);
+         break; /* asked to finish, and nothing left */
+      }
+      uint8_t payload[AB_GUARDRAIL_MAX];
+      uint32_t len = g.writer_q[g.writer_head].len;
+      memcpy(payload, g.writer_q[g.writer_head].payload, len);
+      g.writer_head = (g.writer_head + 1) % AB_WRITER_QUEUE;
+      g.writer_count--;
+      g.writer_busy = 1;
+      pthread_mutex_unlock(&g.writer_lock);
+
+      /* Outside the lock: this is the call that can take milliseconds, and
+       * holding the queue lock across it would stall the consumer's handoff. */
+      if (write_guardrail(payload, len))
+         atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+      else
+         atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+
+      pthread_mutex_lock(&g.writer_lock);
+      g.writer_busy = 0;
+      if (g.writer_count == 0)
+         pthread_cond_broadcast(&g.writer_drained);
+      pthread_mutex_unlock(&g.writer_lock);
+   }
+   pthread_mutex_lock(&g.writer_lock);
+   g.writer_busy = 0;
+   pthread_cond_broadcast(&g.writer_drained);
+   pthread_mutex_unlock(&g.writer_lock);
+   return NULL;
+}
+
+/* Finish the writer: let it empty the queue, then join it.
+ *
+ * MUST BE CALLED WHILE THE CONSUMER IS STILL PUMPING. The writer's calls need
+ * their replies routed, and the consumer is what routes them -- so stopping the
+ * consumer first would leave every remaining event to time out, which is the
+ * lossy shutdown this whole change is about. */
+static void guardrail_writer_finish(void)
+{
+   pthread_mutex_lock(&g.writer_lock);
+   if (!g.writer_running)
+   {
+      pthread_mutex_unlock(&g.writer_lock);
+      return;
+   }
+   g.writer_running = 0;
+   pthread_mutex_unlock(&g.writer_lock);
+   atomic_store_explicit(&g.writer_finish, 1, memory_order_release);
+   pthread_mutex_lock(&g.writer_lock);
+   pthread_cond_broadcast(&g.writer_ready);
+   pthread_mutex_unlock(&g.writer_lock);
+   pthread_join(g.writer, NULL);
+}
+
 /* ---------------------------------------------------------- consumer ----- */
 
 static uint32_t drain(void)
@@ -448,20 +585,39 @@ static uint32_t drain(void)
       atomic_fetch_add_explicit(&g.processed, 1, memory_order_relaxed); /* this event is handled */
       int wrote = 0;
       if (ev.frame.event_kind == KIND_AUDIT_ACTION)
+      {
+         /* The audit sink stays here: audit_action_log writes the WORM ledger,
+          * a file, and makes no module call, so it cannot wait on this thread. */
          wrote = write_row(ev.payload, ev.payload_len);
+         if (wrote)
+         {
+            atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+            n++;
+         }
+      }
       else if (ev.frame.event_kind == KIND_GUARDRAIL_EVENT)
-         wrote = write_guardrail(ev.payload, ev.payload_len);
+      {
+         /* HANDED OFF, not written here. The guardrail sink is a module call,
+          * and this thread pumps the host that would deliver its reply. The
+          * writer counts it written once the store has it, so obs_bus_written()
+          * still means durable. */
+         wrote = guardrail_enqueue(ev.payload, ev.payload_len);
+         if (wrote)
+            n++;
+      }
       else if (ev.frame.event_kind == KIND_DURABILITY_EVENT)
+      {
          wrote = write_durable(ev.payload, ev.payload_len);
+         if (wrote > 0)
+         {
+            atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+            n++;
+         }
+         else if (wrote < 0)
+            n++; /* accepted into the durable retry queue */
+      }
       else
          continue;
-      if (wrote > 0)
-      {
-         atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
-         n++;
-      }
-      else if (wrote < 0)
-         n++; /* accepted into the durable retry queue */
    }
    return n;
 }
@@ -724,7 +880,8 @@ static void *consumer_main(void *arg)
          nanosleep(&nap, NULL);
    }
    /* Final lossless drain: pump+drain until two consecutive empty rounds, so a
-    * row published just before stop is written before the thread exits. */
+    * row published just before stop is handed to its sink before this thread
+    * stops draining. */
    int empty = 0;
    while (empty < 2)
    {
@@ -736,6 +893,33 @@ static void *consumer_main(void *arg)
    capture_flush();              /* persist whatever the final drain recorded */
    g.durable_retry_after_ns = 0; /* make one final attempt regardless of cadence */
    (void)flush_pending_durable();
+
+   /* The ring is empty and everything on it has been handed to a sink. Say so,
+    * because stop cannot finish the writer until this is true -- doing it
+    * earlier would meet a writer that is already closing and drop exactly the
+    * events this drain just rescued. That race is what "written 0, dropped 3"
+    * looked like with no settle window. */
+   atomic_store_explicit(&g.drain_done, 1, memory_order_release);
+
+   /* KEEP PUMPING UNTIL THE WRITER IS DONE. The ring is empty, but the writer
+    * still has queued guardrail events and each one is a module call whose
+    * reply only this thread routes. Leaving now would strand exactly the events
+    * the drain above just rescued -- they would time out one deadline at a time
+    * and be counted dropped, which is the lossy shutdown this phase exists to
+    * prevent.
+    *
+    * Pump only: draining again would find nothing, and handing anything to a
+    * writer that is finishing would race its exit. */
+   const struct timespec settle = {.tv_sec = 0, .tv_nsec = 200 * 1000}; /* 200 us */
+   while (!atomic_load_explicit(&g.consumer_exit, memory_order_acquire))
+   {
+      pthread_mutex_lock(&g.host_lock);
+      if (g.runtime)
+         (void)bus_runtime_maintain(g.runtime, bus_runtime_monotonic_ns());
+      bus_host_pump(&g.host);
+      pthread_mutex_unlock(&g.host_lock);
+      nanosleep(&settle, NULL);
+   }
    return NULL;
 }
 
@@ -927,6 +1111,32 @@ static int start_locked(void)
       }
    }
 
+   /* The writer first, so a guardrail event handed off by the consumer's very
+    * first drain has somewhere to go. */
+   pthread_mutex_init(&g.writer_lock, NULL);
+   pthread_cond_init(&g.writer_ready, NULL);
+   pthread_cond_init(&g.writer_drained, NULL);
+   g.writer_head = 0;
+   g.writer_count = 0;
+   atomic_store(&g.writer_finish, 0);
+   atomic_store(&g.consumer_exit, 0);
+   atomic_store(&g.drain_done, 0);
+   if (pthread_create(&g.writer, NULL, guardrail_writer_main, NULL) != 0)
+   {
+      aimee_log(LOG_ERROR, "obs_bus", "guardrail writer thread failed; events will not be stored");
+      pthread_cond_destroy(&g.writer_drained);
+      pthread_cond_destroy(&g.writer_ready);
+      pthread_mutex_destroy(&g.writer_lock);
+      module_clients_destroy();
+      bus_client_detach(&g.consumer);
+      bus_client_detach(&g.producer);
+      bus_host_destroy(&g.host);
+      pthread_mutex_destroy(&g.host_lock);
+      pthread_mutex_destroy(&g.pub_lock);
+      return -1;
+   }
+   g.writer_running = 1;
+
    if (pthread_create(&g.thread, NULL, consumer_main, NULL) != 0)
    {
       aimee_log(LOG_ERROR, "obs_bus", "audit consumer thread spawn failed");
@@ -943,6 +1153,9 @@ start_fail:
    bus_runtime_policy_free(&g.runtime_policy);
    if (g.cap_fd >= 0)
       close(g.cap_fd);
+   pthread_cond_destroy(&g.writer_drained);
+   pthread_cond_destroy(&g.writer_ready);
+   pthread_mutex_destroy(&g.writer_lock);
    bus_capture_free(&g.capture);
    bus_client_detach(&g.producer);
    bus_client_detach(&g.consumer);
@@ -1095,29 +1308,29 @@ static const struct
     {11526u, "db2.db2-organization"},
     {11527u, "db2.db2-custody"},
     {11528u, "db2.db2-maintenance"},
-    {11777u, "db1.db1-economizer-state"},
-    {11778u, "db1.db1-git-ownership"},
-    {11779u, "db1.db1-conversation"},
-    {11780u, "db1.db1-agent-work"},
-    {11781u, "db1.db1-delegation"},
-    {11782u, "db1.db1-sessions"},
-    {11783u, "db1.db1-runtime"},
-    {11784u, "db1.db1-telemetry"},
-    {11785u, "db1.db1-guardrail-state"},
-    {11786u, "db1.db1-ensemble"},
-    {11787u, "db1.db1-workflow"},
-    {11788u, "db1.db1-roundtable"},
-    {11789u, "db1.db1-identity"},
-    {11790u, "db1.db1-checkpoints"},
-    {11791u, "db1.db1-jti-replay"},
-    {11792u, "db1.db1-lifecycle"},
-    {11793u, "db1.db1-mgmt-jwks"},
-    {11794u, "db1.db1-mgmt-nonce"},
-    {11795u, "db1.db1-pki"},
-    {12033u, "aimee.peer-delivery"},
-    {12034u, "aimee.peer-inbox"},
-    {12035u, "aimee.peer-grant"},
-    {12036u, "aimee.peer-channel"},
+    {11777u, "aimee.aimee-economizer-state"},
+    {11778u, "aimee.aimee-git-ownership"},
+    {11779u, "aimee.aimee-conversation"},
+    {11780u, "aimee.aimee-agent-work"},
+    {11781u, "aimee.aimee-delegation"},
+    {11782u, "aimee.aimee-sessions"},
+    {11783u, "aimee.aimee-runtime"},
+    {11784u, "aimee.aimee-telemetry"},
+    {11785u, "aimee.aimee-guardrail-state"},
+    {11786u, "aimee.aimee-ensemble"},
+    {11787u, "aimee.aimee-workflow"},
+    {11788u, "aimee.aimee-roundtable"},
+    {11789u, "aimee.aimee-identity"},
+    {11790u, "aimee.aimee-checkpoints"},
+    {11791u, "aimee.aimee-jti-replay"},
+    {11792u, "aimee.aimee-lifecycle"},
+    {11793u, "aimee.aimee-mgmt-jwks"},
+    {11794u, "aimee.aimee-mgmt-nonce"},
+    {11795u, "aimee.aimee-pki"},
+    {11796u, "aimee.aimee-peer-delivery"},
+    {11797u, "aimee.aimee-peer-inbox"},
+    {11798u, "aimee.aimee-peer-grant"},
+    {11799u, "aimee.aimee-peer-channel"},
 };
 
 /* Sampled declarations use integer parts-per-million so the checked contract
@@ -1226,17 +1439,38 @@ int obs_bus_module_peak_concurrency(void)
    return peak;
 }
 
+/* Is a kind served right now?
+ *
+ * NO start_lock, AND THAT IS THE WHOLE POINT. This used to take it, which
+ * deadlocked the daemon on shutdown the moment a guardrail event was in flight:
+ *
+ *   obs_bus_stop()  holds start_lock, then waits for module_callers to drain
+ *                   and joins the consumer
+ *   the consumer    is inside persist_guardrail -> db1_guardrail_event_insert,
+ *                   whose first act is to ask HERE whether the kind is served
+ *                   -- and blocks on start_lock, which stop is holding
+ *
+ * Neither moves again. It could not happen while the store was in-process
+ * SQLite: persist_guardrail wrote to a local database and made no bus call at
+ * all, which is exactly what its comment in obs_bus_adapter.c said. The store
+ * becoming a module turned that comment false without touching either file.
+ *
+ * Registering in module_callers is what makes dropping start_lock safe: stop
+ * clears accepting_calls before it waits, so a probe arriving after that
+ * returns 0 without touching the host, and one already inside is waited for
+ * before the host is torn down. Exactly the discipline obs_bus_module_call
+ * uses, for exactly the same reason. */
 int obs_bus_module_available(uint32_t event_kind)
 {
    int available = 0;
-   pthread_mutex_lock(&start_lock);
-   if (g.started && atomic_load_explicit(&g.accepting_calls, memory_order_acquire))
+   atomic_fetch_add(&g.module_callers, 1); /* seq_cst: pairs with stop's gate */
+   if (atomic_load_explicit(&g.accepting_calls, memory_order_acquire))
    {
       pthread_mutex_lock(&g.host_lock);
       available = bus_host_kind_has_server(&g.host, event_kind);
       pthread_mutex_unlock(&g.host_lock);
    }
-   pthread_mutex_unlock(&start_lock);
+   atomic_fetch_sub(&g.module_callers, 1);
    return available;
 }
 
@@ -1528,22 +1762,59 @@ void obs_bus_stop(void)
     * inside publish(). The consumer is still running, so any producer mid-publish
     * still drains and completes. Bounded: a producer waits at most AB_PUB_MAX
     * backoffs. */
-   atomic_store(&g.emitting, 0);        /* seq_cst */
-   atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
-   atomic_store_explicit(&g.module_stop, 1, memory_order_release);
+   atomic_store(&g.emitting, 0);                                    /* seq_cst */
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000}; /* 50 us */
    while (atomic_load(&g.publishers) > 0)
       nanosleep(&nap, NULL);
-   while (atomic_load(&g.module_callers) > 0)
+
+   /* Now no producer will touch the ring again — final-drain, then hold.
+    *
+    * THE CALL PATH IS STILL OPEN HERE, deliberately. The consumer's final drain
+    * hands every queued event to the sink, and the sink is a MODULE CALL now:
+    * closing accepting_calls before this join made the drain process each event
+    * and fail to persist it, so a shutdown discarded whatever was still queued.
+    * Measured as "emitted 3, written 0, dropped 3".
+    *
+    * It was correct while the store was in-process SQLite -- that sink made no
+    * module call at all, so the ordering below could not affect it. The store
+    * becoming a module is what made this ordering wrong, with nothing in either
+    * file changing to say so. */
+   atomic_store_explicit(&g.stop, 1, memory_order_release);
+
+   /* WAIT FOR THAT DRAIN TO FINISH before touching the writer. The consumer is
+    * still pumping throughout, so nothing is stalled by waiting here. */
+   while (!atomic_load_explicit(&g.drain_done, memory_order_acquire))
       nanosleep(&nap, NULL);
 
-   /* No new process may receive mappings once shutdown begins. The listener is
-    * joined before the host and regions are touched. */
-   bus_runtime_stop(&g.runtime);
+   /* The consumer is now pumping without draining.
+    * Finish the writer against that still-pumping consumer: its queued calls
+    * need their replies routed, and this thread is the only one routing.
+    *
+    * The ordering is forced from both ends. Finishing the writer BEFORE the
+    * drain loses the events the drain hands over; finishing it AFTER the
+    * consumer is joined loses them to timeouts. Between the two is the only
+    * place it works. */
+   guardrail_writer_finish();
 
-   /* Now no producer will touch the ring again — final-drain and exit. */
-   atomic_store_explicit(&g.stop, 1, memory_order_release);
-   pthread_join(g.thread, NULL); /* the consumer does its final capture_flush here */
+   /* Nothing is left to route. Release the consumer and collect it. */
+   atomic_store_explicit(&g.consumer_exit, 1, memory_order_release);
+   pthread_join(g.thread, NULL);
+
+   /* The drain is over: nothing else will call, so close the path and wait for
+    * anything an external caller still has in flight.
+    *
+    * bus_runtime_stop MOVED HERE TOO, and for the same reason as the line below
+    * it. It stops the listener that services attached peers, so a sink call made
+    * during the final drain went out and its reply never came back --
+    * DEADLINE_EXCEEDED, two seconds at a time, with the events dropped. The
+    * comment it carried ("no new process may receive mappings once shutdown
+    * begins") is still true here: nothing has been torn down, and the drain that
+    * needed the listener has finished. */
+   bus_runtime_stop(&g.runtime);
+   atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
+   atomic_store_explicit(&g.module_stop, 1, memory_order_release);
+   while (atomic_load(&g.module_callers) > 0)
+      nanosleep(&nap, NULL);
 
    if (g.cap_fd >= 0)
    {
@@ -1582,12 +1853,42 @@ void obs_bus_flush(void)
     * stuck consumer cannot hang the caller forever. Does NOT stop the bus. */
    uint64_t target = atomic_load_explicit(&g.enqueued, memory_order_acquire);
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 100 * 1000}; /* 100 us */
-   for (int i = 0; i < 50000; i++)                                   /* ~5 s cap */
+   int i = 0;
+   for (; i < 50000; i++) /* ~5 s cap */
    {
       if (atomic_load_explicit(&g.processed, memory_order_acquire) >= target)
-         return;
+         break;
       nanosleep(&nap, NULL);
    }
+   /* SECOND WAIT, and the reason this function was not enough on its own. The
+    * consumer counts an event `processed` when it DISPATCHES it, and dispatching
+    * a guardrail event means putting it on the writer's queue -- the sink is a
+    * module call and the consumer may not make one, since it is the thread that
+    * routes the reply. So the first loop above proves the handoff happened and
+    * says nothing about the write.
+    *
+    * A caller that emits a guardrail event, flushes, and reads the store back
+    * would therefore race the writer and usually lose: the read is a few
+    * microseconds away and the module call is milliseconds. That is what
+    * obs_bus_flush promises not to do.
+    *
+    * Bounded like the first loop, and against the SAME budget rather than a
+    * fresh one, so a flush cannot take twice as long as its documented cap. */
+   pthread_mutex_lock(&g.writer_lock);
+   while (i < 50000 && (g.writer_count > 0 || g.writer_busy))
+   {
+      struct timespec deadline;
+      clock_gettime(CLOCK_REALTIME, &deadline);
+      deadline.tv_nsec += nap.tv_nsec;
+      if (deadline.tv_nsec >= 1000000000L)
+      {
+         deadline.tv_sec++;
+         deadline.tv_nsec -= 1000000000L;
+      }
+      pthread_cond_timedwait(&g.writer_drained, &g.writer_lock, &deadline);
+      i++;
+   }
+   pthread_mutex_unlock(&g.writer_lock);
 }
 
 uint64_t obs_bus_dropped(void)

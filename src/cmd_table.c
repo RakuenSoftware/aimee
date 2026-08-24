@@ -94,8 +94,6 @@ void cmd_help(app_ctx_t *ctx, int argc, char **argv)
             subs = get_index_subcmds();
          else if (strcmp(target, "wm") == 0)
             subs = get_wm_subcmds();
-         else if (strcmp(target, "db") == 0)
-            subs = get_db_subcmds();
          else if (strcmp(target, "session") == 0)
             subs = get_session_subcmds();
          else if (strcmp(target, "ensemble") == 0)
@@ -247,7 +245,6 @@ const command_t commands[] = {
      CMD_TIER_ADMIN},
     {"export", "Export state to portable JSONL format", cmd_export, CMD_TIER_ADMIN},
     {"import", "Import state from exported directory", cmd_import, CMD_TIER_ADMIN},
-    {"db", "Database diagnostics and maintenance", cmd_db, CMD_TIER_ADMIN},
     {"branch", "Branch conflict analysis and cascading merge", cmd_branch, CMD_TIER_ADMIN},
     {"git", "Git and PR operations", cmd_git, CMD_TIER_ADMIN},
     {"clean", "Remove all aimee data and hooks (use --force)", NULL, CMD_TIER_ADMIN},

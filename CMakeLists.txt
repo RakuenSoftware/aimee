@@ -415,58 +415,13 @@ else()
     )
 endif()
 
+# The C store module is gone: server-go/modules/postgres serves its kinds now.
+#
+# What is left of it here is the secret store, which stores secrets as files
+# under the config directory and opened no database at any point -- it merely
+# lived in that directory.
 set(DB1_SRCS
-    ${AIMEE_SRC_DIR}/modules/db1/db1_init.c
-    ${AIMEE_SRC_DIR}/modules/db1/db1_write.c
-    ${AIMEE_SRC_DIR}/modules/db1/wm.c
-    ${AIMEE_SRC_DIR}/modules/db1/fsnap.c
-    ${AIMEE_SRC_DIR}/modules/db1/checkpoints.c
-    ${AIMEE_SRC_DIR}/modules/db1/clarify.c
-    ${AIMEE_SRC_DIR}/modules/db1/diagnose.c
-    ${AIMEE_SRC_DIR}/modules/db1/ensemble.c
-    ${AIMEE_SRC_DIR}/modules/db1/caches.c
-    ${AIMEE_SRC_DIR}/modules/db1/web_page_cache.c
-    ${AIMEE_SRC_DIR}/modules/db1/primary_sessions.c
-    ${AIMEE_SRC_DIR}/modules/db1/webchat_claude_sessions.c
-    ${AIMEE_SRC_DIR}/modules/db1/env.c
-    ${AIMEE_SRC_DIR}/modules/db1/delegations.c
-    ${AIMEE_SRC_DIR}/modules/db1/delegation_checkpoint.c
-    ${AIMEE_SRC_DIR}/modules/db1/model_catalog.c
-    ${AIMEE_SRC_DIR}/modules/db1/decisions.c
-    ${AIMEE_SRC_DIR}/modules/db1/eval.c
-    ${AIMEE_SRC_DIR}/modules/db1/runtime_state.c
-    ${AIMEE_SRC_DIR}/modules/db1/server_sessions.c
-    ${AIMEE_SRC_DIR}/modules/db1/session_state.c
-    ${AIMEE_SRC_DIR}/modules/db1/session_paths.c
-    ${AIMEE_SRC_DIR}/modules/db1/token_audit.c
-    ${AIMEE_SRC_DIR}/modules/db1/agent_log.c
-    ${AIMEE_SRC_DIR}/modules/db1/agent_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/coord_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/execution_plans.c
-    ${AIMEE_SRC_DIR}/modules/db1/pipelines.c
-    ${AIMEE_SRC_DIR}/modules/db1/secrets.c
-    ${AIMEE_SRC_DIR}/modules/db1/cognify_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/cost_fold.c
-    ${AIMEE_SRC_DIR}/modules/db1/local_operator.c
-    ${AIMEE_SRC_DIR}/modules/db1/project_clones.c
-    ${AIMEE_SRC_DIR}/modules/db1/git_ownership.c
-    ${AIMEE_SRC_DIR}/modules/db1/tool_local_availability.c
-    ${AIMEE_SRC_DIR}/modules/db1/execution_trace.c
-    ${AIMEE_SRC_DIR}/modules/db1/working_profile_local.c
-    ${AIMEE_SRC_DIR}/modules/db1/windows.c
-    ${AIMEE_SRC_DIR}/modules/db1/diagnostics.c
-    ${AIMEE_SRC_DIR}/modules/db1/maintenance.c
-    ${AIMEE_SRC_DIR}/modules/db1/conv_context.c
-    ${AIMEE_SRC_DIR}/modules/db1/payload_rewrite_state.c
-    ${AIMEE_SRC_DIR}/modules/db1/guardrail_events.c
-    ${AIMEE_SRC_DIR}/modules/db1/db1_trigger.c
-    ${AIMEE_SRC_DIR}/modules/db1/db1_cron_jobs.c
-    ${AIMEE_SRC_DIR}/modules/db1/delegate_learning.c
-    ${AIMEE_SRC_DIR}/modules/db1/interaction_events.c
-    ${AIMEE_SRC_DIR}/modules/db1/mcp_osv_cache.c
-    ${AIMEE_SRC_DIR}/modules/db1/server_management_jti.c
-    ${AIMEE_SRC_DIR}/modules/db1/wfe_store.c
-    ${AIMEE_SRC_DIR}/modules/db1/wfe_binding.c
+    ${AIMEE_SRC_DIR}/secrets.c
 )
 
 # The preserved C implementation now lives under module ownership. It remains
@@ -589,8 +544,6 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/config_client_accessors_7.c
     ${AIMEE_SRC_DIR}/module_json_call.c
     ${AIMEE_SRC_DIR}/session_id.c
-    ${AIMEE_SRC_DIR}/modules/db1/db.c
-    ${AIMEE_SRC_DIR}/modules/db1/db_schema.c
     ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c
     ${AIMEE_SRC_DIR}/util.c
     ${AIMEE_SRC_DIR}/util_url.c
@@ -1248,8 +1201,6 @@ set(KB_DATA_SRCS
 )
 set(KB_CORE_SRCS ${CORE_SRCS})
 list(REMOVE_ITEM KB_CORE_SRCS
-    ${AIMEE_SRC_DIR}/modules/db1/db.c
-    ${AIMEE_SRC_DIR}/modules/db1/db_schema.c
 )
 
 find_package(Threads REQUIRED)
@@ -1294,7 +1245,7 @@ add_library(aimee-core STATIC
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_PROJECT_INCLUDE_DIRS}
-    ${AIMEE_SRC_DIR}/modules/db1
+    ${AIMEE_SRC_DIR}/db1_client
     ${AIMEE_SRC_DIR}/modules/db2/c
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
@@ -1548,7 +1499,7 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}
     ${AIMEE_SRC_DIR}/headers
     ${AIMEE_SRC_DIR}/vendor/headers
-    ${AIMEE_SRC_DIR}/modules/db1
+    ${AIMEE_SRC_DIR}/db1_client
     ${AIMEE_SRC_DIR}/modules/db2/c)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE aimee-core-connection)
@@ -1672,7 +1623,6 @@ add_dependencies(aimee-agent tool_prompts_header)
 # generator only ran from the Makefile.
 set(SCHEMA_DATA_HEADER "${AIMEE_SRC_DIR}/schema_data.h")
 set(SCHEMA_FILES
-    "${AIMEE_SRC_DIR}/modules/db1/schema.sql"
     "${AIMEE_SRC_DIR}/modules/db2/c/schema.sql"
     "${AIMEE_SRC_DIR}/modules/db2/c/schema_sqlite.sql"
 )

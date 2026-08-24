@@ -6,8 +6,7 @@
  * See docs/proposals/done/learning-signals-router-phase-2.md. */
 
 #include <assert.h>
-#include "db.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include <stdio.h>
@@ -48,7 +47,6 @@ int main(void)
 {
    printf("learning_metrics: ");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 
    /* The production router must not classify or persist a signal without the
@@ -221,7 +219,6 @@ int main(void)
    }
 
    db2_test_shim_close();
-   db1_shutdown();
    printf("all tests passed\n");
    return 0;
 }

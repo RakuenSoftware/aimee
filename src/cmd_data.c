@@ -1,6 +1,6 @@
 /* cmd_data.c: data management commands (db, export, import, config) */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
 #include "kb_client.h"
@@ -25,21 +25,6 @@
 #include <ctype.h>
 
 #define CMD_DATA_ERRBUF 256
-
-void cmd_db(app_ctx_t *ctx, int argc, char **argv)
-{
-   const char *sub = (argc > 0) ? argv[0] : NULL;
-   if (argc > 0)
-   {
-      argc--;
-      argv++;
-   }
-
-   if (subcmd_dispatch(get_db_subcmds(), sub, ctx, argc, argv) != 0)
-      subcmd_usage("db", get_db_subcmds());
-}
-
-/* --- cmd_db: status and pragma subcmds --- */
 
 void cmd_export(app_ctx_t *ctx, int argc, char **argv)
 {
@@ -547,52 +532,11 @@ void cmd_config(app_ctx_t *ctx, int argc, char **argv)
               sub);
 }
 
-/* --- db subcmds (moved from cmd_core.c) --- */
-
-/* Removed `aimee db status` and `aimee db pragma`; the supported operator
- * surface is `aimee doctor db` plus native DB2 tooling for storage stats. */
-
-static void db_subcmd_backup(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)ctx;
-   const char *out = (argc > 0) ? argv[0] : NULL;
-   if (db1_backup(config_db1_path(), out) != 0)
-   {
-      LOG_ERROR("db", "db backup failed");
-      exit(1);
-   }
-}
-
-static void db_subcmd_check(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)ctx;
-   (void)argc;
-   (void)argv;
-   if (db1_check(config_db1_path(), 1) != 0)
-      exit(1);
-}
-
-static void db_subcmd_recover(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)ctx;
-   int force = 0;
-   for (int i = 0; i < argc; i++)
-   {
-      if (strcmp(argv[i], "--force") == 0)
-         force = 1;
-   }
-   if (db1_recover(config_db1_path(), force) != 0)
-      exit(1);
-}
-
-static const subcmd_t db_subcmds[] = {
-    {"backup", "Create a manual database backup", db_subcmd_backup},
-    {"check", "Run full integrity check", db_subcmd_check},
-    {"recover", "Recover from most recent valid backup", db_subcmd_recover},
-    {NULL, NULL, NULL},
-};
-
-const subcmd_t *get_db_subcmds(void)
-{
-   return db_subcmds;
-}
+/* The `db` command group is gone.
+ *
+ * Its three subcommands -- backup, check and recover -- copied, integrity-
+ * checked and restored a SQLite file at config_db1_path(). The store is
+ * PostgreSQL: there is no file to copy, no PRAGMA integrity_check to run, and
+ * nothing this process could recover if there were. Backups are pg_dump's job
+ * and consistency is the server's.
+ */

@@ -11,11 +11,11 @@
 #include "command_registry.h"
 #include <aimee/core/connection/auth.h>
 #include "server_http.h"
-#include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
+#include "delegate_egress_adapter.h" /* fd handoff to the Go sole-egress module */
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h"
-#include "db1.h"            /* db1_store_probe — the mTLS ramp needs a live store */
+#include "db1_client/db1.h" /* db1_store_probe — the mTLS ramp needs a live store */
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
@@ -1413,11 +1413,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
    {
       /* Defense in depth beyond !is_tcp: confirm the socket really is AF_UNIX before
        * exposing the forward proxy, so a future is_tcp regression cannot open egress on
-       * the public TCP/TLS listener. sandbox_pkg_proxy_serve also refuses if !is_uds. */
+       * the public TCP/TLS listener. The adapter also refuses if !is_uds. */
       struct sockaddr_storage ss;
       socklen_t sl = sizeof(ss);
       int is_uds = getsockname(fd, (struct sockaddr *)&ss, &sl) == 0 && ss.ss_family == AF_UNIX;
-      sandbox_pkg_proxy_serve(fd, is_uds, buf, NULL, "sandbox");
+      delegate_egress_adapter_serve(fd, is_uds, buf, total, "sandbox");
       return;
    }
 

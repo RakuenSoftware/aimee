@@ -3,7 +3,7 @@
 
 #include "agent_types.h"
 #include "agent_tasks.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 
 /* File reference resolution: @path/to/file syntax in delegate prompts */
 #define FILE_REF_MAX_REFS 3           /* max references resolved per prompt */

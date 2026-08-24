@@ -9,10 +9,10 @@
 #include "cJSON.h"
 #include "config.h" /* require_aimee_git */
 #include "log.h"
-#include "wfe_binding.h"     /* db1_wfe_binding_get */
-#include "wfe_enforce.h"     /* the enforce dial */
-#include "wfe_native_gate.h" /* classifier + decision */
-#include "wfe_store.h"       /* db1_work_item_get (delivered==accepted) */
+#include "wfe_binding.h"          /* db1_wfe_binding_get */
+#include "wfe_enforce.h"          /* the enforce dial */
+#include "wfe_native_gate.h"      /* classifier + decision */
+#include "db1_client/wfe_store.h" /* db1_work_item_get (delivered==accepted) */
 
 int hook_send_blocked(server_conn_t *conn, const char *msg, const char *request_id)
 {

@@ -139,8 +139,9 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	sandboxReq := SandboxRequestFor(plan, req.RepoRoot, req.Worktree, req.GitDir,
 		req.IsGitCheckout, req.ParentSocketHost, req.ParentSocketTarget, req.EgressProxy)
 	sandboxReq.RunAsUser = req.RunAsUser
-	sandboxReq.ScratchDir = req.ScratchDir
-	sandboxReq.ScratchTarget = req.ScratchTarget
+	if req.ScratchDir != "" || req.ScratchTarget != "" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
 
 	spec, err := BuildSandboxSpec(sandboxReq)
 	if err != nil {

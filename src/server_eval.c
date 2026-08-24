@@ -36,7 +36,7 @@
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "eval_synthesis.h" /* synthesised regression candidates (S1) */
 #include "approach_store.h"
 #include "kb_client.h"

@@ -20,7 +20,7 @@ func envSpec(t *testing.T) SandboxSpec {
 		GitDir:             "/repo/.git/worktrees/d1",
 		IsGitCheckout:      true,
 		ParentSocketHost:   "/run/aimee/aimee-http.sock",
-		ParentSocketTarget: "/run/aimee.sock",
+		ParentSocketTarget: "/run/aimee/aimee-http.sock",
 		EgressProxy:        "http://127.0.0.1:3129",
 		RunAsUser:          "1000:1000",
 	})
@@ -37,22 +37,18 @@ func TestSandboxEnvPointsTheCLIAtTheParentSocket(t *testing.T) {
 	if !ok {
 		t.Fatal("AIMEE_API_ENDPOINT is absent, so the delegate cannot reach its parent")
 	}
-	if got != "unix:/run/aimee.sock" {
+	if got != "unix:/run/aimee/aimee-http.sock" {
 		t.Errorf("AIMEE_API_ENDPOINT = %q, want the in-container socket path", got)
 	}
 }
 
-// A delegate with no socket has nothing to point at, and a dangling endpoint
-// would make every tool call fail slowly rather than not be attempted.
-func TestSandboxEnvOmitsTheEndpointWithoutASocket(t *testing.T) {
-	spec, err := BuildSandboxSpec(SandboxRequest{
+// A delegate without the bus has no permitted outward channel and is refused.
+func TestSandboxEnvRequiresTheBusSocket(t *testing.T) {
+	_, err := BuildSandboxSpec(SandboxRequest{
 		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo", IsGitCheckout: true,
 	})
-	if err != nil {
-		t.Fatalf("BuildSandboxSpec: %v", err)
-	}
-	if _, ok := envValue(spec, "AIMEE_API_ENDPOINT"); ok {
-		t.Error("an endpoint was set with no socket to point at")
+	if err == nil {
+		t.Fatal("sandbox without its sole-egress socket was accepted")
 	}
 }
 
@@ -81,6 +77,7 @@ func TestSandboxEnvSetsBothProxySpellings(t *testing.T) {
 func TestSandboxEnvHasNoProxyWithoutOne(t *testing.T) {
 	spec, err := BuildSandboxSpec(SandboxRequest{
 		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo", IsGitCheckout: true,
+		ParentSocketHost: "/run/aimee/aimee-http.sock", ParentSocketTarget: ControlSocketTarget,
 	})
 	if err != nil {
 		t.Fatalf("BuildSandboxSpec: %v", err)
@@ -182,7 +179,7 @@ func TestControlSocketIsNotTranslatedTwice(t *testing.T) {
 		Worktree:           "/repo",
 		IsGitCheckout:      true,
 		ParentSocketHost:   "/host/run/aimee-http.sock",
-		ParentSocketTarget: "/run/aimee.sock",
+		ParentSocketTarget: "/run/aimee/aimee-http.sock",
 	})
 	if err != nil {
 		t.Fatalf("BuildSandboxSpec: %v", err)
@@ -199,10 +196,10 @@ func TestControlSocketIsNotTranslatedTwice(t *testing.T) {
 
 	var sawSocket, sawWorkspace bool
 	for _, a := range args {
-		if a == "/host/run/aimee-http.sock:/run/aimee.sock" {
+		if a == "/host/run/aimee-http.sock:/run/aimee/aimee-http.sock" {
 			sawSocket = true
 		}
-		if a == "/elsewhere/run/aimee-http.sock:/run/aimee.sock" {
+		if a == "/elsewhere/run/aimee-http.sock:/run/aimee/aimee-http.sock" {
 			t.Error("the control socket source was translated a second time")
 		}
 		if a == "/host/checkout:/repo" {

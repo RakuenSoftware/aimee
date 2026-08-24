@@ -30,9 +30,6 @@ type ContainerRunner struct {
 	Docker string
 	// Run executes a command. Required.
 	Run CommandRunner
-	// RequireIsolation refuses any container whose isolation cannot be proven,
-	// not merely one proven broken.
-	RequireIsolation bool
 	// MountTable translates bind sources into the daemon's namespace.
 	MountTable string
 }
@@ -58,7 +55,9 @@ func (r ContainerRunner) docker() string {
 
 // networkProbeFormat asks the daemon for this container's attached networks and
 // their addresses, which is what JudgeIsolation reads.
-const networkProbeFormat = `{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}};{{end}}`
+const networkProbeFormat = `{{json .NetworkSettings.Networks}}`
+const mountProbeFormat = `{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.RW}};{{end}}`
+const environmentProbeFormat = `{{range .Config.Env}}{{println .}}{{end}}`
 
 // Start creates and starts a delegate container, then proves it is isolated.
 //
@@ -86,34 +85,71 @@ func (r ContainerRunner) Start(ctx context.Context, req DockerCreateRequest) (Co
 	}
 	if _, err := r.Run(ctx, r.docker(), "start", req.ContainerName); err != nil {
 		// Nothing is running, but a created container still exists.
-		r.destroy(ctx, req.ContainerName)
+		if cleanupErr := r.destroy(ctx, req.ContainerName); cleanupErr != nil {
+			return ContainerResult{Name: req.ContainerName, Refused: true},
+				fmt.Errorf("start container: %w; cleanup: %v", err, cleanupErr)
+		}
 		return ContainerResult{Name: req.ContainerName}, fmt.Errorf("start container: %w", err)
 	}
 
-	verdict := JudgeIsolation(r.probe(ctx, req.ContainerName), r.RequireIsolation)
+	verdict := VerifyRuntimePosture(req.Spec, r.MountTable, r.probe(ctx, req.ContainerName))
 	if verdict.Refuse {
 		// A container that failed the isolation check must not be left running.
-		r.destroy(ctx, req.ContainerName)
+		if err := r.destroy(ctx, req.ContainerName); err != nil {
+			return ContainerResult{Name: req.ContainerName, Refused: true, Reason: verdict.Reason},
+				fmt.Errorf("refused container cleanup: %w", err)
+		}
 		return ContainerResult{
 			Name: req.ContainerName, Refused: true, Reason: verdict.Reason,
 		}, nil
 	}
-	return ContainerResult{
-		Name: req.ContainerName, Warned: verdict.Warn, Reason: verdict.Reason,
-	}, nil
+	return ContainerResult{Name: req.ContainerName}, nil
+}
+
+// Acquire resumes a matching hibernated container when possible, otherwise
+// creates a fresh one. Both paths are verified after start before handoff.
+func (r ContainerRunner) Acquire(ctx context.Context, req DockerCreateRequest) (ContainerResult, error) {
+	if r.Run == nil {
+		return ContainerResult{}, fmt.Errorf("no command runner configured")
+	}
+	if _, err := DockerCreateArgs(req); err != nil {
+		return ContainerResult{Name: req.ContainerName}, err
+	}
+	if _, err := r.Run(ctx, r.docker(), "start", req.ContainerName); err != nil {
+		if cleanupErr := r.destroy(ctx, req.ContainerName); cleanupErr != nil {
+			return ContainerResult{Name: req.ContainerName, Refused: true}, fmt.Errorf("remove stale container: %w", cleanupErr)
+		}
+		return r.Start(ctx, req)
+	}
+	verdict := VerifyRuntimePosture(req.Spec, r.MountTable, r.probe(ctx, req.ContainerName))
+	if verdict.Refuse {
+		if err := r.destroy(ctx, req.ContainerName); err != nil {
+			return ContainerResult{Name: req.ContainerName, Refused: true, Reason: verdict.Reason}, fmt.Errorf("refused container cleanup: %w", err)
+		}
+		return ContainerResult{Name: req.ContainerName, Refused: true, Reason: verdict.Reason}, nil
+	}
+	return ContainerResult{Name: req.ContainerName}, nil
 }
 
 // probe asks whether the container actually got no network.
-func (r ContainerRunner) probe(ctx context.Context, name string) IsolationProbe {
-	out, err := r.Run(ctx, r.docker(), "inspect", "--format", networkProbeFormat, name)
-	return ParseIsolationProbe(out, err != nil)
+func (r ContainerRunner) probe(ctx context.Context, name string) RuntimePostureReport {
+	network, networkErr := r.Run(ctx, r.docker(), "inspect", "--format", networkProbeFormat, name)
+	mounts, mountsErr := r.Run(ctx, r.docker(), "inspect", "--format", mountProbeFormat, name)
+	environment, environmentErr := r.Run(ctx, r.docker(), "inspect", "--format", environmentProbeFormat, name)
+	return RuntimePostureReport{Network: network, NetworkFailed: networkErr != nil,
+		Mounts: mounts, MountsFailed: mountsErr != nil,
+		Environment: environment, EnvironmentFailed: environmentErr != nil}
 }
 
 // destroy removes a container, ignoring the result. It runs on paths that are
 // already failing, and a removal error must not replace the reason the caller
 // needs to see.
-func (r ContainerRunner) destroy(ctx context.Context, name string) {
-	_, _ = r.Run(ctx, r.docker(), "rm", "-f", name)
+func (r ContainerRunner) destroy(ctx context.Context, name string) error {
+	out, err := r.Run(ctx, r.docker(), "rm", "-f", name)
+	if err != nil && !strings.Contains(strings.ToLower(out), "no such container") {
+		return fmt.Errorf("remove container %s: %w", name, err)
+	}
+	return nil
 }
 
 // Stop removes the container once the delegate has finished.

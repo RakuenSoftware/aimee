@@ -4,8 +4,7 @@
 #include <string.h>
 #include "aimee.h"
 #include "agent_exec.h"
-#include "db.h"
-#include "../db1/db1.h"
+#include "db1_client/db1.h"
 #include "../modules/db2/c/db2.h"
 #include "../modules/db2/c/db2_test_shim.h"
 #include "../modules/db2/c/db2_internal.h"
@@ -16,7 +15,6 @@ static void setup(void)
 {
    /* db1_init is idempotent: reuse a single in-memory db1 across all
     * tests. anti-pattern test cases clear the table at the start. */
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
    db2_set_ephemeral(1);
 }

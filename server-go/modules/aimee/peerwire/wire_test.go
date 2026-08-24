@@ -18,17 +18,19 @@ import (
 // test pins the derivation itself.
 func TestEventKindsFollowTheBusFormula(t *testing.T) {
 	// The ref is supplied by the module, not held here. These are the values at
-	// ref 31; at ref 30 the same four stages give 11796-11799, and the formula
-	// is what makes that a renumber rather than a rewrite.
-	const ref uint32 = 31
+	// ref 30, which is the store's -- the module has one principal and the db1
+	// absorption made it that one. At ref 31, where peer messaging started, the
+	// same four stages gave 12053-12056; the formula is what made that a
+	// renumber rather than a rewrite.
+	const ref uint32 = 30
 	for _, tc := range []struct {
 		stage uint32
 		want  uint32
 	}{
-		{StageDelivery, 12033},
-		{StageInbox, 12034},
-		{StageGrant, 12035},
-		{StageChannel, 12036},
+		{StageDelivery, 11796},
+		{StageInbox, 11797},
+		{StageGrant, 11798},
+		{StageChannel, 11799},
 	} {
 		if got := EventKind(ref, tc.stage); got != tc.want {
 			t.Errorf("EventKind(%d, %d) = %d; want %d", ref, tc.stage, got, tc.want)
@@ -37,9 +39,13 @@ func TestEventKindsFollowTheBusFormula(t *testing.T) {
 			t.Errorf("formula for stage %d = %d; want %d", tc.stage, got, tc.want)
 		}
 	}
-	// Stage ids are stable across a ref change; only the kinds move.
-	if StageDelivery != 1 || StageInbox != 2 || StageGrant != 3 || StageChannel != 4 {
-		t.Error("stage ids moved; the merge renumbers them deliberately, not incidentally")
+	// Stage ids moved to 20..23 in the absorption, and they are pinned here for
+	// the same reason they were pinned at 1..4: the store owns 1..19 of this
+	// principal, so a peer stage drifting back down would advertise a kind a
+	// store family already serves, and the loser is silently unreachable rather
+	// than refused.
+	if StageDelivery != 20 || StageInbox != 21 || StageGrant != 22 || StageChannel != 23 {
+		t.Error("stage ids moved; the store owns 1..19 of this principal")
 	}
 }
 

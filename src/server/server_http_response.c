@@ -30,7 +30,7 @@
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "http_content_encoding.h"
 #include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"

@@ -126,28 +126,56 @@ static const char *session_keywords[] = {
     "what happened",   "how did",      "tell me about",      "recap",          "summary of",
     "session summary", "what went on", "what was discussed", "what did we do", NULL};
 
+/* Right-hand boundary test for a keyword match. A keyword may be followed by a
+ * non-letter (a whole-token match) or by a common inflectional suffix, so "deploy"
+ * still matches "deployed" and "deploying". An arbitrary letter continuation is
+ * rejected — that is what let "add" match "address", "new" match "newsletter",
+ * "count" match "country" and "account", and "fix" match "fixture". These lists
+ * feed intent scoring and the recall-bundle kind budgets, so a false hit reweights
+ * what the model is shown. */
+static int keyword_tail_ok(const char *tail)
+{
+   if (!isalpha((unsigned char)tail[0]))
+      return 1;
+   static const char *const inflections[] = {"s", "es", "ed", "d", "ing", NULL};
+   for (int i = 0; inflections[i]; i++)
+   {
+      size_t n = strlen(inflections[i]);
+      if (strncasecmp(tail, inflections[i], n) == 0 && !isalpha((unsigned char)tail[n]))
+         return 1;
+   }
+   return 0;
+}
+
+/* 1 iff |needle| occurs in |haystack| on both a left and a right word boundary.
+ * Case-insensitive. Multi-word needles work unchanged — only the outer edges are
+ * checked, so "how many" still matches inside a sentence.
+ * Declared in memory_context_internal.h; also used by memory_core_scope_embed.c
+ * and memory_lifecycle.c, which had the same unbounded-strstr keyword lists. */
+int memory_keyword_present(const char *haystack, const char *needle)
+{
+   if (!haystack || !needle || !needle[0])
+      return 0;
+   size_t nlen = strlen(needle);
+   for (const char *p = haystack; *p; p++)
+   {
+      if (strncasecmp(p, needle, nlen) != 0)
+         continue;
+      /* Left boundary: previous char must not be a letter. */
+      if (p != haystack && isalpha((unsigned char)p[-1]))
+         continue;
+      if (keyword_tail_ok(p + nlen))
+         return 1;
+   }
+   return 0;
+}
+
 static int count_keyword_matches(const char *text, const char **keywords)
 {
    int count = 0;
    for (int i = 0; keywords[i]; i++)
-   {
-      /* Case-insensitive substring search */
-      const char *p = text;
-      int klen = (int)strlen(keywords[i]);
-      while (*p)
-      {
-         if (strncasecmp(p, keywords[i], klen) == 0)
-         {
-            /* Check word boundary: previous char must not be alpha */
-            if (p == text || !isalpha((unsigned char)p[-1]))
-            {
-               count++;
-               break;
-            }
-         }
-         p++;
-      }
-   }
+      if (memory_keyword_present(text, keywords[i]))
+         count++;
    return count;
 }
 
@@ -174,7 +202,7 @@ int has_temporal_markers(const char *text)
 
    for (int i = 0; temporal_phrases[i]; i++)
    {
-      if (strstr(buf, temporal_phrases[i]))
+      if (memory_keyword_present(buf, temporal_phrases[i]))
          return 1;
    }
    return 0;
@@ -198,7 +226,7 @@ int memory_is_session_query(const char *task_hint)
 
    for (int k = 0; session_keywords[k]; k++)
    {
-      if (strstr(lower, session_keywords[k]))
+      if (memory_keyword_present(lower, session_keywords[k]))
          return 1;
    }
    return 0;
@@ -233,11 +261,11 @@ memory_query_shape_t memory_classify_deriver_shape(const char *query)
    lower[i] = '\0';
 
    for (int k = 0; quantitative_keywords[k]; k++)
-      if (strstr(lower, quantitative_keywords[k]))
+      if (memory_keyword_present(lower, quantitative_keywords[k]))
          return MEM_SHAPE_QUANTITATIVE;
 
    for (int k = 0; interval_keywords[k]; k++)
-      if (strstr(lower, interval_keywords[k]))
+      if (memory_keyword_present(lower, interval_keywords[k]))
          return MEM_SHAPE_TEMPORAL_INTERVAL;
 
    return MEM_SHAPE_UNKNOWN;

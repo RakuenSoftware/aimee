@@ -94,9 +94,8 @@ func TestContainerNameFollowsTheTranslatedSource(t *testing.T) {
 	}
 }
 
-// A delegate with no workspace runs in the backend's scratch dir, which is
-// derived from the task id already. Fingerprinting there would defeat the
-// resume-by-task-id that scratch containers exist for.
+// The pure name helper remains deterministic for a partial spec, even though
+// runtime validation refuses any live sandbox without a workspace.
 func TestContainerNameHasNoFingerprintWithoutAWorkspace(t *testing.T) {
 	name, err := ContainerName("task-1", SandboxSpec{}, "")
 	if err != nil {

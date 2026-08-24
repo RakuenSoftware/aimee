@@ -1,7 +1,7 @@
 # Delegate sandbox
 
-Write-capable delegates run in an assigned worktree and, by default, a container with no network or
-ambient credentials (`delegate_sandbox` is on unless an operator sets `delegate_sandbox: false`).
+Delegates run in an assigned full source worktree and a container with no network or ambient
+credentials.
 The sandbox bounds damage after a model or dependency makes a bad decision; it does not make
 arbitrary host mounts safe.
 
@@ -19,6 +19,12 @@ arbitrary host mounts safe.
 The agent's role and workflow still decide whether the worktree is writable. A container is not a
 write grant.
 
+The immutable specification, Docker create/start/resume lifecycle, and post-start verification live
+in `server-go/modules/delegates`. The network-capable package proxy lives in
+`server-go/modules/sandbox`; `aimee-delegate-egress` is the shipped Go entry point for both. C only
+hands canonical filesystem facts or an already-accepted Unix fd to that binary. It cannot request a
+network mode, provide an allowlist, resolve a destination, dial a socket, or override a refusal.
+
 ## Source authority
 
 The server resolves the workspace and canonical worktree before launch. Absolute paths are accepted
@@ -33,8 +39,8 @@ owns them. Arbitrary sibling paths are not.
 Delegates do not reach public package registries directly. Package requests use a mediated proxy or
 prebuilt cache with allowlist, vulnerability, integrity, size, and audit policy.
 
-If a task needs network, grant the narrow destination and protocol. Do not switch the whole backend
-to host networking for one dependency.
+If a task needs external data, grant the narrow destination and protocol to an aimee-server module
+on the other side of the bus. Never switch the delegate container to host networking.
 
 ## Images
 
@@ -59,22 +65,19 @@ Local CLI-provider logins stay on the thin client and do not enter the container
 
 ## Isolation failure
 
-Fail closed when the requested namespace, mount, network, or resource boundary cannot be created.
-An operator may configure a documented degraded mode for a trusted host; every degraded launch emits
-a sandbox audit event with the missing boundary.
+Fail closed when the requested namespace, exact mount set, environment, network, or resource boundary
+cannot be created or proved after every start or resume. The failed container is destroyed.
 
 Never silently fall back from container to host shell.
 
 ## A sandbox needs a workspace, and a bind source the daemon can see
 
-Two conditions have to hold before a delegate can run a shell or read a file. Both fail quietly, and
-both look like the model being unhelpful rather than like a deployment problem.
+Two conditions have to hold before a delegate can run a shell or read a file. Both are checked and
+refused explicitly.
 
 **The delegate needs an assigned worktree.** The container provider is bound per delegate from that
-worktree; it is deliberately not selectable from configuration, because a configurable kind would
-have to fall back to the shared provider when no container exists, which is the one outcome the
-sandbox is for. A delegate launched with no workspace has nothing to containerise, falls through to
-co-located execution, and is then refused:
+worktree; it is deliberately not selectable from configuration. A delegate launched with no full
+source workspace is refused before container creation:
 
 ```text
 refused: a delegated shell requires sandbox isolation, but the sandbox is off/unavailable;
@@ -128,10 +131,10 @@ an unavailable container backend now fails allocation, and a delegated shell tha
 co-located path with `sandbox.mode=off` is refused before fork/exec. The trusted primary/operator
 session remains a separate host-execution path; it is not a delegate fallback.
 
-`delegate_sandbox_require_isolation` has the narrower job its name now documents: after a container
-starts, verify that the runtime actually honored network isolation and fail closed if that proof is
-missing or shows an attached network. It no longer decides whether a delegate may fall back to the
-host; there is no such path. Package access, when enabled, crosses only the audited package proxy;
+`delegate_sandbox_require_isolation` is a compatibility key and cannot weaken the boundary. The Go
+module always verifies network isolation, exact source/target/read-write mounts, and the effective
+credentialless environment after start or resume. Package access, when enabled, crosses only the
+audited Go package proxy;
 credential stripping and workspace guards remain defense in depth inside the container boundary.
 
 Regression coverage lives in `test_server_compute` (container allocation is mandatory) and

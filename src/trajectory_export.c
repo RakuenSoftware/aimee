@@ -3,7 +3,7 @@
 #include "trajectory.h"
 
 #include "cJSON.h"
-#include "interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include "modules/memory/memory_platform.h"
 
 #include <stdint.h>

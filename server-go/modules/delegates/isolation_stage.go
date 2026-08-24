@@ -22,7 +22,6 @@ const (
 	isolationReqHeaderLen         = 16
 
 	isolationFlagProbeFailed uint8 = 1
-	isolationFlagRequire     uint8 = 2
 
 	isolationReportMax = 1 << 16
 )
@@ -37,7 +36,6 @@ func handleIsolation(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	probeFailed := request[5]&isolationFlagProbeFailed != 0
-	requireIsolation := request[5]&isolationFlagRequire != 0
 
 	reportLen := int(binary.LittleEndian.Uint32(request[8:12]))
 	if reportLen > isolationReportMax {
@@ -52,7 +50,7 @@ func handleIsolation(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 		return nil, bus.ModuleStatusCancelled
 	}
 
-	verdict := JudgeIsolation(ParseIsolationProbe(report, probeFailed), requireIsolation)
+	verdict := JudgeIsolation(ParseIsolationProbe(report, probeFailed))
 
 	// The reason travels with the verdict. A caller that logged its own wording
 	// would describe a judgement it did not make, and the wording is the part an
@@ -60,10 +58,8 @@ func handleIsolation(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	response := make([]byte, 16, 16+len(verdict.Reason))
 	binary.LittleEndian.PutUint32(response[0:4], isolationResponseMagic)
 	putBool(response[4:8], verdict.Refuse)
-	putBool(response[8:12], verdict.Warn)
-	// The SEVERITY too: a breach that runs anyway is an error, not a caution,
-	// and a caller left to infer that from the wording would get it wrong.
-	putBool(response[12:16], verdict.Error)
+	putBool(response[8:12], false)
+	putBool(response[12:16], verdict.Refuse)
 	response = append(response, verdict.Reason...)
 	return response, bus.ModuleStatusOK
 }

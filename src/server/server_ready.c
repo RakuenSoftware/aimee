@@ -37,7 +37,7 @@
  */
 #include "server_http.h"
 #include "kb_client.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "log.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/delegates/module_api.h>

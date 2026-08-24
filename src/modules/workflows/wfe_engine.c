@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "aimee_home.h"
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 
 struct wfe_ctx
 {

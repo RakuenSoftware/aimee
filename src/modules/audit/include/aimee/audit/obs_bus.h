@@ -34,7 +34,7 @@
 
 #include <aimee/core/event_bus/module_client.h>
 
-#include "guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
+#include "db1_client/guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
 
 #ifdef __cplusplus
 extern "C"

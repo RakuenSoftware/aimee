@@ -11,13 +11,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "db.h"
 #include "db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 
 #include <aimee/learning/approach_memory.h>
 #include "approach_store.h"
+#include "support/store_module_fixture.h"
 #include <aimee/learning/learning.h>
 #include <aimee/learning/policy_arms.h>
 
@@ -175,6 +175,12 @@ static void test_promotion_is_gated_and_reversible(void)
 
 static void test_the_arm_changes_what_is_actually_said(void)
 {
+   /* Reads the store back, so it needs one attached. main() has started the
+      module when a database was named; without one there is nothing to assert
+      against and the pure tests above still ran. */
+   if (!store_module_fixture_available())
+      return;
+
    /* The registry is only worth anything if the arm reaches real output. */
    assert(approach_store_record("Rebuild the search index for the docs project",
                                 "drop and re-ingest every document", "ran out of disk", "agent_job",
@@ -214,7 +220,8 @@ int main(void)
 {
    printf("policy_arms: ");
 
-   assert(db1_init(":memory:") == 0);
+   if (store_module_fixture_available())
+      store_module_fixture_start();
    db2_test_shim_open();
 
    test_registry_shape();

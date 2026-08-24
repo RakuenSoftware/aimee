@@ -7,7 +7,7 @@
  * Deliberately simple: fixed-size array, linear scan. Enough to exercise
  * the public API contract without pulling in SQLite. */
 
-#include "wm.h"
+#include "db1_client/wm.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -23,9 +23,9 @@
 #include <string.h>
 #include <time.h>
 
-/* The DERIVED halfvec vector tables: each is rebuilt from an authoritative source
+/* The DERIVED vector vector tables: each is rebuilt from an authoritative source
  * elsewhere (kb_documents, artifacts, evidence_index_ops, memories), so dropping +
- * recreating + re-deriving loses no source data. Any halfvec table NOT on this list
+ * recreating + re-deriving loses no source data. Any vector table NOT on this list
  * is unknown -> the reset REFUSES rather than risk destroying source it doesn't
  * understand. Declared in db_schema.c, which reads the same set to decide whether a
  * corpus has been embedded at all. */
@@ -53,7 +53,7 @@ static void rpt(db2_reembed_plan_t *p, const char *fmt, ...)
    va_end(ap);
 }
 
-/* Does any halfvec table in the live schema fall outside the known set? Fills the
+/* Does any vector table in the live schema fall outside the known set? Fills the
  * report with the discovered tables. Returns 0 if all known, -1 if an unknown one
  * exists (refuse), -2 on a query error. */
 static int discover_and_check(void *conn, db2_reembed_plan_t *p)
@@ -62,7 +62,7 @@ static int discover_and_check(void *conn, db2_reembed_plan_t *p)
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "SELECT DISTINCT table_name FROM information_schema.columns"
-       " WHERE table_schema = 'public' AND udt_name = 'halfvec' ORDER BY table_name",
+       " WHERE table_schema = 'public' AND udt_name = 'vector' ORDER BY table_name",
        err, sizeof(err));
    if (!st)
       return -2;
@@ -78,7 +78,7 @@ static int discover_and_check(void *conn, db2_reembed_plan_t *p)
       if (!is_known_vector_table(t))
       {
          unknown = 1;
-         rpt(p, "  UNKNOWN halfvec table (refusing): %s\n", t);
+         rpt(p, "  UNKNOWN vector table (refusing): %s\n", t);
       }
    }
    aimee_pg_finalize(st);
@@ -308,11 +308,11 @@ int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_pla
    int chk = discover_and_check(conn, p);
    if (chk == -2)
    {
-      rpt(p, "could not enumerate halfvec tables\n");
+      rpt(p, "could not enumerate vector tables\n");
       return -1;
    }
    if (chk == -1)
-      return -2; /* unknown halfvec table -> refuse (distinct code so the CLI explains) */
+      return -2; /* unknown vector table -> refuse (distinct code so the CLI explains) */
 
    rpt(p, "dim change: recorded=%d -> target=%d; %d derived vector table(s)\n",
        p->recorded_dim ? p->recorded_dim : -1, target_dim, p->n_tables);
@@ -320,7 +320,7 @@ int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_pla
    {
       long long rows = table_rows(conn, p->tables[i]);
       p->rows_cleared += (rows > 0 ? rows : 0);
-      rpt(p, "  DROP %s (%lld rows) -> recreate halfvec(%d)\n", p->tables[i], rows, target_dim);
+      rpt(p, "  DROP %s (%lld rows) -> recreate vector(%d)\n", p->tables[i], rows, target_dim);
    }
    rpt(p,
        "  then: re-record schema_embedding_dim=%d, set reembed_in_progress, re-trigger "

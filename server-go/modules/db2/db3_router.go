@@ -97,6 +97,18 @@ func (r *DB3Router) ObserveCapabilities(principal, handle uint32, sequence uint6
 	if r == nil || principal == 0 || sequence == 0 || capabilities.Validate() != nil {
 		return ErrDB3RouterConfig
 	}
+	// The principal is host-authenticated, so it is who the provider IS -- but
+	// until this check it could be ANY ref, including a canonical module's. A ref
+	// carves a whole 256-kind block (4096 + ref*256 + stage), so a provider
+	// attaching as ref 28 would derive postgres's kinds, and bus_host_serve_kind()
+	// binds one kind to one serving slot: whichever attaches second is denied,
+	// possibly the core module, with nothing in its own log to explain why.
+	//
+	// Providers are dynamically provisioned, so they draw from a reserved band in
+	// the canonical inventory, exactly as plugin instances do. Fail closed.
+	if err := protocol.ValidateProviderRef(principal); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, exists := r.providers[principal]

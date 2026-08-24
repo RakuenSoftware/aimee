@@ -7,13 +7,13 @@
 #include <time.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db.h"
 #include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "server/obs_bus_adapter.h"
 #include <aimee/workspace/workspace.h>
+#include "db1_client/session_state.h" /* db1_session_state_delete -- teardown only */
 #include "session_worktree_key.h"
 #include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
 #include "platform_test_util.h"

@@ -1,7 +1,16 @@
 /* db1_client/workflow.c: the workflow family, reached over the bus.
  *
- * GENERATED from src/modules/db1/eventcontract/operations.json by
- * scripts/gen_db1_contract.py. Do not edit.
+ * WAS GENERATED from the store catalog by scripts/gen_db1_contract.py. Both
+ * moved on: the catalog is now server-go/modules/aimee/operations.json, and the
+ * generator was deleted with the C module.
+ *
+ * So this is maintained BY HAND now, and the header used to say "Do not edit"
+ * while pointing at a generator that no longer exists and a path that no longer
+ * resolves -- which is a dead end at exactly the moment someone needs to change
+ * something. Edit it, and keep it agreeing with the catalog:
+ * scripts/check-db1-client-contract.py matches every call site here against the
+ * catalog by arity and reply width, and runs in lint on every pull request.
+ * That check is what replaced the generator.
  *
  * Same functions, same contract, different side of the boundary: the daemon
  * links this instead of the DB1 domain, so nothing that calls these had to
@@ -18,8 +27,8 @@
 /* clang-format off */
 #include "execution_plans.h"
 #include "execution_trace.h"
-#include "pipelines.h"
-#include "roadmap_runtime.h"
+#include "db1_client/pipelines.h"
+#include "db1_client/roadmap_runtime.h"
 #include "wfe_binding.h"
 
 #include "db1_module_api.h"

@@ -9,11 +9,9 @@
  * see the provider CLI's --allowedTools list: those tools are the host CLI's,
  * not aimee's, and they are named in a source file rather than registered.
  *
- * Measured before writing this: every tool currently on that list is already
- * handled correctly -- WebFetch and WebSearch are recognised as externalization,
- * Bash is recognised as a shell tool and gated by command inspection, and the
- * rest are genuinely local. So there is NO present bypass, and a proposal that
- * described one as high-severity was overstating it.
+ * WebFetch and WebSearch are deliberately absent: the no-network container must
+ * use aimee's mediated web tools. Bash is recognised as a shell tool and the
+ * remaining provider tools are local.
  *
  * The real exposure is temporal: a name-matched gate is fail-open for anything
  * added after the list was written, and this allowlist is precisely where
@@ -119,11 +117,18 @@ static void test_egress_tools_are_gated(void)
    assert(wfe_is_externalization_tool("WebFetch"));
    assert(wfe_is_externalization_tool("WebSearch"));
    assert(wfe_is_shell_tool("Bash"));
+   size_t n = cli_claude_allowed_tools_count();
+   const char *const *tools = cli_claude_allowed_tools();
+   for (size_t i = 0; i < n; i++)
+   {
+      assert(strcmp(tools[i], "WebFetch") != 0);
+      assert(strcmp(tools[i], "WebSearch") != 0);
+   }
    /* and the local ones stay permitted, or gated runs break */
    assert(!wfe_is_externalization_tool("Read"));
    assert(!wfe_is_externalization_tool("Edit"));
    assert(!wfe_is_externalization_tool("Grep"));
-   printf("  PASS: egress tools gated, local tools permitted\n");
+   printf("  PASS: provider web tools absent; local tools permitted\n");
 }
 
 int main(void)

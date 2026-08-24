@@ -8,7 +8,7 @@
  * The ceiling is the same number the wire enforces, so a caller cannot ask for
  * more than a reply can carry and then be handed a silently short list.
  */
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 
 int db1_work_item_list(db1_work_item_t **out)
 {

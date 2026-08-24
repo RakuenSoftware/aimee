@@ -1,7 +1,16 @@
 /* db1_client/runtime.c: the runtime family, reached over the bus.
  *
- * GENERATED from src/modules/db1/eventcontract/operations.json by
- * scripts/gen_db1_contract.py. Do not edit.
+ * WAS GENERATED from the store catalog by scripts/gen_db1_contract.py. Both
+ * moved on: the catalog is now server-go/modules/aimee/operations.json, and the
+ * generator was deleted with the C module.
+ *
+ * So this is maintained BY HAND now, and the header used to say "Do not edit"
+ * while pointing at a generator that no longer exists and a path that no longer
+ * resolves -- which is a dead end at exactly the moment someone needs to change
+ * something. Edit it, and keep it agreeing with the catalog:
+ * scripts/check-db1-client-contract.py matches every call site here against the
+ * catalog by arity and reply width, and runs in lint on every pull request.
+ * That check is what replaced the generator.
  *
  * Same functions, same contract, different side of the boundary: the daemon
  * links this instead of the DB1 domain, so nothing that calls these had to
@@ -23,7 +32,7 @@
 #include "local_operator.h"
 #include "mcp_osv_cache.h"
 #include "model_catalog.h"
-#include "model_pricing.h"
+#include "db1_client/model_pricing.h"
 #include "project_clones.h"
 #include "runtime_state.h"
 #include "tool_local_availability.h"

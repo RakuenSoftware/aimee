@@ -24,9 +24,9 @@
  * module, short enough that the reported state and the store's actual state
  * cannot diverge in a way anybody could act on.
  */
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "db1_module_api.h"
-#include "modules/db1/server_sessions.h"
+#include "db1_client/server_sessions.h"
 
 #include <pthread.h>
 #include <time.h>

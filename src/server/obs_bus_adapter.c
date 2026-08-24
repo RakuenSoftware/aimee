@@ -4,7 +4,7 @@
 #include <aimee/audit/obs_bus.h>
 #include <aimee/audit/audit_worm.h>
 
-#include "guardrail_events.h"
+#include "db1_client/guardrail_events.h"
 
 static int persist_guardrail(const guardrail_event_t *event, void *ctx)
 {

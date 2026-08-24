@@ -11,8 +11,7 @@
 
 #include "../headers/aimee.h"
 #include "../headers/agent_exec.h"
-#include "../db1/db.h"
-#include "../db1/db1.h"
+#include "db1_client/db1.h"
 #include "../modules/db2/c/db2.h"
 #include "../modules/db2/c/db2_test_shim.h"
 #include "../modules/db2/c/db2_internal.h"
@@ -23,14 +22,12 @@
 static void setup_db(void)
 {
    db2_test_shim_close();
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 }
 
 static void teardown_db(void)
 {
    db2_test_shim_close();
-   db1_shutdown();
 }
 
 /* --- tool_suggest --- */

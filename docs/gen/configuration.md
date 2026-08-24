@@ -50,8 +50,8 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
 | `delegate_graph_context_enabled` | bool | Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off). |
 | `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build. It augments a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
-| `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host through aimee for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. |
-| `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory. A delegate always runs in its own container -- there is no in-process host path to fall back to -- and this additionally refuses on a breach or an unverifiable probe. |
+| `delegate_sandbox_package_access` | string | Runtime package access for a `--network none` delegate. The delegate has no outside socket: the Go egress module proxies only its immutable package registry allowlist, pins the validated numeric destination, and logs the transfer. `proxy` (default) enables that narrow path; `off` permits only build-time/pre-baked packages. Legacy `gated` and `governance` values cannot widen the live proxy allowlist. |
+| `delegate_sandbox_require_isolation` | bool | Deprecated compatibility key. Its value is ignored: every delegate is created with no network, its complete network/mount/environment posture is verified after every start or resume, and any breach or unverifiable fact destroys the container and refuses the delegation. There is no host fallback. |
 | `embedder_command` | string | Command that produces embeddings (overrides the endpoint). |
 | `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and refuses to start on drift. |
 | `embedder_model` | string | Embedder identity. Written for a bundled model too, not just an external one: it is the registry key pooling and prefixes resolve from, and the value recorded against the corpus. |
@@ -290,7 +290,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 229 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -298,7 +298,6 @@ The binaries read 229 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_BUNDLED_SKILLS_DIR` | Override directory for the bundled skills. |
 | `AIMEE_CAPTURE_DIR` | Directory for best-effort event-bus capture sessions. Defaults to `AIMEE_HOME`; capture failure is exposed in health and recorded in the WORM ledger. |
-| `AIMEE_DB1_PATH` | SQLite database the DB1 module process opens. The module is a separate process and cannot read the config store, so it is told the path and refuses to start without it rather than guessing a default and serving a different, empty database. Set it whenever `db1_path` is overridden in the configuration; the container entrypoint otherwise defaults it to `<AIMEE_HOME>/aimee.db`, which is config's own default. |
 | `AIMEE_FORENSICS_DIR` | Directory for shutdown-forensics dumps. |
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
@@ -598,7 +597,7 @@ The binaries read 229 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_CLI_PATH`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
+`AIMEE_CLI_PATH`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
 
 ## External & provider environment
 

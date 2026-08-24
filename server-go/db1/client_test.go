@@ -9,7 +9,8 @@ import (
 	"time"
 )
 
-// fakeModule decodes a request exactly as src/modules/db1/module_adapter.c does
+// fakeModule decodes a request exactly as the C module adapter did before it
+// was deleted (src/modules/db1/module_adapter.c, in git history)
 // and serves it from a map. Testing against a re-implementation of the C
 // decoder is the point: if the Go encoder drifts from the wire contract, the
 // frame stops parsing here rather than in production.

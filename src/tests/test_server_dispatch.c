@@ -5,9 +5,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../db1/db.h"
-#include "../db1/eval.h"
-#include "../db1/server_sessions.h"
+#include "db1_client/db1_module_api.h"
+#include "support/module_bus_stub.h"
+#include "db1_client/db1.h"
+#include "db1_client/eval.h"
+#include "db1_client/server_sessions.h"
 #include "eval_synthesis.h" /* the regression-candidate surface stubbed below */
 #include "approach_store.h"
 #include <aimee/learning/attribution.h>
@@ -258,12 +260,6 @@ int platform_exec_capture(const char *cmd, char **out, size_t *out_len, int time
    return 0;
 }
 
-void db1_apply_pragmas(sqlite3 *db, db_mode_t mode)
-{
-   (void)db;
-   (void)mode;
-}
-
 int compute_pool_init(compute_pool_t *pool, int num_threads)
 {
    (void)pool;
@@ -382,39 +378,11 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
    return 1;
 }
 
-int db1_eval_results_list(const char *suite_or_null, db1_eval_display_row_t *out, int max)
-{
-   (void)suite_or_null;
-   if (!out || max <= 0)
-      return 0;
-   snprintf(out[0].suite, sizeof(out[0].suite), "delegate");
-   snprintf(out[0].task_name, sizeof(out[0].task_name), "dispatch");
-   snprintf(out[0].agent_name, sizeof(out[0].agent_name), "test-agent");
-   snprintf(out[0].ablation, sizeof(out[0].ablation), "full");
-   out[0].success = 1;
-   out[0].tool_calls = 3;
-   out[0].tool_call_failures = 1;
-   out[0].rescue_recoveries = 2;
-   out[0].latency_ms = 11;
-   snprintf(out[0].created_at, sizeof(out[0].created_at), "2026-05-25T00:00:00Z");
-   return 1;
-}
-
-/* The eval.candidates surface reaches DB1 and the endogeneity gate. Neither is
- * what this test exercises — it proves the dispatch table routes — so both are
- * stubbed to a quiet, empty installation. */
-int db1_eval_candidate_list(const char *state_or_null, db1_eval_candidate_t *out, int max)
-{
-   (void)state_or_null;
-   (void)out;
-   return max > 0 ? 0 : -1;
-}
-
-int db1_eval_candidate_mark_rejected(int64_t id, const char *reason)
-{
-   (void)reason;
-   return id > 0 ? 0 : -1;
-}
+/* The eval.candidates surface reaches the endogeneity gate, which is not what
+ * this test exercises -- it proves the dispatch table routes -- so the gate is
+ * stubbed open. The store side of that surface is no longer stubbed here: it
+ * runs through the real db1_client over module_bus_stub, whose default is "no
+ * module attached". */
 
 learning_gate_state_t learning_gate_check(learning_endogeneity_t *out)
 {
@@ -1704,6 +1672,50 @@ static void test_authz_denied_shape(void)
    free(ctx);
 }
 
+/* One eval row as the telemetry stage would answer it: a status, a field count,
+ * then each value length-prefixed. The eleven values are the order
+ * db1_eval_results_list lays out its slots in.
+ *
+ * Built here rather than stubbing db1_eval_results_list, because that function
+ * shares an object file with the token-audit and insights readers this test
+ * needs -- see .wire_eval.py. The upside is that the client's own encoding and
+ * decoding run for real.
+ */
+static uint8_t g_eval_reply[512];
+static uint32_t g_eval_reply_len;
+
+static void eval_reply_build(void)
+{
+   static const char *const values[11] = {
+       "delegate",             /* suite */
+       "dispatch",             /* task_name */
+       "test-agent",           /* agent_name */
+       "full",                 /* ablation */
+       "1",                    /* success */
+       "0",                    /* turns */
+       "3",                    /* tool_calls */
+       "1",                    /* tool_call_failures */
+       "2",                    /* rescue_recoveries */
+       "11",                   /* latency_ms */
+       "2026-05-25T00:00:00Z", /* created_at */
+   };
+   uint32_t at = 0;
+   aimee_db1_put_u32(g_eval_reply + at, (uint32_t)AIMEE_DB1_STATUS_OK);
+   at += 4u;
+   aimee_db1_put_u32(g_eval_reply + at, 11u);
+   at += 4u;
+   for (unsigned i = 0; i < 11u; ++i)
+   {
+      uint32_t n = (uint32_t)strlen(values[i]);
+      assert(at + 4u + n <= sizeof g_eval_reply);
+      aimee_db1_put_u32(g_eval_reply + at, n);
+      at += 4u;
+      memcpy(g_eval_reply + at, values[i], n);
+      at += n;
+   }
+   g_eval_reply_len = at;
+}
+
 static void test_routing(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1911,6 +1923,8 @@ static void test_routing(void)
    assert(cJSON_GetObjectItem(run_row, "rescue_recoveries")->valueint == 2);
    cJSON_Delete(json);
 
+   eval_reply_build();
+   module_bus_stub_reply_bytes(g_eval_reply, g_eval_reply_len);
    json = dispatch_json(ctx, conn, "{\"method\":\"eval.results\"}",
                         strlen("{\"method\":\"eval.results\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "status")->valuestring, "ok") == 0);

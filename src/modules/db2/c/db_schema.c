@@ -416,7 +416,7 @@ static char *schema_subst(const char *src, const char *token, const char *repl)
 /* embedder-runtime-fetch-autodim §2: record the embedding dim the schema was
  * sized at, and REFUSE a later mismatch. kb_meta.schema_embedding_dim is written
  * once (the first apply) and is then authoritative: if a subsequent apply is asked
- * for a different dim, the existing halfvec columns are still at the recorded dim,
+ * for a different dim, the existing vector columns are still at the recorded dim,
  * so proceeding would silently embed queries at one dim against a corpus at
  * another (search returns nothing). Refuse instead, with a remediation message.
  * Returns 0 (recorded or matches), -1 (mismatch / DB error -> errbuf set).
@@ -749,7 +749,7 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
  * elsewhere, which is why db2_reembed.c may drop them; here the same set answers a
  * different question — has anything actually been embedded yet.
  *
- * Keep in sync with schema.sql's halfvec(__EMBED_DIM__) tables (and their
+ * Keep in sync with schema.sql's vector(__EMBED_DIM__) tables (and their
  * schema_sqlite.sql counterparts). A table missing from this list would answer the
  * emptiness question wrongly in the unsafe direction, so adding one is not optional. */
 const char *const DB2_DERIVED_VECTOR_TABLES[] = {"kb_embeddings",
@@ -915,7 +915,7 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    if (!pg_conn)
       return -1;
 
-   /* The DB2 schema declares its halfvec embedding columns with the
+   /* The DB2 schema declares its vector embedding columns with the
     * __EMBED_DIM__ placeholder so a deployment can run an embedder of any
     * supported width. Substitute the configured dimension here — the one place
     * the schema is applied to Postgres.

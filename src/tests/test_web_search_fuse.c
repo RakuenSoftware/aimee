@@ -9,9 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "web_search.h"
 #include "web_search_fuse.h"
+#include "support/store_module_fixture.h"
 
 /* Build a borrowed result list; strings are literals, never freed. */
 static void mk(web_search_result_t *r, const char *title, const char *url, const char *snip)
@@ -202,7 +203,13 @@ static void test_deterministic(void)
 
 int main(void)
 {
-   assert(db1_init(":memory:") == 0); /* dedup uses the cache's canonical form */
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    test_dedup_within_one_engine();
    test_agreement_outranks_a_single_top_hit();
    test_distinct_pages_are_never_merged();

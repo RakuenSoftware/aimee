@@ -17,7 +17,7 @@
 #include "role_templates.h"
 #include "delegate_permissions_stub.h"
 #include "cJSON.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -44,23 +44,6 @@ static char *kb_agent_surfaces_stub(void)
 }
 
 extern int g_remote_writes;
-
-typedef struct
-{
-   pthread_barrier_t *barrier;
-   int result;
-   char bearer[65];
-} wizard_bootstrap_thread_t;
-
-static void *wizard_bootstrap_thread(void *arg)
-{
-   wizard_bootstrap_thread_t *thread = arg;
-   int barrier_result = pthread_barrier_wait(thread->barrier);
-   assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
-   thread->result =
-       server_http_first_user_bootstrap("webuser:alice", thread->bearer, sizeof(thread->bearer));
-   return NULL;
-}
 
 int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
 {
@@ -2638,10 +2621,23 @@ int main(void)
       assert(server_http_request_framing_valid(pipelined, strlen(pipelined)) == 0);
    }
 
-   /* The wizard creates one durable identity transaction: additive bearer now,
-    * explicit full tier only after the CSR certificate is bound. */
+   /* Wizard enrollment with no store reachable.
+    *
+    * This suite stubs obs_bus_module_available() to 0 deliberately -- its
+    * subject is the HTTP layer with no module attached -- so every
+    * db1_remote_client_* call the enrollment path makes is refused before it
+    * reaches a module. That makes this the right place to pin the FAIL-CLOSED
+    * direction, and the wrong place to pin the happy path: a bootstrap that
+    * reported success here would be handing out an owner credential that no
+    * store has a record of.
+    *
+    * The happy path moved to where a store exists:
+    *   - claim semantics: server-go/modules/aimee/families/identity.go
+    *     (+ identity_test.go);
+    *   - two setup requests racing for the single owner row, which is what the
+    *     two threads here were really testing: scripts/test-family-identity.sql,
+    *     against a real server. */
    {
-      assert(db1_init(":memory:") == 0);
       assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "primary") == 0);
       assert(config_set_server_api_mtls(1) == 0);
       for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
@@ -2651,47 +2647,24 @@ int main(void)
          runtime_secret_remove(name);
       }
 
-      pthread_barrier_t barrier;
-      pthread_t workers[2];
-      wizard_bootstrap_thread_t attempts[2] = {{.barrier = &barrier}, {.barrier = &barrier}};
-      assert(pthread_barrier_init(&barrier, NULL, 3) == 0);
-      assert(pthread_create(&workers[0], NULL, wizard_bootstrap_thread, &attempts[0]) == 0);
-      assert(pthread_create(&workers[1], NULL, wizard_bootstrap_thread, &attempts[1]) == 0);
-      int barrier_result = pthread_barrier_wait(&barrier);
-      assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
-      assert(pthread_join(workers[0], NULL) == 0);
-      assert(pthread_join(workers[1], NULL) == 0);
-      assert(pthread_barrier_destroy(&barrier) == 0);
-      assert(attempts[0].result == 0 && attempts[1].result == 0);
-      assert(strcmp(attempts[0].bearer, attempts[1].bearer) == 0);
+      char bearer[65] = "";
+      assert(server_http_first_user_bootstrap("webuser:alice", bearer, sizeof(bearer)) != 0);
+      /* Nothing minted, nothing configured, nothing authorized: a refusal that
+       * still left a usable bearer behind would be worse than a crash. */
+      assert(bearer[0] == '\0');
+      assert(server_http_enrolled_bearer_count() == 0);
+      assert(config_server_api_bearer_extra_count() == 0);
 
-      char bearer[65], again[65], principal[128];
-      snprintf(bearer, sizeof(bearer), "%s", attempts[0].bearer);
-      assert(strlen(bearer) == 64 && server_http_enrolled_bearer_count() == 1);
-      assert(config_server_api_bearer_extra_count() == 1);
-      assert(strcmp(config_server_api_bearer_extra(0), bearer) == 0);
-      assert(server_http_authorize_enrolled(1, "primary", NULL, bearer, 0) == 0);
-      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 0);
-      assert(strcmp(again, bearer) == 0); /* refresh is idempotent */
-      assert(server_http_first_user_bootstrap("webuser:bob", again, sizeof(again)) == -2);
-
-      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 0);
+      /* And the certificate side refuses rather than inventing a tier. It only
+       * ever RAISES the caller's tier, so starting at OFF is what shows that an
+       * unreachable store cannot elevate one. */
+      char principal[128] = "unset";
       int effective_tier = SERVER_REMOTE_WRITES_OFF;
-      assert(server_http_first_user_apply_cert_grant(0, "A1B2", &effective_tier, principal,
-                                                     sizeof(principal)) == 0);
-      assert(effective_tier == SERVER_REMOTE_WRITES_OFF && !principal[0]);
-      assert(server_http_first_user_bind_cert(bearer, "A1B2") == 1);
-      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 2);
-      assert(strcmp(principal, "webuser:alice") == 0);
-      effective_tier = SERVER_REMOTE_WRITES_OFF;
       assert(server_http_first_user_apply_cert_grant(1, "A1B2", &effective_tier, principal,
-                                                     sizeof(principal)) == 2);
-      assert(effective_tier == SERVER_REMOTE_WRITES_FULL);
-      assert(strcmp(principal, "webuser:alice") == 0);
-      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 1);
+                                                     sizeof(principal)) < 0);
+      assert(effective_tier == SERVER_REMOTE_WRITES_OFF);
+      assert(principal[0] == '\0');
       runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
-      runtime_secret_remove("AIMEE_API_BEARER_TOKEN_EXTRA_0");
-      db1_shutdown();
    }
 
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);

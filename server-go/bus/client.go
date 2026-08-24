@@ -3,6 +3,7 @@ package bus
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"golang.org/x/sys/unix"
 )
@@ -39,6 +40,32 @@ var (
 	// ErrPayload is returned when a payload does not fit the inline budget.
 	ErrPayload = errors.New("bus: payload too large for inline budget")
 )
+
+// String names the refusal, so a log line says which of the four it was.
+//
+// The host distinguishes four and they call for different things: a policy
+// refusal means no grant admits this principal or its executable does not
+// match; a version refusal means the two ends disagree about the protocol;
+// no-slot means the host is full and it is worth retrying. A bare "attach
+// denied" for all of them sends a reader to the grant file even when the grant
+// was never the problem, which src/tests/test_plugin_grant_provisioning.c names
+// as the reason that test exists.
+func (s AttachStatus) String() string {
+	switch s {
+	case AttachOK:
+		return "ok"
+	case AttachDeniedPolicy:
+		return "denied by grant policy: no grant admits this principal, or the " +
+			"grant's executable= does not match the running binary"
+	case AttachDeniedVersion:
+		return "denied on protocol version"
+	case AttachDeniedNoSlot:
+		return "denied: the host has no free slot"
+	case AttachProtocol:
+		return "protocol error"
+	}
+	return fmt.Sprintf("unknown attach status %d", uint32(s))
+}
 
 // Client is an attached bus client. It holds the mapped regions and, after
 // attach, never touches the socket again.
@@ -106,7 +133,7 @@ func AttachAs(sock int, principalClass uint32, principalRef uint32) (*Client, er
 	status := AttachStatus(binary.LittleEndian.Uint32(replyBuf[4:]))
 	if status != AttachOK {
 		closeAll()
-		return &Client{Status: status}, ErrDenied
+		return &Client{Status: status}, fmt.Errorf("%w: %s", ErrDenied, status)
 	}
 	if len(fds) != 3 {
 		closeAll()

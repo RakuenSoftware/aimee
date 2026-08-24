@@ -64,6 +64,21 @@ def main() -> int:
     paths = sorted((spec.get("paths") or {}).keys())
     literals, seg_literals = load_code()
 
+    # A spec that parses to no paths makes every documented endpoint routed by
+    # vacuity: `missing` is empty, the check prints "ok (0 documented endpoints
+    # all routed)" and exits zero. That is not a passing gate, it is a gate that
+    # stopped reading its input -- if the spec moves, is renamed, or changes the
+    # shape this parse expects, the tree goes on looking verified.
+    if not paths:
+        print(f"api-conformance-check: {SPEC} declares no paths; this check would "
+              f"pass having verified nothing")
+        return 2
+    if not literals and not seg_literals:
+        print("api-conformance-check: found no route literals in the sources; "
+              "this check would report every documented path as missing or none "
+              "at all depending on the spec, and neither answer is about the code")
+        return 2
+
     missing = [p for p in paths if not implemented(p, literals, seg_literals)]
     if missing:
         print("api-conformance-check: FAIL — documented paths with no route handler:")

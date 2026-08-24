@@ -7,7 +7,9 @@ package db1
 // fields in both directions, because an operation that answers with a row -- or
 // with a list of them -- has to have somewhere to put the values.
 //
-// From src/modules/db1/db1_module_api.h, which is generated from the catalog:
+// From the catalog, server-go/modules/aimee/operations.json. This used to
+// cite the generated C header src/modules/db1/db1_module_api.h, which went with
+// the C store:
 //
 //	Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
 //	Response: status(u32) | field_count(u32) | (len(u32) | bytes) * field_count

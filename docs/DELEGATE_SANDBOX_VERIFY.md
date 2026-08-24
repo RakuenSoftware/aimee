@@ -28,11 +28,11 @@ The delegate must be able to:
 - return bounded logs and results;
 - shut down normally and release admission.
 
-## Degradation check
+## Fail-closed checks
 
-Force one isolation primitive to fail. The launch must either fail or take the explicitly enabled
-degraded path. The latter must create an event-bus audit row naming the missing boundary. A plain
-warning in a transient container log is not enough.
+Force network inspect, mount inspect, environment inspect, bus-socket validation, and refused-container
+removal to fail independently. Every launch must refuse and must never execute on the host. Also resume
+a stopped container with a stale mount or environment and confirm the same verification runs again.
 
 ## Cleanup check
 

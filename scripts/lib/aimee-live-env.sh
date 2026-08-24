@@ -283,6 +283,20 @@ live_env_pg_create() {
    # PG15+: the database owner still needs CREATE on public explicitly.
    pg_db -c "GRANT CREATE ON SCHEMA public TO $LIVE_OWNER" >/dev/null 2>&1
    pg_db -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null 2>&1
+   # BOTH tiers, exported HERE rather than beside the process that reads each.
+   # The store's DSN used to be set nowhere: AIMEE_DB2_URL was exported inside
+   # live_env_start_kb, and live_env_start_module passed AIMEE_STORE_URL through
+   # as ${AIMEE_STORE_URL:-} -- empty, in every rig. The store then attached,
+   # found no database, and declined to serve, which every rig reported as
+   # nineteen separate "DB1 <family> is unreachable" warnings and one failure
+   # somewhere downstream. Not one of them named the DSN.
+   #
+   # They are the same database on purpose: a rig provisions ONE disposable
+   # database, and the two tiers own disjoint tables in it. TCP rather than the
+   # socket for the reason above -- kb runs as root here and peer auth would
+   # present root.
+   export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
+   export AIMEE_STORE_URL="$AIMEE_DB2_URL"
    echo "database $LIVE_DB on $LIVE_PG_HOST:$LIVE_PG_PORT"
 }
 
@@ -451,8 +465,8 @@ live_env_start_kb() {
    # failure is silent and identical wherever it happens.
    local v
    for v in $(env | sed -nE 's/^(AIMEE_KB_OIDC[A-Z_]*)=.*/\1/p'); do unset "$v"; done
-   # TCP, not the socket: kb runs as root here and peer auth would present root.
-   export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
+   # AIMEE_DB2_URL and AIMEE_STORE_URL are exported by live_env_pg_create, with
+   # the database they name.
    export AIMEE_KB_API_BEARER_TOKEN="$LIVE_KB_BEARER"
    live_env_start_kb_modules
    ./aimee-kb --http-port="$LIVE_KB_PORT" >"$LIVE_KB_LOG" 2>&1 &
@@ -582,39 +596,116 @@ live_env_stop_kb_modules() {
 live_env_start_module() {
    live_env_stop_module
    live_env_prepare_modules
-   local module="${LIVE_DB1_MODULE:-src/build/obj/aimee-module-db1}"
-   # `make all` does not build the module, and both CI rigs that source this
-   # file run exactly that. Build it here rather than making them remember.
-   [ -x "$module" ] || make -C src build/obj/aimee-module-db1 >/dev/null 2>&1 || true
+   # The store is the multicall binary under its own name; the grant pins the
+   # resolved path, and the binary takes its identity from argv[0].
+   local module="${LIVE_DB1_MODULE:-src/build/obj/aimee-module-aimee}"
+   # `make all` does not build the multicall binary: its rule is in
+   # tests/Rules.mk, and every CI rig that sources this file runs `make all`.
+   [ -x src/build/obj/aimee-module ] || make -C src build/obj/aimee-module >/dev/null 2>&1 || true
+   [ -x "$module" ] || cp src/build/obj/aimee-module "$module" 2>/dev/null || true
    [ -x "$module" ] || {
-      echo "$LIVE_NAME: could not build the DB1 module at $module" >&2
+      echo "$LIVE_NAME: could not provide the store module at $module" >&2
       exit 2
    }
-   local grant="src/build/obj/module-bundle/grants/server/db1.grant"
+   local grant="src/build/obj/module-bundle/grants/server/aimee.grant"
    [ -r "$grant" ] || python3 scripts/export_c_repositories.py \
       --runtime-bundle src/build/obj/module-bundle >/dev/null 2>&1 || true
    [ -r "$grant" ] || {
-      echo "$LIVE_NAME: no generated DB1 grant at $grant" >&2
+      echo "$LIVE_NAME: no generated store grant at $grant" >&2
       exit 2
    }
+   # The store does not reach PostgreSQL itself: it calls the postgres module's
+   # SQL stage over the bus. Without that module, and without a grant for the
+   # store's OUTBOUND principal, the store attaches and then finds no backend.
+   local pgmodule="src/build/obj/aimee-module-postgres"
+   [ -x "$pgmodule" ] || cp src/build/obj/aimee-module "$pgmodule" 2>/dev/null || true
    mkdir -p "$AIMEE_HOME/modules.d/server"
    sed "s|^executable=.*|executable=$PWD/$module|" "$grant" \
-      >"$AIMEE_HOME/modules.d/server/db1.grant"
+      >"$AIMEE_HOME/modules.d/server/aimee.grant"
+   # Both grants come from the SAME generated bundle the store's own grant
+   # does, rather than being written out here: the refs and kinds are derived
+   # from src/modules/process-contracts.json, and a copy transcribed into this
+   # file goes stale silently. The store's outbound ref moved from 68 to 69 in
+   # a merge; a heredoc here would still say 68 while every other site said 69.
+   local gname gexe
+   for gname in postgres aimee-postgres; do
+      case "$gname" in
+      postgres) gexe="$PWD/$pgmodule" ;;
+      *) gexe="$PWD/$module" ;;
+      esac
+      [ -r "src/build/obj/module-bundle/grants/server/$gname.grant" ] || {
+         echo "$LIVE_NAME: no generated $gname grant" >&2
+         exit 2
+      }
+      sed "s|^executable=.*|executable=$gexe|" \
+         "src/build/obj/module-bundle/grants/server/$gname.grant" \
+         >"$AIMEE_HOME/modules.d/server/$gname.grant"
+   done
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
       src/build/obj/module-bundle/grants/server/config.grant \
       >"$AIMEE_HOME/modules.d/server/config.grant"
    local bus="$AIMEE_HOME/server-module-bus.sock"
+   # Postgres first: the store checks for its backend as it comes up.
+   live_env_arm_module "$PWD/$pgmodule" "$bus" "$AIMEE_HOME/pg-module.log" \
+      LIVE_PG_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
+      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
    live_env_arm_module "$PWD/$module" "$bus" "$AIMEE_HOME/db1-module.log" \
       LIVE_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
-      "AIMEE_DB1_PATH=$AIMEE_HOME/aimee.db"
+      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/server-config-module.log" LIVE_SERVER_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server"
 }
 
+# Everything the store's own processes said, for a failure that cannot say why.
+#
+# Twice now a rig has failed with a one-line symptom and no way to see the
+# cause: the daemon reports a module unreachable, and the module's account of
+# why it is unreachable sits in a file nobody prints.
+live_env_dump_module_logs() {
+   local f
+   for f in "$AIMEE_HOME/db1-module.log" "$AIMEE_HOME/pg-module.log" \
+            "$AIMEE_HOME/server-config-module.log" "$LIVE_SRV_LOG"; do
+      [ -r "$f" ] || continue
+      echo "---- ${f##*/} ----" >&2
+      tail -40 "$f" >&2
+   done
+}
+
+# Block until the store can be USED, not merely until it has started. Called
+# after the server is proven healthy, never from live_env_start_module: that
+# function ARMS the modules, and they attach only once the daemon creates the
+# bus socket.
+#
+# ASKED, not inferred. This waited on the module log printing "schema applied"
+# and that was the wrong question twice over: the line is written BEFORE the
+# module registers its stages, so it is true while every call still answers
+# CAPABILITY_ABSENT, and a module that dies afterwards is restarted by the
+# arming loop and prints it again. A rig that trusted it went on to fail with
+# "DB1 mgmt jwks is unreachable (module call result 1)" -- result 1 being
+# CAPABILITY_ABSENT, which is the daemon saying nothing serves that kind.
+#
+# /v1/server/health answers the real question. Its `state` is db1_store_probe(),
+# a genuine store call rather than registry state, and it exists precisely
+# because the registry keeps saying "ok" for ~37s after a module dies. If it
+# says ok, the next caller's store call will work.
+live_env_await_store() {
+   local i state
+   for i in $(seq 1 1200); do # 120s, the store's own schema deadline
+      state=$(curl -sf -H "x-api-key: $LIVE_SRV_BEARER" \
+         "http://127.0.0.1:$LIVE_SRV_PORT/v1/server/health" 2>/dev/null |
+         sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p')
+      [ "$state" = "ok" ] && return 0
+      sleep 0.1
+   done
+   echo "$LIVE_NAME: the store never became usable (server.health state=${state:-none})" >&2
+   live_env_dump_module_logs
+   exit 2
+}
+
 live_env_stop_module() {
    local var pid
-   for var in LIVE_MODULE_PID LIVE_SERVER_CONFIG_PID; do
+   for var in LIVE_MODULE_PID LIVE_PG_MODULE_PID LIVE_SERVER_CONFIG_PID; do
       eval "pid=\${$var:-}"
       [ -n "$pid" ] || continue
       kill "$pid" 2>/dev/null || true
@@ -661,6 +752,7 @@ live_env_start_server() {
       exit 2
    }
    echo "aimee-server TCP listener healthy on $LIVE_SRV_PORT"
+   live_env_await_store
 }
 
 live_env_restart_server() {
@@ -679,7 +771,10 @@ live_env_restart_server() {
    local i
    for i in $(seq 1 60); do
       curl -sf -H "x-api-key: $LIVE_SRV_BEARER" \
-         "http://127.0.0.1:$LIVE_SRV_PORT/v1/health" >/dev/null 2>&1 && return 0
+         "http://127.0.0.1:$LIVE_SRV_PORT/v1/health" >/dev/null 2>&1 && {
+         live_env_await_store
+         return 0
+      }
       sleep 1
    done
    echo "$LIVE_NAME: aimee-server did not come back" >&2

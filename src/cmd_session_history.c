@@ -1,6 +1,6 @@
 /* cmd_session_history.c: session show, search, and stats subcommands */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "commands.h"
 #include "config.h"
 #include "cJSON.h"
