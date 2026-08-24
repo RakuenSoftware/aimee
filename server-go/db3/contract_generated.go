@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a536a1673ff799ec3b8c289aebbad1cd7b2dedd9a0688730f8a2aa9029c262ab"
+const ContractSHA256 = "cd92526eef0f7c9cdd4490101bba3255291cf088f5190272a79a3179d169c904"
 const ProtocolID uint32 = 3
 const WireVersion uint16 = 1
 
@@ -28,6 +28,19 @@ const MaxLabelValueBytes = 256
 const MaxLabelsBytes = 4096
 const MaxDimension = 4096
 const MaxTopK = 256
+const MaxFilterCount = 16
+const MaxFilterValues = 256
+const MaxFiltersBytes = 16384
+
+// Filter operators. A conjunction of these and nothing else: no OR, no nesting,
+// no precedence. Scope visibility is a disjunction in SQL and becomes one
+// FilterIn over a multi-valued label, which is why OR is not needed rather than
+// merely not offered.
+const (
+	FilterEq uint8 = 1
+	FilterNe uint8 = 2
+	FilterIn uint8 = 3
+)
 
 const searchRequestMagic uint32 = 0x53334244
 const searchReplyMagic uint32 = 0x52334244
@@ -39,6 +52,9 @@ const searchFailureMagic uint32 = 0x45334244
 const routeRequestMagic uint32 = 0x54334244
 const routeReplyMagic uint32 = 0x55334244
 const searchRequestHeader = 36
+const searchRequestV2Version uint16 = 2
+const searchRequestV2Header = 44
+const filterHeader = 4
 const searchReplyHeader = 28
 const candidateBytes = 16
 const applyHeader = 36

@@ -184,27 +184,28 @@ static void test_wire_codecs(void)
    uint8_t wire[512], mutated[512];
    size_t length = 0;
    float vec[3], decoded_vec[AIMEE_DB3_MAX_DIM];
+   aimee_db3_filter_view_t decoded_filters;
    aimee_db3_search_request_t req = request(vec), decoded_req;
    assert(aimee_db3_search_request_encode(&req, wire, sizeof(wire), &length) == 0);
    assert(length == 36 + strlen(req.workspace) + strlen(req.project) + strlen(req.record_type) +
                         req.dimension * sizeof(float));
    assert(aimee_db3_search_request_decode(wire, length, &decoded_req, decoded_vec,
-                                          AIMEE_DB3_MAX_DIM) == 0);
+                                          AIMEE_DB3_MAX_DIM, &decoded_filters) == 0);
    assert(decoded_req.request_id == req.request_id && decoded_req.dimension == req.dimension);
    assert(memcmp(decoded_req.vector, req.vector, req.dimension * sizeof(float)) == 0);
    assert(aimee_db3_search_request_decode(wire, length - 1, &decoded_req, decoded_vec,
-                                          AIMEE_DB3_MAX_DIM) != 0);
+                                          AIMEE_DB3_MAX_DIM, &decoded_filters) != 0);
    memcpy(mutated, wire, length);
    mutated[34] = 1;
    assert(aimee_db3_search_request_decode(mutated, length, &decoded_req, decoded_vec,
-                                          AIMEE_DB3_MAX_DIM) != 0);
+                                          AIMEE_DB3_MAX_DIM, &decoded_filters) != 0);
    memcpy(mutated, wire, length);
    mutated[length - 1] = 0x7f;
    mutated[length - 2] = 0x80;
    mutated[length - 3] = 0;
    mutated[length - 4] = 0;
    assert(aimee_db3_search_request_decode(mutated, length, &decoded_req, decoded_vec,
-                                          AIMEE_DB3_MAX_DIM) != 0);
+                                          AIMEE_DB3_MAX_DIM, &decoded_filters) != 0);
 
    aimee_db3_search_reply_t reply = {.request_id = req.request_id,
                                      .generation = req.required_generation,
@@ -350,131 +351,180 @@ static void test_wire_codecs(void)
    assert(length == sizeof(expected_apply_v2) && memcmp(wire, expected_apply_v2, length) == 0);
 }
 
-static void test_a_filter_the_wire_cannot_carry_is_refused(void)
+static void test_every_filter_a_search_has_is_carried(void)
 {
-   /* The eight searches reclassified as needing a DB3 v2 all have this shape: a
-    * signature richer than the message. The adapter that drops the filter
-    * produces a WELL-FORMED request, which every provider answers happily and
-    * wrongly, so the refusal has to happen here -- at the build -- and not at
-    * any reader. */
+   /* This test used to assert the opposite: that four filters and two
+    * predicates were REFUSED. That was the right assertion about a wire which
+    * could not carry them, and it would now pin the defect.
+    *
+    * The six things every DB2 vector search filters by, and where each goes:
+    *
+    *   labels             one EQ each -- four curator searches
+    *   kinds              one IN      -- two memory searches
+    *   exclude_project    one NE      -- two scoped kb searches
+    *   rank_column        the collection field -- claim and code-unit search
+    *   visibility         one IN over a multi-valued label -- scope membership
+    *   current_generation one EQ      -- currency
+    */
    float vec[3] = {0.25f, -0.5f, 0.75f};
    const char *kinds[] = {"note", "fact"};
    const char *label_keys[] = {"status"};
    const char *label_values[] = {"open"};
-
-   aimee_db3_search_filters_t base = {
-       .workspace = "workspace-a", .project = "project-a", .record_type = "memory"};
-
-   /* What DB3 v1 can carry builds. */
+   const char *visibility[] = {"proj:project-a", "ws:workspace-a", "global", "untagged"};
+   aimee_db3_filter_t predicates[AIMEE_DB3_MAX_FILTERS];
    aimee_db3_search_request_t request;
-   assert(aimee_db3_search_filters_expressible(&base) == 1);
-   assert(aimee_db3_search_request_build(&base, 91, 7, vec, 3, 3, &request) == 0);
-   assert(request.vector == vec && request.dimension == 3);
-   assert(strcmp(request.workspace, "workspace-a") == 0);
-   assert(strcmp(request.record_type, "memory") == 0);
 
-   /* And each thing it cannot carry is refused, with nothing built. */
-   struct
+   aimee_db3_search_filters_t everything = {.workspace = "workspace-a",
+                                            .project = "project-a",
+                                            .record_type = "memory",
+                                            .rank_column = "subj_attr",
+                                            .exclude_project = "project-b",
+                                            .kinds = kinds,
+                                            .kind_count = 2,
+                                            .label_keys = label_keys,
+                                            .label_values = label_values,
+                                            .label_count = 1,
+                                            .visibility = visibility,
+                                            .visibility_count = 4,
+                                            .current_generation = "7"};
+   assert(aimee_db3_search_filters_expressible(&everything) == 1);
+   assert(aimee_db3_search_request_build(&everything, 91, 7, vec, 3, 3, predicates,
+                                         AIMEE_DB3_MAX_FILTERS, &request) == 0);
+   /* Five predicates: one label, kinds, exclude_project, visibility, generation.
+    * rank_column is the collection field rather than a predicate. */
+   assert(request.filter_count == 5);
+   assert(strcmp(request.collection, "subj_attr") == 0);
+
+   /* And they survive the wire, which is the half a struct comparison cannot
+    * show. Walked with the cursor a provider would use. */
+   uint8_t wire[4096];
+   size_t length = 0;
+   assert(aimee_db3_search_request_encode(&request, wire, sizeof(wire), &length) == 0);
+   aimee_db3_search_request_t decoded;
+   float decoded_vector[AIMEE_DB3_MAX_DIM];
+   aimee_db3_filter_view_t view;
+   assert(aimee_db3_search_request_decode(wire, length, &decoded, decoded_vector, AIMEE_DB3_MAX_DIM,
+                                          &view) == 0);
+   assert(strcmp(decoded.collection, "subj_attr") == 0);
+   assert(decoded.filter_count == 5);
+
+   int saw_kinds = 0, saw_exclude = 0, saw_visibility = 0, saw_generation = 0, saw_label = 0;
+   aimee_db3_filter_entry_t entry;
+   while (aimee_db3_filter_next(&view, &entry) == 1)
    {
-      const char *what;
-      aimee_db3_search_filters_t filters;
-   } refused[] = {
-       /* pgvec_kb_search_scoped: negation. */
-       {"exclude_project",
-        {.workspace = "workspace-a",
-         .project = "project-a",
-         .record_type = "memory",
-         .exclude_project = "project-b"}},
-       /* pgvec_memory_vector_search_with_kinds: set membership. */
-       {"kinds",
-        {.workspace = "workspace-a",
-         .project = "project-a",
-         .record_type = "memory",
-         .kinds = kinds,
-         .kind_count = 2}},
-       /* pgvec_curator_claim_search, pgvec_curator_code_unit_search: which_vec
-        * names the column to rank against, and search carries no collection. */
-       {"rank_column",
-        {.workspace = "workspace-a",
-         .project = "project-a",
-         .record_type = "memory",
-         .rank_column = "subj_attr"}},
-       /* The optional equality filters on the four curator searches: apply
-        * carries exact labels and search does not. */
-       {"labels",
-        {.workspace = "workspace-a",
-         .project = "project-a",
-         .record_type = "memory",
-         .label_keys = label_keys,
-         .label_values = label_values,
-         .label_count = 1}},
-   };
-   for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); ++i)
-   {
-      aimee_db3_search_request_t built;
-      memset(&built, 0xAB, sizeof(built));
-      assert(aimee_db3_search_filters_expressible(&refused[i].filters) == 0);
-      assert(aimee_db3_search_request_build(&refused[i].filters, 91, 7, vec, 3, 3, &built) != 0);
-      /* Nothing written. A half-built request is one a caller can use by
-       * mistake, which is the whole failure this exists to stop. */
-      assert(built.request_id != 91);
+      const char *value = NULL;
+      size_t value_length = 0;
+      if (entry.key_length == 4 && memcmp(entry.key, "kind", 4) == 0)
+      {
+         assert(entry.op == AIMEE_DB3_FILTER_IN && entry.value_count == 2);
+         assert(aimee_db3_filter_value(&view, &entry, 1, &value, &value_length) == 0);
+         assert(value_length == 4 && memcmp(value, "fact", 4) == 0);
+         saw_kinds = 1;
+      }
+      else if (entry.key_length == 7 && memcmp(entry.key, "project", 7) == 0)
+      {
+         assert(entry.op == AIMEE_DB3_FILTER_NE && entry.value_count == 1);
+         saw_exclude = 1;
+      }
+      else if (entry.key_length == 10 && memcmp(entry.key, "visibility", 10) == 0)
+      {
+         /* The four-way scope disjunction, as ONE set-membership predicate. */
+         assert(entry.op == AIMEE_DB3_FILTER_IN && entry.value_count == 4);
+         assert(aimee_db3_filter_value(&view, &entry, 3, &value, &value_length) == 0);
+         assert(value_length == 8 && memcmp(value, "untagged", 8) == 0);
+         saw_visibility = 1;
+      }
+      else if (entry.key_length == 10 && memcmp(entry.key, "generation", 10) == 0)
+      {
+         assert(entry.op == AIMEE_DB3_FILTER_EQ && entry.value_count == 1);
+         assert(aimee_db3_filter_value(&view, &entry, 0, &value, &value_length) == 0);
+         assert(value_length == 1 && value[0] == '7');
+         saw_generation = 1;
+      }
+      else if (entry.key_length == 6 && memcmp(entry.key, "status", 6) == 0)
+      {
+         assert(entry.op == AIMEE_DB3_FILTER_EQ);
+         saw_label = 1;
+      }
    }
-
-   /* A scope too long for its field is refused rather than truncated: a
-    * workspace cut short is a different workspace, and would filter to rows
-    * nobody asked for. */
-   char oversized[AIMEE_DB3_MAX_SCOPE + 8];
-   memset(oversized, 'w', sizeof(oversized) - 1);
-   oversized[sizeof(oversized) - 1] = '\0';
-   aimee_db3_search_filters_t long_scope = base;
-   long_scope.workspace = oversized;
-   assert(aimee_db3_search_request_build(&long_scope, 91, 7, vec, 3, 3, &request) != 0);
-
-   /* And the builder refuses what validate refuses, rather than handing back a
-    * request that only fails later. */
-   aimee_db3_search_filters_t no_scope = {.record_type = "memory"};
-   assert(aimee_db3_search_request_build(&no_scope, 91, 7, vec, 3, 3, &request) != 0);
-   assert(aimee_db3_search_request_build(&base, 0, 7, vec, 3, 3, &request) != 0);
-   assert(aimee_db3_search_request_build(&base, 91, 7, vec, 0, 3, &request) != 0);
+   assert(saw_kinds && saw_exclude && saw_visibility && saw_generation && saw_label);
 }
 
-static void test_a_predicate_the_sql_applies_is_refused_too(void)
+static void test_a_request_with_nothing_extra_is_still_version_one(void)
 {
-   /* The filters the earlier test covers are ones a caller holds: it was handed
-    * an exclude_project, it was handed a kinds list. These two are not passed by
-    * anybody -- the query applies them -- which is exactly why an adapter would
-    * build a request without them and never notice anything was missing.
-    *
-    * Both are real. Every kb and code search JOINs projects and requires
-    * lifecycle_state = 'current' with the point's generation matching
-    * p.current_generation. Every memory search applies the scope filter, which
-    * decides visibility from rows in memory_scopes and memory_workspaces --
-    * including the case where the ABSENCE of rows means legacy-untagged and
-    * therefore shared, which is not a value any label can hold. */
+   /* Byte for byte, so a provider that speaks only version 1 keeps receiving
+    * every request it could already serve. The compatibility is a consequence
+    * of the encoding rather than a promise made about it. */
+   float vec[3];
+   aimee_db3_filter_t predicates[AIMEE_DB3_MAX_FILTERS];
+   aimee_db3_search_request_t plain;
+   aimee_db3_search_filters_t bare = {
+       .workspace = "workspace-a", .project = "project-a", .record_type = "memory"};
+   vec[0] = 0.25f;
+   vec[1] = -0.5f;
+   vec[2] = 0.75f;
+   assert(aimee_db3_search_request_build(&bare, 91, 7, vec, 3, 3, predicates, AIMEE_DB3_MAX_FILTERS,
+                                         &plain) == 0);
+   assert(plain.filter_count == 0 && plain.collection[0] == '\0');
+
+   uint8_t wire[512];
+   size_t length = 0;
+   assert(aimee_db3_search_request_encode(&plain, wire, sizeof(wire), &length) == 0);
+   assert(length == AIMEE_DB3_SEARCH_REQUEST_HEADER + strlen("workspace-a") + strlen("project-a") +
+                        strlen("memory") + 3 * sizeof(float));
+   uint16_t version = (uint16_t)(wire[4] | (wire[5] << 8));
+   assert(version == AIMEE_DB3_WIRE_VERSION);
+}
+
+static void test_what_does_not_fit_is_still_refused(void)
+{
+   /* The refusals that remain are arithmetic rather than vocabulary: a set over
+    * the ceiling, more predicates than there are fields for, half a label pair.
+    * Still refusals rather than trims -- a filter set silently narrowed is a
+    * search with a predicate missing, which returns more rows than it should
+    * and looks exactly like a correct answer. */
    float vec[3] = {0.25f, -0.5f, 0.75f};
+   aimee_db3_filter_t predicates[AIMEE_DB3_MAX_FILTERS];
+   aimee_db3_search_request_t request;
+   const char *many[AIMEE_DB3_MAX_FILTER_VALUES + 1];
+   for (size_t i = 0; i < sizeof(many) / sizeof(many[0]); ++i)
+      many[i] = "value";
+
    aimee_db3_search_filters_t base = {
        .workspace = "workspace-a", .project = "project-a", .record_type = "memory"};
 
-   /* Everything a memory search passes is expressible, which is the trap. */
-   aimee_db3_search_request_t request;
-   assert(aimee_db3_search_request_build(&base, 91, 7, vec, 3, 3, &request) == 0);
+   aimee_db3_search_filters_t too_many_values = base;
+   too_many_values.kinds = many;
+   too_many_values.kind_count = AIMEE_DB3_MAX_FILTER_VALUES + 1;
+   assert(aimee_db3_search_filters_expressible(&too_many_values) == 0);
 
-   /* Declaring what the query actually does is what refuses it. */
-   aimee_db3_search_filters_t scoped = base;
-   scoped.scope_membership = 1;
-   assert(aimee_db3_search_filters_expressible(&scoped) == 0);
-   assert(aimee_db3_search_request_build(&scoped, 91, 7, vec, 3, 3, &request) != 0);
+   /* A label pair with one half missing. Guessing the other half is how a
+    * search asks a question nobody wrote. */
+   const char *keys[] = {"status"};
+   aimee_db3_search_filters_t half_a_pair = base;
+   half_a_pair.label_keys = keys;
+   half_a_pair.label_count = 1;
+   assert(aimee_db3_search_filters_expressible(&half_a_pair) == 0);
 
-   aimee_db3_search_filters_t current = base;
-   current.current_generation_only = 1;
-   assert(aimee_db3_search_filters_expressible(&current) == 0);
-   assert(aimee_db3_search_request_build(&current, 91, 7, vec, 3, 3, &request) != 0);
+   /* More predicates than the caller gave room for. */
+   const char *label_keys[AIMEE_DB3_MAX_FILTERS];
+   const char *label_values[AIMEE_DB3_MAX_FILTERS];
+   for (size_t i = 0; i < AIMEE_DB3_MAX_FILTERS; ++i)
+   {
+      label_keys[i] = "status";
+      label_values[i] = "open";
+   }
+   aimee_db3_search_filters_t full = base;
+   full.label_keys = label_keys;
+   full.label_values = label_values;
+   full.label_count = AIMEE_DB3_MAX_FILTERS;
+   assert(aimee_db3_search_filters_expressible(&full) == 1);
+   assert(aimee_db3_search_request_build(&full, 91, 7, vec, 3, 3, predicates, 4, &request) != 0);
 
-   /* Both at once, since a search can need both. */
-   aimee_db3_search_filters_t both = base;
-   both.scope_membership = 1;
-   both.current_generation_only = 1;
-   assert(aimee_db3_search_filters_expressible(&both) == 0);
+   /* One more than there are filter slots. */
+   aimee_db3_search_filters_t over = full;
+   over.current_generation = "7";
+   assert(aimee_db3_search_filters_expressible(&over) == 0);
 }
 
 int main(void)
@@ -483,8 +533,9 @@ int main(void)
    test_fail_closed_and_explicit_fallback();
    test_invalid_requests();
    test_wire_codecs();
-   test_a_filter_the_wire_cannot_carry_is_refused();
-   test_a_predicate_the_sql_applies_is_refused_too();
+   test_every_filter_a_search_has_is_carried();
+   test_a_request_with_nothing_extra_is_still_version_one();
+   test_what_does_not_fit_is_still_refused();
    puts("test_db3_route: routing, fallback, revalidation, and codecs passed");
    return 0;
 }

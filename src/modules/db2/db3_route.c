@@ -1,18 +1,21 @@
 #include <aimee/db2/db3_route.h>
 
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
-#define SEARCH_REQUEST_MAGIC  AIMEE_DB3_SEARCH_REQUEST_MAGIC
-#define SEARCH_REPLY_MAGIC    AIMEE_DB3_SEARCH_REPLY_MAGIC
-#define APPLY_MAGIC           AIMEE_DB3_APPLY_MAGIC
-#define WIRE_VERSION          AIMEE_DB3_WIRE_VERSION
-#define SEARCH_REQUEST_HEADER AIMEE_DB3_SEARCH_REQUEST_HEADER
-#define SEARCH_REPLY_HEADER   AIMEE_DB3_SEARCH_REPLY_HEADER
-#define APPLY_HEADER          AIMEE_DB3_APPLY_HEADER
-#define APPLY_V2_HEADER       AIMEE_DB3_APPLY_V2_HEADER
-#define APPLY_V2_VERSION      AIMEE_DB3_APPLY_V2_VERSION
-#define LABEL_HEADER          AIMEE_DB3_LABEL_HEADER
+#define SEARCH_REQUEST_MAGIC      AIMEE_DB3_SEARCH_REQUEST_MAGIC
+#define SEARCH_REPLY_MAGIC        AIMEE_DB3_SEARCH_REPLY_MAGIC
+#define APPLY_MAGIC               AIMEE_DB3_APPLY_MAGIC
+#define WIRE_VERSION              AIMEE_DB3_WIRE_VERSION
+#define SEARCH_REQUEST_HEADER     AIMEE_DB3_SEARCH_REQUEST_HEADER
+#define SEARCH_REQUEST_V2_HEADER  AIMEE_DB3_SEARCH_REQUEST_V2_HEADER
+#define SEARCH_REQUEST_V2_VERSION AIMEE_DB3_SEARCH_REQUEST_V2_VERSION
+#define SEARCH_REPLY_HEADER       AIMEE_DB3_SEARCH_REPLY_HEADER
+#define APPLY_HEADER              AIMEE_DB3_APPLY_HEADER
+#define APPLY_V2_HEADER           AIMEE_DB3_APPLY_V2_HEADER
+#define APPLY_V2_VERSION          AIMEE_DB3_APPLY_V2_VERSION
+#define LABEL_HEADER              AIMEE_DB3_LABEL_HEADER
 
 _Static_assert(sizeof(float) == 4, "DB3 wire requires 32-bit float");
 _Static_assert(sizeof(double) == 8, "DB3 wire requires 64-bit double");
@@ -162,25 +165,45 @@ static int copy_scope(char *destination, size_t capacity, const char *value)
    return 0;
 }
 
+/* How many predicates this filter set becomes. */
+static size_t predicate_count(const aimee_db3_search_filters_t *filters)
+{
+   size_t count = filters->label_count;
+   if (filters->kinds && filters->kind_count > 0)
+      count++;
+   if (filters->exclude_project && filters->exclude_project[0])
+      count++;
+   if (filters->visibility && filters->visibility_count > 0)
+      count++;
+   if (filters->current_generation && filters->current_generation[0])
+      count++;
+   return count;
+}
+
 int aimee_db3_search_filters_expressible(const aimee_db3_search_filters_t *filters)
 {
    if (!filters)
       return 0;
-   /* Every one of these is a filter DB3 v1 has no field for. Emptiness is the
-    * only acceptable value; anything else means the caller is asking for
-    * something this wire cannot ask. */
-   if (filters->exclude_project && filters->exclude_project[0])
+   /* Everything here now has somewhere to go, so what remains is arithmetic:
+    * does it FIT. A predicate over its ceiling is still refused, and still
+    * refused rather than trimmed -- a filter set silently narrowed is a search
+    * with a predicate missing, which returns more rows than it should and looks
+    * exactly like a correct answer.
+    *
+    * The label arrays must be a pair. One without the other is a caller that
+    * built half a filter, and guessing the missing half is how a search asks a
+    * question nobody wrote. */
+   if ((filters->label_count > 0) != (filters->label_keys != NULL) ||
+       (filters->label_keys != NULL) != (filters->label_values != NULL))
       return 0;
-   if (filters->kind_count > 0 || filters->kinds)
+   if ((filters->kind_count > 0) != (filters->kinds != NULL))
       return 0;
-   if (filters->rank_column && filters->rank_column[0])
+   if ((filters->visibility_count > 0) != (filters->visibility != NULL))
       return 0;
-   if (filters->label_count > 0 || filters->label_keys || filters->label_values)
+   if (predicate_count(filters) > AIMEE_DB3_MAX_FILTERS)
       return 0;
-   /* The two the caller does not pass and the SQL applies. Refused for the same
-    * reason as the rest and with more urgency: these are the ones an adapter
-    * omits without noticing it omitted anything. */
-   if (filters->scope_membership || filters->current_generation_only)
+   if (filters->kind_count > AIMEE_DB3_MAX_FILTER_VALUES ||
+       filters->visibility_count > AIMEE_DB3_MAX_FILTER_VALUES)
       return 0;
    return 1;
 }
@@ -188,33 +211,246 @@ int aimee_db3_search_filters_expressible(const aimee_db3_search_filters_t *filte
 int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, uint64_t request_id,
                                    uint64_t required_generation, const float *vector,
                                    uint32_t dimension, uint32_t top_k,
+                                   aimee_db3_filter_t *predicates, size_t predicate_capacity,
                                    aimee_db3_search_request_t *request)
 {
-   if (!filters || !request || !vector)
+   if (!filters || !request || !vector || !predicates || predicate_capacity < 1)
       return -1;
    /* Checked BEFORE anything is written, so a refusal leaves no half-built
     * request for a caller to use by mistake. */
    if (!aimee_db3_search_filters_expressible(filters))
       return -1;
+   if (predicate_count(filters) > predicate_capacity)
+      return -1;
 
    aimee_db3_search_request_t built = {0};
    if (copy_scope(built.workspace, sizeof(built.workspace), filters->workspace) != 0 ||
        copy_scope(built.project, sizeof(built.project), filters->project) != 0 ||
-       copy_scope(built.record_type, sizeof(built.record_type), filters->record_type) != 0)
+       copy_scope(built.record_type, sizeof(built.record_type), filters->record_type) != 0 ||
+       copy_scope(built.collection, sizeof(built.collection), filters->rank_column) != 0)
       return -1;
+
+   /* Each filter becomes one predicate, written into the caller's array. The
+    * builder allocates nothing; `predicates` outlives the request the same way
+    * the vector does. */
+   size_t at = 0;
+   for (size_t i = 0; i < filters->label_count; ++i)
+   {
+      predicates[at].op = AIMEE_DB3_FILTER_EQ;
+      predicates[at].key = filters->label_keys[i];
+      predicates[at].values = &filters->label_values[i];
+      predicates[at].value_count = 1;
+      at++;
+   }
+   if (filters->kinds && filters->kind_count > 0)
+   {
+      predicates[at].op = AIMEE_DB3_FILTER_IN;
+      predicates[at].key = "kind";
+      predicates[at].values = filters->kinds;
+      predicates[at].value_count = filters->kind_count;
+      at++;
+   }
+   if (filters->exclude_project && filters->exclude_project[0])
+   {
+      predicates[at].op = AIMEE_DB3_FILTER_NE;
+      predicates[at].key = "project";
+      predicates[at].values = &filters->exclude_project;
+      predicates[at].value_count = 1;
+      at++;
+   }
+   if (filters->visibility && filters->visibility_count > 0)
+   {
+      /* The four-way scope disjunction, as one set-membership question over a
+       * multi-valued label. This is the predicate that made OR unnecessary. */
+      predicates[at].op = AIMEE_DB3_FILTER_IN;
+      predicates[at].key = "visibility";
+      predicates[at].values = filters->visibility;
+      predicates[at].value_count = filters->visibility_count;
+      at++;
+   }
+   if (filters->current_generation && filters->current_generation[0])
+   {
+      /* A point's generation is fixed when it is written, so this asks for a
+       * label rather than requiring anything to be relabelled. */
+      predicates[at].op = AIMEE_DB3_FILTER_EQ;
+      predicates[at].key = "generation";
+      predicates[at].values = &filters->current_generation;
+      predicates[at].value_count = 1;
+      at++;
+   }
 
    built.request_id = request_id;
    built.required_generation = required_generation;
    built.dimension = dimension;
    built.top_k = top_k;
    built.vector = vector;
+   built.filters = at ? predicates : NULL;
+   built.filter_count = at;
    if (aimee_db3_search_request_validate(&built) != 0)
       return -1;
    *request = built;
    return 0;
 }
 
-int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
+/* Total the encoded size of the caller's filters, refusing what will not fit.
+ *
+ * Every bound here is a refusal rather than a clamp. A filter set silently
+ * trimmed is a search with a predicate missing, which returns more rows than it
+ * should and looks exactly like a correct answer. */
+static int filters_size(const aimee_db3_filter_t *filters, size_t count, size_t *size)
+{
+   if (!size)
+      return -1;
+   *size = 0;
+   if (count == 0)
+      return filters ? -1 : 0;
+   if (!filters || count > AIMEE_DB3_MAX_FILTERS)
+      return -1;
+   size_t total = 0;
+   for (size_t i = 0; i < count; ++i)
+   {
+      const aimee_db3_filter_t *filter = &filters[i];
+      if (filter->op != AIMEE_DB3_FILTER_EQ && filter->op != AIMEE_DB3_FILTER_NE &&
+          filter->op != AIMEE_DB3_FILTER_IN)
+         return -1;
+      /* EQ and NE are about one value. A set of two cannot mean "equals", and
+       * accepting it would leave the provider to pick which one. */
+      if (filter->op != AIMEE_DB3_FILTER_IN && filter->value_count != 1)
+         return -1;
+      if (filter->value_count == 0 || filter->value_count > AIMEE_DB3_MAX_FILTER_VALUES ||
+          !filter->values || !filter->key)
+         return -1;
+      size_t key_len = strlen(filter->key);
+      if (key_len == 0 || key_len >= AIMEE_DB3_MAX_LABEL_KEY)
+         return -1;
+      total += AIMEE_DB3_FILTER_HEADER + key_len;
+      for (size_t v = 0; v < filter->value_count; ++v)
+      {
+         if (!filter->values[v])
+            return -1;
+         size_t value_len = strlen(filter->values[v]);
+         if (value_len == 0 || value_len >= AIMEE_DB3_MAX_LABEL_VALUE)
+            return -1;
+         total += 2 + value_len;
+      }
+      if (total > AIMEE_DB3_MAX_FILTER_BYTES)
+         return -1;
+   }
+   *size = total;
+   return 0;
+}
+
+/* Every length and offset inside a declared filter region, checked once.
+ *
+ * The count must match exactly: a region holding fewer filters than declared
+ * would leave a provider's loop reading a filter that is not there, and one
+ * holding more would leave predicates unapplied -- the silent direction. */
+static int filter_region_valid(const uint8_t *bytes, size_t length, size_t count)
+{
+   size_t offset = 0;
+   for (size_t i = 0; i < count; ++i)
+   {
+      if (offset + AIMEE_DB3_FILTER_HEADER > length)
+         return -1;
+      uint8_t op = bytes[offset];
+      size_t key_len = bytes[offset + 1];
+      size_t value_count = get_u16(bytes + offset + 2);
+      if ((op != AIMEE_DB3_FILTER_EQ && op != AIMEE_DB3_FILTER_NE && op != AIMEE_DB3_FILTER_IN) ||
+          key_len == 0 || key_len >= AIMEE_DB3_MAX_LABEL_KEY || value_count == 0 ||
+          value_count > AIMEE_DB3_MAX_FILTER_VALUES)
+         return -1;
+      /* EQ and NE are about one value; a set of two cannot mean "equals". */
+      if (op != AIMEE_DB3_FILTER_IN && value_count != 1)
+         return -1;
+      offset += AIMEE_DB3_FILTER_HEADER + key_len;
+      if (offset > length)
+         return -1;
+      for (size_t v = 0; v < value_count; ++v)
+      {
+         if (offset + 2 > length)
+            return -1;
+         size_t value_len = get_u16(bytes + offset);
+         offset += 2;
+         if (value_len == 0 || value_len >= AIMEE_DB3_MAX_LABEL_VALUE ||
+             offset + value_len > length)
+            return -1;
+         offset += value_len;
+      }
+   }
+   /* Exactly consumed. Trailing bytes mean the sender and this disagree about
+    * the region, and ignoring them would let a predicate travel unread. */
+   return offset == length ? 0 : -1;
+}
+
+int aimee_db3_filter_next(aimee_db3_filter_view_t *view, aimee_db3_filter_entry_t *entry)
+{
+   if (!view || !entry || !view->bytes)
+      return -1;
+   if (view->remaining == 0)
+      return 0;
+   if (view->offset + AIMEE_DB3_FILTER_HEADER > view->length)
+      return -1;
+   const uint8_t *at = view->bytes + view->offset;
+   entry->op = at[0];
+   entry->key_length = at[1];
+   entry->value_count = get_u16(at + 2);
+   size_t consumed = AIMEE_DB3_FILTER_HEADER + entry->key_length;
+   if (view->offset + consumed > view->length)
+      return -1;
+   entry->key = (const char *)(at + AIMEE_DB3_FILTER_HEADER);
+   entry->value_offset = view->offset + consumed;
+   /* Step over the values so the next call lands on the next filter. */
+   size_t at_value = entry->value_offset;
+   for (size_t v = 0; v < entry->value_count; ++v)
+   {
+      if (at_value + 2 > view->length)
+         return -1;
+      size_t value_len = get_u16(view->bytes + at_value);
+      at_value += 2;
+      if (at_value + value_len > view->length)
+         return -1;
+      at_value += value_len;
+   }
+   view->offset = at_value;
+   view->remaining--;
+   return 1;
+}
+
+int aimee_db3_filter_value(const aimee_db3_filter_view_t *view,
+                           const aimee_db3_filter_entry_t *entry, size_t index, const char **value,
+                           size_t *value_length)
+{
+   if (!view || !entry || !value || !value_length || index >= entry->value_count)
+      return -1;
+   size_t at = entry->value_offset;
+   for (size_t v = 0; v <= index; ++v)
+   {
+      if (at + 2 > view->length)
+         return -1;
+      size_t value_len = get_u16(view->bytes + at);
+      at += 2;
+      if (at + value_len > view->length)
+         return -1;
+      if (v == index)
+      {
+         *value = (const char *)(view->bytes + at);
+         *value_length = value_len;
+         return 0;
+      }
+      at += value_len;
+   }
+   return -1;
+}
+
+/* The fields, without the caller-side filter structs.
+ *
+ * Decode produces a request whose filters live in the input buffer rather than
+ * in an array of aimee_db3_filter_t, so the public validate below -- which
+ * checks that array -- would refuse every decoded request that carried one. The
+ * encoded region is validated by filter_region_valid during decode instead, so
+ * nothing goes unchecked; what differs is WHICH representation is being
+ * checked. */
+static int search_request_fields_valid(const aimee_db3_search_request_t *request)
 {
    if (!request || request->request_id == 0 || request->required_generation == 0 ||
        request->dimension == 0 || request->dimension > AIMEE_DB3_MAX_DIM || request->top_k == 0 ||
@@ -223,7 +459,18 @@ int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
        !text_valid(request->project, sizeof(request->project), 1) ||
        (!request->workspace[0] && !request->project[0]) ||
        !text_valid(request->record_type, sizeof(request->record_type), 0) ||
+       !text_valid(request->collection, sizeof(request->collection), 1) ||
        !vectors_valid(request->vector, request->dimension))
+      return -1;
+   return 0;
+}
+
+int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
+{
+   if (search_request_fields_valid(request) != 0)
+      return -1;
+   size_t ignored = 0;
+   if (filters_size(request->filters, request->filter_count, &ignored) != 0)
       return -1;
    return 0;
 }
@@ -293,16 +540,31 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
    size_t workspace_len = text_length(request->workspace, sizeof(request->workspace));
    size_t project_len = text_length(request->project, sizeof(request->project));
    size_t record_len = text_length(request->record_type, sizeof(request->record_type));
-   size_t total = 0;
-   if (checked_total(SEARCH_REQUEST_HEADER, workspace_len, project_len, record_len, sizeof(float),
-                     request->dimension, &total) != 0 ||
-       total > capacity || workspace_len > UINT16_MAX || project_len > UINT16_MAX ||
-       record_len > UINT16_MAX || request->dimension > UINT16_MAX || request->top_k > UINT16_MAX)
+   size_t collection_len = text_length(request->collection, sizeof(request->collection));
+   size_t filter_bytes = 0;
+   if (filters_size(request->filters, request->filter_count, &filter_bytes) != 0)
       return -1;
-   memset(output, 0, SEARCH_REQUEST_HEADER);
+   /* Version 1 when there is nothing version 2 exists to carry, byte for byte.
+    * A provider that speaks only version 1 keeps receiving every request it
+    * could already serve, and refuses on the VERSION the ones it cannot -- loud
+    * rather than an unfiltered search. */
+   int v2 = (collection_len > 0 || request->filter_count > 0);
+   size_t header = v2 ? SEARCH_REQUEST_V2_HEADER : SEARCH_REQUEST_HEADER;
+   size_t total = 0;
+   if (checked_total(header, workspace_len, project_len, record_len, sizeof(float),
+                     request->dimension, &total) != 0 ||
+       total > SIZE_MAX - collection_len - filter_bytes)
+      return -1;
+   total += collection_len + filter_bytes;
+   if (total > capacity || workspace_len > UINT16_MAX || project_len > UINT16_MAX ||
+       record_len > UINT16_MAX || request->dimension > UINT16_MAX || request->top_k > UINT16_MAX ||
+       collection_len > UINT16_MAX || filter_bytes > UINT16_MAX ||
+       request->filter_count > UINT16_MAX)
+      return -1;
+   memset(output, 0, header);
    put_u32(output, SEARCH_REQUEST_MAGIC);
-   put_u16(output + 4, WIRE_VERSION);
-   put_u16(output + 6, SEARCH_REQUEST_HEADER);
+   put_u16(output + 4, v2 ? SEARCH_REQUEST_V2_VERSION : WIRE_VERSION);
+   put_u16(output + 6, (uint16_t)header);
    put_u64(output + 8, request->request_id);
    put_u64(output + 16, request->required_generation);
    put_u16(output + 24, (uint16_t)workspace_len);
@@ -310,13 +572,43 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
    put_u16(output + 28, (uint16_t)record_len);
    put_u16(output + 30, (uint16_t)request->dimension);
    put_u16(output + 32, (uint16_t)request->top_k);
-   size_t offset = SEARCH_REQUEST_HEADER;
+   if (v2)
+   {
+      put_u16(output + 36, (uint16_t)collection_len);
+      put_u16(output + 38, (uint16_t)request->filter_count);
+      put_u16(output + 40, (uint16_t)filter_bytes);
+   }
+   size_t offset = header;
    memcpy(output + offset, request->workspace, workspace_len);
    offset += workspace_len;
    memcpy(output + offset, request->project, project_len);
    offset += project_len;
    memcpy(output + offset, request->record_type, record_len);
    offset += record_len;
+   if (v2)
+   {
+      memcpy(output + offset, request->collection, collection_len);
+      offset += collection_len;
+      for (size_t i = 0; i < request->filter_count; ++i)
+      {
+         const aimee_db3_filter_t *filter = &request->filters[i];
+         size_t key_len = strlen(filter->key);
+         output[offset] = filter->op;
+         output[offset + 1] = (uint8_t)key_len;
+         put_u16(output + offset + 2, (uint16_t)filter->value_count);
+         offset += AIMEE_DB3_FILTER_HEADER;
+         memcpy(output + offset, filter->key, key_len);
+         offset += key_len;
+         for (size_t v = 0; v < filter->value_count; ++v)
+         {
+            size_t value_len = strlen(filter->values[v]);
+            put_u16(output + offset, (uint16_t)value_len);
+            offset += 2;
+            memcpy(output + offset, filter->values[v], value_len);
+            offset += value_len;
+         }
+      }
+   }
    for (uint32_t i = 0; i < request->dimension; ++i)
    {
       uint32_t bits = 0;
@@ -330,11 +622,28 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
 
 int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
                                     aimee_db3_search_request_t *request, float *vector_out,
-                                    size_t vector_capacity)
+                                    size_t vector_capacity, aimee_db3_filter_view_t *filters_out)
 {
-   if (!input || !request || !vector_out || length < SEARCH_REQUEST_HEADER ||
-       get_u32(input) != SEARCH_REQUEST_MAGIC || get_u16(input + 4) != WIRE_VERSION ||
-       get_u16(input + 6) != SEARCH_REQUEST_HEADER || get_u16(input + 34) != 0)
+   if (!input || !request || !vector_out || !filters_out || length < SEARCH_REQUEST_HEADER ||
+       get_u32(input) != SEARCH_REQUEST_MAGIC || get_u16(input + 34) != 0)
+      return -1;
+   uint16_t version = get_u16(input + 4);
+   size_t header = SEARCH_REQUEST_HEADER;
+   uint16_t collection_len = 0, filter_count = 0, filter_bytes = 0;
+   if (version == SEARCH_REQUEST_V2_VERSION)
+   {
+      if (length < SEARCH_REQUEST_V2_HEADER || get_u16(input + 6) != SEARCH_REQUEST_V2_HEADER ||
+          get_u16(input + 42) != 0)
+         return -1;
+      header = SEARCH_REQUEST_V2_HEADER;
+      collection_len = get_u16(input + 36);
+      filter_count = get_u16(input + 38);
+      filter_bytes = get_u16(input + 40);
+      if (collection_len >= AIMEE_DB3_MAX_COLLECTION || filter_count > AIMEE_DB3_MAX_FILTERS ||
+          filter_bytes > AIMEE_DB3_MAX_FILTER_BYTES || (filter_count == 0) != (filter_bytes == 0))
+         return -1;
+   }
+   else if (version != WIRE_VERSION || get_u16(input + 6) != SEARCH_REQUEST_HEADER)
       return -1;
    uint16_t workspace_len = get_u16(input + 24), project_len = get_u16(input + 26);
    uint16_t record_len = get_u16(input + 28), dimension = get_u16(input + 30);
@@ -345,22 +654,44 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
        top_k > AIMEE_DB3_MAX_TOP_K)
       return -1;
    size_t total = 0;
-   if (checked_total(SEARCH_REQUEST_HEADER, workspace_len, project_len, record_len, sizeof(float),
-                     dimension, &total) != 0 ||
-       total != length)
+   if (checked_total(header, workspace_len, project_len, record_len, sizeof(float), dimension,
+                     &total) != 0 ||
+       total > SIZE_MAX - collection_len - filter_bytes)
+      return -1;
+   total += (size_t)collection_len + filter_bytes;
+   if (total != length)
       return -1;
    memset(request, 0, sizeof(*request));
+   memset(filters_out, 0, sizeof(*filters_out));
    request->request_id = get_u64(input + 8);
    request->required_generation = get_u64(input + 16);
    request->dimension = dimension;
    request->top_k = top_k;
-   size_t offset = SEARCH_REQUEST_HEADER;
+   size_t offset = header;
    memcpy(request->workspace, input + offset, workspace_len);
    offset += workspace_len;
    memcpy(request->project, input + offset, project_len);
    offset += project_len;
    memcpy(request->record_type, input + offset, record_len);
    offset += record_len;
+   if (collection_len)
+   {
+      memcpy(request->collection, input + offset, collection_len);
+      offset += collection_len;
+   }
+   if (filter_count)
+   {
+      /* Checked HERE, before anyone walks it. A cursor that validated as it went
+       * would put that on every provider, and the one that forgot would read
+       * past the message. */
+      if (filter_region_valid(input + offset, filter_bytes, filter_count) != 0)
+         return -1;
+      filters_out->bytes = input + offset;
+      filters_out->length = filter_bytes;
+      filters_out->remaining = filter_count;
+      request->filter_count = filter_count;
+      offset += filter_bytes;
+   }
    for (uint32_t i = 0; i < dimension; ++i)
    {
       uint32_t bits = get_u32(input + offset);
@@ -368,7 +699,7 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
       offset += sizeof(bits);
    }
    request->vector = vector_out;
-   return aimee_db3_search_request_validate(request);
+   return search_request_fields_valid(request);
 }
 
 int aimee_db3_search_reply_encode(const aimee_db3_search_reply_t *reply, uint8_t *output,
@@ -521,7 +852,8 @@ int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_
       return -1;
    uint16_t collection_len = get_u16(input + 32), dimension = get_u16(input + 34);
    if (collection_len == 0 || collection_len >= AIMEE_DB3_MAX_COLLECTION ||
-       dimension > AIMEE_DB3_MAX_DIM || (dimension > 0 && (!vector_out || dimension > vector_capacity)) ||
+       dimension > AIMEE_DB3_MAX_DIM ||
+       (dimension > 0 && (!vector_out || dimension > vector_capacity)) ||
        length != header + (size_t)collection_len + (size_t)dimension * sizeof(float) + label_bytes)
       return -1;
    memset(apply, 0, sizeof(*apply));

@@ -40,8 +40,9 @@ class PortabilityTests(unittest.TestCase):
         summary = checker.run(REPO_ROOT)
         self.assertEqual(sum(summary.values()), 74)
         self.assertEqual(summary, {
-            # All fourteen, and none of them portable to DB3 v1: every one
-            # filters by a relational predicate the point does not carry.
+            # All fourteen, and all portable now: search version 2 carries a
+            # collection and a conjunction of eq/ne/in predicates over labels
+            # that may hold several values, which is every filter they apply.
             "portable-search": 14,
             "committed-mutation": 32,
             "provider-control": 13,

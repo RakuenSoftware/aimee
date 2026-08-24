@@ -212,8 +212,9 @@ int main(void)
    uint64_t server_correlation = event.frame.correlation_id;
    aimee_db3_search_request_t decoded_request;
    float decoded_vec[AIMEE_DB3_MAX_DIM];
+   aimee_db3_filter_view_t decoded_filters;
    assert(aimee_db3_search_request_decode(event.payload, event.payload_len, &decoded_request,
-                                          decoded_vec, AIMEE_DB3_MAX_DIM) == 0);
+                                          decoded_vec, AIMEE_DB3_MAX_DIM, &decoded_filters) == 0);
    assert(decoded_request.request_id == request.request_id);
    assert(bus_client_poll(&provider_b, &event) == BUS_CLIENT_EMPTY);
 

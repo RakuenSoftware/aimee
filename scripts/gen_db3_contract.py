@@ -158,7 +158,7 @@ def validate_catalog(value: object) -> dict[str, object]:
     catalog = _keys(
         value,
         {"schema_version", "protocol", "protocol_id", "owner", "wire_version", "events",
-         "limits", "wire"},
+         "limits", "wire", "filter_ops"},
         "catalog",
     )
     if catalog["schema_version"] != 1 or catalog["wire_version"] != 1:
@@ -183,7 +183,8 @@ def validate_catalog(value: object) -> dict[str, object]:
     limits = _keys(
         catalog["limits"],
         {"scope_bytes", "record_type_bytes", "collection_bytes", "label_count",
-         "label_key_bytes", "label_value_bytes", "labels_bytes", "dimension", "top_k"},
+         "label_key_bytes", "label_value_bytes", "labels_bytes", "dimension", "top_k",
+         "filter_count", "filter_values", "filters_bytes"},
         "limits",
     )
     if limits != {
@@ -196,18 +197,35 @@ def validate_catalog(value: object) -> dict[str, object]:
         "labels_bytes": 4096,
         "dimension": 4096,
         "top_k": 256,
+        # Search v2. Sixteen filters matches the label ceiling, because a filter
+        # asks about a label. 256 values is what a whole-corpus currency search
+        # needs -- one project-generation pair per project -- and 16 KiB is the
+        # budget those fit in; past either, the request is refused rather than
+        # narrowed for the caller.
+        "filter_count": 16,
+        "filter_values": 256,
+        "filters_bytes": 16384,
     }:
-        fail("limits", "DB3 v1 limits changed")
+        fail("limits", "vector-module limits changed")
+    operators = _keys(catalog["filter_ops"], {"eq", "ne", "in"}, "filter_ops")
+    if operators != {"eq": 1, "ne": 2, "in": 3}:
+        fail("filter-ops", "the filter operators are pinned; zero is not an operator")
     wire = _keys(
         catalog["wire"],
         {
-            "capabilities", "search_request", "search_reply", "apply", "apply_v2", "apply_chunk",
+            "capabilities", "search_request", "search_request_v2", "search_reply", "apply",
+            "apply_v2", "apply_chunk",
             "applied", "search_failure", "route_request", "route_reply",
         },
         "wire",
     )
     capabilities = _keys(wire["capabilities"], {"magic", "header_bytes"}, "wire.capabilities")
     request = _keys(wire["search_request"], {"magic", "header_bytes"}, "wire.search_request")
+    request_v2 = _keys(
+        wire["search_request_v2"],
+        {"magic", "wire_version", "header_bytes", "filter_header_bytes"},
+        "wire.search_request_v2",
+    )
     reply = _keys(
         wire["search_reply"], {"magic", "header_bytes", "candidate_bytes"},
         "wire.search_reply",
@@ -234,7 +252,16 @@ def validate_catalog(value: object) -> dict[str, object]:
     if capabilities != {"magic": 0x43334244, "header_bytes": 48}:
         fail("capabilities-wire", "capabilities wire differs from DB3 v1")
     if request != {"magic": 0x53334244, "header_bytes": 36}:
-        fail("search-request-wire", "search request wire differs from DB3 v1")
+        fail("search-request-wire", "search request wire differs from version 1")
+    # Same magic and the v1 fields at their v1 offsets, so a v1 reader refuses
+    # this on the version rather than misreading it. The header grows by eight:
+    # collection length, filter count, filter bytes, and a reserved pair.
+    if request_v2 != {
+        "magic": 0x53334244, "wire_version": 2, "header_bytes": 44,
+        "filter_header_bytes": 4,
+    }:
+        fail("search-request-v2-wire",
+             "search request v2 wire differs from the canonical filter extension")
     if reply != {"magic": 0x52334244, "header_bytes": 28, "candidate_bytes": 16}:
         fail("search-reply-wire", "search reply wire differs from DB3 v1")
     if apply != {"magic": 0x41334244, "header_bytes": 36}:
@@ -327,7 +354,8 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
                  events: list[dict[str, object]]) -> bytes:
     limits = catalog["limits"]
     wire = catalog["wire"]
-    assert isinstance(limits, dict) and isinstance(wire, dict)
+    ops = catalog["filter_ops"]
+    assert isinstance(limits, dict) and isinstance(wire, dict) and isinstance(ops, dict)
     event_width = max(len(str(event["name"])) for event in events)
     event_lines = "\n".join(
         f"#define AIMEE_DB3_EVENT_{str(event['name']).upper():<{event_width}} 0x{int(event['event_kind']):08x}u"
@@ -353,6 +381,17 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_DB3_MAX_LABEL_BYTES  {limits['labels_bytes']}u
 #define AIMEE_DB3_MAX_DIM         {limits['dimension']}u
 #define AIMEE_DB3_MAX_TOP_K       {limits['top_k']}u
+#define AIMEE_DB3_MAX_FILTERS       {limits['filter_count']}u
+#define AIMEE_DB3_MAX_FILTER_VALUES {limits['filter_values']}u
+#define AIMEE_DB3_MAX_FILTER_BYTES  {limits['filters_bytes']}u
+
+/* Filter operators. A conjunction of these, and nothing else: no OR, no
+ * nesting, no precedence. Scope visibility is a disjunction in SQL and becomes
+ * one AIMEE_DB3_FILTER_IN over a multi-valued label, which is why OR is not
+ * needed rather than merely not offered. */
+#define AIMEE_DB3_FILTER_EQ {ops['eq']}u
+#define AIMEE_DB3_FILTER_NE {ops['ne']}u
+#define AIMEE_DB3_FILTER_IN {ops['in']}u
 
 #define AIMEE_DB3_SEARCH_REQUEST_MAGIC  0x{wire['search_request']['magic']:08x}u
 #define AIMEE_DB3_SEARCH_REPLY_MAGIC    0x{wire['search_reply']['magic']:08x}u
@@ -365,6 +404,9 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_DB3_ROUTE_REQUEST_MAGIC   0x{wire['route_request']['magic']:08x}u
 #define AIMEE_DB3_ROUTE_REPLY_MAGIC     0x{wire['route_reply']['magic']:08x}u
 #define AIMEE_DB3_SEARCH_REQUEST_HEADER {wire['search_request']['header_bytes']}u
+#define AIMEE_DB3_SEARCH_REQUEST_V2_VERSION {wire['search_request_v2']['wire_version']}u
+#define AIMEE_DB3_SEARCH_REQUEST_V2_HEADER  {wire['search_request_v2']['header_bytes']}u
+#define AIMEE_DB3_FILTER_HEADER             {wire['search_request_v2']['filter_header_bytes']}u
 #define AIMEE_DB3_SEARCH_REPLY_HEADER   {wire['search_reply']['header_bytes']}u
 #define AIMEE_DB3_CANDIDATE_BYTES       {wire['search_reply']['candidate_bytes']}u
 #define AIMEE_DB3_APPLY_HEADER          {wire['apply']['header_bytes']}u
@@ -390,7 +432,8 @@ def go_bytes(catalog: dict[str, object], registry: dict[str, object],
              events: list[dict[str, object]]) -> bytes:
     limits = catalog["limits"]
     wire = catalog["wire"]
-    assert isinstance(limits, dict) and isinstance(wire, dict)
+    ops = catalog["filter_ops"]
+    assert isinstance(limits, dict) and isinstance(wire, dict) and isinstance(ops, dict)
     event_lines = "\n".join(
         f"const Event{_go_name(str(event['name']))} uint32 = 0x{int(event['event_kind']):08x}"
         for event in events
@@ -421,6 +464,19 @@ const MaxLabelValueBytes = {limits['label_value_bytes']}
 const MaxLabelsBytes = {limits['labels_bytes']}
 const MaxDimension = {limits['dimension']}
 const MaxTopK = {limits['top_k']}
+const MaxFilterCount = {limits['filter_count']}
+const MaxFilterValues = {limits['filter_values']}
+const MaxFiltersBytes = {limits['filters_bytes']}
+
+// Filter operators. A conjunction of these and nothing else: no OR, no nesting,
+// no precedence. Scope visibility is a disjunction in SQL and becomes one
+// FilterIn over a multi-valued label, which is why OR is not needed rather than
+// merely not offered.
+const (
+	FilterEq uint8 = {ops['eq']}
+	FilterNe uint8 = {ops['ne']}
+	FilterIn uint8 = {ops['in']}
+)
 
 const searchRequestMagic uint32 = 0x{wire['search_request']['magic']:08x}
 const searchReplyMagic uint32 = 0x{wire['search_reply']['magic']:08x}
@@ -432,6 +488,9 @@ const searchFailureMagic uint32 = 0x{wire['search_failure']['magic']:08x}
 const routeRequestMagic uint32 = 0x{wire['route_request']['magic']:08x}
 const routeReplyMagic uint32 = 0x{wire['route_reply']['magic']:08x}
 const searchRequestHeader = {wire['search_request']['header_bytes']}
+const searchRequestV2Version uint16 = {wire['search_request_v2']['wire_version']}
+const searchRequestV2Header = {wire['search_request_v2']['header_bytes']}
+const filterHeader = {wire['search_request_v2']['filter_header_bytes']}
 const searchReplyHeader = {wire['search_reply']['header_bytes']}
 const candidateBytes = {wire['search_reply']['candidate_bytes']}
 const applyHeader = {wire['apply']['header_bytes']}

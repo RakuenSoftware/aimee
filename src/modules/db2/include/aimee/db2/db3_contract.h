@@ -2,7 +2,7 @@
 #ifndef AIMEE_DB2_DB3_CONTRACT_H
 #define AIMEE_DB2_DB3_CONTRACT_H 1
 
-#define AIMEE_DB3_CONTRACT_SHA256 "a536a1673ff799ec3b8c289aebbad1cd7b2dedd9a0688730f8a2aa9029c262ab"
+#define AIMEE_DB3_CONTRACT_SHA256 "cd92526eef0f7c9cdd4490101bba3255291cf088f5190272a79a3179d169c904"
 #define AIMEE_DB3_PROTOCOL_KIND_FLAG 0x80000000u
 #define AIMEE_DB3_PROTOCOL_ID        3u
 #define AIMEE_DB3_WIRE_VERSION       1u
@@ -22,6 +22,17 @@
 #define AIMEE_DB3_MAX_LABEL_BYTES  4096u
 #define AIMEE_DB3_MAX_DIM         4096u
 #define AIMEE_DB3_MAX_TOP_K       256u
+#define AIMEE_DB3_MAX_FILTERS       16u
+#define AIMEE_DB3_MAX_FILTER_VALUES 256u
+#define AIMEE_DB3_MAX_FILTER_BYTES  16384u
+
+/* Filter operators. A conjunction of these, and nothing else: no OR, no
+ * nesting, no precedence. Scope visibility is a disjunction in SQL and becomes
+ * one AIMEE_DB3_FILTER_IN over a multi-valued label, which is why OR is not
+ * needed rather than merely not offered. */
+#define AIMEE_DB3_FILTER_EQ 1u
+#define AIMEE_DB3_FILTER_NE 2u
+#define AIMEE_DB3_FILTER_IN 3u
 
 #define AIMEE_DB3_SEARCH_REQUEST_MAGIC  0x53334244u
 #define AIMEE_DB3_SEARCH_REPLY_MAGIC    0x52334244u
@@ -34,6 +45,9 @@
 #define AIMEE_DB3_ROUTE_REQUEST_MAGIC   0x54334244u
 #define AIMEE_DB3_ROUTE_REPLY_MAGIC     0x55334244u
 #define AIMEE_DB3_SEARCH_REQUEST_HEADER 36u
+#define AIMEE_DB3_SEARCH_REQUEST_V2_VERSION 2u
+#define AIMEE_DB3_SEARCH_REQUEST_V2_HEADER  44u
+#define AIMEE_DB3_FILTER_HEADER             4u
 #define AIMEE_DB3_SEARCH_REPLY_HEADER   28u
 #define AIMEE_DB3_CANDIDATE_BYTES       16u
 #define AIMEE_DB3_APPLY_HEADER          36u

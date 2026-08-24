@@ -31,13 +31,15 @@ STANDARD_HEADERS = {
     "stdbool.h", "stddef.h", "stdint.h", "stdio.h", "stdlib.h", "string.h", "time.h",
 }
 CLASSIFICATIONS = (
-    # No vector search is portable to DB3 v1. Measured against the signatures,
-    # six looked portable; measured against the SQL, all fourteen filter by a
-    # relational predicate the point does not carry -- currency for the code and
-    # kb searches, scope membership for the memory ones. The blocker is the
-    # search model, not a missing field, which is why they share one disposition
-    # rather than being split by which field they lack.
-    ("portable-search", "portable-after-db3-v2", "candidate-search"),
+    # All fourteen, portable to search version 2. They were blocked by the
+    # search MODEL rather than by missing fields: every one filters by a
+    # relational predicate -- currency for the code and kb searches, scope
+    # membership for the memory ones -- and version 2 carries both. Currency is
+    # a generation label fixed at write time plus a value the caller already
+    # read from projects; scope visibility is one set-membership question over a
+    # label that may hold several values, which is what a four-way disjunction
+    # becomes when a point carries every scope it belongs to.
+    ("portable-search", "portable-now", "candidate-search"),
     ("committed-mutation", "portable-after-commit", "apply"),
     ("provider-control", "provider-local", "provider-control"),
     ("db2-authority", "retained-db2", "none"),

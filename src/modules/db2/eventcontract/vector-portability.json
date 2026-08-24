@@ -6,9 +6,9 @@
   "classifications": [
     {
       "id": "portable-search",
-      "disposition": "portable-after-db3-v2",
+      "disposition": "portable-now",
       "db3_operation_family": "candidate-search",
-      "rationale": "None is portable to DB3 v1: the blocker is the search model, not a missing field. Every one filters by a relational predicate the point does not carry -- currency (JOIN projects, lifecycle_state='current', generation = current_generation) for code and kb, scope membership (memory_scopes and memory_workspaces rows, including their ABSENCE meaning shared) for memory. Dropping currency returns superseded generations; dropping scope returns too few. Authorization only removes candidates, so it repairs neither.",
+      "rationale": "Portable to the vector module's search version 2: a bounded vector and filters the wire carries, returning only opaque candidate IDs and scores, which DB2 rehydrates and authorizes. Labels become eq, kinds in, exclude_project ne, which_vec the collection. Scope visibility -- a four-way disjunction in SQL -- is one in over a multi-valued label. Currency is one eq on a generation label fixed when a point is written, so nothing is relabelled when a project is re-ingested.",
       "symbols": [
         "pgvec_code_search",
         "pgvec_curator_claim_search",

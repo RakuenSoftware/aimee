@@ -50,7 +50,10 @@
     "label_value_bytes": 256,
     "labels_bytes": 4096,
     "dimension": 4096,
-    "top_k": 256
+    "top_k": 256,
+    "filter_count": 16,
+    "filter_values": 256,
+    "filters_bytes": 16384
   },
   "wire": {
     "capabilities": {
@@ -95,6 +98,17 @@
     "route_reply": {
       "magic": 1429422660,
       "header_bytes": 40
+    },
+    "search_request_v2": {
+      "magic": 1395868228,
+      "wire_version": 2,
+      "header_bytes": 44,
+      "filter_header_bytes": 4
     }
+  },
+  "filter_ops": {
+    "eq": 1,
+    "ne": 2,
+    "in": 3
   }
 }
