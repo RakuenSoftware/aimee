@@ -13,9 +13,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if !defined(_WIN32) && !defined(_WIN64)
+/* Unconditional, as in every sibling cli_v1_routes*.c: MinGW supplies unistd.h
+ * and getcwd, and guarding it out on Windows removed the declaration while
+ * leaving the call -- which is exactly how this file broke the Windows build. */
 #include <unistd.h>
-#endif
 
 cJSON *marshal_eval_run(int argc, char **argv)
 {
