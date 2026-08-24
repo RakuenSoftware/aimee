@@ -141,6 +141,26 @@ if [[ "$MODE" == "full" ]]; then
   "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
   kb_pid=$!
   export AIMEE_KB_API_URL="http://127.0.0.1:8741"
+  # The server and kb deliberately share the scratch Vault in this single-host
+  # topology.  Let the kb finish its first-boot credential transaction before
+  # starting the server; launching both writers concurrently can make one fail
+  # closed on the Vault's atomic-replace checks even though both inputs are
+  # identical.
+  bold "==> Waiting for aimee-kb first-boot initialization"
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! curl -fsS --max-time 3 "${AIMEE_KB_API_URL}/v1/health" >/dev/null 2>&1; do
+    if ! kill -0 "$kb_pid" 2>/dev/null; then
+      red "    aimee-kb exited during startup"
+      sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2
+      exit 1
+    fi
+    if (( SECONDS >= deadline )); then
+      red "    aimee-kb did not become healthy within ${WAIT_SECONDS}s"
+      sed -n '1,20p' "$AIMEE_HOME/kb.log" >&2
+      exit 1
+    fi
+    sleep 1
+  done
 elif [[ "$MODE" == "hybrid" ]]; then
   bold "==> Mode HYBRID (T6): local server + external kb at ${KB_URL}"
   export AIMEE_KB_API_URL="$KB_URL"
@@ -166,7 +186,7 @@ deadline=$((SECONDS + WAIT_SECONDS))
 while true; do
   status="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' \
     "${SERVER_URL}/v1/health" 2>/dev/null || true)"
-  [[ -S "$AIMEE_HOME/aimee-server.sock" && "$status" != 000 ]] && break
+  [[ -S "$AIMEE_HOME/aimee-http.sock" && "$status" != 000 ]] && break
   if ! kill -0 "$server_pid" 2>/dev/null; then red "    aimee-server exited during startup"; exit 1; fi
   if (( SECONDS >= deadline )); then red "    server listeners did not start within ${WAIT_SECONDS}s"; exit 1; fi
   sleep 2
@@ -179,7 +199,7 @@ done
 CLIENT_HOME="$SCRATCH/client"
 mkdir -p "$CLIENT_HOME"
 bold "==> Claiming the first wizard user"
-deploy_status="$(curl -sS --unix-socket "$AIMEE_HOME/aimee-server.sock" \
+deploy_status="$(curl -sS --unix-socket "$AIMEE_HOME/aimee-http.sock" \
   -H 'X-Aimee-Webuser: local-stack-e2e' \
   -H 'content-type: application/json' -X POST -d '{}' -o "$SCRATCH/deploy-apply.json" \
   -w '%{http_code}' http://localhost/v1/deploy/apply)"
@@ -235,7 +255,7 @@ check "GET /v1/version" 'version'                  "${SERVER_URL}/v1/version"
 bold "==> kb-backed contract (server -> kb)"
 check "GET /v1/kb/status -> vector" '"vector"' "${SERVER_URL}/v1/kb/status"
 check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: application/json' \
-                                               -d '{"query":"local e2e","max_results":3}' \
+                                               -d '{"query":"local e2e","scope":"all","max_results":3}' \
                                                "${SERVER_URL}/v1/kb/search"
 
 bold "==> Write→read round-trip (store a memory, read it back)"

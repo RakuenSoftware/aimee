@@ -16,9 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from benchmarks.common.result_schema import (
     PROVENANCE_FIELDS,
+    retrieval_outcome_bucket,
     validate_direct_result,
     validate_llm_result,
     validate_provenance,
+    validate_retrieval_assessment,
 )
 
 
@@ -142,6 +144,50 @@ class LLMResultSchemaTest(unittest.TestCase):
         row["answer_latency_s"] = "one second"  # type: ignore[assignment]
         with self.assertRaises(ValueError):
             validate_llm_result(row, "category")
+
+
+class RetrievalAssessmentSchemaTest(unittest.TestCase):
+    @staticmethod
+    def assessment() -> dict:
+        return {
+            "context_sufficiency": "COMPLETE",
+            "context_sufficiency_reason": "All cited facts were retrieved.",
+            "retrieved_tokens": 120,
+            "assembled_context_tokens": 90,
+            "sufficient_context_tokens": 70,
+            "unsupported_context_rate": 0.0,
+            "citation_validity_rate": 1.0,
+            "channel_metrics": {
+                "semantic_assertion": {"candidate_count": 4, "result_count": 2, "tokens": 70}
+            },
+        }
+
+    def test_complete_assessment_passes(self) -> None:
+        validate_retrieval_assessment(self.assessment())
+
+    def test_partial_instrumentation_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_retrieval_assessment({"context_sufficiency": "COMPLETE"})
+
+    def test_legacy_token_metrics_alone_pass(self) -> None:
+        validate_retrieval_assessment(
+            {"retrieved_tokens": 12, "assembled_context_tokens": 8}
+        )
+
+    def test_invalid_grade_fails(self) -> None:
+        row = self.assessment()
+        row["context_sufficiency"] = "GOOD"
+        with self.assertRaises(ValueError):
+            validate_retrieval_assessment(row)
+
+    def test_sufficiency_and_correctness_are_separate(self) -> None:
+        row = {**_valid_direct_row(), **self.assessment()}
+        self.assertEqual(retrieval_outcome_bucket(row), "complete_context__correct_answer")
+        row["context_sufficiency"] = "INSUFFICIENT"
+        self.assertEqual(
+            retrieval_outcome_bucket(row),
+            "partial_or_insufficient_context__correct_answer",
+        )
 
 
 class ProvenanceSchemaTest(unittest.TestCase):

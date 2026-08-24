@@ -732,7 +732,6 @@ static size_t kb_curator_ordered_stages(kb_curator_stage_desc_t *out, size_t max
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
-
    /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
     * built>0 event, so the incremental rebuild below would never fire and
     * cross_repo_route would stay empty — silently demoting every legitimate

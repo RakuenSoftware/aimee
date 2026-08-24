@@ -2,11 +2,46 @@
  * P2a), against the sqlite shim. */
 #include "../headers/aimee.h"
 #include "../db2/entity_registry.h"
+#include "../db2/fact_mutation.h"
 #include "../db2/db2_test_shim.h"
+#include "../db2/db2_internal.h"
+#include "../db2/db_postgres.h"
 #include "memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+static void merge_commit(int64_t merge_id, char out[FACT_COMMIT_ID_MAX])
+{
+   char key[32], err[256] = "";
+   snprintf(key, sizeof(key), "%lld", (long long)merge_id);
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT commit_id FROM fact_graph_changes WHERE object_kind='entity_merge'"
+                        " AND object_key=?1 AND action='merge' LIMIT 1",
+                        err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", key);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   snprintf(out, FACT_COMMIT_ID_MAX, "%s", aimee_pg_column_text(st, 0));
+   aimee_pg_finalize(st);
+}
+
+static void assert_commit_actor(const char *commit_id, const char *principal, int rank)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT actor_principal,authority_rank FROM fact_graph_commits"
+                        " WHERE commit_id=?1 LIMIT 1",
+                        err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", commit_id);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   assert(strcmp(aimee_pg_column_text(st, 0), principal) == 0);
+   assert(aimee_pg_column_int(st, 1) == rank);
+   aimee_pg_finalize(st);
+}
 
 static void test_normalize(void)
 {
@@ -84,7 +119,25 @@ int main(void)
    int64_t mid = db2_entity_merge(m_from, m_into);
    assert(mid > 0);
    assert(db2_entity_resolve("oldname box") == m_into); /* merged -> follows */
-   assert(db2_entity_unmerge(mid) == 0);
+   char cid_commit[FACT_COMMIT_ID_MAX], rollback_commit[FACT_COMMIT_ID_MAX];
+   merge_commit(mid, cid_commit);
+   fact_actor_t operator_actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
+   snprintf(operator_actor.principal, sizeof(operator_actor.principal), "test:operator");
+   snprintf(operator_actor.role, sizeof(operator_actor.role), "operator");
+   assert(db2_fact_commit_rollback(&operator_actor, cid_commit, rollback_commit) == 1);
+   assert(db2_entity_resolve("oldname box") == m_from); /* batch rollback restored merge */
+   char direct_commit[FACT_COMMIT_ID_MAX], unmerge_commit[FACT_COMMIT_ID_MAX];
+   mid = db2_entity_merge_as(&operator_actor, m_from, m_into, direct_commit);
+   assert(mid > 0);
+   assert(direct_commit[0] != '\0');
+   assert_commit_actor(direct_commit, "test:operator", FACT_ACTOR_OPERATOR);
+   entity_summary_t summaries[32];
+   entity_merge_summary_t merge_summaries[32];
+   assert(db2_entity_summaries(summaries, 32) > 0);
+   assert(db2_entity_merge_summaries(merge_summaries, 32) > 0);
+   assert(db2_entity_unmerge_as(&operator_actor, mid, unmerge_commit) == 0);
+   assert(unmerge_commit[0] != '\0');
+   assert_commit_actor(unmerge_commit, "test:operator", FACT_ACTOR_OPERATOR);
    assert(db2_entity_resolve("oldname box") == m_from); /* restored */
    assert(db2_entity_unmerge(mid) == -1);               /* already undone */
    assert(db2_entity_merge(m_from, m_from) == -1);      /* self-merge rejected */

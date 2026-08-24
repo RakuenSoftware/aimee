@@ -6,6 +6,9 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
+#include "db2/db2.h"
+#include "db2/db_postgres.h"
+#include "db2/memory_scope_query.h"
 #include "../db2/typed_facts.h"
 #include "../db2/fact_recall.h"     /* db2_fact_recall_block */
 #include "../db2/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
@@ -68,17 +71,19 @@ int main(void)
 
    /* db2_fact_commit path (entity_edges) — the one the memory-fact extractor and
     * auto-inject use. Unlike the strict CSS assert above, this gate ACCEPTs a
-    * free-form (NOVEL) relation as a provisional semantic edge, and recall must
-    * surface it. This is the assumption the LLM extractor relies on (it emits
-    * arbitrary snake_case relations). */
+    * free-form (NOVEL) relation as a provisional semantic edge. Model-derived
+    * assertions remain candidates and therefore stay out of default recall. */
    assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
-   /* A free-form (unknown) relation now defaults OPEN, so a benign LLM fact like
-    * works_as surfaces on an ORDINARY turn (turn_requests_sensitive=0). */
+   /* Candidate quarantine: inference is reviewable, but not recallable. */
    char facts[1024] = "";
    int fn = db2_fact_recall_block("user", 0, facts, sizeof(facts));
-   assert(fn >= 1);
-   assert(strstr(facts, "works_as") != NULL && strstr(facts, "engineer") != NULL);
+   assert(fn == 0 && strstr(facts, "works_as") == NULL);
+   /* Authenticated-user evidence promotes the exact candidate to persistent. */
+   assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
+                          FACT_AUTHORITY_USER, 1) == FACT_GATE_NOVEL);
+   fn = db2_fact_recall_block("user", 0, facts, sizeof(facts));
+   assert(fn >= 1 && strstr(facts, "works_as") != NULL && strstr(facts, "engineer") != NULL);
 
    /* But an unknown relation whose NAME plainly denotes PII is still gated:
     * withheld on an ordinary turn, surfaced only when the turn asks. (PII facts
@@ -91,7 +96,11 @@ int main(void)
    assert(strstr(ord, "home_address") == NULL); /* PII-looking: withheld by default */
    char sens[1024] = "";
    (void)db2_fact_recall_block("user", 1, sens, sizeof(sens));
-   assert(strstr(sens, "home_address") != NULL); /* surfaced when asked */
+   assert(strstr(sens, "home_address") == NULL); /* candidate stays quarantined */
+   assert(db2_fact_commit("user", NODE_PERSON, "home_address", "12 Oak St", NODE_OTHER,
+                          FACT_AUTHORITY_USER, 1) == FACT_GATE_NOVEL);
+   (void)db2_fact_recall_block("user", 1, sens, sizeof(sens));
+   assert(strstr(sens, "home_address") != NULL); /* persistent and explicitly requested */
 
    /* Personal-data boundary (Track A): a CREDENTIAL relation is withheld from the
     * shared KB entirely — never committed to DB2, so it never surfaces there. */
@@ -100,6 +109,94 @@ int main(void)
    char cred[1024] = "";
    (void)db2_fact_recall_block("user", 1, cred, sizeof(cred));
    assert(strstr(cred, "api_key") == NULL); /* not in the shared KB, even when asked */
+
+   /* The semantic channel applies valid-time and transaction-time independently,
+    * labels old versions, retains exact evidence locators, and rejects malformed
+    * time input rather than falling back to unfiltered history. */
+   char err[256] = "";
+   int sql_rc =
+       aimee_pg_exec(db2_conn(),
+                     "INSERT INTO fact_graph_commits"
+                     " (commit_id,operation,actor_principal,actor_role,authority_rank,status)"
+                     " VALUES ('temporal-fixture','assert','test','system',100,'open')",
+                     err, sizeof(err));
+   assert(sql_rc == 0);
+   sql_rc = aimee_pg_exec(
+       db2_conn(),
+       "INSERT INTO entity_edges"
+       " (id,source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,"
+       " confidence,authority_rank,valid_from,valid_until,asserted_at,superseded_at,commit_id) "
+       "VALUES"
+       " (9001,'Atlas','deployment_state','old','semantic','world_fact','persistent','A',"
+       "  0.9,80,'2026-01-01T00:00:00Z','2026-03-01T00:00:00Z',"
+       " '2026-01-02T00:00:00Z','2026-03-02T00:00:00Z','temporal-fixture'),"
+       " (9002,'Atlas','deployment_state','new','semantic','world_fact','persistent','A',"
+       "  0.95,80,'2026-03-01T00:00:00Z','','2026-03-02T00:00:00Z','',"
+       " 'temporal-fixture')",
+       err, sizeof(err));
+   if (sql_rc != 0)
+      fprintf(stderr, "semantic fixture insert failed: %s\n", err);
+   assert(sql_rc == 0);
+   assert(aimee_pg_exec(
+              db2_conn(),
+              "INSERT INTO fact_evidence"
+              " (assertion_id,source_kind,source_id,source_span,evidence_hash,observed_at,stance)"
+              " VALUES (9001,'episode','event:41','bytes:4-19','abc',"
+              " '2026-01-02T00:00:00Z','supports')",
+              err, sizeof(err)) == 0);
+   semantic_assertion_hit_t hits[4];
+   n = db2_semantic_assertion_search("atlas", "2026-02-01T00:00:00Z", "2026-02-02T00:00:00Z", 0, 4,
+                                     hits, 4);
+   assert(n == 1 && hits[0].assertion_id == 9001);
+   assert(hits[0].historical == 1 && hits[0].evidence_count == 1);
+   assert(hits[0].retrieval_count == 1);
+   assert(strcmp(hits[0].retrieval[0].channel, "lexical") == 0);
+   assert(strcmp(hits[0].evidence[0].source_span, "bytes:4-19") == 0);
+   n = db2_semantic_assertion_search("atlas", "2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z", 0, 4,
+                                     hits, 4);
+   assert(n == 1 && hits[0].assertion_id == 9002 && hits[0].historical == 0);
+   semantic_assertion_hit_t by_id;
+   assert(db2_semantic_assertion_get_filtered(9002, "2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z",
+                                              0, &by_id) == 1);
+   assert(strcmp(by_id.object, "new") == 0);
+   assert(db2_semantic_assertion_search("atlas", "2026-04-01T00:00:00.123Z", "", 0, 4, hits, 4) ==
+          SEMANTIC_ASSERTION_SEARCH_INVALID_TIME);
+
+   /* A derived assertion is visible only if every scoped memory evidence item
+    * is visible in the request-local partition. */
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO memories(id,key,content) VALUES(9100,'scoped','evidence');"
+                        "INSERT INTO memory_scopes(memory_id,scope_type,scope_value)"
+                        " VALUES(9100,'project','allowed-project');"
+                        "INSERT INTO fact_evidence"
+                        " (assertion_id,source_kind,source_id,source_span,evidence_hash,stance)"
+                        " VALUES(9002,'memory','memory:9100','bytes:0-8','scope-hash','supports')",
+                        err, sizeof(err)) == 0);
+   db2_memory_scope_context_set("", "different-project", 0);
+   assert(db2_semantic_assertion_search("atlas", "2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z", 0,
+                                        4, hits, 4) == 0);
+   db2_memory_scope_context_set("", "allowed-project", 0);
+   assert(db2_semantic_assertion_search("atlas", "2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z", 0,
+                                        4, hits, 4) == 1);
+   db2_memory_scope_context_clear();
+
+   /* Canonical rendering is derived from the single assertion store; versioned
+    * vector state suppresses already-current rows without duplicating truth. */
+   semantic_assertion_index_row_t index_rows[4];
+   int indexed = db2_semantic_assertion_index_list(0, index_rows, 4);
+   assert(indexed >= 2);
+   int saw_canonical_rendering = 0;
+   for (int i = 0; i < indexed; i++)
+      saw_canonical_rendering |= index_rows[i].canonical_rendering[0] != '\0';
+   assert(saw_canonical_rendering);
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO memory_embeddings"
+                        " (point_id,embedding,record_type,kind,payload_json)"
+                        " VALUES(2000000009001,'[]','semantic_assertion','assertion_v1','{}')",
+                        err, sizeof(err)) == 0);
+   indexed = db2_semantic_assertion_index_list(9000, index_rows, 4);
+   for (int i = 0; i < indexed; i++)
+      assert(index_rows[i].assertion_id != 9001);
 
    db2_test_shim_close();
    printf("typed_facts: all tests passed\n");

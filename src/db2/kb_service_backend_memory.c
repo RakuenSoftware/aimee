@@ -9,6 +9,7 @@
 #include "memory_lint.h"
 #include "config.h"
 #include "fact_ingest.h"     /* db2_typed_fact_ingress (typed-fact §4/§6/§7 ingress) */
+#include "fact_mutation.h"   /* verifier-derived async fact actor capture */
 #include "fact_recall.h"     /* db2_fact_recall_in_query (read-only §7 recall) */
 #include "memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "kb_payload.h"      /* db2_kb_async_enqueue (background memory_facts job) */
@@ -1191,7 +1192,7 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
     * synchronous fact work on the store hot path; the drain's pattern pass now
     * captures the high-precision triples the old inline call did. */
    {
-      if (config_typed_facts_enabled() && out.id > 0)
+      if (config_typed_facts_enabled() && out.id > 0 && db2_fact_actor_capture_memory(out.id) == 0)
          (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
    }
    cJSON *obj = kbs_memory_row_to_json(&out);

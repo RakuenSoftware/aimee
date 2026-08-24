@@ -537,6 +537,18 @@ int kb_handle_memory_assemble_context(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to assemble context");
 }
 
+int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
+{
+   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
+   if (!cJSON_IsString(query_j) || !query_j->valuestring[0])
+      return kb_send_error(fd, "memory.assemble_typed_context requires a non-empty query");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 1, &missing);
+   cJSON *resp = db2_kb_service_memory_assemble_typed_context_json(req);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to assemble typed context");
+}
+
 int kb_handle_memory_compact_windows(int fd, cJSON *req)
 {
    (void)req;
@@ -1244,6 +1256,38 @@ int kb_handle_memory_search_graph_as_of(int fd, cJSON *req)
                                                                as_of_j->valuestring, limit);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to search memory graph as-of");
+}
+
+int kb_handle_memory_search_assertions(int fd, cJSON *req)
+{
+   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
+   cJSON *valid_j = cJSON_GetObjectItemCaseSensitive(req, "valid_at");
+   cJSON *believed_j = cJSON_GetObjectItemCaseSensitive(req, "believed_at");
+   cJSON *historical_j = cJSON_GetObjectItemCaseSensitive(req, "include_historical");
+   cJSON *hops_j = cJSON_GetObjectItemCaseSensitive(req, "max_hops");
+   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
+   if (!cJSON_IsString(query_j) || !query_j->valuestring[0])
+      return kb_send_error(fd, "memory.search_assertions requires a non-empty query");
+   if (valid_j && !cJSON_IsString(valid_j))
+      return kb_send_error(fd, "memory.search_assertions valid_at must be a timestamp string");
+   if (believed_j && !cJSON_IsString(believed_j))
+      return kb_send_error(fd, "memory.search_assertions believed_at must be a timestamp string");
+   if (historical_j && !cJSON_IsBool(historical_j))
+      return kb_send_error(fd, "memory.search_assertions include_historical must be boolean");
+   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
+   int include_historical = cJSON_IsBool(historical_j) && cJSON_IsTrue(historical_j);
+   int max_hops = cJSON_IsNumber(hops_j) ? (int)hops_j->valuedouble : 0;
+   if (max_hops < 0 || max_hops > 2)
+      return kb_send_error(fd, "memory.search_assertions max_hops must be between 0 and 2");
+
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 1, &missing);
+   cJSON *resp = db2_kb_service_memory_search_assertions_json(
+       query_j->valuestring, cJSON_IsString(valid_j) ? valid_j->valuestring : "",
+       cJSON_IsString(believed_j) ? believed_j->valuestring : "", include_historical, max_hops,
+       limit);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to search semantic assertions");
 }
 
 int kb_handle_memory_get_episode(int fd, cJSON *req)

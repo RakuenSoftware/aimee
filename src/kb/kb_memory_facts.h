@@ -11,7 +11,14 @@
 #ifndef DEC_KB_MEMORY_FACTS_H
 #define DEC_KB_MEMORY_FACTS_H 1
 
-#include "config.h"
+#include <stddef.h>
+#include <stdint.h>
+
+/* Validate an end-exclusive byte span and derive its stable locator and
+ * region hash. Exposed so the extraction contract can be unit-tested without
+ * an LLM. Returns 0 on success, -1 for an invalid/out-of-bounds span. */
+int kb_memory_fact_evidence_span(const char *content, int64_t source_start, int64_t source_end,
+                                 char *span_out, size_t span_cap, char *hash_out, size_t hash_cap);
 
 /* Drain up to `batch` pending "memory_facts" jobs. Returns the number processed
  * (0 when none, when typed_facts_enabled is off, or when DB2 is unavailable). */

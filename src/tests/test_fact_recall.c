@@ -40,24 +40,20 @@ int main(void)
    assert(strstr(buf, "age: 30") != NULL);
 
    /* defensive: a row whose formatted line would exceed the internal 256B buffer
-    * is skipped (never truncated into the prompt, never over-read). db2_fact_commit
-    * caps endpoints below this, so insert the long-target row directly. */
+    * is skipped (never truncated into the prompt, never over-read). */
    {
-      void *conn = db2_conn();
-      assert(conn);
       char longt[400];
       memset(longt, 'z', sizeof(longt) - 1);
       longt[sizeof(longt) - 1] = '\0';
-      char err[256] = "";
-      aimee_pg_stmt_t *ins = aimee_pg_prepare(
-          conn,
-          "INSERT INTO entity_edges (source, relation, target, weight, edge_class,"
-          " confidence_class, confidence) VALUES ('user', 'bio', ?1, 1, 'semantic', 'C', 0.9)",
-          err, sizeof(err));
-      assert(ins);
-      aimee_pg_bind_text(ins, "?1", longt);
-      assert(aimee_pg_step(ins, err, sizeof(err)) == AIMEE_PG_DONE);
-      aimee_pg_finalize(ins);
+      fact_actor_t actor;
+      assert(db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &actor) == 0);
+      fact_assertion_input_t input = {.source = "user",
+                                      .relation = "bio",
+                                      .target = longt,
+                                      .confidence_class = "C",
+                                      .confidence = 0.9,
+                                      .assertion_kind = FACT_KIND_WORLD_FACT};
+      assert(db2_fact_mutation_assert(&actor, &input, NULL) == 0);
    }
    n = db2_fact_recall_block("user", 1, buf, sizeof(buf));
    assert(n == 2); /* works_for + age; the over-long bio row skipped */
@@ -93,6 +89,16 @@ int main(void)
    /* the entity is reachable via its alias too (registry resolution). */
    n = db2_fact_recall_in_query("tell me about the workstation", 1, buf, sizeof(buf));
    assert(strstr(buf, "device_has_ip: 10.0.0.5") != NULL);
+
+   /* A durable fact whose subject kind is OTHER has no entity_registry row. It
+    * is still query-recallable by its direct assertion subject after promotion /
+    * persistence; otherwise LLM facts with an unknown subject kind disappear
+    * even after an operator approves them. */
+   assert(db2_fact_commit("warehouse", NODE_OTHER, "located_in", "Rotterdam", NODE_PLACE,
+                          FACT_AUTHORITY_USER, 1) == FACT_GATE_ACCEPT);
+   n = db2_fact_recall_in_query("what is known about the warehouse", 1, buf, sizeof(buf));
+   assert(strstr(buf, "located_in: Rotterdam") != NULL);
+
    /* a query naming no known entity -> just the user's facts. */
    n = db2_fact_recall_in_query("what's the weather", 1, buf, sizeof(buf));
    assert(strstr(buf, "device_has_ip") == NULL);

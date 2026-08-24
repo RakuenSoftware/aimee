@@ -17,11 +17,12 @@
  * the C canonicalization), and (b) an INDEPENDENT recomputation in C of the SQL row's
  * hash (audit_worm_row_hash over its stored fields + stored prev_hash) equals the row
  * hash the SQL function stored — direct byte-identity, not merely self-consistency. */
-#include <aimee/audit/audit_worm_chain.h> /* audit_worm_row_hash, AUDIT_WORM_GENESIS_PREV */
-#include "db2.h"                          /* db2_init / db2_shutdown */
-#include "db2/db2_internal.h"             /* db2_conn */
-#include "db2/db_postgres.h"              /* aimee_pg_* */
-#include "kb_audit_worm.h"                /* db2_kb_audit_append / verify / count */
+#include <aimee/audit/audit_worm_chain.h>        /* audit_worm_row_hash, AUDIT_WORM_GENESIS_PREV */
+#include "db2.h"                                 /* db2_init / db2_shutdown */
+#include "db2/db2_internal.h"                    /* db2_conn */
+#include "db2/db_postgres.h"                     /* aimee_pg_* */
+#include "kb_audit_worm.h"                       /* db2_kb_audit_append / verify / count */
+#include "modules/config/config_embedding_dim.h" /* deployment test width */
 
 #include <assert.h>
 #include <stdio.h>
@@ -172,6 +173,11 @@ int main(void)
    snprintf(mk, sizeof(mk), "rm -rf %s && mkdir -p %s", home, home);
    assert(system(mk) == 0);
    setenv("AIMEE_HOME", home, 1);
+
+   /* Real-PG tests bypass the production entry points, so they must perform the
+    * same explicit width injection as cmd_core/kb_main before db2_init(). */
+   db2_set_embedding_dim_default(CONFIG_EMBEDDING_DIM_DEFAULT);
+   db2_set_embedding_dim(CONFIG_EMBEDDING_DIM_DEFAULT);
 
    if (db2_init(url) != 0)
    {

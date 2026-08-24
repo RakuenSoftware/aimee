@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "fact_mutation.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -68,9 +69,44 @@ extern "C"
     * or -1. */
    int64_t db2_entity_merge(int64_t from_id, int64_t into_id);
 
+   /* Authenticated/operator-aware form used by public mutation surfaces.  The
+    * actor is recorded on the graph commit and WORM event in the same
+    * transaction as the registry change. */
+   int64_t db2_entity_merge_as(const fact_actor_t *actor, int64_t from_id, int64_t into_id,
+                               char commit_id[FACT_COMMIT_ID_MAX]);
+
    /* Reverse a recorded merge: restore the merged entity to active and mark the
     * audit row undone. 0 on success, -1 on error / unknown / already-undone. */
    int db2_entity_unmerge(int64_t merge_id);
+
+   int db2_entity_unmerge_as(const fact_actor_t *actor, int64_t merge_id,
+                             char commit_id[FACT_COMMIT_ID_MAX]);
+
+   typedef struct
+   {
+      int64_t canonical_id;
+      int kind;
+      char status[24];
+      int64_t merged_into;
+      char name[128];
+   } entity_summary_t;
+
+   typedef struct
+   {
+      int64_t merge_id;
+      int64_t from_id;
+      int64_t into_id;
+      int undone;
+      char from_name[128];
+      char into_name[128];
+      char commit_id[FACT_COMMIT_ID_MAX];
+   } entity_merge_summary_t;
+
+   /* Operator-console read models.  They expose surrogate IDs and preferred
+    * display names without allowing aliases or authority to be nominated by a
+    * mutation payload. */
+   int db2_entity_summaries(entity_summary_t *out, int max);
+   int db2_entity_merge_summaries(entity_merge_summary_t *out, int max);
 
    /* entity_name_conflicts: the true-ambiguity queue (§3 tier 3). Record an open
     * conflict for a name (idempotent on name_norm; bumps priority on repeat).

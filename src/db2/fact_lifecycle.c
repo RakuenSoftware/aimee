@@ -2,6 +2,7 @@
  * the semantic edges written through db2_fact_commit. P3. See fact_lifecycle.h. */
 #include "../headers/aimee.h" /* edge_t (pulled in transitively by entity_edges.h) */
 #include "fact_lifecycle.h"
+#include "fact_mutation.h"
 #include "../headers/rel_types.h" /* rel_types_seed_lookup, correction_behavior_t */
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -11,17 +12,6 @@
 #include <time.h>
 
 #define FL_ERRBUF 256
-
-/* Host-clock UTC "now" in the stored text format, so every transaction-time
- * stamp (asserted_at, superseded_at) shares one clock — independent of the DB
- * session timezone — and lexical compares stay chronological. */
-static void fl_now_utc(char *buf, size_t n)
-{
-   time_t now_t = time(NULL);
-   struct tm tmv;
-   gmtime_r(&now_t, &tmv);
-   strftime(buf, n, "%Y-%m-%d %H:%M:%S", &tmv);
-}
 
 double fact_class_confidence(const char *cls)
 {
@@ -63,62 +53,25 @@ int db2_fact_expire_speculative(int ttl_days)
 {
    if (ttl_days <= 0)
       return -1;
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   /* Cutoff = now - ttl_days, in the same UTC text format as asserted_at, so the
-    * lexical comparison is also chronological. */
    time_t cutoff_t = time(NULL) - (time_t)ttl_days * 86400;
    struct tm tmv;
    gmtime_r(&cutoff_t, &tmv);
    char cutoff[32];
    strftime(cutoff, sizeof(cutoff), "%Y-%m-%d %H:%M:%S", &tmv);
-   char now_utc[32];
-   fl_now_utc(now_utc, sizeof(now_utc));
-
-   /* Supersede unconfirmed (weight<=1) Class C edges asserted before the cutoff
-    * and still active. The row is retained (only stamped) per "always keep the
-    * origin artifact". asserted_at='' (legacy/un-stamped) is left alone. */
-   static const char *sql = "UPDATE entity_edges SET superseded_at = ?2"
-                            " WHERE edge_class = 'semantic' AND confidence_class = 'C'"
-                            "   AND superseded_at = '' AND suppressed = 0 AND weight <= 1"
-                            "   AND asserted_at <> '' AND asserted_at < ?1";
-   char err[FL_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &actor) != 0)
       return -1;
-   aimee_pg_bind_text(st, "?1", cutoff);
-   aimee_pg_bind_text(st, "?2", now_utc);
-   int rc = aimee_pg_step(st, err, sizeof(err));
-   int changes = aimee_pg_stmt_changes(st);
-   aimee_pg_finalize(st);
-   return rc == AIMEE_PG_DONE ? changes : -1;
+   return db2_fact_mutation_expire_candidates(&actor, cutoff);
 }
 
 int db2_fact_promote_durable(int threshold)
 {
    if (threshold <= 0)
       return -1;
-   void *conn = db2_conn();
-   if (!conn)
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &actor) != 0)
       return -1;
-   /* Class B confirmed >= threshold times becomes durable (confidence 0.8). It
-    * stays Class B (never promoted to A, §5 R2-3); durability means it no longer
-    * expires (expiry targets only Class C). */
-   static const char *sql = "UPDATE entity_edges SET confidence = 0.8"
-                            " WHERE edge_class = 'semantic' AND confidence_class = 'B'"
-                            "   AND superseded_at = '' AND suppressed = 0"
-                            "   AND weight >= ?1 AND confidence < 0.8";
-   char err[FL_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_int(st, "?1", threshold);
-   int rc = aimee_pg_step(st, err, sizeof(err));
-   int changes = aimee_pg_stmt_changes(st);
-   aimee_pg_finalize(st);
-   return rc == AIMEE_PG_DONE ? changes : -1;
+   return db2_fact_mutation_promote_supported(&actor, threshold);
 }
 
 int db2_fact_retract(const char *source, const char *relation, const char *target,
@@ -126,10 +79,6 @@ int db2_fact_retract(const char *source, const char *relation, const char *targe
 {
    if (!source || !source[0] || !relation || !relation[0])
       return -1;
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
    char norm[REL_TYPE_NAME_MAX];
    rel_type_normalize(relation, norm, sizeof(norm));
    if (!norm[0])
@@ -145,41 +94,11 @@ int db2_fact_retract(const char *source, const char *relation, const char *targe
    if (behavior == CORR_IMMUTABLE && authority != FACT_AUTHORITY_USER)
       return FACT_RETRACT_IMMUTABLE;
 
-   char now_utc[32];
-   fl_now_utc(now_utc, sizeof(now_utc));
-
-   /* §4 scope: when `target` (the old value) is given, retract only that specific
-    * {subject, rel_type, old_value} edge; NULL retracts all current values of
-    * (subject, relation) — the "this no longer holds at all" case.
-    *
-    * §4/§5 authority guard: a non-user (model / inferred) retraction must NOT
-    * supersede or hard-delete a user-stated Class-A fact. Without this, a model
-    * correction could silently delete what the user explicitly said. A user
-    * retraction is unrestricted (it already overrides even `immutable` above). */
-   int has_target = target && target[0];
-   const char *set_clause = (behavior == CORR_HARD_DELETE)
-                                ? "UPDATE entity_edges SET suppressed = 1, superseded_at = ?3"
-                                : "UPDATE entity_edges SET superseded_at = ?3";
-   char sql[512];
-   snprintf(sql, sizeof sql,
-            "%s WHERE source = ?1 AND relation = ?2 AND edge_class = 'semantic'"
-            " AND superseded_at = '' AND suppressed = 0%s%s",
-            set_clause, has_target ? " AND target = ?4" : "",
-            authority != FACT_AUTHORITY_USER ? " AND confidence_class <> 'A'" : "");
-
-   char err[FL_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(
+           authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
       return -1;
-   aimee_pg_bind_text(st, "?1", source);
-   aimee_pg_bind_text(st, "?2", norm);
-   aimee_pg_bind_text(st, "?3", now_utc);
-   if (has_target)
-      aimee_pg_bind_text(st, "?4", target);
-   int rc = aimee_pg_step(st, err, sizeof(err));
-   int changes = aimee_pg_stmt_changes(st);
-   aimee_pg_finalize(st);
-   return rc == AIMEE_PG_DONE ? changes : -1;
+   return db2_fact_mutation_invalidate(&actor, source, norm, target, NULL);
 }
 
 int db2_fact_current_count(const char *entity)
@@ -191,7 +110,8 @@ int db2_fact_current_count(const char *entity)
       return -1;
    static const char *sql = "SELECT COUNT(*) FROM entity_edges"
                             " WHERE (source = ?1 OR target = ?2) AND edge_class = 'semantic'"
-                            "   AND superseded_at = '' AND suppressed = 0";
+                            "   AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0"
+                            "   AND lifecycle_state IN ('persistent','promoted')";
    char err[FL_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

@@ -25,6 +25,7 @@ static void test_allowed_routes(void)
    assert(kb_route_acl_console_admin_allows("POST", "/v1/console/pipeline/config"));
    assert(kb_route_acl_console_admin_allows("GET", "/v1/console/settings"));
    assert(kb_route_acl_console_admin_allows("POST", "/v1/console/settings/config"));
+   assert(kb_route_acl_console_admin_allows("POST", "/v1/console/typed_facts/entity"));
    printf("  allowed_routes: ok\n");
 }
 
@@ -45,6 +46,7 @@ static void test_wrong_method_denied(void)
    assert(!kb_route_acl_console_admin_allows("POST", "/v1/console/pipeline"));
    assert(!kb_route_acl_console_admin_allows("GET", "/v1/console/pipeline/config"));
    assert(!kb_route_acl_console_admin_allows("POST", "/v1/console/settings"));
+   assert(!kb_route_acl_console_admin_allows("GET", "/v1/console/typed_facts/entity"));
    assert(!kb_route_acl_console_admin_allows("GET", "/v1/console/settings/config"));
    printf("  wrong_method: ok\n");
 }

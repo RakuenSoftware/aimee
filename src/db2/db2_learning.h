@@ -17,6 +17,102 @@ extern "C"
 {
 #endif
 
+#define LEARNING_OBSERVATION_TEXT_MAX 512
+#define LEARNING_REF_JSON_MAX         2048
+
+   typedef struct
+   {
+      char observation_id[64];
+      char scope_kind[32];
+      char scope_id[128];
+      char observation_type[64];
+      char title[256];
+      char summary[LEARNING_OBSERVATION_TEXT_MAX];
+      char status[16];
+      double confidence;
+      char evidence_window_start[40];
+      char evidence_window_end[40];
+      char synthesis_policy_version[64];
+      int evidence_count;
+      int independent_session_count;
+      char supersedes[64];
+      char superseded_by[64];
+      char created_at[40];
+      char refreshed_at[40];
+      char retired_at[40];
+   } learning_observation_t;
+
+   typedef struct
+   {
+      int64_t source_event_id;
+      const char *source_span;
+      const char *stance;
+   } learning_observation_evidence_input_t;
+
+   typedef struct
+   {
+      char application_id[64];
+      int64_t source_event_id;
+      char session_id[128];
+      char scope_kind[32];
+      char scope_id[128];
+      char task_family[128];
+      char observation_id[64];
+      char procedure_artifact_id[64];
+      int proposal_id;
+      int retrieved;
+      int rendered;
+      int selected;
+      int applied;
+      char outcome[16];
+      char failure_class[128];
+      char human_correction[512];
+      int64_t latency_ms;
+      int tool_count;
+      int turn_count;
+      int64_t token_count;
+      char retrieved_refs[LEARNING_REF_JSON_MAX];
+      char rendered_refs[LEARNING_REF_JSON_MAX];
+      char selected_refs[LEARNING_REF_JSON_MAX];
+      char applied_refs[LEARNING_REF_JSON_MAX];
+   } learning_application_event_t;
+
+   /* Deterministically materialize/refresh one recurring-failure observation
+    * and attach every matching source event through max_event_id. The derived
+    * row becomes active only at the closed policy's 3-event/2-session floor. */
+   int db2_learning_observation_refresh_recurrence(const char *observation_id, const char *role,
+                                                   const char *failure_mode, const char *title,
+                                                   const char *summary, int64_t max_event_id);
+
+   /* Read-only observation surfaces. evidence ids are stable source_event_id
+    * locators, ordered oldest-first. */
+   int db2_learning_observation_get(const char *observation_id, learning_observation_t *out);
+   int db2_learning_observation_list(const char *status, const char *scope_kind,
+                                     const char *scope_id, int limit, learning_observation_t *out,
+                                     int max);
+   int db2_learning_observation_evidence_ids(const char *observation_id, int64_t *out, int max);
+   int db2_learning_observation_set_status(const char *observation_id, const char *status);
+   /* Closed-type, normalized observation refresh. The transaction upserts the
+    * derived row, idempotently attaches exact event locators, and recomputes its
+    * lifecycle from the effective supporting/contradicting evidence. */
+   int db2_learning_observation_refresh(const char *observation_id, const char *scope_kind,
+                                        const char *scope_id, const char *observation_type,
+                                        const char *title, const char *summary,
+                                        const char *policy_version,
+                                        const learning_observation_evidence_input_t *evidence,
+                                        int evidence_count, const char *supersedes);
+   int db2_learning_observation_add_evidence(const char *observation_id, int64_t source_event_id,
+                                             const char *source_span, const char *stance);
+   /* Recompute evidence/session counts and retire observations whose effective
+    * supporting evidence fell below policy after erasure/invalidation. */
+   int db2_learning_observations_reconcile(void);
+
+   /* Idempotent use/outcome attribution. Exposure stages are independent in
+    * storage, while impossible orderings are rejected (application requires
+    * selection, rendering, and retrieval). */
+   int db2_learning_application_record(const learning_application_event_t *event);
+   int db2_learning_application_get(const char *application_id, learning_application_event_t *out);
+
    /* Sweep state='pending' learning_proposals whose expires_at has
     * elapsed into state='archived' with archive_reason='expired'. Best
     * effort — failures are logged and ignored. */
@@ -31,6 +127,10 @@ extern "C"
     * pending learning_proposals row. Returns 0 on success, -1 on SQL /
     * connection error. */
    int db2_learning_proposal_bump_corroboration(int id);
+
+   /* Replace the evidence reference manifest on a pending proposal after its
+    * deterministic observation is refreshed. */
+   int db2_learning_proposal_refresh_evidence(int id, const char *evidence_refs_json);
 
    /* Count rows in learning_proposals where sink = ?, state = 'committed',
     * and committed_at falls within the last 7 days. Returns count, or
