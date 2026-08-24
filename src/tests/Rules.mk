@@ -307,6 +307,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails \
                $(TESTPREFIX)/unit-test-mcp-git \
+               $(TESTPREFIX)/unit-test-agent \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-conn-accept \
@@ -2663,6 +2664,46 @@ $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OB
 $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integrations.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+
+# Restored, with test_agent_delegate_root.c which shares the binary. 826 + 103
+# assertions about agent behaviour, deleted with the C store.
+#
+# STUBS DO NOT SCALE HERE, unlike the guardrails and mcp-git binaries. This one
+# links a large slice of the server and wanted 41 store symbols, nearly all of
+# them irrelevant to anything it asserts. It links the real $(DB1_CLIENT_OBJS)
+# instead: production code that fails closed with no module attached, which is
+# the correct behaviour for the ~900 assertions that never touch the store.
+#
+# The three that DO read the store back are gated on store_module_fixture, the
+# convention seven other suites here already use: bring the real module up, or
+# skip saying why.
+$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
+                      $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/store_module_fixture.o $(DB1_CLIENT_OBJS) \
+                     $(OBJDIR)/db1_store_ready.o \
+                      $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
+                      $(OBJDIR)/modules/execution-policy/execution_policy.o \
+                      $(OBJDIR)/modules/workflows/tool_egress.o \
+                      $(OBJDIR)/tests/test_agent_responses.o \
+                      $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+                      $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
+                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/delegates/aimee_ir_rescue.o \
+                      $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
+                      $(OBJDIR)/tests/test_agent_delegate_root.o $(OBJDIR)/server/agent_cli_shell.o \
+                      $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                      $(OBJDIR)/server/tool_call_args.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
+                      $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
+                      $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
+                      $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
+                      $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
+                      $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
+                      $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
+                      $(OBJDIR)/server/mistral_profile.o $(OBJDIR)/server/openrouter_profile.o \
+                      $(OBJDIR)/server/ollama_profile.o $(OBJDIR)/server/llama_native_profile.o \
+                      $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Restored. Deleted with the C store as "store-coupled": its only matches for
 # /db1/ were an <sqlite3.h> include it never used, a db_schema.h include it never

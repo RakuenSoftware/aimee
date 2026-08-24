@@ -43,8 +43,6 @@ RULES = Path("src/tests/Rules.mk")
 # removed, which the check below enforces so the list cannot rot into a place
 # things hide.
 UNBUILT_SOURCES = {
-    "test_agent_caps.c",
-    "test_agent_responses.c",
     "test_audit_action.c",
     "test_audit_action_log.c",
     "test_audit_ledger.c",

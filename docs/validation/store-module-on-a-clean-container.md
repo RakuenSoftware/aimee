@@ -611,3 +611,61 @@ other.
 The stubs were split so each symbol has one home — session state, guardrail
 events and git ownership in three files rather than one — since the guardrails
 and mcp-git binaries need overlapping but different subsets.
+
+## test_agent restored, and a fixture that said yes to the wrong question
+
+826 assertions, plus 103 in `test_agent_delegate_root.c` which shares the
+binary. This one could not be done with stubs: the binary links a large slice of
+the server and needed **41** store symbols, most of them irrelevant to anything
+it asserts. It links the real `$(DB1_CLIENT_OBJS)` instead, which satisfies all
+41 with production code that fails closed when no module is attached.
+
+Three tests genuinely read the store back, so they are gated on
+`store_module_fixture`, the convention seven suites in this tree already use:
+bring the real module up, or skip saying why.
+
+### The fixture aborted the moment a database was named
+
+Standing up PostgreSQL 17.11 and pointing `AIMEE_STORE_URL` at it did not run
+the gated tests — it **aborted the whole suite**:
+
+    store_module_fixture: module exited before it attached
+                          (check AIMEE_STORE_URL reaches the database)
+
+The DSN was fine. `store_module_fixture_available()` answered on the DSN alone,
+and the DSN was never sufficient: the store module does not open PostgreSQL
+itself. `storeBackend()` in `cmd/aimee-module` connects as principal 68 and
+reaches the database **through the postgres module's SQL stage, kind 11266** —
+the one gap this whole document records. Nothing serves it, so the module exits
+before it attaches whatever the DSN names.
+
+That combination is the worst arrangement of the two halves. `available()` is
+generous, `start()` aborts by design — correctly, since a failure after a yes is
+a real fault — and the error message points at the operator's database. Seven
+existing suites carried this, not just the restored one, and every one of them
+would have died the same way.
+
+**It was invisible because the skip was the normal path.** With `AIMEE_STORE_URL`
+unset, all seven skip and the suite is green; a skip that would abort if taken
+looks exactly like a skip that would pass. Only setting the variable and running
+tells them apart, and nothing in the tree had done that since the store moved.
+
+`available()` now reports the real blocker and returns 0, naming kind 11266 and
+saying to delete the block when the stage lands. The DSN check stays as the
+second condition.
+
+### And an ordering fault underneath it
+
+Fixed on the way: the fixture configures the module runtime and starts the bus,
+and `obs_bus` refuses configuration once running. Several `test_agent` cases
+bring the bus up as a side effect, so a fixture started at the first store-backed
+test found it already up and died at `configure the module endpoint`. It starts
+from `main` now, before anything else. Also only visible with a real database —
+the two faults were stacked, and the first hid the second.
+
+### What the restoration cost
+
+`check_tests_are_run` then failed correctly: `test_agent_caps.c` and
+`test_agent_responses.c` were in `UNBUILT_SOURCES`, orphaned when `test_agent`
+was deleted, and are built again now. Its stale-entry rule caught that without
+being asked — the one guard in this sweep that needed no repair.

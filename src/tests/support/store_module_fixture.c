@@ -60,7 +60,29 @@ int store_module_fixture_available(void)
       printf("  SKIP: AIMEE_STORE_URL is unset; the store module needs a PostgreSQL\n");
       return 0;
    }
-   return 1;
+
+   /* THE DSN IS NOT SUFFICIENT, and answering on it alone was a yes to the wrong
+    * question. The store module does not open PostgreSQL itself: storeBackend()
+    * in cmd/aimee-module connects as principal 68 and reaches the database
+    * through the postgres module's SQL stage, kind 11266. Nothing in this tree
+    * serves that stage -- see docs/validation/store-module-on-a-clean-container.md
+    * -- so the module exits before it attaches whatever the DSN names.
+    *
+    * This matters because start() ABORTS on failure, by design: once available()
+    * has said yes, a failure there is a real fault. So every suite gated on this
+    * died the moment anyone set AIMEE_STORE_URL, reporting "module exited before
+    * it attached (check AIMEE_STORE_URL reaches the database)" -- which points at
+    * the operator's DSN, and the DSN was fine.
+    *
+    * Found by setting the variable and running, not by reading. With it unset
+    * every one of these suites skips, and a skip that would abort if taken is
+    * indistinguishable from a skip that would pass.
+    *
+    * DELETE THIS BLOCK when the postgres SQL stage lands; the DSN check above is
+    * the real one and stays. */
+   printf("  SKIP: nothing serves kind 11266 (the postgres SQL stage) in this tree,\n"
+          "        so the store module cannot attach whatever AIMEE_STORE_URL names\n");
+   return 0;
 }
 
 void store_module_fixture_stop(void)
