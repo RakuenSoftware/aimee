@@ -1,8 +1,8 @@
 # Temporal Assertion and Learning Loop: Validation Report
 
 Closes the implementation acceptance criteria in the corresponding completed proposal. The
-feature remains default-off; this report validates implementation readiness, not a production
-activation decision.
+feature is now default-on after review of the representative benchmark evidence recorded here.
+Explicit ingress, assembler, and per-channel opt-outs remain available for rollback.
 
 ## Scope
 
@@ -64,6 +64,48 @@ Raw remote evidence is retained under:
 
 At report time, both isolated services remain running on loopback ports `18780` and `18781` for
 inspection.
+
+## Default-on activation evidence
+
+The default-on change was independently rebuilt and deployed on the requested `.252` host in a
+second isolated environment. The final source snapshot passed the complete temporal acceptance
+runner on that host: 24 benchmark-schema cases, the 12-case golden memory-sufficiency gate,
+typed-fact, curator, mining, DB2, and schema-ordering suites. Focused configuration, KB-client,
+ingress, and gateway tests also passed.
+
+Live requests omitted every temporal enable flag. They proved current semantic assertions, active
+observations, and reviewed procedures were enabled and packed by default, while historical
+assertions, episodes, summaries, and working context remained disabled. Separate requests proved
+the master opt-out, every temporal channel opt-out, malformed-flag fail-closed behavior, and the
+explicit historical opt-in.
+
+An isolated capture provider then exercised normal `aimee-server` prompt assembly under the
+repository's default strict code-context mode. The provider received the temporal-learning header,
+the untrusted memory boundary, the reviewed-procedure boundary, and representative assertion,
+observation, and procedure rows. A second request with `X-Aimee-Preinject: 0` contained none of
+those bytes, proving the immediate ingress rollback control.
+
+Raw activation evidence is retained under:
+
+```text
+/root/aimee-temporal-default-on-20260824T194144Z/results/
+  final-acceptance.log
+  build-and-focused-tests.log
+  live-smoke.log
+  typed-context-default.json
+  typed-context-master-off.json
+  typed-context-channel-opt-outs.json
+  typed-context-malformed-flag.json
+  typed-context-historical-opt-in.json
+  captured-provider-request-final.json
+  captured-provider-request-optout.json
+  e2e-provider-assertions.json
+  deployment-status.txt
+```
+
+At report time, the isolated validation deployment remains active on loopback ports `18880`
+(`aimee-server`), `18881` (`aimee-kb`), and `18882` (the capture provider). Its dedicated database
+and role are both named `aimee_ton_20260824`; it does not replace the earlier deployment.
 
 ## Findings corrected during exploratory testing
 

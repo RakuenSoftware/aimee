@@ -15,6 +15,8 @@ static const char *g_context_mode = "observe";
 static int g_context_calls = 0;
 static int g_facts_enabled = 0;
 static int g_facts_calls = 0;
+static int g_temporal_enabled = 0;
+static int g_temporal_calls = 0;
 static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
 
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
@@ -32,6 +34,15 @@ char *kb_client_memory_facts(const char *query)
    (void)query;
    g_facts_calls++;
    return strdup("- global preference: never substitute for project evidence\n");
+}
+char *kb_client_memory_assemble_typed_context(const char *query)
+{
+   (void)query;
+   g_temporal_calls++;
+   return g_temporal_enabled ? strdup("<memory_data trust=\"untrusted\">assertion</memory_data>\n"
+                                      "<approved_procedures authority=\"reviewed\">procedure"
+                                      "</approved_procedures>")
+                             : NULL;
 }
 
 /* Typed-facts gate stub: off, so the builder's facts path stays inert here
@@ -555,6 +566,41 @@ static void test_budgeted_build_uses_memory_previews(void)
    printf("budgeted_build_uses_memory_previews OK\n");
 }
 
+static void test_default_temporal_context_injection(void)
+{
+   g_temporal_enabled = 1;
+   g_temporal_calls = 0;
+   g_context_mode = "observe";
+   char *env = ingress_preinject_build("recover the deployment", 0);
+   assert(env != NULL);
+   assert(strstr(env, "recommended (temporal learning):") != NULL);
+   assert(strstr(env, "<memory_data trust=\"untrusted\">assertion</memory_data>") != NULL);
+   assert(strstr(env, "<approved_procedures authority=\"reviewed\">") != NULL);
+   assert(g_temporal_calls == 1);
+   free(env);
+
+   /* The repository default is strict code-context mode. Temporal learning is
+    * an independently labelled and scope-filtered channel, so strict mode must
+    * not silently turn the default back off. */
+   ingress_preinject_task_state_reset();
+   ingress_preinject_set_session_id("session-temporal-strict");
+   g_context_mode = "on";
+   env = ingress_preinject_build("recover the strict deployment", 0);
+   assert(env != NULL);
+   assert(strstr(env, "recommended (task-conditioned code") != NULL);
+   assert(strstr(env, "recommended (temporal learning):") != NULL);
+   assert(g_temporal_calls == 2);
+   free(env);
+
+   /* The existing request-level ingress opt-out remains an instant rollback. */
+   assert(ingress_preinject_build("recover the deployment", 1) == NULL);
+   assert(g_temporal_calls == 2);
+   ingress_preinject_set_session_id(NULL);
+   g_context_mode = "observe";
+   g_temporal_enabled = 0;
+   printf("default_temporal_context_injection OK\n");
+}
+
 /* P0 Envelope IR: the renderer reproduces the old inline rendering — group
  * headers, single blank-line separators between non-empty groups, the
  * header-rides-the-first-fitting-candidate rule, the budget/omitted gate, the
@@ -711,6 +757,7 @@ int main(void)
    test_append();
    test_render_block();
    test_budgeted_build_uses_memory_previews();
+   test_default_temporal_context_injection();
    test_turn_id_mint_and_thread_local();
    test_compress_code_fold();
    printf("all tests passed\n");

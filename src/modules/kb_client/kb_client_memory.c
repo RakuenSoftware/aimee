@@ -650,6 +650,32 @@ char *kb_client_memory_assemble_context(const char *task_hint)
    return out;
 }
 
+char *kb_client_memory_assemble_typed_context(const char *query)
+{
+   if (!query || !query[0])
+      return NULL;
+
+   cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
+   cJSON_AddStringToObject(req, "query", query);
+   char *json = kb_v1_action_request("memory.assemble_typed_context", req);
+   if (!json)
+      return NULL;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return NULL;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   cJSON *used = cJSON_GetObjectItemCaseSensitive(resp, "used_tokens");
+   cJSON *body = cJSON_GetObjectItemCaseSensitive(resp, "rendered_context");
+   char *out = NULL;
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(used) &&
+       used->valuedouble > 0 && cJSON_IsString(body) && body->valuestring[0])
+      out = strdup(body->valuestring);
+   cJSON_Delete(resp);
+   return out;
+}
+
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count)
 {
    if (summary_count)
