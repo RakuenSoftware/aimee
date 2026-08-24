@@ -1,8 +1,8 @@
 # Temporal Assertion and Learning Loop: Validation Report
 
 Closes the implementation acceptance criteria in the corresponding completed proposal. The
-feature remains default-off; this report validates implementation readiness, not a production
-activation decision.
+feature is now default-on after review of the representative benchmark evidence recorded here.
+Explicit ingress, assembler, and per-channel opt-outs remain available for rollback.
 
 ## Scope
 
@@ -64,6 +64,46 @@ Raw remote evidence is retained under:
 
 At report time, both isolated services remain running on loopback ports `18780` and `18781` for
 inspection.
+
+## Default-on activation evidence on `testing`
+
+Commit `d7fdec06ca`, based directly on `testing`, was rebuilt and deployed in an isolated
+module-based stack on the requested `.252` host. The extracted config module reported
+`kb_mining_failure_learning_enabled=1`; both `aimee-kb` and `aimee-server` passed their live health
+gates on loopback ports `18931` and `18933`.
+
+The deployed typed-context action received no temporal enable flags. It packed current semantic
+assertions, active observations, and reviewed procedures by default while leaving historical
+assertions, episodes, summaries, and working context disabled. A second live request set only the
+master flag to false and returned zero context with every channel disabled, proving the immediate
+rollback control.
+
+The exact deployed snapshot also passed the complete temporal acceptance runner, all Go package
+tests, all 68 lint checks, and a full release build on `.252`. The acceptance runner includes the
+24-case benchmark schema, the 12-case golden memory-sufficiency gate, typed-fact, curator, mining,
+DB2, and schema-ordering coverage.
+
+Raw evidence is retained under:
+
+```text
+/root/aimee-temporal-testing-default-on-20260824T210000Z/results/
+  source-commit.txt
+  build-test-lint.log
+  lint-build-retry.log
+  isolated-live-deployment.log
+  deployment-status.txt
+  typed-context-default.json
+  typed-context-master-off.json
+  server-health.json
+  kb-health.json
+  server.log
+  kb.log
+  server-config-module.log
+  kb-config-module.log
+```
+
+The deployment used a disposable database and was stopped and removed after the assertions; the
+earlier isolated validation services were not modified.
 
 ## Findings corrected during exploratory testing
 

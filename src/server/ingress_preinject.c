@@ -823,9 +823,9 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       return NULL;
    if (!query || !query[0])
       return NULL;
-   /* The envelope carries two layers: the code/memory preview block
-    * (ingress_preinject_enabled, aimed at coding agents) and the typed-fact
-    * block. Only the preview layer is gated now.
+   /* The envelope carries code/memory preview, typed-fact, and temporal-learning
+    * layers. The temporal assembler is default-on and remains governed by the
+    * ingress master gate and per-request opt-out.
     *
     * Typed facts used to be KB-OWNED (proposal §8): aimee-server asked the KB
     * through kb_client_typed_facts_enabled() rather than reading a config of its
@@ -834,6 +834,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * always returns 1 would keep the shape of an option that no longer exists.
     * Facts now depend only on having an active scope. */
    int preview_configured = config_ingress_preinject_enabled();
+   int temporal_configured = preview_configured;
    char active_workspace[512] = "";
    char active_project[512] = "";
    int active_scope =
@@ -843,6 +844,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * neither code nor memory may silently broaden to global recall. */
    int preview_on = preview_configured && active_scope;
    int facts_on = active_scope;
+   int temporal_on = temporal_configured && active_scope;
 
    const char *mode_name = config_code_context_mode();
    int context_mode = 1; /* invalid/blank values fail safely to observe */
@@ -853,13 +855,15 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    else if (mode_name && mode_name[0] && strcmp(mode_name, "observe") != 0)
       LOG_WARN("ingress-context", "invalid code_context_mode=%s; using observe", mode_name);
 
-   /* Strict `on` packets may contain only validated current-project evidence.
-    * Typed facts are user/global evidence today, so they remain available in
-    * off/observe but cannot become a silent fallback when strict retrieval
-    * abstains or is unavailable. */
+   /* Strict `on` task packets may contain only validated current-project code
+    * evidence. Typed facts are user/global evidence today, so they cannot
+    * become a silent fallback when strict code retrieval abstains. Temporal
+    * learning is a separately labelled, scope-filtered channel with explicit
+    * trust/authority boundaries, and remains default-on in every code-context
+    * mode. */
    if (context_mode == 2)
       facts_on = 0;
-   if (!preview_on && !facts_on)
+   if (!preview_on && !facts_on && !temporal_on)
       return NULL;
 
    kb_client_memory_scope_context_set(active_workspace, active_project, 0);
@@ -931,8 +935,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
        compress ? "recommended (code — expand via code_span_get):\n" : "recommended (code):\n";
 
    /* P0 Envelope IR: gather each source into a typed entry, then render the block
-    * from the list. CAP = 6 code + 5 memory + 1 facts + 1 audit. */
-   ingress_entry_t entries[1 + 6 + 5 + 1 + 1];
+    * from the list. CAP = 6 code + 5 memory + 1 facts + 1 temporal + 1 audit. */
+   ingress_entry_t entries[1 + 6 + 5 + 1 + 1 + 1];
    int k = 0;
    double score = 0.0;
    int headline_missing_count = 0;
@@ -1052,6 +1056,24 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          score = 0.5;
    }
    free(facts);
+
+   /* Default temporal-learning context: current semantic assertions, active
+    * evidence-backed observations, and reviewed procedures. The KB assembles
+    * and scope-filters these as typed channels, returns nothing when no
+    * authorized evidence fits, and labels untrusted versus reviewed content. */
+   char *temporal = temporal_on ? kb_client_memory_assemble_typed_context(query) : NULL;
+   if (temporal && temporal[0])
+   {
+      entries[k].kind = ING_SRC_TEMPORAL;
+      entries[k].transform = ING_XF_NONE;
+      entries[k].header = "recommended (temporal learning):\n";
+      entries[k].preview = temporal;
+      k++;
+      if (score < 0.6)
+         score = 0.6;
+   }
+   else
+      free(temporal);
 
    /* Auditable-correctness P1: emit a single-writer, turn-keyed retrieval_event
     * recording the memory rows surfaced into this turn's context. Default-off

@@ -1,6 +1,6 @@
 # Proposal: temporal assertion recall, evidence-backed observations, and a closed learning loop
 
-- **State:** done — implemented and validated; default-off promotion remains a separate reviewed decision
+- **State:** done — implemented, validated, and promoted default-on after benchmark review
 - **Date:** 2026-08-24
 - **Charter roles:** Extract / Recall / Rank-Fuse / Observe / Learn / Gate-Promote /
   Evaluate / Constrain-Verify
@@ -13,7 +13,7 @@
 
 ## Implementation status
 
-The full default-off implementation was completed and validated on 2026-08-24:
+The implementation was completed and validated on 2026-08-24:
 
 - the result and dual-axis temporal contracts are represented by a distinct semantic assertion
   search surface with typed invalid-time and degraded-channel responses;
@@ -33,9 +33,10 @@ The full default-off implementation was completed and validated on 2026-08-24:
 - schema mirrors, version fencing, temporal/evidence goldens, observation refresh tests, and
   compatibility checks cover the implementation.
 
-Semantic recall, observations, and the typed assembler remain opt-in and do not alter normal
-prompt assembly. Production activation is intentionally outside this implementation: it requires
-review of representative benchmark evidence and is never inferred from code completion.
+Semantic recall, active observations, reviewed procedures, and the typed assembler are default-on
+for normal prompt assembly. The master assembler and each channel retain explicit request-level
+opt-outs; historical recall remains opt-in so old and current facts are never mixed implicitly.
+This is the activation behavior slated for the 0.4.0 release.
 
 Implementation and deployment evidence is recorded in the
 [validation report](../../validation/temporal-assertion-learning-loop.md).
@@ -668,5 +669,6 @@ implementation.
    agreement of at least 0.90, complete manifests, and independently reported retrieval and answer
    grades. Representative production activation still requires an operator-reviewed run.
 
-The implementation and its acceptance checks are closed. The feature remains shadow-safe and
-default-off until the separate production activation decision is approved.
+The implementation, acceptance checks, representative benchmark review, and production activation
+are closed. The feature is default-on with explicit rollback controls at the ingress, assembler,
+and channel levels.
