@@ -761,6 +761,26 @@
           "id": 19,
           "name": "aimee-pki",
           "event_kind": 11795
+        },
+        {
+          "id": 20,
+          "name": "aimee-peer-delivery",
+          "event_kind": 11796
+        },
+        {
+          "id": 21,
+          "name": "aimee-peer-inbox",
+          "event_kind": 11797
+        },
+        {
+          "id": 22,
+          "name": "aimee-peer-grant",
+          "event_kind": 11798
+        },
+        {
+          "id": 23,
+          "name": "aimee-peer-channel",
+          "event_kind": 11799
         }
       ]
     }
@@ -805,8 +825,31 @@
       ]
     },
     {
-      "id": "aimee-postgres",
+      "id": "aimee-db1",
+      "principal_ref": 67,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-aimee",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11782
+      ]
+    },
+    {
+      "id": "server-peer",
       "principal_ref": 68,
+      "executable": "/usr/local/bin/aimee-server",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11796,
+        11797
+      ]
+    },
+    {
+      "id": "aimee-postgres",
+      "principal_ref": 69,
       "executable": "/usr/local/libexec/aimee-modules/aimee-module-aimee",
       "placements": [
         "server"

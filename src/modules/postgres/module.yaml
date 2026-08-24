@@ -11,13 +11,13 @@
   },
   "ownership_complete": true,
   "go_sources": [
+    "server-go/modules/postgres/checksum.go",
     "server-go/modules/postgres/health.go",
-    "server-go/modules/postgres/sql.go",
-    "server-go/modules/postgres/checksum.go"
+    "server-go/modules/postgres/sql.go"
   ],
   "go_tests": [
-    "server-go/modules/postgres/health_test.go",
-    "server-go/modules/postgres/checksum_test.go"
+    "server-go/modules/postgres/checksum_test.go",
+    "server-go/modules/postgres/health_test.go"
   ],
   "public_headers": [
     "src/modules/postgres/include/aimee/postgres/module_api.h"

@@ -82,13 +82,11 @@
   ],
   "tests": [
     "src/tests/test_gw_stage_memory.c",
-    "src/tests/test_memory.c",
     "src/tests/test_memory_advanced.c",
     "src/tests/test_memory_assemble_util.c",
     "src/tests/test_memory_embed_dim_guard.c",
     "src/tests/test_memory_fact_gate.c",
     "src/tests/test_memory_filter.c",
-    "src/tests/test_memory_health.c",
     "src/tests/test_memory_lanes.c",
     "src/tests/test_memory_profiles.c",
     "src/tests/test_memory_provider.c",

@@ -37,6 +37,12 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		// first use and answers with the reason when it cannot, so the stage is
 		// servable whether or not a database is reachable.
 		{"postgres", 28, []uint32{11265, 11266}},
+		// `aimee` is deliberately absent. It is the one module here whose
+		// config depends on the environment: it refuses to serve without a
+		// store backend, so in this test's process it has no stage table to
+		// compare. Its twenty-three stages are checked against the same
+		// contract file by TestModuleStagesMatchContract in the module itself,
+		// where the table is built rather than resolved.
 	}
 	for _, test := range tests {
 		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + test.name)

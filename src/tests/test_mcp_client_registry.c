@@ -549,7 +549,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 53
+#define MCP_TOOLS_GOLDEN_COUNT 54
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -566,8 +566,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "describe_tool {name} req:name\n"                                                               \
    "diagnose {command,content,diagnosis_id,hypothesis_id,rank,source,stance,symptom} "             \
    "req:command\n"                                                                                 \
-   "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} "              \
-   "req:command\n"                                                                                 \
+   "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} req:command\n" \
    "epistemic_directive "                                                                          \
    "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
    "id,state,suppress,topic,valid_until} req:command\n"                                            \
@@ -583,9 +582,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
    "{command,fallback,file_path,file_paths,include_code,judge,line_end,line_start,max_results,"    \
-   "node,paths,project,"                                                                           \
-   "queries,query,scope,spans,symbol,symbols} "                                                    \
-   "req:command\n"                                                                                 \
+   "node,paths,project,queries,query,scope,spans,symbol,symbols} req:command\n"                    \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
    "learning "                                                                                     \
    "{command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,"     \
@@ -594,8 +591,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "lsp {col,command,file,line,workspace} req:command\n"                                           \
    "memory "                                                                                       \
    "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
-   "project,"                                                                                      \
-   "query,reason,scope,tier,verb,workspace} req:command\n"                                         \
+   "project,query,reason,scope,tier,verb,workspace} req:command\n"                                 \
    "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \
@@ -606,9 +602,10 @@ static void test_osv_offline_cache_miss_allows(void)
    "pdf_open_neighbors {chunk_id,project} req:chunk_id,project\n"                                  \
    "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n"               \
    "pdf_search_chunks {max_results,project,query} req:project,query\n"                             \
+   "peer {command,conversation_id,expect_reply,max,reply_to,text,to} req:command\n"                \
    "pipeline "                                                                                     \
-   "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,"             \
-   "pipeline_id,questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"      \
+   "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,pipeline_id," \
+   "questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"                  \
    "preview_blast_radius {paths,project,scope} req:paths\n"                                        \
    "prospective_memory "                                                                           \
    "{action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_"  \
@@ -749,6 +746,7 @@ static void test_tool_profile_filter(void)
                                       "ask_user",
                                       "send_message",
                                       "note",
+                                      "peer",
                                       NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
@@ -784,6 +782,87 @@ static void test_tool_profile_filter(void)
       /* roundtable_review blocks and returns the verdict; a status tool on the
        * surface is an invitation to poll a call that has already finished. */
       assert(!have_status);
+   }
+
+   /* THE SAME CHECK FOR peer, FOR THE SAME REASON THE COMMENT ABOVE GIVES.
+    *
+    * Peer messaging shipped served-but-unreachable once already: four bus stages
+    * nothing called, then two MCP tools that worked and were not on the floor. A
+    * name in the mirror above proves only that this array was edited. What has
+    * to be true is that a client asking for the default profile is SHOWN it, and
+    * that both operations are reachable through the one entry -- a family whose
+    * enum lost a member is a capability silently withdrawn.
+    *
+    * There is no fallback here. An agent not shown this does not reach another
+    * session by some slower route; it does not reach one at all. */
+   {
+      cJSON *served = mcp_build_tools_list();
+      cJSON *peer = NULL, *t = NULL;
+      cJSON_ArrayForEach(t, served)
+      {
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(t, "name");
+         if (cJSON_IsString(nm) && strcmp(nm->valuestring, "peer") == 0)
+            peer = t;
+      }
+      assert(peer && "the peer family is not on the served surface at all");
+
+      cJSON *schema = cJSON_GetObjectItemCaseSensitive(peer, "inputSchema");
+      cJSON *props = schema ? cJSON_GetObjectItemCaseSensitive(schema, "properties") : NULL;
+      cJSON *cmd = props ? cJSON_GetObjectItemCaseSensitive(props, "command") : NULL;
+      cJSON *en = cmd ? cJSON_GetObjectItemCaseSensitive(cmd, "enum") : NULL;
+      int has_send = 0, has_inbox = 0, has_reply = 0;
+      cJSON *e = NULL;
+      cJSON_ArrayForEach(e, en)
+      {
+         if (!cJSON_IsString(e))
+            continue;
+         if (strcmp(e->valuestring, "send") == 0)
+            has_send = 1;
+         if (strcmp(e->valuestring, "inbox") == 0)
+            has_inbox = 1;
+         if (strcmp(e->valuestring, "reply") == 0)
+            has_reply = 1;
+      }
+      assert(has_send && "peer command=send is not offered");
+      assert(has_inbox && "peer command=inbox is not offered");
+      assert(has_reply && "peer command=reply is not offered");
+
+      /* The parameters each operation needs must survive the fold. The family
+         unions its members' properties, so a member that failed to attach takes
+         its arguments with it and leaves a command that cannot be called. */
+      assert(cJSON_GetObjectItemCaseSensitive(props, "to"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "text"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "conversation_id"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "expect_reply"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "max"));
+      assert(cJSON_GetObjectItemCaseSensitive(props, "reply_to"));
+
+      /* And the demux resolves both commands to real handlers. A family entry
+         whose command maps to a name mcp_tool_lookup does not know is an advert
+         for a tool that cannot run. */
+      char resolved[96];
+      cJSON *args = cJSON_CreateObject();
+      cJSON_AddStringToObject(args, "command", "send");
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == 1);
+      assert(strcmp(resolved, "peer_send") == 0);
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("inbox"));
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == 1);
+      assert(strcmp(resolved, "peer_inbox") == 0);
+      /* An unknown command must RESOLVE TO NOTHING rather than fall through to a
+         default. -1 is "this family does not serve that", which the caller turns
+         into a refusal; a 0 here would mean "not a family at all" and send the
+         call somewhere else entirely. */
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("reply"));
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == 1);
+      assert(strcmp(resolved, "peer_reply") == 0);
+      /* An unknown command must RESOLVE TO NOTHING rather than fall through to a
+         default. -1 is "this family does not serve that", which the caller turns
+         into a refusal; a 0 would mean "not a family at all" and send the call
+         somewhere else entirely. */
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "command", cJSON_CreateString("broadcast"));
+      assert(mcp_family_demux("peer", args, resolved, sizeof resolved) == -1);
+      cJSON_Delete(args);
+      cJSON_Delete(served);
    }
 
    /* An asynchronous tool whose poller is NOT core costs the agent a

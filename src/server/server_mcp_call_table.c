@@ -52,6 +52,7 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include "agent_help_data.h"
+#include "peer_client.h"
 
 /* Per-call bundle passed to every handler: the request context plus the
  * out-param for tools that emit an MCP `structured` payload alongside text. */
@@ -1767,6 +1768,208 @@ static cJSON *mcph_workflow_run(struct mcp_call *c)
    return content;
 }
 
+/* ── peer messaging: one aimee session talking to another ────────────────────
+ *
+ * The sender is c->sid, NEVER an argument. A `from` parameter would let any
+ * caller claim to be any session, and the registry's provenance stamping exists
+ * precisely so a message's origin is a fact rather than a claim -- handing the
+ * caller a field to fill in would put the forgery one layer above the check.
+ *
+ * These are the FIRST callers of the aimee module in the product. Before them
+ * the module served four stages that nothing invoked, and the only client that
+ * had ever spoken to it was a probe written to test it. */
+
+/* An unresolved session id is a refusal to state, not a silent no-op.
+ *
+ * Native calls (aimee's own agents) and external MCP calls both carry a sid,
+ * but a sid is not guaranteed non-empty, and sending "from nobody" would reach
+ * the module as an unknown_sender refusal whose reason the caller cannot see.
+ * Saying so here names the actual condition. */
+static const char *peer_self(struct mcp_call *c)
+{
+   return (c && c->sid && c->sid[0]) ? c->sid : NULL;
+}
+
+/* Render one message. The envelope is the module's stamp, so what a reader sees
+ * here is provenance rather than anything the sender asserted. */
+static cJSON *peer_message_json(const peer_client_message_t *m)
+{
+   cJSON *j = cJSON_CreateObject();
+   cJSON_AddStringToObject(j, "id", m->id ? m->id : "");
+   cJSON_AddStringToObject(j, "conversation_id", m->conversation_id ? m->conversation_id : "");
+   cJSON_AddStringToObject(j, "from_session", m->from_session ? m->from_session : "");
+   cJSON_AddStringToObject(j, "from_owner", m->from_owner ? m->from_owner : "");
+   cJSON_AddStringToObject(j, "sent_at", m->sent_at ? m->sent_at : "");
+   cJSON_AddBoolToObject(j, "is_reply", m->is_reply ? 1 : 0);
+   cJSON_AddNumberToObject(j, "hop", m->hop);
+   cJSON_AddStringToObject(j, "text", m->text ? m->text : "");
+   return j;
+}
+
+/* The three outcomes, kept three in the text a model reads.
+ *
+ * "could not reach the peer module" and "the peer module refused" are different
+ * instructions: the first says try again or tell a human, the second says stop
+ * and read the reason. Collapsing them into one "failed" line is how an agent
+ * ends up retrying a refusal forever, so the wording differs deliberately. */
+static cJSON *peer_outcome_text(const char *verb, peer_client_result_t rc, uint32_t status,
+                                int transport)
+{
+   char msg[320];
+   if (rc == PEER_CLIENT_TRANSPORT)
+      /* The transport outcome is NAMED, not summarised. "did not answer" covers
+         a module that is absent, a grant that denied the call, a deadline that
+         expired and a reply too large to receive -- four conditions with four
+         different responses, and a reader given only the summary cannot tell
+         which one they are looking at. That cost real time: a hang and an
+         absence were indistinguishable in this exact sentence. */
+      snprintf(msg, sizeof msg,
+               "peer %s: the request was never judged — the peer-messaging module did not "
+               "answer (%s). This is NOT a refusal; do not treat it as the peer saying no.",
+               verb, peer_client_transport_name(transport));
+   else
+      snprintf(msg, sizeof msg, "peer %s refused: %s", verb, peer_client_status_name(status));
+   return text_content(msg);
+}
+
+static cJSON *mcph_peer_send(struct mcp_call *c)
+{
+   const char *self = peer_self(c);
+   if (!self)
+      return text_content("error: peer_send needs a session id and this call carries none");
+   cJSON *jto = cJSON_GetObjectItemCaseSensitive(c->jargs, "to");
+   cJSON *jtext = cJSON_GetObjectItemCaseSensitive(c->jargs, "text");
+   if (!cJSON_IsString(jto) || !jto->valuestring[0])
+      return text_content("error: peer_send requires 'to' (the recipient's session id)");
+   if (!cJSON_IsString(jtext) || !jtext->valuestring[0])
+      return text_content("error: peer_send requires 'text'");
+   cJSON *jconv = cJSON_GetObjectItemCaseSensitive(c->jargs, "conversation_id");
+   cJSON *jexpect = cJSON_GetObjectItemCaseSensitive(c->jargs, "expect_reply");
+   peer_client_message_t stamped;
+   uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
+   peer_client_result_t rc =
+       peer_client_send(self, jto->valuestring, jtext->valuestring,
+                        cJSON_IsString(jconv) ? jconv->valuestring : NULL,
+                        cJSON_IsTrue(jexpect) ? 1 : 0, &stamped, &status, &transport);
+   if (rc != PEER_CLIENT_OK)
+      return peer_outcome_text("send", rc, status, transport);
+   cJSON *j = peer_message_json(&stamped);
+   char msg[320];
+   snprintf(msg, sizeof msg, "Delivered to %s (message %s, conversation %s).", jto->valuestring,
+            stamped.id ? stamped.id : "", stamped.conversation_id ? stamped.conversation_id : "");
+   peer_client_message_free(&stamped);
+   cJSON *content = text_content(msg);
+   if (c->structured)
+      *c->structured = j;
+   else
+      cJSON_Delete(j);
+   return content;
+}
+
+static cJSON *mcph_peer_reply(struct mcp_call *c)
+{
+   const char *self = peer_self(c);
+   if (!self)
+      return text_content("error: peer_reply needs a session id and this call carries none");
+   cJSON *jh = cJSON_GetObjectItemCaseSensitive(c->jargs, "reply_to");
+   cJSON *jtext = cJSON_GetObjectItemCaseSensitive(c->jargs, "text");
+   if (!cJSON_IsString(jh) || !jh->valuestring[0])
+      return text_content("error: peer_reply requires 'reply_to' (the token printed beside the "
+                          "message in your inbox)");
+   if (!cJSON_IsString(jtext) || !jtext->valuestring[0])
+      return text_content("error: peer_reply requires 'text'");
+
+   peer_client_message_t stamped;
+   uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
+   peer_client_result_t rc =
+       peer_client_reply(self, jh->valuestring, jtext->valuestring, &stamped, &status, &transport);
+   if (rc != PEER_CLIENT_OK)
+      return peer_outcome_text("reply", rc, status, transport);
+   cJSON *j = peer_message_json(&stamped);
+   char msg[320];
+   /* The hop is reported because it is the point of replying rather than
+      sending: it is what makes the conversation's loop ceiling reachable. */
+   snprintf(msg, sizeof msg, "Replied to %s (message %s, conversation %s, hop %d).",
+            stamped.from_session ? "the sender" : "the sender", stamped.id ? stamped.id : "",
+            stamped.conversation_id ? stamped.conversation_id : "", stamped.hop);
+   peer_client_message_free(&stamped);
+   cJSON *content = text_content(msg);
+   if (c->structured)
+      *c->structured = j;
+   else
+      cJSON_Delete(j);
+   return content;
+}
+
+static cJSON *mcph_peer_inbox(struct mcp_call *c)
+{
+   const char *self = peer_self(c);
+   if (!self)
+      return text_content("error: peer_inbox needs a session id and this call carries none");
+   cJSON *jmax = cJSON_GetObjectItemCaseSensitive(c->jargs, "max");
+   int max = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : PEER_CLIENT_INBOX_TAKE_MAX;
+   peer_client_message_t *msgs = NULL;
+   size_t count = 0;
+   int remaining = 0;
+   uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
+   peer_client_result_t rc =
+       peer_client_inbox_take(self, max, &msgs, &count, &remaining, &status, &transport);
+   if (rc != PEER_CLIENT_OK)
+      return peer_outcome_text("inbox", rc, status, transport);
+   cJSON *j = cJSON_CreateObject();
+   cJSON_AddNumberToObject(j, "remaining", remaining);
+   cJSON *arr = cJSON_AddArrayToObject(j, "messages");
+   for (size_t i = 0; i < count; i++)
+      cJSON_AddItemToArray(arr, peer_message_json(&msgs[i]));
+
+   /* THE MESSAGES GO IN THE TEXT, NOT ONLY IN structuredContent.
+    *
+    * mcp_native_call passes structured = NULL and the native dispatch flattens
+    * the CONTENT array alone, so an in-process agent never sees
+    * structuredContent at all. With the bodies only there, aimee's own agents
+    * received "1 message(s) taken; 0 still waiting." and no mail -- a tool that
+    * reports the size of an answer instead of the answer.
+    *
+    * Found by having two live models hold a conversation: the second read its
+    * inbox, replied "I received the message, but its contents were not
+    * available to me", and every mechanical check passed -- delivery, drain,
+    * counts, provenance -- because the external MCP path DOES carry
+    * structuredContent and was the only path ever tested. */
+   dstr_t body;
+   dstr_init(&body);
+   dstr_appendf(&body, "%zu message(s) taken; %d still waiting.", count, remaining);
+   for (size_t i = 0; i < count; i++)
+   {
+      const peer_client_message_t *m = &msgs[i];
+      /* Sender and conversation travel with the text because a reply needs
+         both: who to answer, and which thread to answer on. */
+      dstr_appendf(&body, "\n\n[%zu] from %s (conversation %s)", i + 1,
+                   m->from_session ? m->from_session : "?",
+                   m->conversation_id ? m->conversation_id : "?");
+      /* The reply handle rides with the message because a reply needs the hop
+         count, and `peer send` cannot carry it -- send always declares hop 0, so
+         two sessions answering each other with send reset the loop count every
+         time and DefaultMaxHops could never be reached. Offered only when the
+         message can actually be represented; a handle that would be malformed is
+         omitted rather than printed broken. */
+      char handle[PEER_CLIENT_REPLY_HANDLE_MAX];
+      if (peer_client_reply_handle(m, handle, sizeof handle) == 0)
+         dstr_appendf(&body, "\n   reply_to: %s", handle);
+      dstr_appendf(&body, "\n%s", m->text ? m->text : "");
+   }
+   peer_client_messages_free(msgs, count);
+   cJSON *content = text_content(body.data ? body.data : "0 message(s) taken.");
+   dstr_free(&body);
+   if (c->structured)
+      *c->structured = j;
+   else
+      cJSON_Delete(j);
+   return content;
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ──
  *
  * THIS TABLE IS THE SINGLE SOURCE OF TRUTH for which tools aimee has.
@@ -1787,6 +1990,20 @@ static cJSON *mcph_workflow_run(struct mcp_call *c)
  * session_search / workflow_run touch conn — keep those two external-only (they are
  * about an external client's own session anyway, and are EXEMPT in
  * check-native-tool-parity.py for that reason).
+ *
+ * A NATIVE TOOL MUST PUT ITS ANSWER IN THE CONTENT, NOT ONLY IN structuredContent.
+ * mcp_native_call passes structured = NULL and the native dispatch
+ * (td_mcp_tool -> mcp_content_flatten) flattens the content array alone, so an
+ * in-process agent NEVER SEES structuredContent. peer_inbox put the message
+ * bodies only there and a count in the text, and aimee's own agents received
+ * "1 message(s) taken; 0 still waiting." and no mail — a tool returning the size
+ * of an answer instead of the answer. Every mechanical check passed, because the
+ * external MCP path does carry structuredContent and was the only path tested;
+ * what found it was a live model saying its message "contents were not available
+ * to me". The other three handlers that write structuredContent — memory_ask,
+ * session_search, workflow_run — are all NULL in the native column, so no
+ * in-process caller reaches them; a native marker on any of those needs their
+ * payload moved into the content first.
  *
  * scripts/check-native-tool-parity.py fails the build on an unmarked, unexempted
  * new tool, so this stays true rather than becoming a comment that used to be. */
@@ -1885,6 +2102,13 @@ static const struct
     {"advance_request", mcph_advance_request, NULL},
     /* Start a saved workflow-engine run from a written proposal */
     {"workflow_run", mcph_workflow_run, NULL},
+    /* Peer messaging. NATIVE, not exempt: an in-process agent has exactly the
+     * same use for reaching another session as an external client does, and
+     * both carry a sid (mcp_native_call passes one). Marking these external-only
+     * would have asserted the opposite of the reason they exist. */
+    {"peer_send", mcph_peer_send, "core"},
+    {"peer_inbox", mcph_peer_inbox, "core"},
+    {"peer_reply", mcph_peer_reply, "core"},
 };
 
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

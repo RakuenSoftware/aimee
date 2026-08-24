@@ -59,6 +59,32 @@ The Makefile is canonical. Keep CMake in sync for Windows and macOS builds.
 Regenerate documentation after changing one of those sources. Do not hand-edit files under
 `docs/gen/`.
 
+## Guards and their exceptions
+
+A guard nothing runs is not a guard. Wire a new check into `LINT_CHECKS` in `src/Makefile` in the
+same change that adds it.
+
+**An exception must be able to expire on its own.** An exemption that can only be removed by someone
+remembering to remove it will outlive the reason for it and still read as coverage. Give every
+exception a condition the code can check: an entry that matches no files fails, a conditional
+exemption retires when its condition goes false, an acceptance table fails when reality drifts from
+it. Three separate guards in this repository arrived at that rule independently.
+
+**Exempt exact paths, not prefixes.** A prefix exemption covers packages that do not exist yet,
+including the one the guard was written for. `server-go/internal/peer/` owned a session directory,
+message inboxes and an authorization table while three validators reported ok, because descriptors
+are read to find what to *build* and a file nobody declares is never looked at. A prefix exemption
+for `server-go/internal/` would have permitted it in silence: a guard that passes over its own
+motivating case while looking thorough.
+
+**Name debt as debt.** When a check finds something that needs an architectural decision, such as a
+principal to allocate or an owner to choose, record it with what resolving it would take. Do not
+invent the decision to make the check pass, and do not exempt it quietly: a silent exemption turns a
+gap into a blessing.
+
+**Verify a guard by breaking what it guards.** Re-introduce the defect and confirm the check fails
+with a diagnostic that names it. A guard that has only ever been seen passing has not been tested.
+
 ## Documentation
 
 Follow [Documentation voice and maintenance](docs/WRITING.md). Write short, direct prose. State what

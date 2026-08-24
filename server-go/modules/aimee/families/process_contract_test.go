@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 )
 
 // The served families against src/modules/process-contracts.json.
@@ -90,9 +91,27 @@ func TestServedFamiliesMatchTheProcessContract(t *testing.T) {
 		servedKinds[bind.Event] = bind.Name
 	}
 
+	// The peer stages are declared by the same component and served by the
+	// module's OTHER capability, so they are neither this package's to serve nor
+	// evidence of a gap. They are DERIVED rather than listed, so a peer stage
+	// added or renumbered stays excluded without anyone remembering to edit a
+	// skip list here -- and a store family colliding with one is still caught,
+	// because the collision would show up as a family serving an undeclared
+	// kind in the second loop.
+	peerKinds := map[uint32]bool{}
+	for _, stage := range []uint32{
+		peerwire.StageDelivery, peerwire.StageInbox,
+		peerwire.StageGrant, peerwire.StageChannel,
+	} {
+		peerKinds[peerwire.EventKind(store.PrincipalRef, stage)] = true
+	}
+
 	// Declared but not served: the daemon routes the kind here and the caller
 	// gets CAPABILITY_ABSENT from a module that is plainly running.
 	for kind, name := range declared {
+		if peerKinds[kind] {
+			continue
+		}
 		if _, ok := servedKinds[kind]; !ok {
 			t.Errorf("the contract declares %s (kind %d) but no family serves it",
 				name, kind)
