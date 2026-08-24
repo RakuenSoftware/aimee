@@ -13,6 +13,7 @@
 #include "db1_stages.h"
 
 #include "db1_module_api.h"
+#include "approach_failures.h"
 #include "cost_fold.h"
 #include "diagnose.h"
 #include "eval.h"
@@ -184,7 +185,8 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
    db1_token_audit_spend_t row_db1_token_audit_spend_t;
    guardrail_event_counts_t row_guardrail_event_counts_t;
    diagnosis_t row_diagnosis_t;
-   const char *row_slots[12];
+   db1_eval_candidate_t row_db1_eval_candidate_t;
+   const char *row_slots[16];
    char row_text[12][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
@@ -2523,6 +2525,388 @@ aimee_module_status_t aimee_db1_stage_telemetry(const uint8_t *request_body, uin
          }
          rows = cells;
          row_count = produced * 3u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_EVAL_CANDIDATE_OBSERVE:
+      if (count != 7u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_eval_candidate_observe(field[0], field[1], field[2], field[3], field[4], field[5], field[6]);
+      break;
+   case AIMEE_DB1_OP_EVAL_CANDIDATE_GET_BY_SIGNATURE:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_db1_eval_candidate_t, 0, sizeof row_db1_eval_candidate_t);
+      rc = db1_eval_candidate_get_by_signature(field[0], &row_db1_eval_candidate_t);
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)row_db1_eval_candidate_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_db1_eval_candidate_t.occurrences);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_db1_eval_candidate_t.distinct_sessions);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_db1_eval_candidate_t.passing_windows);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_db1_eval_candidate_t.signature;
+      row_slots[2] = row_db1_eval_candidate_t.state;
+      row_slots[3] = row_db1_eval_candidate_t.suite;
+      row_slots[4] = row_db1_eval_candidate_t.task_name;
+      row_slots[5] = row_db1_eval_candidate_t.task_json;
+      row_slots[6] = row_db1_eval_candidate_t.origin;
+      row_slots[7] = row_db1_eval_candidate_t.origin_ref;
+      row_slots[8] = row_text[1];
+      row_slots[9] = row_text[2];
+      row_slots[10] = row_db1_eval_candidate_t.admitted_by;
+      row_slots[11] = row_db1_eval_candidate_t.admitted_path;
+      row_slots[12] = row_db1_eval_candidate_t.reject_reason;
+      row_slots[13] = row_text[3];
+      row_slots[14] = row_db1_eval_candidate_t.created_at;
+      row_slots[15] = row_db1_eval_candidate_t.updated_at;
+      rows = row_slots;
+      row_count = 16u;
+      reads = 1;
+      found = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_EVAL_CANDIDATE_LIST:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 128)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_eval_candidate_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_eval_candidate_list(field[0][0] ? field[0] : NULL, found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 16u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 4u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 4u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            snprintf(numbers[row * 4u + 1u], 32,
+                     "%d", found[row].occurrences);
+            snprintf(numbers[row * 4u + 2u], 32,
+                     "%d", found[row].distinct_sessions);
+            snprintf(numbers[row * 4u + 3u], 32,
+                     "%d", found[row].passing_windows);
+            cells[row * 16u + 0u] = numbers[row * 4u + 0u];
+            cells[row * 16u + 1u] = found[row].signature;
+            cells[row * 16u + 2u] = found[row].state;
+            cells[row * 16u + 3u] = found[row].suite;
+            cells[row * 16u + 4u] = found[row].task_name;
+            cells[row * 16u + 5u] = found[row].task_json;
+            cells[row * 16u + 6u] = found[row].origin;
+            cells[row * 16u + 7u] = found[row].origin_ref;
+            cells[row * 16u + 8u] = numbers[row * 4u + 1u];
+            cells[row * 16u + 9u] = numbers[row * 4u + 2u];
+            cells[row * 16u + 10u] = found[row].admitted_by;
+            cells[row * 16u + 11u] = found[row].admitted_path;
+            cells[row * 16u + 12u] = found[row].reject_reason;
+            cells[row * 16u + 13u] = numbers[row * 4u + 3u];
+            cells[row * 16u + 14u] = found[row].created_at;
+            cells[row * 16u + 15u] = found[row].updated_at;
+         }
+         rows = cells;
+         row_count = produced * 16u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_ADMITTED:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_eval_candidate_mark_admitted(parsed0, field[1], field[2]);
+      break;
+   }
+   case AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_REJECTED:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_eval_candidate_mark_rejected(parsed0, field[1]);
+      break;
+   }
+   case AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_ARCHIVED:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_eval_candidate_mark_archived(parsed0);
+      break;
+   }
+   case AIMEE_DB1_OP_EVAL_CANDIDATE_SET_PASSING_WINDOWS:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_eval_candidate_set_passing_windows(parsed0, parsed1);
+      break;
+   }
+   case AIMEE_DB1_OP_EVAL_ABLATION_GRID:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 512)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_eval_ablation_cell_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_eval_ablation_grid(field[0][0] ? field[0] : NULL, found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 4u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 2u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 2u + 0u], 32,
+                     "%d", found[row].passed);
+            snprintf(numbers[row * 2u + 1u], 32,
+                     "%d", found[row].total);
+            cells[row * 4u + 0u] = found[row].task_name;
+            cells[row * 4u + 1u] = found[row].ablation;
+            cells[row * 4u + 2u] = numbers[row * 2u + 0u];
+            cells[row * 4u + 3u] = numbers[row * 2u + 1u];
+         }
+         rows = cells;
+         row_count = produced * 4u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_APPROACH_FAILURE_RECORD:
+      if (count != 8u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_approach_failure_record(field[0], field[1], field[2], field[3], field[4], field[5], field[6], field[7]);
+      break;
+   case AIMEE_DB1_OP_APPROACH_FAILURE_CANDIDATES:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 64)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_approach_failure_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_approach_failure_candidates(field[0][0] ? field[0] : NULL, found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 12u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 2u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 2u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            snprintf(numbers[row * 2u + 1u], 32,
+                     "%d", found[row].occurrences);
+            cells[row * 12u + 0u] = numbers[row * 2u + 0u];
+            cells[row * 12u + 1u] = found[row].goal_signature;
+            cells[row * 12u + 2u] = found[row].goal_text;
+            cells[row * 12u + 3u] = found[row].goal_tokens;
+            cells[row * 12u + 4u] = found[row].approach_signature;
+            cells[row * 12u + 5u] = found[row].approach_text;
+            cells[row * 12u + 6u] = found[row].failure_mode;
+            cells[row * 12u + 7u] = found[row].source;
+            cells[row * 12u + 8u] = found[row].source_ref;
+            cells[row * 12u + 9u] = numbers[row * 2u + 1u];
+            cells[row * 12u + 10u] = found[row].created_at;
+            cells[row * 12u + 11u] = found[row].updated_at;
+         }
+         rows = cells;
+         row_count = produced * 12u;
       }
       listed = 1;
       break;

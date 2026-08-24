@@ -1571,8 +1571,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dogfood.tag", handle_dogfood_tag},
     {"dogfood.review", handle_dogfood_review},
     {"dogfood.report", handle_dogfood_report},
-    {"eval.run", handle_eval_run},
-    {"eval.results", handle_eval_results},
+#include "server_dispatch_eval_data.h"
     /* Identity */
     {"identity.show", handle_identity_show},
     {"identity.snapshot", handle_identity_snapshot},

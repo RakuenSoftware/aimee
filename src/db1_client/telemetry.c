@@ -16,6 +16,7 @@
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
+#include "approach_failures.h"
 #include "cost_fold.h"
 #include "diagnose.h"
 #include "eval.h"
@@ -1814,6 +1815,275 @@ int db1_diagnose_suggest_probes(int diag_id, diagnosis_probe_suggestion_t *out, 
    {
       out[wire_row].hypothesis_a_id = (int)strtol(wire_scratch[wire_row * 2u + 0u], NULL, 10);
       out[wire_row].hypothesis_b_id = (int)strtol(wire_scratch[wire_row * 2u + 1u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_eval_candidate_observe(const char *signature, const char *suite, const char *task_name, const char *task_json, const char *origin, const char *origin_ref, const char *session_id)
+{
+   if (!signature || !signature[0])
+      return -1;
+   const char *fields[] = {signature, suite ? suite : "", task_name ? task_name : "", task_json ? task_json : "", origin ? origin : "", origin_ref ? origin_ref : "", session_id ? session_id : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_OBSERVE, fields, 7, NULL, NULL, 0, NULL));
+}
+
+int db1_eval_candidate_get_by_signature(const char *signature, db1_eval_candidate_t *out)
+{
+   if (!signature || !signature[0] || !out)
+      return -1;
+   const char *fields[] = {signature};
+   char slot0[32];
+   char slot8[32];
+   char slot9[32];
+   char slot13[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, out->signature, out->state, out->suite, out->task_name, out->task_json, out->origin, out->origin_ref, slot8, slot9, out->admitted_by, out->admitted_path, out->reject_reason, slot13, out->created_at, out->updated_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->signature, sizeof out->state, sizeof out->suite, sizeof out->task_name, sizeof out->task_json, sizeof out->origin, sizeof out->origin_ref, sizeof slot8, sizeof slot9, sizeof out->admitted_by, sizeof out->admitted_path, sizeof out->reject_reason, sizeof slot13, sizeof out->created_at, sizeof out->updated_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_GET_BY_SIGNATURE, fields, 1, values, caps, 16, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
+   }
+   out->id = (int64_t)strtoll(slot0, NULL, 10);
+   out->occurrences = (int)strtol(slot8, NULL, 10);
+   out->distinct_sessions = (int)strtol(slot9, NULL, 10);
+   out->passing_windows = (int)strtol(slot13, NULL, 10);
+   return 1;
+}
+
+int db1_eval_candidate_list(const char *state_or_null, db1_eval_candidate_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 128)
+      max = 128;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {state_or_null ? state_or_null : "", arg1};
+   char **wire_values = malloc((size_t)max * 16u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 16u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 4u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 16u + 0u] = wire_scratch[wire_row * 4u + 0u];
+      wire_caps[wire_row * 16u + 0u] = sizeof wire_scratch[wire_row * 4u + 0u];
+      wire_values[wire_row * 16u + 1u] = out[wire_row].signature;
+      wire_caps[wire_row * 16u + 1u] = sizeof out[wire_row].signature;
+      wire_values[wire_row * 16u + 2u] = out[wire_row].state;
+      wire_caps[wire_row * 16u + 2u] = sizeof out[wire_row].state;
+      wire_values[wire_row * 16u + 3u] = out[wire_row].suite;
+      wire_caps[wire_row * 16u + 3u] = sizeof out[wire_row].suite;
+      wire_values[wire_row * 16u + 4u] = out[wire_row].task_name;
+      wire_caps[wire_row * 16u + 4u] = sizeof out[wire_row].task_name;
+      wire_values[wire_row * 16u + 5u] = out[wire_row].task_json;
+      wire_caps[wire_row * 16u + 5u] = sizeof out[wire_row].task_json;
+      wire_values[wire_row * 16u + 6u] = out[wire_row].origin;
+      wire_caps[wire_row * 16u + 6u] = sizeof out[wire_row].origin;
+      wire_values[wire_row * 16u + 7u] = out[wire_row].origin_ref;
+      wire_caps[wire_row * 16u + 7u] = sizeof out[wire_row].origin_ref;
+      wire_values[wire_row * 16u + 8u] = wire_scratch[wire_row * 4u + 1u];
+      wire_caps[wire_row * 16u + 8u] = sizeof wire_scratch[wire_row * 4u + 1u];
+      wire_values[wire_row * 16u + 9u] = wire_scratch[wire_row * 4u + 2u];
+      wire_caps[wire_row * 16u + 9u] = sizeof wire_scratch[wire_row * 4u + 2u];
+      wire_values[wire_row * 16u + 10u] = out[wire_row].admitted_by;
+      wire_caps[wire_row * 16u + 10u] = sizeof out[wire_row].admitted_by;
+      wire_values[wire_row * 16u + 11u] = out[wire_row].admitted_path;
+      wire_caps[wire_row * 16u + 11u] = sizeof out[wire_row].admitted_path;
+      wire_values[wire_row * 16u + 12u] = out[wire_row].reject_reason;
+      wire_caps[wire_row * 16u + 12u] = sizeof out[wire_row].reject_reason;
+      wire_values[wire_row * 16u + 13u] = wire_scratch[wire_row * 4u + 3u];
+      wire_caps[wire_row * 16u + 13u] = sizeof wire_scratch[wire_row * 4u + 3u];
+      wire_values[wire_row * 16u + 14u] = out[wire_row].created_at;
+      wire_caps[wire_row * 16u + 14u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 16u + 15u] = out[wire_row].updated_at;
+      wire_caps[wire_row * 16u + 15u] = sizeof out[wire_row].updated_at;
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_LIST, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 16), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 16u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 16u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 4u + 0u], NULL, 10);
+      out[wire_row].occurrences = (int)strtol(wire_scratch[wire_row * 4u + 1u], NULL, 10);
+      out[wire_row].distinct_sessions = (int)strtol(wire_scratch[wire_row * 4u + 2u], NULL, 10);
+      out[wire_row].passing_windows = (int)strtol(wire_scratch[wire_row * 4u + 3u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_eval_candidate_mark_admitted(int64_t id, const char *admitted_by, const char *path)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)id);
+   const char *fields[] = {arg0, admitted_by ? admitted_by : "", path ? path : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_ADMITTED, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_eval_candidate_mark_rejected(int64_t id, const char *reason)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)id);
+   const char *fields[] = {arg0, reason ? reason : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_REJECTED, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_eval_candidate_mark_archived(int64_t id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_MARK_ARCHIVED, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_eval_candidate_set_passing_windows(int64_t id, int windows)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", windows);
+   const char *fields[] = {arg0, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_EVAL_CANDIDATE_SET_PASSING_WINDOWS, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_eval_ablation_grid(const char *suite_or_null, db1_eval_ablation_cell_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 512)
+      max = 512;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {suite_or_null ? suite_or_null : "", arg1};
+   char **wire_values = malloc((size_t)max * 4u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 4u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 2u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 4u + 0u] = out[wire_row].task_name;
+      wire_caps[wire_row * 4u + 0u] = sizeof out[wire_row].task_name;
+      wire_values[wire_row * 4u + 1u] = out[wire_row].ablation;
+      wire_caps[wire_row * 4u + 1u] = sizeof out[wire_row].ablation;
+      wire_values[wire_row * 4u + 2u] = wire_scratch[wire_row * 2u + 0u];
+      wire_caps[wire_row * 4u + 2u] = sizeof wire_scratch[wire_row * 2u + 0u];
+      wire_values[wire_row * 4u + 3u] = wire_scratch[wire_row * 2u + 1u];
+      wire_caps[wire_row * 4u + 3u] = sizeof wire_scratch[wire_row * 2u + 1u];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_EVAL_ABLATION_GRID, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 4), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 4u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 4u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].passed = (int)strtol(wire_scratch[wire_row * 2u + 0u], NULL, 10);
+      out[wire_row].total = (int)strtol(wire_scratch[wire_row * 2u + 1u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_approach_failure_record(const char *goal_signature, const char *goal_text, const char *goal_tokens, const char *approach_signature, const char *approach_text, const char *failure_mode, const char *source, const char *source_ref)
+{
+   if (!goal_signature || !goal_signature[0] || !approach_signature || !approach_signature[0])
+      return -1;
+   const char *fields[] = {goal_signature, goal_text ? goal_text : "", goal_tokens ? goal_tokens : "", approach_signature, approach_text ? approach_text : "", failure_mode ? failure_mode : "", source ? source : "", source_ref ? source_ref : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_APPROACH_FAILURE_RECORD, fields, 8, NULL, NULL, 0, NULL));
+}
+
+int db1_approach_failure_candidates(const char *must_contain, db1_approach_failure_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {must_contain ? must_contain : "", arg1};
+   char **wire_values = malloc((size_t)max * 12u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 12u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 2u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 12u + 0u] = wire_scratch[wire_row * 2u + 0u];
+      wire_caps[wire_row * 12u + 0u] = sizeof wire_scratch[wire_row * 2u + 0u];
+      wire_values[wire_row * 12u + 1u] = out[wire_row].goal_signature;
+      wire_caps[wire_row * 12u + 1u] = sizeof out[wire_row].goal_signature;
+      wire_values[wire_row * 12u + 2u] = out[wire_row].goal_text;
+      wire_caps[wire_row * 12u + 2u] = sizeof out[wire_row].goal_text;
+      wire_values[wire_row * 12u + 3u] = out[wire_row].goal_tokens;
+      wire_caps[wire_row * 12u + 3u] = sizeof out[wire_row].goal_tokens;
+      wire_values[wire_row * 12u + 4u] = out[wire_row].approach_signature;
+      wire_caps[wire_row * 12u + 4u] = sizeof out[wire_row].approach_signature;
+      wire_values[wire_row * 12u + 5u] = out[wire_row].approach_text;
+      wire_caps[wire_row * 12u + 5u] = sizeof out[wire_row].approach_text;
+      wire_values[wire_row * 12u + 6u] = out[wire_row].failure_mode;
+      wire_caps[wire_row * 12u + 6u] = sizeof out[wire_row].failure_mode;
+      wire_values[wire_row * 12u + 7u] = out[wire_row].source;
+      wire_caps[wire_row * 12u + 7u] = sizeof out[wire_row].source;
+      wire_values[wire_row * 12u + 8u] = out[wire_row].source_ref;
+      wire_caps[wire_row * 12u + 8u] = sizeof out[wire_row].source_ref;
+      wire_values[wire_row * 12u + 9u] = wire_scratch[wire_row * 2u + 1u];
+      wire_caps[wire_row * 12u + 9u] = sizeof wire_scratch[wire_row * 2u + 1u];
+      wire_values[wire_row * 12u + 10u] = out[wire_row].created_at;
+      wire_caps[wire_row * 12u + 10u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 12u + 11u] = out[wire_row].updated_at;
+      wire_caps[wire_row * 12u + 11u] = sizeof out[wire_row].updated_at;
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_APPROACH_FAILURE_CANDIDATES, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 12), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 12u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 12u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 2u + 0u], NULL, 10);
+      out[wire_row].occurrences = (int)strtol(wire_scratch[wire_row * 2u + 1u], NULL, 10);
    }
    free(wire_scratch);
    return wire_rows;

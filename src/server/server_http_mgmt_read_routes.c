@@ -284,3 +284,13 @@ int server_http_mgmt_read_config(char *resp, int cap)
 {
    return server_http_mgmt_read(SERVER_MGMT_READ_SELECTOR_CONFIG, resp, cap);
 }
+
+/* Relocated from server_http_routes.c to stay under the line-check ceiling
+ * (same precedent as the git surface): the route TABLE stays there, the handler
+ * lives here with external linkage. A dashboard read belongs with the other
+ * management reads regardless. Pure relocation -- no behaviour change. */
+int rh_curiosity(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_json_provider(g_curiosity_provider, resp, cap, "curiosity");
+}

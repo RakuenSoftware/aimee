@@ -199,6 +199,18 @@
      "  list             List trigger runs\n"
      "  status           Show one trigger run\n"
      "  cancel           Cancel a queued trigger run\n"},
+    {"learning", "Learning-loop safety, regret, and negative knowledge",
+     AIMEE_CMD_TIER_ADVANCED, 0,
+     "  approaches \"<goal>\"\n"
+     "                   Approaches that already failed against a similar goal\n"
+     "                   (advisory recall for planning; never blocks)\n"
+     "  attribution [suite]\n"
+     "                   Measured per-capability contribution from the ablation grid\n"
+     "  fate <id> <standing|superseded|contradicted|reverted> [--reason R]\n"
+     "                   Record what became of a committed proposal; regret raises\n"
+     "                   the bar for the detector that raised it\n"
+     "  resolve [--budget N]\n"
+     "                   Close curiosity gaps the corpus now answers (bounded, on demand)\n"},
     {"aux", "Auxiliary model routing", AIMEE_CMD_TIER_ADVANCED, 0,
      "  config           Show resolved aux task->provider/model mapping\n"
      "  test <task> \"<prompt>\"\n"

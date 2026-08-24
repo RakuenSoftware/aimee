@@ -157,6 +157,7 @@ extern "C"
     * fields in |req|.  Returns {"status":"ok","dispatch":{...}} or
     * {"status":"error","message":"..."}.  Caller frees. */
    cJSON *db2_kb_service_learning_propose_signal_json(const cJSON *req);
+   cJSON *db2_kb_service_learning_record_application_json(const cJSON *req);
 
    cJSON *db2_kb_service_agent_outcome_record_json(const char *agent_name, const char *role,
                                                    const char *outcome_kind, const char *reason,
@@ -286,6 +287,7 @@ extern "C"
    cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max);
    cJSON *db2_kb_service_memory_compact_windows_json(void);
    cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint);
+   cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
    cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
    cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
                                                         const char *project, int limit);
@@ -331,6 +333,10 @@ extern "C"
    cJSON *db2_kb_service_memory_search_graph_json(const char *query, int limit);
    cJSON *db2_kb_service_memory_search_graph_as_of_json(const char *query, const char *as_of,
                                                         int limit);
+   cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const char *valid_at,
+                                                       const char *believed_at,
+                                                       int include_historical, int max_hops,
+                                                       int limit);
    cJSON *db2_kb_service_memory_get_episode_json(const char *episode_key);
    cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
                                          const char *scope_value, int limit);

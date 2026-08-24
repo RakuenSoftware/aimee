@@ -1341,6 +1341,41 @@ char *kb_client_learning_list_proposals_json(const char *state, const char *sink
    return kb_v1_learning_action_request("learning.list_proposals", req);
 }
 
+char *kb_client_learning_endogeneity_json(int window_days)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (window_days > 0)
+      cJSON_AddNumberToObject(req, "window_days", window_days);
+   return kb_v1_learning_action_request("learning.endogeneity", req);
+}
+
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddNumberToObject(req, "id", id);
+   if (fate && fate[0])
+      cJSON_AddStringToObject(req, "fate", fate);
+   if (reason && reason[0])
+      cJSON_AddStringToObject(req, "reason", reason);
+   return kb_v1_learning_action_request("learning.fate", req);
+}
+
+char *kb_client_learning_resolve_json(int budget)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (budget > 0)
+      cJSON_AddNumberToObject(req, "budget", budget);
+   return kb_v1_learning_action_request("learning.resolve", req);
+}
+
+char *kb_client_learning_policy_select_json(const char *decision_point)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (decision_point && decision_point[0])
+      cJSON_AddStringToObject(req, "decision_point", decision_point);
+   return kb_v1_learning_action_request("learning.policy_select", req);
+}
+
 static char *kb_v1_learning_mutate(const char *method, int id)
 {
    cJSON *req = cJSON_CreateObject();

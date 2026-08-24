@@ -1328,6 +1328,28 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
             old_path ? old_path : "");
    assert(setenv("PATH", new_path, 1) == 0);
 
+   /* This test owns its checkout. It used to run in whatever directory the
+    * previous test left behind, which meant it only passed where that happened
+    * to be a clone whose origin is a github.com URL -- true in a developer's
+    * working copy, false in a checkout cloned from a bundle or a mirror. The
+    * merge path resolves the origin slug BEFORE it reaches auto-merge, so the
+    * ambient case returned "cannot resolve a github.com origin" and the --auto
+    * assertion below failed for a reason that had nothing to do with the
+    * behaviour under test. A test must carry its own preconditions. */
+   char repo[320];
+   snprintf(repo, sizeof(repo), "%s/repo", tmpdir);
+   char setup[1024];
+   snprintf(setup, sizeof(setup),
+            "mkdir -p '%s' && cd '%s' && git init -q && git config user.email test@test && "
+            "git config user.name test && echo x > f.txt && git add f.txt && "
+            "git commit -q -m init && "
+            "git remote add origin https://github.com/example/repo.git",
+            repo, repo);
+   assert(system(setup) == 0);
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(repo) == 0);
+
    /* Pending CI is the whole point of auto-merge: branch protection holds the PR
     * until green, so the gate must NOT refuse it here. Without this exemption an
     * auto-merge into a protected branch would refuse itself. */
@@ -1374,6 +1396,7 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
+   assert(chdir(saved_cwd) == 0);
    git_pr_api_stub_set_ci(GIT_PR_CI_ERROR); /* leave the fail-closed default in place */
 
    if (saved_path[0])

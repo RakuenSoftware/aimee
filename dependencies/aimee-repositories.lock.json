@@ -127,7 +127,8 @@
       "commit": "4f603cebea169413813a0d9c2217698f63947414",
       "execution": "process",
       "placements": [
-        "server"
+        "server",
+        "kb"
       ],
       "source_sha256": "514eb1ffffdac374faca358b378f99c9d162af151df60ddae30957149c311a5f",
       "runtime": "go",

@@ -720,48 +720,6 @@ static void print_episode_list(cJSON *resp)
    }
 }
 
-static void print_eval_run(cJSON *resp)
-{
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "results");
-   printf("%-30s %-12s %-12s %-6s %-6s %-8s %-10s\n", "Task", "Agent", "Ablation", "Pass", "Turns",
-          "ToolOK", "Latency");
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *row;
-      cJSON_ArrayForEach(row, rows)
-      {
-         double tool_ok =
-             cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "tool_call_success_rate"));
-         printf("%-30s %-12s %-12s %-6s %-6d %-7.2f%% %-10dms\n", json_str(row, "task_name"),
-                json_str(row, "agent_name"), json_str(row, "ablation"),
-                json_int(row, "success", 0) ? "PASS" : "FAIL", json_int(row, "turns", 0),
-                tool_ok * 100.0, json_int(row, "latency_ms", 0));
-      }
-   }
-   printf("\n%d/%d passed.\n", json_int(resp, "passes", 0), json_int(resp, "total", 0));
-}
-
-static void print_eval_results(cJSON *resp)
-{
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "results");
-   if (!cJSON_IsArray(rows) || cJSON_GetArraySize(rows) == 0)
-   {
-      printf("No eval results.\n");
-      return;
-   }
-   printf("%-15s %-25s %-12s %-12s %-6s %-6s %-6s %-10s %s\n", "Suite", "Task", "Agent", "Ablation",
-          "Pass", "Turns", "Tools", "Latency", "Time");
-   cJSON *row;
-   cJSON_ArrayForEach(row, rows)
-   {
-      printf("%-15s %-25s %-12s %-12s %-6s %-6d %-6d %-10dms %s\n", json_str(row, "suite"),
-             json_str(row, "task_name"), json_str(row, "agent_name"), json_str(row, "ablation"),
-             json_int(row, "success", 0) ? "PASS" : "FAIL", json_int(row, "turns", 0),
-             json_int(row, "tool_calls", 0), json_int(row, "latency_ms", 0),
-             json_str(row, "created_at"));
-   }
-}
-
 static void print_delegate_status_object(cJSON *job, cJSON *full_result, cJSON *result_limit)
 {
    cJSON *id = cJSON_GetObjectItemCaseSensitive(job, "job_id");
@@ -2194,14 +2152,6 @@ void pt_print_dogfood_report(const char *method, cJSON *resp)
    cJSON *armed = cJSON_GetObjectItemCaseSensitive(resp, "review_reminder_armed");
    if (cJSON_IsTrue(armed))
       printf("  review reminder armed\n");
-}
-void pt_print_eval_run(const char *method, cJSON *resp)
-{
-   print_eval_run(resp);
-}
-void pt_print_eval_results(const char *method, cJSON *resp)
-{
-   print_eval_results(resp);
 }
 void pt_print_identity_show(const char *method, cJSON *resp)
 {
