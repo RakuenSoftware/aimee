@@ -337,45 +337,64 @@ component at principal ref 31 in `src/modules/process-contracts.json`, the inven
 `tests/baselines/modules/canonical-inventory.yaml`, the dispatch case in
 `server-go/cmd/aimee-module/main.go`, and `docs/modules/aimee.md`.
 
-**Peer messaging now works end to end.** On a clean container with the full
-stack, two sessions db1 holds exchange a message over the real bus: 23 of 23
-probe checks pass twice consecutively, including the recipient draining the
-sender's exact text. See the validation record.
+**Peer messaging is reachable and works through the product.** Two aimee
+sessions exchange messages in both directions over `POST /v1/mcp/call` -- the
+request `aimee mcp-serve` posts for a real MCP client -- on a clean container
+with the full stack up. `peer_send` and `peer_inbox` are in the MCP tool table,
+folded into one `peer` family (`command=send|inbox`) that sits in
+`MCP_CORE_TOOLS`, so a client asking for the default profile is SHOWN it.
+Sessions register themselves: `mcp_session_register` runs before tool dispatch,
+and a native chat turn registers via `chat_session_register`.
+
+**This section previously said the opposite, and the correction is the point of
+the whole exercise.** It read: nothing registers a session, no session can
+exist, every session-scoped stage answers `no_directory`, and the `/v1` routes
+are "mounted by nothing at all". All of that was true when written. It stayed on
+the page while three separate things were fixed, which is its own instance of
+the shape this proposal keeps running into -- a record that describes a state
+nobody has re-checked.
+
+Two defects were found only by building the caller, and neither could have been
+found without one:
+
+- the C client accepted only `"true"`/`"false"` for a boolean cell, words
+  `peerwire.Btoa` never writes, so it rejected every message row the module ever
+  sent. `Atob`'s leniency accepted the client's REQUESTS, so half the
+  conversation worked and the failure presented at the caller as the module
+  being broken.
+- the tools worked and were not on the core floor, so no agent would have been
+  shown them. `mcp_tool_profile.c` states the measured rule two lines from the
+  list: a tool the agent cannot afford to reach is a tool it does not have.
 
 The shipped default is still `NoDirectory`, because on db1's C store an absent
 session is indistinguishable from a broken one. `AIMEE_PEER_DIRECTORY=db1` wires
-the directory, which is how the end-to-end run was made, and it becomes the
+the directory, which is how every end-to-end run was made, and it becomes the
 default when db1 runs the Go store that reports `missing`.
 
-**"Done" below means BUILT AND TESTED, which is not the same as reachable.** The
-distinction is not pedantic here: as deployed, the module has no session
-directory and nothing registers a session, so no session can exist and every
-session-scoped stage answers `no_directory`. The registry, delivery, inboxes,
-channels and hop budget are all implemented and covered, and none of them can be
-exercised by a real caller yet. The `/v1` routes are further back still --
-mounted by nothing at all.
-
-The third column says which, because the first two columns said "done" for both
-and that is how this went unnoticed through a container validation.
+**The third column below means REACHABLE BY A CALLER, not built.** The first two
+columns once said "done" for things nothing could invoke, and that is how a
+container validation passed over a module no client could reach.
 
 | Slice | Built | Reachable as deployed |
 |---|---|---|
 | The `aimee` module itself — descriptor, contract, inventory, dispatch, docs | **done** | yes — the module runs and serves |
-| D1 labels and lookup | **done** in-module; directory moves to `db1` (see below) | no — needs a session to label |
-| D2 pull-based delivery, inbox lifetime | **done** | no — no session can exist |
+| D1 labels and lookup | **done** in-module; directory moves to `db1` (see below) | no — no caller sets a label |
+| D2 pull-based delivery, inbox lifetime | **done** | **YES** — `peer command=inbox`, drained once |
 | D3 live announcement (`Notify` seam) | **done** in the registry; Runtime wiring outstanding | no — nothing to announce, and no subscriber |
-| D4 `Send` / `Ask` / `Reply` | **done** | no — no session can exist |
-| D4 channels | **done** — `peer/channel.go`, stage `peer-channel`, per-recipient outcomes | no — no session can join |
-| D5 envelope, provenance, grants | **done** | grants YES; envelope and provenance no |
+| D4 `Send` / `Reply` | `Send` **done**; `OpReply` served by the module, **not implemented in the C client** | `Send` **YES**; reply no — threading uses `conversation_id` |
+| D4 channels | **done** — `peer/channel.go`, stage `peer-channel`, per-recipient outcomes | no — no caller joins a channel |
+| D5 envelope, provenance, grants | **done** | **YES** — the envelope is stamped and returned; `from_owner` comes from db1 |
 | D6 bus tap / `execution-policy` verdict | **not started** — attaches at the `Notify` seam | no |
-| D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** | no — no traffic to bound |
-| D8 bus stages | **done** — 12033/12034/12035/12036 | advertised and routed; session stages answer `no_directory` |
-| D8 `/v1` routes | **done** and MOUNTED BY NOTHING — no caller constructs `Registry.Handler`, so no client can reach a route | no |
-| D8 MCP / ACP mirroring | not started (P4) | no |
+| D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** | partly — `too_long` and `self` refuse a real caller; hop and cycle need multi-hop traffic |
+| D8 bus stages | **done** — 12033/12034/12035/12036 | **YES** — both delivery and inbox serve real callers |
+| D8 `/v1` routes | **done** and MOUNTED BY NOTHING — no caller constructs `Registry.Handler` | no — superseded by the MCP surface, which is what callers use |
+| D8 MCP surface | **done** — `peer_send`/`peer_inbox`, `peer` family, on the core floor, `src/peer_client` | **YES** — this is the reachable path |
+| D8 ACP mirroring | not started (P4) | no |
 | Directory read from `db1` | **written and tested, deliberately not wired** — `DB1Directory`; see below | no — one line away, once db1 runs the Go store |
 | Durable inboxes | **not started** — needs the `postgres` generic storage wire | no |
 
-60 tests green under `-race`. Verified by mutation, not only by passing:
+88 Go tests green under `-race`, plus 55 C checks in `test_peer_client.c` for the
+client that reaches the module. Verified by mutation, not only by passing:
 
 - removing the cycle walk makes both cycle tests fail (they hang to their deadlines — the exact
   wedge the check prevents);
@@ -567,13 +586,20 @@ existed since the code moved into the module. A citation to a directory that is
 gone is the cheapest kind of stale, and it survived because nothing reads a
 prose path.
 
-**✅ means A TEST ASSERTS IT IN PROCESS. It does not mean a real caller can do
-it.** As deployed the module has no session directory and nothing registers a
-session, so every criterion below involving two sessions is asserted against a
-registry the tests populate themselves and is NOT reachable in the shipped
-artifact. That is not a caveat on one row; it applies to A1 through A6, A12 and
-A13. A8 is the exception among the session-shaped ones -- grants are
-owner-to-owner and work without a directory.
+**✅ means A TEST ASSERTS IT IN PROCESS.** That is still what the mark means, and
+it is still not the same claim as "a caller can do it" -- but the gap it once
+described has closed for the delivery path.
+
+This paragraph used to say every two-session criterion was asserted against a
+registry the tests populate themselves and was NOT reachable in the shipped
+artifact. That was true and is no longer: sessions register themselves
+(`mcp_session_register` before tool dispatch, `chat_session_register` on a chat
+turn), `AIMEE_PEER_DIRECTORY=db1` resolves them, and A1/A2-shaped exchanges have
+been driven end to end through `POST /v1/mcp/call` on hardware.
+
+What a reader should still not read into a ✅: the criteria involving channels,
+hop budget and cycle refusal have no caller that exercises them, because the MCP
+surface exposes send and inbox only. Those remain asserted in process.
 
 - **A1** ✅ Two sessions with the same owner discover each other by label, and a message appears with
   an envelope the receiver did not author and the sender could not forge.
