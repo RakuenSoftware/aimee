@@ -606,6 +606,18 @@ attached to the KB bus — with every effect read back through `psql` rather tha
 from the process that wrote it. See
 [the validation report](../../validation/recursive-self-improvement-producers-2026-08-24.md).
 
+That verification is now committed rather than living in scratch, as
+[`tests/e2e/learning-loops-pg-e2e.sh`](../../../tests/e2e/learning-loops-pg-e2e.sh)
+— 20 assertions covering the S0 gate closing on a self-referential ledger and
+reopening, a closed gate admitting nothing and writing nothing, the S4 probe
+leaving an uncovered gap open rather than closing it by assertion, S5
+supersession and the operator verdict, and S6 answering with a declared arm —
+alongside
+[`tests/e2e/module-liveness-pg-e2e.sh`](../../../tests/e2e/module-liveness-pg-e2e.sh),
+which proves every granted module attaches and no provider is silently null. The
+shape of the classifier defect is gated in `make lint` by
+`scripts/check_provider_registration.py`.
+
 **What this run does not prove.** The S4 pass resolved nothing, because the
 seeded gaps are genuinely uncovered — that proves the probe runs and reports
 honestly, not that it closes a gap when evidence exists. The S6 arm came back

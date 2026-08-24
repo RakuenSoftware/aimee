@@ -69,14 +69,11 @@ from the process that wrote them.
 | `make lint` | 63/63, including `check-module-placement` |
 | `make docs-gen-check` | ok |
 | `make integration-tests` | pass |
-| `kb_stack.sh` (both services, real Postgres) | all checks passed |
-| `live_e2e.sh` (daemon alone) | all checks passed |
-| `explore.sh` (exploratory) | nothing broke |
-| `pg_check.sh` (raw SQL on real Postgres) | all statements behave |
+| four scratch harnesses on a real stack (see the note below) | all passed |
 
 ## One assertion corrected, not worked around
 
-`live_e2e.sh` still asserted that `learning resolve` reports "No evidence probe
+The daemon-only harness still asserted that `learning resolve` reports "No evidence probe
 is installed". That was true when S4 ran in the daemon; S4 now runs in the KB,
 and this suite runs the daemon alone, so the honest answer is that the
 knowledge service is unreachable. The check now asserts exactly that, and fails
@@ -132,7 +129,8 @@ reproduces the original defect and the check reports it.
 
 The harness that found the classifier gap started two modules. That is part of
 why the gap hid: a module that is *granted but never attached* fails exactly
-like a module that was never placed. `full_env.sh` attaches **every** module
+like a module that was never placed. The full-environment harness attaches
+**every** module
 each daemon is granted and has a binary for -- 7 on the KB (config, learning,
 memory, postgres, kb-synthesis, control-web, benchmarks; `db2` is granted but
 deliberately not started in the KB image) and 17 on the server -- reports any it
@@ -171,11 +169,38 @@ environment healthy would be the dishonest reading.
 
 | Suite | Result |
 | --- | --- |
-| `full_env.sh` (all modules, broad exercise, provider sweep) | all checks passed |
-| `kb_stack.sh` (producers, gate, both services) | all checks passed |
-| `live_e2e.sh` (daemon alone) | all checks passed |
-| `explore.sh` (exploratory) | nothing broke |
-| `pg_check.sh` (raw SQL on real Postgres) | all statements behave |
+| full environment: all modules, broad exercise, provider sweep | all checks passed |
+| producers and gate, both services | all checks passed |
+| daemon alone | all checks passed |
+| exploratory | nothing broke |
+| raw SQL on real Postgres | all statements behave |
+
+## Correction: where this evidence now lives
+
+Every run above was driven by harnesses in a gitignored `src/build/`, named in
+an earlier draft of this report as `full_env.sh`, `kb_stack.sh`, `live_e2e.sh`,
+`explore.sh` and `pg_check.sh`. **None of those files exist.** The directory was
+cleaned during the session and they were lost, so this report cited evidence a
+reader could neither run nor find — which is worth stating plainly rather than
+quietly renaming.
+
+What replaced them is committed, and covers what they covered:
+
+| Suite | Subject |
+| --- | --- |
+| [`tests/e2e/module-liveness-pg-e2e.sh`](../../tests/e2e/module-liveness-pg-e2e.sh) | every granted module attaches; no provider is silently null; signal capture and supersession |
+| [`tests/e2e/learning-loops-pg-e2e.sh`](../../tests/e2e/learning-loops-pg-e2e.sh) | S0 gate closes on a self-referential ledger and reopens; a closed gate admits nothing and writes nothing; S4 probe; S5 supersession and operator verdict; S6 arm |
+
+Both were run on a real stack (`root@192.168.1.252`, both services, PostgreSQL
+17, every granted module attached): **13 passed / 0 failed** and **20 passed / 0
+failed** respectively. `module-liveness` is additionally proved against the bug
+— deleting the KB registration turns it red on four assertions.
+
+Two exploratory areas the lost harnesses covered have **not** been reconstructed
+and are named here rather than left implied: the malformed-argument sweep across
+the learning CLI surfaces, and the direct-SQL checks of the fate ledger's
+delimited `LIKE` and one-row-per-proposal behaviour. Both are covered by unit
+tests; neither is covered end to end any more.
 
 ## Limits of this run
 
