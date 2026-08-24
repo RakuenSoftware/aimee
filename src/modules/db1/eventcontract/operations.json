@@ -198,8 +198,9 @@
    "active": true,
    "doc": "what the system spent and what it noticed: token and cost ledgers, guardrail and interaction events, eval results and diagnoses.",
    "client_doc": "",
-   "covers": "cost_fold, diagnose, eval, guardrail_events, interaction_events, token_audit",
+   "covers": "approach_failures, cost_fold, diagnose, eval, guardrail_events, interaction_events, token_audit",
    "sources": [
+    "approach_failures",
     "cost_fold",
     "diagnose",
     "eval",
@@ -208,6 +209,7 @@
     "token_audit"
    ],
    "retired_sources": [
+    "approach_failures.c",
     "cost_fold.c",
     "diagnose.c",
     "eval.c",
@@ -15579,6 +15581,660 @@
      }
     ],
     "max_bytes": 65536
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 49,
+   "name": "eval_candidate_observe",
+   "c_name": "db1_eval_candidate_observe",
+   "c_params": [
+    "signature",
+    "suite",
+    "task_name",
+    "task_json",
+    "origin",
+    "origin_ref",
+    "session_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "signature",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "suite",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "task_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "task_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "origin",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "origin_ref",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 50,
+   "name": "eval_candidate_get_by_signature",
+   "c_name": "db1_eval_candidate_get_by_signature",
+   "c_params": [
+    "signature",
+    "out"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "signature",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_eval_candidate_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "signature",
+      "type": "text"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "suite",
+      "type": "text"
+     },
+     {
+      "name": "task_name",
+      "type": "text"
+     },
+     {
+      "name": "task_json",
+      "type": "text"
+     },
+     {
+      "name": "origin",
+      "type": "text"
+     },
+     {
+      "name": "origin_ref",
+      "type": "text"
+     },
+     {
+      "name": "occurrences",
+      "type": "int"
+     },
+     {
+      "name": "distinct_sessions",
+      "type": "int"
+     },
+     {
+      "name": "admitted_by",
+      "type": "text"
+     },
+     {
+      "name": "admitted_path",
+      "type": "text"
+     },
+     {
+      "name": "reject_reason",
+      "type": "text"
+     },
+     {
+      "name": "passing_windows",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 51,
+   "name": "eval_candidate_list",
+   "c_name": "db1_eval_candidate_list",
+   "c_params": [
+    "state_or_null",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "state_or_null",
+      "type": "text",
+      "required": false,
+      "null_when_empty": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_eval_candidate_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "signature",
+      "type": "text"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "suite",
+      "type": "text"
+     },
+     {
+      "name": "task_name",
+      "type": "text"
+     },
+     {
+      "name": "task_json",
+      "type": "text"
+     },
+     {
+      "name": "origin",
+      "type": "text"
+     },
+     {
+      "name": "origin_ref",
+      "type": "text"
+     },
+     {
+      "name": "occurrences",
+      "type": "int"
+     },
+     {
+      "name": "distinct_sessions",
+      "type": "int"
+     },
+     {
+      "name": "admitted_by",
+      "type": "text"
+     },
+     {
+      "name": "admitted_path",
+      "type": "text"
+     },
+     {
+      "name": "reject_reason",
+      "type": "text"
+     },
+     {
+      "name": "passing_windows",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 52,
+   "name": "eval_candidate_mark_admitted",
+   "c_name": "db1_eval_candidate_mark_admitted",
+   "c_params": [
+    "id",
+    "admitted_by",
+    "path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "admitted_by",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "path",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 53,
+   "name": "eval_candidate_mark_rejected",
+   "c_name": "db1_eval_candidate_mark_rejected",
+   "c_params": [
+    "id",
+    "reason"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 54,
+   "name": "eval_candidate_mark_archived",
+   "c_name": "db1_eval_candidate_mark_archived",
+   "c_params": [
+    "id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 55,
+   "name": "eval_candidate_set_passing_windows",
+   "c_name": "db1_eval_candidate_set_passing_windows",
+   "c_params": [
+    "id",
+    "windows"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "windows",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 56,
+   "name": "eval_ablation_grid",
+   "c_name": "db1_eval_ablation_grid",
+   "c_params": [
+    "suite_or_null",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "suite_or_null",
+      "type": "text",
+      "required": false,
+      "null_when_empty": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_eval_ablation_cell_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 512
+    },
+    "fields": [
+     {
+      "name": "task_name",
+      "type": "text"
+     },
+     {
+      "name": "ablation",
+      "type": "text"
+     },
+     {
+      "name": "passed",
+      "type": "int"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 57,
+   "name": "approach_failure_record",
+   "c_name": "db1_approach_failure_record",
+   "c_params": [
+    "goal_signature",
+    "goal_text",
+    "goal_tokens",
+    "approach_signature",
+    "approach_text",
+    "failure_mode",
+    "source",
+    "source_ref"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "goal_signature",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "goal_text",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "goal_tokens",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "approach_signature",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "approach_text",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "failure_mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source_ref",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 58,
+   "name": "approach_failure_candidates",
+   "c_name": "db1_approach_failure_candidates",
+   "c_params": [
+    "must_contain",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "must_contain",
+      "type": "text",
+      "required": false,
+      "null_when_empty": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_approach_failure_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "goal_signature",
+      "type": "text"
+     },
+     {
+      "name": "goal_text",
+      "type": "text"
+     },
+     {
+      "name": "goal_tokens",
+      "type": "text"
+     },
+     {
+      "name": "approach_signature",
+      "type": "text"
+     },
+     {
+      "name": "approach_text",
+      "type": "text"
+     },
+     {
+      "name": "failure_mode",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "source_ref",
+      "type": "text"
+     },
+     {
+      "name": "occurrences",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
    }
   },
   {

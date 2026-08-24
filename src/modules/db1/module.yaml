@@ -14,6 +14,7 @@
     "src/modules/db1/agent_jobs.c",
     "src/modules/db1/agent_log.c",
     "src/modules/db1/agent_work_stage.c",
+    "src/modules/db1/approach_failures.c",
     "src/modules/db1/caches.c",
     "src/modules/db1/checkpoints.c",
     "src/modules/db1/checkpoints_stage.c",
@@ -106,6 +107,7 @@
   "private_headers": [
     "src/modules/db1/agent_jobs.h",
     "src/modules/db1/agent_log.h",
+    "src/modules/db1/approach_failures.h",
     "src/modules/db1/caches.h",
     "src/modules/db1/checkpoints.h",
     "src/modules/db1/clarify.h",

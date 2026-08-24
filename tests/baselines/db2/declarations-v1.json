@@ -38,6 +38,10 @@
     },
     {
       "classification": "host-generated-client",
+      "path": "src/eval_synthesis.c"
+    },
+    {
+      "classification": "host-generated-client",
       "path": "src/index.c"
     },
     {
@@ -446,110 +450,118 @@
     },
     {
       "classification": "module-kb-contract",
+      "path": "src/modules/learning/learning_endogeneity.c"
+    },
+    {
+      "classification": "module-kb-contract",
       "path": "src/modules/learning/learning_evidence.c"
+    },
+    {
+      "classification": "module-kb-contract",
+      "path": "src/modules/learning/learning_regret.c"
     },
     {
       "classification": "module-kb-contract",
       "path": "src/modules/learning/learning_router.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_advanced.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_assemble.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_conflict.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_context.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_crud.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_helpers.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_helpers_b.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_scope_embed.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_search.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_search_b.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_search_c.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_core_tiers.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_directives.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_episodes.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_graph.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_graph_fusion.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_graph_fusion.h"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_health.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_improve.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_lifecycle.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_logic.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_maintenance.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_prospective.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/memory/memory_scan.c"
     },
     {
@@ -602,6 +614,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/db2_test_template.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/fuzz_memory_search.c"
     },
     {
@@ -619,6 +635,10 @@
     {
       "classification": "private-implementation-test",
       "path": "src/tests/support/kb_txn_stub.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_approach_memory.c"
     },
     {
       "classification": "private-implementation-test",
@@ -850,6 +870,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_eval_candidates.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_evidence_embed.c"
     },
     {
@@ -999,6 +1023,10 @@
     {
       "classification": "private-implementation-test",
       "path": "src/tests/test_learning_metrics.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_learning_regret.c"
     },
     {
       "classification": "private-implementation-test",
@@ -1664,6 +1692,7 @@
     {
       "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/db2_test_template.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_pool.c",
         "src/tests/test_management_status_key_ctx.c",
@@ -2010,6 +2039,7 @@
         "src/modules/kb-synthesis/kb_curator_extract.c",
         "src/modules/kb-synthesis/kb_curator_extract_code.c",
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/db2_test_template.c",
         "src/tests/support/kb_txn_stub.c",
         "src/tests/test_artifacts.c",
         "src/tests/test_code_index_ops.c",
@@ -2280,6 +2310,7 @@
     {
       "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/db2_test_template.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_conn_open.c",
         "src/tests/test_db2_pool.c",
@@ -3099,6 +3130,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
+        "src/tests/test_approach_memory.c",
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
@@ -3185,6 +3217,7 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/memory/memory_assemble.c",
+        "src/tests/test_approach_memory.c",
         "src/tests/test_guardrails.c",
         "src/tests/test_memory_advanced.c"
       ],
@@ -5037,6 +5070,7 @@
         "src/modules/roadmap/roadmap_milestone.c",
         "src/modules/roadmap/roadmap_reassess.c",
         "src/modules/roadmap/roadmap_report.c",
+        "src/tests/db2_test_template.c",
         "src/tests/support/kb_txn_stub.c",
         "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
@@ -9286,6 +9320,7 @@
         "src/cmd_core.c",
         "src/cmd_doctor.c",
         "src/kb/kb_main.c",
+        "src/tests/db2_test_template.c",
         "src/tests/test_content_scope_pg.c",
         "src/tests/test_db2.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -13298,6 +13333,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
+        "src/kb/kb_service.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -14232,7 +14268,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 114
+          "line": 115
         }
       ],
       "signature": "int db2_learning_application_get ( const char * application_id , learning_application_event_t * out )",
@@ -14248,7 +14284,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 113
+          "line": 114
         }
       ],
       "signature": "int db2_learning_application_record ( const learning_application_event_t * event )",
@@ -14263,7 +14299,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 138
+          "line": 139
         }
       ],
       "signature": "int db2_learning_commits_in_last_7_days ( const char * sink )",
@@ -14273,12 +14309,87 @@
     },
     {
       "consumers": [
+        "src/modules/learning/learning_endogeneity.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 214
+        }
+      ],
+      "signature": "int db2_learning_committed_source_counts ( int window_days , const char * sink_or_null , db2_learning_source_count_t * out , int max )",
+      "signature_sha256": "2702965d486ba020c5f1a996a9c52beea128febbe065561f4d0469b45da5c599",
+      "status": "audit-pending",
+      "symbol": "db2_learning_committed_source_counts"
+    },
+    {
+      "consumers": [
+        "src/modules/learning/learning_regret.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 275
+        }
+      ],
+      "signature": "int db2_learning_fate_counts ( int window_days , const char * regret_fates , db2_learning_fate_count_t * out , int max )",
+      "signature_sha256": "99976b4cf04d61d8f1f9689d54fc3036a3ade23e7e05089f818407e1b447a633",
+      "status": "audit-pending",
+      "symbol": "db2_learning_fate_counts"
+    },
+    {
+      "consumers": [
+        "src/tests/test_learning_regret.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 261
+        }
+      ],
+      "signature": "int db2_learning_fate_get ( int proposal_id , char * fate_out , size_t fate_out_len )",
+      "signature_sha256": "64387d297f81589e1a94e0d97bcfbb823420bfdbd360283414c2d5a5bd533192",
+      "status": "private-test-only",
+      "symbol": "db2_learning_fate_get"
+    },
+    {
+      "consumers": [
+        "src/modules/learning/learning_regret.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 257
+        }
+      ],
+      "signature": "int db2_learning_fate_record ( int proposal_id , const char * fate , const char * reason )",
+      "signature_sha256": "b13701f7975388baecfbc26f2a79e8e917b9d25ab4142f8b1892569b11d7261e",
+      "status": "audit-pending",
+      "symbol": "db2_learning_fate_record"
+    },
+    {
+      "consumers": [
+        "src/eval_synthesis.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 240
+        }
+      ],
+      "signature": "int db2_learning_negative_signals_recent ( int window_days , db2_learning_negative_signal_t * out , int max )",
+      "signature_sha256": "f20d525c3f19752f1dcffcd74d2c7614e6654e8b5e653e99a19d279cd2bd3bff",
+      "status": "audit-pending",
+      "symbol": "db2_learning_negative_signals_recent"
+    },
+    {
+      "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 104
+          "line": 105
         }
       ],
       "signature": "int db2_learning_observation_add_evidence ( const char * observation_id , int64_t source_event_id , const char * source_span , const char * stance )",
@@ -14294,7 +14405,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 93
+          "line": 94
         }
       ],
       "signature": "int db2_learning_observation_evidence_ids ( const char * observation_id , int64_t * out , int max )",
@@ -14309,7 +14420,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 89
+          "line": 90
         }
       ],
       "signature": "int db2_learning_observation_get ( const char * observation_id , learning_observation_t * out )",
@@ -14324,7 +14435,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 90
+          "line": 91
         }
       ],
       "signature": "int db2_learning_observation_list ( const char * status , const char * scope_kind , const char * scope_id , int limit , learning_observation_t * out , int max )",
@@ -14341,7 +14452,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 98
+          "line": 99
         }
       ],
       "signature": "int db2_learning_observation_refresh ( const char * observation_id , const char * scope_kind , const char * scope_id , const char * observation_type , const char * title , const char * summary , const char * policy_version , const learning_observation_evidence_input_t * evidence , int evidence_count , const char * supersedes )",
@@ -14354,7 +14465,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 83
+          "line": 84
         }
       ],
       "signature": "int db2_learning_observation_refresh_recurrence ( const char * observation_id , const char * role , const char * failure_mode , const char * title , const char * summary , int64_t max_event_id )",
@@ -14367,7 +14478,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 94
+          "line": 95
         }
       ],
       "signature": "int db2_learning_observation_set_status ( const char * observation_id , const char * status )",
@@ -14382,7 +14493,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 108
+          "line": 109
         }
       ],
       "signature": "int db2_learning_observations_reconcile ( void )",
@@ -14397,7 +14508,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 124
+          "line": 125
         }
       ],
       "signature": "int db2_learning_proposal_archive ( int id , const char * reason )",
@@ -14414,13 +14525,28 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 129
+          "line": 130
         }
       ],
       "signature": "int db2_learning_proposal_bump_corroboration ( int id )",
       "signature_sha256": "35b1d0df0c6e34d734cafcbe6a7ac8323c6fe18a58358078bcf679ac4084e9f1",
       "status": "audit-pending",
       "symbol": "db2_learning_proposal_bump_corroboration"
+    },
+    {
+      "consumers": [
+        "src/modules/learning/learning_router.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 158
+        }
+      ],
+      "signature": "int db2_learning_proposal_find_committed ( const char * sink , const char * target_key , int64_t target_memory_id , int exclude_id )",
+      "signature_sha256": "d1b694a0ed4126607e3aa4675c3654de02d3184f0ffc1c33a3ea554f7ad54023",
+      "status": "audit-pending",
+      "symbol": "db2_learning_proposal_find_committed"
     },
     {
       "consumers": [
@@ -14432,7 +14558,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 150
+          "line": 151
         }
       ],
       "signature": "int db2_learning_proposal_find_pending ( const char * sink , const char * target_key , int64_t target_memory_id )",
@@ -14448,7 +14574,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 169
+          "line": 177
         }
       ],
       "signature": "int db2_learning_proposal_get ( int id , learning_proposal_t * out )",
@@ -14465,7 +14591,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 158
+          "line": 166
         }
       ],
       "signature": "int db2_learning_proposal_insert ( int signal_id , const char * sink , const char * target_key , int64_t target_memory_id , const char * action_json , const char * evidence_refs , const char * expires_at )",
@@ -14480,7 +14606,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 176
+          "line": 184
         }
       ],
       "signature": "int db2_learning_proposal_list ( const char * state , const char * sink , int limit , learning_proposal_t * out , int max )",
@@ -14495,7 +14621,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 165
+          "line": 173
         }
       ],
       "signature": "int db2_learning_proposal_mark_committed ( int id )",
@@ -14510,7 +14636,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 133
+          "line": 134
         }
       ],
       "signature": "int db2_learning_proposal_refresh_evidence ( int id , const char * evidence_refs_json )",
@@ -14525,7 +14651,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 119
+          "line": 120
         }
       ],
       "signature": "void db2_learning_proposals_archive_expired ( void )",
@@ -14540,7 +14666,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 184
+          "line": 192
         }
       ],
       "signature": "int db2_learning_proposals_settled_counts ( int window_days , int64_t * committed , int64_t * terminal )",
@@ -14557,7 +14683,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 144
+          "line": 145
         }
       ],
       "signature": "int db2_learning_signal_insert ( const learning_signal_input_t * input , const char * source_session )",
@@ -21646,6 +21772,7 @@
         "src/cmd_core.c",
         "src/cmd_doctor.c",
         "src/kb/kb_main.c",
+        "src/tests/db2_test_template.c",
         "src/tests/test_db2.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_memory.c",
@@ -21674,6 +21801,7 @@
       "consumers": [
         "src/cmd_core.c",
         "src/kb/kb_main.c",
+        "src/tests/db2_test_template.c",
         "src/tests/test_kb_audit_worm_pg.c"
       ],
       "locations": [
@@ -21845,6 +21973,7 @@
         "src/cmd_core.c",
         "src/cmd_doctor.c",
         "src/kb/kb_main.c",
+        "src/tests/db2_test_template.c",
         "src/tests/test_content_scope_pg.c",
         "src/tests/test_db2.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -22765,6 +22894,7 @@
       "consumers": [
         "src/tests/bench_perf.c",
         "src/tests/fuzz_memory_search.c",
+        "src/tests/test_approach_memory.c",
         "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
@@ -22806,6 +22936,7 @@
         "src/tests/test_demotion.c",
         "src/tests/test_embedding_dim.c",
         "src/tests/test_entity_registry.c",
+        "src/tests/test_eval_candidates.c",
         "src/tests/test_evidence_embed.c",
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
@@ -22824,6 +22955,7 @@
         "src/tests/test_kb_releases_db.c",
         "src/tests/test_learning_bundle.c",
         "src/tests/test_learning_metrics.c",
+        "src/tests/test_learning_regret.c",
         "src/tests/test_learning_synth.c",
         "src/tests/test_learning_version.c",
         "src/tests/test_memory_advanced.c",
@@ -26741,15 +26873,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b062d7600e3a4f128b75726bcec27c95e7d85991c401d67cc965f884431ead4b",
+  "fingerprint": "14f262636d7c2f48824bb61b4a20df83a7b5a067e3cc14fb2fe0c03d0978d435",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 704,
-    "declarations": 1454,
+    "audit_pending": 709,
+    "declarations": 1460,
     "headers": 140,
     "internal_unconsumed": 164,
-    "private_test_only": 292,
+    "private_test_only": 293,
     "reviewed": 294
   }
 }

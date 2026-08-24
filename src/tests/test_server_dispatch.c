@@ -8,6 +8,10 @@
 #include "../db1/db.h"
 #include "../db1/eval.h"
 #include "../db1/server_sessions.h"
+#include "eval_synthesis.h" /* the regression-candidate surface stubbed below */
+#include "approach_store.h"
+#include <aimee/learning/attribution.h>
+#include "curiosity_resolve.h"
 #include "kb_client.h"       /* kb_health_t for the stub below */
 #include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
@@ -380,6 +384,120 @@ int db1_eval_results_list(const char *suite_or_null, db1_eval_display_row_t *out
    out[0].latency_ms = 11;
    snprintf(out[0].created_at, sizeof(out[0].created_at), "2026-05-25T00:00:00Z");
    return 1;
+}
+
+/* The eval.candidates surface reaches DB1 and the endogeneity gate. Neither is
+ * what this test exercises — it proves the dispatch table routes — so both are
+ * stubbed to a quiet, empty installation. */
+int db1_eval_candidate_list(const char *state_or_null, db1_eval_candidate_t *out, int max)
+{
+   (void)state_or_null;
+   (void)out;
+   return max > 0 ? 0 : -1;
+}
+
+int db1_eval_candidate_mark_rejected(int64_t id, const char *reason)
+{
+   (void)reason;
+   return id > 0 ? 0 : -1;
+}
+
+learning_gate_state_t learning_gate_check(learning_endogeneity_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return LEARNING_GATE_OPEN;
+}
+
+int eval_synthesis_scan_failures(int window_days, const char *suite,
+                                 eval_synthesis_scan_stats_t *out)
+{
+   (void)window_days;
+   (void)suite;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int eval_synthesis_admit_pending(const char *suite_dir, const char *admitted_by,
+                                 int min_occurrences)
+{
+   (void)admitted_by;
+   (void)min_occurrences;
+   return (suite_dir && suite_dir[0]) ? 0 : -1;
+}
+
+int eval_synthesis_retire(const char *suite_dir, int retire_windows)
+{
+   (void)retire_windows;
+   return (suite_dir && suite_dir[0]) ? 0 : -1;
+}
+
+/* Approach recall reaches DB2, which this test deliberately does not link —
+ * it proves the dispatch table routes, not what the stores hold. */
+int approach_store_recall(const char *goal, learning_approach_hit_t *out, int max)
+{
+   (void)goal;
+   (void)out;
+   return max > 0 ? 0 : -1;
+}
+
+int approach_store_render(const char *goal, char *out, size_t out_len, char *arm_out,
+                          size_t arm_out_len)
+{
+   (void)goal;
+   if (out && out_len)
+      out[0] = '\0';
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   return 0;
+}
+
+int eval_attribution_for_suite(const char *suite_or_null, learning_attribution_t *out, int max)
+{
+   (void)suite_or_null;
+   (void)out;
+   return max > 0 ? 0 : -1;
+}
+
+/* The backlog drain reaches DB2; this test proves routing, not resolution. */
+int curiosity_resolve_pass(int budget, curiosity_resolve_stats_t *out)
+{
+   if (out)
+   {
+      memset(out, 0, sizeof(*out));
+      out->budget = budget > 0 ? budget : CURIOSITY_RESOLVE_DEFAULT_BUDGET;
+      out->no_probe = 1;
+   }
+   return 0;
+}
+
+/* The gate is answered by the knowledge service, which this test does not
+ * link; NULL is what an unreachable one looks like. */
+char *kb_client_learning_endogeneity_json(int window_days)
+{
+   (void)window_days;
+   return NULL;
+}
+
+char *kb_client_learning_resolve_json(int budget)
+{
+   (void)budget;
+   return NULL;
+}
+
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason)
+{
+   (void)id;
+   (void)fate;
+   (void)reason;
+   return NULL;
+}
+
+char *kb_client_learning_policy_select_json(const char *decision_point)
+{
+   (void)decision_point;
+   return NULL;
 }
 
 int server_load_token(server_ctx_t *ctx)

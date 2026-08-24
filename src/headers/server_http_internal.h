@@ -227,6 +227,7 @@ int rh_server_forensics(const route_req_t *rq, char *resp, int cap);
  * (relocated out of server_http_routes.c to stay under the line-check
  * ceiling). Referenced by the route table in server_http_routes.c. */
 int git_surface_enabled(void); /* AIMEE_WEBCHAT_GIT gate shared by every git route */
+int rh_curiosity(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap);

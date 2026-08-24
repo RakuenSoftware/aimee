@@ -16,4 +16,8 @@ int kb_handle_kb_import(int fd, cJSON *req);
 
 int kb_handle_file_get(int fd, cJSON *req);
 
+/* S6: register the plan-advisory arms and install the bandit-backed sampler
+ * and reward sink. Called once at service start. */
+void kb_policy_arms_init(void);
+
 #endif /* DEC_KB_SERVICE_KB_H */
