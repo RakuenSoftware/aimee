@@ -84,15 +84,30 @@ def markdown_files() -> list[Path]:
         text=True,
     )
     paths = {ROOT / line for line in result.stdout.splitlines() if line and (ROOT / line).exists()}
-    # Include intentional new guides before their first commit.
-    for relative_path in (
-        Path("docs/KB_FLEET.md"),
-        Path("docs/WRITING.md"),
-        Path("docs/runbooks/change-embedder.md"),
-    ):
-        path = ROOT / relative_path
-        if path.exists():
-            paths.add(path)
+
+    # UNTRACKED MARKDOWN IS CHECKED TOO, and it is the half most likely to be
+    # wrong: a brand-new guide has never been read by this script, while a
+    # tracked one has passed it at least once.
+    #
+    # This replaces a hand-written list of three "intentional new guides before
+    # their first commit". That list had the failure mode of every enumerated
+    # gate -- docs/modules/db3.md was the fourth such guide, was not on it, and
+    # reached its first commit carrying ten em dashes that this check exists to
+    # refuse. It was caught by committing, which is the expensive way.
+    #
+    # --exclude-standard keeps .gitignore'd files out, so scratch notes and
+    # build output do not become lint failures.
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "*.md"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    paths |= {
+        ROOT / line for line in untracked.stdout.splitlines()
+        if line and (ROOT / line).exists()
+    }
     return sorted(
         path for path in paths
         if not any(part in SKIP_PARTS for part in relative(path).parts)

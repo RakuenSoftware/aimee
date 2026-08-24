@@ -472,3 +472,42 @@ a server.
 
 So the claim holds, and it now holds because it was counted here rather than
 because it was true when someone wrote it down.
+
+## What the commit itself found
+
+Committing was expected to clear the one remaining red, `docs-gen-check`, which
+compares generated output against git and so could not pass on an uncommitted
+tree. It did. **And `make lint` stayed red, on a different target.**
+
+`check-docs` had never seen `docs/modules/db3.md`. It enumerates with
+`git ls-files *.md`, which lists TRACKED files only, so the file was invisible
+for as long as it was new — and it reached its first commit carrying ten em
+dashes the voice check exists to refuse.
+
+The script already knew about this hole and had patched it by hand:
+
+    # Include intentional new guides before their first commit.
+    for relative_path in (
+        Path("docs/KB_FLEET.md"),
+        Path("docs/WRITING.md"),
+        Path("docs/runbooks/change-embedder.md"),
+    ):
+
+Three names, maintained by hand, with the failure mode of every enumerated gate.
+`db3.md` was the fourth such guide and nobody added it, which is not a lapse —
+it is what enumerated gates do.
+
+Replaced with `git ls-files --others --exclude-standard *.md`, so every new
+guide is covered by existing code. `--exclude-standard` keeps `.gitignore`'d
+paths out, so scratch notes and build output do not become lint failures.
+Mutation-verified in both directions: an untracked violating file is now caught,
+and a gitignored violating file is still ignored.
+
+The em dashes are fixed and `make lint` is green end to end.
+
+**The general point is about the shape of the evidence.** Every green reading
+before this commit was true, and none of them covered this file, because the
+gate's own scope excluded it and said nothing about the exclusion. "Everything
+passes" and "everything was checked" are different claims, and only the second
+one is worth anything — which is the same lesson as the record guard vouching
+for one file out of eighty-eight, arriving from the opposite direction.
