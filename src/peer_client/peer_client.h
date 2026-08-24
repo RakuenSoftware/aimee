@@ -95,9 +95,10 @@ extern "C"
     * NULL) receives the module's re-stamped envelope -- its provenance, not the
     * caller's claim about it -- and the caller frees it with
     * peer_client_message_free. On PEER_CLIENT_REFUSED, *status names the no. */
-   peer_client_result_t peer_client_send(const char *from, const char *to, const char *text,
-                                         const char *conversation_id, int expect_reply,
-                                         peer_client_message_t *stamped, uint32_t *status);
+   peer_client_result_t
+   peer_client_send(const char *from, const char *to, const char *text,
+                    const char *conversation_id, int expect_reply,
+                    peer_client_message_t *stamped, uint32_t *status, int *transport);
 
    /* PEER_CLIENT_INBOX_TAKE_MAX bounds ONE drain, not an inbox.
     *
@@ -116,12 +117,12 @@ extern "C"
     * "that was the first max of more". */
    peer_client_result_t peer_client_inbox_take(const char *session, int max,
                                                peer_client_message_t **out, size_t *count,
-                                               int *remaining, uint32_t *status);
+                                               int *remaining, uint32_t *status, int *transport);
 
    /* How many are waiting, and how many were dropped on overflow. Answering
     * zero is a legitimate success: an empty inbox is an answer, not a failure. */
    peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, int *dropped,
-                                              uint32_t *status);
+                                              uint32_t *status, int *transport);
 
    void peer_client_message_free(peer_client_message_t *m);
    void peer_client_messages_free(peer_client_message_t *m, size_t count);
@@ -131,6 +132,15 @@ extern "C"
     * MODULE added, so naming it "unclassified" would claim the module said
     * something it did not. */
    const char *peer_client_status_name(uint32_t status);
+
+   /* A name for the TRANSPORT outcome an operation's `transport` out-param
+    * received: "capability_absent", "deadline_exceeded", "capability_denied",
+    * and so on. Only meaningful when the call returned PEER_CLIENT_TRANSPORT.
+    *
+    * This exists because "the module did not answer" is four different
+    * conditions wearing one sentence -- absent, denied, timed out, reply too
+    * large -- and they need different responses from whoever reads it. */
+   const char *peer_client_transport_name(int transport);
 
    /* Is anything serving peer delivery on this daemon's bus? A local check
     * against the bus registry, not a probe: with no module attached there is no

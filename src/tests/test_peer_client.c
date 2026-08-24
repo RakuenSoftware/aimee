@@ -156,7 +156,7 @@ static void test_three_outcomes(void)
          and a caller that reads this as "the peer said no" stops trying. */
    reset();
    g_available = 0;
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "no module serving delivery is a transport failure, not a refusal");
    ok(status == PEER_CLIENT_STATUS_OK,
       "a transport failure leaves status untouched (there was no status to report)");
@@ -164,7 +164,7 @@ static void test_three_outcomes(void)
    /* 2. the module answered, understood, and said no. */
    reset();
    reply_set(PEER_CLIENT_STATUS_UNKNOWN_SENDER, NULL, 0);
-   ok(peer_client_send("ghost", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_REFUSED,
+   ok(peer_client_send("ghost", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_REFUSED,
       "a non-zero status is a domain refusal");
    ok(status == PEER_CLIENT_STATUS_UNKNOWN_SENDER, "the refusal carries WHICH no");
    ok(strcmp(peer_client_status_name(status), "unknown_sender") == 0,
@@ -173,7 +173,7 @@ static void test_three_outcomes(void)
    /* 3. the module answered and it worked. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
-   ok(peer_client_send("sess-a", "sess-b", "hello from a", "conv-1", 0, &m, &status) ==
+   ok(peer_client_send("sess-a", "sess-b", "hello from a", "conv-1", 0, &m, &status, NULL) ==
           PEER_CLIENT_OK,
       "a zero status with a full row is a delivery");
    ok(strcmp(m.text, "hello from a") == 0, "the stamped envelope carries the text");
@@ -204,7 +204,7 @@ static void test_row_width(void)
       from a real one. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH - 1);
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a SHORT row is refused rather than read as a message");
 
    /* Twelve. A wider row is a newer module: cells append, so the first eleven
@@ -220,7 +220,7 @@ static void test_row_width(void)
       wide[PEER_CLIENT_MESSAGE_WIDTH] = "a cell from a newer module";
       reply_set(PEER_CLIENT_STATUS_OK, wide, PEER_CLIENT_MESSAGE_WIDTH + 1);
    }
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a WIDER row is refused too, rather than read as its first eleven cells");
 }
 
@@ -235,21 +235,21 @@ static void test_malformed(void)
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
    put_u32(g_reply + 8, 0xfffffff0u); /* first cell claims to be enormous */
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a cell length past the end of the frame is refused, not clamped");
 
    /* Trailing bytes the frame never declared. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH);
    g_reply[g_reply_len++] = 0x41;
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "trailing undeclared bytes are refused, not ignored");
 
    /* A header alone, with a status of OK and no cells: a send that reports
       success and delivers no envelope. */
    reset();
    reply_set(PEER_CLIENT_STATUS_OK, NULL, 0);
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "OK with no row is refused: a delivery with no envelope is not a delivery");
 
    /* A corrupt hop cell. Defaulting it to zero would make a corrupt frame look
@@ -262,7 +262,7 @@ static void test_malformed(void)
       bad[7] = "not-a-number";
       reply_set(PEER_CLIENT_STATUS_OK, bad, PEER_CLIENT_MESSAGE_WIDTH);
    }
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a hop cell that does not parse is refused, not read as hop 0");
 
    /* And an is_reply that is neither true nor false. */
@@ -274,7 +274,7 @@ static void test_malformed(void)
       bad[8] = "yes";
       reply_set(PEER_CLIENT_STATUS_OK, bad, PEER_CLIENT_MESSAGE_WIDTH);
    }
-   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "an is_reply cell that is neither true nor false is refused, not read as false");
 }
 
@@ -295,7 +295,7 @@ static void test_inbox(void)
       const char *cells[1] = {"0"};
       reply_set(PEER_CLIENT_STATUS_OK, cells, 1);
    }
-   ok(peer_client_inbox_take("sess-b", 0, &msgs, &count, &remaining, &status) == PEER_CLIENT_OK,
+   ok(peer_client_inbox_take("sess-b", 0, &msgs, &count, &remaining, &status, NULL) == PEER_CLIENT_OK,
       "an empty inbox is a success, not a failure");
    ok(count == 0 && remaining == 0 && msgs == NULL, "and it reports nothing taken, none waiting");
 
@@ -309,7 +309,7 @@ static void test_inbox(void)
          cells[1 + i] = ROW[i];
       reply_set(PEER_CLIENT_STATUS_OK, cells, 1 + PEER_CLIENT_MESSAGE_WIDTH);
    }
-   ok(peer_client_inbox_take("sess-b", 4, &msgs, &count, &remaining, &status) == PEER_CLIENT_OK,
+   ok(peer_client_inbox_take("sess-b", 4, &msgs, &count, &remaining, &status, NULL) == PEER_CLIENT_OK,
       "a take with rows succeeds");
    ok(count == 1, "one row decodes to one message");
    ok(remaining == 5, "and REMAINING is reported, so a caller knows to ask again");
@@ -326,7 +326,7 @@ static void test_inbox(void)
       const char *cells[1] = {"0"};
       reply_set(PEER_CLIENT_STATUS_OK, cells, 1);
    }
-   (void)peer_client_inbox_take("sess-b", 9999, &msgs, &count, &remaining, &status);
+   (void)peer_client_inbox_take("sess-b", 9999, &msgs, &count, &remaining, &status, NULL);
    {
       char asked[16];
       char want[16];
@@ -345,14 +345,14 @@ static void test_inbox(void)
          cells[1 + i] = ROW[i];
       reply_set(PEER_CLIENT_STATUS_OK, cells, PEER_CLIENT_MESSAGE_WIDTH); /* one short */
    }
-   ok(peer_client_inbox_take("sess-b", 4, &msgs, &count, &remaining, &status) ==
+   ok(peer_client_inbox_take("sess-b", 4, &msgs, &count, &remaining, &status, NULL) ==
           PEER_CLIENT_TRANSPORT,
       "a take reply that is not a whole number of rows is refused");
 
    /* An unknown session is a refusal from the module, and must arrive as one. */
    reset();
    reply_set(PEER_CLIENT_STATUS_NO_PEER, NULL, 0);
-   ok(peer_client_inbox_take("gone", 4, &msgs, &count, &remaining, &status) == PEER_CLIENT_REFUSED,
+   ok(peer_client_inbox_take("gone", 4, &msgs, &count, &remaining, &status, NULL) == PEER_CLIENT_REFUSED,
       "an unknown session refuses rather than reporting an empty inbox");
    ok(status == PEER_CLIENT_STATUS_NO_PEER, "and says which no");
 
@@ -363,7 +363,7 @@ static void test_inbox(void)
       reply_set(PEER_CLIENT_STATUS_OK, cells, 2);
    }
    int waiting = -1, dropped = -1;
-   ok(peer_client_inbox_len("sess-b", &waiting, &dropped, &status) == PEER_CLIENT_OK,
+   ok(peer_client_inbox_len("sess-b", &waiting, &dropped, &status, NULL) == PEER_CLIENT_OK,
       "inbox_len reads its two cells");
    ok(waiting == 3 && dropped == 1, "waiting and dropped are separate facts");
 
@@ -372,7 +372,7 @@ static void test_inbox(void)
       const char *cells[1] = {"3"};
       reply_set(PEER_CLIENT_STATUS_OK, cells, 1);
    }
-   ok(peer_client_inbox_len("sess-b", &waiting, &dropped, &status) == PEER_CLIENT_TRANSPORT,
+   ok(peer_client_inbox_len("sess-b", &waiting, &dropped, &status, NULL) == PEER_CLIENT_TRANSPORT,
       "a one-cell inbox_len reply is refused rather than leaving dropped stale");
 }
 
@@ -399,9 +399,76 @@ static void test_status_names(void)
       "a status this build does not know is 'unknown', not mislabelled as one it does");
 }
 
+/* ── the transport outcome is NAMED, not summarised ───────────────────────── */
+
+static void test_transport_names(void)
+{
+   peer_client_message_t m;
+   uint32_t status = 0;
+   int transport = -1;
+
+   /* Absent and denied and timed out are FOUR different repairs wearing one
+      sentence if the code is not carried out. Each arm below is a condition a
+      reader has to act on differently. */
+   reset();
+   g_available = 0;
+   transport = -1;
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
+          transport == AIMEE_MODULE_CALL_CAPABILITY_ABSENT,
+      "nothing serving the stage reports capability_absent, not a bare failure");
+
+   reset();
+   g_transport = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   transport = -1;
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
+          transport == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED,
+      "a module that ran out of time reports deadline_exceeded");
+
+   reset();
+   g_transport = AIMEE_MODULE_CALL_CAPABILITY_DENIED;
+   transport = -1;
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
+          transport == AIMEE_MODULE_CALL_CAPABILITY_DENIED,
+      "a grant that denied the call reports capability_denied, not 'unreachable'");
+
+   /* A reply that arrived and could not be read is a PROTOCOL disagreement, and
+      calling it unreachable sends the reader to look at whether the module is
+      running -- which it demonstrably is, since it replied. */
+   reset();
+   reply_set(PEER_CLIENT_STATUS_OK, ROW, PEER_CLIENT_MESSAGE_WIDTH - 1);
+   transport = -1;
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_TRANSPORT &&
+          transport == AIMEE_MODULE_CALL_PROTOCOL,
+      "a reply of the wrong shape reports protocol, not an absent module");
+
+   /* A DOMAIN refusal must leave the transport code alone: the call reached the
+      module and was judged, so naming a transport failure there would invent one. */
+   reset();
+   reply_set(PEER_CLIENT_STATUS_DENIED, NULL, 0);
+   transport = -1;
+   ok(peer_client_send("a", "b", "hi", NULL, 0, &m, &status, &transport) == PEER_CLIENT_REFUSED &&
+          transport == AIMEE_MODULE_CALL_OK,
+      "a refusal leaves the transport code OK: the call was judged, not lost");
+
+   /* And the names are distinct. A table where two codes share a string is a
+      table that cannot tell them apart in the one place a human reads it. */
+   const int codes[] = {AIMEE_MODULE_CALL_CAPABILITY_ABSENT, AIMEE_MODULE_CALL_CAPABILITY_DENIED,
+                        AIMEE_MODULE_CALL_DEADLINE_EXCEEDED, AIMEE_MODULE_CALL_INTERNAL,
+                        AIMEE_MODULE_CALL_PROTOCOL,          AIMEE_MODULE_CALL_TRANSPORT};
+   int distinct = 1;
+   for (size_t i = 0; i < sizeof codes / sizeof codes[0]; i++)
+      for (size_t j = i + 1; j < sizeof codes / sizeof codes[0]; j++)
+         if (strcmp(peer_client_transport_name(codes[i]), peer_client_transport_name(codes[j])) == 0)
+            distinct = 0;
+   ok(distinct, "every transport code this client reports has its OWN name");
+   ok(strcmp(peer_client_transport_name(-1), "unknown") == 0,
+      "a code this build does not know is 'unknown' rather than mislabelled");
+}
+
 int main(void)
 {
    test_three_outcomes();
+   test_transport_names();
    test_row_width();
    test_malformed();
    test_inbox();

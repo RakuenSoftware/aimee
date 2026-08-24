@@ -54,16 +54,56 @@
 /* header + the leading `remaining` cell + the rows one take may return */
 #define PEER_RESPONSE_MAX (8u + 4u + 32u + (uint32_t)PEER_CLIENT_INBOX_TAKE_MAX * PEER_ROW_BYTES)
 
+/* A name for each transport outcome, so a failure says WHICH failure.
+ *
+ * These are aimee_module_call_result_t values. Naming them matters more here
+ * than it looks: "the module did not answer" covers a module that is absent, a
+ * grant that denied the call, a deadline that expired, and a reply too large to
+ * receive -- four different things to do about it, and the first three are
+ * indistinguishable to anyone reading a log that says only "unreachable". */
+static const char *call_result_name(int rc)
+{
+   switch (rc)
+   {
+   case AIMEE_MODULE_CALL_OK: return "ok";
+   case AIMEE_MODULE_CALL_CAPABILITY_ABSENT: return "capability_absent";
+   case AIMEE_MODULE_CALL_CAPABILITY_DENIED: return "capability_denied";
+   case AIMEE_MODULE_CALL_CANCELLED: return "cancelled";
+   case AIMEE_MODULE_CALL_DEADLINE_EXCEEDED: return "deadline_exceeded";
+   case AIMEE_MODULE_CALL_INVALID_REQUEST: return "invalid_request";
+   case AIMEE_MODULE_CALL_INTERNAL: return "internal";
+   case AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE: return "response_too_large";
+   case AIMEE_MODULE_CALL_TRANSPORT: return "transport";
+   case AIMEE_MODULE_CALL_PROTOCOL: return "protocol";
+   case AIMEE_MODULE_CALL_INVALID_ARGUMENT: return "invalid_argument";
+   default: return "unknown";
+   }
+}
+
+/* Warn once per DISTINCT result, not once per process.
+ *
+ * It was once per process, and that is a defect with a long silent tail: the
+ * first failure claims the single warning, and every later one -- including a
+ * different failure, for a different reason, needing a different repair -- is
+ * silent. A module that goes absent, comes back, then starts denying the grant
+ * logs "unreachable" once and never mentions the denial. One message standing
+ * for several repairs.
+ *
+ * Per distinct code keeps the volume bounded (eleven lines at the absolute
+ * worst, for the life of the process) while never letting a NEW kind of failure
+ * hide behind an old one. */
 static void warn_unreachable(int reason)
 {
-   static int warned;
-   if (warned)
+   static unsigned seen;
+   unsigned bit = (reason >= 0 && reason < 31) ? (1u << reason) : (1u << 31);
+   if (seen & bit)
       return;
-   warned = 1;
-   /* Once per process: enough to tell a module that is down from one that is
-      merely quiet, without a line per call. */
-   LOG_WARN("peer.client", "aimee peer module is unreachable (module call result %d)", reason);
+   seen |= bit;
+   LOG_WARN("peer.client", "aimee peer module call failed: %s (%d)", call_result_name(reason),
+            reason);
 }
+
+const char *peer_client_transport_name(int transport) { return call_result_name(transport); }
 
 int peer_client_available(void) { return obs_bus_module_available(PEER_EVENT_KIND(PEER_STAGE_DELIVERY)); }
 
@@ -210,23 +250,36 @@ bad:
 /* One call. Returns PEER_CLIENT_OK with `out` filled, PEER_CLIENT_REFUSED with
  * `out->status` set and no cells, or PEER_CLIENT_TRANSPORT. */
 static peer_client_result_t call_stage(uint32_t stage, uint32_t op, const char *const *fields,
-                                       uint32_t count, struct reply *out)
+                                       uint32_t count, struct reply *out, int *transport)
 {
    uint32_t kind = PEER_EVENT_KIND(stage);
+   if (transport)
+      *transport = AIMEE_MODULE_CALL_OK;
    if (!obs_bus_module_available(kind))
    {
+      /* Nothing serves this kind on the local bus. Distinct from a call that
+         went out and failed, and the distinction is the whole reason the
+         out-param exists: this one means the module is not there. */
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
       warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
       return PEER_CLIENT_TRANSPORT;
    }
    size_t request_len = 0;
    if (frame_size(fields, count, &request_len) != 0)
+   {
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
+   }
    uint8_t *request = malloc(request_len);
    uint8_t *response = malloc(PEER_RESPONSE_MAX);
    if (!request || !response)
    {
       free(request);
       free(response);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INTERNAL;
       return PEER_CLIENT_TRANSPORT;
    }
    encode(request, op, fields, count);
@@ -238,6 +291,8 @@ static peer_client_result_t call_stage(uint32_t stage, uint32_t op, const char *
    free(request);
    if (rc != AIMEE_MODULE_CALL_OK)
    {
+      if (transport)
+         *transport = (int)rc;
       warn_unreachable((int)rc);
       free(response);
       return PEER_CLIENT_TRANSPORT;
@@ -245,7 +300,14 @@ static peer_client_result_t call_stage(uint32_t stage, uint32_t op, const char *
    int decoded = reply_decode(response, response_len, out);
    free(response);
    if (decoded != 0)
+   {
+      /* The call SUCCEEDED at the transport and the frame is unreadable, which
+         is a protocol disagreement rather than an unreachable module. Reported
+         as such so it is not mistaken for the module being down. */
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
+   }
    if (out->status != PEER_CLIENT_STATUS_OK)
    {
       /* A refusal carries no cells worth reading, and freeing them here means
@@ -321,19 +383,26 @@ static int row_take(char **cells, peer_client_message_t *m)
 
 peer_client_result_t peer_client_send(const char *from, const char *to, const char *text,
                                       const char *conversation_id, int expect_reply,
-                                      peer_client_message_t *stamped, uint32_t *status)
+                                      peer_client_message_t *stamped, uint32_t *status,
+                                      int *transport)
 {
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
+   if (transport)
+      *transport = AIMEE_MODULE_CALL_OK;
    if (stamped)
       memset(stamped, 0, sizeof(*stamped));
    if (!from || !to || !text)
+   {
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
+   }
    /* from, to, text, conversation_id, hop, expect_reply */
    const char *fields[6] = {from, to, text, conversation_id ? conversation_id : "", "0",
                             expect_reply ? "true" : "false"};
    struct reply r;
-   peer_client_result_t rc = call_stage(PEER_STAGE_DELIVERY, PEER_OP_SEND, fields, 6, &r);
+   peer_client_result_t rc = call_stage(PEER_STAGE_DELIVERY, PEER_OP_SEND, fields, 6, &r, transport);
    if (rc == PEER_CLIENT_REFUSED && status)
       *status = r.status;
    if (rc != PEER_CLIENT_OK)
@@ -343,6 +412,8 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
       /* The module answered OK with a shape this build does not know. Reading a
          prefix of it would be reading a different contract's row. */
       reply_free(&r);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    if (stamped)
@@ -351,6 +422,8 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
       {
          peer_client_message_free(stamped);
          reply_free(&r);
+         if (transport)
+            *transport = AIMEE_MODULE_CALL_PROTOCOL;
          return PEER_CLIENT_TRANSPORT;
       }
    }
@@ -359,19 +432,26 @@ peer_client_result_t peer_client_send(const char *from, const char *to, const ch
 }
 
 peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, int *dropped,
-                                           uint32_t *status)
+                                           uint32_t *status, int *transport)
 {
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
+   if (transport)
+      *transport = AIMEE_MODULE_CALL_OK;
    if (waiting)
       *waiting = 0;
    if (dropped)
       *dropped = 0;
    if (!session)
+   {
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
+   }
    const char *fields[1] = {session};
    struct reply r;
-   peer_client_result_t rc = call_stage(PEER_STAGE_INBOX, PEER_OP_INBOX_LEN, fields, 1, &r);
+   peer_client_result_t rc =
+       call_stage(PEER_STAGE_INBOX, PEER_OP_INBOX_LEN, fields, 1, &r, transport);
    if (rc == PEER_CLIENT_REFUSED && status)
       *status = r.status;
    if (rc != PEER_CLIENT_OK)
@@ -379,6 +459,8 @@ peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, in
    if (r.count != 2)
    {
       reply_free(&r);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    if (waiting)
@@ -391,10 +473,12 @@ peer_client_result_t peer_client_inbox_len(const char *session, int *waiting, in
 
 peer_client_result_t peer_client_inbox_take(const char *session, int max,
                                             peer_client_message_t **out, size_t *count,
-                                            int *remaining, uint32_t *status)
+                                            int *remaining, uint32_t *status, int *transport)
 {
    if (status)
       *status = PEER_CLIENT_STATUS_OK;
+   if (transport)
+      *transport = AIMEE_MODULE_CALL_OK;
    if (out)
       *out = NULL;
    if (count)
@@ -402,14 +486,19 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
    if (remaining)
       *remaining = 0;
    if (!session || !out || !count)
+   {
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
       return PEER_CLIENT_TRANSPORT;
+   }
    if (max <= 0 || max > PEER_CLIENT_INBOX_TAKE_MAX)
       max = PEER_CLIENT_INBOX_TAKE_MAX;
    char maxbuf[16];
    snprintf(maxbuf, sizeof(maxbuf), "%d", max);
    const char *fields[2] = {session, maxbuf};
    struct reply r;
-   peer_client_result_t rc = call_stage(PEER_STAGE_INBOX, PEER_OP_INBOX_TAKE, fields, 2, &r);
+   peer_client_result_t rc =
+       call_stage(PEER_STAGE_INBOX, PEER_OP_INBOX_TAKE, fields, 2, &r, transport);
    if (rc == PEER_CLIENT_REFUSED && status)
       *status = r.status;
    if (rc != PEER_CLIENT_OK)
@@ -421,6 +510,8 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
    if (r.count < 1 || (r.count - 1) % PEER_CLIENT_MESSAGE_WIDTH != 0)
    {
       reply_free(&r);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_PROTOCOL;
       return PEER_CLIENT_TRANSPORT;
    }
    size_t rows = (size_t)(r.count - 1) / PEER_CLIENT_MESSAGE_WIDTH;
@@ -435,6 +526,8 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
    if (!msgs)
    {
       reply_free(&r);
+      if (transport)
+         *transport = AIMEE_MODULE_CALL_INTERNAL;
       return PEER_CLIENT_TRANSPORT;
    }
    for (size_t i = 0; i < rows; ++i)
@@ -443,6 +536,8 @@ peer_client_result_t peer_client_inbox_take(const char *session, int max,
       {
          peer_client_messages_free(msgs, rows);
          reply_free(&r);
+         if (transport)
+            *transport = AIMEE_MODULE_CALL_PROTOCOL;
          return PEER_CLIENT_TRANSPORT;
       }
    }

@@ -1812,14 +1812,21 @@ static cJSON *peer_message_json(const peer_client_message_t *m)
  * instructions: the first says try again or tell a human, the second says stop
  * and read the reason. Collapsing them into one "failed" line is how an agent
  * ends up retrying a refusal forever, so the wording differs deliberately. */
-static cJSON *peer_outcome_text(const char *verb, peer_client_result_t rc, uint32_t status)
+static cJSON *peer_outcome_text(const char *verb, peer_client_result_t rc, uint32_t status,
+                                int transport)
 {
-   char msg[256];
+   char msg[320];
    if (rc == PEER_CLIENT_TRANSPORT)
+      /* The transport outcome is NAMED, not summarised. "did not answer" covers
+         a module that is absent, a grant that denied the call, a deadline that
+         expired and a reply too large to receive -- four conditions with four
+         different responses, and a reader given only the summary cannot tell
+         which one they are looking at. That cost real time: a hang and an
+         absence were indistinguishable in this exact sentence. */
       snprintf(msg, sizeof msg,
-               "peer %s: the peer-messaging module did not answer. It may not be running on this "
-               "server's bus. This is not a refusal — the request was never judged.",
-               verb);
+               "peer %s: the request was never judged — the peer-messaging module did not "
+               "answer (%s). This is NOT a refusal; do not treat it as the peer saying no.",
+               verb, peer_client_transport_name(transport));
    else
       snprintf(msg, sizeof msg, "peer %s refused: %s", verb, peer_client_status_name(status));
    return text_content(msg);
@@ -1840,12 +1847,13 @@ static cJSON *mcph_peer_send(struct mcp_call *c)
    cJSON *jexpect = cJSON_GetObjectItemCaseSensitive(c->jargs, "expect_reply");
    peer_client_message_t stamped;
    uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
    peer_client_result_t rc =
        peer_client_send(self, jto->valuestring, jtext->valuestring,
                         cJSON_IsString(jconv) ? jconv->valuestring : NULL,
-                        cJSON_IsTrue(jexpect) ? 1 : 0, &stamped, &status);
+                        cJSON_IsTrue(jexpect) ? 1 : 0, &stamped, &status, &transport);
    if (rc != PEER_CLIENT_OK)
-      return peer_outcome_text("send", rc, status);
+      return peer_outcome_text("send", rc, status, transport);
    cJSON *j = peer_message_json(&stamped);
    char msg[320];
    snprintf(msg, sizeof msg, "Delivered to %s (message %s, conversation %s).", jto->valuestring,
@@ -1870,10 +1878,11 @@ static cJSON *mcph_peer_inbox(struct mcp_call *c)
    size_t count = 0;
    int remaining = 0;
    uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
    peer_client_result_t rc =
-       peer_client_inbox_take(self, max, &msgs, &count, &remaining, &status);
+       peer_client_inbox_take(self, max, &msgs, &count, &remaining, &status, &transport);
    if (rc != PEER_CLIENT_OK)
-      return peer_outcome_text("inbox", rc, status);
+      return peer_outcome_text("inbox", rc, status, transport);
    cJSON *j = cJSON_CreateObject();
    cJSON_AddNumberToObject(j, "remaining", remaining);
    cJSON *arr = cJSON_AddArrayToObject(j, "messages");
