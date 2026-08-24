@@ -962,7 +962,7 @@ discarded whatever was still queued.
 Both moved after the join. The drain now runs with the call path open, which is
 what "a graceful stop drains those in flight" requires.
 
-## OPEN: a store call from the bus consumer thread does not complete
+## FIXED (was OPEN): a store call from the bus consumer thread did not complete
 
 With both fixes in, the events still do not arrive — `DEADLINE_EXCEEDED`, and
 **zero rows reach PostgreSQL**. It is not the stop: setting a settle window puts
@@ -976,12 +976,86 @@ traffic, so while it blocks waiting for the store's reply, the store's own call
 to the postgres module has nobody to route it.
 
 That is architectural: the guardrail sink cannot make a blocking module call
-from the thread that routes the bus. Fixing it means handing the write to
-another thread, which is a change to obs_bus's threading model and is not
-something to make unverified at the end of a session.
+from the thread that routes the bus. **See the next section: it is fixed.**
 
 **The test is committed and registered.** Without `AIMEE_STORE_URL` it skips, so
 `make unit-tests` is green; with one it fails, which is the truth. That is the
 opposite of the state this property was in before — a retired test and a note in
 a Makefile — and it is why the defect is now a failing assertion rather than a
 paragraph.
+
+---
+
+# The guardrail write, moved off the routing thread
+
+The open item above is closed. It was mine to close: making the store a bus
+client is what turned an in-process write into a blocking call from the thread
+that routes the bus.
+
+## Confirmed in one process, not inferred from two
+
+The earlier diagnosis compared test binaries. This settles it inside a single
+process, where the bus, modules, database and grants are identical between the
+two calls:
+
+    main-thread store call: rc=0        <- the store answers this thread
+    consumer-thread calls:  result 4    <- DEADLINE_EXCEEDED, 0 written, 3 dropped
+
+And the cause is in the consumer loop itself:
+
+    bus_host_pump(&g.host);   // routes peer traffic, including replies
+    uint32_t n = drain();     // calls the sinks
+
+`drain()` waits inside the very thread that would deliver its reply. It resolves
+only when the 2s deadline expires. **Blast radius is one sink**: the audit sink
+calls `audit_action_log`, which writes the WORM ledger — a file — and makes no
+module call. Checked rather than assumed.
+
+## The fix, and why the ordering is forced
+
+A writer thread owns the guardrail sink. The consumer copies each payload into a
+bounded queue and keeps pumping; the writer makes the call and counts the event
+**written only when the sink reports it durable**, so `obs_bus_written()` still
+means "in the store" and the exactly-once claim is unchanged. A full queue drops
+and counts it — blocking would put the consumer back to waiting on the store,
+which is the defect being removed.
+
+Shutdown is the subtle part, and both obvious orders are wrong:
+
+- finish the writer **before** the consumer's final drain, and the events that
+  drain rescues meet a stopped writer — `written 0, dropped 3`;
+- finish it **after** the consumer is joined, and every queued call times out
+  with nobody routing replies — also `written 0`.
+
+Both were measured, not reasoned about. The order that works has three steps
+and a wait between each: signal the drain, **wait for the drain to complete**,
+finish the writer against a still-pumping consumer, then release the consumer.
+The middle wait is what the first attempt lacked, and its absence looked exactly
+like the original defect.
+
+## Proven
+
+    emitted 2000, written 2000, dropped 0
+
+    PASS  the store gained exactly 2000 rows, matching what the bus wrote
+    PASS  no identity appears twice
+    PASS  overall_risk round-tripped as a double on every row
+    PASS  final_action round-tripped as text on every row
+    PASS  dry_run round-tripped as a boolean on every row
+
+The identity check was verified non-vacuous by planting a duplicate row for `s7`
+and watching it report one — a loss and a duplicate that net to 2000 pass the
+count and fail there, which is the whole reason each event carries an identity.
+
+All seven store-backed suites pass against a clean PostgreSQL after the change,
+including `unit-test-bus-shutdown-race`, which exercises `obs_bus_stop()` under
+concurrent producers.
+
+## One thing the run turned up that is not a code defect
+
+Six suites failed against the database used earlier in this work with
+`migrate db1 v20 ... constraint already exists`. That database was populated
+while the migration ledger was still called `store_schema_version`; renaming it
+to `schema_migrations` left the schema applied and its history invisible, so the
+module replayed from version 1. A pre-rename database that never shipped. On a
+clean database all twenty-one apply and all seven suites pass.

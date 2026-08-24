@@ -32,6 +32,7 @@
 #include <aimee/audit/obs_bus.h>
 #include "platform_test_util.h"
 #include "server/obs_bus_adapter.h"
+#include "db1_client/guardrail_events.h"
 #include "support/store_module_fixture.h"
 
 /* The default is 2000, which is what makes the exactly-once claim worth
@@ -81,6 +82,19 @@ int main(void)
    if (!store_module_fixture_available())
       return 0; /* skipped, with the reason printed by the fixture */
    store_module_fixture_start();
+
+   /* A store call from THIS thread, before any event is emitted.
+    *
+    * The diagnosis under test is that a call from the obs_bus CONSUMER thread
+    * cannot complete while a call from any other thread can. Comparing two test
+    * binaries suggested it; doing both in one process is what settles it,
+    * because everything else -- the bus, the modules, the database, the grants
+    * -- is then identical between the two calls. */
+   {
+      guardrail_event_counts_t probe;
+      int rc = db1_guardrail_event_counts_7d(&probe);
+      printf("  main-thread store call: rc=%d (0 means the store answered this thread)\n", rc);
+   }
 
    for (int i = 0; i < n; i++)
    {
