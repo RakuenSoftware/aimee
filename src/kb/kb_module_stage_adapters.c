@@ -30,6 +30,8 @@
 #include <aimee/db2/client.h>
 #include <aimee/db2/host_contracts.h>
 #include <aimee/kb-synthesis/module_api.h>
+#include <aimee/learning/learning.h>
+#include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
 #include <aimee/postgres/module_api.h>
 
@@ -539,6 +541,23 @@ int kb_module_db2_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables
               : -1;
 }
 
+/* Signal classification, for the router that runs HERE. The signal-capture
+ * route is served by the KB -- that is where the learning tables live -- but
+ * the classifier was registered only by the daemon, so every signal reaching
+ * this process was refused with "classification unavailable" and nothing was
+ * ever recorded. The stage is the same one the daemon calls; only the caller
+ * differs. */
+static int learning_classify(const char *signal, uint32_t *sink_mask)
+{
+   uint8_t request[AIMEE_LEARNING_REQUEST_LEN], response[AIMEE_LEARNING_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   return aimee_learning_request_encode(signal, request, sizeof(request)) == 0 &&
+                  call_module(AIMEE_LEARNING_EVENT_OBSERVE, AIMEE_LEARNING_STAGE_OBSERVE, request,
+                              sizeof(request), response, sizeof(response), &response_len) == 0
+              ? aimee_learning_response_decode(response, response_len, sink_mask)
+              : -1;
+}
+
 void kb_module_stage_adapters_configure(void)
 {
    aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
@@ -556,4 +575,5 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_vault_witness_provider(&vault_witness_provider);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
+   learning_router_register_signal_classifier(learning_classify);
 }
