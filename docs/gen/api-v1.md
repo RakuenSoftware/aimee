@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 92
+Total endpoints: 97
 
 ## Endpoints
 
@@ -505,6 +505,90 @@ Responses:
 - `400`: Missing/invalid key or value
 - `401`: Unauthorized
 - `403`: Not a KB-owned setting, or credential not permitted
+
+### `GET /v1/console/typed_facts`
+
+List ontology, assertion, and canonical-entity review state
+
+Returns quarantined assertion candidates with their lifecycle, authority,
+evidence count, and originating graph commit. Candidates are excluded from
+default recall. Also returns canonical entities and reversible merge
+history for operator review. Requires a console-admin credential.
+
+Responses:
+
+- `200`: Typed-fact configuration and review queues
+- `401`: Unauthorized
+- `403`: Console operator required
+
+### `POST /v1/console/typed_facts/assertion`
+
+Approve, reject, or undo an assertion review
+
+Applies an operator-authorized lifecycle transition. Authority is derived
+from the verified request identity; no authority field is accepted.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Review transition applied
+- `400`: Invalid review request
+- `403`: Authenticated operator required
+- `409`: Review transition conflict
+
+### `POST /v1/console/typed_facts/commit`
+
+Preview or roll back a graph commit
+
+Previews the structured batch diff, or rolls back a reversible assertion,
+ontology, or entity-merge commit. A commit with later dependent changes
+must have those descendants rolled back first. Supplying ingest_run_id
+previews or atomically rolls back every commit in that ingestion batch.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Commit diff or rollback result
+- `400`: Invalid commit request
+- `403`: Authenticated operator required
+- `404`: Commit not found
+- `409`: Commit is not currently reversible
+
+### `POST /v1/console/typed_facts/entity`
+
+Merge or unmerge canonical entities
+
+Atomically changes canonical name resolution and records a reversible
+graph commit, structured diff, and WORM audit event. Actor identity and
+operator authority come only from the verified console credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Entity transition applied
+- `400`: Invalid merge request
+- `403`: Authenticated operator required
+- `409`: Entity state conflicts with requested transition
+
+### `POST /v1/console/typed_facts/erasure`
+
+Preview or execute permanent fact erasure
+
+Reports the assertion/evidence cascade before removal. `erase` permanently
+removes matching assertion and evidence rows while returning an explicit
+residual-data report. Ordinary correction should use reversible invalidation.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Impact preview or completed erasure report
+- `400`: Invalid erasure request
+- `403`: Authenticated operator required
+- `409`: Erasure could not be completed atomically
 
 ### `GET /v1/decisions`
 
