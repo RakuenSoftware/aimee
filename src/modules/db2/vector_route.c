@@ -22,7 +22,8 @@ _Static_assert(sizeof(double) == 8, "DB3 wire requires 64-bit double");
 _Static_assert(AIMEE_VECTOR_MAX_DIM <= UINT16_MAX, "DB3 dimension must fit its wire field");
 _Static_assert(AIMEE_VECTOR_MAX_TOP_K <= UINT16_MAX, "DB3 top-K must fit its wire field");
 _Static_assert(AIMEE_VECTOR_MAX_LABELS <= UINT16_MAX, "DB3 label count must fit its wire field");
-_Static_assert(AIMEE_VECTOR_MAX_LABEL_BYTES <= UINT16_MAX, "DB3 label bytes must fit its wire field");
+_Static_assert(AIMEE_VECTOR_MAX_LABEL_BYTES <= UINT16_MAX,
+               "DB3 label bytes must fit its wire field");
 _Static_assert(sizeof(aimee_vector_apply_t) <= 24u * 1024u,
                "DB3 apply stack value exceeds its explicit budget");
 
@@ -208,11 +209,11 @@ int aimee_vector_search_filters_expressible(const aimee_vector_search_filters_t 
    return 1;
 }
 
-int aimee_vector_search_request_build(const aimee_vector_search_filters_t *filters, uint64_t request_id,
-                                   uint64_t required_generation, const float *vector,
-                                   uint32_t dimension, uint32_t top_k,
-                                   aimee_vector_filter_t *predicates, size_t predicate_capacity,
-                                   aimee_vector_search_request_t *request)
+int aimee_vector_search_request_build(const aimee_vector_search_filters_t *filters,
+                                      uint64_t request_id, uint64_t required_generation,
+                                      const float *vector, uint32_t dimension, uint32_t top_k,
+                                      aimee_vector_filter_t *predicates, size_t predicate_capacity,
+                                      aimee_vector_search_request_t *request)
 {
    if (!filters || !request || !vector || !predicates || predicate_capacity < 1)
       return -1;
@@ -355,7 +356,8 @@ static int filter_region_valid(const uint8_t *bytes, size_t length, size_t count
       uint8_t op = bytes[offset];
       size_t key_len = bytes[offset + 1];
       size_t value_count = get_u16(bytes + offset + 2);
-      if ((op != AIMEE_VECTOR_FILTER_EQ && op != AIMEE_VECTOR_FILTER_NE && op != AIMEE_VECTOR_FILTER_IN) ||
+      if ((op != AIMEE_VECTOR_FILTER_EQ && op != AIMEE_VECTOR_FILTER_NE &&
+           op != AIMEE_VECTOR_FILTER_IN) ||
           key_len == 0 || key_len >= AIMEE_VECTOR_MAX_LABEL_KEY || value_count == 0 ||
           value_count > AIMEE_VECTOR_MAX_FILTER_VALUES)
          return -1;
@@ -417,8 +419,8 @@ int aimee_vector_filter_next(aimee_vector_filter_view_t *view, aimee_vector_filt
 }
 
 int aimee_vector_filter_value(const aimee_vector_filter_view_t *view,
-                           const aimee_vector_filter_entry_t *entry, size_t index, const char **value,
-                           size_t *value_length)
+                              const aimee_vector_filter_entry_t *entry, size_t index,
+                              const char **value, size_t *value_length)
 {
    if (!view || !entry || !value || !value_length || index >= entry->value_count)
       return -1;
@@ -453,8 +455,8 @@ int aimee_vector_filter_value(const aimee_vector_filter_view_t *view,
 static int search_request_fields_valid(const aimee_vector_search_request_t *request)
 {
    if (!request || request->request_id == 0 || request->required_generation == 0 ||
-       request->dimension == 0 || request->dimension > AIMEE_VECTOR_MAX_DIM || request->top_k == 0 ||
-       request->top_k > AIMEE_VECTOR_MAX_TOP_K ||
+       request->dimension == 0 || request->dimension > AIMEE_VECTOR_MAX_DIM ||
+       request->top_k == 0 || request->top_k > AIMEE_VECTOR_MAX_TOP_K ||
        !text_valid(request->workspace, sizeof(request->workspace), 1) ||
        !text_valid(request->project, sizeof(request->project), 1) ||
        (!request->workspace[0] && !request->project[0]) ||
@@ -476,7 +478,7 @@ int aimee_vector_search_request_validate(const aimee_vector_search_request_t *re
 }
 
 int aimee_vector_search_reply_validate(const aimee_vector_search_request_t *request,
-                                    const aimee_vector_search_reply_t *reply)
+                                       const aimee_vector_search_reply_t *reply)
 {
    if (!request || !reply || reply->request_id != request->request_id ||
        reply->generation != request->required_generation || reply->count > request->top_k ||
@@ -506,7 +508,8 @@ int aimee_vector_apply_validate(const aimee_vector_apply_t *apply)
           !vectors_valid(apply->vector, apply->dimension))
          return -1;
    }
-   else if ((apply->kind != AIMEE_VECTOR_APPLY_DELETE && apply->kind != AIMEE_VECTOR_APPLY_TOMBSTONE) ||
+   else if ((apply->kind != AIMEE_VECTOR_APPLY_DELETE &&
+             apply->kind != AIMEE_VECTOR_APPLY_TOMBSTONE) ||
             apply->dimension != 0 || apply->label_count != 0)
       return -1;
    return 0;
@@ -530,8 +533,8 @@ static int checked_total(size_t header, size_t a, size_t b, size_t c, size_t ite
    return 0;
 }
 
-int aimee_vector_search_request_encode(const aimee_vector_search_request_t *request, uint8_t *output,
-                                    size_t capacity, size_t *length)
+int aimee_vector_search_request_encode(const aimee_vector_search_request_t *request,
+                                       uint8_t *output, size_t capacity, size_t *length)
 {
    if (length)
       *length = 0;
@@ -621,8 +624,9 @@ int aimee_vector_search_request_encode(const aimee_vector_search_request_t *requ
 }
 
 int aimee_vector_search_request_decode(const uint8_t *input, size_t length,
-                                    aimee_vector_search_request_t *request, float *vector_out,
-                                    size_t vector_capacity, aimee_vector_filter_view_t *filters_out)
+                                       aimee_vector_search_request_t *request, float *vector_out,
+                                       size_t vector_capacity,
+                                       aimee_vector_filter_view_t *filters_out)
 {
    if (!input || !request || !vector_out || !filters_out || length < SEARCH_REQUEST_HEADER ||
        get_u32(input) != SEARCH_REQUEST_MAGIC || get_u16(input + 34) != 0)
@@ -639,8 +643,20 @@ int aimee_vector_search_request_decode(const uint8_t *input, size_t length,
       collection_len = get_u16(input + 36);
       filter_count = get_u16(input + 38);
       filter_bytes = get_u16(input + 40);
-      if (collection_len >= AIMEE_VECTOR_MAX_COLLECTION || filter_count > AIMEE_VECTOR_MAX_FILTERS ||
-          filter_bytes > AIMEE_VECTOR_MAX_FILTER_BYTES || (filter_count == 0) != (filter_bytes == 0))
+      if (collection_len >= AIMEE_VECTOR_MAX_COLLECTION ||
+          filter_count > AIMEE_VECTOR_MAX_FILTERS || filter_bytes > AIMEE_VECTOR_MAX_FILTER_BYTES ||
+          (filter_count == 0) != (filter_bytes == 0))
+         return -1;
+      /* A version 2 frame carrying neither a collection nor a filter is a frame
+       * the encoder never writes: that request IS version 1, byte for byte. Two
+       * encodings for one meaning is the inverse of the collapse this contract
+       * is careful about everywhere else -- not one value standing for two
+       * facts, but two standing for one, where a provider that treats the
+       * versions differently answers differently for the same question.
+       *
+       * Refused on the same reasoning as trailing bytes: a frame nobody writes
+       * means a sender believing something about this wire that is not true. */
+      if (collection_len == 0 && filter_count == 0)
          return -1;
    }
    else if (version != WIRE_VERSION || get_u16(input + 6) != SEARCH_REQUEST_HEADER)
@@ -703,7 +719,7 @@ int aimee_vector_search_request_decode(const uint8_t *input, size_t length,
 }
 
 int aimee_vector_search_reply_encode(const aimee_vector_search_reply_t *reply, uint8_t *output,
-                                  size_t capacity, size_t *length)
+                                     size_t capacity, size_t *length)
 {
    if (length)
       *length = 0;
@@ -739,7 +755,7 @@ int aimee_vector_search_reply_encode(const aimee_vector_search_reply_t *reply, u
 }
 
 int aimee_vector_search_reply_decode(const uint8_t *input, size_t length,
-                                  aimee_vector_search_reply_t *reply)
+                                     aimee_vector_search_reply_t *reply)
 {
    if (!input || !reply || length < SEARCH_REPLY_HEADER || get_u32(input) != SEARCH_REPLY_MAGIC ||
        get_u16(input + 4) != WIRE_VERSION || get_u16(input + 6) != SEARCH_REPLY_HEADER)
@@ -773,7 +789,7 @@ int aimee_vector_search_reply_decode(const uint8_t *input, size_t length,
 }
 
 int aimee_vector_apply_encode(const aimee_vector_apply_t *apply, uint8_t *output, size_t capacity,
-                           size_t *length)
+                              size_t *length)
 {
    if (length)
       *length = 0;
@@ -830,7 +846,7 @@ int aimee_vector_apply_encode(const aimee_vector_apply_t *apply, uint8_t *output
 }
 
 int aimee_vector_apply_decode(const uint8_t *input, size_t length, aimee_vector_apply_t *apply,
-                           float *vector_out, size_t vector_capacity)
+                              float *vector_out, size_t vector_capacity)
 {
    if (!input || !apply || length < APPLY_HEADER || get_u32(input) != APPLY_MAGIC || input[7] != 0)
       return -1;
@@ -898,10 +914,10 @@ int aimee_vector_apply_decode(const uint8_t *input, size_t length, aimee_vector_
    return aimee_vector_apply_validate(apply);
 }
 
-int aimee_vector_route_init(aimee_vector_route_t *route, aimee_vector_search_fn internal_pgvector_search,
-                         void *internal_context,
-                         aimee_vector_candidate_authorize_fn authorize_candidate,
-                         void *authorize_context)
+int aimee_vector_route_init(aimee_vector_route_t *route,
+                            aimee_vector_search_fn internal_pgvector_search, void *internal_context,
+                            aimee_vector_candidate_authorize_fn authorize_candidate,
+                            void *authorize_context)
 {
    if (!route || !internal_pgvector_search || !authorize_candidate)
       return -1;
@@ -914,8 +930,8 @@ int aimee_vector_route_init(aimee_vector_route_t *route, aimee_vector_search_fn 
 }
 
 int aimee_vector_route_select(aimee_vector_route_t *route, uint32_t principal, int ready,
-                           int fallback_enabled, aimee_vector_search_fn external_search,
-                           void *external_context)
+                              int fallback_enabled, aimee_vector_search_fn external_search,
+                              void *external_context)
 {
    if (!route || principal == 0 || !external_search)
       return -1;
@@ -939,8 +955,8 @@ void aimee_vector_route_clear(aimee_vector_route_t *route)
 }
 
 static aimee_vector_result_t call_and_validate(aimee_vector_search_fn search, void *context,
-                                            const aimee_vector_search_request_t *request,
-                                            aimee_vector_search_reply_t *reply, int external)
+                                               const aimee_vector_search_request_t *request,
+                                               aimee_vector_search_reply_t *reply, int external)
 {
    memset(reply, 0, sizeof(*reply));
    if (search(context, request, reply) != 0)
@@ -951,8 +967,8 @@ static aimee_vector_result_t call_and_validate(aimee_vector_search_fn search, vo
 }
 
 static aimee_vector_result_t authorize(aimee_vector_route_t *route,
-                                    const aimee_vector_search_request_t *request,
-                                    aimee_vector_search_reply_t *reply)
+                                       const aimee_vector_search_request_t *request,
+                                       aimee_vector_search_reply_t *reply)
 {
    uint32_t kept = 0;
    for (uint32_t i = 0; i < reply->count; ++i)
@@ -968,9 +984,10 @@ static aimee_vector_result_t authorize(aimee_vector_route_t *route,
    return AIMEE_VECTOR_OK;
 }
 
-aimee_vector_result_t aimee_vector_memory_candidates_search(aimee_vector_route_t *route,
-                                                      const aimee_vector_search_request_t *request,
-                                                      aimee_vector_search_outcome_t *outcome)
+aimee_vector_result_t
+aimee_vector_memory_candidates_search(aimee_vector_route_t *route,
+                                      const aimee_vector_search_request_t *request,
+                                      aimee_vector_search_outcome_t *outcome)
 {
    if (!outcome)
       return AIMEE_VECTOR_INVALID_REQUEST;
@@ -1002,7 +1019,8 @@ aimee_vector_result_t aimee_vector_memory_candidates_search(aimee_vector_route_t
       outcome->external_error = AIMEE_VECTOR_UNAVAILABLE;
    }
 
-   if (route->selected_principal != 0 && outcome->result != AIMEE_VECTOR_OK && route->fallback_enabled)
+   if (route->selected_principal != 0 && outcome->result != AIMEE_VECTOR_OK &&
+       route->fallback_enabled)
    {
       outcome->route = AIMEE_VECTOR_ROUTE_EXPLICIT_FALLBACK;
       outcome->result = call_and_validate(route->internal_pgvector_search, route->internal_context,

@@ -122,11 +122,13 @@ static void test_fail_closed_and_explicit_fallback(void)
 
    assert(aimee_vector_route_select(&route, 1001, 0, 0, search, &external) == 0);
    assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_UNAVAILABLE);
-   assert(out.route == AIMEE_VECTOR_ROUTE_EXTERNAL && out.external_error == AIMEE_VECTOR_UNAVAILABLE);
+   assert(out.route == AIMEE_VECTOR_ROUTE_EXTERNAL &&
+          out.external_error == AIMEE_VECTOR_UNAVAILABLE);
    assert(internal.calls == 0 && external.calls == 0);
 
    assert(aimee_vector_route_select(&route, 1001, 1, 0, search, &external) == 0);
-   assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_PROVIDER_FAILURE);
+   assert(aimee_vector_memory_candidates_search(&route, &req, &out) ==
+          AIMEE_VECTOR_PROVIDER_FAILURE);
    assert(internal.calls == 0 && external.calls == 1);
 
    assert(aimee_vector_route_select(&route, 1001, 1, 1, search, &external) == 0);
@@ -145,7 +147,8 @@ static void test_fail_closed_and_explicit_fallback(void)
    for (int mode = 2; mode <= 5; ++mode)
    {
       external.mode = mode;
-      assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_INVALID_RESPONSE);
+      assert(aimee_vector_memory_candidates_search(&route, &req, &out) ==
+             AIMEE_VECTOR_INVALID_RESPONSE);
       assert(out.reply.count == 3 || mode == 2);
    }
 
@@ -165,17 +168,21 @@ static void test_invalid_requests(void)
    aimee_vector_search_request_t req = request(vec);
 
    vec[1] = INFINITY;
-   assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_INVALID_REQUEST);
+   assert(aimee_vector_memory_candidates_search(&route, &req, &out) ==
+          AIMEE_VECTOR_INVALID_REQUEST);
    req = request(vec);
    req.top_k = 0;
-   assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_INVALID_REQUEST);
+   assert(aimee_vector_memory_candidates_search(&route, &req, &out) ==
+          AIMEE_VECTOR_INVALID_REQUEST);
    req = request(vec);
    req.workspace[0] = '\0';
    req.project[0] = '\0';
-   assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_INVALID_REQUEST);
+   assert(aimee_vector_memory_candidates_search(&route, &req, &out) ==
+          AIMEE_VECTOR_INVALID_REQUEST);
    req = request(vec);
    memset(req.record_type, 'x', sizeof(req.record_type));
-   assert(aimee_vector_memory_candidates_search(&route, &req, &out) == AIMEE_VECTOR_INVALID_REQUEST);
+   assert(aimee_vector_memory_candidates_search(&route, &req, &out) ==
+          AIMEE_VECTOR_INVALID_REQUEST);
    assert(internal.calls == 0);
 }
 
@@ -190,27 +197,27 @@ static void test_wire_codecs(void)
    assert(length == 36 + strlen(req.workspace) + strlen(req.project) + strlen(req.record_type) +
                         req.dimension * sizeof(float));
    assert(aimee_vector_search_request_decode(wire, length, &decoded_req, decoded_vec,
-                                          AIMEE_VECTOR_MAX_DIM, &decoded_filters) == 0);
+                                             AIMEE_VECTOR_MAX_DIM, &decoded_filters) == 0);
    assert(decoded_req.request_id == req.request_id && decoded_req.dimension == req.dimension);
    assert(memcmp(decoded_req.vector, req.vector, req.dimension * sizeof(float)) == 0);
    assert(aimee_vector_search_request_decode(wire, length - 1, &decoded_req, decoded_vec,
-                                          AIMEE_VECTOR_MAX_DIM, &decoded_filters) != 0);
+                                             AIMEE_VECTOR_MAX_DIM, &decoded_filters) != 0);
    memcpy(mutated, wire, length);
    mutated[34] = 1;
    assert(aimee_vector_search_request_decode(mutated, length, &decoded_req, decoded_vec,
-                                          AIMEE_VECTOR_MAX_DIM, &decoded_filters) != 0);
+                                             AIMEE_VECTOR_MAX_DIM, &decoded_filters) != 0);
    memcpy(mutated, wire, length);
    mutated[length - 1] = 0x7f;
    mutated[length - 2] = 0x80;
    mutated[length - 3] = 0;
    mutated[length - 4] = 0;
    assert(aimee_vector_search_request_decode(mutated, length, &decoded_req, decoded_vec,
-                                          AIMEE_VECTOR_MAX_DIM, &decoded_filters) != 0);
+                                             AIMEE_VECTOR_MAX_DIM, &decoded_filters) != 0);
 
    aimee_vector_search_reply_t reply = {.request_id = req.request_id,
-                                     .generation = req.required_generation,
-                                     .count = 2,
-                                     .candidates = {{101, 0.9}, {102, 0.8}}};
+                                        .generation = req.required_generation,
+                                        .count = 2,
+                                        .candidates = {{101, 0.9}, {102, 0.8}}};
    aimee_vector_search_reply_t decoded_reply;
    assert(aimee_vector_search_reply_encode(&reply, wire, sizeof(wire), &length) == 0);
    assert(aimee_vector_search_reply_decode(wire, length, &decoded_reply) == 0);
@@ -223,19 +230,19 @@ static void test_wire_codecs(void)
 
    float apply_vec[3] = {0.1f, 0.2f, 0.3f};
    aimee_vector_apply_t apply = {.operation_id = 1001,
-                              .generation = 7,
-                              .point_id = 101,
-                              .kind = AIMEE_VECTOR_APPLY_UPSERT,
-                              .collection = "memory",
-                              .dimension = 3,
-                              .vector = apply_vec};
+                                 .generation = 7,
+                                 .point_id = 101,
+                                 .kind = AIMEE_VECTOR_APPLY_UPSERT,
+                                 .collection = "memory",
+                                 .dimension = 3,
+                                 .vector = apply_vec};
    aimee_vector_apply_t decoded_apply;
    assert(aimee_vector_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
-   assert(aimee_vector_apply_decode(wire, length, &decoded_apply, decoded_vec, AIMEE_VECTOR_MAX_DIM) ==
-          0);
+   assert(aimee_vector_apply_decode(wire, length, &decoded_apply, decoded_vec,
+                                    AIMEE_VECTOR_MAX_DIM) == 0);
    assert(decoded_apply.operation_id == apply.operation_id && decoded_apply.dimension == 3);
    assert(aimee_vector_apply_decode(wire, length - 1, &decoded_apply, decoded_vec,
-                                 AIMEE_VECTOR_MAX_DIM) != 0);
+                                    AIMEE_VECTOR_MAX_DIM) != 0);
    apply_vec[0] = NAN;
    assert(aimee_vector_apply_encode(&apply, wire, sizeof(wire), &length) != 0);
    apply_vec[0] = 0.1f;
@@ -255,20 +262,20 @@ static void test_wire_codecs(void)
    strcpy(apply.labels[2].value, "workspace-a");
    assert(aimee_vector_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
    assert(wire[4] == AIMEE_VECTOR_APPLY_V2_VERSION && wire[5] == 0);
-   assert(aimee_vector_apply_decode(wire, length, &decoded_apply, decoded_vec, AIMEE_VECTOR_MAX_DIM) ==
-          0);
+   assert(aimee_vector_apply_decode(wire, length, &decoded_apply, decoded_vec,
+                                    AIMEE_VECTOR_MAX_DIM) == 0);
    assert(decoded_apply.label_count == 3);
    assert(strcmp(decoded_apply.labels[0].value, "project with space") == 0);
    assert(strcmp(decoded_apply.labels[2].key, "workspace") == 0);
    memcpy(mutated, wire, length);
    mutated[36] = 0;
    mutated[37] = 0;
-   assert(aimee_vector_apply_decode(mutated, length, &decoded_apply, decoded_vec, AIMEE_VECTOR_MAX_DIM) !=
-          0);
+   assert(aimee_vector_apply_decode(mutated, length, &decoded_apply, decoded_vec,
+                                    AIMEE_VECTOR_MAX_DIM) != 0);
    memcpy(mutated, wire, length);
    mutated[38]++;
-   assert(aimee_vector_apply_decode(mutated, length, &decoded_apply, decoded_vec, AIMEE_VECTOR_MAX_DIM) !=
-          0);
+   assert(aimee_vector_apply_decode(mutated, length, &decoded_apply, decoded_vec,
+                                    AIMEE_VECTOR_MAX_DIM) != 0);
    strcpy(apply.labels[1].key, "project");
    assert(aimee_vector_apply_validate(&apply) != 0);
    strcpy(apply.labels[1].key, "record_type");
@@ -310,13 +317,13 @@ static void test_wire_codecs(void)
        0x77, 0x6f, 0x72, 0x6b, 0x73, 0x70, 0x61, 0x63, 0x65, 0x2d, 0x61};
    float fixture_request_vec[3] = {0.3f, 0.2f, 0.1f};
    aimee_vector_search_request_t fixture_request = {.request_id = 77,
-                                                 .required_generation = 7,
-                                                 .workspace = "workspace-a",
-                                                 .project = "project-a",
-                                                 .record_type = "memory",
-                                                 .dimension = 3,
-                                                 .top_k = 2,
-                                                 .vector = fixture_request_vec};
+                                                    .required_generation = 7,
+                                                    .workspace = "workspace-a",
+                                                    .project = "project-a",
+                                                    .record_type = "memory",
+                                                    .dimension = 3,
+                                                    .top_k = 2,
+                                                    .vector = fixture_request_vec};
    assert(aimee_vector_search_request_encode(&fixture_request, wire, sizeof(wire), &length) == 0);
    assert(length == sizeof(expected_request) && memcmp(wire, expected_request, length) == 0);
    aimee_vector_search_reply_t fixture_reply = {
@@ -325,28 +332,28 @@ static void test_wire_codecs(void)
    assert(length == sizeof(expected_reply) && memcmp(wire, expected_reply, length) == 0);
    float fixture_apply_vec[3] = {0.1f, 0.2f, 0.3f};
    aimee_vector_apply_t fixture_apply = {.operation_id = 1001,
-                                      .generation = 7,
-                                      .point_id = 41,
-                                      .kind = AIMEE_VECTOR_APPLY_UPSERT,
-                                      .collection = "memory",
-                                      .dimension = 3,
-                                      .vector = fixture_apply_vec};
+                                         .generation = 7,
+                                         .point_id = 41,
+                                         .kind = AIMEE_VECTOR_APPLY_UPSERT,
+                                         .collection = "memory",
+                                         .dimension = 3,
+                                         .vector = fixture_apply_vec};
    assert(aimee_vector_apply_encode(&fixture_apply, wire, sizeof(wire), &length) == 0);
    assert(length == sizeof(expected_apply) && memcmp(wire, expected_apply, length) == 0);
    float fixture_apply_v2_vec[3] = {0.3f, 0.2f, 0.1f};
    aimee_vector_apply_t fixture_apply_v2 = {.operation_id = 1002,
-                                         .generation = 7,
-                                         .point_id = 42,
-                                         .kind = AIMEE_VECTOR_APPLY_UPSERT,
-                                         .collection = "memory",
-                                         .dimension = 3,
-                                         .vector = fixture_apply_v2_vec,
-                                         .label_count = 3,
-                                         .labels = {
-                                             {.key = "project", .value = "project-a"},
-                                             {.key = "record_type", .value = "memory"},
-                                             {.key = "workspace", .value = "workspace-a"},
-                                         }};
+                                            .generation = 7,
+                                            .point_id = 42,
+                                            .kind = AIMEE_VECTOR_APPLY_UPSERT,
+                                            .collection = "memory",
+                                            .dimension = 3,
+                                            .vector = fixture_apply_v2_vec,
+                                            .label_count = 3,
+                                            .labels = {
+                                                {.key = "project", .value = "project-a"},
+                                                {.key = "record_type", .value = "memory"},
+                                                {.key = "workspace", .value = "workspace-a"},
+                                            }};
    assert(aimee_vector_apply_encode(&fixture_apply_v2, wire, sizeof(wire), &length) == 0);
    assert(length == sizeof(expected_apply_v2) && memcmp(wire, expected_apply_v2, length) == 0);
 }
@@ -375,21 +382,21 @@ static void test_every_filter_a_search_has_is_carried(void)
    aimee_vector_search_request_t request;
 
    aimee_vector_search_filters_t everything = {.workspace = "workspace-a",
-                                            .project = "project-a",
-                                            .record_type = "memory",
-                                            .rank_column = "subj_attr",
-                                            .exclude_project = "project-b",
-                                            .kinds = kinds,
-                                            .kind_count = 2,
-                                            .label_keys = label_keys,
-                                            .label_values = label_values,
-                                            .label_count = 1,
-                                            .visibility = visibility,
-                                            .visibility_count = 4,
-                                            .current_generation = "7"};
+                                               .project = "project-a",
+                                               .record_type = "memory",
+                                               .rank_column = "subj_attr",
+                                               .exclude_project = "project-b",
+                                               .kinds = kinds,
+                                               .kind_count = 2,
+                                               .label_keys = label_keys,
+                                               .label_values = label_values,
+                                               .label_count = 1,
+                                               .visibility = visibility,
+                                               .visibility_count = 4,
+                                               .current_generation = "7"};
    assert(aimee_vector_search_filters_expressible(&everything) == 1);
    assert(aimee_vector_search_request_build(&everything, 91, 7, vec, 3, 3, predicates,
-                                         AIMEE_VECTOR_MAX_FILTERS, &request) == 0);
+                                            AIMEE_VECTOR_MAX_FILTERS, &request) == 0);
    /* Five predicates: one label, kinds, exclude_project, visibility, generation.
     * rank_column is the collection field rather than a predicate. */
    assert(request.filter_count == 5);
@@ -403,8 +410,8 @@ static void test_every_filter_a_search_has_is_carried(void)
    aimee_vector_search_request_t decoded;
    float decoded_vector[AIMEE_VECTOR_MAX_DIM];
    aimee_vector_filter_view_t view;
-   assert(aimee_vector_search_request_decode(wire, length, &decoded, decoded_vector, AIMEE_VECTOR_MAX_DIM,
-                                          &view) == 0);
+   assert(aimee_vector_search_request_decode(wire, length, &decoded, decoded_vector,
+                                             AIMEE_VECTOR_MAX_DIM, &view) == 0);
    assert(strcmp(decoded.collection, "subj_attr") == 0);
    assert(decoded.filter_count == 5);
 
@@ -463,17 +470,62 @@ static void test_a_request_with_nothing_extra_is_still_version_one(void)
    vec[0] = 0.25f;
    vec[1] = -0.5f;
    vec[2] = 0.75f;
-   assert(aimee_vector_search_request_build(&bare, 91, 7, vec, 3, 3, predicates, AIMEE_VECTOR_MAX_FILTERS,
-                                         &plain) == 0);
+   assert(aimee_vector_search_request_build(&bare, 91, 7, vec, 3, 3, predicates,
+                                            AIMEE_VECTOR_MAX_FILTERS, &plain) == 0);
    assert(plain.filter_count == 0 && plain.collection[0] == '\0');
 
    uint8_t wire[512];
    size_t length = 0;
    assert(aimee_vector_search_request_encode(&plain, wire, sizeof(wire), &length) == 0);
-   assert(length == AIMEE_VECTOR_SEARCH_REQUEST_HEADER + strlen("workspace-a") + strlen("project-a") +
-                        strlen("memory") + 3 * sizeof(float));
+   assert(length == AIMEE_VECTOR_SEARCH_REQUEST_HEADER + strlen("workspace-a") +
+                        strlen("project-a") + strlen("memory") + 3 * sizeof(float));
    uint16_t version = (uint16_t)(wire[4] | (wire[5] << 8));
    assert(version == AIMEE_VECTOR_WIRE_VERSION);
+}
+
+static void test_one_meaning_has_one_encoding(void)
+{
+   /* The encoder picks version 1 when there is nothing version 2 carries, so a
+    * version 2 frame with neither a collection nor a filter is one nobody
+    * writes. Accepting it would make two byte sequences mean one request, and a
+    * provider that treats the versions differently would answer differently for
+    * the same question. */
+   float vec[3] = {0.25f, -0.5f, 0.75f};
+   aimee_vector_filter_t predicates[AIMEE_VECTOR_MAX_FILTERS];
+   aimee_vector_search_request_t request;
+   aimee_vector_search_filters_t bare = {
+       .workspace = "workspace-a", .project = "project-a", .record_type = "memory"};
+   assert(aimee_vector_search_request_build(&bare, 91, 7, vec, 3, 3, predicates,
+                                            AIMEE_VECTOR_MAX_FILTERS, &request) == 0);
+
+   uint8_t wire[512];
+   size_t length = 0;
+   assert(aimee_vector_search_request_encode(&request, wire, sizeof(wire), &length) == 0);
+
+   /* Hand-build the version 2 form of the same request: the v1 header widened,
+    * the version bumped, the three new fields zero. Every byte after the header
+    * is identical, which is what makes it the same request. */
+   uint8_t forged[512];
+   size_t header = AIMEE_VECTOR_SEARCH_REQUEST_HEADER;
+   size_t v2_header = AIMEE_VECTOR_SEARCH_REQUEST_V2_HEADER;
+   memset(forged, 0, v2_header);
+   memcpy(forged, wire, header);
+   forged[4] = (uint8_t)AIMEE_VECTOR_SEARCH_REQUEST_V2_VERSION;
+   forged[5] = 0;
+   forged[6] = (uint8_t)v2_header;
+   forged[7] = 0;
+   memcpy(forged + v2_header, wire + header, length - header);
+   size_t forged_length = length - header + v2_header;
+
+   aimee_vector_search_request_t decoded;
+   float decoded_vector[AIMEE_VECTOR_MAX_DIM];
+   aimee_vector_filter_view_t view;
+   assert(aimee_vector_search_request_decode(forged, forged_length, &decoded, decoded_vector,
+                                             AIMEE_VECTOR_MAX_DIM, &view) != 0);
+
+   /* And the form the encoder does write still decodes. */
+   assert(aimee_vector_search_request_decode(wire, length, &decoded, decoded_vector,
+                                             AIMEE_VECTOR_MAX_DIM, &view) == 0);
 }
 
 static void test_what_does_not_fit_is_still_refused(void)
@@ -536,6 +588,7 @@ int main(void)
    test_every_filter_a_search_has_is_carried();
    test_a_request_with_nothing_extra_is_still_version_one();
    test_what_does_not_fit_is_still_refused();
+   test_one_meaning_has_one_encoding();
    puts("test_vector_route: routing, fallback, revalidation, and codecs passed");
    return 0;
 }

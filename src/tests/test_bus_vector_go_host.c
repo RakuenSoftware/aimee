@@ -39,7 +39,8 @@ int main(int argc, char **argv)
    const uint32_t db2_subscribe[] = {AIMEE_VECTOR_EVENT_CAPABILITIES, AIMEE_VECTOR_EVENT_APPLIED};
    const uint32_t db2_request[] = {AIMEE_VECTOR_EVENT_SEARCH};
    const uint32_t db2_serve[] = {AIMEE_VECTOR_EVENT_ROUTE};
-   const uint32_t provider_publish[] = {AIMEE_VECTOR_EVENT_CAPABILITIES, AIMEE_VECTOR_EVENT_APPLIED};
+   const uint32_t provider_publish[] = {AIMEE_VECTOR_EVENT_CAPABILITIES,
+                                        AIMEE_VECTOR_EVENT_APPLIED};
    const uint32_t provider_subscribe[] = {AIMEE_VECTOR_EVENT_APPLY};
    const uint32_t provider_serve[] = {AIMEE_VECTOR_EVENT_SEARCH};
    const uint32_t control_request[] = {AIMEE_VECTOR_EVENT_ROUTE};

@@ -121,9 +121,9 @@ typedef struct
 } aimee_vector_apply_t;
 
 typedef int (*aimee_vector_search_fn)(void *context, const aimee_vector_search_request_t *request,
-                                   aimee_vector_search_reply_t *reply);
+                                      aimee_vector_search_reply_t *reply);
 typedef int (*aimee_vector_candidate_authorize_fn)(void *context, const char *workspace,
-                                                const char *project, int64_t point_id);
+                                                   const char *project, int64_t point_id);
 
 typedef struct
 {
@@ -224,11 +224,11 @@ typedef struct
  * `vector`: both must outlive the request, and the builder allocates nothing.
  * `predicate_capacity` should be AIMEE_VECTOR_MAX_FILTERS unless the caller knows
  * it passes fewer. */
-int aimee_vector_search_request_build(const aimee_vector_search_filters_t *filters, uint64_t request_id,
-                                   uint64_t required_generation, const float *vector,
-                                   uint32_t dimension, uint32_t top_k,
-                                   aimee_vector_filter_t *predicates, size_t predicate_capacity,
-                                   aimee_vector_search_request_t *request);
+int aimee_vector_search_request_build(const aimee_vector_search_filters_t *filters,
+                                      uint64_t request_id, uint64_t required_generation,
+                                      const float *vector, uint32_t dimension, uint32_t top_k,
+                                      aimee_vector_filter_t *predicates, size_t predicate_capacity,
+                                      aimee_vector_search_request_t *request);
 
 /* Reports whether these filters can cross DB3 v1 at all, without building.
  *
@@ -238,11 +238,11 @@ int aimee_vector_search_filters_expressible(const aimee_vector_search_filters_t 
 
 int aimee_vector_search_request_validate(const aimee_vector_search_request_t *request);
 int aimee_vector_search_reply_validate(const aimee_vector_search_request_t *request,
-                                    const aimee_vector_search_reply_t *reply);
+                                       const aimee_vector_search_reply_t *reply);
 int aimee_vector_apply_validate(const aimee_vector_apply_t *apply);
 
-int aimee_vector_search_request_encode(const aimee_vector_search_request_t *request, uint8_t *output,
-                                    size_t capacity, size_t *length);
+int aimee_vector_search_request_encode(const aimee_vector_search_request_t *request,
+                                       uint8_t *output, size_t capacity, size_t *length);
 /* A read-only walk over the filters in a decoded request.
  *
  * A provider iterates this; nothing allocates. Decode has already checked every
@@ -277,8 +277,8 @@ int aimee_vector_filter_next(aimee_vector_filter_view_t *view, aimee_vector_filt
 /* Reads value `index` of the entry just returned. -1 when there is no such
  * value. */
 int aimee_vector_filter_value(const aimee_vector_filter_view_t *view,
-                           const aimee_vector_filter_entry_t *entry, size_t index, const char **value,
-                           size_t *value_length);
+                              const aimee_vector_filter_entry_t *entry, size_t index,
+                              const char **value, size_t *value_length);
 
 /* Decode into `request`, writing the vector into `vector_out`.
  *
@@ -288,31 +288,33 @@ int aimee_vector_filter_value(const aimee_vector_filter_view_t *view,
  * it is REFUSED rather than truncated -- a short read here would be a vector
  * silently missing its tail, which scores as a perfectly ordinary result. */
 int aimee_vector_search_request_decode(const uint8_t *input, size_t length,
-                                    aimee_vector_search_request_t *request, float *vector_out,
-                                    size_t vector_capacity, aimee_vector_filter_view_t *filters_out);
+                                       aimee_vector_search_request_t *request, float *vector_out,
+                                       size_t vector_capacity,
+                                       aimee_vector_filter_view_t *filters_out);
 int aimee_vector_search_reply_encode(const aimee_vector_search_reply_t *reply, uint8_t *output,
-                                  size_t capacity, size_t *length);
+                                     size_t capacity, size_t *length);
 int aimee_vector_search_reply_decode(const uint8_t *input, size_t length,
-                                  aimee_vector_search_reply_t *reply);
+                                     aimee_vector_search_reply_t *reply);
 int aimee_vector_apply_encode(const aimee_vector_apply_t *apply, uint8_t *output, size_t capacity,
-                           size_t *length);
+                              size_t *length);
 /* Decode into `apply`, writing the vector into `vector_out`. See the search
  * request decode above. A delete or a tombstone carries no vector, so a NULL
  * buffer is accepted for those and refused for an upsert. */
 int aimee_vector_apply_decode(const uint8_t *input, size_t length, aimee_vector_apply_t *apply,
-                           float *vector_out, size_t vector_capacity);
+                              float *vector_out, size_t vector_capacity);
 
-int aimee_vector_route_init(aimee_vector_route_t *route, aimee_vector_search_fn internal_pgvector_search,
-                         void *internal_context,
-                         aimee_vector_candidate_authorize_fn authorize_candidate,
-                         void *authorize_context);
+int aimee_vector_route_init(aimee_vector_route_t *route,
+                            aimee_vector_search_fn internal_pgvector_search, void *internal_context,
+                            aimee_vector_candidate_authorize_fn authorize_candidate,
+                            void *authorize_context);
 /* principal must be nonzero. Use aimee_vector_route_clear() to deselect the external provider. */
 int aimee_vector_route_select(aimee_vector_route_t *route, uint32_t principal, int ready,
-                           int fallback_enabled, aimee_vector_search_fn external_search,
-                           void *external_context);
+                              int fallback_enabled, aimee_vector_search_fn external_search,
+                              void *external_context);
 void aimee_vector_route_clear(aimee_vector_route_t *route);
-aimee_vector_result_t aimee_vector_memory_candidates_search(aimee_vector_route_t *route,
-                                                      const aimee_vector_search_request_t *request,
-                                                      aimee_vector_search_outcome_t *outcome);
+aimee_vector_result_t
+aimee_vector_memory_candidates_search(aimee_vector_route_t *route,
+                                      const aimee_vector_search_request_t *request,
+                                      aimee_vector_search_outcome_t *outcome);
 
 #endif /* AIMEE_DB2_VECTOR_ROUTE_H */
