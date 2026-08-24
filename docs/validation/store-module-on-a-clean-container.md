@@ -1059,3 +1059,65 @@ while the migration ledger was still called `store_schema_version`; renaming it
 to `schema_migrations` left the schema applied and its history invisible, so the
 module replayed from version 1. A pre-rename database that never shipped. On a
 clean database all twenty-one apply and all seven suites pass.
+
+---
+
+# Run three: the whole system, with the threading change in it
+
+Run two proved the store on hardware. It was taken **before** the obs_bus
+threading change, so the daemons had never run with the guardrail writer thread
+— and that change alters shutdown ordering in a process every module attaches
+to. A green unit suite says little about it: no unit test stops a real
+`aimee-server` with a real fleet attached.
+
+Fresh container, current build, both daemons.
+
+    == the module fleet ==
+            module processes: 17
+    PASS  the supervisor started modules (17)
+    PASS  the store module is running
+    PASS  the store module created its schema (93)
+    PASS  migrations were recorded (21)
+
+    PASS=11 FAIL=0
+
+## Shutdown, which is what actually changed
+
+`obs_bus_stop()` now waits for the consumer's final drain, finishes a writer
+thread against a still-pumping consumer, then releases the consumer — three
+waits where there were none, and a mistake in any of them is a daemon that never
+exits.
+
+    PASS  aimee-server exited 2s after SIGTERM
+    PASS  no aimee-server left running
+    PASS  aimee-kb exited 5s after SIGTERM
+    PASS  no aimee-kb left running
+
+Both daemons, both clean.
+
+## Durability, on the same container as the fleet
+
+The property had been proven from a workstation against a remote database. Run
+here, on the e2e container, against the store the fleet had just used, with the
+binaries that were deployed:
+
+    emitted 2000, written 2000, dropped 0
+    PASS  the store gained exactly 2000 rows, matching what the bus wrote
+    PASS  no identity appears twice
+    PASS  overall_risk round-tripped as a double on every row
+    PASS  final_action round-tripped as text on every row
+    PASS  dry_run round-tripped as a boolean on every row
+
+## What this rig cannot show, stated rather than implied
+
+**The daemon emitted no guardrail events of its own.** `/v1/hooks/pre` answers
+and blocks — `"BLOCKED: write blocked because this session is not running in a
+worktree"` — but that refusal happens at the worktree guard, upstream of the
+semantic orchestrator that calls `gsem_record`. Reaching it needs a
+worktree-backed agent session, which this rig does not create.
+
+So the daemon-side evidence is: it starts, it serves, and **it stops cleanly
+with the new ordering**. The write-and-drain path itself is evidenced at 2000
+events through the same obs_bus code, on the same container, rather than through
+the daemon's own orchestrator. That distinction is worth keeping: it is the
+difference between "the code path works here" and "the daemon exercised it".
