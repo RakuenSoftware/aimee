@@ -11,7 +11,7 @@
 
 #include "cJSON.h"
 #include "config.h" /* config_autonomy_lookup: live autonomy.* caps (env > snapshot) */
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 #include "wfe_approval.h"
 #include "wfe_blocks.h"
 #include "wfe_def.h"

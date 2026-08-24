@@ -98,13 +98,32 @@ pg_indb()     { pg_db -c "$1"; }
 pg_indb_val() { pg_val "$1"; }
 
 # --- the management trust chain -------------------------------------------
-# Seeded BEFORE the server starts, into the very db1 file the server will open
-# ($AIMEE_HOME/aimee.db), because the server reads the envelope at request time
-# and an absent one denies every token as INVALID — which looks identical to a
-# forged token and would make this rig "pass" for the wrong reason.
+# Seeded BEFORE the server starts, and once again for the original reason: the
+# server reads the envelope at request time, and an absent one denies every
+# token as INVALID -- which looks identical to a forged token and would make
+# this rig "pass" for the wrong reason.
+#
+# It briefly ran AFTER the server, on the theory that the store had to be up
+# first. It does, and the daemon's store cannot be the one: obs_bus LISTENS for
+# modules rather than dialling one, so a bus belongs to the process hosting it
+# and this tool can never borrow the daemon's. It brings its own store module up
+# instead, against the same PostgreSQL, so the row it writes is the row the
+# daemon reads. AIMEE_TEST_MODULE_BIN is how the fixture finds the module.
+#
+# Which means the ordering constraint is gone rather than satisfied: nothing
+# here depends on the daemon, so this goes back where it reads correctly.
 step "Provisioning the JWKS trust chain (real envelope, real signature)"
+export AIMEE_TEST_MODULE_BIN="$PWD/src/build/obj/aimee-module"
+# `make all` does not build the module -- its rule lives in tests/Rules.mk --
+# and both this step and live_env_start_module need it, so build it here rather
+# than making the CI job remember.
+[ -x "$AIMEE_TEST_MODULE_BIN" ] || make -C src build/obj/aimee-module >/dev/null 2>&1 || true
+[ -x "$AIMEE_TEST_MODULE_BIN" ] || {
+  echo "enforce-live: no module binary at $AIMEE_TEST_MODULE_BIN" >&2
+  exit 2
+}
 kid=$(./write-tier-enforce-live provision \
-        --db1 "$AIMEE_HOME/aimee.db" --bundle "$BUNDLE" --key "$TOKEN_KEY") \
+        --bundle "$BUNDLE" --key "$TOKEN_KEY") \
   || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
 echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
 
@@ -217,7 +236,10 @@ deny "wrong issuer          " "$(./write-tier-enforce-live mint --key "$TOKEN_KE
 # A token signed by a key the JWKS does not carry: the IdP-signed / rotated-away
 # case. Its kid is derived from ITS OWN modulus, so it is well-formed and simply
 # unknown to this server.
-./write-tier-enforce-live provision --db1 "$work/other.db" --bundle "$work/other.pem" --key "$work/other-key.pem" >/dev/null 2>&1
+# --no-store is what the throwaway --db1 "$work/other.db" was really buying: a
+# key the server has NEVER been taught. Seeding it into the shared store would
+# teach the server this key and invert the assertion below.
+./write-tier-enforce-live provision --no-store --bundle "$work/other.pem" --key "$work/other-key.pem" >/dev/null 2>&1
 deny "signed by a foreign key" "$(./write-tier-enforce-live mint --key "$work/other-key.pem" --aud "$SERVER_ID" --team $TEAM_ID --sub 'oidc:test:alice' --tier full --jti enf-$$-key)"
 # The mutation must be GUARANTEED to change the token. `sed 's/.$/A/'` did not:
 # when the signature already ended in 'A' it rewrote 'A' as 'A', left the token

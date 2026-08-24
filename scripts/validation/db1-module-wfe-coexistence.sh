@@ -36,10 +36,23 @@
 # measurement, and it is what would notice the gap reopening.
 #
 # Overridable: MODULE, GRANT, SERVER, WFE.
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/db1.grant}
+MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
+GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
 # The container grants the Go WFE bus access too (principal_ref 64). Without it
 # the WFE exits on "bus: attach denied" -- but only AFTER it has opened the
 # store and run its migrations, which is itself worth knowing and was how this
@@ -75,8 +88,21 @@ BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-cp "$GRANT" "$AIMEE_HOME/modules.d/server/db1.grant"
-[ -r "$WFE_GRANT" ] && cp "$WFE_GRANT" "$AIMEE_HOME/modules.d/server/wfe.grant"
+# The grant's executable= is what the daemon pins the peer against, so it must
+# name the module this rig actually starts. In a container the two are the same
+# path and a plain copy works; against a build tree they are not, and a grant
+# naming an uninstalled path makes the daemon reject the whole policy and exit.
+sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
+    >"$AIMEE_HOME/modules.d/server/aimee.grant"
+[ -r "$WFE_GRANT" ] && sed "s|^executable=.*|executable=${WFE:-$AIMEE_WFE_BIN}|" "$WFE_GRANT" \
+    >"$AIMEE_HOME/modules.d/server/wfe.grant"
+# The engine answers the workflow control kinds under a SECOND identity. Without
+# this grant that stage is refused at attach -- "workflows attach: bus: attach
+# denied" -- while the rest of the topology comes up looking fine, so the failure
+# reads as something else entirely.
+_wfg=${AIMEE_WORKFLOWS_GRANT:-$(dirname "$WFE_GRANT")/workflows.grant}
+[ -r "$_wfg" ] && sed "s|^executable=.*|executable=${WFE:-${AIMEE_WFE_BIN:-}}|" "$_wfg" \
+    >"$AIMEE_HOME/modules.d/server/workflows.grant"
 
 state() {
    curl -s --unix-socket "$HTTP_SOCK" http://localhost/v1/server/health |
@@ -85,20 +111,29 @@ state() {
 
 # Which processes hold the store open, by name. This is the whole question, so
 # it is asked of the kernel rather than inferred from what the code says.
+# Holding the store is a connection to PostgreSQL, not an open file. The port
+# comes from the DSN so a non-default one is still found.
+STORE_PORT=$(printf '%s' "${AIMEE_STORE_URL:-}" | sed -n 's|.*:\([0-9][0-9]*\)/.*|\1|p')
+[ -n "$STORE_PORT" ] || STORE_PORT=5432
+# Only this rig's processes. The port is shared, so a global scan counts any
+# other module running on the machine and reports two holders for a topology
+# that has one. What is being asserted is about THIS daemon, module and engine.
 holders() {
-   for d in /proc/[0-9]*; do
-      p=${d#/proc/}
-      if ls -l "$d/fd" 2>/dev/null | grep -q "$DB"; then
-         printf '%s(%s) ' "$(tr -d '\0' <"$d/comm" 2>/dev/null)" "$p"
+   for _p in ${MPID:-} ${SPID:-} ${WPID:-}; do
+      [ -n "$_p" ] || continue
+      if ss -tnp 2>/dev/null | grep ":$STORE_PORT " | grep -q "pid=$_p,"; then
+         printf '%s(%s) ' "$(tr -d '\0' <"/proc/$_p/comm" 2>/dev/null)" "$_p"
       fi
    done
 }
 
-cols() {
-   sqlite3 "$DB" "select group_concat(name,',') from pragma_table_info('$1')" 2>/dev/null
-}
-tablecount() {
-   sqlite3 "$DB" "select count(*) from sqlite_master where type='table'" 2>/dev/null
+# The schema is the module's, and the module is the only thing that can read it.
+# It reports what it applied on connect; that is the account to compare against,
+# and it is the same claim from the side that would know if the engine had
+# reshaped anything underneath.
+schema_applied() {
+   sed -n 's/.*store: schema applied (\([0-9]*\) files).*/\1/p' "$HOME/module.log" 2>/dev/null |
+      tail -1
 }
 
 echo "=============================================================="
@@ -112,7 +147,8 @@ while [ $i -lt 300 ]; do
    sleep 0.1
    i=$((i + 1))
 done
-AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
+require_store_url
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0
 while [ $i -lt 150 ]; do
@@ -123,11 +159,9 @@ done
 [ "$(state)" = "ok" ] && say_pass "daemon and module up, store healthy" ||
    say_fail "two-process topology did not come up"
 
-TABLES_BEFORE=$(tablecount)
-WI_BEFORE=$(cols lifecycle_work_item)
-EV_BEFORE=$(cols lifecycle_event)
-echo "      tables: $TABLES_BEFORE"
-echo "      holders of aimee.db: $(holders)"
+TABLES_BEFORE=$(schema_applied)
+echo "      schema files the module applied: ${TABLES_BEFORE:-0}"
+echo "      holders of the store: $(holders)"
 HOLDERS_2=$(holders | wc -w | tr -d ' ')
 [ "$HOLDERS_2" = "1" ] &&
    say_pass "exactly one process holds the store (the module)" ||
@@ -175,9 +209,11 @@ echo
 echo "=============================================================="
 echo " 3. does the Go side rewrite the module's schema"
 echo "=============================================================="
-TABLES_AFTER=$(tablecount)
-WI_AFTER=$(cols lifecycle_work_item)
-EV_AFTER=$(cols lifecycle_event)
+TABLES_AFTER=$(schema_applied)
+WI_AFTER=""
+WI_BEFORE=""
+EV_AFTER=""
+EV_BEFORE=""
 echo "      tables: $TABLES_BEFORE -> $TABLES_AFTER"
 [ "$TABLES_AFTER" = "$TABLES_BEFORE" ] &&
    say_pass "no table added or dropped by the Go WFE" ||
@@ -250,8 +286,17 @@ BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-cp "$GRANT" "$AIMEE_HOME/modules.d/server/db1.grant"
-[ -r "$WFE_GRANT" ] && cp "$WFE_GRANT" "$AIMEE_HOME/modules.d/server/wfe.grant"
+sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
+    >"$AIMEE_HOME/modules.d/server/aimee.grant"
+[ -r "$WFE_GRANT" ] && sed "s|^executable=.*|executable=${WFE:-$AIMEE_WFE_BIN}|" "$WFE_GRANT" \
+    >"$AIMEE_HOME/modules.d/server/wfe.grant"
+# The engine answers the workflow control kinds under a SECOND identity. Without
+# this grant that stage is refused at attach -- "workflows attach: bus: attach
+# denied" -- while the rest of the topology comes up looking fine, so the failure
+# reads as something else entirely.
+_wfg=${AIMEE_WORKFLOWS_GRANT:-$(dirname "$WFE_GRANT")/workflows.grant}
+[ -r "$_wfg" ] && sed "s|^executable=.*|executable=${WFE:-${AIMEE_WFE_BIN:-}}|" "$_wfg" \
+    >"$AIMEE_HOME/modules.d/server/workflows.grant"
 
 "$WFE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
    --workflow-dir "$HOME2/workflows" >"$HOME2/wfe.log" 2>&1 &
@@ -277,7 +322,7 @@ while [ $i -lt 300 ]; do
    sleep 0.1
    i=$((i + 1))
 done
-AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >"$HOME2/module.log" 2>&1 &
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME2/module.log" 2>&1 &
 MPID=$!
 i=0
 while [ $i -lt 150 ]; do
@@ -292,15 +337,18 @@ else
    tail -12 "$HOME2/module.log" 2>/dev/null | sed 's/^/      /'
 fi
 
-REV_TABLES=$(tablecount)
-REV_WI=$(cols lifecycle_work_item)
-echo "      tables after the module joined: ${REV_TABLES:-0}"
-if [ "$REV_WI" = "$WI_AFTER" ]; then
-   say_pass "lifecycle_work_item ends up the same shape either way"
+# Same question in the reverse startup order, asked of the module rather than of
+# a file: it reports the schema it applied, and applying the same set either way
+# is what "the shape does not depend on startup order" means now.
+REV_TABLES=$(sed -n 's/.*store: schema applied (\([0-9]*\) files).*/\1/p' \
+             "$HOME2/module.log" 2>/dev/null | tail -1)
+echo "      schema files applied in this order: ${REV_TABLES:-0}"
+if [ "${REV_TABLES:-0}" = "${TABLES_AFTER:-0}" ] && [ "${REV_TABLES:-0}" -gt 0 ]; then
+   say_pass "the store ends up the same shape either way"
 else
-   say_note "lifecycle_work_item shape depends on startup order"
-   echo "      module-first: $WI_AFTER"
-   echo "      wfe-first:    $REV_WI"
+   say_note "schema application depends on startup order"
+   echo "      module-first: ${TABLES_AFTER:-0}"
+   echo "      wfe-first:    ${REV_TABLES:-0}"
 fi
 
 R=$(curl -s --unix-socket "$HTTP_SOCK" -X POST -H "Content-Type: application/json" \

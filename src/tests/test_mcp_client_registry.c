@@ -7,7 +7,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "config_client.h"
-#include "mcp_osv_cache.h"
+#include "db1_client/mcp_osv_cache.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include "agent_code_capabilities.h"

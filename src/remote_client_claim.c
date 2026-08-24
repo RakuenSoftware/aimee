@@ -12,7 +12,7 @@
  */
 #include <string.h>
 
-#include "remote_client_grant.h"
+#include "db1_client/remote_client_grant.h"
 
 db1_remote_client_claim_result_t db1_remote_client_claim(const char *principal,
                                                          const char *new_bearer_sha256, int64_t now,

@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "server.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include <aimee/delegates/delegate_role.h>
 #include "liveness.h"
 #include "cJSON.h"

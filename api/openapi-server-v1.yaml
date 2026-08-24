@@ -4610,6 +4610,56 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /commands/{method}:
+    post:
+      summary: Invoke a command declared in the command registry
+      description: >-
+        Invokes a capability registered in THE command table
+        (src/headers/command_registry.h), addressed by its RPC spelling
+        "<group>.<verb>". This is how a module-declared command - including one
+        contributed by a plugin module hosting an MCP server or a pluggy plugin -
+        is actually called; the same declaration also drives the CLI manifest and
+        the MCP tool surface, so a listed capability is a reachable one. The
+        request body is the command's own argument object and reaches its handler
+        unchanged.
+      parameters:
+        - name: method
+          in: path
+          required: true
+          description: The command's RPC spelling, "<group>.<verb>".
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: The command's result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  result: { type: object, additionalProperties: true }
+        "400":
+          description: Missing command method, or an invalid JSON body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such command, or it is not on the RPC surface
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: The command handler failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /personas/{name}:
     get:
       summary: Show a persona by name

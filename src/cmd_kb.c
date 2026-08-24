@@ -955,7 +955,7 @@ static void kb_cmd_reembed(app_ctx_t *ctx, int argc, char **argv)
    if (prc != 0)
    {
       if (prc == -2)
-         fprintf(stderr, "refused: an unknown halfvec table exists; not auto-resetting.\n");
+         fprintf(stderr, "refused: an unknown vector table exists; not auto-resetting.\n");
       else if (prc == -3)
          fprintf(stderr, "an inbound foreign key exists; re-run with --force.\n");
       return;

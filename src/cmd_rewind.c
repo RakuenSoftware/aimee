@@ -1,6 +1,6 @@
 /* cmd_rewind.c: aimee rewind — file-snapshot checkpoint list/restore. */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "commands.h"
 #include "config.h"
 #include "log.h"

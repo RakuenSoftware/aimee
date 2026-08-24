@@ -17,7 +17,7 @@
 #include "aimee.h"
 #include "commands.h"
 #include "cmd_review.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "working_profile.h"
 #include "cJSON.h"
 #include "platform_path.h"

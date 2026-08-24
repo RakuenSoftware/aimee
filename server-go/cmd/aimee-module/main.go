@@ -3,12 +3,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
+	"github.com/JBailes/aimee/server-go/modules/aimee/families"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
@@ -27,6 +30,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/governance"
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
 	"github.com/JBailes/aimee/server-go/modules/learning"
+	mcpmodule "github.com/JBailes/aimee/server-go/modules/mcp"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
@@ -52,6 +56,19 @@ const roundtableDelegatePrincipalRef uint32 = 65
 // serving grant requests nothing, so reaching another module's stage needs a
 // second principal that is granted exactly that request and nothing else.
 const economizerStorePrincipalRef uint32 = 66
+
+// storePrincipalRef is the store module's OUTBOUND identity, used to call the
+// postgres module. Separate from its serving ref (30) because a serving grant
+// requests nothing -- the rule that stops a module's right to answer becoming a
+// right to ask.
+//
+// 69, having been 67 and then 68 in turn. Both were taken by the session
+// building peer messaging -- 67 for its directory client below, 68 for the
+// server's own peer client -- and it landed first. Two clients on one ref are
+// two callers the bus cannot tell apart, and the failure surfaces long after
+// the merge that caused it rather than at it, so this yields rather than
+// contests. Declared as aimee-postgres in src/modules/process-contracts.json.
+const storePrincipalRef uint32 = 69
 
 // aimeeDirectoryPrincipalRef is the aimee module's OUTBOUND identity, used only
 // to read the session directory out of db1. Same reason as the economizer's: a
@@ -143,6 +160,88 @@ func economizerStore(ctx context.Context, moduleBusSocket string) economizer.Sta
 	return store
 }
 
+// storeBackend is db1's storage: the postgres module, over the bus.
+//
+// db1 opens no database. The postgres module owns the connection, the DSN and
+// the pooling policy, and this is the client that asks it -- the same shape as
+// economizerStore above, under db1's outbound identity.
+// applySchemaWaiting applies the schema, giving the postgres module time to
+// finish attaching first.
+//
+// THE SUPERVISOR GIVES NO ORDERING GUARANTEE. It starts every module in its
+// manifest back to back and each registers its stages asynchronously, so the
+// store routinely makes its first call before postgres has claimed kind 11266.
+// Without this the store exits at startup and the daemon comes up storeless:
+//
+//	[module-supervisor:server] starting postgres
+//	store: schema: read the applied schema version: ... capability absent
+//	aimee-module: module "aimee" could not start
+//
+// Observed on a sixteen-module fleet, where the two start one line apart.
+// Ordering the manifest would not fix it -- registration is asynchronous, so
+// starting postgres first only narrows the window, and a window that closes on
+// a fast machine reopens on a loaded one.
+//
+// A BOUNDED WAIT. If postgres is genuinely absent -- not installed, refused by
+// its grant, unable to open the database -- the store must still fail and say
+// so rather than hang forever looking healthy. The ceiling is what separates
+// "not up yet" from "not coming".
+//
+// Retrying ONLY ErrStoreUnavailable, which is the transport reporting it could
+// not reach the module at all. A store that answers and refuses is a different
+// thing, and retrying that would turn one clear error into the same error
+// thirty times.
+func applySchemaWaiting(ctx context.Context, db aimee.Store) error {
+	const (
+		attempts = 30
+		gap      = time.Second
+	)
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err = families.ApplySchema(ctx, db)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("store: the postgres module answered after %ds", attempt-1)
+			}
+			return nil
+		}
+		if !errors.Is(err, aimee.ErrStoreUnavailable) {
+			return err
+		}
+		if attempt == attempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(gap):
+		}
+	}
+	return fmt.Errorf("the postgres module did not answer within %ds: %w", attempts, err)
+}
+
+func storeBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, error) {
+	if ctx == nil || moduleBusSocket == "" {
+		return nil, errors.New("store: no module bus to reach the postgres module on")
+	}
+	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, storePrincipalRef)
+	if err != nil {
+		return nil, err
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	if err != nil {
+		busClient.Detach()
+		return nil, err
+	}
+	db, err := aimee.NewStore(caller)
+	if err != nil {
+		caller.CloseAndWait()
+		busClient.Detach()
+		return nil, err
+	}
+	return db, nil
+}
+
 func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtable.PanelReviewer, error) {
 	home := os.Getenv("AIMEE_HOME")
 	if home == "" {
@@ -195,6 +294,15 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string) (bus.ModuleProcessConfig, bool) {
 	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
 	config := bus.ModuleProcessConfig{PrincipalClass: 1}
+
+	// Plugin modules are instanced: `aimee-module-mcp-github` hosts exactly one
+	// MCP server under the group "github". They are matched by prefix because
+	// the set is a deployment decision, not a compile-time list -- a fleet may
+	// run ten of them, each its own process and its own failure domain.
+	if instance, isPlugin := strings.CutPrefix(name, "mcp-"); isPlugin {
+		return mcpModuleConfig(ctx, config, name, instance)
+	}
+
 	switch name {
 	case "memory":
 		config.ModuleName = name
@@ -372,29 +480,63 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// the module reduces without warming up.
 		config.Handler = economizer.NewHandlerWithStore(
 			economizerStore(ctx, moduleBusSocket))
-	case "aimee":
+	case "postgres":
+		config.ModuleName = name
+		config.PrincipalRef = 28
+		// Two stages, and the SQL one is what every store call in the tree
+		// ultimately lands on: aimee keeps no database and reaches PostgreSQL
+		// through here. Before it existed the store module attached, built its
+		// client, found nothing serving 11266 and exited -- which read as "the
+		// store is absent" on a system where every other part had been written.
+		config.Stages = []bus.ModuleStage{
+			{EventKind: postgres.EventHealth, StageID: postgres.StageHealth},
+			{EventKind: postgres.EventSQL, StageID: postgres.StageSQL},
+		}
+		// BOTH STAGES, ALWAYS. The SQL handler opens its pool on first use and
+		// answers with the reason when it cannot, so a missing DSN produces an
+		// explained refusal rather than a stage that is declared and absent.
+		// Trimming the list here instead would make this process disagree with
+		// process-contracts.json exactly when the database is unreachable.
+		sqlHandler := postgres.NewSQLHandler()
+		config.Handler = func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+			if invocation.StageID == postgres.StageSQL {
+				return sqlHandler(invocation, frame)
+			}
+			return postgres.Handle(invocation, frame)
+		}
+	// "aimee" is what a deployment installs this as: the id in
+	// process-contracts.json and the executable every generated grant pins.
+	//
+	// "db1" and "store" stay accepted rather than being cleaned away. A grant
+	// generated before the rename pins the old name, and an installed deployment
+	// does not regenerate its grants because this tree moved a directory -- so
+	// dropping them turns an upgrade into a module that cannot attach, which
+	// presents as the store being absent rather than as a name that changed.
+	case "aimee", "store", "db1":
+		// The module HOSTS CAPABILITIES. Two of them meet here: the store --
+		// every table the daemon keeps, on one PostgreSQL database -- and peer
+		// messaging, which was its own module until this principal absorbed it.
+		// A third is another argument to New, not a restructure.
+		//
+		// The store is a different principal from the "postgres" health probe
+		// below, deliberately: the probe keeps its own connection precisely so
+		// it can still answer when this module's pool is broken, and a probe
+		// sharing the pool it reports on would read healthy right up until it
+		// could not answer at all.
 		config.ModuleName = name
 		config.PrincipalRef = aimee.PrincipalRef
-		// The module hosts capabilities; peer messaging is the first. A second
-		// capability is another argument here, not a restructure.
+
+		// Peer messaging. The registry is process-local: inboxes and grants
+		// live in memory and do not survive a bounce.
 		//
-		// The registry is process-local today: inboxes and grants live in
-		// memory and do not survive a bounce. Durable storage arrives through
-		// the postgres module's generic wire and changes nothing here.
-		//
-		// NoDirectory{} is not a placeholder, it is the accurate description of
-		// this build. There is no DirectorySource yet -- it needs db1's session
-		// family, which lands with the absorption -- and nothing else populates
-		// the registry either: Register has no caller outside tests, and no bus
-		// op reaches it. So no session can exist here, and PEER MESSAGING IS
-		// INERT IN THIS CONFIGURATION.
-		//
-		// Said explicitly because the previous nil said it silently. Every
-		// session-scoped call refused with unknown_sender or no_peer, which are
-		// answers ABOUT A SESSION from a module that could not know about any
-		// session, and every refusal check in the container validation passed
-		// against exactly this state. A correct refusal and a module that can
-		// never do anything produce the same word.
+		// Its DirectorySource is the store's session family, which is why the
+		// store is REQUIRED below rather than optional. Peer messaging with no
+		// directory is not degraded, it is inert -- every session-scoped call
+		// refuses with unknown_sender or no_peer, which are answers ABOUT A
+		// SESSION from a module that cannot know about any session. Serving
+		// four peer stages out of this principal's twenty-three while the store
+		// is unreachable would advertise exactly that: a correct-looking
+		// refusal from something that can never do anything.
 		directory, sourceDescription := aimeeDirectory(ctx, moduleBusSocket)
 		peerCapability, err := aimee.NewPeer(peer.New(peer.Options{}), directory)
 		if err != nil {
@@ -404,24 +546,52 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// Logged at every start, not once at build time: an operator reading
 		// why a peer send refuses should find the reason in the log of the
 		// process that refused it. It names the source either way, so a run
-		// that MEANT to use db1 and did not is visible rather than looking the
-		// same as one that never asked.
+		// that MEANT to use the session family and did not is visible rather
+		// than looking the same as one that never asked.
 		log.Printf("aimee module: session directory = %s", sourceDescription)
-		module, err := aimee.New(peerCapability)
+
+		db, err := storeBackend(ctx, moduleBusSocket)
 		if err != nil {
-			// A stage conflict is a programming error in the capability list,
-			// not a runtime condition: refusing to advertise is better than
-			// advertising a stage served by the wrong owner.
+			// Without a store this module serves nothing. Declaring its stages
+			// anyway would have the daemon route every store call here to fail
+			// one at a time; declaring none makes it report the kinds as
+			// unserved, which is what is true.
+			log.Printf("store: no store backend: %v", err)
+			return config, false
+		}
+		// Create anything missing before serving. Nothing else applies this
+		// schema -- there is no deploy step for it -- so a fresh database would
+		// otherwise come up empty and fail every call against tables that were
+		// never created.
+		schemaCtx, cancelSchema := context.WithTimeout(context.Background(), 2*time.Minute)
+		err = applySchemaWaiting(schemaCtx, db)
+		cancelSchema()
+		if err != nil {
+			log.Printf("store: schema: %v", err)
+			return config, false
+		}
+		log.Printf("store: schema applied (%d files)", families.SchemaFileCount())
+		mux, err := aimee.NewMux(db, families.All()...)
+		if err != nil {
+			log.Printf("store: %v", err)
+			return config, false
+		}
+		for _, bind := range families.Binds(db) {
+			if err := mux.Add(bind); err != nil {
+				log.Printf("store: %v", err)
+				return config, false
+			}
+		}
+		// One stage table, one handler. Mux answers stages 1..19 and the peer
+		// capability 20..23; New refuses a collision at construction rather
+		// than letting the loser be silently unreachable.
+		module, err := aimee.New(peerCapability, mux)
+		if err != nil {
 			log.Printf("aimee module unavailable: %v", err)
 			return bus.ModuleProcessConfig{}, false
 		}
 		config.Stages = module.Stages()
 		config.Handler = module.Handle
-	case "postgres":
-		config.ModuleName = name
-		config.PrincipalRef = 28
-		config.Stages = []bus.ModuleStage{{EventKind: postgres.EventHealth, StageID: postgres.StageHealth}}
-		config.Handler = postgres.Handle
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
@@ -436,12 +606,162 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	return config, true
 }
 
+// mcpModuleConfig builds the process config for one MCP plugin instance.
+//
+// PRINCIPAL REF IS NOT ALLOCATED HERE, DELIBERATELY. Every other module carries
+// a compile-time constant (7..28), which cannot work for a set whose membership
+// is a deployment decision. Inventing an allocation -- hashing the instance name
+// into a band, say -- would be inventing an AUTHORIZATION policy, and a
+// collision there means two plugins sharing one grant. So the ref is supplied by
+// whatever provisions the instance, and a module with no ref refuses to start
+// rather than defaulting to something. Fail closed; the allocation scheme is its
+// own decision.
+//
+// The plugin itself is NOT started here. Attaching a plugin means running
+// third-party code, and the supply-chain gate that covers aimee.yaml-declared
+// MCP clients (the OSV scan in src/cmd_mcp.c, plus permission and egress
+// admission) does not yet cover module-hosted ones. Until it does, this module
+// serves its stages with no plugin attached: it declares zero commands and
+// answers CapabilityAbsent. That is a working, inert module -- not a gap left
+// open.
+func mcpModuleConfig(ctx context.Context, config bus.ModuleProcessConfig, name, instance string) (bus.ModuleProcessConfig, bool) {
+	if instance == "" {
+		log.Printf("mcp module: executable names no instance (want aimee-module-mcp-NAME)")
+		return bus.ModuleProcessConfig{}, false
+	}
+	// The permission ceiling is what this instance may do at most. Unset means
+	// `read` -- the least privilege -- matching plugin_permission_from_str().
+	ceiling := mcpmodule.ParsePermission(os.Getenv("AIMEE_MCP_PLUGIN_PERMISSION"))
+	module := mcpmodule.New(instance, ceiling)
+	if module.Group() == "" {
+		log.Printf("mcp module: instance %q has no usable command group", instance)
+		return bus.ModuleProcessConfig{}, false
+	}
+	ref, err := principalRefFromEnv()
+	if err != nil {
+		log.Printf("mcp module %s: %v", name, err)
+		return bus.ModuleProcessConfig{}, false
+	}
+	// The kinds come from the ref, not from a second environment variable. An
+	// independently supplied base is a second allocation authority for one
+	// namespace, which is exactly how the old range came to squat postgres's
+	// kinds; see the derivation comment in modules/mcp.
+	invoke, declare, err := mcpmodule.EventKinds(ref)
+	if err != nil {
+		log.Printf("mcp module %s: %v", name, err)
+		return bus.ModuleProcessConfig{}, false
+	}
+	if err := checkLegacyEventBase(invoke); err != nil {
+		log.Printf("mcp module %s: %v", name, err)
+		return bus.ModuleProcessConfig{}, false
+	}
+
+	config.ModuleName = name
+	config.PrincipalRef = ref
+	config.Stages = []bus.ModuleStage{
+		{EventKind: invoke, StageID: mcpmodule.StageInvoke},
+		{EventKind: declare, StageID: mcpmodule.StageDeclareCommands},
+	}
+	config.Handler = module.Handle
+
+	// The plugin is RECORDED, not started.
+	//
+	// Starting it executes third-party code, so it waits for the daemon's
+	// admission verdict -- the same OSV malware gate that has always guarded an
+	// aimee.yaml-declared MCP server (mcp_osv_gate.c, shared by both paths).
+	// With no argv the module runs inert: it serves its stages, declares zero
+	// commands, and answers CapabilityAbsent.
+	if argv := pluginArgvFromEnv(); len(argv) > 0 {
+		module.SetPending(argv, os.Getenv("AIMEE_MCP_PLUGIN_CWD"), ceiling)
+		log.Printf("%s: plugin recorded, awaiting admission (ceiling %s)", name, ceiling)
+	}
+	if ctx != nil {
+		// Reap the plugin on shutdown rather than orphaning it.
+		go func() {
+			<-ctx.Done()
+			module.Detach()
+		}()
+	}
+	return config, true
+}
+
+// pluginArgvFromEnv reads the plugin command line as a JSON array.
+//
+// JSON rather than a shell string so an argument containing a space is exact:
+// splitting on whitespace is how a path with a space becomes two broken
+// arguments, and the failure shows up as "plugin did not start" with no clue.
+func pluginArgvFromEnv() []string {
+	raw := os.Getenv("AIMEE_MCP_PLUGIN_ARGV")
+	if raw == "" {
+		return nil
+	}
+	var argv []string
+	if err := json.Unmarshal([]byte(raw), &argv); err != nil {
+		log.Printf("AIMEE_MCP_PLUGIN_ARGV is not a JSON array of strings: %v", err)
+		return nil
+	}
+	if len(argv) == 0 || argv[0] == "" {
+		log.Printf("AIMEE_MCP_PLUGIN_ARGV names no executable")
+		return nil
+	}
+	return argv
+}
+
+// checkLegacyEventBase rejects an instance still carrying the retired
+// AIMEE_MODULE_EVENT_BASE variable when it disagrees with the ref-derived kinds.
+//
+// Kinds are now derived from the principal ref, so the variable is obsolete. It
+// is not merely ignored: a deployment provisioned under the old scheme has a
+// .grant whose `serve=` list names the OLD kinds, and those kinds sit in the
+// blocks belonging to postgres, db2 and db1. Starting such an instance would
+// either be denied at attach or, worse, win the race and deny a core module.
+// Failing here with a pointer to re-provisioning is the safe outcome.
+func checkLegacyEventBase(invoke uint32) error {
+	raw := os.Getenv("AIMEE_MODULE_EVENT_BASE")
+	if raw == "" {
+		return nil
+	}
+	base, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		return fmt.Errorf("AIMEE_MODULE_EVENT_BASE=%q is not a 32-bit id", raw)
+	}
+	if uint32(base) == invoke {
+		return nil // agrees with the derivation; harmless leftover
+	}
+	return fmt.Errorf("AIMEE_MODULE_EVENT_BASE=%d is stale: event kinds are now derived "+
+		"from the principal ref (this instance's invoke kind is %d). Re-run "+
+		"scripts/provision-plugin-module.py for this instance to rewrite its .grant",
+		base, invoke)
+}
+
+// principalRefFromEnv reads the instance's provisioned principal reference.
+func principalRefFromEnv() (uint32, error) {
+	raw := os.Getenv("AIMEE_MODULE_PRINCIPAL_REF")
+	if raw == "" {
+		return 0, errors.New("AIMEE_MODULE_PRINCIPAL_REF is not set; an instanced module " +
+			"cannot allocate its own authorization identity")
+	}
+	ref, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil || ref == 0 {
+		return 0, fmt.Errorf("AIMEE_MODULE_PRINCIPAL_REF=%q is not a positive 32-bit id", raw)
+	}
+	return uint32(ref), nil
+}
+
 func run(ctx context.Context, args []string) error {
 	if len(args) != 2 {
 		return errUsage
 	}
 	config, ok := moduleConfigRuntime(ctx, args[0], args[1])
 	if !ok {
+		// A recognised module that could not start sets its name before giving
+		// up, and has already logged why. Reporting that as an unknown
+		// executable sends the reader to check the binary's name when the real
+		// answer -- a missing DSN, an unreachable database -- is the line above.
+		if config.ModuleName != "" {
+			return fmt.Errorf("module %q could not start; see the error above",
+				config.ModuleName)
+		}
 		return fmt.Errorf("unknown Go module executable %q", filepath.Base(args[0]))
 	}
 	if config.ModuleName == "postgres" {

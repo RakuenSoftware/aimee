@@ -30,7 +30,8 @@ SURFACES = {
         "src/modules/*/include/**/*.h",
     ),
     "database-schemas": (
-        "src/modules/db1/*.sql",
+        # The store's schema, one file per family since DB1 became a Go module.
+        "server-go/modules/aimee/families/schema_*.sql",
         "src/modules/db2/c/*.sql",
         "deploy/migrations/*.sql",
     ),

@@ -554,6 +554,16 @@ static double compute_term_overlap(char **query_terms, int term_count, const cha
    int matched = 0;
    for (int t = 0; t < term_count; t++)
    {
+      /* Substring, deliberately — do NOT convert this to the whole-word matcher the
+       * module's fixed keyword lists use. These are USER QUERY terms, and the prefix
+       * match is acting as a poor-man's stemmer: "cert" has to cover "certificate"
+       * and "auth" has to cover "authentication", or a query typed in abbreviations
+       * scores zero overlap against the very memories it is looking for
+       * (test_context_assembly.c:91 pins exactly that case). The cost is that an
+       * unrelated word sharing a prefix ("add" inside "address") also counts;
+       * removing that without losing the stemming needs a real stemmer, not a
+       * boundary check. A closed keyword list has no such tension, which is why
+       * those sites use memory_keyword_present() and this one does not. */
       if (strstr(lower, query_terms[t]))
          matched++;
    }

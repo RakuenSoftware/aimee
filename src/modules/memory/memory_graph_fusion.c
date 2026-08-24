@@ -15,10 +15,12 @@
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/db2_internal.h"
 #include "modules/db2/c/db_postgres.h"
+#include "log.h"
 
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* --- Relation gravity table (provisional random-walk priors) --- */
@@ -205,6 +207,91 @@ static int node_key_is_code(const char *key)
           strncmp(key, "route:", 6) == 0 || strncmp(key, "project:", 8) == 0;
 }
 
+/* BFS visit budget across the whole seed set. The traversal is breadth-first over
+ * ALL seeds at once rather than per-seed, so a node's recorded hop distance is its
+ * minimum over every seed, and the total number of neighbour reads is bounded by
+ * this constant instead of by seed_count * fan-out^max_hops. */
+#define GRAPH_EXPAND_MAX_NODES 192
+
+typedef struct
+{
+   char key[GRAPH_ENDPOINT_MAX];
+} graph_visit_t;
+
+/* 1 iff `key` is already in the visit queue. Linear scan: the queue is bounded at
+ * GRAPH_EXPAND_MAX_NODES, so this stays cheap next to the per-node DB reads. */
+static int graph_visit_seen(const graph_visit_t *queue, int n, const char *key)
+{
+   for (int i = 0; i < n; i++)
+      if (strcmp(queue[i].key, key) == 0)
+         return 1;
+   return 0;
+}
+
+/* Record the memories attached to `node`, reached at 1-based `hop` with `score`.
+ * Dedups on memory id across the whole result set, keeping the strongest score and
+ * the shortest hop distance seen (a node reachable at hop 1 from one seed and hop 2
+ * from another is a hop-1 result). Returns the new count. */
+static int graph_record_node(const char *node, double score, int hop, memory_graph_expansion_t *out,
+                             int count, int max)
+{
+   memory_t hits[8];
+   int got =
+       db2_memory_collect_entity_matches(node, 4, hits, (int)(sizeof(hits) / sizeof(hits[0])));
+   for (int h = 0; h < got && count < max; h++)
+   {
+      int dup = 0;
+      for (int d = 0; d < count; d++)
+         if (out[d].memory_id == hits[h].id)
+         {
+            dup = 1;
+            if (score > out[d].graph_score)
+               out[d].graph_score = score;
+            if (hop < out[d].hops)
+            {
+               out[d].hops = hop;
+               snprintf(out[d].via, sizeof(out[d].via), "%s", node);
+            }
+            break;
+         }
+      if (dup)
+         continue;
+      out[count].memory_id = hits[h].id;
+      out[count].graph_score = score;
+      out[count].hops = hop;
+      snprintf(out[count].via, sizeof(out[count].via), "%s", node);
+      count++;
+   }
+   return count;
+}
+
+/* Graph expansion needs the relational store. Where that store is unreachable --
+ * on aimee-server, which links no libpq and reaches PostgreSQL only through the
+ * kb client socket -- every db2_* helper below guards internally and returns
+ * nothing, so expansion yields zero results and the caller cannot tell that from
+ * "this memory genuinely has no neighbours".
+ *
+ * A silent zero is the worst of the three possible behaviours: a crash would be
+ * found immediately and a real answer would be correct, but silence looks like a
+ * working feature with an empty graph. Say it once per process, the same way
+ * db1_client/git_ownership.c reports an unreachable store: enough to tell a store
+ * that is down from one that is quiet, without a line per call.
+ *
+ * This is a diagnostic, not a fix. Graph memory works on aimee-kb and does not on
+ * aimee-server until the store migration puts PostgreSQL on both -- see
+ * docs/proposals/pending/one-store-postgres-and-pgvectorscale-everywhere.md.
+ */
+static void graph_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.graph", "graph expansion is unavailable: the relational store is unreachable "
+                            "from this process, so neighbour expansion returns no results "
+                            "(vector and lexical retrieval are unaffected)");
+}
+
 int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int max_hops,
                                    int max_neighbors, int allow_code_graph,
                                    int utility_scoring_enabled, memory_graph_expansion_t *out,
@@ -212,13 +299,31 @@ int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int m
 {
    if (!node_keys || seed_count <= 0 || !out || max <= 0)
       return 0;
+   /* Probe once, before doing any work: without the store every helper below
+      returns empty and the result is indistinguishable from a memory with no
+      neighbours. */
+   if (!db2_conn())
+   {
+      graph_warn_store_unreachable();
+      return 0;
+   }
    if (max_hops <= 0)
       max_hops = 2;
    if (max_neighbors <= 0)
       max_neighbors = 16;
 
+   /* Heap, not automatic: the queue is ~96 KiB and memory retrieval is a deep call
+    * chain that has exhausted the thread stack on buffers of this size before. */
+   graph_visit_t *queue = calloc(GRAPH_EXPAND_MAX_NODES, sizeof(*queue));
+   if (!queue)
+      return 0;
+   int n_queue = 0;
+
    int count = 0;
 
+   /* Level 0: the seeds themselves. Memories attached to a seed node (the node the
+    * vector/lexical hit mapped to) are the most direct evidence and score at hop 1,
+    * i.e. undecayed. */
    for (int s = 0; s < seed_count && count < max; s++)
    {
       const char *seed = node_keys[s];
@@ -229,79 +334,76 @@ int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int m
       if (!allow_code_graph && node_key_is_code(seed))
          continue;
 
-      /* Seed-direct: memories attached to the seed node itself (the node the
-       * vector/lexical hit mapped to) are the most direct evidence. */
+      if (graph_visit_seen(queue, n_queue, seed))
+         continue;
+      if (n_queue < GRAPH_EXPAND_MAX_NODES)
       {
-         /* The seed is a node, not an edge: no relation, no confidence class. */
-         double seed_score =
-             memory_graph_edge_score(NULL, node_key_is_code(seed), 0, 1, 0.0, 1, NULL);
-         memory_t shits[8];
-         int sgot = db2_memory_collect_entity_matches(seed, 4, shits,
-                                                      (int)(sizeof(shits) / sizeof(shits[0])));
-         for (int h = 0; h < sgot && count < max; h++)
-         {
-            int dup = 0;
-            for (int d = 0; d < count; d++)
-               if (out[d].memory_id == shits[h].id)
-               {
-                  dup = 1;
-                  if (seed_score > out[d].graph_score)
-                     out[d].graph_score = seed_score;
-                  break;
-               }
-            if (dup)
-               continue;
-            out[count].memory_id = shits[h].id;
-            out[count].graph_score = seed_score;
-            out[count].hops = 1;
-            snprintf(out[count].via, sizeof(out[count].via), "%s", seed);
-            count++;
-         }
+         snprintf(queue[n_queue].key, sizeof(queue[n_queue].key), "%s", seed);
+         n_queue++;
       }
 
-      db2_entity_edge_weighted_neighbor_t neighbors[64];
-      int cap = max_neighbors < 64 ? max_neighbors : 64;
-      int n =
-          db2_entity_edge_neighbors_weighted(seed, neighbors, cap, cap, utility_scoring_enabled);
-      for (int i = 0; i < n && count < max; i++)
-      {
-         /* Skip code nodes when not allowed. */
-         if (!allow_code_graph && node_key_is_code(neighbors[i].node))
-            continue;
-
-         /* Hop-1 edge score. The reader now returns the traversed edge's relation
-          * and, for typed facts, its confidence class, so both the gravity table
-          * and the A/B/C weighting apply instead of the generic default. */
-         double escore = memory_graph_edge_score(
-             neighbors[i].relation, node_key_is_code(neighbors[i].node), 0, neighbors[i].weight,
-             neighbors[i].effective_utility, 1, neighbors[i].confidence_class);
-
-         /* Look up memories linked to this reached node. */
-         memory_t hits[8];
-         int got = db2_memory_collect_entity_matches(neighbors[i].node, 4, hits,
-                                                     (int)(sizeof(hits) / sizeof(hits[0])));
-         for (int h = 0; h < got && count < max; h++)
-         {
-            /* Dedup. */
-            int dup = 0;
-            for (int d = 0; d < count; d++)
-               if (out[d].memory_id == hits[h].id)
-               {
-                  dup = 1;
-                  if (escore > out[d].graph_score)
-                     out[d].graph_score = escore;
-                  break;
-               }
-            if (dup)
-               continue;
-            out[count].memory_id = hits[h].id;
-            out[count].graph_score = escore;
-            out[count].hops = 1;
-            snprintf(out[count].via, sizeof(out[count].via), "%s", neighbors[i].node);
-            count++;
-         }
-      }
+      /* The seed is a node, not an edge: no relation, no confidence class. */
+      double seed_score = memory_graph_edge_score(NULL, node_key_is_code(seed), 0, 1, 0.0, 1, NULL);
+      count = graph_record_node(seed, seed_score, 1, out, count, max);
    }
+
+   /* Levels 1..max_hops. `queue` doubles as the visited set and the BFS queue:
+    * [level_start, level_end) is the current frontier, and neighbours discovered
+    * while expanding it are appended, forming the next frontier. */
+   int level_start = 0;
+   int level_end = n_queue;
+   int cap = max_neighbors < 64 ? max_neighbors : 64;
+
+   for (int hop = 1; hop <= max_hops && count < max; hop++)
+   {
+      for (int qi = level_start; qi < level_end && count < max; qi++)
+      {
+         db2_entity_edge_weighted_neighbor_t neighbors[64];
+         int n = db2_entity_edge_neighbors_weighted(queue[qi].key, neighbors, cap, cap,
+                                                    utility_scoring_enabled);
+         for (int i = 0; i < n && count < max; i++)
+         {
+            if (!neighbors[i].node[0])
+               continue;
+
+            /* Skip code nodes when not allowed. */
+            if (!allow_code_graph && node_key_is_code(neighbors[i].node))
+               continue;
+
+            /* Already reached at this hop or a shorter one — its memories are
+             * recorded and re-expanding it would only repeat work. */
+            if (graph_visit_seen(queue, n_queue, neighbors[i].node))
+               continue;
+
+            /* Enqueue for the next level. A full queue stops the traversal from
+             * growing but does not stop this node's memories being recorded. */
+            if (n_queue < GRAPH_EXPAND_MAX_NODES)
+            {
+               snprintf(queue[n_queue].key, sizeof(queue[n_queue].key), "%s", neighbors[i].node);
+               n_queue++;
+            }
+
+            /* Edge score at this hop. The reader returns the traversed edge's
+             * relation and, for typed facts, its confidence class, so both the
+             * gravity table and the A/B/C weighting apply instead of the generic
+             * default. hop feeds the pow(0.5, hop-1) decay, so the second ring is
+             * worth half the first. */
+            double escore = memory_graph_edge_score(
+                neighbors[i].relation, node_key_is_code(neighbors[i].node), 0, neighbors[i].weight,
+                neighbors[i].effective_utility, hop, neighbors[i].confidence_class);
+
+            count = graph_record_node(neighbors[i].node, escore, hop, out, count, max);
+         }
+      }
+
+      /* Advance to the frontier just appended; stop early if it is empty. */
+      level_start = level_end;
+      level_end = n_queue;
+      if (level_start >= level_end)
+         break;
+   }
+
+   free(queue);
    return count;
 }
 

@@ -9,11 +9,10 @@
 
 extern char test_vault_server_codex_oauth[4096];
 void test_oauth_tokens_reset(void);
-#include <sqlite3.h>
 #include "aimee.h"
-#include "db.h"
-#include "db_schema.h"
-#include "db1.h"
+#include "db1_client/db1.h"
+#include "support/store_module_fixture.h"
+#include "db1_client/execution_trace.h"
 #include "agent.h"
 #include "agent_config.h"
 #include "runtime_secret.h"
@@ -3386,21 +3385,19 @@ static void test_delegation_error_guidance(void)
 
 static void test_agent_trace_log_uses_db1_execution_trace(void)
 {
-   /* Earlier tests in this suite exercise dispatch_tool_call, which now
-    * lazy-inits DB1 against the real config db_path. Tear that down so
-    * this test's :memory: init actually takes effect. */
-   db1_shutdown();
+   /* Started once from main, before anything else touches the bus. */
+   if (!store_module_fixture_available())
+      return;
 
-   sqlite3 *db = NULL;
-   assert(sqlite3_open(":memory:", &db) == SQLITE_OK);
-   db1_apply_pragmas(db, DB_MODE_CLI);
-   {
-      char err[512] = {0};
-      assert(db1_apply_schema_sqlite(db, err, sizeof(err)) == 0);
-   }
-   assert(db != NULL);
-   assert(db1_init(":memory:") == 0);
-
+   /* The store is a separate process now, so this used to be different: it
+    * opened a real sqlite3 handle on ":memory:", ran db1_apply_pragmas and
+    * db1_apply_schema_sqlite over it, and let the production path write there.
+    * None of that exists any more.
+    *
+    * The ASSERTION is unchanged, because its subject never was the database:
+    * agent_trace_log must fill turn and tool_name from the right arguments.
+    * tests/support/execution_trace_stub.c records the write and returns it, so
+    * what is checked here is still the function that built the row. */
    agent_trace_log(7, 3, "call", "content", "bash", "{}", "ok", "abc123");
 
    db1_execution_trace_recent_row_t rows[4];
@@ -3408,10 +3405,6 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    assert(count == 1);
    assert(rows[0].turn == 3);
    assert(strcmp(rows[0].tool_name, "bash") == 0);
-
-   db1_shutdown();
-   db1_stmt_cache_clear();
-   sqlite3_close(db);
 }
 
 static void test_agent_endpoint_valid(void)
@@ -3750,6 +3743,16 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
 
 int main(void)
 {
+   /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
+      starts the bus, and obs_bus refuses to be configured once it is running.
+      Several tests below bring the bus up as a side effect, so a fixture started
+      at the first store-backed test finds it already up and dies -- which is how
+      this was found: with AIMEE_STORE_URL set, the suite aborted at
+      "configure the module endpoint" rather than skipping.
+      Ordering, not availability, and only a run with a real database shows it. */
+   if (store_module_fixture_available())
+      store_module_fixture_start();
+
    delegate_role_seam_install();
    char tmp_home[512];
    snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-agent-home-XXXXXX", platform_tmpdir());

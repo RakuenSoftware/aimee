@@ -14,7 +14,8 @@
 #include <string.h>
 
 static int g_available;
-static const char *g_reply;
+static const void *g_reply;
+static uint32_t g_reply_len;
 static aimee_module_call_result_t g_result = AIMEE_MODULE_CALL_OK;
 static uint32_t g_last_event, g_last_stage;
 static int g_calls;
@@ -22,13 +23,23 @@ static int g_calls;
 void module_bus_stub_reply(const char *json)
 {
    g_reply = json;
+   g_reply_len = json ? (uint32_t)strlen(json) : 0u;
    g_available = json != NULL;
+   g_result = AIMEE_MODULE_CALL_OK;
+}
+
+void module_bus_stub_reply_bytes(const void *body, uint32_t len)
+{
+   g_reply = body;
+   g_reply_len = len;
+   g_available = body != NULL;
    g_result = AIMEE_MODULE_CALL_OK;
 }
 
 void module_bus_stub_absent(void)
 {
    g_reply = NULL;
+   g_reply_len = 0u;
    g_available = 0;
 }
 
@@ -75,7 +86,7 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       return g_result;
    if (!g_reply)
       return AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
-   size_t n = strlen(g_reply);
+   size_t n = g_reply_len;
    if (n > response_capacity)
       return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
    memcpy(response_body, g_reply, n);

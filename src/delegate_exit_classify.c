@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "delegate_learning.h"
+#include "db1_client/delegate_learning.h"
 
 const char *dl_failure_mode_to_string(dl_failure_mode_t mode)
 {

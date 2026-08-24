@@ -1,7 +1,7 @@
 /* agent_coord.c: multi-agent coordination (planner/critic/worker), quorum voting, hard directives
  */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "agent_coord.h"
 #include "agent_config.h"

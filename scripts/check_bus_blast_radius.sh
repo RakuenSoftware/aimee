@@ -40,16 +40,75 @@ require_target_libraries BINARY 0
 require_target_libraries SERVER 1
 require_target_libraries KB 1
 
-# CORE_EVENT_BUS_LIB may be defined/built once and consumed by exactly the two daemon
+# CORE_EVENT_BUS_LIB may be defined/built once and consumed by a named set of
 # targets. This catches a future link through a target variable the source-path
 # check below cannot see.
-while IFS= read -r hit; do
-   case "$hit" in
-   *'CORE_EVENT_BUS_LIB ='*|*'CORE_EVENT_BUS_LIB :='*|*'$(CORE_EVENT_BUS_LIB):'*|*'$(SERVER):'*|*'$(KB):'*) continue ;;
-   esac
-   printf 'FAIL: event-bus archive referenced outside server/KB graph: %s\n' "$hit" >&2
+#
+# Each reference is attributed to the Makefile TARGET that owns it rather than
+# matched against the text of its own line, because a link line whose
+# prerequisites wrap puts the archive on a continuation line that carries no
+# target name at all. Matching text would report such a line as having escaped a
+# graph it never left -- and, worse in the other direction, would admit any new
+# target that happened to contain the string '$(SERVER):' somewhere in it.
+#
+# ../write-tier-enforce-live is a dev rig, deliberately not part of `all` and
+# never installed. It is here because it links $(DB1_CLIENT_OBJS), and the DB1
+# client became a bus client when the C store module was retired: the store is a
+# separate process now and the client's job is to reach it. A rig that links the
+# production objects rather than reimplementing them necessarily inherits what
+# those objects depend on -- that is the property that makes the rig worth
+# having.
+BUS_LIB_OWNERS='(variable)
+$(CORE_EVENT_BUS_LIB)
+$(SERVER)
+$(KB)
+../write-tier-enforce-live'
+
+bus_lib_refs=$(awk '
+   /^[ \t]*#/ { next }
+   /^[A-Za-z_][A-Za-z0-9_]*[ \t]*:?=/ { owner = "(variable)" }
+   /^[^ \t#]/ && /:/ && !/^[A-Za-z_][A-Za-z0-9_]*[ \t]*:?=/ {
+      t = $0; sub(/:.*/, "", t); gsub(/[ \t]+$/, "", t); owner = t
+   }
+   /CORE_EVENT_BUS_LIB/ { printf "%s\t%d\n", owner, NR }
+' src/Makefile)
+
+# A scan that found nothing must not read as a boundary that holds. The archive
+# is defined in this Makefile and consumed by both daemons, so zero references
+# means the scan broke, not that the graph is clean.
+if [[ -z "$bus_lib_refs" ]]; then
+   printf 'FAIL: no $(CORE_EVENT_BUS_LIB) reference found in src/Makefile at all; this scan is not measuring anything\n' >&2
    fail=1
-done < <(grep -n 'CORE_EVENT_BUS_LIB' src/Makefile | grep -vE '^[0-9]+:[[:space:]]*#' || true)
+fi
+
+while IFS=$'\t' read -r owner lineno; do
+   [[ -z "$owner" ]] && continue
+   if ! grep -Fxq -- "$owner" <<<"$BUS_LIB_OWNERS"; then
+      printf 'FAIL: event-bus archive referenced outside its permitted graph: src/Makefile:%s is owned by %s\n' \
+         "$lineno" "$owner" >&2
+      printf '   The repair is almost never to add %s to BUS_LIB_OWNERS. That list is\n' "$owner" >&2
+      printf '   the blast radius, not a way to quiet this: widening it ships the local\n' >&2
+      printf '   shared-memory bus into another binary, and the check goes green having\n' >&2
+      printf '   recorded the widening as permission for it.\n' >&2
+      printf '   Ask first why that target needs the bus at all -- usually it links an\n' >&2
+      printf '   object that became a bus client, and the answer is to stub the call or\n' >&2
+      printf '   drop the object. Add a name only when the target genuinely must speak\n' >&2
+      printf '   the bus, and say in the comment above the list why.\n' >&2
+      fail=1
+   fi
+done <<<"$bus_lib_refs"
+
+# A permitted owner that no longer references the archive is a stale allowance,
+# and a stale allowance is how an exemption list stops describing the tree it
+# guards. Every name above has to still be earning its place.
+while IFS= read -r owner; do
+   [[ -z "$owner" ]] && continue
+   if ! grep -Fq -- "$owner"$'\t' <<<"$bus_lib_refs"; then
+      printf 'FAIL: %s is permitted to link the event-bus archive but no longer does; drop it from BUS_LIB_OWNERS\n' \
+         "$owner" >&2
+      fail=1
+   fi
+done <<<"$BUS_LIB_OWNERS"
 
 # The bus implementation must enter shipping links only through its archive.
 while IFS= read -r hit; do

@@ -26,7 +26,7 @@
 #include "wfe_engine.h" /* wfe_load_workflow — roundtable-park resume check */
 #include "yaml.h"       /* yaml_emit — write blocks.yaml */
 #include "wfe_iface.h"
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 

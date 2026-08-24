@@ -6,7 +6,7 @@
 #include "agent_exec.h"
 #include "config.h"
 #include "cJSON.h"
-#include "modules/db1/interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include "platform_path.h"
 #include "platform_process.h"
 

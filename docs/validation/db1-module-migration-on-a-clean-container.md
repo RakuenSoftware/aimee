@@ -1,5 +1,28 @@
 # Validating the DB1 module migration on a machine that never built it
 
+> **HISTORICAL. THIS VALIDATED A PROGRAM THAT NO LONGER EXISTS.**
+>
+> Superseded, and recorded rather than deleted because the method still reads
+> well and the failures it found were real. What it does NOT do is say anything
+> about the store module as it now stands.
+>
+> - It ran `feature/db1-module-migration` at `0e44f5a08d`. The store was a C
+>   module over **SQLite**; it is now a Go module over PostgreSQL that opens no
+>   database at all and reaches the postgres module over the bus.
+> - Every count below -- 23 checks, 43 commands, 102 tables -- is from that run.
+>   The scripts it names have since been rewritten and now refuse to start
+>   without `AIMEE_STORE_URL`; `db1-module-e2e.sh` today makes 12 checks, not 23,
+>   and `db1-module-upgrade.sh` no longer exists.
+> - CT 9077 was destroyed under the host's cleanup rule, so nothing here can be
+>   re-checked against the run that produced it.
+>
+> A validation record is the one artefact in a tree with no build to fail it,
+> which is what lets its subject be replaced underneath it while it goes on
+> reading as current. Anything below that sounds like a claim about today is not
+> one. `scripts/check-validation-record.py` compares a record's asserted check
+> counts against the scripts that produce them; this file is exempt from it by
+> the marker above, which is the assertion that it is history.
+
 The repo's own suites run against a build tree, with the module started by the
 harness beside its socket. That is the right shape for CI and the wrong shape
 for answering "does the thing we ship work". This is the record of running the

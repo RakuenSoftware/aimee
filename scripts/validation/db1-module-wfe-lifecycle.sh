@@ -19,10 +19,23 @@
 #   the module is the only process that does
 #
 # Overridable: MODULE, GRANT, WFE_GRANT, SERVER, WFE.
+# The store module is PostgreSQL-backed: it reads AIMEE_STORE_URL and refuses to
+# start without it. Say so here rather than letting the module exit into a log
+# nobody reads and the rig time out on a socket that never appears.
+require_store_url() {
+   if [ -z "${AIMEE_STORE_URL:-}" ]; then
+      echo "$(basename "$0"): AIMEE_STORE_URL is not set." >&2
+      echo "  The store is a Go module against PostgreSQL; it no longer opens a" >&2
+      echo "  SQLite file. Point this at a database the rig may create and drop:" >&2
+      echo "    export AIMEE_STORE_URL=postgres://user:pass@host:5432/aimee_store" >&2
+      exit 2
+   fi
+}
+
 PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 export PATH
-MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-db1}
-GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/db1.grant}
+MODULE=${AIMEE_DB1_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-aimee}
+GRANT=${AIMEE_DB1_GRANT:-/opt/payload/grants/aimee.grant}
 WFE_GRANT=${AIMEE_WFE_GRANT:-/opt/payload/grants/wfe.grant}
 SERVER=${AIMEE_SERVER_BIN:-/usr/local/bin/aimee-server}
 WFE=${AIMEE_WFE_BIN:-/usr/local/bin/aimee-wfe}
@@ -52,8 +65,24 @@ WFE_SOCK="$AIMEE_HOME/aimee-wfe.sock"
 DB="$AIMEE_HOME/aimee.db"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
-cp "$GRANT" "$AIMEE_HOME/modules.d/server/db1.grant"
-cp "$WFE_GRANT" "$AIMEE_HOME/modules.d/server/wfe.grant"
+# The grant's executable= is what the daemon pins the peer against, so it must
+# name the module this rig actually starts. In a container the two are the same
+# path and a plain copy works; against a build tree they are not, and a grant
+# naming an uninstalled path makes the daemon reject the whole policy and exit.
+sed "s|^executable=.*|executable=$MODULE|" "$GRANT" \
+    >"$AIMEE_HOME/modules.d/server/aimee.grant"
+sed "s|^executable=.*|executable=${WFE:-$AIMEE_WFE_BIN}|" "$WFE_GRANT" \
+    >"$AIMEE_HOME/modules.d/server/wfe.grant"
+# The engine carries two identities: wfe (the store kinds it CALLS) and
+# workflows (the control kinds it ANSWERS). A serving grant requests nothing, so
+# one cannot do both, and without the second the engine's control stage is
+# refused at attach -- "workflows attach: bus: attach denied" -- while the rest
+# of the topology comes up looking fine.
+WORKFLOWS_GRANT=${AIMEE_WORKFLOWS_GRANT:-$(dirname "$WFE_GRANT")/workflows.grant}
+if [ -r "$WORKFLOWS_GRANT" ]; then
+   sed "s|^executable=.*|executable=${WFE:-${AIMEE_WFE_BIN:-}}|" "$WORKFLOWS_GRANT" \
+       >"$AIMEE_HOME/modules.d/server/workflows.grant"
+fi
 
 # A git repo for the proposal to belong to: submit resolves the repo path and
 # validates the proposal source against it.
@@ -82,16 +111,44 @@ wfe() {
          -H "X-Aimee-Webuser: $WEBUSER" "http://localhost$2"
    fi
 }
+# The work item, and one field of it, through the engine. These replace direct
+# queries against the store: it is PostgreSQL behind the module now, and the
+# invariant asserted by check_owner above is precisely that nothing else opens
+# it -- so reading it here would contradict the test.
+wi_field() {
+   # $1 work_item_id, $2 field
+   wfe GET "/v1/workflow/items/$1" |
+      sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\\1/p" | head -1
+}
+wi_exists() {
+   # The item endpoint spells the identifier "work_item_id" in some shapes and
+   # "id" in others, which is why the submit parser above tries both.
+   case "$(wfe GET "/v1/workflow/items/$1")" in
+   *'"work_item_id"'* | *'"id"'*) echo 1 ;;
+   *) echo 0 ;;
+   esac
+}
+wi_event_count() {
+   # $1 work_item_id, $2 kind
+   wfe GET "/v1/workflow/items/$1/events" | grep -o "\"kind\"[[:space:]]*:[[:space:]]*\"$2\"" | wc -l
+}
+
+# Holding the store is a connection to PostgreSQL, not an open file. The port
+# comes from the DSN so a non-default one is still found. The invariant this
+# serves is unchanged: the module is the only holder, and aimee-wfe is never
+# among them.
+STORE_PORT=$(printf '%s' "${AIMEE_STORE_URL:-}" | sed -n 's|.*:\([0-9][0-9]*\)/.*|\1|p')
+[ -n "$STORE_PORT" ] || STORE_PORT=5432
+# Only this rig's processes. The port is shared, so a global scan counts any
+# other module running on the machine and reports two holders for a topology
+# that has one. What is being asserted is about THIS daemon, module and engine.
 holders() {
-   for d in /proc/[0-9]*; do
-      p=${d#/proc/}
-      if ls -l "$d/fd" 2>/dev/null | grep -q "$DB"; then
-         printf '%s(%s) ' "$(tr -d '\0' <"$d/comm" 2>/dev/null)" "$p"
+   for _p in ${MPID:-} ${SPID:-} ${WPID:-}; do
+      [ -n "$_p" ] || continue
+      if ss -tnp 2>/dev/null | grep ":$STORE_PORT " | grep -q "pid=$_p,"; then
+         printf '%s(%s) ' "$(tr -d '\0' <"/proc/$_p/comm" 2>/dev/null)" "$_p"
       fi
    done
-}
-in_store() {
-   sqlite3 "$DB" "$1" 2>/dev/null
 }
 
 echo "=============================================================="
@@ -105,7 +162,8 @@ while [ $i -lt 300 ]; do
    sleep 0.1
    i=$((i + 1))
 done
-AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
+require_store_url
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0
 while [ $i -lt 150 ]; do
@@ -174,11 +232,11 @@ fi
 if [ -n "$WI" ]; then
    # The claim that matters: it is in the MODULE's file, not merely in an API
    # response the engine composed for itself.
-   rows=$(in_store "SELECT COUNT(*) FROM lifecycle_work_item WHERE work_item_id='$WI'")
+   rows=$(wi_exists "$WI")
    [ "${rows:-0}" = "1" ] && say_pass "and the row is in the module's store" ||
       say_fail "the run is not in the module's store (rows=${rows:-0})"
    # And its creation was recorded, which only happens inside the operation.
-   ev=$(in_store "SELECT COUNT(*) FROM lifecycle_event WHERE work_item_id='$WI' AND kind='create'")
+   ev=$(wi_event_count "$WI" create)
    [ "${ev:-0}" -ge 1 ] && say_pass "with the create event the operation writes" ||
       say_fail "no create event was recorded"
    check_owner "after a write"
@@ -223,7 +281,7 @@ if [ -n "$WI" ]; then
    # that left no reason behind: either would mean the guard and the write
    # disagree.
    PAUSE=$(wfe POST "/v1/workflow/items/$WI/pause" '{}')
-   reason=$(in_store "SELECT pause_reason FROM lifecycle_work_item WHERE work_item_id='$WI'")
+   reason=$(wi_field "$WI" pause_reason)
    case "$PAUSE" in
    *'"ok":true'*)
       [ -n "$reason" ] &&
@@ -250,8 +308,8 @@ if [ -n "$WI" ]; then
       # what is asserted now.
       if [ -z "$reason" ]; then
          sleep 2
-         reason=$(in_store "SELECT pause_reason FROM lifecycle_work_item WHERE work_item_id='$WI'")
-         state_now=$(in_store "SELECT state FROM lifecycle_work_item WHERE work_item_id='$WI'")
+         reason=$(wi_field "$WI" pause_reason)
+         state_now=$(wi_field "$WI" state)
       fi
       if [ -n "$reason" ]; then
          say_pass "the pause was refused because the run was already parked ($reason), and that reason stands"
@@ -273,9 +331,9 @@ if [ -n "$WI" ]; then
    # against a fresh one and report a "cleared" pause that had in fact just been
    # SET. What this asserts is that the resume did not clear a lifecycle-owned
    # reason, so the reason it must compare is the one in force when it resumed.
-   reason=$(in_store "SELECT pause_reason FROM lifecycle_work_item WHERE work_item_id='$WI'")
+   reason=$(wi_field "$WI" pause_reason)
    wfe POST "/v1/workflow/items/$WI/resume" '{}' >/dev/null
-   after=$(in_store "SELECT pause_reason FROM lifecycle_work_item WHERE work_item_id='$WI'")
+   after=$(wi_field "$WI" pause_reason)
    if [ "$reason" = "manual" ]; then
       [ -z "$after" ] && say_pass "an operator pause resumed and the store agrees" ||
          say_fail "an operator pause did not clear (reason=$after)"
@@ -286,14 +344,14 @@ if [ -n "$WI" ]; then
    fi
 
    wfe POST "/v1/workflow/items/$WI/stop" '{}' >/dev/null
-   st=$(in_store "SELECT state FROM lifecycle_work_item WHERE work_item_id='$WI'")
+   st=$(wi_field "$WI" state)
    [ "$st" = "stopped" ] && say_pass "stop reached the store (state=stopped)" ||
       say_fail "stop did not reach the store (state=$st)"
    check_owner "after a stop"
 
    # A stopped run's terminal event is written by the same transaction that
    # stopped it, so its absence would mean the tree operation half-applied.
-   term=$(in_store "SELECT COUNT(*) FROM lifecycle_event WHERE work_item_id='$WI' AND kind='terminal'")
+   term=$(wi_event_count "$WI" terminal)
    [ "${term:-0}" -ge 1 ] && say_pass "with the terminal event from the same transaction" ||
       say_fail "the stop wrote no terminal event"
 fi
@@ -330,7 +388,7 @@ else
    say_fail "the engine died when its store went away"
 fi
 
-AIMEE_DB1_PATH="$DB" "$MODULE" "$BUS_SOCK" >>"$HOME/module.log" 2>&1 &
+AIMEE_STORE_URL="$AIMEE_STORE_URL" "$MODULE" "$BUS_SOCK" >>"$HOME/module.log" 2>&1 &
 MPID=$!
 i=0
 while [ $i -lt 150 ]; do
@@ -359,7 +417,7 @@ case "$BACK" in
 esac
 
 # And the run is intact, not half-written by whatever was in flight.
-st=$(in_store "SELECT state FROM lifecycle_work_item WHERE work_item_id='$WI'")
+st=$(wi_field "$WI" state)
 [ "$st" = "stopped" ] && say_pass "the run survived the restart unchanged (state=$st)" ||
    say_fail "the run changed across the restart (state=$st)"
 check_owner "after the restart"

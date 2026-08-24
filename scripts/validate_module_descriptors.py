@@ -129,12 +129,21 @@ def module_id(value: object, pointer: str) -> str:
 
 def load_inventory(repo: Path) -> tuple[set[str], set[str]]:
     value = load_json(repo / INVENTORY_PATH)
+    # The two *_principal_ref_band keys are read by check_module_inventory.py,
+    # which owns the rule they express: a ref inside a band reserved for
+    # dynamically provisioned processes must not be handed to a module. They are
+    # accepted rather than ignored because this comparison is EXACT -- an
+    # unlisted key fails the whole file, so the branch that added them to the
+    # inventory and to that script and not to this one left this validator
+    # rejecting a document the other one considered correct.
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
         "required",
         "optional",
         "principal_refs",
         "retired_principal_refs",
+        "plugin_principal_ref_band",
+        "db3_provider_principal_ref_band",
     }:
         fail("inventory-shape", "canonical inventory keys differ from v2")
     if type(value["schema_version"]) is not int or value["schema_version"] != 2:

@@ -9,7 +9,7 @@
 #include "memory.h"
 #include "index.h"
 #include "code_span.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */

@@ -3,7 +3,7 @@
 #include "aimee.h"
 #include "agent_config.h"
 #include "commands.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/code_index.h"
 #include "config_database.h"
 #include "modules/db2/c/memory_payload.h"

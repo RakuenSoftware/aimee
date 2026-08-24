@@ -6,7 +6,7 @@
 #include "cmd_agent_delegate_impl.h"
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/delegate_patch_coordinator.h>
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "cJSON.h"
 
 typedef struct

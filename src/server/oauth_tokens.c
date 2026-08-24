@@ -11,7 +11,7 @@
  * and cross-encoder commands) so the build stays dependency-free.
  */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "oauth_flow.h"
 #include "oauth_pkce.h"
 #include "vault_service.h" /* server-sealed vault: encrypted-at-rest token storage */

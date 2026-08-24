@@ -499,6 +499,21 @@ int bus_runtime_policy_load_dir(const char *directory, bus_runtime_policy_t **ou
       if (n <= 0 || (size_t)n >= sizeof(path) ||
           parse_grant_file(path, &policy->owned[policy->count]) != 0)
       {
+         /* A rejected grant stops the daemon, so it must say which one and the
+            likeliest reason. The common cause by far is `executable=` naming a
+            module that is not installed yet -- realpath() fails, the parse
+            fails, and without this the operator gets a process that exits
+            after half a second having logged nothing at all. */
+         if (n > 0 && (size_t)n < sizeof(path))
+            fprintf(stderr,
+                    "event-bus: refusing to start: the module grant %s is not usable. "
+                    "Check its executable= path exists and is absolute.\n",
+                    path);
+         else
+            fprintf(stderr,
+                    "event-bus: refusing to start: a module grant path in %s "
+                    "is too long\n",
+                    directory);
          ok = 0;
          break;
       }
@@ -506,7 +521,13 @@ int bus_runtime_policy_load_dir(const char *directory, bus_runtime_policy_t **ou
       for (size_t i = 0; i < policy->count; i++)
          if (policy->public[i].principal_class == candidate->principal_class &&
              policy->public[i].principal_ref == candidate->principal_ref)
+         {
+            fprintf(stderr,
+                    "event-bus: refusing to start: %s claims principal %u/%u, which "
+                    "another grant in %s already holds\n",
+                    entry->d_name, candidate->principal_class, candidate->principal_ref, directory);
             ok = 0;
+         }
       if (ok)
          policy->public[policy->count++] = *candidate;
    }

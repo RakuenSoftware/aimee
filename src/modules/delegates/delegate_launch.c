@@ -16,7 +16,7 @@
 #include <aimee/delegates/delegate_launch.h>
 #include "aimee.h"
 #include "agent_tasks.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/delegates/module_api.h>

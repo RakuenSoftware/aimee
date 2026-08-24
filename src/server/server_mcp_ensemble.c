@@ -1,7 +1,7 @@
 /* server_mcp_ensemble.c: MCP ensemble (multi-agent session) tool handlers */
 #include "server_mcp_ensemble.h"
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "headers/primary_session_adapter.h"
 #include "server_http.h"
 #include "agent_config.h"

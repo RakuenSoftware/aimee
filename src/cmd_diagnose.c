@@ -3,7 +3,7 @@
  * Subcommands: start, observe, hypothesize, evidence, probe, status, list, conclude, abandon,
  *              investigate. */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "commands.h"
 #include "platform_process.h"
 #include "cJSON.h"

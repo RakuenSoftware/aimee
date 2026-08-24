@@ -13,8 +13,8 @@
 #include <string.h>
 
 #include <aimee/core/event_bus/module_client.h>
-#include "cognify_jobs.h"
-#include "db1_module_api.h"
+#include "db1_client/cognify_jobs.h"
+#include "db1_client/db1_module_api.h"
 
 /* --- the stubbed bus ------------------------------------------------------ */
 

@@ -22,7 +22,7 @@
  *                    Phase-1 kb audit increment (obs_bus outcome reuse). */
 
 #include "mcp_osv_cache.h"
-#include "interaction_events.h"
+#include "db1_client/interaction_events.h"
 
 int db1_mcp_osv_cache_get(const char *ecosystem, const char *name, const char *version,
                           int ttl_hours, db1_mcp_osv_cache_row_t *out)

@@ -3,7 +3,7 @@
  * Session-start / launch / wrapup live in cmd_session_lifecycle.c; scope-aware
  * section building (shared with that file) lives in cmd_hooks_scope.c. */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "headers/cmd_hooks_scope.h"
 #include "memory_redirect.h"
 #include "platform_process.h"
@@ -11,10 +11,10 @@
 #include "agent_coord.h"
 #include "agent_eval.h"
 #include "log.h"
-#include "wfe_binding.h"     /* db1_wfe_binding_get -- S2 native-tool gate */
-#include "wfe_store.h"       /* db1_work_item_get (delivered==accepted) */
-#include "wfe_enforce.h"     /* the enforce dial -> deny (hard) vs warn (soft) */
-#include "wfe_native_gate.h" /* wfe_native_tool_externalizes / wfe_is_shell_tool */
+#include "wfe_binding.h"          /* db1_wfe_binding_get -- S2 native-tool gate */
+#include "db1_client/wfe_store.h" /* db1_work_item_get (delivered==accepted) */
+#include "wfe_enforce.h"          /* the enforce dial -> deny (hard) vs warn (soft) */
+#include "wfe_native_gate.h"      /* wfe_native_tool_externalizes / wfe_is_shell_tool */
 #include <aimee/audit/audit_action.h>
 #include "trace_analysis.h"
 #include <aimee/workspace/workspace.h>

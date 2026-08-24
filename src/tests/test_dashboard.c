@@ -8,8 +8,6 @@
 #include <unistd.h>
 #include <sqlite3.h>
 #include "aimee.h"
-#include "db.h"
-#include "db_schema.h"
 #include "dashboard.h"
 #include "cJSON.h"
 #include "platform_path.h"

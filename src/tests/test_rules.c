@@ -2,8 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
 #include "db_postgres.h"
 #include "modules/db2/c/db2_test_shim.h"

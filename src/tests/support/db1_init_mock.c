@@ -5,7 +5,7 @@
  * no sqlite connection to open. The init/shutdown functions exist so
  * that callers can still invoke db1_init()/db1_shutdown() uniformly. */
 
-#include "db1.h"
+#include "db1_client/db1.h"
 
 int db1_init(const char *path)
 {
