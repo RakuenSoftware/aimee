@@ -13281,6 +13281,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
+        "src/kb/kb_service.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -14230,7 +14231,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 107
+          "line": 114
         }
       ],
       "signature": "int db2_learning_committed_source_counts ( int window_days , const char * sink_or_null , db2_learning_source_count_t * out , int max )",
@@ -14245,7 +14246,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 168
+          "line": 175
         }
       ],
       "signature": "int db2_learning_fate_counts ( int window_days , const char * regret_fates , db2_learning_fate_count_t * out , int max )",
@@ -14260,7 +14261,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 154
+          "line": 161
         }
       ],
       "signature": "int db2_learning_fate_get ( int proposal_id , char * fate_out , size_t fate_out_len )",
@@ -14275,7 +14276,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 150
+          "line": 157
         }
       ],
       "signature": "int db2_learning_fate_record ( int proposal_id , const char * fate , const char * reason )",
@@ -14290,7 +14291,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 133
+          "line": 140
         }
       ],
       "signature": "int db2_learning_negative_signals_recent ( int window_days , db2_learning_negative_signal_t * out , int max )",
@@ -14331,6 +14332,21 @@
     },
     {
       "consumers": [
+        "src/modules/learning/learning_router.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_learning.h",
+          "line": 58
+        }
+      ],
+      "signature": "int db2_learning_proposal_find_committed ( const char * sink , const char * target_key , int64_t target_memory_id , int exclude_id )",
+      "signature_sha256": "d1b694a0ed4126607e3aa4675c3654de02d3184f0ffc1c33a3ea554f7ad54023",
+      "status": "audit-pending",
+      "symbol": "db2_learning_proposal_find_committed"
+    },
+    {
+      "consumers": [
         "src/kb/kb_mining.c",
         "src/modules/learning/learning_router.c",
         "src/tests/test_kb_mining.c"
@@ -14353,7 +14369,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 70
+          "line": 77
         }
       ],
       "signature": "int db2_learning_proposal_get ( int id , learning_proposal_t * out )",
@@ -14369,7 +14385,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 59
+          "line": 66
         }
       ],
       "signature": "int db2_learning_proposal_insert ( int signal_id , const char * sink , const char * target_key , int64_t target_memory_id , const char * action_json , const char * evidence_refs , const char * expires_at )",
@@ -14384,7 +14400,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 77
+          "line": 84
         }
       ],
       "signature": "int db2_learning_proposal_list ( const char * state , const char * sink , int limit , learning_proposal_t * out , int max )",
@@ -14399,7 +14415,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 66
+          "line": 73
         }
       ],
       "signature": "int db2_learning_proposal_mark_committed ( int id )",
@@ -14429,7 +14445,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_learning.h",
-          "line": 85
+          "line": 92
         }
       ],
       "signature": "int db2_learning_proposals_settled_counts ( int window_days , int64_t * committed , int64_t * terminal )",
@@ -26602,12 +26618,12 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c747d2039bdb968ab6e20eb4718b55cff0fb0db98abda631afa97bd3d9cee825",
+  "fingerprint": "787d9104255300895e6a7be9724ba646f602f51a0bc1c87aa19d0846371bfbaa",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 699,
-    "declarations": 1443,
+    "audit_pending": 700,
+    "declarations": 1444,
     "headers": 140,
     "internal_unconsumed": 162,
     "private_test_only": 288,

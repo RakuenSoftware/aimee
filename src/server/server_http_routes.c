@@ -2102,6 +2102,7 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", 0, rh_dispatch_op},
     {"GET", "/v1/learning/attribution", NULL, RM_EXACT, "learning.attribution", 0, rh_dispatch_op},
     {"POST", "/v1/learning/resolve", NULL, RM_EXACT, "learning.resolve", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/fate", NULL, RM_EXACT, "learning.fate", 0, rh_dispatch_op},
     /* Roundtable authoring pipelines. Every one of these is a DB-backed state
      * machine (rtp_* accessors in server_pipeline.c) that returns the next action
      * for the caller to take -- none of them runs a panel or any other LLM work

@@ -42,7 +42,6 @@
 #include "kb_client.h"
 #include <aimee/learning/attribution.h>
 #include <aimee/learning/policy_arms.h>
-#include "curiosity_resolve.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -297,22 +296,73 @@ int handle_learning_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    const char *request_id = server_eval_json_str(req, "request_id");
-   curiosity_resolve_stats_t stats;
-   int resolved = curiosity_resolve_pass(server_eval_json_int(req, "budget", 0), &stats);
-   if (resolved < 0)
-      return server_send_error(conn, "learning.resolve: could not read the backlog", request_id);
+
+   /* Proxied to the knowledge service. The backlog is DB2 and the evidence
+    * probe needs the corpus; running the pass here would reach neither, and
+    * with a probe installed it would have failed at the first query. */
+   char *json = kb_client_learning_resolve_json(server_eval_json_int(req, "budget", 0));
+   cJSON *doc = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!doc || !cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(doc, "resolved")))
+   {
+      const cJSON *msg = doc ? cJSON_GetObjectItemCaseSensitive(doc, "message") : NULL;
+      char err[192];
+      snprintf(err, sizeof(err), "learning.resolve: the knowledge service did not answer (%s)",
+               (msg && cJSON_IsString(msg)) ? msg->valuestring : "not reachable");
+      cJSON_Delete(doc);
+      return server_send_error(conn, err, request_id);
+   }
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "resolved", stats.resolved);
-   cJSON_AddNumberToObject(resp, "considered", stats.considered);
-   cJSON_AddNumberToObject(resp, "still_open", stats.still_open);
-   cJSON_AddNumberToObject(resp, "unknown", stats.unknown);
-   cJSON_AddNumberToObject(resp, "skipped", stats.skipped);
-   cJSON_AddNumberToObject(resp, "budget", stats.budget);
-   /* Say so loudly rather than reporting a successful pass that closed
-    * nothing because it had no way to decide. */
-   cJSON_AddBoolToObject(resp, "no_probe", stats.no_probe);
+   static const char *const fields[] = {"resolved", "considered", "still_open", "unknown",
+                                        "skipped",  "budget",     NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const cJSON *v = cJSON_GetObjectItemCaseSensitive(doc, fields[i]);
+      cJSON_AddNumberToObject(resp, fields[i], cJSON_IsNumber(v) ? v->valuedouble : 0);
+   }
+   cJSON_AddBoolToObject(resp, "no_probe",
+                         cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(doc, "no_probe")));
+   cJSON_Delete(doc);
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_learning_fate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   int id = server_eval_json_int(req, "id", 0);
+   const char *fate = server_eval_json_str(req, "fate");
+   if (id <= 0 || !fate[0])
+      return server_send_error(conn, "learning.fate requires id and fate", request_id);
+
+   /* Proxied to the knowledge service: the ledger is DB2, which this binary
+    * builds without. Recording it locally would write nowhere. */
+   char *json = kb_client_learning_fate_json(id, fate, server_eval_json_str(req, "reason"));
+   cJSON *doc = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!doc || !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(doc, "fate")))
+   {
+      const cJSON *msg = doc ? cJSON_GetObjectItemCaseSensitive(doc, "message") : NULL;
+      char err[192];
+      snprintf(err, sizeof(err), "learning.fate: the knowledge service did not record it (%s)",
+               (msg && cJSON_IsString(msg)) ? msg->valuestring : "not reachable");
+      cJSON_Delete(doc);
+      return server_send_error(conn, err, request_id);
+   }
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "id", id);
+   cJSON_AddStringToObject(resp, "fate", fate);
+   cJSON_AddBoolToObject(resp, "counts_as_regret",
+                         cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(doc, "counts_as_regret")));
+   cJSON_Delete(doc);
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);

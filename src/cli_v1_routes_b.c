@@ -1402,6 +1402,7 @@ static const struct
     {"eval.candidates-update", marshal_eval_candidates_update},
     {"learning.approaches", marshal_learning_approaches},
     {"learning.attribution", marshal_learning_attribution},
+    {"learning.fate", marshal_learning_fate},
     {"learning.resolve", marshal_learning_resolve},
     {"eval.results", marshal_eval_results},
     {"eval.run", marshal_eval_run},

@@ -92,3 +92,26 @@ char *kb_client_learning_endogeneity_json(int window_days)
    (void)window_days;
    return NULL;
 }
+
+/* S4/S5/S6 are served by the knowledge service. A test that links no KB gets
+ * NULL, which every caller reads as "not reachable" — the same path a real
+ * deployment takes when the KB is down. */
+char *kb_client_learning_resolve_json(int budget)
+{
+   (void)budget;
+   return NULL;
+}
+
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason)
+{
+   (void)id;
+   (void)fate;
+   (void)reason;
+   return NULL;
+}
+
+char *kb_client_learning_policy_select_json(const char *decision_point)
+{
+   (void)decision_point;
+   return NULL;
+}

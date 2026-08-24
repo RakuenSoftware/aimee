@@ -3240,6 +3240,11 @@ paths:
     get:
       summary: Measured per-capability contribution from the ablation grid
       responses: { "200": { description: Attribution per ablation arm, content: { application/json: { schema: { type: object } } } } }
+  /learning/fate:
+    post:
+      summary: Record what became of a committed learning proposal
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Recorded fate, content: { application/json: { schema: { type: object } } } } }
   /learning/resolve:
     post:
       summary: Resolve curiosity-backlog gaps that the corpus now answers

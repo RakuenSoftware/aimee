@@ -480,6 +480,26 @@ char *kb_client_learning_endogeneity_json(int window_days)
    return NULL;
 }
 
+char *kb_client_learning_resolve_json(int budget)
+{
+   (void)budget;
+   return NULL;
+}
+
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason)
+{
+   (void)id;
+   (void)fate;
+   (void)reason;
+   return NULL;
+}
+
+char *kb_client_learning_policy_select_json(const char *decision_point)
+{
+   (void)decision_point;
+   return NULL;
+}
+
 int server_load_token(server_ctx_t *ctx)
 {
    (void)ctx;

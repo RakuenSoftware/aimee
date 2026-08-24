@@ -171,6 +171,48 @@ static void test_fate_is_one_verdict_per_proposal(void)
    assert(db2_learning_fate_get(999999, fate, sizeof(fate)) == 0);
 }
 
+/* The producers. Before these existed the regret controls consumed a fate that
+ * nothing ever wrote — the loop was complete except that no verdict was ever
+ * entered, so regret was permanently zero and the bar never moved. */
+static void test_a_second_commit_supersedes_the_first(void)
+{
+   /* Two commits to the SAME target: the second replaces the first, and the
+    * first's fate says so without anyone being asked. */
+   int first = commit_with_fate("mark_rule", "same-target", NULL);
+   assert(first > 0);
+   char fate[DB2_LEARNING_FATE_LEN] = "";
+   assert(db2_learning_fate_get(first, fate, sizeof(fate)) == 0); /* no verdict yet */
+
+   int second = commit_with_fate("mark_rule", "same-target", NULL);
+   assert(second > 0);
+   assert(second != first);
+   assert(db2_learning_fate_get(first, fate, sizeof(fate)) == 1);
+   assert(strcmp(fate, LEARNING_FATE_SUPERSEDED) == 0);
+   /* The new one is not judged by its own arrival. */
+   assert(db2_learning_fate_get(second, fate, sizeof(fate)) == 0);
+
+   /* A commit to a DIFFERENT target supersedes nothing. */
+   int other = commit_with_fate("mark_rule", "other-target", NULL);
+   assert(other > 0);
+   assert(db2_learning_fate_get(second, fate, sizeof(fate)) == 0);
+}
+
+static void test_rejecting_a_commit_is_regret(void)
+{
+   int id = commit_with_fate("mark_rule", "regretted-target", NULL);
+   assert(id > 0);
+   char fate[DB2_LEARNING_FATE_LEN] = "";
+   assert(db2_learning_fate_get(id, fate, sizeof(fate)) == 0);
+
+   /* A human looked at what the loop did and undid it. That is the clearest
+    * regret signal there is, and it must be recorded without being asked. */
+   learning_proposal_t p;
+   assert(learning_reject_proposal(id, &p) == 0);
+   assert(db2_learning_fate_get(id, fate, sizeof(fate)) == 1);
+   assert(strcmp(fate, LEARNING_FATE_REVERTED) == 0);
+   assert(learning_fate_is_regret(fate) == 1);
+}
+
 int main(void)
 {
    printf("learning_regret: ");
@@ -183,6 +225,8 @@ int main(void)
    test_unmeasured_detector_keeps_the_default_bar();
    test_regret_raises_the_bar();
    test_fate_is_one_verdict_per_proposal();
+   test_a_second_commit_supersedes_the_first();
+   test_rejecting_a_commit_is_regret();
 
    assert(learning_metrics_regret(7, NULL, 4) == -1);
    assert(learning_metrics_regret(7, (learning_detector_regret_t *)1, 0) == -1);

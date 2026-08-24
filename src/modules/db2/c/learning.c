@@ -179,6 +179,35 @@ int db2_learning_proposal_find_pending(const char *sink, const char *target_key,
    return id;
 }
 
+int db2_learning_proposal_find_committed(const char *sink, const char *target_key,
+                                         int64_t target_memory_id, int exclude_id)
+{
+   if (!sink || !*sink)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   static const char *sql =
+       "SELECT id FROM learning_proposals"
+       " WHERE sink = ?1 AND state = 'committed' AND target_key = ?2 AND target_memory_id = ?3"
+       " AND id <> ?4"
+       " ORDER BY id DESC LIMIT 1";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", sink);
+   aimee_pg_bind_text(st, "?2", target_key ? target_key : "");
+   aimee_pg_bind_int64(st, "?3", target_memory_id);
+   aimee_pg_bind_int(st, "?4", exclude_id);
+   int id = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      id = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return id;
+}
+
 int db2_learning_proposal_insert(int signal_id, const char *sink, const char *target_key,
                                  int64_t target_memory_id, const char *action_json,
                                  const char *evidence_refs, const char *expires_at)

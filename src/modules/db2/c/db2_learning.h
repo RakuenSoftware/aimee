@@ -51,6 +51,13 @@ extern "C"
    int db2_learning_proposal_find_pending(const char *sink, const char *target_key,
                                           int64_t target_memory_id);
 
+   /* The most recent COMMITTED proposal for the same target, excluding
+    * `exclude_id`. Used to detect supersession: when a new proposal commits
+    * for a target that already had one, the older commit is what the new one
+    * replaced. Returns the id (>0) on hit, 0 on miss / DB unavailable. */
+   int db2_learning_proposal_find_committed(const char *sink, const char *target_key,
+                                            int64_t target_memory_id, int exclude_id);
+
    /* INSERT a new learning_proposals row with state='pending',
     * corroboration_count=1. expires_at must be a pre-formatted UTC
     * timestamp (caller picks ttl). evidence_refs may be NULL

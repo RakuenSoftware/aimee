@@ -30,6 +30,15 @@ static int approach_row_count(void)
    return n;
 }
 
+/* Rendering asks the knowledge service which arm to apply. This test links
+ * none, so NULL is returned and the LOCAL default stands — which is exactly the
+ * fallback the renderer is required to take. */
+char *kb_client_learning_policy_select_json(const char *decision_point)
+{
+   (void)decision_point;
+   return NULL;
+}
+
 static void test_tokenisation(void)
 {
    char t[APPROACH_MEM_TOKENS_LEN];

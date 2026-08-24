@@ -593,6 +593,9 @@ Subcommands:
                    (advisory recall for planning; never blocks)
   attribution [suite]
                    Measured per-capability contribution from the ablation grid
+  fate <id> <standing|superseded|contradicted|reverted> [--reason R]
+                   Record what became of a committed proposal; regret raises
+                   the bar for the detector that raised it
   resolve [--budget N]
                    Close curiosity gaps the corpus now answers (bounded, on demand)
 ```

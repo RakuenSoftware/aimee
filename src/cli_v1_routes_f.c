@@ -199,6 +199,29 @@ void pt_print_learning_resolve(const char *method, cJSON *resp)
           json_int(resp, "skipped", 0));
 }
 
+cJSON *marshal_learning_fate(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("learning.fate");
+   if (opts.pos_count > 0)
+      cJSON_AddNumberToObject(req, "id", atoi(opts.positional[0]));
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "fate", opts.positional[1]);
+   const char *reason = cli_args_get(&opts, "reason");
+   if (reason)
+      cJSON_AddStringToObject(req, "reason", reason);
+   return req;
+}
+
+void pt_print_learning_fate(const char *method, cJSON *resp)
+{
+   (void)method;
+   int regret = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "counts_as_regret"));
+   printf("proposal %d recorded as %s (%s)\n", json_int(resp, "id", 0), json_str(resp, "fate"),
+          regret ? "counts against the detector that raised it" : "no regret");
+}
+
 static void print_eval_run(cJSON *resp)
 {
    cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "results");

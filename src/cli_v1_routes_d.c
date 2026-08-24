@@ -175,6 +175,7 @@ static const struct
     {"learning.approaches", pt_print_learning_approaches},
     {"learning.attribution", pt_print_learning_attribution},
     {"learning.resolve", pt_print_learning_resolve},
+    {"learning.fate", pt_print_learning_fate},
     {"identity.show", pt_print_identity_show},
     {"api.status", pt_print_api_status},
     {"api.enable", pt_print_api_status},

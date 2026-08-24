@@ -8,6 +8,11 @@
 
 #include <aimee/learning/policy_arms.h>
 
+#include "cJSON.h"
+#include "kb_client.h"
+
+#include <stdlib.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -120,9 +125,25 @@ int approach_store_render(const char *goal, char *out, size_t out_len, char *arm
       return 0;
    out[0] = '\0';
 
-   /* Whether this block is worth its tokens is a question, not a constant. */
-   char arm[LEARNING_POLICY_ARM_LEN] = LEARNING_POLICY_ADVISORY_FULL;
+   /* Whether this block is worth its tokens is a question, not a constant —
+    * and the answer comes from the service that has the bandit. This binary
+    * renders the fragment; it cannot sample it. An unreachable service or an
+    * arm this build does not declare falls back to the local default, so the
+    * output is never something no registry knows about. */
+   char arm[LEARNING_POLICY_ARM_LEN] = "";
    (void)learning_policy_select(LEARNING_POLICY_PLAN_ADVISORY, arm, sizeof(arm));
+
+   char *sel = kb_client_learning_policy_select_json(LEARNING_POLICY_PLAN_ADVISORY);
+   cJSON *doc = sel ? cJSON_Parse(sel) : NULL;
+   free(sel);
+   if (doc)
+   {
+      const cJSON *chosen = cJSON_GetObjectItemCaseSensitive(doc, "arm");
+      if (cJSON_IsString(chosen) &&
+          learning_policy_arm_is_valid(LEARNING_POLICY_PLAN_ADVISORY, chosen->valuestring))
+         snprintf(arm, sizeof(arm), "%s", chosen->valuestring);
+      cJSON_Delete(doc);
+   }
    if (arm_out && arm_out_len)
       snprintf(arm_out, arm_out_len, "%s", arm);
 

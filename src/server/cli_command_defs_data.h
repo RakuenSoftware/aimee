@@ -206,6 +206,9 @@
      "                   (advisory recall for planning; never blocks)\n"
      "  attribution [suite]\n"
      "                   Measured per-capability contribution from the ablation grid\n"
+     "  fate <id> <standing|superseded|contradicted|reverted> [--reason R]\n"
+     "                   Record what became of a committed proposal; regret raises\n"
+     "                   the bar for the detector that raised it\n"
      "  resolve [--budget N]\n"
      "                   Close curiosity gaps the corpus now answers (bounded, on demand)\n"},
     {"aux", "Auxiliary model routing", AIMEE_CMD_TIER_ADVANCED, 0,
