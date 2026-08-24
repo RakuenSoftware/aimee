@@ -442,8 +442,6 @@
       "src/headers/sketch.h",
       "src/headers/util.h",
       "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
-      "src/modules/config/config.h",
-      "src/modules/config/config_accessors.h",
       "src/modules/css/css_analyze.h",
       "src/modules/db1/checkpoints.h",
       "src/modules/db1/decisions.h",

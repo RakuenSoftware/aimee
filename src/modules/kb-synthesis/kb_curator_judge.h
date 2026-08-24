@@ -13,7 +13,7 @@
 #ifndef KB_CURATOR_JUDGE_H
 #define KB_CURATOR_JUDGE_H
 
-#include "config.h" /* config_t — for Tier-B provider resolution via kb_curator_llm */
+#include "config.h" /* legacy_config_record — for Tier-B provider resolution via kb_curator_llm */
 
 #include <stddef.h>
 
@@ -33,9 +33,8 @@
  * output) and leaves *out_same untouched — the caller MUST treat a judge error
  * as "not the same entity" (i.e. create), never as a merge, so a flaky judge can
  * only over-create, never silently collapse distinct entities. */
-int kb_curator_judge_same_entity(const char *judge_cmd,
-                                 const char *mention_name, const char *mention_context,
-                                 const char *candidate_name, double score, int *out_same,
-                                 char *errbuf, size_t errlen);
+int kb_curator_judge_same_entity(const char *judge_cmd, const char *mention_name,
+                                 const char *mention_context, const char *candidate_name,
+                                 double score, int *out_same, char *errbuf, size_t errlen);
 
 #endif /* KB_CURATOR_JUDGE_H */

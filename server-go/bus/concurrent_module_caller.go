@@ -29,6 +29,7 @@ type ConcurrentModuleCaller struct {
 	// wait for it to be gone before unmapping what it reads.
 	stopped      chan struct{}
 	closeOnce    sync.Once
+	calls        sync.WaitGroup
 	pollInterval time.Duration
 }
 
@@ -57,23 +58,6 @@ func newConcurrentModuleCaller(ctx context.Context, client callerBus) *Concurren
 		stopped: make(chan struct{}), pollInterval: 200 * time.Microsecond}
 	go c.poll(ctx)
 	return c
-}
-
-// CloseAndWait stops the poll loop and waits for it to have returned.
-//
-// MUST be called before the underlying Client is detached. Poll reads the bus's
-// shared-memory region from its own goroutine and Detach unmaps it, so a detach
-// while that goroutine is live is a read through an unmapped page: a segfault,
-// after the work has finished and every check has passed.
-//
-// Nothing in the type system enforces the order, and NO IN-PROCESS TEST CAN
-// FAIL ON IT -- a fake bus has no region to unmap. It was found on real
-// hardware by a peer module that had been missing the call for as long as it
-// had existed, across twenty-odd green runs, because the fault arrives after
-// the last assertion.
-func (c *ConcurrentModuleCaller) CloseAndWait() {
-	c.finish(ErrModuleCallCancelled)
-	<-c.stopped
 }
 
 func (c *ConcurrentModuleCaller) finish(err error) {
@@ -197,7 +181,9 @@ func (c *ConcurrentModuleCaller) Call(ctx context.Context, eventKind, stageID ui
 		return nil, ErrModuleRuntime
 	}
 	c.pending[id] = concurrentPending{eventKind: eventKind, reply: ch}
+	c.calls.Add(1)
 	c.mu.Unlock()
+	defer c.calls.Done()
 
 	var deadlineNS uint64
 	if deadline > 0 {
@@ -229,6 +215,35 @@ func (c *ConcurrentModuleCaller) Call(ctx context.Context, eventKind, stageID ui
 		c.abandon(eventKind, id)
 		return nil, ErrModuleRuntime
 	}
+}
+
+// CloseAndWait refuses new calls, releases pending calls, and blocks until both
+// the admitted calls and the poll goroutine have finished. It must run before
+// the underlying Client is detached and its shared-memory region is unmapped.
+//
+// TWO WAITS, because two things are still using that region and they finish
+// independently. This branch and upstream each added a CloseAndWait waiting for
+// one of them, and the merge duplicated the method -- which the Go compiler
+// caught, and which is worth writing down because either version alone looks
+// complete:
+//
+//	c.calls.Wait()  every call admitted before shutdown has returned, so no
+//	                caller is still reading a reply out of the region
+//	<-c.stopped     the poll goroutine has returned, so nothing is reading the
+//	                ring itself
+//
+// Dropping the second is a read through an unmapped page on the ORDINARY exit
+// path: poll is parked reading shared memory when Detach pulls it out from
+// under it. NO IN-PROCESS TEST CAN FAIL ON IT -- a fake bus has no region to
+// unmap -- and it was found on real hardware, as a fault arriving after the
+// last assertion.
+func (c *ConcurrentModuleCaller) CloseAndWait() {
+	if c == nil {
+		return
+	}
+	c.finish(ErrModuleRuntime)
+	c.calls.Wait()
+	<-c.stopped
 }
 
 func (c *ConcurrentModuleCaller) abandon(kind uint32, id uint64) {

@@ -1,12 +1,17 @@
-/* db2/typed_facts.c: typed-fact store + write gate. See typed_facts.h. */
+/* db2/typed_facts.c: compatibility write gate over canonical assertions. */
 #include "typed_facts.h"
 
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "fact_mutation.h"
+#include "modules/memory/memory_ontology.h"
+#include "memory_scope_query.h"
 
 #include <stddef.h>
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define TF_ERRBUF 256
@@ -82,6 +87,35 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
       confidence = 0;
    if (confidence > 100)
       confidence = 100;
+
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &actor) != 0)
+      return TYPED_FACT_ERROR;
+   fact_evidence_input_t evidence = {.source_kind = "typed_fact_source",
+                                     .source_id = source && source[0] ? source : NULL,
+                                     .observed_at = now_iso,
+                                     .stance = "supports"};
+   fact_assertion_input_t input = {
+       .source = subject,
+       .relation = relation,
+       .target = object,
+       .relation_id = 0,
+       .subject_kind = NODE_OTHER,
+       .object_kind =
+           object_kind && (strcmp(object_kind, "scalar") == 0 || strcmp(object_kind, "value") == 0)
+               ? NODE_SCALAR
+               : NODE_OTHER,
+       .confidence_class = "B",
+       .confidence = (double)confidence / 100.0,
+       .assertion_kind = FACT_KIND_WORLD_FACT,
+       .valid_from = now_iso,
+       .evidence = &evidence,
+       .functional = 1};
+   fact_mutation_result_t result;
+   if (db2_fact_mutation_assert(&actor, &input, &result) != 0)
+      return TYPED_FACT_ERROR;
+   return result.changed || result.evidence_added ? TYPED_FACT_OK : TYPED_FACT_UNCHANGED;
+#if 0 /* legacy parallel fact table retired; semantic assertions are canonical */
 
    void *conn = db2_conn();
    if (!conn)
@@ -172,6 +206,7 @@ int db2_typed_fact_assert(const char *subject, const char *subject_kind, const c
    else
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
    return rc;
+#endif
 }
 
 static void tf_row(aimee_pg_stmt_t *st, typed_fact_t *f)
@@ -196,7 +231,10 @@ static void tf_row(aimee_pg_stmt_t *st, typed_fact_t *f)
 }
 
 #define TF_COLS                                                                                    \
-   "id, subject, subject_kind, relation, object, object_kind, confidence, source, asserted_at"
+   "e.id, e.source, CAST(e.subject_kind AS TEXT), e.relation, e.target,"                           \
+   " CAST(e.object_kind AS TEXT), CAST(e.confidence * 100 AS INTEGER),"                            \
+   " COALESCE((SELECT fe.source_id FROM fact_evidence fe WHERE fe.assertion_id=e.id"               \
+   " AND fe.invalidated_at='' ORDER BY fe.id DESC LIMIT 1),''), e.asserted_at"
 
 int db2_typed_fact_recall(const char *subject, const char *relation_filter, typed_fact_t *out,
                           int max)
@@ -207,11 +245,16 @@ int db2_typed_fact_recall(const char *subject, const char *relation_filter, type
    if (!conn)
       return -1;
    int filt = (relation_filter && relation_filter[0]) ? 1 : 0;
-   static const char *q_all = "SELECT " TF_COLS " FROM typed_facts"
-                              " WHERE subject = ?1 AND active = 1 ORDER BY relation, id LIMIT ?2";
-   static const char *q_rel = "SELECT " TF_COLS " FROM typed_facts"
-                              " WHERE subject = ?1 AND relation = ?3 AND active = 1"
-                              " ORDER BY id LIMIT ?2";
+   static const char *q_all = "SELECT " TF_COLS " FROM entity_edges e"
+                              " WHERE e.source = ?1 AND e.edge_class='semantic'"
+                              " AND e.lifecycle_state IN ('persistent','promoted')"
+                              " AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0"
+                              " ORDER BY e.relation, e.id LIMIT ?2";
+   static const char *q_rel = "SELECT " TF_COLS " FROM entity_edges e"
+                              " WHERE e.source = ?1 AND e.relation = ?3 AND e.edge_class='semantic'"
+                              " AND e.lifecycle_state IN ('persistent','promoted')"
+                              " AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0"
+                              " ORDER BY e.id LIMIT ?2";
    char err[TF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? q_rel : q_all, err, sizeof(err));
    if (!st)
@@ -234,8 +277,11 @@ int db2_typed_fact_by_relation(const char *relation, typed_fact_t *out, int max)
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *q = "SELECT " TF_COLS " FROM typed_facts"
-                          " WHERE relation = ?1 AND active = 1 ORDER BY subject, id LIMIT ?2";
+   static const char *q = "SELECT " TF_COLS " FROM entity_edges e"
+                          " WHERE e.relation = ?1 AND e.edge_class='semantic'"
+                          " AND e.lifecycle_state IN ('persistent','promoted')"
+                          " AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0"
+                          " ORDER BY e.source, e.id LIMIT ?2";
    char err[TF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, q, err, sizeof(err));
    if (!st)
@@ -245,6 +291,343 @@ int db2_typed_fact_by_relation(const char *relation, typed_fact_t *out, int max)
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       tf_row(st, &out[n++]);
+   aimee_pg_finalize(st);
+   return n;
+}
+
+static int tf_timestamp_valid(const char *value)
+{
+   if (!value || !value[0])
+      return 1;
+   size_t n = strlen(value);
+   if (n != 19 && n != 20)
+      return 0;
+   if (n == 20 && value[19] != 'Z')
+      return 0;
+   for (size_t i = 0; i < 19; i++)
+   {
+      if (i == 4 || i == 7)
+      {
+         if (value[i] != '-')
+            return 0;
+      }
+      else if (i == 10)
+      {
+         if (value[i] != 'T' && value[i] != ' ')
+            return 0;
+      }
+      else if (i == 13 || i == 16)
+      {
+         if (value[i] != ':')
+            return 0;
+      }
+      else if (!isdigit((unsigned char)value[i]))
+         return 0;
+   }
+   int year = atoi(value), month = atoi(value + 5), day = atoi(value + 8);
+   int hour = atoi(value + 11), minute = atoi(value + 14), second = atoi(value + 17);
+   if (year < 1 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59)
+      return 0;
+   static const int days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+   int max_day = days_in_month[month];
+   if (month == 2 && (year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)))
+      max_day = 29;
+   return day >= 1 && day <= max_day;
+}
+
+static void tf_copy(char *dst, size_t cap, const char *src)
+{
+   snprintf(dst, cap, "%s", src ? src : "");
+}
+
+static void tf_load_semantic_row(aimee_pg_stmt_t *st, semantic_assertion_hit_t *hit)
+{
+   memset(hit, 0, sizeof(*hit));
+   hit->assertion_id = aimee_pg_column_int64(st, 0);
+   hit->version = aimee_pg_column_int(st, 1);
+   tf_copy(hit->subject, sizeof(hit->subject), aimee_pg_column_text(st, 2));
+   tf_copy(hit->relation, sizeof(hit->relation), aimee_pg_column_text(st, 3));
+   tf_copy(hit->object, sizeof(hit->object), aimee_pg_column_text(st, 4));
+   tf_copy(hit->assertion_kind, sizeof(hit->assertion_kind), aimee_pg_column_text(st, 5));
+   tf_copy(hit->lifecycle_state, sizeof(hit->lifecycle_state), aimee_pg_column_text(st, 6));
+   hit->authority_rank = aimee_pg_column_int(st, 7);
+   tf_copy(hit->confidence_class, sizeof(hit->confidence_class), aimee_pg_column_text(st, 8));
+   hit->confidence = aimee_pg_column_double(st, 9);
+   tf_copy(hit->valid_from, sizeof(hit->valid_from), aimee_pg_column_text(st, 10));
+   tf_copy(hit->valid_until, sizeof(hit->valid_until), aimee_pg_column_text(st, 11));
+   tf_copy(hit->asserted_at, sizeof(hit->asserted_at), aimee_pg_column_text(st, 12));
+   tf_copy(hit->superseded_at, sizeof(hit->superseded_at), aimee_pg_column_text(st, 13));
+   hit->historical = aimee_pg_column_int(st, 14);
+   hit->support_count = aimee_pg_column_int(st, 15);
+   hit->contradiction_count = aimee_pg_column_int(st, 16);
+   hit->raw_score = aimee_pg_column_double(st, 17);
+   hit->fused_score = hit->raw_score;
+   tf_copy(hit->inclusion_reason, sizeof(hit->inclusion_reason),
+           "lexical semantic match after lifecycle, authority, and temporal filters");
+}
+
+static void tf_add_retrieval_trace(semantic_assertion_hit_t *hit, const char *channel,
+                                   double raw_score, double fused_score, int rank)
+{
+   if (!hit || hit->retrieval_count >= SEMANTIC_ASSERTION_TRACE_MAX)
+      return;
+   semantic_assertion_retrieval_trace_t *trace = &hit->retrieval[hit->retrieval_count++];
+   tf_copy(trace->channel, sizeof(trace->channel), channel);
+   trace->raw_score = raw_score;
+   trace->fused_score = fused_score;
+   trace->rank = rank;
+}
+
+static void tf_load_evidence(void *conn, semantic_assertion_hit_t *hit)
+{
+   static const char *sql =
+       "SELECT source_kind, source_id, source_span, observed_at, stance"
+       " FROM fact_evidence WHERE assertion_id=?1 AND invalidated_at=''"
+       " ORDER BY CASE WHEN stance='supports' THEN 0 ELSE 1 END, id DESC LIMIT ?2";
+   char err[TF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_int64(st, "?1", hit->assertion_id);
+   aimee_pg_bind_int(st, "?2", SEMANTIC_ASSERTION_EVIDENCE_MAX);
+   while (hit->evidence_count < SEMANTIC_ASSERTION_EVIDENCE_MAX &&
+          aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      semantic_assertion_evidence_t *ev = &hit->evidence[hit->evidence_count++];
+      tf_copy(ev->source_kind, sizeof(ev->source_kind), aimee_pg_column_text(st, 0));
+      tf_copy(ev->source_id, sizeof(ev->source_id), aimee_pg_column_text(st, 1));
+      tf_copy(ev->source_span, sizeof(ev->source_span), aimee_pg_column_text(st, 2));
+      tf_copy(ev->observed_at, sizeof(ev->observed_at), aimee_pg_column_text(st, 3));
+      tf_copy(ev->stance, sizeof(ev->stance), aimee_pg_column_text(st, 4));
+   }
+   aimee_pg_finalize(st);
+}
+
+int db2_semantic_assertion_search(const char *query, const char *valid_at, const char *believed_at,
+                                  int include_historical, int limit, semantic_assertion_hit_t *out,
+                                  int max)
+{
+   if (!query || !query[0] || !out || max <= 0)
+      return SEMANTIC_ASSERTION_SEARCH_ERROR;
+   if (!tf_timestamp_valid(valid_at) || !tf_timestamp_valid(believed_at))
+      return SEMANTIC_ASSERTION_SEARCH_INVALID_TIME;
+   void *conn = db2_conn();
+   if (!conn)
+      return SEMANTIC_ASSERTION_SEARCH_ERROR;
+   if (limit <= 0 || limit > max)
+      limit = max;
+
+   char pattern[TYPED_FACT_STR_MAX + 3], exact[TYPED_FACT_STR_MAX + 1];
+   size_t qn = strlen(query);
+   if (qn > TYPED_FACT_STR_MAX)
+      qn = TYPED_FACT_STR_MAX;
+   pattern[0] = '%';
+   for (size_t i = 0; i < qn; i++)
+   {
+      exact[i] = (char)tolower((unsigned char)query[i]);
+      pattern[i + 1] = exact[i];
+   }
+   exact[qn] = '\0';
+   pattern[qn + 1] = '%';
+   pattern[qn + 2] = '\0';
+
+   /* Empty time parameters are bound twice so query semantics remain explicit:
+    * neither axis can accidentally degrade into an unfiltered historical scan. */
+   static const char *sql =
+       "SELECT e.id,e.version,e.source,e.relation,e.target,e.assertion_kind,"
+       " e.lifecycle_state,e.authority_rank,e.confidence_class,e.confidence,"
+       " e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,"
+       " CASE WHEN NOT ((e.asserted_at='' OR"
+       "      REPLACE(SUBSTR(e.asserted_at,1,19),'T',' ')<=pg_now_text())"
+       "   AND (e.superseded_at='' OR pg_now_text()<"
+       "      REPLACE(SUBSTR(e.superseded_at,1,19),'T',' '))"
+       "   AND (e.invalidated_at='' OR pg_now_text()<"
+       "      REPLACE(SUBSTR(e.invalidated_at,1,19),'T',' '))"
+       "   AND (e.assertion_kind<>'world_fact' OR ((e.valid_from='' OR"
+       "      REPLACE(SUBSTR(e.valid_from,1,19),'T',' ')<=pg_now_text())"
+       "      AND (e.valid_until='' OR pg_now_text()<"
+       "      REPLACE(SUBSTR(e.valid_until,1,19),'T',' '))))) THEN 1 ELSE 0 END,"
+       " (SELECT COUNT(*) FROM fact_evidence fe WHERE fe.assertion_id=e.id"
+       "    AND fe.invalidated_at='' AND fe.stance='supports'),"
+       " (SELECT COUNT(*) FROM fact_evidence fe WHERE fe.assertion_id=e.id"
+       "    AND fe.invalidated_at='' AND fe.stance='contradicts'),"
+       " (CASE WHEN LOWER(e.source)=?1 OR LOWER(e.target)=?1 THEN 4.0"
+       "       WHEN LOWER(e.relation)=?1 THEN 3.5 ELSE 1.0 END"
+       "  + e.confidence + CAST(e.authority_rank AS DOUBLE PRECISION)/100.0) AS score"
+       " FROM entity_edges e"
+       " WHERE e.edge_class='semantic' AND e.suppressed=0"
+       " AND e.lifecycle_state IN ('persistent','promoted')"
+       " AND (LOWER(e.source) LIKE ?2 OR LOWER(e.relation) LIKE ?2"
+       "      OR LOWER(e.target) LIKE ?2"
+       "      OR LOWER(e.source || ' ' || e.relation || ' ' || e.target) LIKE ?2)"
+       " AND (?4<>'' OR ?3=1 OR ((e.asserted_at='' OR"
+       "      REPLACE(SUBSTR(e.asserted_at,1,19),'T',' ')<=pg_now_text())"
+       "      AND (e.superseded_at='' OR pg_now_text()<"
+       "           REPLACE(SUBSTR(e.superseded_at,1,19),'T',' '))"
+       "      AND (e.invalidated_at='' OR pg_now_text()<"
+       "           REPLACE(SUBSTR(e.invalidated_at,1,19),'T',' '))))"
+       " AND (?4='' OR ((e.asserted_at='' OR"
+       "      REPLACE(SUBSTR(e.asserted_at,1,19),'T',' ')<=REPLACE(SUBSTR(?4,1,19),'T',' '))"
+       "      AND (e.superseded_at='' OR REPLACE(SUBSTR(?4,1,19),'T',' ')<"
+       "           REPLACE(SUBSTR(e.superseded_at,1,19),'T',' '))"
+       "      AND (e.invalidated_at='' OR REPLACE(SUBSTR(?4,1,19),'T',' ')<"
+       "           REPLACE(SUBSTR(e.invalidated_at,1,19),'T',' '))))"
+       " AND (?5<>'' OR ?3=1 OR e.assertion_kind<>'world_fact' OR"
+       "      ((e.valid_from='' OR REPLACE(SUBSTR(e.valid_from,1,19),'T',' ')<=pg_now_text())"
+       "       AND (e.valid_until='' OR pg_now_text()<"
+       "            REPLACE(SUBSTR(e.valid_until,1,19),'T',' '))))"
+       " AND (?5='' OR ((e.valid_from='' OR"
+       "      REPLACE(SUBSTR(e.valid_from,1,19),'T',' ')<=REPLACE(SUBSTR(?5,1,19),'T',' '))"
+       "      AND (e.valid_until='' OR REPLACE(SUBSTR(?5,1,19),'T',' ')<"
+       "           REPLACE(SUBSTR(e.valid_until,1,19),'T',' '))))"
+       /* Deny-dominant derivation: if any live memory evidence is outside the
+        * request-local visibility partition, the synthesized assertion is not
+        * returned. Evidence from non-memory global/system sources is unaffected. */
+       " AND (?101=0 OR ?102=1 OR NOT EXISTS ("
+       "   SELECT 1 FROM fact_evidence se JOIN memories sm"
+       "     ON se.source_kind='memory'"
+       "    AND se.source_id=('memory:' || CAST(sm.id AS TEXT))"
+       "   WHERE se.assertion_id=e.id AND se.invalidated_at='' AND (" DB2_MEMORY_SCOPE_RANK_SQL(
+           "sm.id") ")=0))"
+                    " ORDER BY score DESC,e.authority_rank DESC,e.id DESC LIMIT ?6";
+   char err[TF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return SEMANTIC_ASSERTION_SEARCH_ERROR;
+   aimee_pg_bind_text(st, "?1", exact);
+   aimee_pg_bind_text(st, "?2", pattern);
+   aimee_pg_bind_int(st, "?3", include_historical ? 1 : 0);
+   aimee_pg_bind_text(st, "?4", believed_at ? believed_at : "");
+   aimee_pg_bind_text(st, "?5", valid_at ? valid_at : "");
+   aimee_pg_bind_int(st, "?6", limit);
+   db2_memory_scope_bind_current(st);
+   int n = 0;
+   while (n < limit && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      tf_load_semantic_row(st, &out[n]);
+      out[n].rank = n + 1;
+      tf_add_retrieval_trace(&out[n], "lexical", out[n].raw_score, out[n].fused_score, out[n].rank);
+      n++;
+   }
+   aimee_pg_finalize(st);
+   for (int i = 0; i < n; i++)
+      tf_load_evidence(conn, &out[i]);
+   return n;
+}
+
+int db2_semantic_assertion_get_filtered(int64_t assertion_id, const char *valid_at,
+                                        const char *believed_at, int include_historical,
+                                        semantic_assertion_hit_t *out)
+{
+   if (assertion_id <= 0 || !out)
+      return SEMANTIC_ASSERTION_SEARCH_ERROR;
+   if (!tf_timestamp_valid(valid_at) || !tf_timestamp_valid(believed_at))
+      return SEMANTIC_ASSERTION_SEARCH_INVALID_TIME;
+   void *conn = db2_conn();
+   if (!conn)
+      return SEMANTIC_ASSERTION_SEARCH_ERROR;
+   static const char *sql =
+       "SELECT e.id,e.version,e.source,e.relation,e.target,e.assertion_kind,"
+       " e.lifecycle_state,e.authority_rank,e.confidence_class,e.confidence,"
+       " e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,"
+       " CASE WHEN NOT ((e.asserted_at='' OR"
+       "      REPLACE(SUBSTR(e.asserted_at,1,19),'T',' ')<=pg_now_text())"
+       "   AND (e.superseded_at='' OR pg_now_text()<"
+       "      REPLACE(SUBSTR(e.superseded_at,1,19),'T',' '))"
+       "   AND (e.invalidated_at='' OR pg_now_text()<"
+       "      REPLACE(SUBSTR(e.invalidated_at,1,19),'T',' '))"
+       "   AND (e.assertion_kind<>'world_fact' OR ((e.valid_from='' OR"
+       "      REPLACE(SUBSTR(e.valid_from,1,19),'T',' ')<=pg_now_text())"
+       "      AND (e.valid_until='' OR pg_now_text()<"
+       "      REPLACE(SUBSTR(e.valid_until,1,19),'T',' '))))) THEN 1 ELSE 0 END,"
+       " (SELECT COUNT(*) FROM fact_evidence fe WHERE fe.assertion_id=e.id"
+       "    AND fe.invalidated_at='' AND fe.stance='supports'),"
+       " (SELECT COUNT(*) FROM fact_evidence fe WHERE fe.assertion_id=e.id"
+       "    AND fe.invalidated_at='' AND fe.stance='contradicts'),"
+       " (1.0+e.confidence+CAST(e.authority_rank AS DOUBLE PRECISION)/100.0)"
+       " FROM entity_edges e WHERE e.id=?1 AND e.edge_class='semantic'"
+       " AND e.suppressed=0 AND e.lifecycle_state IN ('persistent','promoted')"
+       " AND (?3<>'' OR ?2=1 OR ((e.asserted_at='' OR"
+       "      REPLACE(SUBSTR(e.asserted_at,1,19),'T',' ')<=pg_now_text())"
+       "      AND (e.superseded_at='' OR pg_now_text()<"
+       "           REPLACE(SUBSTR(e.superseded_at,1,19),'T',' '))"
+       "      AND (e.invalidated_at='' OR pg_now_text()<"
+       "           REPLACE(SUBSTR(e.invalidated_at,1,19),'T',' '))))"
+       " AND (?3='' OR ((e.asserted_at='' OR"
+       "      REPLACE(SUBSTR(e.asserted_at,1,19),'T',' ')<=REPLACE(SUBSTR(?3,1,19),'T',' '))"
+       "      AND (e.superseded_at='' OR REPLACE(SUBSTR(?3,1,19),'T',' ')<"
+       "           REPLACE(SUBSTR(e.superseded_at,1,19),'T',' '))"
+       "      AND (e.invalidated_at='' OR REPLACE(SUBSTR(?3,1,19),'T',' ')<"
+       "           REPLACE(SUBSTR(e.invalidated_at,1,19),'T',' '))))"
+       " AND (?4<>'' OR ?2=1 OR e.assertion_kind<>'world_fact' OR"
+       "      ((e.valid_from='' OR REPLACE(SUBSTR(e.valid_from,1,19),'T',' ')<=pg_now_text())"
+       "       AND (e.valid_until='' OR pg_now_text()<"
+       "            REPLACE(SUBSTR(e.valid_until,1,19),'T',' '))))"
+       " AND (?4='' OR ((e.valid_from='' OR"
+       "      REPLACE(SUBSTR(e.valid_from,1,19),'T',' ')<=REPLACE(SUBSTR(?4,1,19),'T',' '))"
+       "      AND (e.valid_until='' OR REPLACE(SUBSTR(?4,1,19),'T',' ')<"
+       "           REPLACE(SUBSTR(e.valid_until,1,19),'T',' '))))"
+       " AND (?101=0 OR ?102=1 OR NOT EXISTS ("
+       "   SELECT 1 FROM fact_evidence se JOIN memories sm"
+       "     ON se.source_kind='memory'"
+       "    AND se.source_id=('memory:' || CAST(sm.id AS TEXT))"
+       "   WHERE se.assertion_id=e.id AND se.invalidated_at='' AND (" DB2_MEMORY_SCOPE_RANK_SQL(
+           "sm.id") ")=0))";
+   char err[TF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return SEMANTIC_ASSERTION_SEARCH_ERROR;
+   aimee_pg_bind_int64(st, "?1", assertion_id);
+   aimee_pg_bind_int(st, "?2", include_historical ? 1 : 0);
+   aimee_pg_bind_text(st, "?3", believed_at ? believed_at : "");
+   aimee_pg_bind_text(st, "?4", valid_at ? valid_at : "");
+   db2_memory_scope_bind_current(st);
+   int rc = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      tf_load_semantic_row(st, out);
+      rc = 1;
+   }
+   aimee_pg_finalize(st);
+   if (rc == 1)
+      tf_load_evidence(conn, out);
+   return rc;
+}
+
+int db2_semantic_assertion_index_list(int64_t after_assertion_id,
+                                      semantic_assertion_index_row_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "SELECT e.id,e.version,e.source,e.relation,e.target,e.assertion_kind FROM entity_edges e"
+       " LEFT JOIN memory_embeddings me"
+       "   ON me.point_id=(2000000000000+e.id) AND me.record_type='semantic_assertion'"
+       " WHERE e.id>?1 AND e.edge_class='semantic' AND e.suppressed=0"
+       " AND e.lifecycle_state IN ('persistent','promoted')"
+       " AND (me.point_id IS NULL OR me.kind<>( 'assertion_v' || CAST(e.version AS TEXT)))"
+       " ORDER BY e.id LIMIT ?2";
+   char err[TF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", after_assertion_id);
+   aimee_pg_bind_int(st, "?2", max);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      out[n].assertion_id = aimee_pg_column_int64(st, 0);
+      out[n].version = aimee_pg_column_int(st, 1);
+      snprintf(out[n].canonical_rendering, sizeof(out[n].canonical_rendering), "%s %s %s [%s]",
+               aimee_pg_column_text(st, 2) ? aimee_pg_column_text(st, 2) : "",
+               aimee_pg_column_text(st, 3) ? aimee_pg_column_text(st, 3) : "",
+               aimee_pg_column_text(st, 4) ? aimee_pg_column_text(st, 4) : "",
+               aimee_pg_column_text(st, 5) ? aimee_pg_column_text(st, 5) : "");
+      n++;
+   }
    aimee_pg_finalize(st);
    return n;
 }

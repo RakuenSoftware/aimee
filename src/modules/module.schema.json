@@ -131,6 +131,26 @@
     "enabled_by_default": {
       "type": "boolean"
     },
+    "external_source": {
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "module",
+        "package",
+        "repository"
+      ],
+      "type": "object"
+    },
     "go_sources": {
       "items": {
         "type": "string"

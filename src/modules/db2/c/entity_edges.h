@@ -46,7 +46,15 @@ extern "C"
     * the typed-fact gate (db2_fact_commit) — callers route through it, not here
     * directly. Bumps weight on a repeat (source,relation,target) and upgrades the
     * stored confidence_class/confidence when the new write outranks it (§5; never
-    * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C"). 0/-1. */
+    * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C").
+    *
+    * On a FUNCTIONAL (single-valued) relation a differing object contradicts the
+    * prior one, so the relation's correction_behavior applies — bounded by class
+    * rank (§5): a write only corrects values it outranks or matches, and a write
+    * outranked by a current value is DROPPED rather than left contradicting it.
+    * So a model-authored (Class B/C) assertion can neither supersede nor sit
+    * beside a user-stated Class-A fact. Returns 0 on success (including a dropped
+    * outranked write, which leaves *out_added = 0), -1 on error. */
    int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
                                        int relation_id, int subject_kind, int object_kind,
                                        const char *confidence_class, double confidence,
@@ -145,20 +153,22 @@ extern "C"
     * Returns rows updated. */
    int db2_entity_edge_normalize_weights(void);
 
-   /* (relation_id, subject_kind, object_kind) triple from
-    * memory_relation_schema. Subject/object kinds use the integer codes
-    * from memory_ontology_node_kind_t with 99 as the wildcard "any". */
+   /* (relation_id, subject_kind, object_kind) triple carried by
+    * relations.schema_list. Subject/object kinds use the integer codes from
+    * memory_ontology_node_kind_t with 99 as the wildcard "any".
+    *
+    * The rows are served from the ontology's static rule table (see
+    * memory_ontology_rules) because that is what memory_ontology_validate()
+    * enforces. The `memory_relation_schema` TABLE has DDL and an index but no
+    * writer anywhere in the tree, so the reader that used to back this surface
+    * could only ever return zero rows; it was removed rather than left as a
+    * second, always-empty source of truth for the same question. */
    typedef struct
    {
       int relation_id;
       int subject_kind;
       int object_kind;
    } db2_relation_schema_row_t;
-
-   /* List the memory_relation_schema rows ordered by
-    * (relation_id, subject_kind, object_kind). Returns rows written
-    * into |out|. */
-   int db2_relation_schema_list(db2_relation_schema_row_t *out, int max);
 
    /* Rich edge row for `graph explain`: full provenance + scoring fields. */
    typedef struct

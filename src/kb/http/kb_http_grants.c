@@ -53,9 +53,31 @@ static int json_body(char *out_buf, int out_cap, int status, cJSON *o)
  * debugging their credentials when the backend is simply wrong. */
 static int map_db_failure(int rc, char *out_buf, int out_cap)
 {
-   if (rc < -1)
+   /* Only DB2_ERR_TENANT_REQUIRES_PG means the backend is wrong. `rc < -1` swept
+    * up EVERY tenancy code, so DB2_ERR_TENANT_DENIED (-104, "team not in
+    * principal memberships") -- an ordinary authorization refusal -- was reported
+    * as "requires the postgres backend" on a deployment already running Postgres.
+    * That is exactly the confusion this function was written to prevent, in the
+    * other direction: an operator whose credential simply lacks membership goes
+    * looking at the database.
+    *
+    * Measured: a grant set against team 7 logged `tenant scope refused (rc=-104)`
+    * and answered 503 "requires the postgres backend" on a Postgres kb. */
+   if (rc == DB2_ERR_TENANT_REQUIRES_PG)
       return json_error(out_buf, out_cap, 503,
                         "grant administration requires the postgres backend");
+   if (rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+      return json_error(out_buf, out_cap, 401,
+                        "authentication required: the acting principal is not verifier-produced");
+   if (rc == DB2_ERR_TENANT_NO_CONN || rc == DB2_ERR_TENANT_BEGIN)
+      return json_error(out_buf, out_cap, 503,
+                        "grant administration is temporarily unavailable: the tenant scope "
+                        "could not be opened");
+   if (rc == DB2_ERR_TENANT_DENIED)
+      return json_error(out_buf, out_cap, 403,
+                        "refused: the acting principal is not a member of that team. Grant "
+                        "administration needs admin or team-lead authority IN the named team, "
+                        "and the (server, team) pair must be registered");
    return json_error(out_buf, out_cap, 403,
                      "refused: grant administration requires admin or team-lead authority, "
                      "and the (server, team) pair must be registered");

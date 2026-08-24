@@ -13,7 +13,7 @@ import {
 } from './deployTopology';
 
 /* The page-2 keys the server's /api/config/set allowlist accepts (mirrors
- * src/modules/config/config_fields.c). Any key this page emits MUST be in here, or
+ * the external config module's field metadata). Any key this page emits MUST be in here, or
  * the wizard would POST an un-settable key.
  *
  * The llm_*_backend / llm_synth_tier / llm_synth_host / llm_synth_gpu keys that used

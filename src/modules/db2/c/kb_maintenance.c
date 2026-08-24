@@ -162,15 +162,24 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
                             " created_at::timestamptz)),"
                             " COALESCE(last_accessed_at, NULLIF(committed_at,'')::timestamptz,"
                             " created_at::timestamptz))";
+      /* ?1/?2 carry an explicit ::double precision. A libpq parameter arrives with
+       * no type, and unary minus over an untyped parameter is ambiguous -- Postgres
+       * rejects "-?2" outright with "operator is not unique: - unknown", so this
+       * statement never ran against the real engine at all and confidence decay was
+       * a no-op there. The sqlite shim binds by value and has no such notion, which
+       * is why the suite never saw it. Casting at the placeholder pins the type for
+       * every use of the parameter in the statement. */
       snprintf(decay_sql, sizeof(decay_sql),
                "UPDATE artifacts"
-               "   SET confidence = GREATEST(?1, confidence * EXP(-?2 *"
+               "   SET confidence = GREATEST(?1::double precision,"
+               "       confidence * EXP(-(?2::double precision) *"
                "       EXTRACT(EPOCH FROM (now() - %s)) / 86400.0)),"
                "       last_decay_at = pg_now_text()"
                " WHERE state = 'committed'"
-               "   AND confidence > ?1"
+               "   AND confidence > ?1::double precision"
                "   AND %s < now() - ('%d days')::INTERVAL"
-               "   AND GREATEST(?1, confidence * EXP(-?2 *"
+               "   AND GREATEST(?1::double precision,"
+               "       confidence * EXP(-(?2::double precision) *"
                "       EXTRACT(EPOCH FROM (now() - %s)) / 86400.0))"
                "       < confidence - 0.000001",
                base_ts, access_ts, min_age_days, base_ts);
@@ -237,7 +246,7 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
                "UPDATE artifacts"
                "   SET state = 'retired', retired_at = pg_now_text()"
                " WHERE state = 'committed'"
-               "   AND confidence <= ?1"
+               "   AND confidence <= ?1::double precision"
                "   AND %s < now() - ('%d days')::INTERVAL"
                "   AND NOT EXISTS ("
                "         SELECT 1 FROM artifact_citations ac"

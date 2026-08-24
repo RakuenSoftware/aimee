@@ -27,6 +27,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* This header declares a cJSON * parameter, so it carries the type
+ * rather than relying on every includer having pulled it in first. */
+#include "cJSON.h"
+
 /* Principal refs reserved for plugin instances. MUST match
  * PluginRefFirst/PluginRefLimit in server-go/modules/mcp/mcp.go, and the
  * reservation recorded in tests/baselines/modules/canonical-inventory.yaml. */
@@ -106,5 +110,8 @@ const char *aimee_plugin_state_name(aimee_plugin_state_t state);
  * Reports what the LAST collect observed rather than probing the bus, so an
  * operator surface cannot stall behind a wedged plugin. */
 int aimee_module_commands_snapshot(aimee_plugin_status_t *out, int max);
+
+/* Serialise the plugin-instance table into a response object. */
+void aimee_module_commands_report(cJSON *resp);
 
 #endif /* DEC_MODULE_COMMANDS_H */

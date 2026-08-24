@@ -46,6 +46,14 @@ extern "C"
     * aimee_pg_exec(db2_conn(), ...), which works on both backends. */
    int db2_test_shim_is_postgres(void);
 
+   /* Give the eval scratch store (db2_eval_open_temp_store) somewhere disposable
+    * to work. Under the sqlite shim it opens its own in-memory handle and this is
+    * a no-op; backed by Postgres it needs a real database, so this creates the
+    * per-process clone if one is not open yet and exports AIMEE_DB2_EVAL_URL
+    * pointing at it. Call once from main() before the first eval-store open.
+    * Returns 0 when the eval store is usable. */
+   int db2_test_shim_prepare_eval_store(void);
+
    /* Print a skip notice naming `test_name` and return 1 when the shim is on
     * Postgres, else 0. For the tests still seeding through the raw sqlite handle:
     *   if (db2_test_shim_skip_on_postgres("curator_queue")) return;

@@ -32,7 +32,7 @@
 #include <ctype.h>
 
 /* The config arrays the engine fans out over must be sized to ENSEMBLE_MAX_REFS.
- * Checked against config's exported capacity rather than against config_t's
+ * Checked against config's exported capacity rather than against legacy_config_record's
  * layout, so drift is still caught at compile time without this file knowing
  * the struct's shape. */
 _Static_assert(ENSEMBLE_MAX_REFS == CONFIG_ENSEMBLE_MAX_REFS,

@@ -428,13 +428,17 @@ int handle_get_doc(const char *doc_id, char *out_buf, int out_cap)
 int handle_delete_doc(const char *doc_id, char *out_buf, int out_cap)
 {
    int64_t id = (int64_t)atoll(doc_id);
-   if (db2_kb_doc_delete(id) != 0)
+   db2_kb_doc_t doc;
+   if (id <= 0 || db2_kb_doc_read(id, &doc) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
       return 404;
    }
-   snprintf(out_buf, (size_t)out_cap, "{\"deleted\":true}");
-   return 200;
+   snprintf(out_buf, (size_t)out_cap,
+            "{\"error\":\"direct document deletion is disabled\","
+            "\"required_action\":\"document.preview_lifecycle\","
+            "\"operations\":[\"invalidate\",\"purge\"]}");
+   return 409;
 }
 
 int handle_get_review(const char *query_string, char *out_buf, int out_cap)

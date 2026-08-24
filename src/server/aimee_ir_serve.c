@@ -2,10 +2,14 @@
 #include "aimee_ir_serve.h"
 #include "request_context.h"
 
+/* Matches IR_MEMORY_QUERY_MAX in gw_stage_memory.c: the same message is being
+ * captured, just before the persona is prepended to it. */
+#define IR_STAGE_QUERY_MAX 16384
+
 #include <aimee/translation/aimee_backend.h>
 #include <aimee/translation/aimee_frontend.h>
 #include "modules/memory/gw_stage_memory.h" /* ir_stage_memory + gw_stage_memory_enabled */
-#include "config.h" /* config_load + config_module_enabled (modules.memory) */
+#include "config.h" /* legacy_config_read + config_module_enabled (modules.memory) */
 #include "persona.h"
 #include "server_http.h"          /* session_persona_get */
 #include "server_http_identity.h" /* inbound session identity */
@@ -47,7 +51,7 @@ int aimee_ir_stream_relay_enabled(void)
 }
 
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
- * default (gw_stage_memory_enabled). Cached config_load, so an operator toggle applies
+ * default (gw_stage_memory_enabled). Cached legacy_config_read, so an operator toggle applies
  * without a restart; keeps ir_stage_memory itself config-free. Resolved at the seam
  * call site, mirroring the legacy gw_stage_slot_t catalogs. */
 static int ir_memory_enabled(void)
@@ -151,6 +155,25 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
     * is the first ported module -- it replaces gw_stage_memory's two structured-ingress
     * arms (anthropic /v1/messages + /v1/responses). The four legacy plain-chat handlers
     * stay on gw_memory_system_prompt until agent_execute itself moves onto the IR. */
+   /* Capture the user's OWN query before anything is prepended to it.
+    *
+    * ir_stage_memory takes its query from aimee_ir_last_user_text(), and the
+    * persona below is inserted onto that same first user message BEFORE the
+    * stage list runs. So on any turn that delivers a persona -- the opening turn
+    * of every session -- the "query" put to recall was thousands of characters
+    * of persona with the real question buried at the end, which matches nothing.
+    * Memory pre-injection was silently dead exactly when it matters most, with no
+    * error anywhere: recall answers "no rows", the block assembles empty, and
+    * ingress_preinject_build returns NULL before it ever reaches the confidence
+    * call. Measured on the box: the same question recalls 1 row asked plainly and
+    * 0 rows asked the way the stage asked it. */
+   char *pristine_query = malloc(IR_STAGE_QUERY_MAX);
+   if (pristine_query && aimee_ir_last_user_text(ir, pristine_query, IR_STAGE_QUERY_MAX) == 0)
+   {
+      free(pristine_query);
+      pristine_query = NULL;
+   }
+
    const char *sid = server_http_identity_session_hdr();
    int persona_first = session_persona_delivery_claim(sid);
    if (persona_first < 0)
@@ -163,7 +186,7 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    if (persona_first > 0)
       session_persona_delivery_finish(sid, persona_delivered);
    const aimee_ir_transform_t stages[] = {
-       {"memory", ir_stage_memory, NULL, memory_enabled},
+       {"memory", ir_stage_memory, pristine_query, memory_enabled},
        /* Runs AFTER memory, so the opening turn already carries the guidance that
         * names what replaces the shell it is about to lose. Always on: an agent
         * that never reaches aimee's tools is not using aimee. */
@@ -175,6 +198,7 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    if (persona_inserted)
       ir->mutated = 1;
    aimee_ir_run_transforms(ir, stages, sizeof stages / sizeof stages[0]);
+   free(pristine_query);
 
    /* What the turn actually did, recorded on the ingress request so the ordinary
     * token-audit row carries behaviour beside cost. Derived from the IR, so this

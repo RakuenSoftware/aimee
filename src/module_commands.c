@@ -698,3 +698,57 @@ size_t aimee_module_commands_plugin_count(void)
 {
    return g_plugin_count;
 }
+
+/* Serialise the plugin-instance table into a response object.
+ *
+ * Lives here rather than in the endpoint because the snapshot is this module's:
+ * the endpoint knows it wants plugin status, not how a status row is shaped. It
+ * moved when the merge pushed server_state.c past the line limit, which is a
+ * blunt reason for a change that was right anyway.
+ */
+void aimee_module_commands_report(cJSON *resp)
+{
+   if (!resp)
+   {
+      return;
+   }
+   /* Plugin modules: one row per attached instance.
+    *
+    * "Is my plugin running, and if not why not" is otherwise unanswerable from
+    * outside the daemon log. An instance blocked by the supply-chain gate, one
+    * whose plugin exited, and one that was never configured all present as zero
+    * commands, and each needs a different action -- so the STATE is reported,
+    * not just a count. Read off the last collect rather than probing, so this
+    * endpoint cannot stall behind a wedged plugin. */
+   {
+      /* Refresh before reporting.
+       *
+       * Reading the snapshot alone made this endpoint useless as a diagnostic:
+       * the status table is filled by a collect, and nothing here triggered one,
+       * so "is my plugin running" answered "no plugins" until some OTHER surface
+       * happened to ask. Found on the live host -- the instance was attached and
+       * serving, and this said nothing. The TTL is what keeps the refresh from
+       * costing a bus round trip per scrape. */
+      aimee_module_commands_refresh(2000);
+
+      aimee_plugin_status_t plugins[32];
+      int n = aimee_module_commands_snapshot(plugins, 32);
+      cJSON *arr = cJSON_AddArrayToObject(resp, "plugins");
+      if (arr)
+      {
+         for (int i = 0; i < n; i++)
+         {
+            cJSON *row = cJSON_CreateObject();
+            if (!row)
+               continue;
+            cJSON_AddNumberToObject(row, "principal_ref", (double)plugins[i].principal_ref);
+            cJSON_AddStringToObject(row, "state", aimee_plugin_state_name(plugins[i].state));
+            cJSON_AddStringToObject(row, "group", plugins[i].group);
+            cJSON_AddNumberToObject(row, "commands", plugins[i].command_count);
+            if (plugins[i].last_error[0])
+               cJSON_AddStringToObject(row, "last_error", plugins[i].last_error);
+            cJSON_AddItemToArray(arr, row);
+         }
+      }
+   }
+}

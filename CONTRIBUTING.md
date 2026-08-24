@@ -35,6 +35,18 @@ make docs-gen-check
 Run the narrow test target while iterating. Run the full unit suite before sending a change. Add
 ASAN or TSAN for memory ownership, concurrency, event-bus, and shutdown work.
 
+`make unit-tests` links DB2 against a sqlite shim that *translates* its SQL, so engine-level
+behaviour is unverified by it. `make unit-tests-pg` runs the same binaries against a real
+PostgreSQL, which is what CI gates on:
+
+```bash
+make unit-tests-pg AIMEE_TEST_DB2_TEMPLATE_URL=postgresql://user@host/aimee_test_tpl
+```
+
+It rebuilds the template database, then clones it per test process. Point it at a disposable
+server: it creates and drops databases beside the template. Touching DB2 SQL without running it is
+how a statement that Postgres rejects outright can sit in a green tree.
+
 The Makefile is canonical. Keep CMake in sync for Windows and macOS builds.
 
 ## Change contracts, not copies

@@ -27,7 +27,7 @@ Two modes (``--mode``):
 Toggle mechanism
 ----------------
 P1 gates pre-injection on the server config flag, which the server re-reads per
-request (``config_load``), so flipping it takes effect with no redeploy. The
+request (``legacy_config_read``), so flipping it takes effect with no redeploy. The
 harness flips it between the two runs of each prompt via the aimee CLI:
 
     aimee config set ingress_preinject_enabled 1   # ON

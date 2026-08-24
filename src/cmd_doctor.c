@@ -13,6 +13,7 @@
 #include "lifecycle.h"
 #include "provider_catalog.h"
 #include "shutdown_forensics.h"
+#include "runtime_secret.h"
 #include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include <unistd.h>
@@ -54,12 +55,13 @@ static doctor_db2_session_t check_database(check_result_t *r)
 
    /* Open shared knowledge storage once for the doctor run. Later checks reuse
     * the same connection instead of closing it between probes. */
-   if (!config_db2_url()[0])
+   char db2_url[2048] = "";
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       r->status = CHECK_ERROR;
       snprintf(r->message, sizeof(r->message), "shared knowledge URL not configured");
       snprintf(r->remediation, sizeof(r->remediation),
-               "Set the shared knowledge connection URL in config");
+               "Store AIMEE_DB2_URL in the runtime secret store");
       return session;
    }
 
@@ -75,19 +77,21 @@ static doctor_db2_session_t check_database(check_result_t *r)
    else if ((db2_set_embedding_dim(config_embedder_dims_current()),
              db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current()),
              db2_set_embedder_model_id(config_embedder_model()), /* unified-llm §2 drift guard */
-             db2_init(config_db2_url())) == 0)
+             db2_init(db2_url)) == 0)
    {
       session.ready = 1;
       session.owned = 1;
    }
    else
    {
+      runtime_secret_wipe(db2_url, sizeof(db2_url));
       r->status = CHECK_ERROR;
       snprintf(r->message, sizeof(r->message), "shared knowledge connection failed");
       snprintf(r->remediation, sizeof(r->remediation),
                "Verify the shared knowledge connection URL and service reachability");
       return session;
    }
+   runtime_secret_wipe(db2_url, sizeof(db2_url));
    int schema_ok = 0;
    int have_fuzzy_extension = 0;
    if (db2_health_probe(&schema_ok, &have_fuzzy_extension) != 0)
@@ -246,13 +250,12 @@ static void check_config(check_result_t *r)
 {
    r->name = "Config";
 
-   const char *path = config_default_path();
    struct stat st;
-   if (stat(path, &st) != 0)
+   if (!config_present())
    {
       r->status = CHECK_ERROR;
-      snprintf(r->message, sizeof(r->message), "not found");
-      snprintf(r->remediation, sizeof(r->remediation), "Run 'aimee init' to create config");
+      snprintf(r->message, sizeof(r->message), "module unavailable");
+      snprintf(r->remediation, sizeof(r->remediation), "Start the Aimee config module");
       return;
    }
 

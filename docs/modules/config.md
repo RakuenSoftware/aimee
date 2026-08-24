@@ -1,132 +1,75 @@
 # config module
 
-## Purpose and non-goals
+## Purpose
 
-`config` is required core and owns configuration defaults, parsing, validation, persistence, effective
-snapshot publication, reload classification, and projections consumed by CLI, API, environment, and GUI
-surfaces. It does not own module behavior, provider selection semantics, secret values, deployment
-orchestration, or a GUI's navigation and presentation.
+`config` is a required pure-Go process. It owns configuration defaults,
+YAML parsing, validation, optimistic versioning, and atomic persistence.
+Callers do not receive a store or filesystem path and cannot import the
+implementation; they use the caller contract in `server-go/config`.
 
-## Public contracts
+The module contains no C implementation, compatibility layer, or bridge.
 
-`config_load`, `config_load_file`, `config_save`, `config_snapshot_get`, `config_reload`, and
-`config_reload_if_changed` are the current C contracts in `src/modules/config/config.h`. The typed
-`config_fields` allowlist supplies get/set validation, surface grouping, and the `live` or
-`restart_required` verdict. Module/provider owners remain responsible for consuming their values and
-registering a re-applier when bound state can safely change live.
+## Event-bus contract
 
-The descriptor declares this module's fifteen sources, seven module-root headers, four direct tests,
-and this document; it sets `ownership_complete: true`. All seven headers are declared as
-`private_headers` because they live at the module root rather than under
-`src/modules/config/include/aimee/config/`, the layout the header-layout checker treats as private;
-`config_internal.h` is the internal seam header and has no paired source, and nine section-parser
-sources (charter, kb-curator, kb-maintenance, mode, plugin, save, server-api, skills, trigger) declare
-through `config.h`, `config_sections.h`, and `config_internal.h` rather than a paired header.
-`config_fields.h` is declared private today but is a cross-cutting get/set allowlist reached by the cmd
-and server layers, so it is a public-header candidate for a future header-layout slice; an
-ownership-declaration slice moves nothing. Make compiles all fifteen sources; CMake compiles the twelve
-the thin `aimee` client reaches and omits `config_fields.c`, `config_mode.c`, and `config_server_api.c`
-whose callers are cmd/server/TLS-side, the same intentional thin-client boundary recorded for gateway,
-learning, workspace, and vault. `docs/validation/core-modularization-slice-48.md` records the declaration audit and
-`docs/validation/core-modularization-slice-49.md` the completeness audit; the two were split so the
-latch reviews declarations merged on their own first. Adding a new module-local source or module-root
-header without declaring it now fails CI on `rule=ownership-complete`.
+The module serves principal `1/2`, event kind `4609`, stage `1`
+(`config-store`). Requests and responses are JSON. The owned operation catalog
+and golden vectors are in
+`src/modules/config/eventcontract/operations.json`.
 
-## Dependencies and consumers
+Supported operations are:
 
-- `module-runtime`: supplies the required module identity, lifecycle, and readiness model whose active capabilities constrain configuration surfaces.
+- `values`: return the editable configuration projection with defaults.
+- `value`: return one editable value.
+- `string-value`: read a non-editable string needed by an internal consumer.
+- `set-versioned`: validate and atomically persist a value, optionally guarded
+  by the previous version.
+- `version`: return the SHA-256 version of a configuration node.
+- `trigger-rules`: return validated workflow trigger rules.
+- `snapshot`: return one consistent effective-value/version pair.
+- `persist-defaults`: persist missing public defaults without writing secrets.
+- `workspace-add` / `workspace-remove`: mutate the bounded workspace registry.
+- `apply-roundtable-preset`: atomically apply one complete preset.
+- `set-typed-facts`, `set-api-http-listener`, `set-model-concurrency`, and
+  `remove-model-concurrency`: perform multi-field mutations under one store lock.
 
-Every required and optional module may consume `config`; server startup, the live server loop, CLI
-commands, deployment tooling, runtime and control GUIs, and tests are direct consumers. A dependency on
-config does not transfer ownership of another module's schema or activation semantics into this module.
+Every call has a bounded deadline. Malformed JSON, unknown fields, trailing
+values, wrong stages, and oversized replies fail closed. Validation errors stay
+inside a successful bus reply as typed `code`/`error` data because a non-OK
+bus status intentionally carries no body.
 
-## Providers and readiness
+## Storage and startup
 
-The reference provider is `aimee.yaml` plus compiled defaults and typed projections. Environment
-overrides are narrow consumer-owned seams, such as `config_apply_db2_url_env_override`, rather than a
-second universal parser. Readiness distinguishes missing files, accepted defaults, rejected invalid
-reloads, persistence failures, and startup-bound values; a syntactically valid snapshot does not prove
-that its selected provider or module is operational.
+Only the module resolves its file. `AIMEE_CONFIG_PATH` selects an explicit
+path; otherwise it uses `$AIMEE_HOME/aimee.yaml`, falling back to the user's
+configuration directory when `AIMEE_HOME` is unset.
 
-## Configuration and activation
+Writes hold the store mutex, preserve unrelated YAML nodes, write a mode-0600
+temporary file in the destination directory, sync and close it, then rename it
+over the configured path. Version checks happen under the same lock.
 
-- `runtime_toggle.supported`: `false`; configuration is required core and cannot be disabled, while the values it projects may activate optional modules and providers.
+## Consumers
 
-Defaults are established before file parsing. Server startup seeds a lock-free snapshot; `config.set`
-performs a disk-based read-modify-save and immediately calls `config_reload`; the main loop also detects
-out-of-band file changes once per tick, while SIGHUP requests reload off the signal path. Invalid reloads
-retain the running snapshot. `RELOAD_RESTART` fields persist immediately but do not claim live effect.
-
-### GUI truthfulness contract
-
-A field shown in the GUI exists only when the currently selected live module/provider consumes it; unused fields are not rendered, not defaulted, and not silently preserved across reload of a module/provider that does not consume them.
-
-The current main Settings page receives every allowlisted field and filters only by runtime/deploy/
-advanced/dev group; the webchat settings panel uses a static allowlist. Dynamic live-consumer filtering
-is `not present`, so the quoted rule is the required target boundary rather than a current guarantee.
-
-## Surfaces
-
-Surfaces include `aimee config show|get|set`, `/v1/config`, `/v1/config/get`, `/v1/config/set`, typed
-`config_t` readers, `aimee.yaml`, narrowly defined environment overrides, and GUI projections. All
-surfaces must derive from one effective contract and expose an accurate reload verdict; a GUI may curate
-or label fields but may not invent defaults, persistence, provider readiness, or activation state.
-
-## Data and migrations
-
-Configuration data comprises compiled defaults, the parsed YAML tree, flat typed `config_t` values, the
-file-identity cache, the published double-buffer snapshot, field metadata, and consumer-specific derived
-state. Save/load round trips are compatibility-sensitive migrations: recognized sections must not be
-silently dropped, unknown or legacy shapes require an explicit policy, and secrets should be stored as
-`vault` references rather than copied into general configuration.
-
-## Security and privacy
-
-Configuration files, environment values, API writes, paths, endpoints, commands, and provider metadata
-are untrusted input. The typed `config_fields` allowlist bounds remote get/set, strict validation rejects invalid
-reloads, and disk reads avoid overwriting unseen edits. Config must not expose secret material through
-GUI/API projections, logs, reload diagnostics, serialized defaults, or an inactive module's stale field.
-
-## Supported journeys
-
-At startup, defaults and a valid file produce the initial effective snapshot before consumers bind
-state. During operation, `config_reload` validates and atomically publishes a typed API write or detected
-file change; hot readers see the next snapshot, registered re-appliers update bounded state, and
-startup-bound consumers continue with an explicit restart requirement. CLI-only reads use the file path
-when no live server snapshot exists.
+The Go workflow engine creates one concurrent event-bus caller and shares it
+with DB1, config, delegates, and other module clients. The WFE waits for both
+DB1 and config to answer before serving. Its HTTP config endpoints and scheduler
+depend only on the `config.Service` caller interface.
 
 ## Tests and failure behavior
 
-The descriptor's four direct tests are `test_config.c` (the config core), `test_config_surface.c` (a
-characterization net auto-derived from `config.c`'s parse surface), `test_config_snapshot.c` (the live
-snapshot double-buffer/seqlock in `config.c`, including a concurrent torn-read stress), and
-`test_config_economizer.c` (config's resolution of the `economizer: off|safe|aggressive` setting, a
-`config_fields`/`config.c` concern, not the economizer module; it links the core object bundle and no
-economizer object). Adjacent tests such as `test_cmd_config.c` and frontend setup/settings tests
-exercise the cmd and UI layers and are not claimed here. Of the four, `test_config.c` is registered
-with CTest and the other three run under Make alone. Together they cover defaults, validation, round
-trips, projections, reload, and UI assumptions. Missing files yield defaults; malformed or invalid
-reload input keeps the running snapshot; failed save/set returns an error; unrecognized typed keys are
-rejected rather than persisted.
+Both sides replay the same owned golden vectors:
 
-## Operational diagnostics
+- `server-go/config/contract_test.go` proves the caller emits the contract
+  bytes, event kind, and stage, and decodes typed responses.
+- The external module's `server-go/modules/config/contract_test.go` proves the
+  module accepts those bytes and emits the matching responses.
+- `src/tests/test_bus_config_autonomy.c` proves native callers emit the same
+  event/stage/JSON envelopes through the generic module transport.
+- External handler/store tests cover malformed payloads, validation, atomic
+  persistence, trigger rules, versions, conflicts, and concurrent mutation.
+- Deployment E2E starts the independently built config process and WFE against
+  the daemon bus, then exercises reads, writes, persistence, conflicts, restart,
+  and invalid-input behavior through the public HTTP surface.
 
-Report the selected config path, validation issue class, reload source, `publication/no-op/rejection`,
-field reload verdict, re-applier failure context, and module/provider readiness without printing values
-that may be secret. SIGHUP and file-watch logs must distinguish a rejected reload from a process restart;
-neither path restarts the server in the current implementation.
-
-## Compatibility
-
-Field names and `config_t` types, defaults, saved YAML shapes, allowlisted API response shapes, environment
-precedence, reload verdicts, and preservation on save are compatibility contracts. Adding a field is not
-enough to make it user-facing: its consuming module/provider, activation condition, secrecy, reload
-class, and live GUI eligibility must also be declared and tested.
-
-## Extension and removal
-
-New configuration belongs with the module/provider that consumes it and is projected through config's
-shared validation and persistence seams. Duplicate parsers, hand-maintained GUI field lists, settings
-with no non-test consumer, and serialize-only values are `configuration-only` or
-`duplicated-by-adjacent-module` candidates, not confirmed dead code; removal requires save/load,
-environment, API, GUI, and runtime-liveness evidence.
+Missing files produce defaults. Invalid values do not modify the file. A stale
+version returns a conflict. An unavailable config process prevents WFE startup
+instead of silently falling back to direct file access.

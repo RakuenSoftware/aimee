@@ -8,8 +8,8 @@
  *   aimee identity snapshot [--out DIR]
  *   aimee identity diff A.json B.json [--flip-threshold 0.3]
  *
- * The charter is operator-authored and immutable at runtime — no
- * setter exists; editing aimee.yaml is the only path. The working
+ * The charter is operator-authored and immutable through this command; the
+ * external config module owns its document and mutation policy. The working
  * profile is mutable-but-gated: observations accumulate until a
  * sample-count threshold commits a value, so single-turn reactions
  * can't flip it. */
@@ -148,10 +148,10 @@ static void identity_show(app_ctx_t *ctx)
    int total = config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
                config_charter_values_count() + config_charter_tone_boundaries_count();
    if (total == 0)
-      printf("Charter: (none configured — add a `charter:` block to aimee.yaml)\n");
+      printf("Charter: (none configured — configure a charter through the config module)\n");
    else
    {
-      printf("Charter (immutable, loaded from aimee.yaml):\n");
+      printf("Charter (immutable, loaded from the config module):\n");
       print_section("Safety axioms", config_charter_safety_axioms,
                     config_charter_safety_axioms_count());
       print_section("Hard constraints", config_charter_hard_constraints,

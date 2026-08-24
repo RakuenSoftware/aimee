@@ -66,11 +66,10 @@ PENDING_BUS_MIGRATION = {
 # means the owner grows a bus stage for what the caller needs, not that the
 # caller switches to the peer's public header.
 PRIVATE_HEADER_REACH = {
-    # The DB1 block that used to sit here is gone. The store became a Go module,
-    # src/modules/db1 stopped being a module at all, and its callers now include
-    # db1_client/*.h -- a bus client, which this checker counts as bus
-    # communication rather than coupling. That is the ratchet finishing, not an
-    # entry being waived.
+    # DB1 moved under src/modules, so every pre-existing reach into it became a
+    # visible crossing. These carry a modules/ prefix. Phase B of the DB1 proposal
+    # retires them, and stale-allowlist forces each line out as it goes -- this
+    # block emptying IS that migration's progress bar.
     ("src/modules/git/git_ops.c", "modules/workspace/workspace_scope.h"),
     ("src/modules/git/git_project.c", "modules/workspace/workspace_scope.h"),
     ("src/modules/git/mcp_git_query.c", "modules/workspace/workspace_provider.h"),
@@ -103,100 +102,21 @@ PRIVATE_HEADER_REACH = {
 CORE_LINKED_REACH = {
     # db1 reaching config, which is core-linked. Retires when db1 stops reading
     # config directly.
-    ("src/modules/audit/audit_ledger.c", "config/config.h"),
-    ("src/modules/audit/obs_bus.c", "config/config.h"),
-    ("src/modules/benchmarks/agent_eval.c", "config/config.h"),
-    ("src/modules/benchmarks/agent_eval_benchmarks.c", "config/config.h"),
-    ("src/modules/benchmarks/agent_eval_memory_support.c", "config/config.h"),
-    ("src/modules/benchmarks/agent_eval_memory_support.c", "config/config_database.h"),
-    ("src/modules/config/config.c", "vault/runtime_secret.h"),
-    ("src/modules/config/config_database.c", "vault/runtime_secret.h"),
-    ("src/modules/config/config_fields.c", "vault/runtime_secret.h"),
-    ("src/modules/config/config_server_api.c", "vault/runtime_secret.h"),
-    ("src/modules/css/css_render_cmd.c", "config/config.h"),
-    ("src/modules/delegates/delegate_credential_retry.c", "config/config.h"),
     ("src/modules/delegates/delegate_credential_retry.c", "vault/runtime_secret.h"),
     ("src/modules/delegates/delegate_credential_retry.c", "vault/vault_service.h"),
-    ("src/modules/delegates/delegate_prompt.c", "config/config.h"),
-    ("src/modules/delegates/delegate_sandbox_image.c", "config/config.h"),
     ("src/modules/delegates/include/aimee/delegates/delegate_credentials.h", "vault/vault_principal.h"),
-    ("src/modules/economizer/gateway_mutate_wire.c", "config/config.h"),
-    ("src/modules/execution-policy/execution_policy.c", "config/config.h"),
-    ("src/modules/gateway/gateway_policy.c", "config/config.h"),
     ("src/modules/git/git_forge_vault.c", "vault/vault_service.h"),
     ("src/modules/git/git_host_cred.c", "vault/vault_service.h"),
     ("src/modules/git/git_host_cred.c", "vault/vault_store.h"),
     ("src/modules/git/git_oauth_device.c", "vault/vault_service.h"),
     ("src/modules/git/git_oauth_github.c", "vault/runtime_secret.h"),
     ("src/modules/git/git_oauth_github.c", "vault/vault_service.h"),
-    ("src/modules/git/git_verify.c", "config/config.h"),
-    ("src/modules/git/git_verify_ops.c", "config/config.h"),
-    ("src/modules/git/mcp_git_pr.c", "config/config.h"),
-    ("src/modules/git/mcp_git_query.c", "config/config.h"),
-    ("src/modules/git/mcp_git_write.c", "config/config.h"),
-    ("src/modules/guardrails/guardrails_action_audit.c", "config/config.h"),
-    ("src/modules/guardrails/guardrails_blast_radius.c", "config/config.h"),
-    ("src/modules/guardrails/guardrails_orchestrator.c", "config/config.h"),
-    ("src/modules/guardrails/guardrails_semantic.h", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_drain.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_drain.c", "config/config_database.h"),
-    ("src/modules/kb-synthesis/kb_curator_extract.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_index_claims.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_index_code_unit.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_index_narrative.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_judge.h", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_link_artifacts.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_notify.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_promote.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_queue.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_queue.c", "config/config_database.h"),
-    ("src/modules/kb-synthesis/kb_curator_resolve_entities.c", "config/config.h"),
-    ("src/modules/kb-synthesis/kb_curator_synthesize.c", "config/config.h"),
     ("src/modules/kb_client/kb_client.c", "vault/runtime_secret.h"),
-    ("src/modules/kb_client/kb_client_mtls.c", "config/config.h"),
     ("src/modules/kb_client/kb_client_mtls.c", "vault/runtime_secret.h"),
     ("src/modules/kb_client/kb_client_ws.c", "vault/runtime_secret.h"),
-    ("src/modules/learning/learning_implicit.c", "config/config.h"),
-    ("src/modules/lsp/lsp_manager.c", "config/config.h"),
-    ("src/modules/memory/memory_advanced.c", "config/config.h"),
     ("src/modules/memory/memory_core_helpers_b.c", "vault/runtime_secret.h"),
-    ("src/modules/memory/memory_core_internal.h", "config/config.h"),
-    ("src/modules/memory/memory_core_scope_embed.c", "config/config_database.h"),
-    ("src/modules/memory/memory_logic.c", "config/config.h"),
-    ("src/modules/memory/memory_rewrite_llm.h", "config/config.h"),
-    ("src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h", "config/config.h"),
-    # mcp_osv_gate.c is the supply-chain gate LIFTED OUT of mcp_client_registry.c
-    # so the aimee.yaml client path and provisioned plugin instances run the same
-    # policy instead of two copies. It inherits that file's already-sanctioned
-    # crossings rather than adding new ones; the pair moves or dies together.
-    ("src/modules/protocols/mcp/mcp_osv_gate.c", "config/config.h"),
     ("src/modules/protocols/mcp/mcp_client_registry.c", "vault/runtime_secret.h"),
-    ("src/modules/roundtable/delegate_ensemble.c", "config/config.h"),
     ("src/modules/roundtable/delegate_ensemble.c", "vault/runtime_secret.h"),
-    ("src/modules/roundtable/delegate_ensemble.h", "config/config.h"),
-    ("src/modules/roundtable/delegate_ensemble_review.c", "config/config.h"),
-    ("src/modules/roundtable/roundtable_preset.c", "config/config.h"),
-    ("src/modules/roundtable/roundtable_preset.h", "config/config.h"),
-    ("src/modules/roundtable/roundtable_seat_resolve.h", "config/config.h"),
-    ("src/modules/sandbox/sandbox_learned.c", "config/config.h"),
-    ("src/modules/skills/skill.c", "config/config.h"),
-    ("src/modules/tools/agent_tools.c", "config/config.h"),
-    ("src/modules/tools/agent_tools_anchored.c", "config/config.h"),
-    ("src/modules/tools/agent_tools_completion.c", "config/config.h"),
-    ("src/modules/tools/agent_tools_dispatch.c", "config/config.h"),
-    ("src/modules/vault/vault_capability.c", "config/config.h"),
-    ("src/modules/vault/vault_config_bootstrap.c", "config/config.h"),
-    ("src/modules/vault/vault_custody_tpm2.c", "config/config.h"),
-    ("src/modules/vault/vault_server_key.c", "config/config.h"),
-    ("src/modules/vault/vault_store.c", "config/config.h"),
-    ("src/modules/workflows/wfe_autonomy.c", "config/config.h"),
-    ("src/modules/workflows/wfe_blocks.c", "config/config.h"),
-    ("src/modules/workflows/wfe_live_forge.c", "config/config.h"),
-    ("src/modules/workflows/wfe_live_panel.c", "config/config.h"),
-    ("src/modules/workflows/wfe_scheduler.c", "config/config.h"),
-    ("src/modules/workspace/workspace.c", "config/config.h"),
-    ("src/modules/workspace/workspace.c", "config/config_accessors.h"),
-    ("src/modules/workspace/workspace_turn.c", "config/config.h"),
 }
 # Reaches into a module that is NOT core-linked, through the flat include root the
 # build puts on the path. Same coupling as PRIVATE_HEADER_REACH, reached by bare
@@ -207,7 +127,6 @@ FLAT_ROOT_REACH = {
     # The same DB1 move, reached by bare filename because the build puts
     # -Imodules/db1 on the include path. Two run the other way, db1 itself
     # reaching config, and retire when db1 stops linking config directly.
-    ("src/modules/config/config_sections.c", "economizer/economizer.h"),
     ("src/modules/delegates/delegate_prompt.c", "kb_client/kb_client.h"),
     ("src/modules/delegates/delegate_run_phases.c", "guardrails/guardrails.h"),
     ("src/modules/delegates/delegate_sandbox_image.c", "guardrails/guardrails.h"),

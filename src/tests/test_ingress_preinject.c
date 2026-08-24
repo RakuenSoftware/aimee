@@ -13,7 +13,6 @@
 
 static const char *g_context_mode = "observe";
 static int g_context_calls = 0;
-static int g_facts_enabled = 0;
 static int g_facts_calls = 0;
 static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
 
@@ -34,13 +33,10 @@ char *kb_client_memory_facts(const char *query)
    return strdup("- global preference: never substitute for project evidence\n");
 }
 
-/* Typed-facts gate stub: off, so the builder's facts path stays inert here
- * (kb_client_memory_facts above already returns NULL). ingress_preinject.c gained
- * this call with the typed_facts feature; the test link needs the symbol. */
-int kb_client_typed_facts_enabled(void)
-{
-   return g_facts_enabled;
-}
+/* There is no typed-facts gate to stub any more: the layer is unconditional, so
+ * kb_client_memory_facts above is called whenever there is an active scope. The
+ * g_facts_enabled flag that used to drive the stub is gone with it -- a test
+ * switch for an option that does not exist would suggest one still does. */
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len)
 {
@@ -115,7 +111,7 @@ int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t 
    out[1].parts.total = 0.44;
    return 2;
 }
-/* Drives the compression lever in the build test below (config_load stub). */
+/* Drives the compression lever in the build test below (legacy_config_read stub). */
 static int g_test_compress = 0;
 
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
@@ -143,23 +139,7 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    }
    return 1;
 }
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->ingress_preinject_enabled = 1;
-      cfg->ingress_preinject_assembly_budget = 1200;
-      cfg->ingress_compress_enabled = g_test_compress;
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the memory module. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values mirror exactly what the stub above writes into the struct —
+/* Accessor stubs mirror the desired fixture values —
  * preinject on, budget 1200, compress tracking g_test_compress, and the two
  * fields the stub leaves zeroed — so no assertion changes meaning. */
 int config_ingress_preinject_enabled(void)
@@ -387,7 +367,6 @@ static void test_task_context_mode_and_first_turn_gate(void)
    ingress_preinject_task_state_reset();
    ingress_preinject_set_session_id("session-task-1");
    g_context_calls = 0;
-   g_facts_enabled = 1;
    g_facts_calls = 0;
    g_context_mode = "on";
    g_context_result = KB_CLIENT_RESULT_OK;
@@ -424,7 +403,6 @@ static void test_task_context_mode_and_first_turn_gate(void)
    assert(g_context_calls == 3);
 
    ingress_preinject_set_session_id(NULL);
-   g_facts_enabled = 0;
    g_context_mode = "observe";
    printf("task_context_mode_and_first_turn_gate OK\n");
 }
@@ -637,7 +615,16 @@ static void test_budgeted_build_uses_memory_previews(void)
        "    > Use the deploy matrix.\n"
        "  - memory:102 fallback [L2/policy score=0.440 headline_missing=true]\n"
        "    > Fallback preview from content.\n"
-       "context-budget: used_bytes=342 budget_bytes=1200 omitted_count=0 headline_missing_count=1\n"
+       /* The typed-fact block is UNCONDITIONAL now. It used to sit behind
+        * kb_client_typed_facts_enabled(), which this file stubbed to 0 for this
+        * scenario, so the golden was captured without it. That gate is retired --
+        * facts depend only on an active scope -- so the section is part of every
+        * envelope the builder produces and belongs in the byte anchor. The
+        * used_bytes figure moves with it (342 -> 417). */
+       "\n"
+       "## Known facts\n"
+       "- global preference: never substitute for project evidence\n"
+       "context-budget: used_bytes=417 budget_bytes=1200 omitted_count=0 headline_missing_count=1\n"
        /* explore-with / fix-scope USED TO BE HERE. They moved to a session-start
         * injection on the IR (ir_stage_memory), because riding the per-turn
         * retrieval envelope meant aimee only told an agent to use aimee's tools
@@ -823,13 +810,4 @@ int main(void)
    test_compress_code_fold();
    printf("all tests passed\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

@@ -4,6 +4,7 @@
 #include "entity_edges.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "fact_mutation.h"
 #include "../headers/rel_types.h" /* correction_behavior + rel_type_is_functional (§4) */
 
 #include <stddef.h>
@@ -29,14 +30,17 @@
  * populations in *results* (a typed-recall walk must not return co_discussed and
  * vice-versa) — that is a filter on what gets rendered, not on what may serve as
  * traversal evidence. Co-occurrence rows carry no temporal state; semantic rows
- * do, so admitting them requires constraining them to current facts or the walk
- * would traverse retracted ones. Always pair with EE_VISIBLE_PROJECTION. */
+ * do, so admitting them requires the same persistent/promoted lifecycle gate as
+ * direct typed recall. In particular, candidates remain quarantined until an
+ * operator promotes them. Always pair with EE_VISIBLE_PROJECTION. */
 #define EE_ADMIT_CURRENT_SEMANTIC                                                                  \
    " AND (edge_class <> 'semantic'"                                                                \
-   " OR (superseded_at = '' AND suppressed = 0))"
+   " OR (lifecycle_state IN ('persistent','promoted')"                                             \
+   " AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0))"
 #define EE_ADMIT_CURRENT_SEMANTIC_E                                                                \
    " AND (e.edge_class <> 'semantic'"                                                              \
-   " OR (e.superseded_at = '' AND e.suppressed = 0))"
+   " OR (e.lifecycle_state IN ('persistent','promoted')"                                           \
+   " AND e.superseded_at = '' AND e.invalidated_at = '' AND e.suppressed = 0))"
 
 #define EE_VISIBLE_PROJECTION_E                                                                    \
    " AND (COALESCE(e.edge_origin, '') <> 'code_projection'"                                        \
@@ -209,6 +213,29 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
                                     int relation_id, int subject_kind, int object_kind,
                                     const char *confidence_class, double confidence, int *out_added)
 {
+   /* Compatibility entrypoint only.  The authority-aware seam owns every
+    * semantic mutation; callers that need user/operator authority must use it
+    * directly with a verifier-derived actor. */
+   fact_actor_t actor;
+   fact_mutation_result_t result;
+   fact_assertion_input_t input = {.source = source,
+                                   .relation = relation,
+                                   .target = target,
+                                   .relation_id = relation_id,
+                                   .subject_kind = subject_kind,
+                                   .object_kind = object_kind,
+                                   .confidence_class = confidence_class,
+                                   .confidence = confidence,
+                                   .assertion_kind = FACT_KIND_WORLD_FACT};
+   if (out_added)
+      *out_added = 0;
+   if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0 ||
+       db2_fact_mutation_assert(&actor, &input, &result) != 0)
+      return -1;
+   if (out_added)
+      *out_added = result.changed;
+   return 0;
+#if 0 /* superseded by fact_mutation; retained temporarily for blame continuity */
    if (out_added)
       *out_added = 0;
    if (!source || !relation || !target)
@@ -300,14 +327,48 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
       }
       else
       {
+         /* §5 authority guard on the correction itself. Class rank (A>B>C) IS the
+          * write's authority: only a direct user assertion earns A. A model-authored
+          * (Class B/C) write must therefore not supersede or tombstone a value that
+          * outranks it — without this, an ordinary model write silently replaces a
+          * user-stated Class-A fact on a single-valued relation, the hole the
+          * retraction path already closes with its `confidence_class <> 'A'` guard.
+          *
+          * Nor may the outranked write be inserted alongside: a functional relation
+          * would then hold two contradictory current values and recall would surface
+          * the model's next to the user's. It is dropped instead, exactly as the
+          * immutable branch drops a contradicting object. */
+         static const char *outranked =
+             "SELECT 1 FROM entity_edges WHERE source=?1 AND relation=?2 AND target<>?3"
+             " AND edge_class='semantic' AND superseded_at='' AND suppressed=0"
+             " AND (CASE confidence_class WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
+             "   > (CASE ?4 WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END) LIMIT 1";
+         aimee_pg_stmt_t *os = aimee_pg_prepare(conn, outranked, err, sizeof(err));
+         if (!os)
+            return -1; /* authority unprovable: never correct blind */
+         aimee_pg_bind_text(os, "?1", source);
+         aimee_pg_bind_text(os, "?2", relation);
+         aimee_pg_bind_text(os, "?3", target);
+         aimee_pg_bind_text(os, "?4", confidence_class);
+         int outranked_prior = (aimee_pg_step(os, err, sizeof(err)) == AIMEE_PG_ROW);
+         aimee_pg_finalize(os);
+         if (outranked_prior)
+            return 0; /* a higher-authority value stands: drop this write */
+
+         /* The rank test is repeated in the UPDATE so a higher-class row inserted
+          * between the probe and here is still not corrected by this write. */
          const char *upd =
              (corr == CORR_HARD_DELETE)
                  ? "UPDATE entity_edges SET suppressed=1, superseded_at=?4 WHERE source=?1"
                    " AND relation=?2 AND target<>?3 AND edge_class='semantic'"
                    " AND superseded_at='' AND suppressed=0"
+                   " AND (CASE confidence_class WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
+                   "   <= (CASE ?5 WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
                  : "UPDATE entity_edges SET superseded_at=?4 WHERE source=?1 AND relation=?2"
                    " AND target<>?3 AND edge_class='semantic' AND superseded_at='' AND "
-                   "suppressed=0";
+                   "suppressed=0"
+                   " AND (CASE confidence_class WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)"
+                   "   <= (CASE ?5 WHEN 'A' THEN 3 WHEN 'B' THEN 2 ELSE 1 END)";
          aimee_pg_stmt_t *us = aimee_pg_prepare(conn, upd, err, sizeof(err));
          if (us)
          {
@@ -315,6 +376,7 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
             aimee_pg_bind_text(us, "?2", relation);
             aimee_pg_bind_text(us, "?3", target);
             aimee_pg_bind_text(us, "?4", asserted_at);
+            aimee_pg_bind_text(us, "?5", confidence_class);
             (void)aimee_pg_step(us, err, sizeof(err));
             aimee_pg_finalize(us);
          }
@@ -345,6 +407,7 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
    if (out_added)
       *out_added = 1;
    return 0;
+#endif
 }
 
 int db2_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max)
@@ -676,7 +739,7 @@ int db2_entity_edge_bump_utility(const char *key, double delta)
        "UPDATE entity_edges"
        " SET utility_score = GREATEST(-5.0, LEAST(5.0, utility_score + ?1)),"
        "     utility_touched_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')"
-       " WHERE source = ?2 OR target = ?3";
+       " WHERE (source = ?2 OR target = ?3) AND edge_class <> 'semantic'";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -832,32 +895,13 @@ int db2_entity_edge_normalize_weights(void)
    return (rc == AIMEE_PG_DONE) ? changes : 0;
 }
 
-int db2_relation_schema_list(db2_relation_schema_row_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   void *conn = db2_conn();
-   if (!conn)
-      return 0;
-
-   static const char *sql =
-       "SELECT relation_id, subject_kind, object_kind FROM memory_relation_schema"
-       " ORDER BY relation_id, subject_kind, object_kind";
-   char err[EE_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   int n = 0;
-   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      out[n].relation_id = aimee_pg_column_int(st, 0);
-      out[n].subject_kind = aimee_pg_column_int(st, 1);
-      out[n].object_kind = aimee_pg_column_int(st, 2);
-      n++;
-   }
-   aimee_pg_finalize(st);
-   return n;
-}
+/* db2_relation_schema_list() lived here and SELECTed from
+ * memory_relation_schema. Nothing in the tree ever inserts into that table, and
+ * memory_ontology_validate() does not consult it, so the function returned zero
+ * rows on every deployment and relations.schema_list published an empty list
+ * while a different table did the enforcing. The surface now reads the ontology
+ * rules directly (memory_ontology_rules), so this reader is gone rather than
+ * kept as a second source of truth that can never agree with the first. */
 
 /* --- Phase 1: entity edge uniqueness migration --- */
 
@@ -973,7 +1017,8 @@ int db2_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
        " FROM (SELECT MIN(id) AS survivor_id, source, relation, target,"
        "              SUM(weight) AS total_weight, MAX(utility_score) AS max_utility,"
        "              MAX(utility_touched_at) AS newest_touched"
-       "       FROM entity_edges GROUP BY source, relation, target HAVING COUNT(*) > 1) g"
+       "       FROM entity_edges WHERE edge_class <> 'semantic'"
+       "       GROUP BY source, relation, target HAVING COUNT(*) > 1) g"
        " WHERE e.id = g.survivor_id";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, merge_sql, err, sizeof(err));
    if (!st)
@@ -986,7 +1031,7 @@ int db2_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
        "DELETE FROM entity_edges WHERE id IN"
        " (SELECT id FROM (SELECT id,"
        "  ROW_NUMBER() OVER (PARTITION BY source, relation, target ORDER BY id) AS rn"
-       "  FROM entity_edges) t WHERE t.rn > 1)";
+       "  FROM entity_edges WHERE edge_class <> 'semantic') t WHERE t.rn > 1)";
    st = aimee_pg_prepare(conn, delete_sql, err, sizeof(err));
    if (!st)
       return -1;
@@ -1221,6 +1266,7 @@ int db2_entity_edge_backfill_utility_touched_at(void)
        "UPDATE entity_edges"
        " SET utility_touched_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')"
        " WHERE utility_score != 0.0"
+       "   AND edge_class <> 'semantic'"
        "   AND (utility_touched_at = '' OR utility_touched_at = '1970-01-01 00:00:00')";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));

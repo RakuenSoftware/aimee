@@ -5,6 +5,7 @@
 #include "../headers/rel_types.h"
 #include "modules/memory/memory_pii_gate.h" /* memory_pii_rel_sensitivity — personal-data boundary */
 #include "entity_edges.h"
+#include "fact_mutation.h"
 #include "entity_registry.h"    /* db2_entity_register_named (§3 endpoint resolution) */
 #include "ontology_evolution.h" /* db2_ontology_eval_observe (§2 / P4) */
 #include "db2_internal.h"
@@ -196,10 +197,13 @@ static void fact_canonical_endpoint(const char *in, memory_node_kind_t kind, cha
    snprintf(out, cap, "%s", in); /* scalar/other, or registry unavailable */
 }
 
-fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_kind,
-                                    const char *rel_type, const char *target,
-                                    memory_node_kind_t tail_kind, fact_authority_t authority,
-                                    int enabled)
+fact_gate_verdict_t db2_fact_commit_with_actor(const char *source, memory_node_kind_t head_kind,
+                                               const char *rel_type, const char *target,
+                                               memory_node_kind_t tail_kind,
+                                               const fact_actor_t *actor, int enabled,
+                                               const fact_evidence_input_t *evidence,
+                                               const char *assertion_kind, const char *valid_from,
+                                               const char *valid_until)
 {
    int verdict = -1;
    if (!g_fact_gate_provider ||
@@ -245,6 +249,8 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
       return FACT_GATE_REJECT_SENSITIVE;
 
    /* §5: provenance-keyed class. user -> A, model+ACCEPT -> B, model NOVEL -> C. */
+   fact_authority_t authority =
+       actor && actor->rank >= FACT_ACTOR_USER ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
    const char *cls = fact_class_for(authority, v);
    double conf = fact_class_confidence(cls);
 
@@ -275,8 +281,21 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
          return FACT_GATE_DEFER;
       /* §1: a failed write must NOT be reported as success — return DEFER so the
        * caller retries rather than believing the fact was committed. */
-      if (db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind, (int)tail_kind,
-                                          cls, conf, NULL) != 0)
+      if (!actor)
+         return FACT_GATE_DEFER;
+      fact_assertion_input_t input = {.source = csrc,
+                                      .relation = norm,
+                                      .target = ctgt,
+                                      .relation_id = (int)id,
+                                      .subject_kind = (int)head_kind,
+                                      .object_kind = (int)tail_kind,
+                                      .confidence_class = cls,
+                                      .confidence = conf,
+                                      .assertion_kind = assertion_kind,
+                                      .valid_from = valid_from,
+                                      .valid_until = valid_until,
+                                      .evidence = evidence};
+      if (db2_fact_mutation_assert(actor, &input, NULL) != 0)
          return FACT_GATE_DEFER;
       return FACT_GATE_ACCEPT;
    }
@@ -287,11 +306,49 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
    long id = db2_rel_types_stage_provisional(norm);
    if (id <= 0)
       return FACT_GATE_DEFER; /* could not stage (DB issue) — defer, do not drop */
-   if (db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind, (int)tail_kind,
-                                       cls, conf, NULL) != 0)
+   if (!actor)
+      return FACT_GATE_DEFER;
+   fact_assertion_input_t input = {.source = csrc,
+                                   .relation = norm,
+                                   .target = ctgt,
+                                   .relation_id = (int)id,
+                                   .subject_kind = (int)head_kind,
+                                   .object_kind = (int)tail_kind,
+                                   .confidence_class = cls,
+                                   .confidence = conf,
+                                   .assertion_kind = assertion_kind,
+                                   .valid_from = valid_from,
+                                   .valid_until = valid_until,
+                                   .evidence = evidence};
+   if (db2_fact_mutation_assert(actor, &input, NULL) != 0)
       return FACT_GATE_DEFER;
    /* §2: count the sighting only after the edge actually committed, so a failed
     * write doesn't inflate the promotion occurrence count. */
    (void)db2_ontology_eval_observe(norm);
    return v;
+}
+
+fact_gate_verdict_t db2_fact_commit_with_evidence(const char *source, memory_node_kind_t head_kind,
+                                                  const char *rel_type, const char *target,
+                                                  memory_node_kind_t tail_kind,
+                                                  fact_authority_t authority, int enabled,
+                                                  const fact_evidence_input_t *evidence,
+                                                  const char *assertion_kind,
+                                                  const char *valid_from, const char *valid_until)
+{
+   fact_actor_t actor;
+   if (db2_fact_actor_internal(
+           authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
+      return FACT_GATE_DEFER;
+   return db2_fact_commit_with_actor(source, head_kind, rel_type, target, tail_kind, &actor,
+                                     enabled, evidence, assertion_kind, valid_from, valid_until);
+}
+
+fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_kind,
+                                    const char *rel_type, const char *target,
+                                    memory_node_kind_t tail_kind, fact_authority_t authority,
+                                    int enabled)
+{
+   return db2_fact_commit_with_evidence(source, head_kind, rel_type, target, tail_kind, authority,
+                                        enabled, NULL, FACT_KIND_WORLD_FACT, NULL, NULL);
 }

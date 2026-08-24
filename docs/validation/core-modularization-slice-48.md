@@ -66,7 +66,7 @@ bundle (`TEST_CORE_OBJS`) plus their test object; none singles out another modul
 are config-owned by subject:
 
 - `test_config.c` — the config core.
-- `test_config_surface.c` — a characterization net for `config_load`'s parse surface, auto-derived
+- `test_config_surface.c` — a characterization net for `legacy_config_read`'s parse surface, auto-derived
   from `config.c`.
 - `test_config_snapshot.c` — the live config snapshot double-buffer/seqlock in `config.c`: init/get,
   reload, validate-or-keep, and a concurrent torn-read stress.

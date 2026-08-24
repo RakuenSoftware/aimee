@@ -21,6 +21,7 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include "config.h"
+#include "config_client.h"
 #include <aimee/delegates/delegate_driver.h>
 #include "http_retry.h"
 #include "log.h"
@@ -168,21 +169,22 @@ static void record_outcome(const char *agent_name, const char *role, const agent
 
 extern const char *delegation_active_id(void);
 
-/* Apply config -> the admission controller, re-applying only when the config file changes
- * (the acquire runs per turn, so this stays a cheap stat() on the hot path). Guarantees the
- * controller is configured before the first acquire, and picks up hot-reloaded limits. */
+/* Apply config -> the admission controller from the module's version contract.
+ * The acquire runs per turn, so the cheap version call avoids filesystem
+ * coupling while still picking up every committed module mutation. */
 static void admission_ensure_configured(void)
 {
-   static long long applied_mtime = -1;
+   static int configured;
    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
-   const char *path = config_default_path();
-   struct stat st;
-   long long mtime = (path && stat(path, &st) == 0)
-                         ? (long long)st.st_mtime * 1000000000LL + (long long)st.st_mtim.tv_nsec
-                         : 0;
+   int changed = config_client_changed();
    pthread_mutex_lock(&mu);
-   if (mtime != applied_mtime)
+   if (!configured || changed > 0)
    {
+      if (changed > 0 && config_client_refresh() != 0)
+      {
+         pthread_mutex_unlock(&mu);
+         return;
+      }
       int global_max = config_maximum_total_concurrent_agent_sessions() > 0
                            ? config_maximum_total_concurrent_agent_sessions()
                            : AGENT_ADMISSION_DEFAULT_GLOBAL_MAX;
@@ -200,7 +202,7 @@ static void admission_ensure_configured(void)
          n++;
       }
       agent_admission_configure(global_max, default_model, overrides, n);
-      applied_mtime = mtime;
+      configured = 1;
    }
    pthread_mutex_unlock(&mu);
 }

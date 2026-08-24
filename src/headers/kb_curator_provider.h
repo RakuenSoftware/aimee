@@ -1,5 +1,5 @@
 /* kb_curator_provider.h: map a curator pipeline stage to its configured LLM
- * provider (curator-llm-backend §2). Pure resolution over config_t — given a
+ * provider (curator-llm-backend §2). Pure resolution over legacy_config_record — given a
  * stage, classify it Tier-A (mechanical extract/index) or Tier-B (reasoning /
  * judge) and return the provider def for that tier, or report "idle" when the
  * tier is unconfigured. Tier-B has NO weak fallback to the Tier-A default: a
@@ -7,7 +7,7 @@
 #ifndef DEC_KB_CURATOR_PROVIDER_H
 #define DEC_KB_CURATOR_PROVIDER_H 1
 
-#include "config.h"          /* config_t */
+#include "config.h"          /* legacy_config_record */
 #include "provider_client.h" /* provider_def_t */
 
 #ifdef __cplusplus

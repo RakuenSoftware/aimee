@@ -7,9 +7,9 @@
 /* --- cmd_require_db1 --- */
 
 /* Load config and open DB1, aborting with `errmsg` on failure. Folds the
- * config_t + config_load + db1_init + fatal prolog the CLI command handlers
+ * legacy_config_record + legacy_config_read + db1_init + fatal prolog the CLI command handlers
  * otherwise repeat verbatim; callers that also need the config keep their own
- * config_load. */
+ * legacy_config_read. */
 void cmd_require_db1(const char *errmsg)
 {
    if (!db1_store_ready())

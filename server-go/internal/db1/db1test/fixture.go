@@ -48,12 +48,14 @@ const (
 const (
 	serverEnv = "AIMEE_TEST_SERVER_BIN"
 	moduleEnv = "AIMEE_TEST_DB1_MODULE_BIN"
+	configEnv = "AIMEE_TEST_CONFIG_MODULE_BIN"
 )
 
 type fixture struct {
 	home   string
 	server *exec.Cmd
 	module *exec.Cmd
+	config *exec.Cmd
 	cancel context.CancelFunc
 	// One client per fixture, deliberately. The bus denies a second live attach
 	// for the same principal -- correctly, since two live slots for one identity
@@ -71,19 +73,22 @@ var (
 
 // locate finds the two binaries relative to the repo root, which is three
 // levels up from this package in a normal checkout.
-func locate() (server string, module string, err error) {
+func locate() (server string, module string, config string, err error) {
 	if fromEnv := os.Getenv(serverEnv); fromEnv != "" {
 		server = fromEnv
 	}
 	if fromEnv := os.Getenv(moduleEnv); fromEnv != "" {
 		module = fromEnv
 	}
-	if server != "" && module != "" {
-		return server, module, nil
+	if fromEnv := os.Getenv(configEnv); fromEnv != "" {
+		config = fromEnv
+	}
+	if server != "" && module != "" && config != "" {
+		return server, module, config, nil
 	}
 	root, err := repoRoot()
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if server == "" {
 		server = filepath.Join(root, "aimee-server")
@@ -91,12 +96,15 @@ func locate() (server string, module string, err error) {
 	if module == "" {
 		module = filepath.Join(root, "src", "build", "obj", "aimee-module-db1")
 	}
-	for _, path := range []string{server, module} {
+	if config == "" {
+		config = filepath.Join(root, "src", "build", "obj", "aimee-module-config")
+	}
+	for _, path := range []string{server, module, config} {
 		if info, statErr := os.Stat(path); statErr != nil || info.IsDir() {
-			return "", "", fmt.Errorf("%s is not built", path)
+			return "", "", "", fmt.Errorf("%s is not built", path)
 		}
 	}
-	return server, module, nil
+	return server, module, config, nil
 }
 
 func repoRoot() (string, error) {
@@ -126,7 +134,7 @@ func repoRoot() (string, error) {
 func Open(t testing.TB, path string) (*db1.Store, error) {
 	t.Helper()
 	once.Do(func() {
-		if _, _, err := locate(); err != nil {
+		if _, _, _, err := locate(); err != nil {
 			skipCause = err.Error()
 		}
 	})
@@ -150,7 +158,7 @@ func Open(t testing.TB, path string) (*db1.Store, error) {
 
 func start(t testing.TB, path string) (*fixture, error) {
 	t.Helper()
-	serverBin, moduleBin, err := locate()
+	serverBin, moduleBin, configBin, err := locate()
 	if err != nil {
 		return nil, err
 	}
@@ -168,6 +176,9 @@ func start(t testing.TB, path string) (*fixture, error) {
 	// in production.
 	if err := writeGrant(filepath.Join(policy, "db1.grant"), 1, 30, moduleBin,
 		serveKinds()); err != nil {
+		return nil, err
+	}
+	if err := writeGrant(filepath.Join(policy, "config.grant"), 1, 2, configBin, "4609"); err != nil {
 		return nil, err
 	}
 	// Mirrors the wfe client in src/modules/process-contracts.json: the engine
@@ -198,13 +209,27 @@ func start(t testing.TB, path string) (*fixture, error) {
 		cancel()
 		return nil, err
 	}
+	busSock := filepath.Join(aimeeHome, "server-module-bus.sock")
+	if err := waitFor(busSock, 10*time.Second); err != nil {
+		cancel()
+		return nil, fmt.Errorf("daemon module bus did not bind: %w\nserver: %s", err,
+			tail(filepath.Join(home, "server.log")))
+	}
+	configModule := exec.CommandContext(ctx, configBin, busSock)
+	configModule.Env = append(os.Environ(), "HOME="+home, "AIMEE_HOME="+aimeeHome)
+	configLog, _ := os.Create(filepath.Join(home, "config.log"))
+	configModule.Stdout, configModule.Stderr = configLog, configLog
+	if err := configModule.Start(); err != nil {
+		cancel()
+		return nil, err
+	}
 	httpSock := filepath.Join(aimeeHome, "aimee-http.sock")
 	if err := waitFor(httpSock, 30*time.Second); err != nil {
 		cancel()
-		return nil, fmt.Errorf("daemon did not bind: %w", err)
+		return nil, fmt.Errorf("daemon did not bind: %w\nserver: %s\nconfig: %s", err,
+			tail(filepath.Join(home, "server.log")), tail(filepath.Join(home, "config.log")))
 	}
 
-	busSock := filepath.Join(aimeeHome, "server-module-bus.sock")
 	module := exec.CommandContext(ctx, moduleBin, busSock)
 	module.Env = append(os.Environ(), "HOME="+home, "AIMEE_DB1_PATH="+path)
 	moduleLog, _ := os.Create(filepath.Join(home, "module.log"))
@@ -214,7 +239,7 @@ func start(t testing.TB, path string) (*fixture, error) {
 		return nil, err
 	}
 
-	f := &fixture{home: home, server: server, module: module, cancel: cancel}
+	f := &fixture{home: home, server: server, module: module, config: configModule, cancel: cancel}
 	t.Cleanup(func() {
 		mu.Lock()
 		defer mu.Unlock()

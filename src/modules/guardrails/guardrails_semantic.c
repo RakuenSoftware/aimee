@@ -248,7 +248,7 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
 /* Effective semantic thresholds: the configured value, clamped when the
  * "guardrail_strictness" bandit arm is promoted to strict.
  *
- * This replaced gsem_apply_strictness_arm(config_t *), which mutated a caller's
+ * This replaced gsem_apply_strictness_arm(legacy_config_record *), which mutated a caller's
  * config in place and so required every caller to hold the struct. The clamp is
  * transient — it was never saved — so it belongs behind a function that answers
  * "what threshold applies right now", not behind a struct edit.

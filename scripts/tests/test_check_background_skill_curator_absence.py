@@ -23,16 +23,12 @@ class CuratorAbsenceTests(unittest.TestCase):
     def fixture(self, root: Path) -> None:
         (root / ".git").mkdir()
         (root / "src/server").mkdir(parents=True)
-        files = set(checker.CONFIG_FILES + checker.BUILD_FILES + (
+        files = set(checker.BUILD_FILES + (
             "src/modules/memory/memory_maintenance.c",
-            # The store's side of maintenance state, in Go since DB1 became a
-            # module. Was src/modules/db1/maintenance.c.
-            "server-go/modules/aimee/families/runtime_state.go",
-            "src/modules/config/config_kb_curator.c",
+            "src/modules/db1/maintenance.c",
             "src/modules/kb-synthesis/kb_curator_pipeline.c",
             "src/modules/kb-synthesis/kb_curator_queue.c",
             "src/modules/kb-synthesis/kb_curator_drain.c",
-            "src/tests/test_config.c",
             checker.DISPOSITION,
         ))
         for rel in files:
@@ -83,15 +79,6 @@ class CuratorAbsenceTests(unittest.TestCase):
 
                 self.assert_rejected(resurrect, "deleted-file")
 
-    def test_every_config_reader_path_and_key_is_rejected(self) -> None:
-        for rel in checker.CONFIG_FILES:
-            for key in checker.CONFIG_KEYS:
-                with self.subTest(config_file=rel, key=key):
-                    self.assert_rejected(
-                        lambda root, path=rel, value=key: (root / path).write_text(value),
-                        "retired-config",
-                    )
-
     def test_preserved_anchors_are_enforced(self) -> None:
         self.assert_rejected(
             lambda root: (root / "src/modules/memory/memory_maintenance.c").write_text("empty"),
@@ -102,12 +89,7 @@ class CuratorAbsenceTests(unittest.TestCase):
             "kb-curator-preserved",
         )
 
-    def test_legacy_test_and_disposition_fail_closed(self) -> None:
-        self.assert_rejected(
-            lambda root: (root / "src/tests/test_config.c").write_text("no compatibility test"),
-            "legacy-config-test",
-        )
-
+    def test_disposition_fails_closed(self) -> None:
         def corrupt(root: Path) -> None:
             path = root / checker.DISPOSITION
             value = json.loads(path.read_text())

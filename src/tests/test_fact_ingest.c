@@ -8,10 +8,48 @@
 #include "../modules/db2/c/entity_edges.h"
 #include "../modules/db2/c/ontology_evolution.h"
 #include "../modules/db2/c/db2_test_shim.h"
+#include "../headers/kb_identity.h"
 #include "modules/memory/memory_extract_patterns.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+/* AN AUTHENTICATED REQUEST CONTEXT, because without one this file could not
+ * reach the bug it already had an assertion for.
+ *
+ * The "retracts at the authority it was CALLED with" case below has been here
+ * all along and passed all along -- while the shipped code was doing the
+ * opposite. db2_fact_actor_from_request() consults kb_reqctx_actor(), a WEAK
+ * symbol that no test binary links, so it always returned -1 here and the code
+ * fell through to the authority-derived branch, which is correct. In the KB the
+ * symbol IS defined, the request context always exists for a tool call inside a
+ * user's turn, and the wrong branch ran every time.
+ *
+ * So the assertion was right and blind at once: it could not reach the
+ * condition that breaks it. Defining these makes the failing path reachable, so
+ * the test now fails if the declared authority is ever again treated as a
+ * fallback for the request identity rather than a cap on it. */
+static int g_reqctx_authenticated = 0;
+
+const kb_principal_t *kb_reqctx_actor(void)
+{
+   static kb_principal_t p;
+   if (!g_reqctx_authenticated)
+      return NULL;
+   memset(&p, 0, sizeof(p));
+   p.authenticated = 1;
+   p.kind = KB_PRIN_OIDC;
+   snprintf(p.subject, sizeof(p.subject), "%s", "alice@example.com");
+   return &p;
+}
+
+int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
+{
+   if (!p || !out || !cap)
+      return -1;
+   snprintf(out, cap, "oidc:%s", p->subject);
+   return 0;
+}
 
 static int semantic_count(const char *entity)
 {
@@ -107,6 +145,18 @@ static int invalid_scan(const char *text, int *is_retraction, int *has_attr,
    return 0;
 }
 
+/* Reads every turn as "retract works_for", so the authority the ingress was
+ * called with is the only thing that decides whether the fact goes. */
+static int scan_retract_works_for(const char *text, int *is_retraction, int *has_attr,
+                                  char attr[DB2_FACT_ATTR_MAX])
+{
+   (void)text;
+   *is_retraction = 1;
+   *has_attr = 1;
+   snprintf(attr, DB2_FACT_ATTR_MAX, "works_for");
+   return 0;
+}
+
 int main(void)
 {
    db2_test_shim_open();
@@ -149,17 +199,65 @@ int main(void)
    /* §4 retraction flow: no scanner, a failed scanner, or an inconsistent answer
     * cannot delete. The host-installed scanner then retracts only the named fact. */
    assert(db2_fact_current_count("user") == 2); /* email + city currently believed */
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 2);
    aimee_db2_register_fact_scan_provider(failing_scan);
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 2);
    aimee_db2_register_fact_scan_provider(invalid_scan);
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 2);
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
-   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_typed_fact_ingress("please forget my email", FACT_AUTHORITY_USER, NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 1); /* only city remains current */
+
+   /* §4/§5: the ingress retracts at the authority it was CALLED with, not at the
+    * user's. A turn asking to forget a user-stated (Class A) fact leaves it
+    * standing when the caller could only prove model authority — which is what
+    * every model-driven surface passes — and withdraws it at user authority. */
+   assert(db2_fact_commit("user", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("user") == 2); /* city + works_for */
+   aimee_db2_register_fact_scan_provider(scan_retract_works_for);
+   assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_MODEL, NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 2); /* model refused: Class A stands */
+
+   /* THE SAME CALL, WITH SOMEONE AUTHENTICATED. This is the case the KB always
+    * runs and this file never could: get_context_block is a tool the model
+    * calls inside a human's authenticated turn, so a request context exists and
+    * names a real person. The text is still the MODEL's, so MODEL authority must
+    * still refuse -- an authenticated human in the session does not make the
+    * agent's words the human's.
+    *
+    * Before the fix this deleted the row: db2_fact_actor_from_request() was
+    * tried first and returns FACT_ACTOR_USER for any authenticated principal, so
+    * the declared MODEL was discarded whenever this context existed. */
+   g_reqctx_authenticated = 1;
+   assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_MODEL, NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 2); /* still refused: the caller's
+                                                 * identity must not raise the
+                                                 * authority the text was
+                                                 * composed at */
+   g_reqctx_authenticated = 0;
+
+   assert(db2_typed_fact_ingress("forget where I work", FACT_AUTHORITY_USER, NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 1); /* the user's own retraction lands */
+
+   /* A SEED relation whose declared kinds disagree with the extractor's guess
+    * must still commit. The extractor infers kinds from the value's spelling --
+    * a bare number is NODE_OTHER -- while `age` declares tail NODE_SCALAR, so
+    * the gate rejected it and the fact vanished with no error anywhere. Most
+    * seed relations were unreachable from this path for that reason. */
+   assert(db2_fact_ingest_text("my age is 41", FACT_AUTHORITY_USER, 1) == 1);
+   {
+      edge_t e[16];
+      int n = db2_entity_edges_semantic_by_entity("user", e, 16);
+      int found = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(e[i].relation, "age") == 0 && strcmp(e[i].target, "41") == 0)
+            found = 1;
+      assert(found); /* rejected on kind before the fixup */
+   }
 
    /* Bad args. */
    assert(db2_fact_ingest_text(NULL, FACT_AUTHORITY_USER, 1) == -1);

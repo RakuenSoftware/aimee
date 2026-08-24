@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parent.parent
 CONTRACTS = ROOT / "src/modules/process-contracts.json"
 INVENTORY = ROOT / "tests/baselines/modules/canonical-inventory.yaml"
 CORE = {
-    "module-runtime", "config", "ir", "translation", "protocols", "gateway",
+    "module-runtime", "ir", "translation", "protocols", "gateway",
     "vault", "execution-policy", "audit",
 }
 PROCESS_REQUIRED = {
-    "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
+    "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition",
     # aimee is the core server module: everything specific to aimee-server,
     # including the nineteen store families it absorbed from db1. Required
@@ -26,7 +26,7 @@ PROCESS_REQUIRED = {
     "aimee",
 }
 GO_PROCESSES = {
-    "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
+    "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
     "runtime-web", "control-web", "benchmarks", "sandbox", "economizer", "postgres",
     # The core server module. Its code is server-go/modules/aimee. It keeps

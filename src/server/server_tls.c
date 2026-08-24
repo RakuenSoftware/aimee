@@ -2,7 +2,7 @@
  * client-cert verification + revocation. */
 #include "server_tls.h"
 #include "server_conn_io.h" /* register/clear the per-conn SSL on the I/O shim */
-#include "config.h"         /* config_default_dir, config_load */
+#include "config.h"         /* config_default_dir, legacy_config_read */
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
 #include "log.h"
@@ -1015,7 +1015,10 @@ int server_tls_init_default(void)
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
    int effective_mtls = pki_mtls_ramp_init(config_server_api_mtls());
    if (effective_mtls < 0)
-      return -1;
+      /* NOT a certificate problem, and it must not be reported as one: the ramp
+       * self-test is DB1 stage 19 (db1-pki), so this is what a missing or
+       * unreachable db1 module looks like from here. */
+      return SERVER_TLS_INIT_ERR_MTLS_RAMP;
    if (effective_mtls == 1)
       aimee_log(LOG_WARN, "server.tls",
                 "mTLS migration is optional: bearer-only clients remain accepted until the "
@@ -1030,8 +1033,27 @@ int server_tls_init_default(void)
     * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
     * file and the verify callback starts consulting the snapshot. */
    if (effective_mtls > 0 && pki_ca_ensure() != 0)
-      return -1;
-   return server_tls_init(cert, NULL, effective_mtls, config_server_api_mtls_client_ca());
+      return SERVER_TLS_INIT_ERR_CLIENT_CA;
+   return server_tls_init(cert, NULL, effective_mtls, config_server_api_mtls_client_ca()) == 0
+              ? SERVER_TLS_INIT_OK
+              : SERVER_TLS_INIT_ERR_IDENTITY;
+}
+
+const char *server_tls_init_result_str(int result)
+{
+   switch (result)
+   {
+   case SERVER_TLS_INIT_OK:
+      return "ok";
+   case SERVER_TLS_INIT_ERR_MTLS_RAMP:
+      return "the mTLS ramp self-test refused (DB1 pki unreachable; is the db1 module running?)";
+   case SERVER_TLS_INIT_ERR_CLIENT_CA:
+      return "aimee's client CA could not be created or loaded";
+   case SERVER_TLS_INIT_ERR_IDENTITY:
+      return "the server certificate or its Vault-held key could not be loaded";
+   }
+   /* An out-of-range code is a bug, and a bug must not name a specific cause. */
+   return "unknown";
 }
 
 SSL *server_tls_begin(int fd)

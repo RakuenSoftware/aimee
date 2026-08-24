@@ -25,7 +25,6 @@ typedef struct
    int kb_pdf_vector_enabled;
    int kb_purge_fence_ttl_s;
    int present;
-   int typed_facts_enabled;
    char embedder_command[DB2_RUNTIME_EMBEDDER_COMMAND_MAX];
 } db2_runtime_config_t;
 
@@ -48,6 +47,5 @@ int config_kb_curator_cross_repo_review_queue_max(void);
 int config_kb_pdf_vector_enabled(void);
 int config_kb_purge_fence_ttl_s(void);
 int config_present(void);
-int config_typed_facts_enabled(void);
 
 #endif

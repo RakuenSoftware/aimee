@@ -325,7 +325,7 @@ static void provider_cli_terminate_child(pid_t pid)
  * helper we do not enumerate, a credential minted later). Treat it as raising the
  * cost, not as a guarantee.
  *
- * Called post-fork. `flag` is resolved by the PARENT because config_load reads files
+ * Called post-fork. `flag` is resolved by the PARENT because legacy_config_read reads files
  * and allocates, and running that between fork and exec in a threaded process risks
  * a malloc-lock deadlock. setenv/unsetenv may themselves allocate, so this is not
  * strictly async-signal-safe either -- it matches the risk the adjacent

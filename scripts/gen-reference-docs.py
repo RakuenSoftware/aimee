@@ -5,15 +5,17 @@ Two committed outputs (regenerate with `make -C src docs-gen`):
   docs/gen/cli-commands.md  : every `aimee` CLI command + subcommands, from the
                                command catalogue the server serves
                                (src/server/cli_command_defs_data.h).
-  docs/gen/configuration.md : every config key: the `aimee config get/set`
-                               scalar allowlist (src/modules/config/config_fields.c) plus the
-                               config-file (JSON) sections parsed by src/config*.c.
+  docs/gen/configuration.md : every config key from the metadata shipped by the
+                               external pure-Go config module.
 
 The point is completeness: these are derived from the same tables the binary
 uses, so they cannot silently drift from the implementation the way hand-written
 lists do.
 """
 import re
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -117,7 +119,7 @@ def render_cli(entries):
     return "\n".join(out).rstrip() + "\n"
 
 
-# ─── Config: CLI-settable scalars (src/modules/config/config_fields.c) ───────────────────────
+# ─── Config: metadata owned by the external pure-Go module ────────────────
 
 CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float",
             "CFG_ECON_TIER": "string (off\\|safe\\|aggressive)"}
@@ -468,30 +470,48 @@ SECTION_DESC = {
 }
 
 
+_CONFIG_METADATA = None
+
+
+def _config_metadata():
+    """Load documentation metadata from the pinned config module dependency."""
+    global _CONFIG_METADATA
+    if _CONFIG_METADATA is not None:
+        return _CONFIG_METADATA
+    override = os.environ.get("AIMEE_CONFIG_MODULE_DIR")
+    if override:
+        metadata_path = (Path(override) / "server-go" / "modules" /
+                         "config" / "metadata.json")
+    else:
+        # Listing a module with `go list -m` may legitimately return an empty
+        # Dir until its zip has already been downloaded.  Resolve the package
+        # instead: package loading downloads the pinned dependency and returns
+        # the exact directory containing the metadata we consume.
+        result = subprocess.run(
+            ["go", "list", "-mod=mod", "-f", "{{.Dir}}",
+             "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"],
+            cwd=ROOT / "server-go", check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        resolved = result.stdout.strip()
+        if not resolved:
+            raise SystemExit(
+                "gen-reference-docs: pinned config module was not downloaded "
+                "and go list returned no module directory"
+            )
+        metadata_path = Path(resolved) / "metadata.json"
+    try:
+        _CONFIG_METADATA = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"gen-reference-docs: cannot read config module metadata: {exc}")
+    if _CONFIG_METADATA.get("version") != 1:
+        raise SystemExit("gen-reference-docs: unsupported config module metadata version")
+    return _CONFIG_METADATA
+
+
 def parse_config_fields():
-    # Each entry is `{"<key>", offsetof(...), <size>, <flag>, CFG_<TYPE>}`. The
-    # offsetof/sizeof macros embed commas, so match the key (first string before
-    # offsetof) and the type (CFG_* before the closing brace) positionally: they
-    # are 1:1 in source order.
-    text = (SRC / "modules" / "config" / "config_fields.c").read_text(encoding="utf-8")
-    # Bound to the config_fields[] initializer, then parse each `{...}` entry as a
-    # unit (split on `},`) so the key and its CFG_* type are paired within one
-    # entry: robust to CFG_* uses in helper functions below the table.
-    start = text.index("config_fields[] = {")
-    text = text[start:text.index("\n};", start)]
-    fields, seen = [], set()
-    for chunk in text.split("},"):
-        km = re.search(r'"([a-z0-9_]+)"\s*,\s*offsetof', chunk)
-        tm = re.search(r'(CFG_\w+)', chunk)
-        if km and tm and km.group(1) not in seen:  # a key may be registered twice
-            seen.add(km.group(1))
-            # Surface group (config_field_group_t): FGROUP_RUNTIME (default) is the
-            # everyday user surface; FGROUP_DEPLOY/ADVANCED/DEV are settable but filed
-            # off the presented "CLI-settable keys" count into their own subsections.
-            gm = re.search(r'(FGROUP_\w+)', chunk)
-            group = gm.group(1) if gm else "FGROUP_RUNTIME"
-            fields.append((km.group(1), CFG_TYPE.get(tm.group(1), tm.group(1)), group))
-    return fields
+    return [(field["key"], field["type"], field["group"])
+            for field in _config_metadata()["fields"]]
 
 
 # ─── Config: config-file (JSON) sections (src/config*.c) ──────────────────────
@@ -508,44 +528,17 @@ FOREACH_RE = re.compile(r'cJSON_ArrayForEach\(\s*(\w+)\s*,\s*(\w+)\s*\)')
 
 
 def parse_config_sections():
-    sections = {}   # section name -> sorted set of keys
-    flat = set()    # top-level scalar keys read straight off root
-    for cfile in sorted((SRC / "modules" / "config").glob("config*.c")):
-        text = cfile.read_text(encoding="utf-8")
-        var_to_section = {}
-        for m in ASSIGN_RE.finditer(text):
-            var, sect = m.group(1), m.group(2)
-            if var == "root":
-                continue
-            var_to_section[var] = sect
-        # array iteration: the loop var inherits the array's section
-        for m in FOREACH_RE.finditer(text):
-            item, arr = m.group(1), m.group(2)
-            if arr in var_to_section:
-                var_to_section[item] = var_to_section[arr]
-        # collect child keys per section-var
-        used_as_parent = set()
-        for m in CHILD_RE.finditer(text):
-            parent, key = m.group(1), m.group(2)
-            used_as_parent.add(parent)
-            if parent in var_to_section:
-                sections.setdefault(var_to_section[parent], set()).add(key)
-        # a (root,"X") whose var is never used as a parent is a flat top key
-        for var, sect in var_to_section.items():
-            if var not in used_as_parent:
-                flat.add(sect)
-    # don't double-list a name that is both a section and a stray flat read
-    flat -= set(sections)
-    return sections, flat
+    metadata = _config_metadata()
+    return ({name: set(keys) for name, keys in metadata["sections"].items()},
+            set(metadata["flat"]))
 
 
 def render_config(fields, sections, flat):
     out = ["# Configuration Reference",
            "",
            "> Auto-generated from the canonical source tables by "
-           "`scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + "
-           "`src/config*.c`, env vars scanned from `getenv()` in `src/` and "
-           "`os.Getenv()` in `server-go/`, and the "
+           "`scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config "
+           "module, env vars scanned from `getenv()` in `src/`, and the "
            "workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
@@ -618,7 +611,7 @@ def render_config(fields, sections, flat):
     out.append(f"## Config-file sections ({len(sections)})")
     out.append("")
     out.append("Set in the config JSON as `{\"<section>\": {\"<key>\": ...}}`. Keys "
-               "are derived from the section parsers in `src/config*.c`; a key shown "
+               "are derived from the external config module metadata; a key shown "
                "as a bare name that is itself a nested object is noted in the section "
                "description (see *Coverage & limitations*).")
     out.append("")
@@ -651,11 +644,6 @@ def render_config(fields, sections, flat):
 # that local accessor exactly like getenv() so their deployment contract is
 # not silently omitted from generated reference docs.
 ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
-
-# The same contract on the Go side. Modules are Go now, and a module's env is
-# just as much a deployment contract as a C binary's -- AIMEE_STORE_URL, without
-# which the store module refuses to start, was invisible here until this existed.
-GO_ENV_RE = re.compile(r'os\.(?:Getenv|LookupEnv)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 
 # Helpers that take the env var NAME as an argument and getenv() it internally.
 # config_sidecar_endpoint is the OCR/TSR resolver: centralising those two reads
@@ -697,26 +685,8 @@ ENV_GROUP_ORDER = [
 
 ENV_DESC = {
     # Paths & assets
-    "AIMEE_HOME": ("Paths & assets", "Root of the per-user state/config store (config, `workflows/`, keys). Overrides the platform default. DB1 is no longer under it: the store is a PostgreSQL database reached through AIMEE_STORE_URL."),
-    "AIMEE_STORE_URL": ("Paths & assets", "PostgreSQL DSN the DB1 store module connects to. The module is a separate process and cannot read the config store, so it is told the DSN and refuses to start without it rather than guessing a default and serving a different, empty database. Replaces AIMEE_DB1_PATH, which named a SQLite file back when the store was a C module; nothing reads that variable now."),
-    "AIMEE_MODULE_PRINCIPAL_REF": ("Server runtime", "Principal reference an instanced module serves under, written into its `.grant` at provisioning time. A module cannot allocate its own authorization identity, so it refuses to start without this. Event kinds are derived from it: `kind = 4096 + ref*256 + stage`."),
-    "AIMEE_MODULE_EVENT_BASE": ("Server runtime", "Retired. Event kinds are derived from the principal ref now. An instance still carrying this variable starts only if the value agrees with the derivation; when it disagrees the module refuses, because a deployment provisioned under the old scheme has a `.grant` naming kinds that belong to other modules. Re-run `scripts/provision-plugin-module.py` for the instance instead of unsetting it."),
-    "AIMEE_MODULE_BUS_SOCKET": ("Server runtime", "Unix socket the module bus listens on; the default for `--module-bus-socket`."),
-    "AIMEE_MODULE_POLICY_DIR": ("Server runtime", "Directory of module `.grant` manifests, overriding the built-in location. The bus reads a peer's grant from here to decide what that module may serve."),
-    "AIMEE_MCP_PLUGIN_ARGV": ("Plugins", "Command line for an MCP plugin instance, as a JSON array of strings. JSON rather than a shell string so an argument containing a space stays one argument. With no argv the module runs inert: it serves its stages, declares no commands and answers CapabilityAbsent."),
-    "AIMEE_MCP_PLUGIN_CWD": ("Plugins", "Working directory the MCP plugin instance is started in."),
-    "AIMEE_MCP_PLUGIN_PERMISSION": ("Plugins", "Permission ceiling for an MCP plugin instance -- the most it may ever do, whatever it requests. Unset means `read`, the least privilege."),
-    "AIMEE_MCP_TOOL_ALLOWLIST": ("Plugins", "Comma-separated tool names `aimee mcp serve` will expose. Unset serves the full tool set; set, it serves only these."),
-    "AIMEE_MCP_TOOL_PROSE": ("Plugins", "Selects the wording of MCP tool descriptions offered to a model."),
-    "AIMEE_WFE_RUNNER_URL": ("Workflow engine", "Workflow runner endpoint; the default for `--runner-url`."),
-    "AIMEE_WFE_RUNNER_SOCKET": ("Workflow engine", "Unix socket for the workflow runner, used instead of a URL when the runner is local."),
-    "AIMEE_FORGE_SERVICE_URL": ("Forge (GitHub App / tokens)", "Forge service endpoint; the default for `--forge-service-url`."),
-    "AIMEE_FORGE_SERVICE_SOCKET": ("Forge (GitHub App / tokens)", "Unix socket for the forge service, used instead of a URL when it is local."),
-    "AIMEE_GIT_AUTHOR_NAME": ("Git verify / MCP", "Author name on commits the native workflow runner makes. Unset falls back to the repository's own git configuration."),
-    "AIMEE_GIT_AUTHOR_EMAIL": ("Git verify / MCP", "Author email on commits the native workflow runner makes. Unset falls back to the repository's own git configuration."),
-    "AIMEE_SESSION_WORKTREE_BASE": ("Client & session", "Which checkout a session's worktree branches from. `remote_default` (the default) uses the server's default branch; `current` opts in to inheriting the source checkout's branch, for offline or detached workflows. Only ever an explicit opt-in -- `current` is never reached as a fallback."),
-    "AIMEE_HOOK_TRANSPORT": ("Client & session", "Which repository-intelligence surface the session-start guidance points an agent at: `mcp` names the Aimee MCP index capability, anything else names the CLI at `AIMEE_CLI_PATH`."),
-    "AIMEE_CLI_PATH": ("Client & session", "Absolute path to the aimee CLI, quoted into the guidance an agent receives so it does not assume `aimee` is on PATH."),
+    "AIMEE_HOME": ("Paths & assets", "Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default."),
+    "AIMEE_DB1_PATH": ("Paths & assets", "SQLite database the DB1 module process opens. The module is a separate process and cannot read the config store, so it is told the path and refuses to start without it rather than guessing a default and serving a different, empty database. Set it whenever `db1_path` is overridden in the configuration; the container entrypoint otherwise defaults it to `<AIMEE_HOME>/aimee.db`, which is config's own default."),
     "AIMEE_INSTALL_PREFIX": ("Paths & assets", "Install prefix used to locate bundled assets and plugins."),
     "AIMEE_BUNDLED_SKILLS_DIR": ("Paths & assets", "Override directory for the bundled skills."),
     "AIMEE_TOOLSETS_CONFIG": ("Paths & assets", "Path to a toolsets config file (overrides the default tool allowlists)."),
@@ -925,7 +895,7 @@ ENV_DESC = {
         "`AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the "
         "statement bound.",
     ),
-    "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives vector column sizing)."),
+    "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory
     "AIMEE_MEMORY_CITATIONS_MODE": ("Memory", "Citation rendering mode for memory recall."),
@@ -1005,7 +975,6 @@ ENV_DESC = {
     "AIMEE_VERIFY_STEP_TIMEOUT_MS": ("Git verify / MCP", "Per-step timeout (ms) for git verify."),
     "AIMEE_MCP_CWD": ("Git verify / MCP", "Working-directory hint for MCP git-root resolution."),
     "AIMEE_MCP_TOOL_PROFILE": ("Git verify / MCP", "MCP tools/list presentation profile: 'core'/'lean' (default: Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront)."),
-    "AIMEE_MCP_TOOLS_WATCH_SECONDS": ("Git verify / MCP", "Seconds between registry-generation polls in `aimee mcp serve`; a change emits notifications/tools/list_changed so a client sees a plugin that appeared mid-session (default: 15)."),
     # Models
     "AIMEE_MODEL_CAPABILITY_OVERRIDES": ("Models", "Override model capability flags (reasoning/tools/vision/…)."),
     # TLS & networking
@@ -1038,7 +1007,7 @@ ENV_DESC = {
     "AIMEE_CLIENT_TYPE": ("Client & session", "Calling client type used for integration-specific request shaping."),
     "AIMEE_CODEX_REFRESH_SKEW": ("Delegates & backends", "Seconds before Codex OAuth expiry at which the server refreshes the token."),
     "AIMEE_CODE_INDEX_SOURCE": ("Knowledge base (aimee-kb)", "Source label recorded for code-index ingestion."),
-    "AIMEE_DB2_EVAL_URL": ("Database & vectors", "Separate DB2 URL used by evaluation harnesses; never the production default."),
+    "AIMEE_DB2_EVAL_URL": ("Database & vectors", "Separate DB2 URL used by evaluation harnesses; never the production default. The harness applies the DB2 schema into the named database: into its public schema when that schema is empty, otherwise into a throwaway schema beside it. Either way the copy is dropped on close, so point this at a disposable server."),
     "AIMEE_DB2_POOL_SIZE": ("Database & vectors", "DB2 connection-pool size override."),
     "AIMEE_DELEGATE_MAX_INFLIGHT": ("Delegates & backends", "Process-wide maximum number of admitted delegate attempts."),
     "AIMEE_DELEGATE_SANDBOX": ("Delegates & backends", "Enable the configured delegate sandbox backend."),
@@ -1115,7 +1084,7 @@ ENV_DESC = {
 
 
 def parse_env_vars():
-    """Every AIMEE_* env var the shipped binaries read, C and Go, tests excluded."""
+    """Every AIMEE_* env var read outside src/tests/ (test-only vars excluded)."""
     found = set()
     for f in sorted(SRC.rglob("*")):
         if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
@@ -1125,13 +1094,6 @@ def parse_env_vars():
             found.add(m.group(1))
         for m in ENV_BY_NAME_RE.finditer(text):
             found.add(m.group(1))
-    go_root = SRC.parent / "server-go"
-    for f in sorted(go_root.rglob("*.go")):
-        if f.name.endswith("_test.go"):
-            continue
-        text = f.read_text(encoding="utf-8", errors="ignore")
-        for m in GO_ENV_RE.finditer(text):
-            found.add(m.group(1))
     return found | ENV_DYNAMIC
 
 
@@ -1139,8 +1101,7 @@ def render_env(found):
     out = ["## Environment variables",
            "",
            f"The binaries read {len(found)} `AIMEE_*` environment variables (scanned "
-           "from `getenv()` in `src/` and `os.Getenv()` in `server-go/`, excluding "
-           "tests, plus the generic first-boot "
+           "from `getenv()` in `src/`, excluding tests, plus the generic first-boot "
            "credential inputs). Depending on the setting, these "
            "variables either override config-store values or provide fallbacks when no "
            "explicit config value is present. Module-activation variables use fallback "
@@ -1518,12 +1479,12 @@ AGENT_FIELD_RE = re.compile(r'cJSON_GetObjectItem(?:CaseSensitive)?\(\s*\w+\s*,\
 
 
 def parse_agent_fields():
-    # DELIBERATELY the config module only. An agent object is also parsed by
+    # DELIBERATELY the routing module only. An agent object is also parsed by
     # src/modules/vault/agent_credentials.c, which reads the credential-bearing
     # fields -- and the vault is an attack surface, so generated public docs do
     # not enumerate what it holds or name the file that reads it. Operators who
     # need those field names have `aimee agent setup`, which prompts for them.
-    f = SRC / "modules" / "config" / "agent_config.c"
+    f = SRC / "modules" / "routing" / "agent_config.c"
     if not f.exists():
         return set()
     return set(AGENT_FIELD_RE.findall(f.read_text(encoding="utf-8")))
@@ -1664,9 +1625,9 @@ def main():
     GEN.mkdir(parents=True, exist_ok=True)
     cli = render_cli(_require("CLI commands", parse_cli_commands(),
                               "src/server/cli_command_defs_data.h"))
-    fields = _require("config fields", parse_config_fields(), "src/modules/config/")
+    fields = _require("config fields", parse_config_fields(), "external config module")
     sections, flat = parse_config_sections()
-    _require("config sections", sections, "src/modules/config/")
+    _require("config sections", sections, "external config module")
     # a key that is a CLI-settable scalar (or a section name) is not also a stray
     # "other top-level" key: subtract both so nothing is double-listed.
     flat = flat - {k for k, _, _ in fields} - set(sections)

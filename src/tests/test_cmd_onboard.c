@@ -68,9 +68,12 @@ static void scratch_env(char *tmpdir, size_t cap)
    platform_setenv("HOME", tmpdir);
    platform_setenv("AIMEE_NO_CACHE", "1");
 
-   config_t cfg;
-   config_load(&cfg);
-   assert(config_save(&cfg) == 0);
+   /* Nothing to seed here any more. Upstream seeded a SQLite file at
+    * config_db1_path(); the store is a module now and neither that accessor
+    * nor the file exists. This branch's own lines called
+    * the config module's old read/write pair, which the move of config into
+    * Go renamed. The onboarding
+    * flow creates what it needs in the scratch home above. */
 }
 
 static void scratch_cleanup(const char *tmpdir)

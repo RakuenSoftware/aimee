@@ -60,7 +60,7 @@ cases; existing enum values are untouched.
 File: `src/server/delegate_ensemble.c` (add `#include "persona.h"`).
 
 - New static helper:
-  `static const char *panel_persona_name(const config_t *cfg, roundtable_mode_t
+  `static const char *panel_persona_name(const legacy_config_record *cfg, roundtable_mode_t
   mode, int model_index)`:
   - returns `NULL` unless `mode == ROUNDTABLE_REVIEW` (draft/MoA unchanged);
   - if `cfg->ensemble_reference_personas[model_index][0]` set → return it;

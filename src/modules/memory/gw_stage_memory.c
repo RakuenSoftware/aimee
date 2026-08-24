@@ -114,9 +114,16 @@ int ir_stage_first_turn_shell_block(aimee_request_t *ir, void *ud)
 
 int ir_stage_memory(aimee_request_t *ir, void *ud)
 {
-   (void)ud; /* query comes from the IR, not per-call user data */
    if (!ir)
       return 0;
+
+   /* `ud`, when the caller supplies it, is the user's query as it arrived --
+    * captured before the persona was prepended to the same message. Reading the
+    * message here instead would recall against the persona text: it is inserted
+    * onto the first user message before this stage runs, so on the opening turn
+    * of every session the query became thousands of characters of persona and
+    * matched nothing. NULL keeps the old behaviour for callers that pass none. */
+   const char *supplied_query = (const char *)ud;
 
    /* No assistant turn yet == the model has not spoken == start of session.
     *
@@ -132,12 +139,20 @@ int ir_stage_memory(aimee_request_t *ir, void *ud)
     * so the rule fires again exactly when compaction discarded the first copy. */
    int session_start = ir_session_start(ir);
 
-   char *query = malloc(IR_MEMORY_QUERY_MAX);
-   if (!query)
-      return 0;
-   size_t qn = aimee_ir_last_user_text(ir, query, IR_MEMORY_QUERY_MAX);
-   char *env = (qn > 0) ? ingress_preinject_build(query, 0) : NULL;
-   free(query);
+   char *env = NULL;
+   if (supplied_query && supplied_query[0])
+   {
+      env = ingress_preinject_build(supplied_query, 0);
+   }
+   else
+   {
+      char *query = malloc(IR_MEMORY_QUERY_MAX);
+      if (!query)
+         return 0;
+      size_t qn = aimee_ir_last_user_text(ir, query, IR_MEMORY_QUERY_MAX);
+      env = (qn > 0) ? ingress_preinject_build(query, 0) : NULL;
+      free(query);
+   }
    if (!env && !session_start)
       return 0; /* nothing to say this turn: byte-identical no-op */
 

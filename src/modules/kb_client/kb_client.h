@@ -96,9 +96,8 @@ char *kb_client_health_json(void);
  * projection. The runtime merges this into its client-facing capabilities. */
 char *kb_client_agent_surfaces_json(void);
 
-/* Cached read of the KB's advertised typed-facts state (proposal §8). aimee-server
- * gates per-turn fact injection on this instead of owning typed_facts_enabled. */
-int kb_client_typed_facts_enabled(void);
+/* kb_client_typed_facts_enabled() is retired: the typed-fact layer is
+ * unconditional, so aimee-server has nothing to ask the KB about. */
 /* §2c: POST /v1/reembed; raw response JSON (caller frees) or NULL on transport
  * failure; *status_out (optional) gets the HTTP status. target_dim>0 pins the
  * reset target (bypasses the embedder probe); clear_maintenance!=0 instead just
@@ -829,6 +828,17 @@ int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
 int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *key,
                                const char *content, const char *use_cases, double confidence,
                                const char *session_id, memory_t *out);
+
+/* Same, but says whose words these are. The authority is recorded as the row's
+ * provenance and decides whether the typed-fact drain may later mint Class-A
+ * facts from this note (memory.h, memory_insert_ex). MEMORY_AUTHORITY_USER is
+ * for a surface where the USER is the author — the `memory store` CLI, the
+ * onboarding wizard — never for text the agent composed, and the kb still checks
+ * that the request authenticated as a person before honouring it. The two
+ * spellings above are the MODEL-authority ones. */
+int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_authority_t authority, memory_t *out);
 
 /* Look up a memory id by (key, kind) via aimee-kb.  Returns 0 if no
  * row matches or kb is unreachable; the row id otherwise.  Mirrors

@@ -122,7 +122,18 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			// silently, so the module whose name just changed would be the one
 			// nobody compared, while `checked` stayed comfortably non-zero from
 			// the other nineteen.
-			if declared.Runtime == "go" && declared.HostedBy == "" && config.ModuleName == "" {
+			// AND ONLY FOR A COMPONENT THIS REPOSITORY IMPLEMENTS. A Go
+			// component whose descriptor declares no go_sources here is built
+			// elsewhere -- config is aimee-module-config, its own program from
+			// github.com/RakuenSoftware/aimee-module-config -- so it can never
+			// have a case in this binary, and demanding one asks a question
+			// with no answer.
+			//
+			// Found by the guard firing on `config` after a merge brought it in.
+			// The guard was right that the name matched nothing; it was wrong
+			// that the name was supposed to.
+			if declared.Runtime == "go" && declared.HostedBy == "" &&
+				config.ModuleName == "" && implementedHere(declared.ID) {
 				t.Errorf("%s is declared runtime=go in process-contracts.json but "+
 					"aimee-module-%s matches no case in the module registry: the "+
 					"contract and the registry disagree about its name",
@@ -166,4 +177,26 @@ func TestModuleRegistryRejectsUnknownAndBadArguments(t *testing.T) {
 	if err := run(context.Background(), []string{"aimee-module-unknown", "/unused"}); err == nil {
 		t.Fatal("unknown module executable was accepted")
 	}
+}
+
+// implementedHere reports whether this repository builds the component's Go
+// module, by asking its descriptor for go_sources.
+//
+// A component can be declared in process-contracts.json and implemented in
+// another repository; the contract describes the FLEET, not this binary's
+// contents. Without this distinction the check above cannot tell "the registry
+// forgot a module" from "the module was never ours".
+func implementedHere(id string) bool {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "modules", id, "module.yaml"))
+	if err != nil {
+		// No descriptor at all: nothing claims it here.
+		return false
+	}
+	var descriptor struct {
+		GoSources []string `json:"go_sources"`
+	}
+	if err := json.Unmarshal(body, &descriptor); err != nil {
+		return false
+	}
+	return len(descriptor.GoSources) > 0
 }

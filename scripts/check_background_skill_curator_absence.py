@@ -26,13 +26,6 @@ FORBIDDEN = (
     "skill_curator.c",
     "skill_curator.h",
 )
-CONFIG_KEYS = ("curator_interval_hours", '"curator"')
-CONFIG_FILES = (
-    "src/modules/config/config.c",
-    "src/modules/config/config.h",
-    "src/modules/config/config_save.c",
-    "src/modules/config/config_skills.c",
-)
 BUILD_FILES = ("CMakeLists.txt", "src/Makefile", "src/tests/Rules.mk")
 DISPOSITION = "docs/audit/dispositions/background-skill-curator.yaml"
 PROPOSAL = "docs/proposals/done/feature-liveness-and-background-curator-removal.md"
@@ -73,11 +66,6 @@ def validate(root: Path) -> None:
         for token in FORBIDDEN:
             require(token not in text, "retired-reference", f"{token!r} in {path.relative_to(root)}")
 
-    for rel in CONFIG_FILES:
-        text = read(root / rel)
-        for key in CONFIG_KEYS:
-            require(key not in text, "retired-config", f"{key!r} in {rel}")
-
     for rel in BUILD_FILES:
         text = read(root / rel)
         # The protected build may invoke this checker by name; reject only the
@@ -97,15 +85,8 @@ def validate(root: Path) -> None:
 
     kb_files = list((root / "src/modules/kb-synthesis").glob("kb_curator_*.c"))
     require(len(kb_files) >= 3, "kb-curator-preserved", "KB curator implementation family")
-    require((root / "src/modules/config/config_kb_curator.c").is_file(), "kb-curator-preserved", "KB config")
     build_text = "\n".join(read(root / rel) for rel in BUILD_FILES)
     require("kb_curator_pipeline.c" in build_text, "kb-curator-preserved", "KB build anchor")
-
-    legacy_test = read(root / "src/tests/test_config.c")
-    require("Retired background skill-curator keys" in legacy_test, "legacy-config-test", "test marker")
-    require("curator_interval_hours" in legacy_test and "curator:" in legacy_test,
-            "legacy-config-test", "exact retired nesting")
-    require("g_config_strict = 1" in legacy_test, "legacy-config-test", "strict-mode compatibility")
 
     disposition_path = root / DISPOSITION
     try:

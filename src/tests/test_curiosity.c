@@ -25,7 +25,7 @@ static void setup(void)
 }
 
 /* Point config at a temp dir this test owns and write the keys the case needs.
- * memory_maintenance_maybe_run reads live config rather than taking a config_t,
+ * memory_maintenance_maybe_run reads live config rather than taking a legacy_config_record,
  * so a case that does not write its own precondition would silently inherit the
  * developer's real aimee.yaml and stop testing what it names. Uses a per-pid
  * path rather than mkdtemp() on a static buffer — mkdtemp rewrites its XXXXXX

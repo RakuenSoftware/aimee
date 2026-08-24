@@ -78,7 +78,7 @@ static void test_redaction(void)
 }
 
 /* computer_use_policy_from_config reads live config rather than taking a
- * config_t, so the projection this case checks has to be written to a config
+ * legacy_config_record, so the projection this case checks has to be written to a config
  * file the test owns — a hand-built struct no longer reaches the function. */
 static void write_test_config(const char *yaml)
 {

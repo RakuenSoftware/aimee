@@ -16,6 +16,7 @@
 #include "evidence_vectors.h"
 #include "learning_synth_ops.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include "support/embedding_literal.h"
 #include "../kb/kb_learning_version.h"
 
 static void open_db(void)
@@ -33,7 +34,9 @@ static void seed(char *id_out, size_t id_len)
    assert(db2_artifact_write(id, "feedback_negative", "proposed", "user", "u", "u", 1.0,
                              "{\"content\":\"x\"}") == 0);
    assert(db2_evidence_enqueue(id, "evidence") == 0);
-   assert(db2_evidence_store_vector(id, "evidence", "[0.1,0.2]") == 0); /* op -> ok */
+   char vec[EMBEDDING_LITERAL_MAX];
+   assert(db2_evidence_store_vector(id, "evidence", embedding_literal(vec, sizeof(vec), 0.5)) ==
+          0); /* op -> ok */
    assert(db2_synth_enqueue(id) == 0);
    assert(db2_synth_mark_done(id) == 0); /* op -> ok */
    if (id_out)
@@ -50,13 +53,16 @@ static void test_store_vector_idempotent(void)
           0);
    assert(db2_evidence_enqueue(id, "evidence") == 0);
 
-   assert(db2_evidence_store_vector(id, "evidence", "[0.1,0.2]") == 0);
-   assert(db2_evidence_store_vector(id, "evidence", "[0.3,0.4]") == 0); /* re-embed */
+   char first[EMBEDDING_LITERAL_MAX], second[EMBEDDING_LITERAL_MAX];
+   embedding_literal(first, sizeof(first), 0.5);
+   embedding_literal(second, sizeof(second), 0.25);
+   assert(db2_evidence_store_vector(id, "evidence", first) == 0);
+   assert(db2_evidence_store_vector(id, "evidence", second) == 0); /* re-embed */
 
    db2_evidence_vector_row_t rows[8];
    int got = db2_evidence_vectors_list(rows, 8);
-   assert(got == 1);                                    /* one row, not two */
-   assert(strcmp(rows[0].embedding, "[0.3,0.4]") == 0); /* latest wins */
+   assert(got == 1);                               /* one row, not two */
+   assert(strcmp(rows[0].embedding, second) == 0); /* latest wins */
 
    printf("  test_store_vector_idempotent: PASS\n");
 }

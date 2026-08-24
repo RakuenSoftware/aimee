@@ -206,12 +206,13 @@ void memory_query_rewrite(const char *query, memory_query_rewrite_t *out)
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out)
 {
-   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
+   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id,
+                           MEMORY_AUTHORITY_MODEL, out);
 }
 
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
                      const char *use_cases, double confidence, const char *session_id,
-                     memory_t *out)
+                     memory_authority_t authority, memory_t *out)
 {
    (void)tier;
    (void)kind;
@@ -220,6 +221,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    (void)use_cases;
    (void)confidence;
    (void)session_id;
+   (void)authority;
    if (out)
       memset(out, 0, sizeof(*out));
    return -1;

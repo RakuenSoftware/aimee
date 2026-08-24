@@ -44,7 +44,7 @@ Only the structural finding below survives.
 
 ## Audit entry
 
-- **Scope:** `src/modules/config/config.h` (the `config_t` struct),
+- **Scope:** `src/modules/config/config.h` (the `legacy_config_record` struct),
   `src/modules/config/config_fields.c` (`config_fields[]`),
   `src/modules/config/config.c` (`config_schema[]` + `config_set_defaults` + the inline
   parse blocks), `src/modules/config/config_save.c` (the per-field writers).

@@ -68,7 +68,7 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
  * The default/balanced arm leaves config unchanged. */
 /* Effective thresholds: configured value, clamped when the guardrail_strictness
  * bandit arm is strict. Replaces gsem_apply_strictness_arm, which mutated a
- * caller-owned config_t in place. */
+ * caller-owned legacy_config_record in place. */
 double gsem_effective_warn_threshold(void);
 double gsem_effective_prompt_threshold(void);
 double gsem_effective_block_threshold(void);

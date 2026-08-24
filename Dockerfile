@@ -13,7 +13,9 @@ WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
 COPY server-go/ ./
-RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module \
+    && CGO_ENABLED=0 go build -trimpath -o /out/aimee-module-config \
+         github.com/RakuenSoftware/aimee-module-config/runtime
 
 FROM debian:trixie-slim AS build
 
@@ -35,6 +37,7 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 COPY --from=module-go-build /out/aimee-module /tmp/aimee-module-go
+COPY --from=module-go-build /out/aimee-module-config /tmp/aimee-module-config-go
 ARG AIMEE_VERSION=""
 # Ship the tree-sitter extraction front-end: fetch + sha256-verify the pinned
 # grammars (scripts/fetch-treesitter.sh; git + network needed only in this trusted
@@ -52,8 +55,9 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
          --bundle /module-runtime --output /module-runtime/bin --placement kb \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
-         install -m 0755 /tmp/aimee-module-go \
-           "/module-runtime/bin/aimee-module-$module_id"; \
+         if [ "$module_id" = config ]; then module_bin=/tmp/aimee-module-config-go; \
+         else module_bin=/tmp/aimee-module-go; fi; \
+         install -m 0755 "$module_bin" "/module-runtime/bin/aimee-module-$module_id"; \
        done < /module-runtime/go.modules
 
 # pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,

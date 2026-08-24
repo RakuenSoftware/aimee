@@ -198,7 +198,7 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int already_registered = (add_rc == -2);
 
    /* Republish the live snapshot now instead of waiting for the server loop's
-    * config_reload_if_changed() tick. In the server, config_load() returns the
+    * config_reload_if_changed() tick. In the server, legacy_config_read() returns the
     * snapshot rather than disk, so until that tick a `workspace list` issued right
     * after this `workspace add` read a config without the new entry and reported
     * "No workspaces configured" — intermittently, depending on where the write

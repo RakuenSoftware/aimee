@@ -270,9 +270,11 @@ int db2_css_migration_assert_conventions(const char *project, const char *now_is
 {
    if (!project || !project[0])
       return -1;
-   /* Gate on the typed-fact master flag; off -> the degraded rules-doc is the
-    * spec and we assert nothing. This is what consumes typed_facts_enabled. */
-   if (!config_css_style_graph_enabled() || !config_typed_facts_enabled())
+   /* Only the style-graph flag gates this now. It used to require
+    * config.typed_facts_enabled as well -- a master gate that defaulted off, so
+    * on a default install this asserted nothing. The typed-fact layer is
+    * unconditional. */
+   if (!config_css_style_graph_enabled())
       return 0;
 
    void *conn = db2_conn();

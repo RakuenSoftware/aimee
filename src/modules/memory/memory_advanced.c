@@ -292,6 +292,12 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    memory_t old_mem;
    if (memory_get(old_id, &old_mem) != 0)
       return -1;
+   char epistemic_kind[32] = "world_fact";
+   (void)db2_memory_epistemic_kind(old_id, epistemic_kind, sizeof(epistemic_kind));
+   if (strcmp(epistemic_kind, "episode") == 0 || strcmp(epistemic_kind, "experience") == 0)
+      return -2; /* immutable observation: caller must offer annotation */
+   if (strcmp(epistemic_kind, "instruction") == 0 || strcmp(epistemic_kind, "policy") == 0)
+      return -3; /* normative content is revoked, never silently corrected */
 
    int version = db2_memory_count_versions(old_mem.key) + 1;
 
@@ -303,8 +309,9 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    if (db2_memory_set_versioned_key(old_id, versioned_key, ts) != 0)
       return -1;
 
-   int rc = memory_insert(old_mem.tier, old_mem.kind, old_mem.key, new_content, confidence,
-                          session_id, out);
+   int rc = memory_insert_epistemic_ex(old_mem.tier, old_mem.kind, epistemic_kind, old_mem.key,
+                                       new_content, "", confidence, session_id,
+                                       MEMORY_AUTHORITY_MODEL, out);
    if (rc != 0)
       return -1;
 

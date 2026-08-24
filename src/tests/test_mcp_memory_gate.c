@@ -168,9 +168,49 @@ static void test_no_gate_is_read_only(void)
    printf("  PASS: no memory gate is satisfied by a read-only caller\n");
 }
 
+/* Capability answers "may they", attestation answers "who are they", and the two
+ * memory verbs that cannot be undone need the second question asked as well.
+ *
+ * CAP_MEMORY_ADMIN sits inside CAPS_AUTHENTICATED, so a bearer clears it — over
+ * TCP too, under remote_writes=DATA/FULL. That is the right answer for "may this
+ * caller delete", and the wrong one for "is this caller the user", which is what
+ * decides whether memory.delete destroys the row or retires it and whether a
+ * stored note may later mint Class-A facts. The person is the ACCOUNT. */
+static void test_authenticated_identity_is_not_capability(void)
+{
+   /* Every account form is a person, and none of them names its transport. A
+    * host account PAM accepted, an OIDC subject, an enrolled client cert and a
+    * webuser are the same answer to "who is this" whichever socket carried the
+    * request. */
+   assert(server_account_is_person("alice") == 1);        /* PAM host account */
+   assert(server_account_is_person("oidc:sub-123") == 1); /* OIDC subject */
+   assert(server_account_is_person("cert:thin-client") == 1);
+   assert(server_account_is_person("webuser:alice") == 1);
+
+   /* A bare bearer authorizes the call but names nobody, so it cannot speak as
+    * the user. Empty is also the zero value: a missed hop never becomes one. */
+   assert(server_account_is_person("") == 0);
+   assert(server_account_is_person(NULL) == 0);
+
+   assert(server_account_memory_authority("alice") == MEMORY_AUTHORITY_USER);
+   assert(server_account_memory_authority("oidc:sub-123") == MEMORY_AUTHORITY_USER);
+   /* The regression this replaces: an mTLS client was MODEL purely because its
+    * bytes arrived over TCP, while aimee-kb called the same caller a person. */
+   assert(server_account_memory_authority("cert:thin-client") == MEMORY_AUTHORITY_USER);
+   assert(server_account_memory_authority("") == MEMORY_AUTHORITY_MODEL);
+   assert(server_account_memory_authority(NULL) == MEMORY_AUTHORITY_MODEL);
+
+   /* The point of the split: a caller can hold the destructive capability and
+    * still not be a person, which is exactly the case the mapping must catch. */
+   assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) != 0);
+   assert(server_account_is_person("") == 0);
+   printf("  PASS: authenticated account is asked separately from capability\n");
+}
+
 int main(void)
 {
    printf("mcp_memory_gate:\n");
+   test_authenticated_identity_is_not_capability();
    test_verb_methods();
    test_verb_grades_are_what_the_fix_intended();
    test_maintain_prune_requires_admin();

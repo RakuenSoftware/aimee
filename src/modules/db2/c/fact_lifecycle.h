@@ -27,12 +27,25 @@ extern "C"
 #define FACT_CLASS_B "B" /* model-inferred, ontology-consistent; 0.6-0.8 */
 #define FACT_CLASS_C "C" /* model speculation / novel rel_type; 0.4; expires */
 
-   /* Write / correction authority. A user assertion always wins (§4 R1-B1). */
+   /* Write / correction authority. A user assertion always wins (§4 R1-B1).
+    *
+    * MODEL is 0 so that an omitted, zero-initialized, or un-established authority
+    * is the safe one. This is never something a request may name for itself: it
+    * is derived from the caller's authentication (the attested transport at the
+    * server, the authenticated actor at the kb) and, where the payload is text
+    * someone wrote, from the provenance recorded when that text was stored. */
    typedef enum
    {
       FACT_AUTHORITY_MODEL = 0,
       FACT_AUTHORITY_USER = 1,
    } fact_authority_t;
+
+   /* The authority facts mined out of stored text may claim, from the row's
+    * memories.provenance_category. Exactly "user_stated" earns USER; every other
+    * value — agent_message, web, document, tool, delegate, an unknown label, NULL
+    * or empty — is MODEL. Fail-closed by construction: the question is "did the
+    * user say this", and anything that is not a recorded yes is a no. */
+   fact_authority_t fact_authority_from_provenance(const char *provenance_category);
 
    /* Default numeric confidence for a class string (A=1.0, B=0.6, C=0.4; any
     * other / NULL -> 0.4, the conservative floor). */

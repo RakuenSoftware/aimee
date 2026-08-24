@@ -12,10 +12,19 @@
     },
     {
       "id": "config",
-      "execution": "core",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 2,
       "placements": [
         "server",
         "kb"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "config-store",
+          "event_kind": 4609
+        }
       ]
     },
     {
@@ -56,7 +65,8 @@
       "runtime": "go",
       "principal_ref": 7,
       "placements": [
-        "server"
+        "server",
+        "kb"
       ],
       "stages": [
         {
@@ -763,6 +773,7 @@
         "server"
       ],
       "request": [
+        4609,
         6657,
         6678,
         9474,

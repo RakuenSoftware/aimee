@@ -48,7 +48,7 @@ int platform_random_hex(char *out, size_t hex_len)
 }
 
 /* deploy_apply asks config_present() then config_emit_deploy_env_current(); the
- * config_load + config_emit_deploy_env pair these replace behaved the same way. */
+ * legacy_config_read + config_emit_deploy_env pair these replace behaved the same way. */
 int config_present(void)
 {
    return 1;
