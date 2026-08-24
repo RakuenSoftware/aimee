@@ -563,3 +563,51 @@ left implicit:**
   policy function already takes explicit bounds (`learning_gate_check_with`), so
   promoting them to config fields is mechanical — but it touches the generated
   accessor set and its drift check, which is its own change.
+
+## Delivery record — the producing halves (2026-08-24)
+
+S4, S5 and S6 each shipped with the *consuming* half built and the *producing*
+half absent. Each was correct in unit tests and inert in a deployment: nothing
+wrote a fate, so regret was permanently zero and the detector bar never moved;
+no probe was installed, so the backlog drain refused to run; no sampler was
+registered, so arm selection always fell back to the default. That has been
+closed, and proving it in a real stack found a defect underneath.
+
+**The defect.** Signal capture is served by `aimee-kb`, because that is where
+the learning tables live. The router it calls needs a signal classifier to
+decide which sinks a signal reaches, and **only `aimee-server` ever registered
+one**. In the KB the pointer was null, so every signal was refused with a single
+WARN while the route answered `200` carrying an error document and wrote
+nothing. Signal ingest through the KB had never worked — which meant S5's
+supersession producer, which lives on the router's commit path, could not fire
+in production however correct its own code was.
+
+It is the same shape as the gap `scripts/check-module-placement.py` exists for:
+a stage a daemon needs, served by a module not placed in it, failing as
+TRANSPORT and doing nothing loudly. It took the same fix that closed that gap
+for `memory` — place `learning` in the KB as well as the server
+(`src/modules/process-contracts.json`,
+`dependencies/aimee-repositories.lock.json`), add the adapter and register it
+(`src/kb/kb_module_stage_adapters.c`). The check now covers this stage, so it
+cannot reopen silently.
+
+**What each producer now does.**
+
+| Slice | Producer | Where |
+| --- | --- | --- |
+| S5 | a later commit to a target marks the earlier one `superseded`, unasked | `learning_mark_superseded` in `src/modules/learning/learning_router.c` |
+| S5 | rejecting a committed proposal records `reverted` | `learning_reject_proposal`, same file |
+| S5 | an operator enters a verdict the router cannot infer | `aimee learning fate <id> <verdict>` |
+| S6 | the service samples and answers with a declared arm | `kb_policy_sampler` / `kb_handle_learning_policy_select` in `src/kb/kb_service.c` |
+| S4 | a real evidence probe backs the backlog drain | `kb_curiosity_probe`, registered in `src/kb/kb_service.c` |
+
+Verified on a full stack — both services, real PostgreSQL, the learning module
+attached to the KB bus — with every effect read back through `psql` rather than
+from the process that wrote it. See
+[the validation report](../../validation/recursive-self-improvement-producers-2026-08-24.md).
+
+**What this run does not prove.** The S4 pass resolved nothing, because the
+seeded gaps are genuinely uncovered — that proves the probe runs and reports
+honestly, not that it closes a gap when evidence exists. The S6 arm came back
+as the default; the sampler answering is what was inert before, and selection
+under reward pressure remains covered by unit tests only.
