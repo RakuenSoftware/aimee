@@ -935,6 +935,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
+    ${AIMEE_SRC_DIR}/cli_v1_routes_f.c
     ${AIMEE_SRC_DIR}/cli_argspec.c
     ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
@@ -1053,6 +1054,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
+    ${AIMEE_SRC_DIR}/cli_v1_routes_f.c
     ${AIMEE_SRC_DIR}/cli_argspec.c
     ${AIMEE_SRC_DIR}/server/agent_admission.c
     ${AIMEE_SRC_DIR}/server/provider_catalog.c
