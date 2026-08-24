@@ -40,6 +40,7 @@
  */
 
 #include "db1_client/db1.h"
+#include "support/store_module_fixture.h"
 #include "kb_mgmt_jwks_publication.h"
 #include "kb_mgmt_token_public.h"
 #include "kb_mgmt_token_roots_provision.h"
@@ -233,10 +234,33 @@ static int cmd_provision(const char *bundle_path, const char *key_path,
       server that key and quietly invert the assertion it is about to make. */
    if (seed_store)
    {
+      /* THIS PROCESS BRINGS ITS OWN STORE UP, and that is not a shortcut around
+         the daemon -- it is the only thing that can work.
+
+         The store is a module reached over a bus, and obs_bus LISTENS for
+         modules rather than dialling one: a bus belongs to the process that
+         hosts it. So this tool cannot borrow the daemon's store however close
+         the two are, and every call it made without a store of its own came
+         back CAPABILITY_ABSENT -- which the rig reported as "the store refused
+         the signed JWKS envelope", when nothing had refused anything and there
+         was nothing there to refuse.
+
+         What makes it the right seed anyway is that both stores are the SAME
+         PostgreSQL: AIMEE_STORE_URL. The row this writes is the row the daemon
+         reads. Before the store moved out of process, this wrote it by opening
+         a SQLite file the daemon would later open too, which is the same
+         arrangement one layer down. */
+      if (!store_module_fixture_available())
+         return fail("provisioning needs the store: set AIMEE_STORE_URL");
+      store_module_fixture_start();
       fetch_ctx_t ctx = {record.envelope, record.envelope_len};
-      if (server_mgmt_jwks_cache_refresh(bundle, bundle_n, now, fetch_envelope, &ctx) !=
-          SERVER_MGMT_JWKS_CACHE_OK)
+      server_mgmt_jwks_cache_result_t seeded =
+          server_mgmt_jwks_cache_refresh(bundle, bundle_n, now, fetch_envelope, &ctx);
+      if (seeded != SERVER_MGMT_JWKS_CACHE_OK)
+      {
+         store_module_fixture_stop();
          return fail("the store refused the signed JWKS envelope");
+      }
    }
 
    /* Prove the server's own read path accepts what we just wrote, here, rather
@@ -244,13 +268,24 @@ static int cmd_provision(const char *bundle_path, const char *key_path,
     * time — that failure mode cost this branch an evening already. */
    char loaded_bundle[SERVER_MGMT_JWKS_BUNDLE_MAX], jwks[SERVER_MGMT_JWKS_BYTES_MAX];
    size_t loaded_n = 0, jwks_n = 0;
-   if (server_mgmt_jwks_trust_bundle_load(bundle_path, loaded_bundle, sizeof(loaded_bundle),
-                                          &loaded_n) != 0)
-      return fail("the server's loader rejected the trust bundle we just wrote");
-   if (server_mgmt_jwks_cache_load(loaded_bundle, loaded_n, now, jwks, sizeof(jwks), &jwks_n) !=
-           SERVER_MGMT_JWKS_CACHE_OK ||
-       jwks_n == 0)
-      return fail("the server's loader rejected the envelope we just stored");
+   int reject = server_mgmt_jwks_trust_bundle_load(bundle_path, loaded_bundle,
+                                                   sizeof(loaded_bundle), &loaded_n) != 0;
+   const char *why = reject ? "the server's loader rejected the trust bundle we just wrote" : NULL;
+   /* The read-back goes through the store as well, so it happens while the
+      module is still up. */
+   if (!reject &&
+       (server_mgmt_jwks_cache_load(loaded_bundle, loaded_n, now, jwks, sizeof(jwks), &jwks_n) !=
+            SERVER_MGMT_JWKS_CACHE_OK ||
+        jwks_n == 0))
+      why = "the server's loader rejected the envelope we just stored";
+
+   /* Stopped whatever the outcome: the daemon holds the row from here, and a
+      module left running would keep a second store attached to the same
+      database for the rest of the rig. */
+   if (seed_store)
+      store_module_fixture_stop();
+   if (why)
+      return fail(why);
 
    char kid[KB_MGMT_TOKEN_KID_MAX + 1];
    if (kb_mgmt_token_kid(modulus, sizeof(modulus), kid, sizeof(kid)) != 0)

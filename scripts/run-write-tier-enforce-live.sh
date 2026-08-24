@@ -97,6 +97,36 @@ TOKEN_KEY="$work/token.pem"
 pg_indb()     { pg_db -c "$1"; }
 pg_indb_val() { pg_val "$1"; }
 
+# --- the management trust chain -------------------------------------------
+# Seeded BEFORE the server starts, and once again for the original reason: the
+# server reads the envelope at request time, and an absent one denies every
+# token as INVALID -- which looks identical to a forged token and would make
+# this rig "pass" for the wrong reason.
+#
+# It briefly ran AFTER the server, on the theory that the store had to be up
+# first. It does, and the daemon's store cannot be the one: obs_bus LISTENS for
+# modules rather than dialling one, so a bus belongs to the process hosting it
+# and this tool can never borrow the daemon's. It brings its own store module up
+# instead, against the same PostgreSQL, so the row it writes is the row the
+# daemon reads. AIMEE_TEST_MODULE_BIN is how the fixture finds the module.
+#
+# Which means the ordering constraint is gone rather than satisfied: nothing
+# here depends on the daemon, so this goes back where it reads correctly.
+step "Provisioning the JWKS trust chain (real envelope, real signature)"
+export AIMEE_TEST_MODULE_BIN="$PWD/src/build/obj/aimee-module"
+# `make all` does not build the module -- its rule lives in tests/Rules.mk --
+# and both this step and live_env_start_module need it, so build it here rather
+# than making the CI job remember.
+[ -x "$AIMEE_TEST_MODULE_BIN" ] || make -C src build/obj/aimee-module >/dev/null 2>&1 || true
+[ -x "$AIMEE_TEST_MODULE_BIN" ] || {
+  echo "enforce-live: no module binary at $AIMEE_TEST_MODULE_BIN" >&2
+  exit 2
+}
+kid=$(./write-tier-enforce-live provision \
+        --bundle "$BUNDLE" --key "$TOKEN_KEY") \
+  || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
+echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
+
 # --- kb --------------------------------------------------------------------
 # The boot recipe (config shape, TCP DSN, health poll) is the shared one; only the
 # trust chain above is this rig's own.
@@ -109,37 +139,6 @@ live_env_start_kb
 # nothing to do with the token.
 export AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE="$BUNDLE"
 live_env_start_server
-
-# --- the management trust chain -------------------------------------------
-# AFTER the server, which is what changed. This used to be seeded before it,
-# into a SQLite file ($AIMEE_HOME/aimee.db) the server would later open
-# directly. The store is a Go module now and is reached over the bus, and the
-# bus socket is the SERVER's -- so the store cannot be running until the server
-# is, and this step cannot run before either of them. Seeding it earlier is what
-# produced "DB1 mgmt jwks is unreachable" followed by "the store refused the
-# signed JWKS envelope": nothing had refused anything, there was no store yet.
-#
-# Still before the first token is minted, which is the ordering that actually
-# matters. The server reads the envelope at REQUEST time, so what must hold is
-# that it is stored before a request needs it -- an absent one denies every
-# token as INVALID, which looks identical to a forged token and would make this
-# rig "pass" for the wrong reason.
-#
-# The server logs one startup error about the trust bundle being unreadable,
-# and it is accurate: the file does not exist yet, and provision writes it a
-# second later. Nothing consumes the bundle until a request does, and the
-# management surface validates only the SHAPE of the path at startup.
-#
-# One provision call, not two. cmd_provision generates a fresh RSA authority key
-# every time it runs, so splitting it into "write the bundle" and "seed the
-# store" would leave the bundle pinning a key the stored envelope does not
-# carry.
-step "Provisioning the JWKS trust chain (real envelope, real signature)"
-kid=$(./write-tier-enforce-live provision \
-        --bundle "$BUNDLE" --key "$TOKEN_KEY") \
-  || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
-echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
-
 
 # --- helpers ---------------------------------------------------------------
 # A FRESH jti per call, from entropy rather than a counter. `t=$(mint data)` runs

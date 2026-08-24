@@ -1576,6 +1576,9 @@ oidc-login-live: ../oidc-login-live
                             $(OBJDIR)/server/oauth_pkce.o \
                             $(OBJDIR)/modules/vault/vault_crypto.o \
                             $(DB1_CLIENT_OBJS) $(OBJDIR)/cJSON.o \
+                            $(OBJDIR)/tests/support/store_module_fixture.o \
+                            $(OBJDIR)/config_client_contract.o $(OBJDIR)/aimee_home.o \
+                            $(PLATFORM_BASIC_OBJS) \
                             $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBS_BUS_RUNTIME_OBJ) $(CORE_EVENT_BUS_LIB)
 	$(CC) -o $@ $^ $(L_SERVER)
 
