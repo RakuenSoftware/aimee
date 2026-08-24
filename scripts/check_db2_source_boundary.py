@@ -854,13 +854,21 @@ def check(root: Path, baseline_path: Path = BASELINE) -> dict[str, int]:
 
 
 def _head_revision(root: Path) -> str:
+    """The commit the source boundary last moved at, not the tip.
+
+    HEAD would make this baseline dirty after every commit, including one that
+    only rewrites the baseline. A diff that always appears carries no
+    information, so a real drift -- a hand-edited inventory -- would arrive
+    looking exactly like the guaranteed noise.
+    """
     result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+        ["git", "log", "-1", "--format=%H", "--", str(BOUNDARY)], cwd=root, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     revision = result.stdout.strip()
     if result.returncode != 0 or not REVISION.fullmatch(revision):
-        fail("source-revision", result.stderr.strip() or "cannot resolve HEAD")
+        fail("source-revision",
+             result.stderr.strip() or f"cannot resolve the last commit touching {BOUNDARY}")
     return revision
 
 

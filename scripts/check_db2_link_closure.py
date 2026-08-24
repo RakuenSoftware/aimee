@@ -1433,7 +1433,15 @@ def build_contract(root: Path) -> dict[str, object]:
             "disposition": disposition,
             "evidence": evidence,
         })
-    revision = _run(["git", "rev-parse", "HEAD"], root).strip()
+    # The commit the SOURCES last moved at, not the tip.
+    #
+    # HEAD makes this file dirty after every commit -- including a commit that
+    # only rewrites this file -- because the fingerprint below covers the
+    # revision. A diff that always appears carries no information, so a real
+    # drift arrives looking exactly like the guaranteed noise.
+    revision = _run(
+        ["git", "log", "-1", "--format=%H", "--",
+         *sources, *(str(unit["path"]) for unit in support_units)], root).strip()
     if not REVISION.fullmatch(revision):
         fail("contract-revision", "git did not return a lowercase 40-hex revision")
     result: dict[str, object] = {
