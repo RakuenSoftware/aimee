@@ -43,12 +43,11 @@ static void lrn_load_proposal_row(aimee_pg_stmt_t *st, learning_proposal_t *out)
 static void lrn_load_observation_row(aimee_pg_stmt_t *st, learning_observation_t *out)
 {
    memset(out, 0, sizeof(*out));
-   lrn_copy_text(out->observation_id, sizeof(out->observation_id), aimee_pg_column_text(st, 0),
-                 "");
+   lrn_copy_text(out->observation_id, sizeof(out->observation_id), aimee_pg_column_text(st, 0), "");
    lrn_copy_text(out->scope_kind, sizeof(out->scope_kind), aimee_pg_column_text(st, 1), "");
    lrn_copy_text(out->scope_id, sizeof(out->scope_id), aimee_pg_column_text(st, 2), "");
-   lrn_copy_text(out->observation_type, sizeof(out->observation_type),
-                 aimee_pg_column_text(st, 3), "");
+   lrn_copy_text(out->observation_type, sizeof(out->observation_type), aimee_pg_column_text(st, 3),
+                 "");
    lrn_copy_text(out->title, sizeof(out->title), aimee_pg_column_text(st, 4), "");
    lrn_copy_text(out->summary, sizeof(out->summary), aimee_pg_column_text(st, 5), "");
    lrn_copy_text(out->status, sizeof(out->status), aimee_pg_column_text(st, 6), "");
@@ -68,17 +67,16 @@ static void lrn_load_observation_row(aimee_pg_stmt_t *st, learning_observation_t
    lrn_copy_text(out->retired_at, sizeof(out->retired_at), aimee_pg_column_text(st, 17), "");
 }
 
-#define LRN_OBSERVATION_COLS                                                                     \
-   "observation_id,scope_kind,scope_id,observation_type,title,summary,status,confidence,"         \
-   "evidence_window_start,evidence_window_end,synthesis_policy_version,evidence_count,"          \
+#define LRN_OBSERVATION_COLS                                                                       \
+   "observation_id,scope_kind,scope_id,observation_type,title,summary,status,confidence,"          \
+   "evidence_window_start,evidence_window_end,synthesis_policy_version,evidence_count,"            \
    "independent_session_count,supersedes,superseded_by,created_at,refreshed_at,retired_at"
 
 static int lrn_observation_type_valid(const char *type)
 {
-   static const char *const types[] = {"recurring_failure", "failed_strategy",
-                                       "successful_recovery", "missing_precondition",
-                                       "tool_misuse", "environment_mismatch",
-                                       "unstable_procedure", NULL};
+   static const char *const types[] = {
+       "recurring_failure", "failed_strategy",      "successful_recovery", "missing_precondition",
+       "tool_misuse",       "environment_mismatch", "unstable_procedure",  NULL};
    if (!type)
       return 0;
    for (int i = 0; types[i]; i++)
@@ -90,19 +88,19 @@ static int lrn_observation_type_valid(const char *type)
 static int lrn_outcome_valid(const char *outcome)
 {
    return outcome && (strcmp(outcome, "unknown") == 0 || strcmp(outcome, "success") == 0 ||
-                       strcmp(outcome, "failure") == 0 || strcmp(outcome, "corrected") == 0 ||
-                       strcmp(outcome, "abandoned") == 0);
+                      strcmp(outcome, "failure") == 0 || strcmp(outcome, "corrected") == 0 ||
+                      strcmp(outcome, "abandoned") == 0);
 }
 
 static int lrn_event_in_scope(void *conn, int64_t source_event_id, const char *scope_kind,
                               const char *scope_id)
 {
    char err[LRN_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT 1 FROM interaction_event_embeddings"
-       " WHERE source_event_id=?1 AND scope_kind=?2 AND scope_id=?3",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT 1 FROM interaction_event_embeddings"
+                        " WHERE source_event_id=?1 AND scope_kind=?2 AND scope_id=?3",
+                        err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", source_event_id);
@@ -185,11 +183,12 @@ static int lrn_recompute_observation(void *conn, const char *observation_id)
    return rc;
 }
 
-int db2_learning_observation_refresh(
-    const char *observation_id, const char *scope_kind, const char *scope_id,
-    const char *observation_type, const char *title, const char *summary,
-    const char *policy_version, const learning_observation_evidence_input_t *evidence,
-    int evidence_count, const char *supersedes)
+int db2_learning_observation_refresh(const char *observation_id, const char *scope_kind,
+                                     const char *scope_id, const char *observation_type,
+                                     const char *title, const char *summary,
+                                     const char *policy_version,
+                                     const learning_observation_evidence_input_t *evidence,
+                                     int evidence_count, const char *supersedes)
 {
    const char *sk = scope_kind && scope_kind[0] ? scope_kind : "workspace";
    const char *si = scope_id ? scope_id : "";
@@ -267,11 +266,12 @@ int db2_learning_observation_refresh(
    }
    if (supersedes && supersedes[0])
    {
-      st = aimee_pg_prepare(conn,
-                            "UPDATE learning_observations SET superseded_by=?2,status='retired',"
-                            " retired_at=CASE WHEN retired_at='' THEN pg_now_text() ELSE retired_at END"
-                            " WHERE observation_id=?1 AND observation_id<>?2",
-                            err, sizeof(err));
+      st = aimee_pg_prepare(
+          conn,
+          "UPDATE learning_observations SET superseded_by=?2,status='retired',"
+          " retired_at=CASE WHEN retired_at='' THEN pg_now_text() ELSE retired_at END"
+          " WHERE observation_id=?1 AND observation_id<>?2",
+          err, sizeof(err));
       if (!st)
          goto done;
       aimee_pg_bind_text(st, "?1", supersedes);
@@ -329,7 +329,8 @@ int db2_learning_observation_refresh_recurrence(const char *observation_id, cons
        "         'recurrence-v1',pg_now_text(),pg_now_text())"
        " ON CONFLICT (observation_id) DO UPDATE SET title=EXCLUDED.title,summary=EXCLUDED.summary,"
        " synthesis_policy_version=EXCLUDED.synthesis_policy_version,refreshed_at=pg_now_text(),"
-       " status=CASE WHEN learning_observations.status='rejected' THEN 'rejected' ELSE 'candidate' END,"
+       " status=CASE WHEN learning_observations.status='rejected' THEN 'rejected' ELSE 'candidate' "
+       "END,"
        " retired_at=''";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, upsert, err, sizeof(err));
    if (!st)
@@ -380,7 +381,8 @@ int db2_learning_observation_refresh_recurrence(const char *observation_id, cons
        "   WHERE oe.observation_id=?1)>=5 THEN 0.95 ELSE 0.5+0.1*(SELECT COUNT(*)"
        "   FROM learning_observation_evidence oe WHERE oe.observation_id=?1) END,"
        " status=CASE WHEN status='rejected' THEN 'rejected'"
-       "   WHEN (SELECT COUNT(*) FROM learning_observation_evidence oe WHERE oe.observation_id=?1)>=3"
+       "   WHEN (SELECT COUNT(*) FROM learning_observation_evidence oe WHERE "
+       "oe.observation_id=?1)>=3"
        "    AND (SELECT COUNT(DISTINCT ie.session_id) FROM learning_observation_evidence oe"
        "      JOIN interaction_event_embeddings ie ON ie.source_event_id=oe.source_event_id"
        "      WHERE oe.observation_id=?1)>=2 THEN 'active' ELSE 'retired' END,"
@@ -412,8 +414,8 @@ int db2_learning_observation_get(const char *observation_id, learning_observatio
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "SELECT " LRN_OBSERVATION_COLS
-                            " FROM learning_observations WHERE observation_id=?1";
+   static const char *sql =
+       "SELECT " LRN_OBSERVATION_COLS " FROM learning_observations WHERE observation_id=?1";
    char err[LRN_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -429,9 +431,8 @@ int db2_learning_observation_get(const char *observation_id, learning_observatio
    return rc;
 }
 
-int db2_learning_observation_list(const char *status, const char *scope_kind,
-                                  const char *scope_id, int limit, learning_observation_t *out,
-                                  int max)
+int db2_learning_observation_list(const char *status, const char *scope_kind, const char *scope_id,
+                                  int limit, learning_observation_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
@@ -440,8 +441,7 @@ int db2_learning_observation_list(const char *status, const char *scope_kind,
       return -1;
    if (limit <= 0 || limit > max)
       limit = max;
-   static const char *sql = "SELECT " LRN_OBSERVATION_COLS
-                            " FROM learning_observations"
+   static const char *sql = "SELECT " LRN_OBSERVATION_COLS " FROM learning_observations"
                             " WHERE (?1='' OR status=?1) AND (?2='' OR scope_kind=?2)"
                             " AND (?3='' OR scope_id=?3) ORDER BY refreshed_at DESC LIMIT ?4";
    char err[LRN_ERRBUF] = "";
@@ -490,10 +490,9 @@ int db2_learning_observation_set_status(const char *observation_id, const char *
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql =
-       "UPDATE learning_observations SET status=?2,refreshed_at=pg_now_text(),"
-       " retired_at=CASE WHEN ?2='retired' THEN pg_now_text() ELSE '' END"
-       " WHERE observation_id=?1";
+   static const char *sql = "UPDATE learning_observations SET status=?2,refreshed_at=pg_now_text(),"
+                            " retired_at=CASE WHEN ?2='retired' THEN pg_now_text() ELSE '' END"
+                            " WHERE observation_id=?1";
    char err[LRN_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -524,8 +523,8 @@ int db2_learning_observations_reconcile(void)
    char(*ids)[64] = calloc((size_t)count, sizeof(*ids));
    if (!ids)
       return -1;
-   st = aimee_pg_prepare(conn, "SELECT observation_id FROM learning_observations",
-                         err, sizeof(err));
+   st =
+       aimee_pg_prepare(conn, "SELECT observation_id FROM learning_observations", err, sizeof(err));
    if (!st)
    {
       free(ids);
@@ -550,9 +549,8 @@ int db2_learning_application_record(const learning_application_event_t *event)
 {
    if (!event || !event->application_id[0] || event->source_event_id <= 0 ||
        !lrn_outcome_valid(event->outcome) || event->latency_ms < 0 || event->tool_count < 0 ||
-       event->turn_count < 0 || event->token_count < 0 ||
-       (event->rendered && !event->retrieved) || (event->selected && !event->rendered) ||
-       (event->applied && !event->selected))
+       event->turn_count < 0 || event->token_count < 0 || (event->rendered && !event->retrieved) ||
+       (event->selected && !event->rendered) || (event->applied && !event->selected))
       return -1;
    const char *sk = event->scope_kind[0] ? event->scope_kind : "workspace";
    if (!lrn_event_in_scope(db2_conn(), event->source_event_id, sk, event->scope_id))
@@ -655,14 +653,18 @@ int db2_learning_application_get(const char *application_id, learning_applicatio
    out->applied = aimee_pg_column_int(st, 12);
    lrn_copy_text(out->outcome, sizeof(out->outcome), aimee_pg_column_text(st, 13), "unknown");
    lrn_copy_text(out->failure_class, sizeof(out->failure_class), aimee_pg_column_text(st, 14), "");
-   lrn_copy_text(out->human_correction, sizeof(out->human_correction), aimee_pg_column_text(st, 15), "");
+   lrn_copy_text(out->human_correction, sizeof(out->human_correction), aimee_pg_column_text(st, 15),
+                 "");
    out->latency_ms = aimee_pg_column_int64(st, 16);
    out->tool_count = aimee_pg_column_int(st, 17);
    out->turn_count = aimee_pg_column_int(st, 18);
    out->token_count = aimee_pg_column_int64(st, 19);
-   lrn_copy_text(out->retrieved_refs, sizeof(out->retrieved_refs), aimee_pg_column_text(st, 20), "[]");
-   lrn_copy_text(out->rendered_refs, sizeof(out->rendered_refs), aimee_pg_column_text(st, 21), "[]");
-   lrn_copy_text(out->selected_refs, sizeof(out->selected_refs), aimee_pg_column_text(st, 22), "[]");
+   lrn_copy_text(out->retrieved_refs, sizeof(out->retrieved_refs), aimee_pg_column_text(st, 20),
+                 "[]");
+   lrn_copy_text(out->rendered_refs, sizeof(out->rendered_refs), aimee_pg_column_text(st, 21),
+                 "[]");
+   lrn_copy_text(out->selected_refs, sizeof(out->selected_refs), aimee_pg_column_text(st, 22),
+                 "[]");
    lrn_copy_text(out->applied_refs, sizeof(out->applied_refs), aimee_pg_column_text(st, 23), "[]");
    aimee_pg_finalize(st);
    return 0;

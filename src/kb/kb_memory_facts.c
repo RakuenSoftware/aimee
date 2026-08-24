@@ -68,10 +68,10 @@
 #define MF_SYSTEM_PROMPT_TMPL                                                                      \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
-   "\"confidence\":0.0,\"source_start\":0,\"source_end\":1}]}. source_start and "              \
-   "source_end are exact zero-based UTF-8 byte offsets into the note, with source_end "             \
+   "\"confidence\":0.0,\"source_start\":0,\"source_end\":1}]}. source_start and "                  \
+   "source_end are exact zero-based UTF-8 byte offsets into the note, with source_end "            \
    "exclusive, covering the smallest passage that directly supports that fact. Every fact "        \
-   "is a stable subject-relation-object triple "                                                    \
+   "is a stable subject-relation-object triple "                                                   \
    "grounded strictly in the note. For relation, choose the single nearest fit "                   \
    "from these canonical predicates when one reasonably applies: %s. If NONE fits, "               \
    "emit a concise snake_case predicate of your own (e.g. drives, founded, "                       \

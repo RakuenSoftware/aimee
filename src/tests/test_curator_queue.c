@@ -76,18 +76,18 @@ static void test_memory_fact_evidence_spans(void)
 {
    const char *content = "prefix exact support suffix";
    char span[64], hash1[65], hash2[65];
-   assert(kb_memory_fact_evidence_span(content, 7, 20, span, sizeof(span), hash1,
-                                       sizeof(hash1)) == 0);
+   assert(kb_memory_fact_evidence_span(content, 7, 20, span, sizeof(span), hash1, sizeof(hash1)) ==
+          0);
    assert(strcmp(span, "bytes:7-20") == 0 && strlen(hash1) == 64);
    assert(kb_memory_fact_evidence_span("exact support", 0, 13, span, sizeof(span), hash2,
                                        sizeof(hash2)) == 0);
    assert(strcmp(hash1, hash2) == 0); /* region hash, independent of surrounding note */
-   assert(kb_memory_fact_evidence_span(content, -1, 5, span, sizeof(span), hash1,
-                                       sizeof(hash1)) == -1);
-   assert(kb_memory_fact_evidence_span(content, 20, 7, span, sizeof(span), hash1,
-                                       sizeof(hash1)) == -1);
-   assert(kb_memory_fact_evidence_span(content, 0, 999, span, sizeof(span), hash1,
-                                       sizeof(hash1)) == -1);
+   assert(kb_memory_fact_evidence_span(content, -1, 5, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+   assert(kb_memory_fact_evidence_span(content, 20, 7, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+   assert(kb_memory_fact_evidence_span(content, 0, 999, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
 }
 
 static void test_provider_outage_arms_global_backoff(void)
