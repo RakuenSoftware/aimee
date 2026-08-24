@@ -30,6 +30,14 @@ GO_PROCESSES = {
     "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
     "runtime-web", "control-web", "benchmarks", "sandbox", "economizer", "postgres",
     "control-plane",
+    # db2's module PROCESS is Go; its data layer is still C and stays that way.
+    # 168 files outside the module call db2_* in-process and the KB links that
+    # library, so none of them goes through a module process and none notices.
+    # What moved is which binary answers db2's eight event kinds on the bus --
+    # and seven of those eight were answered by nobody before, because the C
+    # process declared one stage while the Go implementation had all 445
+    # operations.
+    "db2",
 }
 # Executables that host a process other than the module runtime's multicall binary.
 HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}
@@ -147,6 +155,16 @@ def validate() -> dict[str, dict[str, object]]:
             if ("c_build" in descriptor) != (runtime == "c"):
                 raise ContractError(
                     f"{component_id}: c_build must exist exactly for a C process runtime")
+            # A Go process may declare c_test_build: the build a HARNESS uses,
+            # for a module whose process is Go and whose library is still C.
+            # db2 is the case -- the replay is the only test that proves a DB2
+            # statement parses and runs, and it drives that library through a C
+            # module process. Named apart from c_build so that finding c_build
+            # on a Go module stays a defect.
+            if "c_test_build" in descriptor and runtime != "go":
+                raise ContractError(
+                    f"{component_id}: c_test_build belongs to a Go process whose "
+                    "library is still C")
             principal_ref = raw["principal_ref"]
             expected_ref = declared_refs[component_id]
             if type(principal_ref) is not int or principal_ref != expected_ref or principal_ref in refs:

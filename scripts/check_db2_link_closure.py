@@ -1344,7 +1344,10 @@ def descriptor_support_policy(root: Path, descriptor: object) -> list[dict[str, 
     )
     if disk_headers != expected_headers:
         fail("support-header-closure", f"expected={expected_headers}, actual={disk_headers}")
-    c_build = descriptor.get("c_build")
+    # c_test_build since db2's PROCESS became Go: its data layer is still C --
+    # 168 files call db2_* in-process -- and the harnesses that drive that
+    # library build from the same policy under a name that says it is for them.
+    c_build = descriptor.get("c_build") or descriptor.get("c_test_build")
     if not isinstance(c_build, dict) or not isinstance(c_build.get("include_roots"), list):
         fail("support-build", "DB2 descriptor has no C include-root policy")
     missing_roots = sorted(set(SUPPORT_INCLUDE_ROOTS) - set(c_build["include_roots"]))

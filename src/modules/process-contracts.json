@@ -650,7 +650,7 @@
     {
       "id": "db2",
       "execution": "process",
-      "runtime": "c",
+      "runtime": "go",
       "principal_ref": 29,
       "placements": [
         "kb"
@@ -756,6 +756,17 @@
       "id": "control-plane-postgres",
       "principal_ref": 69,
       "executable": "/usr/local/libexec/aimee-modules/aimee-module-control-plane",
+      "placements": [
+        "kb"
+      ],
+      "request": [
+        11266
+      ]
+    },
+    {
+      "id": "db2-postgres",
+      "principal_ref": 70,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-db2",
       "placements": [
         "kb"
       ],

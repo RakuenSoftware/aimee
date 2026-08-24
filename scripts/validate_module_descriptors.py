@@ -278,8 +278,13 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     # c_init names a symbol the module's process must call before it serves.
     # Optional, because most modules hold no process-wide state; declared here
     # rather than inferred, so "this module needs opening" is reviewable.
+    # c_test_build is c_build for a module whose PROCESS is Go and whose library
+    # is still C: db2, where 168 files call db2_* in-process and two harnesses
+    # drive that library through a C module process. Named apart from c_build so
+    # that finding c_build on a Go module stays a defect, and validated with the
+    # same shape below because it IS the same shape.
     allowed_keys = (required_keys | set(OWNERSHIP_FIELDS)
-                    | {"ownership_complete", "c_build", "c_init"})
+                    | {"ownership_complete", "c_build", "c_test_build", "c_init"})
     if not required_keys <= set(value) or not set(value) <= allowed_keys:
         fail(
             "descriptor-keys",
@@ -339,13 +344,15 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     if "ownership_complete" in value and type(value["ownership_complete"]) is not bool:
         fail("ownership-complete-type", "ownership_complete must be boolean",
              "/ownership_complete")
-    if "c_build" in value:
-        build = value["c_build"]
+    for build_key in ("c_build", "c_test_build"):
+        if build_key not in value:
+            continue
+        build = value[build_key]
         if not isinstance(build, dict) or not C_BUILD_KEYS <= set(build) or \
                 not set(build) <= C_BUILD_KEYS | C_BUILD_OPTIONAL_KEYS:
             fail("c-build-shape",
-                 f"c_build keys must include {sorted(C_BUILD_KEYS)} and may add "
-                 f"{sorted(C_BUILD_OPTIONAL_KEYS)}", "/c_build")
+                 f"{build_key} keys must include {sorted(C_BUILD_KEYS)} and may add "
+                 f"{sorted(C_BUILD_OPTIONAL_KEYS)}", f"/{build_key}")
         for field in sorted(C_BUILD_KEYS):
             entries = build[field]
             if not isinstance(entries, list):

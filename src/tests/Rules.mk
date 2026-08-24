@@ -5239,14 +5239,16 @@ $(OBJDIR)/aimee-module-db1: $(DB1_MODULE_INPUTS)
 
 $(OBJDIR)/aimee-module-db2:
 	@rm -rf $(OBJDIR)/db2-module-bundle
-	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null
+	@python3 ../scripts/export_c_repositories.py --test-runtime db2 \
+	    --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-module-bundle --output $(abspath $(OBJDIR)) --placement kb >/dev/null
 
 # Replay cataloged inactive-family operations against the exact exported DB2
 # source closure without adding their grants to the production process contract.
 $(OBJDIR)/aimee-module-db2-replay: tests/support/db2_module_replay_main.c
 	@rm -rf $(OBJDIR)/db2-replay-bundle $(OBJDIR)/db2-replay-output
-	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-replay-bundle >/dev/null
+	@python3 ../scripts/export_c_repositories.py --test-runtime db2 \
+	    --runtime-bundle $(abspath $(OBJDIR))/db2-replay-bundle >/dev/null
 	@cp $< $(OBJDIR)/db2-replay-bundle/src/aimee-module-db2.c
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-replay-bundle --output $(abspath $(OBJDIR))/db2-replay-output --placement kb >/dev/null
 	@cp $(OBJDIR)/db2-replay-output/aimee-module-db2 $@

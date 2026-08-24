@@ -227,7 +227,9 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
             raise ExportError(f"{module_id}: descriptor field {key} must be a string array")
         result.extend(values)
-    build = descriptor.get("c_build")
+    # c_test_build is the same shape, declared by a module whose process is Go
+    # and whose library is still C. Only the harness path reaches here for one.
+    build = c_build_of(descriptor)
     if isinstance(build, dict):
         for header in c_generated_headers(module_id, build):
             entries = header["entries"]
@@ -241,7 +243,7 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
 def module_repository_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
     """Return owned files plus explicit non-owned standalone build inputs."""
     owned = module_owned_files(module_id, descriptor)
-    build = descriptor.get("c_build")
+    build = c_build_of(descriptor)
     dependencies = c_header_dependencies(module_id, build) if isinstance(build, dict) else []
     result = [*owned, *dependencies]
     if len(result) != len(set(result)):
@@ -399,6 +401,17 @@ def c_generated_headers(module_id: str, build: dict[str, object]) -> list[dict[s
     return result
 
 
+def c_build_of(descriptor: dict[str, object]) -> object:
+    """The C build for a module, whichever key declares it.
+
+    c_build belongs to a C process. c_test_build belongs to a module whose
+    PROCESS is Go and whose library is still C -- db2 -- and is reached only by a
+    harness that asks for a test runtime by name. One reader, because three
+    call sites that each pick a key are three chances to pick a different one.
+    """
+    return descriptor.get("c_build") or descriptor.get("c_test_build")
+
+
 def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
         list[str], list[str], list[str], list[dict[str, object]], list[str], list[str]]:
     """Return validated C sources, includes, definitions, codegen, pkg-config, and links."""
@@ -410,7 +423,7 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
         raise ExportError(f"{module_id}: C process sources must all be .c files")
     if c_sources != sorted(set(c_sources)):
         raise ExportError(f"{module_id}: C process sources must be sorted and unique")
-    build = descriptor.get("c_build")
+    build = c_build_of(descriptor)
     if not isinstance(build, dict) or not C_BUILD_KEYS <= set(build) or \
             not set(build) <= C_BUILD_KEYS | C_BUILD_OPTIONAL_KEYS:
         raise ExportError(f"{module_id}: C process must declare exact c_build fields")
@@ -742,7 +755,7 @@ serve={serve}
 """,
         )
         if runtime == "c":
-            build = descriptor.get("c_build")
+            build = c_build_of(descriptor)
             assert isinstance(build, dict)
             if c_generated_headers(module_id, build):
                 copy_file("scripts/generate_c_embedded_header.py", repository)
@@ -957,8 +970,20 @@ declared separately, copied at canonical paths, and bound into the source digest
     return pin
 
 
-def export_runtime_bundle(output_root: Path) -> int:
-    """Emit build inputs and admission policy without creating Git repositories."""
+def export_runtime_bundle(output_root: Path,
+                          test_runtimes: frozenset[str] = frozenset()) -> int:
+    """Emit build inputs and admission policy without creating Git repositories.
+
+    test_runtimes names components to emit a C runtime for even though they
+    deploy as Go. Empty by default, so the bundle the image builds from and the
+    bundle check_go_module_runtime_bundle validates are both untouched.
+
+    It exists for db2: the module process is Go and its data layer is still C,
+    because 168 files call db2_* in-process. The replay is the only test that
+    proves a DB2 statement parses and runs against a real database, and it
+    drives that library through a C module process. A runtime field should not
+    cost the tree its only real-SQL test.
+    """
     if output_root.exists():
         raise ExportError(f"refusing to overwrite existing output root: {output_root}")
     output_root.mkdir(parents=True)
@@ -988,7 +1013,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         runtime = contract["runtime"]
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
-        if runtime == "c":
+        if runtime == "c" or module_id in test_runtimes:
             sources, include_roots, definitions, generated, pkg_config, libraries = c_process_build(
                 module_id, descriptor
             )
@@ -1009,7 +1034,7 @@ def export_runtime_bundle(output_root: Path) -> int:
                 "pkg_config": pkg_config,
                 "system_libraries": libraries,
             }
-            header_dependencies = c_header_dependencies(module_id, descriptor["c_build"])
+            header_dependencies = c_header_dependencies(module_id, c_build_of(descriptor))
             if header_dependencies:
                 build_row["header_dependencies"] = header_dependencies
             if generated:
@@ -1131,6 +1156,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="emit process sources, placement manifests, and grants instead of Git repositories",
     )
     parser.add_argument(
+        "--test-runtime",
+        action="append",
+        metavar="MODULE",
+        help="emit a C runtime for MODULE even though it deploys as Go; for "
+             "harnesses that drive a C library whose module process is Go",
+    )
+    parser.add_argument(
         "--refresh-lock-root",
         type=Path,
         help="pin the lock to clean vVERSION tags in an existing repository set",
@@ -1154,7 +1186,8 @@ def main(argv: list[str] | None = None) -> int:
     output_root = (args.runtime_bundle or args.output_root).resolve()
     try:
         if args.runtime_bundle is not None:
-            count = export_runtime_bundle(output_root)
+            count = export_runtime_bundle(
+                output_root, frozenset(args.test_runtime or ()))
             print(f"export_c_repositories: wrote runtime bundle for {count} processes to "
                   f"{output_root}")
             return 0

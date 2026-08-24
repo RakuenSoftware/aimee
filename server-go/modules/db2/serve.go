@@ -21,6 +21,17 @@ import (
 // than an error: a caller cannot tell an empty result from an absent database,
 // and would record the absence as fact.
 func NewLazyDispatchHandler() bus.ModuleHandler {
+	return NewLazyDispatchHandlerWith(func() (Store, error) { return ProductionStore() })
+}
+
+// NewLazyDispatchHandlerWith builds the dispatcher from a store the caller
+// opens lazily.
+//
+// Lazily because a module process starts before its database is necessarily
+// reachable, and refusing to attach would make a transient into an outage; the
+// first operation opens it, and a failure is logged per operation rather than
+// once at startup where it would scroll away.
+func NewLazyDispatchHandlerWith(open func() (Store, error)) bus.ModuleHandler {
 	var (
 		once     sync.Mutex
 		dispatch bus.ModuleHandler
@@ -28,7 +39,7 @@ func NewLazyDispatchHandler() bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		once.Lock()
 		if dispatch == nil {
-			store, err := ProductionStore()
+			store, err := open()
 			if err != nil {
 				once.Unlock()
 				// Logged every time rather than once: this is the module

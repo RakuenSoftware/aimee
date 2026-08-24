@@ -60,6 +60,11 @@ const economizerStorePrincipalRef uint32 = 66
 // one request.
 const controlPlaneStorePrincipalRef uint32 = 69
 
+// db2StorePrincipalRef is the db2 module's OUTBOUND identity, for reaching the
+// postgres module's storage stage. Same reason as the two above: a serving
+// grant requests nothing.
+const db2StorePrincipalRef uint32 = 70
+
 // economizerStore seats the economizer's reducer state on DB1.
 //
 // A failure here is not fatal to the module. Reducer state makes the NEXT turn
@@ -150,6 +155,48 @@ func aimeeVersion() string {
 	}
 	return "unknown"
 }
+
+// db2Store opens the store the db2 module serves its operations from.
+//
+// The bus when there is a bus, which is every deployment: a module process is
+// given its socket, and reaching another module's stage is what a socket is
+// for. Before this the default was a pool of db2's own and the bus was an
+// opt-in switch the parity suites set -- which made the architecture something
+// tests could select rather than something the product did.
+//
+// The pool remains for a process with no socket, which is a test binary and
+// nothing that ships. Chosen once, at startup, and logged either way: an
+// operator reading the journal should see which store answered rather than
+// infer it. A module that silently opened its own pool when the bus was
+// unavailable would be the architecture becoming optional without saying so.
+func db2Store(ctx context.Context, moduleBusSocket string) func() (db2.Store, error) {
+	if ctx == nil || moduleBusSocket == "" {
+		log.Printf("db2: no module bus; serving from a pool of this process's own")
+		return func() (db2.Store, error) { return db2.ProductionStore() }
+	}
+	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, db2StorePrincipalRef)
+	if err != nil {
+		log.Printf("db2: no storage bus (%v); serving from a pool of this process's own", err)
+		return func() (db2.Store, error) { return db2.ProductionStore() }
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	if err != nil {
+		busClient.Detach()
+		log.Printf("db2: no storage caller (%v); serving from a pool of this process's own", err)
+		return func() (db2.Store, error) { return db2.ProductionStore() }
+	}
+	client := storage.New(func(callCtx context.Context, body []byte) ([]byte, error) {
+		return caller.Call(callCtx, postgres.EventSQL, postgres.StageSQL, 0,
+			db2StoreDeadline, body)
+	})
+	log.Printf("db2: storage served by the postgres module over the bus")
+	return func() (db2.Store, error) { return db2.NewBusStore(client), nil }
+}
+
+// How long a db2 operation waits on a storage call. The operations are bounded
+// reads and writes rather than migrations, so this is the ordinary statement
+// budget rather than the generous one the control-plane schema gets.
+const db2StoreDeadline = 30 * time.Second
 
 func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtable.PanelReviewer, error) {
 	home := os.Getenv("AIMEE_HOME")
@@ -412,21 +459,21 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "db2":
 		config.ModuleName = name
 		config.PrincipalRef = 29
-		// One stage per family, which is what the wire calls a stage: the
-		// dispatcher keys on the (stage, operation) pair, and the operation
-		// travels in the envelope. Eight stages therefore serve all 445
-		// catalogued operations.
+		// One stage per ACTIVE family. The dispatcher keys on the (stage,
+		// operation) pair and the operation travels in the envelope, so one
+		// stage serves a whole family -- but a family the catalogue marks
+		// inactive is not one this module may serve.
+		//
+		// Seven of the eight are inactive, and registering them anyway is how
+		// this module came to advertise stages no contract declared: a client
+		// may not request a kind no module declares, so those stages ran and
+		// nothing could address them. Activating a family grants callers its
+		// operations and is a catalogue decision with its own review, not a
+		// consequence of changing which binary serves.
 		config.Stages = []bus.ModuleStage{
 			{EventKind: db2contract.EventLifecycle, StageID: db2contract.FamilyLifecycle},
-			{EventKind: db2contract.EventTenancy, StageID: db2contract.FamilyTenancy},
-			{EventKind: db2contract.EventMemory, StageID: db2contract.FamilyMemory},
-			{EventKind: db2contract.EventIndex, StageID: db2contract.FamilyIndex},
-			{EventKind: db2contract.EventLearning, StageID: db2contract.FamilyLearning},
-			{EventKind: db2contract.EventOrganization, StageID: db2contract.FamilyOrganization},
-			{EventKind: db2contract.EventCustody, StageID: db2contract.FamilyCustody},
-			{EventKind: db2contract.EventMaintenance, StageID: db2contract.FamilyMaintenance},
 		}
-		config.Handler = db2.NewLazyDispatchHandler()
+		config.Handler = db2.NewLazyDispatchHandlerWith(db2Store(ctx, moduleBusSocket))
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
