@@ -399,11 +399,13 @@ int main(void)
    if (db2_test_shim_skip_on_postgres("curator_queue"))
       return 0;
 
-   /* Deterministic config: HOME with no aimee.yaml -> legacy_config_read (called inside
-    * the queue) returns built-in defaults (extract_docs default-ON). */
+   /* The queue reads through the config module. Set the gate explicitly so this
+    * test does not depend on a legacy file default that the production caller no
+    * longer reads. */
    platform_setenv("HOME", "/tmp");
    platform_unsetenv("AIMEE_HOME");
    platform_setenv("AIMEE_NO_CACHE", "1");
+   assert(config_set_kb_curator_extract_docs_enabled(1) == 0);
 
    printf("test_curator_queue:\n");
    sqlite3 *db = open_db();
@@ -454,6 +456,7 @@ int main(void)
    test_provider_outage_requeues(db);
    test_only_current_document_generation_queues(db);
 
+   assert(config_set_kb_curator_extract_docs_enabled(0) == 0);
    printf("test_curator_queue: all tests passed\n");
    return 0;
 }
