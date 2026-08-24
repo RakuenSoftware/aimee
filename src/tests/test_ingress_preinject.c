@@ -39,11 +39,10 @@ char *kb_client_memory_assemble_typed_context(const char *query)
 {
    (void)query;
    g_temporal_calls++;
-   return g_temporal_enabled
-              ? strdup("<memory_data trust=\"untrusted\">assertion</memory_data>\n"
-                       "<approved_procedures authority=\"reviewed\">procedure"
-                       "</approved_procedures>")
-              : NULL;
+   return g_temporal_enabled ? strdup("<memory_data trust=\"untrusted\">assertion</memory_data>\n"
+                                      "<approved_procedures authority=\"reviewed\">procedure"
+                                      "</approved_procedures>")
+                             : NULL;
 }
 
 /* Typed-facts gate stub: off, so the builder's facts path stays inert here

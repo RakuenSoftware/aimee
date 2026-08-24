@@ -669,9 +669,8 @@ char *kb_client_memory_assemble_typed_context(const char *query)
    cJSON *used = cJSON_GetObjectItemCaseSensitive(resp, "used_tokens");
    cJSON *body = cJSON_GetObjectItemCaseSensitive(resp, "rendered_context");
    char *out = NULL;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 &&
-       cJSON_IsNumber(used) && used->valuedouble > 0 && cJSON_IsString(body) &&
-       body->valuestring[0])
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(used) &&
+       used->valuedouble > 0 && cJSON_IsString(body) && body->valuestring[0])
       out = strdup(body->valuestring);
    cJSON_Delete(resp);
    return out;
