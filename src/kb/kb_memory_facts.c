@@ -53,7 +53,10 @@
 #define MF_SYSTEM_PROMPT_TMPL                                                                      \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
-   "\"confidence\":0.0}]}. Each fact is a stable subject-relation-object triple "                  \
+   "\"confidence\":0.0,\"source_start\":0,\"source_end\":1}]}. source_start and "              \
+   "source_end are exact zero-based UTF-8 byte offsets into the note, with source_end "             \
+   "exclusive, covering the smallest passage that directly supports that fact. Every fact "        \
+   "is a stable subject-relation-object triple "                                                    \
    "grounded strictly in the note. For relation, choose the single nearest fit "                   \
    "from these canonical predicates when one reasonably applies: %s. If NONE fits, "               \
    "emit a concise snake_case predicate of your own (e.g. drives, founded, "                       \
@@ -62,7 +65,8 @@
    "(use \"user\" for the note's author when it is first-person). "                                \
    "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
    "state, feelings, plans, and one-off events. If the note asserts no durable "                   \
-   "fact, return an empty list. No prose, no markdown."
+   "fact, return an empty list. Omit any fact whose exact supporting span cannot be identified. "    \
+   "No prose, no markdown."
 
 /* Build the extraction system prompt, binding the model to the canonical relation
  * set (autonomous reconciliation, §7). Sourced from the seed ontology so it stays
@@ -238,7 +242,26 @@ static memory_node_kind_t mf_subject_kind(const char *subject)
 
 /* Parse {"facts":[...]} and commit each triple above the confidence floor.
  * Returns the number committed (ACCEPT or NOVEL). */
-static int mf_commit_facts(const char *llm_json, const fact_evidence_input_t *evidence)
+int kb_memory_fact_evidence_span(const char *content, int64_t source_start, int64_t source_end,
+                                 char *span_out, size_t span_cap, char *hash_out, size_t hash_cap)
+{
+   if (!content || !span_out || span_cap < 12 || !hash_out || hash_cap < 65 || source_start < 0 ||
+       source_end <= source_start || (uint64_t)source_end > strlen(content))
+      return -1;
+   int n = snprintf(span_out, span_cap, "bytes:%lld-%lld", (long long)source_start,
+                    (long long)source_end);
+   if (n < 0 || (size_t)n >= span_cap)
+      return -1;
+   unsigned char digest[SHA256_DIGEST_LENGTH];
+   SHA256((const unsigned char *)content + source_start, (size_t)(source_end - source_start),
+          digest);
+   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+      snprintf(hash_out + (size_t)i * 2, 3, "%02x", digest[i]);
+   return 0;
+}
+
+static int mf_commit_facts(const char *llm_json, const char *source_content,
+                           const fact_evidence_input_t *base_evidence)
 {
    if (!llm_json)
       return 0;
@@ -276,13 +299,27 @@ static int mf_commit_facts(const char *llm_json, const fact_evidence_input_t *ev
       const cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(f, "relation");
       const cJSON *obj_j = cJSON_GetObjectItemCaseSensitive(f, "object");
       const cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
+      const cJSON *start_j = cJSON_GetObjectItemCaseSensitive(f, "source_start");
+      const cJSON *end_j = cJSON_GetObjectItemCaseSensitive(f, "source_end");
       const char *subject = cJSON_IsString(subj_j) ? subj_j->valuestring : "";
       const char *relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "";
       const char *object = cJSON_IsString(obj_j) ? obj_j->valuestring : "";
       double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.0;
 
-      if (!subject[0] || !relation[0] || !object[0] || conf < MF_CONF_FLOOR)
+      if (!subject[0] || !relation[0] || !object[0] || conf < MF_CONF_FLOOR ||
+          !cJSON_IsNumber(start_j) || !cJSON_IsNumber(end_j))
          continue;
+      int64_t source_start = (int64_t)start_j->valuedouble;
+      int64_t source_end = (int64_t)end_j->valuedouble;
+      if ((double)source_start != start_j->valuedouble || (double)source_end != end_j->valuedouble)
+         continue;
+      char exact_span[64], exact_hash[SHA256_DIGEST_LENGTH * 2 + 1];
+      if (kb_memory_fact_evidence_span(source_content, source_start, source_end, exact_span,
+                                       sizeof(exact_span), exact_hash, sizeof(exact_hash)) != 0)
+         continue;
+      fact_evidence_input_t evidence = base_evidence ? *base_evidence : (fact_evidence_input_t){0};
+      evidence.source_span = exact_span;
+      evidence.evidence_hash = exact_hash;
 
       /* The extractor supplies no node kinds, so guess: subject via
        * mf_subject_kind, object OTHER (unknown). But the kind gate REJECTS a
@@ -305,8 +342,8 @@ static int mf_commit_facts(const char *llm_json, const fact_evidence_input_t *ev
       if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &model_actor) != 0)
          continue;
       fact_gate_verdict_t v = db2_fact_commit_with_actor(
-          subject, subj_kind, relation, object, obj_kind, &model_actor, 1, evidence,
-          FACT_KIND_OBSERVATION, evidence ? evidence->observed_at : NULL, NULL);
+          subject, subj_kind, relation, object, obj_kind, &model_actor, 1, &evidence,
+          FACT_KIND_OBSERVATION, evidence.observed_at, NULL);
       if (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL)
          committed++;
    }
@@ -388,7 +425,7 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
       return -1;
    }
 
-   int n = mf_commit_facts(resp, &evidence);
+   int n = mf_commit_facts(resp, mem.content, &evidence);
    free(resp);
    mf_mark_done(job->job_id);
    if (n > 0)
