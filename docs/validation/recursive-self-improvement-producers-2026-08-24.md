@@ -209,9 +209,12 @@ than letting the output read as a command ignoring its argument.
 
 ## Limits of this run
 
-- The S4 pass resolved nothing, because the seeded gaps are genuinely
-  uncovered. That proves the probe runs and reports honestly; it does not
-  exercise the path where a gap is closed by found evidence.
+- The S4 drain is now exercised in **both** directions. A gap whose subject the
+  memory graph covers is closed; the uncovered one beside it stays open, and the
+  pass reports `resolved 1 of 2`. The earlier version only ever saw the decline
+  path, which a probe hardwired to answer "no evidence" would have satisfied
+  just as well -- indistinguishable from the inert version this slice shipped
+  with.
 - The S6 arm came back as the default (`full`). The sampler answered, which is
   what was inert before; arm *selection under reward pressure* is covered by
   unit tests, not by this run.

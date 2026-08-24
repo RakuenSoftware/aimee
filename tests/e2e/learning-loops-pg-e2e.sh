@@ -222,6 +222,29 @@ printf '%s' "$OUT" | grep -qE 'resolved [0-9]+ of [1-9]' \
 check "an uncovered gap is left open, not closed" "open" \
       "$(q "SELECT state FROM curiosity_items WHERE source_session='s-e2e'")"
 
+# The other half, and the one that actually proves the probe DECIDES rather than
+# merely declines: a gap whose subject the memory graph does cover must be
+# CLOSED. Without this the section passes just as well against a probe hardwired
+# to answer "no evidence", which is indistinguishable from the inert version
+# this slice shipped with.
+q "INSERT INTO memories (id, tier, kind, key, content)
+     VALUES (7700,'L1','fact','e2e-covered-subject','the covered subject is documented here')
+   ON CONFLICT (id) DO NOTHING;
+   INSERT INTO memory_relations (memory_id, src_entity, relation, dst_entity, fact_text)
+     VALUES (7700,'covered subject','documented_in','the handbook',
+             'the covered subject is documented in the handbook');" >/dev/null
+q "INSERT INTO curiosity_items (gap_type, target_topic, evidence, importance, novelty, state, source_session)
+     VALUES ('weak_coverage','covered subject','seeded',0.5,0.5,'open','s-e2e-covered');" >/dev/null
+OUT2=$("$A" learning resolve --budget 5 2>&1)
+printf '%s\n' "$OUT2" | sed 's/^/        /'
+check "a gap the graph covers is closed" "resolved" \
+      "$(q "SELECT state FROM curiosity_items WHERE source_session='s-e2e-covered'")"
+check "and the uncovered one is still open" "open" \
+      "$(q "SELECT state FROM curiosity_items WHERE source_session='s-e2e'")"
+printf '%s' "$OUT2" | grep -qE 'resolved [1-9]' \
+    && ok "the pass reports the close it made" \
+    || bad "the drain closed a gap without reporting it"
+
 section "5  S6: the policy layer answers with an arm it declares"
 SEL=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json' -d '{}' \
       "$KB_URL/v1/actions/learning.policy_select")
