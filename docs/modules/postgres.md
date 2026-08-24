@@ -79,24 +79,33 @@ The health stage's consumer is the KB health response, including its
 `db2_kb_tables_ok` field. Bootstrap and the local CLI doctor keep their existing
 C probe because they run before the module boundary exists.
 
-**Nothing in production reaches PostgreSQL through the storage stage yet, and
-this section says so because a commit message is not a deployment.** The
-deployed `aimee-module-db2` is the C build: `db2` declares runtime `c` in
-process-contracts.json, and the C data layer is linked into the KB and connects
-through libpq directly. The Go `db2` module implements all 445 catalogued
-operations over this wire and is proven at parity against a real schema -- 193
-operation probes answering identically through a pool and through this module,
-with the codec proven to have carried them -- but it is not the deployed `db2`.
+**Two modules reach PostgreSQL through the storage stage in a running
+deployment**, and this section names them because a commit message is not a
+deployment.
 
-**What gates that flip is not the transport.** `db2`'s declared runtime is one
-line in process-contracts.json, but the C data layer is a LIBRARY linked into
-the KB as well as a module process: 168 files outside the module call `db2_*`
-directly, 765 distinct symbols from `src/kb` alone. Those callers are
-in-process and would not follow a runtime change -- they have to move to the bus
-first, one family at a time, which is the C purge rather than a switch to throw.
+`control-plane` applies its own schema on every KB start and writes a row it
+reads back. Its health stage reports storage from that evidence -- a migration
+and a version read that both crossed the codec -- rather than from a store
+having been bound, which would be equally true of one pointing at nothing.
 
-Counted rather than estimated, because "a one-line change" was the shape of the
-first answer and it was wrong by 168 files.
+`db2` serves its operations from here rather than from a pool of its own. Its
+process is Go; the choice between this and a local pool is made once at startup
+from whether a bus socket exists, and logged either way, because a module that
+silently opened its own pool when the bus was unavailable would be the
+architecture becoming optional without saying so.
+
+**The C data layer is unchanged and stays.** It is a LIBRARY linked into the KB
+as well as a module process: 168 files outside the module call `db2_*` directly,
+765 distinct symbols from `src/kb` alone, and none of them goes through a module
+process. What the flip changed is which binary answers db2's active event kind
+on the bus and where that binary gets its connections. Moving those callers is
+the C purge, and it is untouched by this.
+
+**Only the active family is served.** Seven of db2's eight families are
+catalogued and deliberately inactive; the contract's process-activation rule
+refuses a grant for a kind the catalogue has not switched on. Activating one
+grants callers its operations and is a catalogue decision with its own review --
+not a consequence of changing which binary serves.
 
 ## Providers and readiness
 

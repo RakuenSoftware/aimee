@@ -41,6 +41,22 @@ Its schema is versioned under owner `control-plane`, independent of `db1`'s and
 `db2`'s histories, applied through the storage module's `MIGRATE` operation with
 explicit version numbers and checksums.
 
+**Applied on every start, in a running deployment.** This module is a Go process
+the image installs and the supervisor starts, so what it does at startup happens
+in production: it migrates its own schema through the storage stage and writes a
+row it reads back.
+
+A failure is deliberately not fatal. `postgres` is in the KB's optional module
+list, so an operator can turn it off; this module then reports storage
+unreachable and keeps serving health, which is the truthful answer. Refusing to
+start would turn an operator's choice into an outage.
+
+The outbound identity is declared in `process-contracts.json` (principal ref
+69). A module's serving grant requests nothing, so reaching another module's
+stage needs a second principal granted exactly that request -- undeclared, the
+bus refuses the call and the module reports storage unreachable for a reason
+that is a missing line in a contract.
+
 ## Stages
 
 | stage | name | event kind |
@@ -54,6 +70,14 @@ rather than being discovered by a caller that gets no answer.
 
 ## State
 
-The module exists and serves health. The KB-specific operations move in as
-batches, each one leaving db2 rather than being copied. 157 of the 195
-uncatalogued db2 symbols are consumed only by `src/kb` and belong here.
+The module serves health, and that health answers with EVIDENCE: the flag is set
+from a migration and a version read that both crossed the storage codec, not
+from a store having been bound. Reporting reachable because something was bound
+would be reporting on configuration, which is equally true of a store pointing
+at nothing.
+
+It holds one table, its own state, and deliberately no domain table. The corpus,
+the sketches and the documents move in as batches, each one LEAVING db2 rather
+than being copied, and inventing their tables ahead of the operations that use
+them would be inventing a schema nobody reads. 157 of the 195 uncatalogued db2
+symbols are consumed only by `src/kb` and belong here.
