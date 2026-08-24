@@ -1028,3 +1028,62 @@ repair.
 CT 9106 destroyed and purged, the key file shredded, `/root` verified free of
 `sk-cp-` material and of every rig file. Containers 9001 and 9078–9080 belong to
 other sessions and were not touched.
+
+## Two models hold a conversation (2026-08-24, CT 9107)
+
+One-way delivery by a live model was proved on CT 9106. This is the other half,
+and the original ask: two sessions talking to each other.
+
+- **alpha's model** was told to ask beta *"what is the capital of France?"* and
+  called `peer command=send`.
+- **beta's model** was told ONLY to read its inbox and answer the sender — not
+  what the question was.
+- **alpha received:** `The capital of France is Paris.`
+
+The assertion is deliberately not "a message exists". Beta could not have known
+the question without reading its mail, so an answer that ENGAGES WITH THE
+CONTENT is what separates a conversation from a one-way delivery that looks like
+one. A run that merely checked for a message present would have passed against
+the defect below.
+
+### The defect this found: a native tool that returns the size of its answer
+
+`mcp_native_call` passes `structured = NULL`, and the native dispatch flattens
+the CONTENT array alone -- an in-process agent never sees `structuredContent`.
+`peer_inbox` put the message bodies only there, and a COUNT in the text.
+
+So aimee's own agents received `1 message(s) taken; 0 still waiting.` and no
+mail. The first conversation run produced a perfect-looking transcript -- two
+200s, `SENT`, `REPLIED`, four provider calls, zero errors -- and beta's reply
+said it plainly:
+
+> *"I received the message, but its contents were not available to me."*
+
+Every mechanical check passed while this was true: delivery, drain-once, counts,
+provenance, refusals, the probe. The external MCP path carries
+`structuredContent` and was the only path anything had tested.
+
+Fixed by rendering sender, conversation id and body into the text. Sender and
+conversation travel with it because a reply needs both -- who to answer, and
+which thread to answer on. Verified with the same prompts and the same models,
+one code change:
+
+| | beta's reply |
+|---|---|
+| before | *"I received the message, but its contents were not available to me."* |
+| after | *"The capital of France is Paris."* |
+
+### And a harness that ate the thing it was measuring
+
+The first attempt failed for a different reason: between alpha's turn and
+beta's, the script "looked at" beta's inbox -- with `peer inbox`, which TAKES
+messages. That is the delivered-once guarantee this branch asserts by name, and
+the check consumed the message before beta's model could read it.
+
+The run still produced two 200s, `SENT`, `REPLIED` and no errors. Only the final
+assertion caught it. Nothing now reads beta's inbox except beta.
+
+### Teardown
+
+CT 9107 destroyed and purged, key shredded, `/root` verified free of `sk-cp-`
+material and every rig file.

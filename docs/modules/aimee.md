@@ -132,6 +132,20 @@ an argument. A `from` parameter would let any caller claim to be any session,
 putting the forgery a layer above the provenance stamping that exists to stop
 exactly that.
 
+**A native tool must put its answer in the TEXT, not only in
+`structuredContent`.** `mcp_native_call` passes `structured = NULL` and the
+native dispatch flattens the content array alone, so an in-process agent never
+sees `structuredContent`. `peer_inbox` put the message bodies only there and a
+COUNT in the text, so aimee's own agents received "1 message(s) taken; 0 still
+waiting." and no mail -- a tool reporting the size of an answer instead of the
+answer.
+
+Every mechanical check passed while that was true: delivery, drain-once, counts,
+provenance, refusals. The external MCP path DOES carry `structuredContent` and
+was the only path anything tested. What found it was two live models holding a
+conversation, where the second replied "I received the message, but its contents
+were not available to me."
+
 Both tools are also NATIVE (`core`), so aimee's own agents get them. A live-model
 run confirmed the identity half of that: a native chat turn's session reaches the
 directory, appearing in `server_sessions` as `driver|chat` via

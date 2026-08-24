@@ -1888,13 +1888,35 @@ static cJSON *mcph_peer_inbox(struct mcp_call *c)
    cJSON *arr = cJSON_AddArrayToObject(j, "messages");
    for (size_t i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, peer_message_json(&msgs[i]));
+
+   /* THE MESSAGES GO IN THE TEXT, NOT ONLY IN structuredContent.
+    *
+    * mcp_native_call passes structured = NULL and the native dispatch flattens
+    * the CONTENT array alone, so an in-process agent never sees
+    * structuredContent at all. With the bodies only there, aimee's own agents
+    * received "1 message(s) taken; 0 still waiting." and no mail -- a tool that
+    * reports the size of an answer instead of the answer.
+    *
+    * Found by having two live models hold a conversation: the second read its
+    * inbox, replied "I received the message, but its contents were not
+    * available to me", and every mechanical check passed -- delivery, drain,
+    * counts, provenance -- because the external MCP path DOES carry
+    * structuredContent and was the only path ever tested. */
+   dstr_t body;
+   dstr_init(&body);
+   dstr_appendf(&body, "%zu message(s) taken; %d still waiting.", count, remaining);
+   for (size_t i = 0; i < count; i++)
+   {
+      const peer_client_message_t *m = &msgs[i];
+      /* Sender and conversation travel with the text because a reply needs
+         both: who to answer, and which thread to answer on. */
+      dstr_appendf(&body, "\n\n[%zu] from %s (conversation %s)\n%s", i + 1,
+                   m->from_session ? m->from_session : "?",
+                   m->conversation_id ? m->conversation_id : "?", m->text ? m->text : "");
+   }
    peer_client_messages_free(msgs, count);
-   char msg[200];
-   /* `remaining` is reported even at zero. Rows alone cannot tell "that was all
-      of it" from "that was the first max of more", and a reader that drains once
-      and assumes empty simply stops asking. */
-   snprintf(msg, sizeof msg, "%zu message(s) taken; %d still waiting.", count, remaining);
-   cJSON *content = text_content(msg);
+   cJSON *content = text_content(body.data ? body.data : "0 message(s) taken.");
+   dstr_free(&body);
    if (c->structured)
       *c->structured = j;
    else
