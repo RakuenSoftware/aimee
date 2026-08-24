@@ -1,4 +1,4 @@
-/* db2/kb_service_backend_context.c: temporal semantic recall and opt-in
+/* db2/kb_service_backend_context.c: temporal semantic recall and default-on
  * typed context assembly. Kept separate from the compatibility memory RPCs so
  * the context contract can evolve without growing their translation unit. */
 
@@ -351,9 +351,11 @@ cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const cha
    return resp;
 }
 
-static int kbs_typed_flag(const cJSON *req, const char *name)
+static int kbs_typed_flag(const cJSON *req, const char *name, int fallback)
 {
    const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, name);
+   if (!value)
+      return fallback ? 1 : 0;
    return cJSON_IsBool(value) && cJSON_IsTrue(value);
 }
 
@@ -508,14 +510,18 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
    if (cJSON_IsString(believed_j))
       believed_at = believed_j->valuestring;
 
-   int enabled = kbs_typed_flag(req, "enabled");
-   int semantic_enabled = enabled && kbs_typed_flag(req, "enable_semantic_assertions");
-   int historical_enabled = semantic_enabled && kbs_typed_flag(req, "enable_historical");
-   int episodes_enabled = enabled && kbs_typed_flag(req, "enable_episodes");
-   int summaries_enabled = enabled && kbs_typed_flag(req, "enable_summaries");
-   int observations_enabled = enabled && kbs_typed_flag(req, "enable_observations");
-   int procedures_enabled = enabled && kbs_typed_flag(req, "enable_approved_procedures");
-   int working_enabled = enabled && kbs_typed_flag(req, "enable_working_context");
+   /* The reviewed temporal-learning channels are the normal path. Callers retain
+    * an explicit false opt-out for the master assembler and for each channel.
+    * Historical recall remains opt-in: default-on retrieval still means the
+    * safe current view, never an implicit mixture of old and current facts. */
+   int enabled = kbs_typed_flag(req, "enabled", 1);
+   int semantic_enabled = enabled && kbs_typed_flag(req, "enable_semantic_assertions", 1);
+   int historical_enabled = semantic_enabled && kbs_typed_flag(req, "enable_historical", 0);
+   int episodes_enabled = enabled && kbs_typed_flag(req, "enable_episodes", 0);
+   int summaries_enabled = enabled && kbs_typed_flag(req, "enable_summaries", 0);
+   int observations_enabled = enabled && kbs_typed_flag(req, "enable_observations", 1);
+   int procedures_enabled = enabled && kbs_typed_flag(req, "enable_approved_procedures", 1);
+   int working_enabled = enabled && kbs_typed_flag(req, "enable_working_context", 0);
    int total_budget = kbs_typed_budget(req, "total", 2400);
    int total_used = 0;
 
@@ -528,7 +534,7 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
       return NULL;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddBoolToObject(resp, "default_injection", 0);
+   cJSON_AddBoolToObject(resp, "default_injection", enabled);
    cJSON_AddNumberToObject(resp, "total_budget_tokens", total_budget);
 
    int current_budget = kbs_typed_budget(req, "current_assertions", 800);
@@ -775,8 +781,9 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
        : degraded          ? "authorized evidence present but a requested channel degraded"
                            : "authorized evidence present in every available requested channel");
 
-   /* The renderer preserves the trust boundary explicitly. It is returned for
-    * opt-in callers and is never injected by the legacy context path. */
+   /* The renderer preserves the trust boundary explicitly. Default ingress
+    * injection consumes it, while callers can still disable the assembler or
+    * individual channels on a request. */
    char *channels_json = cJSON_PrintUnformatted(channels);
    cJSON *procedure_items = cJSON_GetObjectItemCaseSensitive(procedures_ch, "items");
    char *procedures_json = cJSON_PrintUnformatted(procedure_items);

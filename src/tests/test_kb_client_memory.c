@@ -120,6 +120,24 @@ static int explicit_scope_post_handler(const char *url, const char *auth_header,
    return 200;
 }
 
+static int typed_context_post_handler(const char *url, const char *auth_header, const char *body,
+                                      char **response_buf, int timeout_ms,
+                                      const char *extra_headers)
+{
+   (void)auth_header;
+   (void)timeout_ms;
+   (void)extra_headers;
+   assert(url && strstr(url, "/v1/actions/memory.assemble_typed_context") != NULL);
+   assert(body != NULL);
+   assert(strstr(body, "\"query\":\"recover deployment\"") != NULL);
+   assert(strstr(body, "enable_semantic_assertions") == NULL);
+   assert(strstr(body, "enable_observations") == NULL);
+   if (response_buf)
+      *response_buf =
+          strdup("{\"status\":\"ok\",\"used_tokens\":4,\"rendered_context\":\"temporal\"}");
+   return 200;
+}
+
 static void test_readers_distinguish_unreachable_from_empty(void)
 {
    memory_t mems[8];
@@ -176,6 +194,8 @@ static void test_ordered_readers_propagate_active_project_context(void)
    (void)kb_client_memory_find_facts_visible("q", NULL, NULL, 8, mems, 8);
    char *json = kb_client_memory_assemble_context("q");
    free(json);
+   json = kb_client_memory_assemble_typed_context("q");
+   free(json);
    json = kb_client_memory_recall_json("q", 128, 0);
    free(json);
    json = kb_client_memory_alerts_json(NULL);
@@ -197,7 +217,7 @@ static void test_ordered_readers_propagate_active_project_context(void)
    (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);
 
    kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 20);
+   assert(scoped_request_count == 21);
    mock_agent_http_reset();
    printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
 }
@@ -238,6 +258,16 @@ static void test_explicit_scope_overrides_ambient_context(void)
    printf("  PASS: test_explicit_scope_overrides_ambient_context\n");
 }
 
+static void test_typed_context_uses_server_defaults(void)
+{
+   mock_agent_http_set_post_handler(typed_context_post_handler);
+   char *context = kb_client_memory_assemble_typed_context("recover deployment");
+   assert(context && strcmp(context, "temporal") == 0);
+   free(context);
+   mock_agent_http_reset();
+   printf("  PASS: test_typed_context_uses_server_defaults\n");
+}
+
 int main(void)
 {
    /* A configured kb URL routes kb_client_v1_post_json through agent_http_post
@@ -249,6 +279,7 @@ int main(void)
    test_single_record_miss_is_not_dependency_failure();
    test_ordered_readers_propagate_active_project_context();
    test_explicit_scope_overrides_ambient_context();
+   test_typed_context_uses_server_defaults();
 
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");

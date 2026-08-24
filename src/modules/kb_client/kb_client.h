@@ -732,6 +732,11 @@ int kb_client_memory_compact_windows(int *summary_count, int *fact_count);
  * Mirrors memory_assemble_context(). */
 char *kb_client_memory_assemble_context(const char *task_hint);
 
+/* Assemble the default temporal-learning context (current semantic assertions,
+ * active observations, and reviewed procedures) via aimee-kb. Returns the
+ * trust-labelled rendered context, or NULL when unavailable or empty. */
+char *kb_client_memory_assemble_typed_context(const char *query);
+
 /* Search conversation windows via aimee-kb.  Returns row count.
  * Mirrors memory_search(). */
 int kb_client_memory_search(char **clusters, int cluster_count, int limit, search_result_t *out,

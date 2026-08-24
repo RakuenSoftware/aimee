@@ -190,6 +190,9 @@ int main(void)
       assert(cfg.kb_typed_facts_promote_threshold == 3);
       /* Typed-fact extraction is offline, so it defaults ON on every backend. */
       assert(cfg.typed_facts_enabled == 1);
+      /* Evidence-backed observations route into reviewed learning by default;
+       * an explicit kb.mining.failure_learning_enabled=false remains the opt-out. */
+      assert(cfg.kb_mining_failure_learning_enabled == 1);
       assert(strcmp(cfg.guardrail_mode, "approve") == 0);
       /* Sub-agent ban is an enforcement dial: defaults ON so a fresh install bans
        * the primary agent's own sub-agents (when delegates exist). */

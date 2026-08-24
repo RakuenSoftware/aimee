@@ -41,6 +41,11 @@ char *kb_client_memory_facts(const char *query)
    (void)query;
    return NULL;
 }
+char *kb_client_memory_assemble_typed_context(const char *query)
+{
+   (void)query;
+   return NULL;
+}
 
 /* Typed-facts gate stub (typed_facts feature added this call to ingress_preinject.c;
  * the test link needs the symbol). Off -> the builder's facts path stays inert. */
