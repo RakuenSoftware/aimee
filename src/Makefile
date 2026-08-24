@@ -1588,7 +1588,8 @@ oidc-login-live: ../oidc-login-live
                             $(OBJDIR)/tests/support/store_module_fixture.o \
                             $(OBJDIR)/config_client_contract.o $(OBJDIR)/aimee_home.o \
                             $(PLATFORM_BASIC_OBJS) \
-                            $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBS_BUS_RUNTIME_OBJ) $(CORE_EVENT_BUS_LIB)
+                            $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/aimee_sha256.o \
+                            $(OBS_BUS_RUNTIME_OBJ) $(CORE_EVENT_BUS_LIB)
 	$(CC) -o $@ $^ $(L_SERVER)
 
 .PHONY: write-tier-enforce-live
