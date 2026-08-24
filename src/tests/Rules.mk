@@ -306,6 +306,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails \
+               $(TESTPREFIX)/unit-test-mcp-git \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-conn-accept \
@@ -1455,7 +1456,7 @@ $(TESTPREFIX)/unit-test-cli-server-compat: $(OBJDIR)/tests/test_cli_server_compa
 # sessions family suite, so nothing was lost by not reaching a real store here.
 $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o $(OBJDIR)/tests/support/git_module_fixture.o \
                             $(OBJDIR)/tests/support/db1_init_mock.o \
-                            $(OBJDIR)/tests/support/session_state_stub.o \
+                            $(OBJDIR)/tests/support/session_state_stub.o $(OBJDIR)/tests/support/guardrail_events_stub.o $(OBJDIR)/tests/support/git_ownership_stub.o \
                             $(OBJDIR)/server/obs_bus_adapter.o \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2662,6 +2663,26 @@ $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OB
 $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integrations.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+
+# Restored. Deleted with the C store as "store-coupled": its only matches for
+# /db1/ were an <sqlite3.h> include it never used, a db_schema.h include it never
+# used, the db1_init/db1_shutdown fixture pair, and two ownership reads. 675
+# assertions about MCP git behaviour -- chdir resolution, commit identity
+# masking, sensitive-file skipping, push/branch/fetch semantics, mirror-workspace
+# write refusal -- none of it about storage.
+#
+# git_ownership_stub.c keeps a real per-(repo, branch) map, because the two reads
+# are a genuine round trip: the tool claims a branch for session-C in one repo
+# and session-D in another, and the test asserts each repo reports its own owner.
+# That is an MCP GIT property -- ownership is recorded per repo, not globally --
+# and a stub that forgot, or that answered one owner for both, would retire the
+# assertion while leaving it in the file.
+$(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/tests/support/git_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/git_ownership_stub.o $(OBJDIR)/tests/support/session_state_stub.o $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
+                        $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
+                        $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
+                        $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
+                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-verify-select: $(OBJDIR)/tests/test_git_verify_select.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \

@@ -1014,6 +1014,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_mcp_git.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_memory_audit_hook.c"
     },
     {
@@ -25756,7 +25760,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "060c326ffa19a6f119cdd3e39312547faa183d80a27e948916944bf9cc6f317f",
+  "fingerprint": "da0d874eeb297f39503ac7158f11964b206aee56460dd5b14824cb71025b0be8",
   "module": "db2",
   "schema_version": 1,
   "summary": {

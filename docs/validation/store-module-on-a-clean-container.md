@@ -577,3 +577,37 @@ and left its recipe line orphaned, which make rejects outright.
 Both are one error: **a target is not its name.** It is a comment, an object
 rule, a `.PHONY`, a target line and a recipe, and editing by the part you can
 grep for leaves the rest.
+
+## test_mcp_git restored
+
+675 assertions about MCP git behaviour — chdir resolution, commit identity
+masking, sensitive-file skipping, push/branch/fetch semantics, mirror-workspace
+write refusal. Deleted for five lines: an `<sqlite3.h>` include it never used, a
+`db_schema.h` include it never used, the `db1_init`/`db1_shutdown` fixture pair,
+and two ownership reads.
+
+`git_ownership_stub.c` keeps a real per-`(repo, branch)` map, and that is not
+incidental. The two reads are a genuine round trip:
+
+    claim "some-branch" as session-C in repo A
+    claim "some-branch" as session-D in repo B
+    assert A reports session-C and B reports session-D
+
+The subject is an **MCP git** property — a claim is scoped to its repository,
+not to the branch name — and the store is only where the answer is read back
+from. A stub keyed on branch alone answers one owner for both, and would retire
+the only assertion that distinguishes them while leaving it in the file.
+
+Verified by making exactly that mistake: keying `find()` on branch alone aborts
+the test. The restored assertions are sensitive to the property they name.
+
+Two smaller decisions in the same stub, both about not inventing answers:
+`find_session_by_prefix` reports **not-found for an ambiguous prefix** rather
+than returning the first matching row, so a resolution test cannot pass on row
+order; and the feature branch a session's PRs target is a separate table from
+ownership, because they are different facts and a test may set one without the
+other.
+
+The stubs were split so each symbol has one home — session state, guardrail
+events and git ownership in three files rather than one — since the guardrails
+and mcp-git binaries need overlapping but different subsets.
