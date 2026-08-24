@@ -914,6 +914,206 @@ int aimee_vector_apply_decode(const uint8_t *input, size_t length, aimee_vector_
    return aimee_vector_apply_validate(apply);
 }
 
+/* ------------------------------------------------------- provider capabilities
+ *
+ * The same 48 bytes the Go encoder writes. Field offsets are pinned by the
+ * contract's header_bytes and by this file agreeing with server-go/vector.
+ */
+
+int aimee_vector_capabilities_validate(const aimee_vector_capabilities_t *capabilities)
+{
+   if (!capabilities)
+      return -1;
+   /* An unknown bit is refused rather than masked away: a provider from a newer
+    * contract announcing a metric this build cannot name would otherwise be
+    * read as some subset of what it said, and its results ranked by a metric
+    * nobody chose. */
+   if (capabilities->operations == 0 ||
+       (capabilities->operations & ~(uint32_t)AIMEE_VECTOR_OPERATION_KNOWN) != 0 ||
+       (capabilities->metrics & ~(uint32_t)AIMEE_VECTOR_METRIC_KNOWN) != 0 ||
+       (capabilities->filters & ~(uint32_t)AIMEE_VECTOR_FILTER_KNOWN) != 0 ||
+       capabilities->max_dimension > AIMEE_VECTOR_MAX_DIM ||
+       capabilities->max_top_k > AIMEE_VECTOR_MAX_TOP_K)
+      return -1;
+   /* Readiness is a claim about a specific generation of the corpus. "Ready as
+    * of nothing" is not one. */
+   if (capabilities->ready && capabilities->generation == 0)
+      return -1;
+   if ((capabilities->operations & AIMEE_VECTOR_OPERATION_SEARCH) != 0 &&
+       (capabilities->metrics == 0 || capabilities->max_dimension == 0 ||
+        capabilities->max_top_k == 0))
+      return -1;
+   if ((capabilities->operations & AIMEE_VECTOR_OPERATION_APPLY) != 0 &&
+       capabilities->max_batch == 0)
+      return -1;
+   return 0;
+}
+
+int aimee_vector_capabilities_decode(const uint8_t *bytes, size_t length,
+                                     aimee_vector_capabilities_t *out)
+{
+   /* Exactly the header. Shorter is a truncated frame; longer means the sender
+    * is using a field this build does not know about, and reading the prefix
+    * would answer a question nobody asked. */
+   if (!bytes || !out || length != AIMEE_VECTOR_CAPABILITIES_HEADER)
+      return -1;
+   if (get_u32(bytes) != AIMEE_VECTOR_CAPABILITIES_MAGIC ||
+       get_u16(bytes + 4) != AIMEE_VECTOR_WIRE_VERSION ||
+       get_u16(bytes + 6) != AIMEE_VECTOR_CAPABILITIES_HEADER)
+      return -1;
+   uint32_t ready = get_u32(bytes + 28);
+   if (ready > 1 || get_u32(bytes + 44) != 0)
+      return -1;
+
+   memset(out, 0, sizeof(*out));
+   out->generation = get_u64(bytes + 8);
+   out->operations = get_u32(bytes + 16);
+   out->metrics = get_u32(bytes + 20);
+   out->filters = get_u32(bytes + 24);
+   out->ready = (int)ready;
+   out->max_dimension = get_u32(bytes + 32);
+   out->max_batch = get_u32(bytes + 36);
+   out->max_top_k = get_u32(bytes + 40);
+   if (aimee_vector_capabilities_validate(out) != 0)
+   {
+      memset(out, 0, sizeof(*out));
+      return -1;
+   }
+   return 0;
+}
+
+int aimee_vector_capabilities_encode(const aimee_vector_capabilities_t *capabilities, uint8_t *out,
+                                     size_t capacity, size_t *written)
+{
+   if (!capabilities || !out || !written || capacity < AIMEE_VECTOR_CAPABILITIES_HEADER)
+      return -1;
+   if (aimee_vector_capabilities_validate(capabilities) != 0)
+      return -1;
+   memset(out, 0, AIMEE_VECTOR_CAPABILITIES_HEADER);
+   put_u32(out, AIMEE_VECTOR_CAPABILITIES_MAGIC);
+   put_u16(out + 4, AIMEE_VECTOR_WIRE_VERSION);
+   put_u16(out + 6, AIMEE_VECTOR_CAPABILITIES_HEADER);
+   put_u64(out + 8, capabilities->generation);
+   put_u32(out + 16, capabilities->operations);
+   put_u32(out + 20, capabilities->metrics);
+   put_u32(out + 24, capabilities->filters);
+   put_u32(out + 28, capabilities->ready ? 1u : 0u);
+   put_u32(out + 32, capabilities->max_dimension);
+   put_u32(out + 36, capabilities->max_batch);
+   put_u32(out + 40, capabilities->max_top_k);
+   *written = AIMEE_VECTOR_CAPABILITIES_HEADER;
+   return 0;
+}
+
+/* ----------------------------------------------------------- provider registry
+ *
+ * The policy below is the Go router's (server-go/modules/db2/vector_router.go),
+ * copied deliberately rather than reinvented. Two routers that disagree about
+ * which provider serves reads would let one deployment answer the same query
+ * from different indexes depending on which process asked. Changing either one
+ * means changing both.
+ */
+
+static int provider_eligible(const aimee_vector_capabilities_t *capabilities)
+{
+   return capabilities->ready && (capabilities->operations & AIMEE_VECTOR_OPERATION_SEARCH) != 0 &&
+          (capabilities->metrics & AIMEE_VECTOR_METRIC_COSINE) != 0 &&
+          (capabilities->filters & AIMEE_VECTOR_FILTER_EXACT) != 0;
+}
+
+/* The lowest eligible principal serves reads. Principals are deployment-owned
+ * and unique, so this does not depend on the order announcements arrived in --
+ * which is what lets two independent implementations reach the same answer. */
+static void select_default(aimee_vector_route_t *route)
+{
+   uint32_t chosen = 0;
+   for (size_t i = 0; i < route->provider_count; ++i)
+   {
+      const aimee_vector_provider_t *provider = &route->providers[i];
+      if (!provider_eligible(&provider->capabilities))
+         continue;
+      if (chosen != 0 && provider->principal >= chosen)
+         continue;
+      chosen = provider->principal;
+   }
+   route->selected_principal = chosen;
+   route->selected_ready = chosen != 0;
+}
+
+int aimee_vector_route_observe_capabilities(aimee_vector_route_t *route, uint32_t principal,
+                                            uint32_t handle, uint64_t sequence,
+                                            const aimee_vector_capabilities_t *capabilities)
+{
+   /* principal and handle come from the bus frame. A provider that could name
+    * its own principal could name someone else's. */
+   if (!route || principal == 0 || sequence == 0 || !capabilities ||
+       aimee_vector_capabilities_validate(capabilities) != 0)
+      return -1;
+
+   aimee_vector_provider_t *slot = NULL;
+   for (size_t i = 0; i < route->provider_count; ++i)
+      if (route->providers[i].principal == principal)
+      {
+         slot = &route->providers[i];
+         break;
+      }
+
+   if (slot)
+   {
+      /* Stale only within one attachment: a new handle is a new attachment and
+       * may restart its sequence, so it is not a replay. */
+      if (slot->handle == handle && sequence <= slot->sequence)
+         return -1;
+   }
+   else
+   {
+      if (route->provider_count >= AIMEE_VECTOR_MAX_PROVIDERS)
+         return -1;
+      slot = &route->providers[route->provider_count++];
+   }
+
+   slot->principal = principal;
+   slot->handle = handle;
+   slot->sequence = sequence;
+   slot->capabilities = *capabilities;
+
+   if (!route->selection_explicit)
+      select_default(route);
+   return 0;
+}
+
+int aimee_vector_route_remove_provider(aimee_vector_route_t *route, uint32_t principal,
+                                       uint32_t handle)
+{
+   if (!route || principal == 0)
+      return 0;
+   for (size_t i = 0; i < route->provider_count; ++i)
+   {
+      if (route->providers[i].principal != principal || route->providers[i].handle != handle)
+         continue;
+      route->providers[i] = route->providers[route->provider_count - 1];
+      route->provider_count--;
+      /* An explicit route stays pinned, and therefore fails closed when its
+       * provider disappears, which is the point of pinning one. */
+      if (!route->selection_explicit)
+         select_default(route);
+      return 1;
+   }
+   return 0;
+}
+
+int aimee_vector_route_set_transport(aimee_vector_route_t *route,
+                                     aimee_vector_search_fn external_search, void *external_context,
+                                     int fallback_enabled)
+{
+   if (!route || !external_search)
+      return -1;
+   route->external_search = external_search;
+   route->external_context = external_context;
+   route->fallback_enabled = fallback_enabled != 0;
+   return 0;
+}
+
 int aimee_vector_route_init(aimee_vector_route_t *route,
                             aimee_vector_search_fn internal_pgvector_search, void *internal_context,
                             aimee_vector_candidate_authorize_fn authorize_candidate,
@@ -940,6 +1140,10 @@ int aimee_vector_route_select(aimee_vector_route_t *route, uint32_t principal, i
    route->fallback_enabled = fallback_enabled != 0;
    route->external_search = external_search;
    route->external_context = external_context;
+   /* A control decision pins the selection: later announcements record their
+    * evidence but do not move it, and a provider disappearing does not silently
+    * hand reads to a different one. */
+   route->selection_explicit = 1;
    return 0;
 }
 
@@ -952,6 +1156,10 @@ void aimee_vector_route_clear(aimee_vector_route_t *route)
    route->fallback_enabled = 0;
    route->external_search = NULL;
    route->external_context = NULL;
+   /* Back to automatic, and back to whatever the live evidence implies -- not
+    * to "no provider", which would strand a deployment that still has one. */
+   route->selection_explicit = 0;
+   select_default(route);
 }
 
 static aimee_vector_result_t call_and_validate(aimee_vector_search_fn search, void *context,

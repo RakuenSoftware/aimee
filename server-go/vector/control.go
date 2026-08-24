@@ -9,25 +9,28 @@ const (
 
 type OperationSet uint32
 
+// Values come from the contract (contract_generated.go), not from iota: the C
+// decoder reads the same catalogue, and a bit either implementation chose for
+// itself is a bit they can disagree about.
 const (
-	OperationSearch OperationSet = 1 << iota
-	OperationApply
-	operationKnown = OperationSearch | OperationApply
+	OperationSearch OperationSet = OperationSet(OperationSearchBit)
+	OperationApply  OperationSet = OperationSet(OperationApplyBit)
+	operationKnown               = OperationSearch | OperationApply
 )
 
 type MetricSet uint32
 
 const (
-	MetricCosine MetricSet = 1 << iota
-	MetricL2
-	MetricDot
-	metricKnown = MetricCosine | MetricL2 | MetricDot
+	MetricCosine MetricSet = MetricSet(MetricCosineBit)
+	MetricL2     MetricSet = MetricSet(MetricL2Bit)
+	MetricDot    MetricSet = MetricSet(MetricDotBit)
+	metricKnown            = MetricCosine | MetricL2 | MetricDot
 )
 
 type FilterSet uint32
 
 const (
-	FilterExact FilterSet = 1 << iota
+	FilterExact FilterSet = FilterSet(FilterExactBit)
 	filterKnown           = FilterExact
 )
 

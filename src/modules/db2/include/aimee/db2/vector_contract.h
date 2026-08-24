@@ -2,7 +2,7 @@
 #ifndef AIMEE_DB2_VECTOR_CONTRACT_H
 #define AIMEE_DB2_VECTOR_CONTRACT_H 1
 
-#define AIMEE_VECTOR_CONTRACT_SHA256 "a6027650b245a17e29dcbf1846896d581e2a8fb6a4e897a580ffe5b50fb5d957"
+#define AIMEE_VECTOR_CONTRACT_SHA256 "8b3144066a582fae742172e0021df463362cf8b6a755515bc1a724775bfae1eb"
 #define AIMEE_VECTOR_PROTOCOL_KIND_FLAG 0x80000000u
 #define AIMEE_VECTOR_PROTOCOL_ID        3u
 #define AIMEE_VECTOR_WIRE_VERSION       1u
@@ -33,6 +33,23 @@
 #define AIMEE_VECTOR_FILTER_EQ 1u
 #define AIMEE_VECTOR_FILTER_NE 2u
 #define AIMEE_VECTOR_FILTER_IN 3u
+
+/* What a provider announces it can do, and the masks that say which bits this
+ * build knows. Decoding refuses an unknown bit rather than ignoring it: a
+ * provider announcing a metric this build has never heard of comes from a newer
+ * contract, and reading its announcement as "cosine only" would rank results by
+ * a metric nobody chose. */
+#define AIMEE_VECTOR_OPERATION_SEARCH 1u
+#define AIMEE_VECTOR_OPERATION_APPLY  2u
+#define AIMEE_VECTOR_OPERATION_KNOWN  3u
+
+#define AIMEE_VECTOR_METRIC_COSINE 1u
+#define AIMEE_VECTOR_METRIC_L2     2u
+#define AIMEE_VECTOR_METRIC_DOT    4u
+#define AIMEE_VECTOR_METRIC_KNOWN  7u
+
+#define AIMEE_VECTOR_FILTER_EXACT 1u
+#define AIMEE_VECTOR_FILTER_KNOWN 1u
 
 #define AIMEE_VECTOR_SEARCH_REQUEST_MAGIC  0x53334244u
 #define AIMEE_VECTOR_SEARCH_REPLY_MAGIC    0x52334244u

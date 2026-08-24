@@ -125,6 +125,62 @@ typedef int (*aimee_vector_search_fn)(void *context, const aimee_vector_search_r
 typedef int (*aimee_vector_candidate_authorize_fn)(void *context, const char *workspace,
                                                    const char *project, int64_t point_id);
 
+/* How many provider attachments this route holds evidence for.
+ *
+ * NOT a protocol limit, and deliberately not in the catalogue: the wire places
+ * no bound on how many providers a deployment attaches, and putting one there
+ * would make a ninth provider protocol-invalid, which is not true. This is a
+ * fixed-array implementation choosing a bound it can state, and observing past
+ * it is refused as "registry full" rather than as a malformed announcement.
+ *
+ * The Go router uses a map and has no such bound. If a deployment ever needs
+ * more than this, the answer is to raise it here, not to reinterpret it as a
+ * limit on what a provider may do. */
+#define AIMEE_VECTOR_MAX_PROVIDERS 8u
+
+/* What a provider announced it can do.
+ *
+ * `operations`, `metrics` and `filters` are bit sets over the
+ * AIMEE_VECTOR_OPERATION_*, _METRIC_* and _FILTER_EXACT constants, which come
+ * from the protocol catalogue so that this and the Go implementation cannot
+ * disagree about what a bit means. */
+typedef struct
+{
+   uint64_t generation;
+   uint32_t operations;
+   uint32_t metrics;
+   uint32_t filters;
+   uint32_t max_dimension;
+   uint32_t max_batch;
+   uint32_t max_top_k;
+   int ready;
+} aimee_vector_capabilities_t;
+
+/* 0 when the announcement is internally consistent, -1 otherwise. Decode applies
+ * this, so a decoded value is always valid; it is public for a caller building
+ * an announcement rather than receiving one. */
+int aimee_vector_capabilities_validate(const aimee_vector_capabilities_t *capabilities);
+
+/* Exactly AIMEE_VECTOR_CAPABILITIES_HEADER bytes in, one announcement out.
+ * Returns 0, or -1 for any length, magic, version, unknown bit, or reserved
+ * field this build does not understand. */
+int aimee_vector_capabilities_decode(const uint8_t *bytes, size_t length,
+                                     aimee_vector_capabilities_t *out);
+
+/* Writes AIMEE_VECTOR_CAPABILITIES_HEADER bytes, or -1 if the buffer is too
+ * small or the announcement does not validate. */
+int aimee_vector_capabilities_encode(const aimee_vector_capabilities_t *capabilities, uint8_t *out,
+                                     size_t capacity, size_t *written);
+
+/* One provider attachment's live evidence. */
+typedef struct
+{
+   uint32_t principal;
+   uint32_t handle;
+   uint64_t sequence;
+   aimee_vector_capabilities_t capabilities;
+} aimee_vector_provider_t;
+
 typedef struct
 {
    aimee_vector_search_fn internal_pgvector_search;
@@ -136,6 +192,13 @@ typedef struct
    uint32_t selected_principal;
    int selected_ready;
    int fallback_enabled;
+   /* Live provider evidence, and whether a control decision pinned the
+    * selection. An explicit route stays pinned and therefore fails closed if
+    * its provider disappears; an automatic one advances to the next eligible
+    * provider, or back to pgvector when none remains. */
+   aimee_vector_provider_t providers[AIMEE_VECTOR_MAX_PROVIDERS];
+   size_t provider_count;
+   int selection_explicit;
 } aimee_vector_route_t;
 
 typedef struct
@@ -308,6 +371,32 @@ int aimee_vector_route_init(aimee_vector_route_t *route,
                             aimee_vector_candidate_authorize_fn authorize_candidate,
                             void *authorize_context);
 /* principal must be nonzero. Use aimee_vector_route_clear() to deselect the external provider. */
+/* Record one provider attachment's announcement and re-derive the automatic
+ * selection. Returns 0 when the evidence was recorded, -1 when it is malformed
+ * or stale (same attachment, non-advancing sequence) or the registry is full.
+ *
+ * `principal` and `handle` come from the BUS FRAME, never from the provider's
+ * payload: a provider that could name its own principal could name someone
+ * else's. `sequence` is monotonic within one attachment; a new handle is a new
+ * attachment and may restart it.
+ *
+ * A search transport must have been installed for a selection to be usable --
+ * see aimee_vector_route_set_transport. */
+int aimee_vector_route_observe_capabilities(aimee_vector_route_t *route, uint32_t principal,
+                                            uint32_t handle, uint64_t sequence,
+                                            const aimee_vector_capabilities_t *capabilities);
+
+/* Drop one attachment's evidence. Returns 1 if it was present, 0 otherwise. */
+int aimee_vector_route_remove_provider(aimee_vector_route_t *route, uint32_t principal,
+                                       uint32_t handle);
+
+/* How a search reaches whichever provider is selected. Installed once; the
+ * transport reads route->selected_principal to know who it is addressing, so
+ * changing the selection does not change the transport. */
+int aimee_vector_route_set_transport(aimee_vector_route_t *route,
+                                     aimee_vector_search_fn external_search, void *external_context,
+                                     int fallback_enabled);
+
 int aimee_vector_route_select(aimee_vector_route_t *route, uint32_t principal, int ready,
                               int fallback_enabled, aimee_vector_search_fn external_search,
                               void *external_context);

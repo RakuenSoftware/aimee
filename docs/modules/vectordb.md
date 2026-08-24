@@ -282,12 +282,43 @@ return identical results by design. An operator uses it to answer "is the provid
 we attached actually seeing traffic"; `unit-test-vector-route-pgvec` uses it to
 prove that the route was taken at all.
 
-**Still missing before a provider is useful**: nothing yet receives a CAPABILITIES
-announcement and calls `aimee_vector_route_select()`, so no provider can be
-selected; and the apply path does not yet write the multi-valued `visibility` and
-`generation` labels the searches filter on -- `db3_projection_labels()` builds a
-JSONB object via `jsonb_object_agg`, which is single-valued, and the Go outbox
-parses labels into `map[string]string`.
+### Provider detection: the policy exists, the delivery does not
+
+`aimee_vector_capabilities_decode()` reads the 48-byte announcement, and
+`aimee_vector_route_observe_capabilities()` records one attachment's evidence and
+re-derives the selection. The rule is the Go router's, deliberately: a provider
+must be ready, able to search, able to do cosine, and able to filter exactly; the
+lowest eligible principal serves reads. Principals are deployment-owned and
+unique, so the answer does not depend on the order announcements arrive in --
+which is the property that lets two independent implementations agree at all. Two
+routers that disagreed would let one deployment answer the same query from
+different indexes depending on which process asked.
+
+`principal` and `handle` come from the bus frame, never from the payload: a
+provider that could name its own principal could name someone else's. A control
+decision made through `aimee_vector_route_select()` pins the selection, so a
+pinned provider disappearing fails closed rather than silently handing reads to a
+different index; an automatic selection advances to the next eligible provider,
+or back to pgvector when none remains.
+
+Wire parity with the Go implementation is pinned by a golden frame that both
+sides assert against, produced by running the Go encoder rather than by hand.
+Verified to catch a swapped pair of offsets -- which a round trip through one
+implementation's own encoder would not.
+
+**Nothing delivers an announcement to it.** CAPABILITIES is a notification, the
+KB's only bus surface is the request/reply `obs_bus_module_call()`, and no C
+subscriber exists. So `aimee_vector_route_observe_capabilities()` has the same
+status the route itself had this morning: implemented, tested, and uncalled. The
+missing piece is a `bus_client_poll()` subscriber in the KB and a search
+transport to reach the selected provider; the client machinery exists
+(`src/core/event_bus/include/aimee/core/event_bus/bus_client.h`), it is simply
+not wired.
+
+**Also still missing**: the apply path does not write the multi-valued
+`visibility` and `generation` labels the searches filter on --
+`db3_projection_labels()` builds a JSONB object via `jsonb_object_agg`, which is
+single-valued, and the Go outbox parses labels into `map[string]string`.
 
 No provider module exists yet, which is why the struct layout could still change:
 once one exists it cannot.

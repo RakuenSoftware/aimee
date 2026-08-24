@@ -160,7 +160,7 @@ def validate_catalog(value: object) -> dict[str, object]:
     catalog = _keys(
         value,
         {"schema_version", "protocol", "protocol_id", "owner", "wire_version", "events",
-         "limits", "wire", "filter_ops"},
+         "limits", "wire", "filter_ops", "capability_bits"},
         "catalog",
     )
     if catalog["schema_version"] != 1 or catalog["wire_version"] != 1:
@@ -212,6 +212,18 @@ def validate_catalog(value: object) -> dict[str, object]:
     operators = _keys(catalog["filter_ops"], {"eq", "ne", "in"}, "filter_ops")
     if operators != {"eq": 1, "ne": 2, "in": 3}:
         fail("filter-ops", "the filter operators are pinned; zero is not an operator")
+    bits = _keys(catalog["capability_bits"], {"operations", "metrics", "filters"},
+                 "capability_bits")
+    operations = _keys(bits["operations"], {"search", "apply"}, "capability_bits.operations")
+    metrics = _keys(bits["metrics"], {"cosine", "l2", "dot"}, "capability_bits.metrics")
+    filters = _keys(bits["filters"], {"exact"}, "capability_bits.filters")
+    # Exact equality, like the operators and the limits. These are on the wire
+    # and already deployed in the Go implementation; the catalogue records what
+    # they are rather than letting an edit choose new ones quietly.
+    if (operations != {"search": 1, "apply": 2}
+            or metrics != {"cosine": 1, "l2": 2, "dot": 4}
+            or filters != {"exact": 1}):
+        fail("capability-bits", "the capability bits are pinned to the deployed wire")
     wire = _keys(
         catalog["wire"],
         {
@@ -357,6 +369,8 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
     limits = catalog["limits"]
     wire = catalog["wire"]
     ops = catalog["filter_ops"]
+    bits = catalog["capability_bits"]
+    operations, metrics, filters = bits["operations"], bits["metrics"], bits["filters"]
     assert isinstance(limits, dict) and isinstance(wire, dict) and isinstance(ops, dict)
     event_width = max(len(str(event["name"])) for event in events)
     event_lines = "\n".join(
@@ -394,6 +408,23 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_VECTOR_FILTER_EQ {ops['eq']}u
 #define AIMEE_VECTOR_FILTER_NE {ops['ne']}u
 #define AIMEE_VECTOR_FILTER_IN {ops['in']}u
+
+/* What a provider announces it can do, and the masks that say which bits this
+ * build knows. Decoding refuses an unknown bit rather than ignoring it: a
+ * provider announcing a metric this build has never heard of comes from a newer
+ * contract, and reading its announcement as "cosine only" would rank results by
+ * a metric nobody chose. */
+#define AIMEE_VECTOR_OPERATION_SEARCH {operations['search']}u
+#define AIMEE_VECTOR_OPERATION_APPLY  {operations['apply']}u
+#define AIMEE_VECTOR_OPERATION_KNOWN  {operations['search'] | operations['apply']}u
+
+#define AIMEE_VECTOR_METRIC_COSINE {metrics['cosine']}u
+#define AIMEE_VECTOR_METRIC_L2     {metrics['l2']}u
+#define AIMEE_VECTOR_METRIC_DOT    {metrics['dot']}u
+#define AIMEE_VECTOR_METRIC_KNOWN  {metrics['cosine'] | metrics['l2'] | metrics['dot']}u
+
+#define AIMEE_VECTOR_FILTER_EXACT {filters['exact']}u
+#define AIMEE_VECTOR_FILTER_KNOWN {filters['exact']}u
 
 #define AIMEE_VECTOR_SEARCH_REQUEST_MAGIC  0x{wire['search_request']['magic']:08x}u
 #define AIMEE_VECTOR_SEARCH_REPLY_MAGIC    0x{wire['search_reply']['magic']:08x}u
@@ -435,6 +466,8 @@ def go_bytes(catalog: dict[str, object], registry: dict[str, object],
     limits = catalog["limits"]
     wire = catalog["wire"]
     ops = catalog["filter_ops"]
+    bits = catalog["capability_bits"]
+    operations, metrics, filters = bits["operations"], bits["metrics"], bits["filters"]
     assert isinstance(limits, dict) and isinstance(wire, dict) and isinstance(ops, dict)
     event_lines = "\n".join(
         f"const Event{_go_name(str(event['name']))} uint32 = 0x{int(event['event_kind']):08x}"
@@ -478,6 +511,21 @@ const (
 	FilterEq uint8 = {ops['eq']}
 	FilterNe uint8 = {ops['ne']}
 	FilterIn uint8 = {ops['in']}
+)
+
+// What a provider announces it can do. Defined here rather than in control.go
+// so that one catalogue fixes them for the C decoder and this one alike: with
+// `1 << iota` in control.go the two implementations could disagree about a bit
+// and nothing in this repository would notice.
+const (
+	OperationSearchBit uint32 = {operations['search']}
+	OperationApplyBit  uint32 = {operations['apply']}
+
+	MetricCosineBit uint32 = {metrics['cosine']}
+	MetricL2Bit     uint32 = {metrics['l2']}
+	MetricDotBit    uint32 = {metrics['dot']}
+
+	FilterExactBit uint32 = {filters['exact']}
 )
 
 const searchRequestMagic uint32 = 0x{wire['search_request']['magic']:08x}

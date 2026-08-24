@@ -110,5 +110,19 @@
     "eq": 1,
     "ne": 2,
     "in": 3
+  },
+  "capability_bits": {
+    "operations": {
+      "search": 1,
+      "apply": 2
+    },
+    "metrics": {
+      "cosine": 1,
+      "l2": 2,
+      "dot": 4
+    },
+    "filters": {
+      "exact": 1
+    }
   }
 }

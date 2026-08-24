@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a6027650b245a17e29dcbf1846896d581e2a8fb6a4e897a580ffe5b50fb5d957"
+const ContractSHA256 = "8b3144066a582fae742172e0021df463362cf8b6a755515bc1a724775bfae1eb"
 const ProtocolID uint32 = 3
 const WireVersion uint16 = 1
 
@@ -40,6 +40,21 @@ const (
 	FilterEq uint8 = 1
 	FilterNe uint8 = 2
 	FilterIn uint8 = 3
+)
+
+// What a provider announces it can do. Defined here rather than in control.go
+// so that one catalogue fixes them for the C decoder and this one alike: with
+// `1 << iota` in control.go the two implementations could disagree about a bit
+// and nothing in this repository would notice.
+const (
+	OperationSearchBit uint32 = 1
+	OperationApplyBit  uint32 = 2
+
+	MetricCosineBit uint32 = 1
+	MetricL2Bit     uint32 = 2
+	MetricDotBit    uint32 = 4
+
+	FilterExactBit uint32 = 1
 )
 
 const searchRequestMagic uint32 = 0x53334244
