@@ -362,10 +362,58 @@ otherwise all look like "no provider":
 | `pgvec_memory_vector_capabilities_rejected() > 0` | announcing in a dialect this build cannot read |
 | seen > 0, rejected == 0, `pgvec_memory_vector_selected_provider() == 0` | announcing, but not eligible |
 
-**A selected provider still serves no searches.** `memory_candidates_search()`
-needs `route->external_search`, and no transport is installed -- so selection is
-correct and observable and changes no query's answer. The transport is the
-remaining piece.
+**Searches reach the selected provider.** `pgvec_memory_vector_set_transport()`
+installs the route's external leg, and the KB installs the bus behind it. The
+split is the same one the announcement path uses, in the other direction: db2
+encodes the search and decodes the reply because db2 owns the wire, and hands the
+bytes to a host-supplied call because the host owns where bytes go. The deadline
+is the host's, for the same reason -- how long to wait on a peer on this bus is
+not a property of the search.
+
+The stage id came out of this. `aimee_module_client_call()` refuses stage 0, so a
+caller needs one, and the vector contract had none: DB3 is a protocol whose event
+kind already names the operation. `AIMEE_VECTOR_STAGE_SEARCH` is now generated
+from the catalogue for the request-reply events only, with the event's own id as
+its value -- any other number would be arbitrary, and arbitrary is what drifts
+between two implementations. Emitted for Go as well, for the same reason the
+capability bits were.
+
+**Fallback is off.** A search a selected provider could not answer fails rather
+than falling back to pgvector. The reason to attach a provider is vectors
+pgvector cannot hold, so the fallback would search a corpus missing exactly those
+vectors and return a short answer indistinguishable from a complete one. A
+deployment mid-migration, with its vectors in both, is the case that wants
+fallback -- an explicit choice for when there is somewhere to express it, not a
+default to inherit.
+
+`pgvec_memory_vector_provider_searches()` and `..._provider_failures()` count at
+the transport: what left this process, and what came back readable. A reply that
+decodes and is then refused for naming the wrong request counts as answered,
+because it was -- the route is what rejected it, and that shows up in the route's
+result rather than in these.
+
+**One attachment, one principal, both roles.** The host admits exactly one live
+attachment per principal, and exactly one server per event kind, so the provider
+that announces is the provider that serves. `unit-test-bus-vector-provider`
+drives a real `pgvec_memory_vector_search_with_kinds()` through obs_bus to a
+provider on its own attachment and asserts on what ARRIVED -- record type, scope,
+dimension, top-k, required generation, and the kind filter. A provider answering
+a different question returns a well-formed, plausible, wrong result that nothing
+downstream would notice, which is why the assertion is on the request rather than
+on the reply. It also pins that an unscoped search never leaves the process even
+with a provider attached and reachable, and that a reply naming a request nobody
+made is refused rather than quietly downgraded to pgvector's answer.
+
+Its first harness used `aimee_module_process_run()` for the serving half and ran
+it beside the announcing client. The announcing attachment silently became the
+server for SEARCH -- one grant carries both rights -- answered nothing, and every
+search died on the deadline while the runtime was denied admission as a live
+duplicate. The denial was right and the harness was wrong: a second attachment is
+a deployment shape a provider cannot have.
+
+Candidate authorisation runs on every external result and is a query, so the
+round trip above returns no candidates by construction; the authorised path is
+covered against live PostgreSQL by `unit-test-vector-route-pgvec`.
 
 **Also still missing**: the apply path does not write the multi-valued
 `visibility` and `generation` labels the searches filter on --

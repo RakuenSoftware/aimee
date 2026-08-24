@@ -238,3 +238,6 @@ benchmarks/compaction-quality/.cache-ab/
 .commitmsg
 .db2scratch/
 .db2verify/
+# Frozen diffs handed to roundtable review; regenerated per slice from git
+# format-patch, so keeping them would commit a copy of the commit.
+.review/

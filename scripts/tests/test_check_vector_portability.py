@@ -38,7 +38,7 @@ class PortabilityTests(unittest.TestCase):
 
     def test_production_audit_covers_every_pgvector_declaration(self) -> None:
         summary = checker.run(REPO_ROOT)
-        self.assertEqual(sum(summary.values()), 80)
+        self.assertEqual(sum(summary.values()), 83)
         self.assertEqual(summary, {
             # All fourteen, and all portable now: search version 2 carries a
             # collection and a conjunction of eq/ne/in predicates over labels
@@ -46,17 +46,21 @@ class PortabilityTests(unittest.TestCase):
             "portable-search": 14,
             "committed-mutation": 32,
             "provider-control": 13,
-            # Six more than before the route work, and every one of them is
+            # Nine more than before the route work, and every one of them is
             # something a provider structurally cannot serve:
             # pgvec_memory_point_visible reads the canonical scope tables to
             # decide whether a PROVIDER's answer may be shown -- handing that to
             # a provider would ask the untrusted party to certify itself;
             # pgvec_memory_vector_on_capabilities decides which provider may
-            # serve reads at all; and the three counters (routed_searches,
-            # capabilities_seen, capabilities_rejected) plus selected_provider
-            # are process-local state whose whole value is being measured on
-            # this side.
-            "db2-authority": 18,
+            # serve reads at all; pgvec_memory_vector_set_transport decides how
+            # one is reached, which is the deployment's question and not the
+            # provider's; and the counters (routed_searches, capabilities_seen,
+            # capabilities_rejected, provider_searches, provider_failures) plus
+            # selected_provider are process-local state whose whole value is
+            # being measured on THIS side of the boundary. A provider reporting
+            # how many of its own searches succeeded answers a different
+            # question.
+            "db2-authority": 21,
             "portable-analytics": 3,
         })
         source = checker.source_symbols(self.ledger())
@@ -202,7 +206,7 @@ class PortabilityTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("total=80", result.stdout)
+            self.assertIn("total=83", result.stdout)
             fingerprint = subprocess.run(
                 [sys.executable, "-I", "-S", str(CHECKER), "--root", str(root),
                  "--print-source-fingerprint"],
@@ -214,7 +218,7 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(fingerprint.returncode, 0, fingerprint.stderr)
             self.assertEqual(
                 fingerprint.stdout.strip(),
-                f"{self.audit()['source_symbols_sha256']}  pgvec-symbols=80",
+                f"{self.audit()['source_symbols_sha256']}  pgvec-symbols=83",
             )
 
 

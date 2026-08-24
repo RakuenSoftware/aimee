@@ -29,9 +29,62 @@ int pgvec_memory_vector_on_capabilities(uint32_t principal_ref, uint32_t src_han
                                         uint64_t sequence, const uint8_t *payload,
                                         uint32_t payload_len);
 
+/* How this host performs one request/reply call on its bus.
+ *
+ * The transport half of the same split the announcement path uses: the host owns
+ * WHERE bytes go, db2 owns what they MEAN. db2 encodes the search and decodes
+ * the reply -- it owns the wire -- and hands the bytes to this. Nothing here
+ * knows what a bus is, so db2's data layer keeps no dependency on the AUDIT
+ * module, and the standalone bundle needs no replacement for one.
+ *
+ * The deadline is the host's: how long to wait on a peer is a property of the
+ * transport, not of the search. Returns 0 with `*response_len` set on success,
+ * and -1 for every failure including "no provider is serving", which the route
+ * treats as a provider failure and resolves by its fallback policy.
+ *
+ * `response_capacity` is what db2 asked for; a reply larger than that is a
+ * failure rather than a truncation. */
+typedef int (*pgvec_vector_call_fn)(void *context, uint32_t event_kind, uint32_t stage_id,
+                                    const uint8_t *request, uint32_t request_len,
+                                    uint8_t *response, uint32_t response_capacity,
+                                    uint32_t *response_len);
+
+/* Install the transport a selected provider is reached through, once.
+ *
+ * Until this is called a selection changes no query's answer: the route has
+ * nowhere to send a search, so every routed search takes the pgvector leg.
+ *
+ * `fallback_enabled` decides the one genuinely ambiguous case -- a selected
+ * provider that errors. Disabled means the search fails; enabled means it is
+ * re-issued against pgvector. Disabled is the correct default for the case this
+ * protocol exists for: a deployment attaches a provider because its vectors are
+ * too wide for pgvector, so falling back searches a corpus that does not contain
+ * them and returns a short answer indistinguishable from a complete one.
+ *
+ * Returns 0, or -1 if the route could not be initialised or a transport is
+ * already installed. */
+int pgvec_memory_vector_set_transport(pgvec_vector_call_fn call, void *context,
+                                      int fallback_enabled);
+
 /* The principal currently selected to serve vector reads, or 0 for pgvector.
  * The first question an operator asks about an attached provider. */
 uint32_t pgvec_memory_vector_selected_provider(void);
+
+/* Searches sent to a provider that came back as a reply this build could read,
+ * and searches sent that did not -- the request would not encode, the transport
+ * refused or timed out, or the bytes returned were not a reply.
+ *
+ * Deliberately counted at the TRANSPORT, so they say what left this process and
+ * what came back, not whether the route then accepted it. A reply that decodes
+ * and is refused for naming the wrong request is a provider that answered, and
+ * an operator chasing that reads it in the route's result rather than here.
+ *
+ * Separate from the routed count, which says a search was expressible and went
+ * through the route, not that it left the process. Comparing the two tells "the
+ * provider is serving traffic" from "every search is being bypassed before it
+ * gets there" from "the provider is attached and not answering". */
+uint64_t pgvec_memory_vector_provider_searches(void);
+uint64_t pgvec_memory_vector_provider_failures(void);
 
 /* Announcements that reached this process at all. Zero means nothing is
  * announcing; compare with the rejected count and the selected principal to tell

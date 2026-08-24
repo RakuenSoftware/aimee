@@ -3721,6 +3721,7 @@ $(TESTPREFIX)/unit-test-bus-vector-provider: $(OBJDIR)/tests/test_bus_vector_pro
                                               $(OBJDIR)/core/event_bus/bus_arena.o \
                                               $(OBJDIR)/core/event_bus/bus_wire.o \
                                               $(OBJDIR)/core/event_bus/bus_capture.o \
+                                              $(OBJDIR)/module_json_call.o \
                                               $(BUS_MEM_OBJS) $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 

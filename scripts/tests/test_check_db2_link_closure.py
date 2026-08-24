@@ -730,21 +730,29 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 146)
-        # Four, and every one is db2's own: memory_vectors.c calls the vector
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 149)
+        # Seven, and every one is db2's own: memory_vectors.c calls the vector
         # route, which lives at src/modules/db2/vector_route.c rather than under
         # c/, so the probe -- which compiles only the c/ boundary -- cannot see
         # its definitions. The standalone bundle packages that file; nothing is
         # owed to the monolith. The symbol list is pinned rather than the count
         # alone, so a row from somewhere else has to be argued for by name.
+        #
+        # The three added by the search transport are the shape of the boundary
+        # working: db2 gained the CODEC calls, not a transport dependency. The
+        # host supplies a byte-level call, so nothing here names obs_bus, the
+        # event bus, or the audit module -- which is what a row from somewhere
+        # else would look like.
         self.assertEqual(
-            contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 4
+            contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 7
         )
         self.assertEqual(sorted(
             row["symbol"] for row in contract["unresolved"]
             if row["disposition"] == "descriptor-owned-copy/generated-input"
         ), ["aimee_vector_capabilities_decode", "aimee_vector_memory_candidates_search",
-            "aimee_vector_route_init", "aimee_vector_route_observe_capabilities"])
+            "aimee_vector_route_init", "aimee_vector_route_observe_capabilities",
+            "aimee_vector_route_set_transport", "aimee_vector_search_reply_decode",
+            "aimee_vector_search_request_encode"])
         # 142: three more than the 139 this batch started at, and all three are
         # pthread_rwlock_*, which the memory route now takes because the bus
         # observer writes it while searches read it. Exactly as much pthread ABI

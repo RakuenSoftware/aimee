@@ -19,6 +19,9 @@ const EventApplied uint32 = 0x80030003
 const EventSearch uint32 = 0x80030004
 const EventRoute uint32 = 0x80030005
 
+const StageSearch uint32 = 4
+const StageRoute uint32 = 5
+
 const MaxScopeBytes = 64
 const MaxRecordTypeBytes = 32
 const MaxCollectionBytes = 32

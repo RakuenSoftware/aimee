@@ -325,6 +325,112 @@ int pgvec_memory_vector_on_capabilities(uint32_t principal_ref, uint32_t src_han
    return 0;
 }
 
+/* ------------------------------------------------------------- transport
+ *
+ * The other half of provider detection. Selection decided WHO should serve
+ * reads; this is how a search reaches them.
+ *
+ * db2 encodes and decodes because db2 owns the wire. It does not know what a bus
+ * is: the host installs a byte-level call and this drives it. Same split as the
+ * announcement path, for the same reason -- a dependency on the AUDIT module
+ * here is one the standalone bundle would have to carry or replace.
+ */
+
+static pgvec_vector_call_fn transport_call;
+static void *transport_context;
+
+static _Atomic uint64_t provider_searches;
+static _Atomic uint64_t provider_failures;
+
+uint64_t pgvec_memory_vector_provider_searches(void)
+{
+   return atomic_load(&provider_searches);
+}
+
+uint64_t pgvec_memory_vector_provider_failures(void)
+{
+   return atomic_load(&provider_failures);
+}
+
+/* The route's external leg. Runs on the searching thread, under the route's read
+ * lock -- so it must not touch the route, and does not: everything it needs is
+ * in the request the route handed it. */
+static int external_search(void *context, const aimee_vector_search_request_t *request,
+                           aimee_vector_search_reply_t *reply)
+{
+   (void)context;
+   if (!transport_call)
+      return -1;
+
+   /* Sized from the contract rather than guessed: a request is its header plus
+    * the filter block plus four bytes per dimension, and a reply is its header
+    * plus one candidate record per result. Stack buffers, because a search on
+    * the hot path must not depend on an allocator being able to answer. */
+   uint8_t request_bytes[AIMEE_VECTOR_SEARCH_REQUEST_HEADER + AIMEE_VECTOR_MAX_FILTER_BYTES +
+                         4u * AIMEE_VECTOR_MAX_DIM];
+   size_t request_len = 0;
+   if (aimee_vector_search_request_encode(request, request_bytes, sizeof(request_bytes),
+                                          &request_len) != 0)
+   {
+      atomic_fetch_add(&provider_failures, 1);
+      return -1;
+   }
+
+   uint8_t reply_bytes[AIMEE_VECTOR_SEARCH_REPLY_HEADER +
+                       AIMEE_VECTOR_CANDIDATE_BYTES * AIMEE_VECTOR_MAX_TOP_K];
+   uint32_t reply_len = 0;
+   if (transport_call(transport_context, AIMEE_VECTOR_EVENT_SEARCH, AIMEE_VECTOR_STAGE_SEARCH,
+                      request_bytes, (uint32_t)request_len, reply_bytes, sizeof(reply_bytes),
+                      &reply_len) != 0)
+   {
+      atomic_fetch_add(&provider_failures, 1);
+      return -1;
+   }
+   if (aimee_vector_search_reply_decode(reply_bytes, reply_len, reply) != 0)
+   {
+      /* The provider answered with something this build cannot read. Counted as
+       * a failure rather than an empty result: an empty result is an answer, and
+       * this is the absence of one. */
+      atomic_fetch_add(&provider_failures, 1);
+      return -1;
+   }
+   atomic_fetch_add(&provider_searches, 1);
+   return 0;
+}
+
+int pgvec_memory_vector_set_transport(pgvec_vector_call_fn call, void *context,
+                                      int fallback_enabled)
+{
+   if (!call)
+      return -1;
+   pthread_once(&memory_route_once, memory_route_init);
+   if (memory_route_init_failed)
+      return -1;
+
+   /* The write lock, because external_search reads transport_call and the route
+    * reads its own external_search leg -- and both of those reads happen under
+    * the read lock held across a search. Installing without it would publish a
+    * half-installed transport to a search already running. */
+   pthread_rwlock_wrlock(&memory_route_lock);
+   int rc = -1;
+   /* Once, like the observer: a second transport is an ownership question, and
+    * swapping one under searches already in flight is not something any caller
+    * needs. */
+   if (!transport_call)
+   {
+      transport_call = call;
+      transport_context = context;
+      rc = aimee_vector_route_set_transport(&memory_route, external_search, NULL, fallback_enabled);
+      if (rc != 0)
+      {
+         transport_call = NULL;
+         transport_context = NULL;
+      }
+   }
+   pthread_rwlock_unlock(&memory_route_lock);
+   return rc;
+}
+
 /* Fill a request, or return -1 if this search is not expressible in the
  * contract. Nothing here is a failure: it is a search that must take the
  * direct path. */

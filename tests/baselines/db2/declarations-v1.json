@@ -27963,7 +27963,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 45
+          "line": 98
         }
       ],
       "signature": "uint64_t pgvec_memory_vector_capabilities_rejected ( void )",
@@ -27978,7 +27978,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 40
+          "line": 93
         }
       ],
       "signature": "uint64_t pgvec_memory_vector_capabilities_seen ( void )",
@@ -28110,7 +28110,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 77
+          "line": 130
         }
       ],
       "review": {
@@ -28140,13 +28140,41 @@
       "symbol": "pgvec_memory_vector_on_capabilities"
     },
     {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/memory_vectors.h",
+          "line": 87
+        }
+      ],
+      "signature": "uint64_t pgvec_memory_vector_provider_failures ( void )",
+      "signature_sha256": "10c8c3861dc42b6235bf48b0fe53b822c0967a5088a886d343cec86a60bcf986",
+      "status": "internal-unconsumed",
+      "symbol": "pgvec_memory_vector_provider_failures"
+    },
+    {
+      "consumers": [
+        "src/tests/test_bus_vector_provider.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/memory_vectors.h",
+          "line": 86
+        }
+      ],
+      "signature": "uint64_t pgvec_memory_vector_provider_searches ( void )",
+      "signature_sha256": "f7d37a29390b0aaef23062328e1a5ea481e4a0342485d875a9f74739dd9e8b00",
+      "status": "private-test-only",
+      "symbol": "pgvec_memory_vector_provider_searches"
+    },
+    {
       "consumers": [
         "src/tests/test_vector_route_pgvec.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 51
+          "line": 104
         }
       ],
       "signature": "uint64_t pgvec_memory_vector_routed_searches ( void )",
@@ -28157,13 +28185,14 @@
     {
       "consumers": [
         "src/modules/memory/memory_core_search_c.c",
+        "src/tests/test_bus_vector_provider.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_vector_route_pgvec.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 59
+          "line": 112
         }
       ],
       "review": {
@@ -28180,13 +28209,14 @@
     {
       "consumers": [
         "src/modules/memory/memory_core_search_c.c",
+        "src/tests/test_bus_vector_provider.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_vector_route_pgvec.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 58
+          "line": 111
         }
       ],
       "review": {
@@ -28204,6 +28234,7 @@
       "consumers": [
         "src/modules/memory/memory_core_search.c",
         "src/modules/memory/memory_core_search_b.c",
+        "src/tests/test_bus_vector_provider.c",
         "src/tests/test_memory_embed_dim_guard.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_vector_route_pgvec.c"
@@ -28211,7 +28242,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 53
+          "line": 106
         }
       ],
       "review": {
@@ -28228,13 +28259,14 @@
     {
       "consumers": [
         "src/modules/memory/memory_core_search_b.c",
+        "src/tests/test_bus_vector_provider.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_vector_route_pgvec.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 55
+          "line": 108
         }
       ],
       "review": {
@@ -28255,13 +28287,28 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 34
+          "line": 71
         }
       ],
       "signature": "uint32_t pgvec_memory_vector_selected_provider ( void )",
       "signature_sha256": "2330f2befecf52aa81404d243a8bf154d97e1ddb097fe8e008f994816724a06a",
       "status": "private-test-only",
       "symbol": "pgvec_memory_vector_selected_provider"
+    },
+    {
+      "consumers": [
+        "src/kb/db2_adapters/kb_vector_provider.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/memory_vectors.h",
+          "line": 66
+        }
+      ],
+      "signature": "int pgvec_memory_vector_set_transport ( pgvec_vector_call_fn call , void * context , int fallback_enabled )",
+      "signature_sha256": "c74d810af11cdaadce21844cdf27fe81a02ecac015b56e01a902802870fbc094",
+      "status": "audit-pending",
+      "symbol": "pgvec_memory_vector_set_transport"
     },
     {
       "consumers": [
@@ -28681,15 +28728,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "894ce69d8a2f580008e7f751bd93da34ecd078a340c19185c8ca6cf7cd0b4088",
+  "fingerprint": "b0950c274b2d563a8150b7f5dc10c341d71f030e0e672166f0ca3b63cedc1ace",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 200,
-    "declarations": 1401,
+    "audit_pending": 201,
+    "declarations": 1404,
     "headers": 138,
-    "internal_unconsumed": 151,
-    "private_test_only": 291,
+    "internal_unconsumed": 152,
+    "private_test_only": 292,
     "reviewed": 759
   }
 }
