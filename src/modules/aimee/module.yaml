@@ -50,6 +50,7 @@
     "server-go/modules/aimee/families/sessions.go",
     "server-go/modules/aimee/families/telemetry.go",
     "server-go/modules/aimee/families/telemetry_diagnose.go",
+    "server-go/modules/aimee/families/telemetry_eval_candidates.go",
     "server-go/modules/aimee/families/telemetry_events.go",
     "server-go/modules/aimee/families/telemetry_insights.go",
     "server-go/modules/aimee/families/telemetry_token_audit.go",

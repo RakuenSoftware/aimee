@@ -582,31 +582,64 @@ live_env_stop_kb_modules() {
 live_env_start_module() {
    live_env_stop_module
    live_env_prepare_modules
-   local module="${LIVE_DB1_MODULE:-src/build/obj/aimee-module-db1}"
-   # `make all` does not build the module, and both CI rigs that source this
-   # file run exactly that. Build it here rather than making them remember.
-   [ -x "$module" ] || make -C src build/obj/aimee-module-db1 >/dev/null 2>&1 || true
+   # The store is the multicall binary under its own name; the grant pins the
+   # resolved path, and the binary takes its identity from argv[0].
+   local module="${LIVE_DB1_MODULE:-src/build/obj/aimee-module-aimee}"
+   [ -x "$module" ] || cp src/build/obj/aimee-module "$module" 2>/dev/null || true
    [ -x "$module" ] || {
-      echo "$LIVE_NAME: could not build the DB1 module at $module" >&2
+      echo "$LIVE_NAME: could not provide the store module at $module" >&2
       exit 2
    }
-   local grant="src/build/obj/module-bundle/grants/server/db1.grant"
+   local grant="src/build/obj/module-bundle/grants/server/aimee.grant"
    [ -r "$grant" ] || python3 scripts/export_c_repositories.py \
       --runtime-bundle src/build/obj/module-bundle >/dev/null 2>&1 || true
    [ -r "$grant" ] || {
-      echo "$LIVE_NAME: no generated DB1 grant at $grant" >&2
+      echo "$LIVE_NAME: no generated store grant at $grant" >&2
       exit 2
    }
+   # The store does not reach PostgreSQL itself: it calls the postgres module's
+   # SQL stage over the bus. Without that module, and without a grant for the
+   # store's OUTBOUND principal, the store attaches and then finds no backend.
+   local pgmodule="src/build/obj/aimee-module-postgres"
+   [ -x "$pgmodule" ] || cp src/build/obj/aimee-module "$pgmodule" 2>/dev/null || true
    mkdir -p "$AIMEE_HOME/modules.d/server"
    sed "s|^executable=.*|executable=$PWD/$module|" "$grant" \
-      >"$AIMEE_HOME/modules.d/server/db1.grant"
+      >"$AIMEE_HOME/modules.d/server/aimee.grant"
+   # 11265 is the postgres module's health stage, 11266 its SQL stage.
+   cat >"$AIMEE_HOME/modules.d/server/aimee-postgres.grant" <<PGGRANT
+version=1
+principal_class=1
+principal_ref=28
+uid=self
+executable=$PWD/$pgmodule
+publish=
+subscribe=
+request=
+serve=11265,11266
+PGGRANT
+   # A module's serve grant admits what it answers, not what it asks for.
+   cat >"$AIMEE_HOME/modules.d/server/aimee-store-client.grant" <<CLIENTGRANT
+version=1
+principal_class=1
+principal_ref=68
+uid=self
+executable=$PWD/$module
+publish=
+subscribe=
+request=11266
+serve=
+CLIENTGRANT
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
       src/build/obj/module-bundle/grants/server/config.grant \
       >"$AIMEE_HOME/modules.d/server/config.grant"
    local bus="$AIMEE_HOME/server-module-bus.sock"
+   # Postgres first: the store checks for its backend as it comes up.
+   live_env_arm_module "$PWD/$pgmodule" "$bus" "$AIMEE_HOME/pg-module.log" \
+      LIVE_PG_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
+      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
    live_env_arm_module "$PWD/$module" "$bus" "$AIMEE_HOME/db1-module.log" \
       LIVE_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
-      "AIMEE_DB1_PATH=$AIMEE_HOME/aimee.db"
+      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/server-config-module.log" LIVE_SERVER_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server"
@@ -614,7 +647,7 @@ live_env_start_module() {
 
 live_env_stop_module() {
    local var pid
-   for var in LIVE_MODULE_PID LIVE_SERVER_CONFIG_PID; do
+   for var in LIVE_MODULE_PID LIVE_PG_MODULE_PID LIVE_SERVER_CONFIG_PID; do
       eval "pid=\${$var:-}"
       [ -n "$pid" ] || continue
       kill "$pid" 2>/dev/null || true

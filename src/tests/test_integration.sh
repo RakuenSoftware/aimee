@@ -80,6 +80,10 @@ export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 # harness stages it under the name the grant pins.
 DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module"
 DB1_MODULE="$AIMEE_HOME/aimee-module-aimee"
+# The same multicall binary under the postgres name: it derives its
+# identity from argv[0], and the grant pins the resolved path.
+PG_MODULE="$AIMEE_HOME/aimee-module-postgres"
+PG_MODULE_PID=""
 MODULE_POLICY_DIR="$AIMEE_HOME/modules.d/server"
 MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
 DB1_MODULE_PID=""
@@ -150,7 +154,36 @@ install_db1_module() {
     # lives.
     cp "$DB1_MODULE_BUILT" "$DB1_MODULE"
     chmod 0755 "$DB1_MODULE"
+    cp "$DB1_MODULE_BUILT" "$PG_MODULE"
+    chmod 0755 "$PG_MODULE"
     mkdir -p "$MODULE_POLICY_DIR"
+
+    # The postgres module: kind 11265 is its health stage, 11266 its SQL stage.
+    cat >"$MODULE_POLICY_DIR/aimee-postgres.grant" <<PGGRANT
+version=1
+principal_class=1
+principal_ref=28
+uid=self
+executable=$PG_MODULE
+publish=
+subscribe=
+request=
+serve=11265,11266
+PGGRANT
+
+    # The store's OUTBOUND principal. Its serve grant admits what it answers,
+    # not what it asks for, and what it asks for is the SQL stage above.
+    cat >"$MODULE_POLICY_DIR/aimee-store-client.grant" <<CLIENTGRANT
+version=1
+principal_class=1
+principal_ref=68
+uid=self
+executable=$DB1_MODULE
+publish=
+subscribe=
+request=11266
+serve=
+CLIENTGRANT
     # The serve list comes from the grant the exporter generates, so it cannot
     # drift from what the module actually serves. It is a build artifact, so
     # generate it when it is not there rather than guessing: the guess this
@@ -158,27 +191,31 @@ install_db1_module() {
     # served eight families. It serves nineteen. A short list does not fail
     # loudly -- the daemon starts, eleven families are simply unserved, and
     # their checks fail as if the code were broken.
-    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/db1.grant"
+    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/aimee.grant"
     if [ ! -r "$generated" ]; then
         python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
             --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
     fi
-    local serve=""
+    local serve="" ref=""
     if [ -r "$generated" ]; then
         serve=$(sed -n 's/^serve=//p' "$generated" || true)
+        # From the file for the same reason the serve list is: a ref restated
+        # here can drift from the one the module registers under, and the
+        # failure that produces is a module nobody can reach.
+        ref=$(sed -n 's/^principal_ref=//p' "$generated" || true)
     fi
     if [ -z "$serve" ]; then
-        echo "ABORT: no generated DB1 grant at $generated, and it could not be"
+        echo "ABORT: no generated store grant at $generated, and it could not be"
         echo "       generated. Without it there is no honest serve list to"
         echo "       install: run"
         echo "           python3 scripts/export_c_repositories.py \\"
         echo "               --runtime-bundle src/build/obj/module-bundle"
         exit 1
     fi
-    cat >"$MODULE_POLICY_DIR/db1.grant" <<GRANT
+    cat >"$MODULE_POLICY_DIR/aimee.grant" <<GRANT
 version=1
 principal_class=1
-principal_ref=30
+principal_ref=${ref:-30}
 uid=self
 executable=$DB1_MODULE
 publish=
@@ -212,6 +249,13 @@ start_db1_module() {
         export AIMEE_STORE_URL AIMEE_STORE_SCHEMA
     fi
     stop_db1_module
+    # Postgres first: the store looks for its backend as it comes up, so a store
+    # started into an empty bus fails immediately rather than waiting.
+    if [ -x "$PG_MODULE" ] && [ -z "$PG_MODULE_PID" ]; then
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" "$PG_MODULE" "$MODULE_BUS_SOCK" \
+            >"$AIMEE_HOME/pg-module.log" 2>&1 &
+        PG_MODULE_PID=$!
+    fi
     # Its output goes to a file, not /dev/null: a module that refuses to start
     # says why exactly once, and discarding that leaves the failure looking like
     # a socket that never appeared.
@@ -673,9 +717,18 @@ ABORT_CMD=""
 # hunting with; bash already knows the line and the command, so ask it.
 trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
+stop_pg_module() {
+    if [ -n "$PG_MODULE_PID" ]; then
+        kill "$PG_MODULE_PID" 2>/dev/null || true
+        wait "$PG_MODULE_PID" 2>/dev/null || true
+        PG_MODULE_PID=""
+    fi
+}
+
 cleanup() {
     stop_workflow_module
     stop_db1_module
+    stop_pg_module
     stop_config_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then

@@ -784,6 +784,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-kb-management-action \
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-command-registry
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-dispatch
+TEST_TARGETS += $(TESTPREFIX)/unit-test-token-audit-load
 TEST_TARGETS += 
 
 # RETIRED: unit-test-bus-memory-recall, unit-test-bus-memory-upsert and

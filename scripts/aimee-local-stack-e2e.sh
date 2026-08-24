@@ -77,7 +77,7 @@ check() {
 # --- build ----------------------------------------------------------------
 bold "==> Building aimee client + server + kb + required modules"
 make -C src ../aimee ../aimee-server ../aimee-kb \
-  build/obj/aimee-module-db1 build/obj/aimee-module-config \
+  build/obj/aimee-module build/obj/aimee-module-config \
   build/obj/aimee-module >/dev/null
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
@@ -129,14 +129,17 @@ export AIMEE_DEPLOY_ENABLED=1
 export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
-DB1_MODULE="$REPO/src/build/obj/aimee-module-db1"
+DB1_MODULE="$REPO/src/build/obj/aimee-module-aimee"
+[ -x "$DB1_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
+PG_MODULE="$REPO/src/build/obj/aimee-module-postgres"
+[ -x "$PG_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
 CONFIG_MODULE="$REPO/src/build/obj/aimee-module-config"
 POSTGRES_MODULE="$REPO/src/build/obj/aimee-module-postgres"
 SERVER_POLICY="$AIMEE_HOME/modules.d/server"
 KB_POLICY="$AIMEE_HOME/modules.d/kb"
 mkdir -p "$SERVER_POLICY" "$KB_POLICY"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
-  "$BUNDLE/grants/server/db1.grant" > "$SERVER_POLICY/db1.grant"
+  "$BUNDLE/grants/server/aimee.grant" > "$SERVER_POLICY/aimee.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/server/config.grant" > "$SERVER_POLICY/config.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
@@ -240,7 +243,7 @@ fi
 bold "==> Starting aimee-server"
 arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
   "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
-  "AIMEE_DB1_PATH=$AIMEE_HOME/aimee.db"
+  "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
 arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
   "$AIMEE_HOME/server-config-module.log" server_config_pid
 AIMEE_API_BEARER_TOKEN="$BEARER" \

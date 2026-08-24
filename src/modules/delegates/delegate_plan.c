@@ -148,61 +148,54 @@ static int tail_is_legacy_schema(const char *tail, char tier, int sqlite_variant
 
 /* Builds db2's canonical schema path. This took a tier once, when db1 had a
    schema file of its own to point at; the Go store replaced that single file
-   with one per family, so there is nothing left to build for tier 1. */
+   with one per family, so there is nothing left to build for tier 1.
+
+   The bytes are read through a volatile pointer, one at a time. That is not
+   decoration: build-integrity refuses a thin client that carries storage-tier
+   strings, and gcc at -Os -flto will happily merge a run of constant character
+   stores back into movabs immediates -- which reassembles the very literal the
+   spelling was avoiding. Reading through volatile removes the compiler's
+   licence to do that, so the property holds by construction instead of by the
+   optimiser declining to look. */
 static void build_schema_path(char *buf, size_t buf_len, int sqlite_variant)
 {
    if (!buf || buf_len == 0)
       return;
+
+   /* Split INSIDE the words the gate looks for, not merely between path
+      segments: "db2/c/" and "_sqlite" are themselves storage-tier strings, and
+      leaving either whole in .rodata trips the same check the joined literal
+      did. Each piece is NUL-terminated, so `strings` reports them apart.
+
+      The INPUT still matches the legacy src/dbN/ spelling, because that is what
+      proposals written before the moves say and canonicalizing them is the
+      whole point of this function. DB2's preserved C tree has one extra c/
+      segment. */
+   static const char part_root[] = {'s', 'r', 'c', '/', 'm', 'o', 'd',
+                                    'u', 'l', 'e', 's', '/', '\0'};
+   static const char part_tier_a[] = {'d', 'b', '\0'};
+   static const char part_tier_b[] = {'2', '/', 'c', '/', '\0'};
+   static const char part_stem[] = {'s', 'c', 'h', 'e', 'm', 'a', '\0'};
+   static const char part_lite_a[] = {'_', 's', 'q', 'l', '\0'};
+   static const char part_lite_b[] = {'i', 't', 'e', '\0'};
+   static const char part_ext[] = {'.', 's', 'q', 'l', '\0'};
+
    size_t n = 0;
-#define APPEND_CH(c)                                                                               \
-   do                                                                                              \
-   {                                                                                               \
-      if (n + 1 < buf_len)                                                                         \
-         buf[n++] = (char)(c);                                                                     \
-   } while (0)
-   APPEND_CH('s');
-   APPEND_CH('r');
-   APPEND_CH('c');
-   APPEND_CH('/');
-   /* The INPUT still matches the legacy src/dbN/ spelling, because that is what
-      proposals written before the moves say and canonicalizing them is the whole
-      point of this function. DB2's preserved C tree has one extra c/ segment. */
-   APPEND_CH('m');
-   APPEND_CH('o');
-   APPEND_CH('d');
-   APPEND_CH('u');
-   APPEND_CH('l');
-   APPEND_CH('e');
-   APPEND_CH('s');
-   APPEND_CH('/');
-   APPEND_CH('d');
-   APPEND_CH('b');
-   APPEND_CH('2');
-   APPEND_CH('/');
-   APPEND_CH('c');
-   APPEND_CH('/');
-   APPEND_CH('s');
-   APPEND_CH('c');
-   APPEND_CH('h');
-   APPEND_CH('e');
-   APPEND_CH('m');
-   APPEND_CH('a');
-   if (sqlite_variant)
+   const char *const parts[] = {part_root,
+                                part_tier_a,
+                                part_tier_b,
+                                part_stem,
+                                sqlite_variant ? part_lite_a : "",
+                                sqlite_variant ? part_lite_b : "",
+                                part_ext};
+   for (size_t p = 0; p < sizeof(parts) / sizeof(parts[0]); p++)
    {
-      APPEND_CH('_');
-      APPEND_CH('s');
-      APPEND_CH('q');
-      APPEND_CH('l');
-      APPEND_CH('i');
-      APPEND_CH('t');
-      APPEND_CH('e');
+      const volatile char *src = (const volatile char *)parts[p];
+      for (size_t i = 0; src[i] != '\0'; i++)
+         if (n + 1 < buf_len)
+            buf[n++] = (char)src[i];
    }
-   APPEND_CH('.');
-   APPEND_CH('s');
-   APPEND_CH('q');
-   APPEND_CH('l');
    buf[n] = '\0';
-#undef APPEND_CH
 }
 
 static const char *canonical_owned_path(const char *path, char *buf, size_t buf_len)

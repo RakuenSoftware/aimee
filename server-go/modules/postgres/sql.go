@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -247,9 +248,62 @@ func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
 			sqlPoolErr = fmt.Errorf("postgres: the SQL stage could not open its pool: %w", err)
 			return
 		}
+		if err := ensureSearchPathSchema(ctx, pool, config); err != nil {
+			pool.Close()
+			sqlPoolErr = err
+			return
+		}
 		sqlPool, sqlPoolErr = pool, nil
 	})
 	return sqlPool, sqlPoolErr
+}
+
+// ensureSearchPathSchema creates the schema the DSN's search_path names.
+//
+// PostgreSQL does not create a schema because search_path mentions one: it
+// resolves unqualified names against what already exists, and CREATE TABLE with
+// nothing resolvable fails with 3F000, "no schema has been selected to create
+// in". A caller that asks for its own schema is asking for isolation, so give
+// it one rather than failing on the first write.
+//
+// Only the first entry, and only a plain identifier: that is the schema the
+// caller means to own. A search_path listing several existing schemas is a
+// resolution order, not a request to create anything, and is left alone.
+func ensureSearchPathSchema(ctx context.Context, pool *pgxpool.Pool,
+	config *pgxpool.Config) error {
+	want := config.ConnConfig.RuntimeParams["search_path"]
+	if i := strings.IndexByte(want, ','); i >= 0 {
+		want = want[:i]
+	}
+	want = strings.TrimSpace(want)
+	if want == "" || want == "public" || !plainIdentifier(want) {
+		return nil
+	}
+	if _, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS `+want); err != nil {
+		return fmt.Errorf("postgres: could not create the schema search_path names (%s): %w",
+			want, err)
+	}
+	return nil
+}
+
+// plainIdentifier reports whether s is safe to interpolate as a schema name.
+// Quoting is deliberately not attempted: a name needing it is not one this is
+// willing to create on a caller's behalf.
+func plainIdentifier(s string) bool {
+	if len(s) > 63 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c == '_':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return s != ""
 }
 
 // sqlHandler serves the stage.
