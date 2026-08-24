@@ -136,6 +136,12 @@ static struct
    } writer_q[AB_WRITER_QUEUE];
    unsigned writer_head;
    unsigned writer_count;
+   /* 1 between taking an event off the queue and finishing its write. The queue
+    * being empty does NOT mean the writer is idle: it decrements the count under
+    * the lock and then writes outside it, so there is a window where the event
+    * is in neither place. A waiter that watched only the count would return in
+    * that window, which is the whole failure obs_bus_flush exists to avoid. */
+   int writer_busy;
 } g;
 
 /* Guards start/stop transitions and the started/terminated fields. Separate from
@@ -364,6 +370,7 @@ static void *guardrail_writer_main(void *arg)
       memcpy(payload, g.writer_q[g.writer_head].payload, len);
       g.writer_head = (g.writer_head + 1) % AB_WRITER_QUEUE;
       g.writer_count--;
+      g.writer_busy = 1;
       pthread_mutex_unlock(&g.writer_lock);
 
       /* Outside the lock: this is the call that can take milliseconds, and
@@ -374,11 +381,13 @@ static void *guardrail_writer_main(void *arg)
          atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
 
       pthread_mutex_lock(&g.writer_lock);
+      g.writer_busy = 0;
       if (g.writer_count == 0)
          pthread_cond_broadcast(&g.writer_drained);
       pthread_mutex_unlock(&g.writer_lock);
    }
    pthread_mutex_lock(&g.writer_lock);
+   g.writer_busy = 0;
    pthread_cond_broadcast(&g.writer_drained);
    pthread_mutex_unlock(&g.writer_lock);
    return NULL;
@@ -1324,12 +1333,42 @@ void obs_bus_flush(void)
     * stuck consumer cannot hang the caller forever. Does NOT stop the bus. */
    uint64_t target = atomic_load_explicit(&g.enqueued, memory_order_acquire);
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 100 * 1000}; /* 100 us */
-   for (int i = 0; i < 50000; i++)                                   /* ~5 s cap */
+   int i = 0;
+   for (; i < 50000; i++) /* ~5 s cap */
    {
       if (atomic_load_explicit(&g.processed, memory_order_acquire) >= target)
-         return;
+         break;
       nanosleep(&nap, NULL);
    }
+   /* SECOND WAIT, and the reason this function was not enough on its own. The
+    * consumer counts an event `processed` when it DISPATCHES it, and dispatching
+    * a guardrail event means putting it on the writer's queue -- the sink is a
+    * module call and the consumer may not make one, since it is the thread that
+    * routes the reply. So the first loop above proves the handoff happened and
+    * says nothing about the write.
+    *
+    * A caller that emits a guardrail event, flushes, and reads the store back
+    * would therefore race the writer and usually lose: the read is a few
+    * microseconds away and the module call is milliseconds. That is what
+    * obs_bus_flush promises not to do.
+    *
+    * Bounded like the first loop, and against the SAME budget rather than a
+    * fresh one, so a flush cannot take twice as long as its documented cap. */
+   pthread_mutex_lock(&g.writer_lock);
+   while (i < 50000 && (g.writer_count > 0 || g.writer_busy))
+   {
+      struct timespec deadline;
+      clock_gettime(CLOCK_REALTIME, &deadline);
+      deadline.tv_nsec += nap.tv_nsec;
+      if (deadline.tv_nsec >= 1000000000L)
+      {
+         deadline.tv_sec++;
+         deadline.tv_nsec -= 1000000000L;
+      }
+      pthread_cond_timedwait(&g.writer_drained, &g.writer_lock, &deadline);
+      i++;
+   }
+   pthread_mutex_unlock(&g.writer_lock);
 }
 
 uint64_t obs_bus_dropped(void)
