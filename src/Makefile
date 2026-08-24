@@ -1780,7 +1780,7 @@ OPENAPI_SERVER_OBJS := \
 	$(OBJDIR)/server/server_http_config_routes.o \
 	$(OBJDIR)/server/server_http_conn_worker.o \
 	$(OBJDIR)/server/server_http_response.o \
-	$(OBJDIR)/server/server_http_routes.o \
+	$(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_routes_workspace.o \
 	$(OBJDIR)/server/server_http_sse.o
 
 $(OPENAPI_SERVER_OBJS): server/openapi_server_data.h
