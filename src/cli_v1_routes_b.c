@@ -1044,38 +1044,6 @@ static cJSON *marshal_dogfood_review(int argc, char **argv)
    return req;
 }
 
-static cJSON *marshal_eval_run(int argc, char **argv)
-{
-   cli_args_t opts;
-   cli_args_parse(argc, argv, NULL, &opts);
-   cJSON *req = marshal_no_args("eval.run");
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "suite_dir", opts.positional[0]);
-   const char *ablation = cli_args_get(&opts, "ablation");
-   if (ablation)
-      cJSON_AddStringToObject(req, "ablation", ablation);
-   const char *runs = cli_args_get(&opts, "runs");
-   if (runs)
-      cJSON_AddNumberToObject(req, "runs", atoi(runs));
-   const char *seed = cli_args_get(&opts, "seed");
-   if (seed)
-      cJSON_AddNumberToObject(req, "seed", strtoul(seed, NULL, 10));
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
-   return req;
-}
-
-static cJSON *marshal_eval_results(int argc, char **argv)
-{
-   cli_args_t opts;
-   cli_args_parse(argc, argv, NULL, &opts);
-   cJSON *req = marshal_no_args("eval.results");
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "suite", opts.positional[0]);
-   return req;
-}
-
 static cJSON *marshal_identity_snapshot(int argc, char **argv)
 {
    cli_args_t opts;
@@ -1430,6 +1398,12 @@ static const struct
     {"dogfood.report", marshal_dogfood_report},
     {"dogfood.review", marshal_dogfood_review},
     {"dogfood.tag", marshal_dogfood_tag},
+    {"eval.candidates", marshal_eval_candidates},
+    {"eval.candidates-update", marshal_eval_candidates_update},
+    {"learning.approaches", marshal_learning_approaches},
+    {"learning.attribution", marshal_learning_attribution},
+    {"learning.fate", marshal_learning_fate},
+    {"learning.resolve", marshal_learning_resolve},
     {"eval.results", marshal_eval_results},
     {"eval.run", marshal_eval_run},
     {"evidence.fidelity_retrieval_event", marshal_audit_fidelity},

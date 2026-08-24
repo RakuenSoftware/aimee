@@ -831,6 +831,35 @@ int db2_learning_proposal_find_pending(const char *sink, const char *target_key,
    return id;
 }
 
+int db2_learning_proposal_find_committed(const char *sink, const char *target_key,
+                                         int64_t target_memory_id, int exclude_id)
+{
+   if (!sink || !*sink)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   static const char *sql =
+       "SELECT id FROM learning_proposals"
+       " WHERE sink = ?1 AND state = 'committed' AND target_key = ?2 AND target_memory_id = ?3"
+       " AND id <> ?4"
+       " ORDER BY id DESC LIMIT 1";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", sink);
+   aimee_pg_bind_text(st, "?2", target_key ? target_key : "");
+   aimee_pg_bind_int64(st, "?3", target_memory_id);
+   aimee_pg_bind_int(st, "?4", exclude_id);
+   int id = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      id = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return id;
+}
+
 int db2_learning_proposal_insert(int signal_id, const char *sink, const char *target_key,
                                  int64_t target_memory_id, const char *action_json,
                                  const char *evidence_refs, const char *expires_at)
@@ -951,6 +980,198 @@ int db2_learning_proposals_settled_counts(int window_days, int64_t *committed, i
    }
    aimee_pg_finalize(st);
    return rc;
+}
+
+int db2_learning_committed_source_counts(int window_days, const char *sink_or_null,
+                                         db2_learning_source_count_t *out, int max)
+{
+   if (window_days <= 0 || !out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char window_expr[32];
+   snprintf(window_expr, sizeof(window_expr), "-%d days", window_days);
+   const char *sink = (sink_or_null && sink_or_null[0]) ? sink_or_null : "";
+
+   static const char *sql =
+       "SELECT s.source, s.signal_type, COUNT(*)"
+       " FROM learning_proposals p"
+       " JOIN learning_signals s ON s.id = p.signal_id"
+       " WHERE p.state = 'committed'"
+       " AND COALESCE(p.committed_at, p.updated_at, p.created_at) >= pg_now_text(?1)"
+       " AND (?2 = '' OR p.sink = ?3)"
+       " GROUP BY s.source, s.signal_type"
+       " ORDER BY s.source, s.signal_type";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", window_expr);
+   aimee_pg_bind_text(st, "?2", sink);
+   aimee_pg_bind_text(st, "?3", sink);
+
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[count], 0, sizeof(out[count]));
+      lrn_copy_text(out[count].source, sizeof(out[count].source), aimee_pg_column_text(st, 0), "");
+      lrn_copy_text(out[count].signal_type, sizeof(out[count].signal_type),
+                    aimee_pg_column_text(st, 1), "");
+      out[count].count = aimee_pg_column_int64(st, 2);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
+int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_signal_t *out,
+                                         int max)
+{
+   if (window_days <= 0 || !out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char window_expr[32];
+   snprintf(window_expr, sizeof(window_expr), "-%d days", window_days);
+
+   static const char *sql = "SELECT id, signal_type, source, title, description, correction_text,"
+                            " source_session"
+                            " FROM learning_signals"
+                            " WHERE polarity = 'negative' AND correction_text <> ''"
+                            " AND created_at >= pg_now_text(?1)"
+                            " ORDER BY id DESC LIMIT ?2";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", window_expr);
+   aimee_pg_bind_int(st, "?2", max);
+
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      db2_learning_negative_signal_t *row = &out[count];
+      memset(row, 0, sizeof(*row));
+      row->id = aimee_pg_column_int64(st, 0);
+      lrn_copy_text(row->signal_type, sizeof(row->signal_type), aimee_pg_column_text(st, 1), "");
+      lrn_copy_text(row->source, sizeof(row->source), aimee_pg_column_text(st, 2), "");
+      lrn_copy_text(row->title, sizeof(row->title), aimee_pg_column_text(st, 3), "");
+      lrn_copy_text(row->description, sizeof(row->description), aimee_pg_column_text(st, 4), "");
+      lrn_copy_text(row->correction_text, sizeof(row->correction_text), aimee_pg_column_text(st, 5),
+                    "");
+      lrn_copy_text(row->source_session, sizeof(row->source_session), aimee_pg_column_text(st, 6),
+                    "");
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
+int db2_learning_fate_record(int proposal_id, const char *fate, const char *reason)
+{
+   if (proposal_id <= 0 || !fate || !fate[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* One fate per proposal: a later verdict replaces an earlier one, because
+    * the question is what became of it, not what we thought at each step. */
+   static const char *sql = "INSERT INTO learning_proposal_fate (proposal_id, fate, reason)"
+                            " VALUES (?1, ?2, ?3)"
+                            " ON CONFLICT (proposal_id) DO UPDATE SET fate = ?4, reason = ?5";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", proposal_id);
+   aimee_pg_bind_text(st, "?2", fate);
+   aimee_pg_bind_text(st, "?3", reason ? reason : "");
+   aimee_pg_bind_text(st, "?4", fate);
+   aimee_pg_bind_text(st, "?5", reason ? reason : "");
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
+}
+
+int db2_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len)
+{
+   if (proposal_id <= 0 || !fate_out || fate_out_len == 0)
+      return -1;
+   fate_out[0] = '\0';
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   static const char *sql = "SELECT fate FROM learning_proposal_fate WHERE proposal_id = ?1";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", proposal_id);
+   int found = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      lrn_copy_text(fate_out, fate_out_len, aimee_pg_column_text(st, 0), "");
+      found = 1;
+   }
+   aimee_pg_finalize(st);
+   return found;
+}
+
+int db2_learning_fate_counts(int window_days, const char *regret_fates,
+                             db2_learning_fate_count_t *out, int max)
+{
+   if (window_days <= 0 || !out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char window_expr[32];
+   snprintf(window_expr, sizeof(window_expr), "-%d days", window_days);
+   const char *fates = (regret_fates && regret_fates[0]) ? regret_fates : "";
+
+   /* The regret vocabulary arrives as a comma-separated list and is matched
+    * with a delimited LIKE, so a fate name cannot match a longer one by
+    * prefix (',superseded,' never matches ',superseded_by_operator,'). */
+   static const char *sql =
+       "SELECT s.signal_type,"
+       " COUNT(*),"
+       " SUM(CASE WHEN f.fate IS NULL THEN 0 ELSE 1 END),"
+       " SUM(CASE WHEN f.fate IS NOT NULL"
+       "          AND (',' || ?1 || ',') LIKE ('%,' || f.fate || ',%') THEN 1 ELSE 0 END)"
+       " FROM learning_proposals p"
+       " JOIN learning_signals s ON s.id = p.signal_id"
+       " LEFT JOIN learning_proposal_fate f ON f.proposal_id = p.id"
+       " WHERE p.state = 'committed'"
+       " AND COALESCE(p.committed_at, p.updated_at, p.created_at) >= pg_now_text(?2)"
+       " GROUP BY s.signal_type"
+       " ORDER BY s.signal_type";
+   char err[LRN_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", fates);
+   aimee_pg_bind_text(st, "?2", window_expr);
+
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[count], 0, sizeof(out[count]));
+      lrn_copy_text(out[count].signal_type, sizeof(out[count].signal_type),
+                    aimee_pg_column_text(st, 0), "");
+      out[count].committed = aimee_pg_column_int64(st, 1);
+      out[count].settled = aimee_pg_column_int64(st, 2);
+      out[count].regret = aimee_pg_column_int64(st, 3);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
 }
 
 int db2_learning_proposal_list(const char *state, const char *sink, int limit,

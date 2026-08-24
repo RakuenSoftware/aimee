@@ -10,6 +10,15 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Attach the kb block to a server.health response (see server_api_status.c). */
 void server_health_add_kb(cJSON *resp);
+/* Rows one eval.candidates response may carry. Bounds both the request's
+ * `limit` and the stack buffer that serves it. */
+#define EVAL_CANDIDATES_MAX_ROWS 100
+int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_attribution(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_fate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_eval_candidates_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_eval_results(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_eval_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_insights_overview(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

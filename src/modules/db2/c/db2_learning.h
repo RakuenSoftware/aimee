@@ -10,6 +10,7 @@
 
 #include <aimee/learning/learning.h>
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -150,6 +151,13 @@ extern "C"
    int db2_learning_proposal_find_pending(const char *sink, const char *target_key,
                                           int64_t target_memory_id);
 
+   /* The most recent COMMITTED proposal for the same target, excluding
+    * `exclude_id`. Used to detect supersession: when a new proposal commits
+    * for a target that already had one, the older commit is what the new one
+    * replaced. Returns the id (>0) on hit, 0 on miss / DB unavailable. */
+   int db2_learning_proposal_find_committed(const char *sink, const char *target_key,
+                                            int64_t target_memory_id, int exclude_id);
+
    /* INSERT a new learning_proposals row with state='pending',
     * corroboration_count=1. expires_at must be a pre-formatted UTC
     * timestamp (caller picks ttl). evidence_refs may be NULL
@@ -183,6 +191,89 @@ extern "C"
     * bad args / SQL / connection error. Either pointer may be NULL. */
    int db2_learning_proposals_settled_counts(int window_days, int64_t *committed,
                                              int64_t *terminal);
+
+#define DB2_LEARNING_SOURCE_LEN      16
+#define DB2_LEARNING_SIGNAL_TYPE_LEN 32
+
+   /* One (source, signal_type) group with its committed-proposal count. */
+   typedef struct
+   {
+      char source[DB2_LEARNING_SOURCE_LEN];
+      char signal_type[DB2_LEARNING_SIGNAL_TYPE_LEN];
+      int64_t count;
+   } db2_learning_source_count_t;
+
+   /* Committed proposals within |window_days|, grouped by the originating
+    * signal's (source, signal_type). Rows are the raw provenance groups; the
+    * exogenous/endogenous judgement is policy and belongs to the learning
+    * module, not to SQL. `sink_or_null` filters to one sink when non-empty.
+    * Uses COALESCE(committed_at, updated_at, created_at) for the timestamp,
+    * matching db2_learning_proposals_settled_counts.
+    * Returns rows written (>=0, capped at max), or -1 on bad args / SQL /
+    * connection error. window_days must be > 0. */
+   int db2_learning_committed_source_counts(int window_days, const char *sink_or_null,
+                                            db2_learning_source_count_t *out, int max);
+
+#define DB2_LEARNING_NEG_TITLE_LEN      256
+#define DB2_LEARNING_NEG_DESC_LEN       1024
+#define DB2_LEARNING_NEG_CORRECTION_LEN 1024
+#define DB2_LEARNING_NEG_SESSION_LEN    64
+
+   /* One negative signal that carried a correction. */
+   typedef struct
+   {
+      int64_t id;
+      char signal_type[DB2_LEARNING_SIGNAL_TYPE_LEN];
+      char source[DB2_LEARNING_SOURCE_LEN];
+      char title[DB2_LEARNING_NEG_TITLE_LEN];
+      char description[DB2_LEARNING_NEG_DESC_LEN];
+      char correction_text[DB2_LEARNING_NEG_CORRECTION_LEN];
+      char source_session[DB2_LEARNING_NEG_SESSION_LEN];
+   } db2_learning_negative_signal_t;
+
+   /* Negative-polarity signals from the last |window_days| that carry a
+    * non-empty correction_text, newest first. These are the only signal rows
+    * that state BOTH what was asked and what should have been said, which is
+    * what makes them synthesisable into a regression check.
+    * Returns rows written (>=0, capped at max), or -1 on bad args / SQL /
+    * connection error. window_days must be > 0. */
+   int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_signal_t *out,
+                                            int max);
+
+   /* --- Post-commit fate (recursive-self-improvement S5) ---
+    *
+    * commit_ratio measures whether a proposal was ACCEPTED. It cannot see
+    * whether accepting it was right. These rows record what became of a
+    * committed proposal afterwards, so a detector that is repeatedly wrong can
+    * be told apart from one that is repeatedly agreed with. */
+
+#define DB2_LEARNING_FATE_LEN        16
+#define DB2_LEARNING_FATE_REASON_LEN 256
+
+   /* Record (or replace) the fate of one committed proposal. `fate` is one of
+    * the LEARNING_FATE_* names in aimee/learning/learning.h; the SQL layer does
+    * not police the vocabulary, the policy layer does. Returns 0 on success,
+    * -1 on bad args / SQL / connection error. */
+   int db2_learning_fate_record(int proposal_id, const char *fate, const char *reason);
+
+   /* The recorded fate of one proposal. Writes at most DB2_LEARNING_FATE_LEN
+    * bytes. Returns 1 when a row exists, 0 when none does, -1 on error. */
+   int db2_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len);
+
+   /* Committed-proposal counts by originating signal_type over |window_days|,
+    * split by whether a fate has been recorded and whether it was a regret.
+    * `regret_fates` is a comma-separated list of fate names that count as
+    * regret, supplied by the policy layer so the vocabulary lives in one
+    * place. Returns rows written (capped at max) or -1 on error. */
+   typedef struct
+   {
+      char signal_type[DB2_LEARNING_SIGNAL_TYPE_LEN];
+      int64_t committed; /* committed in the window */
+      int64_t settled;   /* of those, with a fate recorded */
+      int64_t regret;    /* of those settled, a regret fate */
+   } db2_learning_fate_count_t;
+   int db2_learning_fate_counts(int window_days, const char *regret_fates,
+                                db2_learning_fate_count_t *out, int max);
 
 #ifdef __cplusplus
 }

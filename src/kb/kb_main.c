@@ -31,6 +31,7 @@
 #include "kb_sidecar_identity.h"
 #include "kb_paths.h"
 #include "kb_service.h"
+#include "kb_service_kb.h"
 #include "kb_tenancy_cli.h"
 #include "log.h"
 #include "lifecycle.h"
@@ -1841,6 +1842,10 @@ int main(int argc, char **argv)
     * The distinction belongs to the module that knows what each probe requires, not to
     * its caller. */
    embedder_probe_register(config_embedder_command_current(NULL));
+   /* S6: register the policy arms and install the bandit-backed sampler.
+    * Without this nothing ever samples, and the registry only describes a
+    * decision nobody makes. */
+   kb_policy_arms_init();
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
 

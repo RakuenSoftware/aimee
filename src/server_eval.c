@@ -37,6 +37,11 @@
 #include "model_provider.h"
 #include "model_registry.h"
 #include "db1_client/db1.h"
+#include "eval_synthesis.h" /* synthesised regression candidates (S1) */
+#include "approach_store.h"
+#include "kb_client.h"
+#include <aimee/learning/attribution.h>
+#include <aimee/learning/policy_arms.h>
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -174,6 +179,328 @@ int handle_eval_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *arr = cJSON_AddArrayToObject(resp, "results");
    for (int i = 0; i < rows; i++)
       cJSON_AddItemToArray(arr, server_eval_result_json(&results[i]));
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* --- Synthesised regression candidates (recursive self-improvement S1) --- */
+
+static cJSON *server_eval_candidate_json(const db1_eval_candidate_t *c)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return NULL;
+   cJSON_AddNumberToObject(obj, "id", (double)c->id);
+   cJSON_AddStringToObject(obj, "signature", c->signature);
+   cJSON_AddStringToObject(obj, "state", c->state);
+   cJSON_AddStringToObject(obj, "suite", c->suite);
+   cJSON_AddStringToObject(obj, "task_name", c->task_name);
+   cJSON_AddStringToObject(obj, "origin", c->origin);
+   cJSON_AddStringToObject(obj, "origin_ref", c->origin_ref);
+   cJSON_AddNumberToObject(obj, "occurrences", c->occurrences);
+   cJSON_AddNumberToObject(obj, "distinct_sessions", c->distinct_sessions);
+   cJSON_AddStringToObject(obj, "admitted_by", c->admitted_by);
+   cJSON_AddStringToObject(obj, "admitted_path", c->admitted_path);
+   cJSON_AddStringToObject(obj, "reject_reason", c->reject_reason);
+   cJSON_AddNumberToObject(obj, "passing_windows", c->passing_windows);
+   cJSON_AddStringToObject(obj, "created_at", c->created_at);
+   cJSON_AddStringToObject(obj, "updated_at", c->updated_at);
+   return obj;
+}
+
+/* --- Approach-level negative knowledge (recursive self-improvement S3) --- */
+
+int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *goal = server_eval_json_str(req, "goal");
+   if (!goal[0])
+      return server_send_error(conn, "learning.approaches requires goal", request_id);
+
+   learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
+   int n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
+   if (n < 0)
+      return server_send_error(conn, "learning.approaches: could not recall", request_id);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "goal", goal);
+   cJSON *arr = cJSON_AddArrayToObject(resp, "approaches");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "approach", hits[i].approach_text);
+      cJSON_AddStringToObject(o, "failure_mode", hits[i].failure_mode);
+      cJSON_AddStringToObject(o, "goal", hits[i].goal_text);
+      cJSON_AddStringToObject(o, "source_ref", hits[i].source_ref);
+      cJSON_AddNumberToObject(o, "occurrences", (double)hits[i].occurrences);
+      cJSON_AddNumberToObject(o, "similarity", hits[i].similarity);
+      cJSON_AddItemToArray(arr, o);
+   }
+   /* The rendered advisory block, so a caller assembling a plan-time prompt
+    * does not have to re-derive the wording (and cannot turn it into an
+    * instruction by accident). */
+   char rendered[2048];
+   char arm[LEARNING_POLICY_ARM_LEN] = "";
+   (void)approach_store_render(goal, rendered, sizeof(rendered), arm, sizeof(arm));
+   cJSON_AddStringToObject(resp, "advisory", rendered);
+   /* Which arm produced it: a caller measuring whether the block earns its
+    * tokens needs to know which variant it is measuring. */
+   cJSON_AddStringToObject(resp, "advisory_arm", arm);
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_learning_attribution(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *suite = server_eval_json_str(req, "suite");
+
+   learning_attribution_t arms[LEARNING_ATTRIBUTION_MAX_ARMS];
+   int n = eval_attribution_for_suite(suite[0] ? suite : NULL, arms, LEARNING_ATTRIBUTION_MAX_ARMS);
+   if (n < 0)
+      return server_send_error(conn, "learning.attribution: could not read the grid", request_id);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "baseline", LEARNING_ATTRIBUTION_BASELINE);
+   cJSON_AddNumberToObject(resp, "min_tasks", LEARNING_ATTRIBUTION_MIN_TASKS);
+   cJSON *arr = cJSON_AddArrayToObject(resp, "arms");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "ablation", arms[i].ablation);
+      cJSON_AddNumberToObject(o, "tasks_compared", arms[i].tasks_compared);
+      cJSON_AddNumberToObject(o, "baseline_passed", arms[i].baseline_passed);
+      cJSON_AddNumberToObject(o, "arm_passed", arms[i].arm_passed);
+      cJSON_AddNumberToObject(o, "delta", arms[i].delta);
+      cJSON_AddBoolToObject(o, "attributable", arms[i].attributable);
+      cJSON_AddItemToArray(arr, o);
+   }
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_learning_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+
+   /* Proxied to the knowledge service. The backlog is DB2 and the evidence
+    * probe needs the corpus; running the pass here would reach neither, and
+    * with a probe installed it would have failed at the first query. */
+   char *json = kb_client_learning_resolve_json(server_eval_json_int(req, "budget", 0));
+   cJSON *doc = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!doc || !cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(doc, "resolved")))
+   {
+      const cJSON *msg = doc ? cJSON_GetObjectItemCaseSensitive(doc, "message") : NULL;
+      char err[192];
+      snprintf(err, sizeof(err), "learning.resolve: the knowledge service did not answer (%s)",
+               (msg && cJSON_IsString(msg)) ? msg->valuestring : "not reachable");
+      cJSON_Delete(doc);
+      return server_send_error(conn, err, request_id);
+   }
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   static const char *const fields[] = {"resolved", "considered", "still_open", "unknown",
+                                        "skipped",  "budget",     NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const cJSON *v = cJSON_GetObjectItemCaseSensitive(doc, fields[i]);
+      cJSON_AddNumberToObject(resp, fields[i], cJSON_IsNumber(v) ? v->valuedouble : 0);
+   }
+   cJSON_AddBoolToObject(resp, "no_probe",
+                         cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(doc, "no_probe")));
+   cJSON_Delete(doc);
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_learning_fate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   int id = server_eval_json_int(req, "id", 0);
+   const char *fate = server_eval_json_str(req, "fate");
+   if (id <= 0 || !fate[0])
+      return server_send_error(conn, "learning.fate requires id and fate", request_id);
+
+   /* Proxied to the knowledge service: the ledger is DB2, which this binary
+    * builds without. Recording it locally would write nowhere. */
+   char *json = kb_client_learning_fate_json(id, fate, server_eval_json_str(req, "reason"));
+   cJSON *doc = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!doc || !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(doc, "fate")))
+   {
+      const cJSON *msg = doc ? cJSON_GetObjectItemCaseSensitive(doc, "message") : NULL;
+      char err[192];
+      snprintf(err, sizeof(err), "learning.fate: the knowledge service did not record it (%s)",
+               (msg && cJSON_IsString(msg)) ? msg->valuestring : "not reachable");
+      cJSON_Delete(doc);
+      return server_send_error(conn, err, request_id);
+   }
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "id", id);
+   cJSON_AddStringToObject(resp, "fate", fate);
+   cJSON_AddBoolToObject(resp, "counts_as_regret",
+                         cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(doc, "counts_as_regret")));
+   cJSON_Delete(doc);
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *state = server_eval_json_str(req, "state");
+   int limit = server_eval_json_int(req, "limit", 50);
+   if (limit <= 0 || limit > EVAL_CANDIDATES_MAX_ROWS)
+      limit = EVAL_CANDIDATES_MAX_ROWS;
+
+   db1_eval_candidate_t rows[EVAL_CANDIDATES_MAX_ROWS];
+   int n = db1_eval_candidate_list(state, rows, limit);
+   if (n < 0)
+      return server_send_error(conn, "eval.candidates: could not read candidates", request_id);
+
+   /* The endogeneity gate decides whether admission is even possible, so it
+    * belongs in the same view as the backlog it governs — and it must be the
+    * SAME gate the admission path enforces. Computing it locally reported
+    * "nothing observed" forever, because the ledger it reads is DB2 and this
+    * binary builds without it. */
+   char *gate_json = kb_client_learning_endogeneity_json(0);
+   cJSON *gate_doc = gate_json ? cJSON_Parse(gate_json) : NULL;
+   free(gate_json);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON *arr = cJSON_AddArrayToObject(resp, "candidates");
+   for (int i = 0; i < n; i++)
+      cJSON_AddItemToArray(arr, server_eval_candidate_json(&rows[i]));
+   cJSON *g = cJSON_AddObjectToObject(resp, "gate");
+   if (g)
+   {
+      const cJSON *state = gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "gate") : NULL;
+      const cJSON *ratio =
+          gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "exogenous_ratio") : NULL;
+      const cJSON *total =
+          gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "committed_total") : NULL;
+      const cJSON *window =
+          gate_doc ? cJSON_GetObjectItemCaseSensitive(gate_doc, "window_days") : NULL;
+      /* No answer is reported as "unavailable", not as "open": an operator
+       * reading this must be able to tell a measured gate from an absent one. */
+      cJSON_AddStringToObject(g, "state",
+                              cJSON_IsString(state) ? state->valuestring : "unavailable");
+      cJSON_AddNumberToObject(g, "exogenous_ratio", cJSON_IsNumber(ratio) ? ratio->valuedouble : 0);
+      cJSON_AddNumberToObject(g, "committed_total", cJSON_IsNumber(total) ? total->valuedouble : 0);
+      cJSON_AddNumberToObject(g, "window_days", cJSON_IsNumber(window) ? window->valuedouble : 0);
+   }
+   cJSON_Delete(gate_doc);
+   if (request_id[0])
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+int handle_eval_candidates_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id = server_eval_json_str(req, "request_id");
+   const char *op = server_eval_json_str(req, "op");
+   if (!op[0])
+      return server_send_error(
+          conn, "eval.candidates-update requires op (scan|admit|reject|retire)", request_id);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "op", op);
+
+   if (strcmp(op, "scan") == 0)
+   {
+      eval_synthesis_scan_stats_t stats;
+      int observed = eval_synthesis_scan_failures(server_eval_json_int(req, "window_days", 0),
+                                                  server_eval_json_str(req, "suite"), &stats);
+      if (observed < 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update scan failed", request_id);
+      }
+      cJSON_AddNumberToObject(resp, "observed", observed);
+      cJSON_AddNumberToObject(resp, "jobs_seen", stats.jobs_seen);
+      cJSON_AddNumberToObject(resp, "signals_seen", stats.signals_seen);
+      cJSON_AddNumberToObject(resp, "rejected_text", stats.rejected_text);
+      cJSON_AddNumberToObject(resp, "skipped", stats.skipped);
+   }
+   else if (strcmp(op, "admit") == 0 || strcmp(op, "retire") == 0)
+   {
+      const char *dir = server_eval_json_str(req, "suite_dir");
+      if (!dir[0])
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update admit/retire requires suite_dir",
+                                  request_id);
+      }
+      char suite_path[MAX_PATH_LEN];
+      server_eval_resolve_suite_path(server_eval_json_str(req, "cwd"), dir, suite_path,
+                                     sizeof(suite_path));
+      cJSON_AddStringToObject(resp, "suite_dir", suite_path);
+
+      int n =
+          strcmp(op, "admit") == 0
+              ? eval_synthesis_admit_pending(suite_path, server_eval_json_str(req, "by"),
+                                             server_eval_json_int(req, "min_occurrences", 0))
+              : eval_synthesis_retire(suite_path, server_eval_json_int(req, "retire_windows", 0));
+      if (n < 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update failed", request_id);
+      }
+      cJSON_AddNumberToObject(resp, strcmp(op, "admit") == 0 ? "admitted" : "retired", n);
+   }
+   else if (strcmp(op, "reject") == 0)
+   {
+      int id = server_eval_json_int(req, "id", 0);
+      if (id <= 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update reject requires id", request_id);
+      }
+      const char *reason = server_eval_json_str(req, "reason");
+      if (db1_eval_candidate_mark_rejected((int64_t)id, reason) != 0)
+      {
+         cJSON_Delete(resp);
+         return server_send_error(conn, "eval.candidates-update: no such candidate", request_id);
+      }
+      cJSON_AddNumberToObject(resp, "rejected", id);
+   }
+   else
+   {
+      cJSON_Delete(resp);
+      return server_send_error(conn, "eval.candidates-update unknown op", request_id);
+   }
+
+   cJSON_AddStringToObject(resp, "status", "ok");
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);

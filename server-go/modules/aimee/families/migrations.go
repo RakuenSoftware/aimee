@@ -85,6 +85,10 @@ var schemaHistory = []struct {
 	// The same defect from the other side: columns that DO carry a limit, but
 	// count it in characters while every consumer counts bytes.
 	{21, "schema_length_units.sql"},
+	// Upstream kept developing the C store while this branch replaced it: eval
+	// candidates and approach memory landed there with no Go equivalent, and
+	// src/db1_client already calls all ten of their operations.
+	{22, "schema_eval_candidates.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

@@ -348,49 +348,25 @@ int eval_feedback_loop(void)
       }
    }
 
-   /* Reinforce rules that correlate with recent successes */
-   db1_eval_passed_task_t passes[20];
-   int n_pass = db1_eval_passed_tasks_recent(passes, 20);
-   for (int p = 0; p < n_pass; p++)
-   {
-      const char *task_name = passes[p].task_name;
-      if (!task_name || !task_name[0])
-         continue;
-
-      rule_t rules[32];
-      int rcount = db2_rules_list(rules, 32);
-      for (int i = 0; i < rcount; i++)
-      {
-         char title_copy[256];
-         snprintf(title_copy, sizeof(title_copy), "%s", rules[i].title);
-
-         char *saveptr = NULL;
-         char *word = strtok_r(title_copy, " \t", &saveptr);
-         int matched = 0;
-         int total = 0;
-
-         while (word)
-         {
-            if (strlen(word) > 3)
-            {
-               total++;
-               if (strcasestr(task_name, word))
-                  matched++;
-            }
-            word = strtok_r(NULL, " \t", &saveptr);
-         }
-
-         /* Successful task correlated with rule: small reinforcement */
-         if (total > 0 && matched * 2 >= total && rules[i].weight < 100)
-         {
-            int new_weight = rules[i].weight + 5;
-            if (new_weight > 100)
-               new_weight = 100;
-            db2_rules_update_weight(rules[i].id, new_weight);
-            adjustments++;
-         }
-      }
-   }
+   /* The success direction used to live here, and it was incoherent: a rule
+    * whose title words overlapped a FAILED task was bumped +10, and a rule
+    * whose title words overlapped a PASSED task was bumped +5. The same rule,
+    * on opposite outcomes, moved the same way. Word overlap is not evidence of
+    * contribution in either direction, but at least the failure direction
+    * carries a defensible reading -- "this rule is about something that is
+    * going wrong, surface it more". Rewarding a rule for being mentioned near
+    * a success is a pure ratchet: every rule drifts to weight 100 and the
+    * ordering it exists to provide is gone.
+    *
+    * Removing it is not the whole fix. A rule's real contribution needs a
+    * counterfactual -- the same task run with and without it -- which is what
+    * learning_attribution_* measures for CAPABILITIES from the ablation grid
+    * the harness already produces. There is no equivalent grid per rule yet,
+    * so the honest position is to stop manufacturing the signal rather than to
+    * keep a wrong one until a right one exists.
+    *
+    * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md
+    * (S2). */
 
    /* Also process agent_outcomes: failures and errors reinforce rules */
    db2_agent_outcome_failure_t outcome_fails[20];

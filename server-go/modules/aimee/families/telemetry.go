@@ -67,6 +67,19 @@ const (
 	opDiagnoseConclude       = 43
 	opDiagnoseAbandon        = 44
 	opDiagnoseSuggestProbes  = 48
+
+	// Eval candidates and approach memory, added upstream in the C store after
+	// this branch forked. Handlers live in telemetry_eval_candidates.go.
+	opEvalCandidateObserve           = 49
+	opEvalCandidateGetBySignature    = 50
+	opEvalCandidateList              = 51
+	opEvalCandidateMarkAdmitted      = 52
+	opEvalCandidateMarkRejected      = 53
+	opEvalCandidateMarkArchived      = 54
+	opEvalCandidateSetPassingWindows = 55
+	opEvalAblationGrid               = 56
+	opApproachFailureRecord          = 57
+	opApproachFailureCandidates      = 58
 )
 
 // Telemetry is the family, ready to be bound to kind 11783.
@@ -190,6 +203,46 @@ var Telemetry = store.Family{
 		},
 		opEvalResultsList: {
 			Name: "eval_results_list", Cells: evalCells, Args: 2, Run: evalResultsList,
+		},
+
+		// --- eval candidates and approach memory ---
+		opEvalCandidateObserve: {
+			Name: "eval_candidate_observe", Args: 7, Tx: true, Run: evalCandidateObserve,
+		},
+		opEvalCandidateGetBySignature: {
+			Name: "eval_candidate_get_by_signature", Cells: evalCandidateCells, Args: 1,
+			Run: evalCandidateGetBySignature,
+		},
+		opEvalCandidateList: {
+			Name: "eval_candidate_list", Cells: evalCandidateCells, Args: 2,
+			Run: evalCandidateList,
+		},
+		opEvalCandidateMarkAdmitted: {
+			Name: "eval_candidate_mark_admitted", Args: 3, Tx: true,
+			Run: evalCandidateMarkAdmitted,
+		},
+		opEvalCandidateMarkRejected: {
+			Name: "eval_candidate_mark_rejected", Args: 2, Tx: true,
+			Run: evalCandidateMarkRejected,
+		},
+		opEvalCandidateMarkArchived: {
+			Name: "eval_candidate_mark_archived", Args: 1, Tx: true,
+			Run: evalCandidateMarkArchived,
+		},
+		opEvalCandidateSetPassingWindows: {
+			Name: "eval_candidate_set_passing_windows", Args: 2, Tx: true,
+			Run: evalCandidateSetPassingWindows,
+		},
+		opEvalAblationGrid: {
+			Name: "eval_ablation_grid", Cells: ablationCellCells, Args: 2,
+			Run: evalAblationGrid,
+		},
+		opApproachFailureRecord: {
+			Name: "approach_failure_record", Args: 8, Tx: true, Run: approachFailureRecord,
+		},
+		opApproachFailureCandidates: {
+			Name: "approach_failure_candidates", Cells: approachFailureCells, Args: 2,
+			Run: approachFailureCandidates,
 		},
 
 		// --- diagnoses ---

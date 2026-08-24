@@ -539,11 +539,6 @@ static int rh_roadmap(const route_req_t *rq, char *resp, int cap)
    (void)rq;
    return route_json_provider(g_roadmap_provider, resp, cap, "roadmap");
 }
-static int rh_curiosity(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   return route_json_provider(g_curiosity_provider, resp, cap, "curiosity");
-}
 static int rh_notes(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -2097,6 +2092,15 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/worktree/gc", NULL, RM_EXACT, "worktree.gc", 0, rh_dispatch_op},
     {"POST", "/v1/aux/test", NULL, RM_EXACT, "aux.test", 0, rh_dispatch_op},
     {"GET", "/v1/eval/results", NULL, RM_EXACT, "eval.results", 0, rh_dispatch_op},
+    /* Synthesised regression candidates: bounded DB + filesystem work with no
+     * LLM step, so both the read and the write stay on the synchronous bridge. */
+    {"GET", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates", 0, rh_dispatch_op},
+    {"POST", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates-update", 0, rh_dispatch_op},
+    /* Learning surfaces: advisory recall, measured credit, bounded drain. */
+    {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", 0, rh_dispatch_op},
+    {"GET", "/v1/learning/attribution", NULL, RM_EXACT, "learning.attribution", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/resolve", NULL, RM_EXACT, "learning.resolve", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/fate", NULL, RM_EXACT, "learning.fate", 0, rh_dispatch_op},
     /* Roundtable authoring pipelines. Every one of these is a DB-backed state
      * machine (rtp_* accessors in server_pipeline.c) that returns the next action
      * for the caller to take -- none of them runs a panel or any other LLM work

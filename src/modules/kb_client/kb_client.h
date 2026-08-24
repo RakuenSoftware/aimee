@@ -1032,6 +1032,27 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
  * {"status":"error","message":"..."}. */
 char *kb_client_learning_list_proposals_json(const char *state, const char *sink, int limit);
 
+/* The endogeneity gate, answered by the knowledge service because the ledger it
+ * reads is DB2 and the daemon builds without it. Returns the response JSON (the
+ * caller frees), or NULL when the service is unreachable — which is NOT the same
+ * as a closed gate, and callers must not conflate them. */
+char *kb_client_learning_endogeneity_json(int window_days);
+
+/* Record what became of a committed proposal (S5). The router observes
+ * supersession and post-commit rejection itself; this is how a judgement it
+ * cannot make — that a commit was CONTRADICTED — gets entered. */
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason);
+
+/* Drain the curiosity backlog (S4). Served by the knowledge service: the
+ * backlog is DB2 and the evidence probe needs the corpus, neither of which
+ * the daemon has. */
+char *kb_client_learning_resolve_json(int budget);
+
+/* Ask which policy arm to apply (S6). The bandit lives in the knowledge
+ * service, so the daemon renders the fragment but does not choose it. NULL
+ * or an unparseable answer means "use the local default". */
+char *kb_client_learning_policy_select_json(const char *decision_point);
+
 /* Fetch a single learning proposal via the aimee-kb sidecar.  Sends
  * `learning.get_proposal` with {id} and returns the heap-allocated JSON
  * response (caller frees).  {"status":"ok","proposal":{...}} on success. */
