@@ -1945,6 +1945,20 @@ static cJSON *mcph_peer_inbox(struct mcp_call *c)
  * about an external client's own session anyway, and are EXEMPT in
  * check-native-tool-parity.py for that reason).
  *
+ * A NATIVE TOOL MUST PUT ITS ANSWER IN THE CONTENT, NOT ONLY IN structuredContent.
+ * mcp_native_call passes structured = NULL and the native dispatch
+ * (td_mcp_tool -> mcp_content_flatten) flattens the content array alone, so an
+ * in-process agent NEVER SEES structuredContent. peer_inbox put the message
+ * bodies only there and a count in the text, and aimee's own agents received
+ * "1 message(s) taken; 0 still waiting." and no mail — a tool returning the size
+ * of an answer instead of the answer. Every mechanical check passed, because the
+ * external MCP path does carry structuredContent and was the only path tested;
+ * what found it was a live model saying its message "contents were not available
+ * to me". The other three handlers that write structuredContent — memory_ask,
+ * session_search, workflow_run — are all NULL in the native column, so no
+ * in-process caller reaches them; a native marker on any of those needs their
+ * payload moved into the content first.
+ *
  * scripts/check-native-tool-parity.py fails the build on an unmarked, unexempted
  * new tool, so this stays true rather than becoming a comment that used to be. */
 
