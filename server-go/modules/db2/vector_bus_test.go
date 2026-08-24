@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	protocol "github.com/JBailes/aimee/server-go/db3"
+	protocol "github.com/JBailes/aimee/server-go/vector"
 )
 
 type db3FakeFrame struct {
@@ -101,7 +101,7 @@ func enqueueCapabilities(t *testing.T, client *db3FakeBus, principal, handle uin
 		Seq: sequence}, Payload: wire}
 }
 
-func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
+func TestVectorBusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := newDB3FakeBus(31) // force request and reply fragmentation
@@ -130,7 +130,7 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 	var observed protocol.Applied
 	var observedPrincipal uint32
 	var observedMu sync.Mutex
-	router, endpoint, err := newDB3BusRouter(ctx, client,
+	router, endpoint, err := newVectorBusRouter(ctx, client,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 10), nil
 		}, allowAll, func(principal uint32, applied protocol.Applied) {
@@ -192,7 +192,7 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 	}
 }
 
-func TestDB3BusRouterRejectsWrongProviderAndSupportsExplicitFallback(t *testing.T) {
+func TestVectorBusRouterRejectsWrongProviderAndSupportsExplicitFallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := newDB3FakeBus(256)
@@ -204,7 +204,7 @@ func TestDB3BusRouterRejectsWrongProviderAndSupportsExplicitFallback(t *testing.
 			EventKind: protocol.EventSearch, CorrelationID: correlation,
 			PrincipalRef: 1002, SrcHandle: 42}, Payload: wire}
 	}
-	router, _, err := newDB3BusRouter(ctx, client,
+	router, _, err := newVectorBusRouter(ctx, client,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 50), nil
 		}, allowAll, nil)
@@ -223,11 +223,11 @@ func TestDB3BusRouterRejectsWrongProviderAndSupportsExplicitFallback(t *testing.
 	}
 }
 
-func TestDB3BusRouterPublishesDirectAndChunkedApply(t *testing.T) {
+func TestVectorBusRouterPublishesDirectAndChunkedApply(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := newDB3FakeBus(64)
-	_, endpoint, err := newDB3BusRouter(ctx, client,
+	_, endpoint, err := newVectorBusRouter(ctx, client,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		}, allowAll, nil)
@@ -268,11 +268,11 @@ func TestDB3BusRouterPublishesDirectAndChunkedApply(t *testing.T) {
 	}
 }
 
-func TestDB3BusRouterCancelsOutstandingSearch(t *testing.T) {
+func TestVectorBusRouterCancelsOutstandingSearch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := newDB3FakeBus(256)
-	router, _, err := newDB3BusRouter(ctx, client,
+	router, _, err := newVectorBusRouter(ctx, client,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		}, allowAll, nil)
@@ -300,24 +300,24 @@ func TestDB3BusRouterCancelsOutstandingSearch(t *testing.T) {
 	}
 }
 
-func TestDB3BusRouterConstructionFailsClosed(t *testing.T) {
+func TestVectorBusRouterConstructionFailsClosed(t *testing.T) {
 	client := newDB3FakeBus(0)
-	_, _, err := newDB3BusRouter(context.Background(), client,
+	_, _, err := newVectorBusRouter(context.Background(), client,
 		func(context.Context, protocol.SearchRequest) (protocol.SearchReply, error) {
 			return protocol.SearchReply{}, nil
 		},
 		allowAll, nil)
-	if !errors.Is(err, ErrDB3RouterConfig) {
+	if !errors.Is(err, ErrVectorRouterConfig) {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestDB3BusRouterPersistsApplyProviderBeforeRouting(t *testing.T) {
+func TestVectorBusRouterPersistsApplyProviderBeforeRouting(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := newDB3FakeBus(128)
 	var observed atomic.Int32
-	router, _, err := newDB3BusRouterWithObservers(ctx, client,
+	router, _, err := newVectorBusRouterWithObservers(ctx, client,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		}, allowAll, DB3BusObservers{

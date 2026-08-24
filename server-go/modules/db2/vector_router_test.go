@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	protocol "github.com/JBailes/aimee/server-go/db3"
+	protocol "github.com/JBailes/aimee/server-go/vector"
 )
 
 func db3Request() protocol.SearchRequest {
@@ -37,10 +37,10 @@ func db3Capabilities(generation uint64, ready bool) protocol.Capabilities {
 	}
 }
 
-func newTestDB3Router(t *testing.T, internal DB3InternalSearcher,
-	external DB3ExternalSearcher, authorize DB3CandidateAuthorizer) *DB3Router {
+func newTestVectorRouter(t *testing.T, internal DB3InternalSearcher,
+	external DB3ExternalSearcher, authorize DB3CandidateAuthorizer) *VectorRouter {
 	t.Helper()
-	router, err := NewDB3Router(internal, external, authorize)
+	router, err := NewVectorRouter(internal, external, authorize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,9 +49,9 @@ func newTestDB3Router(t *testing.T, internal DB3InternalSearcher,
 
 func allowAll(context.Context, string, string, int64) (bool, error) { return true, nil }
 
-func TestDB3RouterDeploymentMakesExternalTheDefaultAndRevalidates(t *testing.T) {
+func TestVectorRouterDeploymentMakesExternalTheDefaultAndRevalidates(t *testing.T) {
 	var internalCalls, externalCalls atomic.Int32
-	router := newTestDB3Router(t,
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			internalCalls.Add(1)
 			return db3Reply(request, 10), nil
@@ -101,8 +101,8 @@ func TestDB3RouterDeploymentMakesExternalTheDefaultAndRevalidates(t *testing.T) 
 	}
 }
 
-func TestDB3RouterAutomaticDefaultIsDeterministicAcrossMultipleProviders(t *testing.T) {
-	router := newTestDB3Router(t,
+func TestVectorRouterAutomaticDefaultIsDeterministicAcrossMultipleProviders(t *testing.T) {
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},
@@ -163,8 +163,8 @@ func TestDB3RouterAutomaticDefaultIsDeterministicAcrossMultipleProviders(t *test
 	}
 }
 
-func TestDB3RouterExplicitOverrideWinsUntilClear(t *testing.T) {
-	router := newTestDB3Router(t,
+func TestVectorRouterExplicitOverrideWinsUntilClear(t *testing.T) {
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},
@@ -195,8 +195,8 @@ func TestDB3RouterExplicitOverrideWinsUntilClear(t *testing.T) {
 	}
 }
 
-func TestDB3RouterSelectionRequiresFreshReadyCompatibleEvidence(t *testing.T) {
-	router := newTestDB3Router(t,
+func TestVectorRouterSelectionRequiresFreshReadyCompatibleEvidence(t *testing.T) {
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},
@@ -216,7 +216,7 @@ func TestDB3RouterSelectionRequiresFreshReadyCompatibleEvidence(t *testing.T) {
 	if got := router.Route(selectRequest); got.Result != protocol.RouteNotReady {
 		t.Fatalf("unready provider = %+v", got)
 	}
-	if err := router.ObserveCapabilities(1001, 41, 4, db3Capabilities(7, true)); !errors.Is(err, ErrDB3StaleCapability) {
+	if err := router.ObserveCapabilities(1001, 41, 4, db3Capabilities(7, true)); !errors.Is(err, ErrVectorStaleCapability) {
 		t.Fatalf("duplicate evidence error = %v", err)
 	}
 	if err := router.ObserveCapabilities(1001, 41, 5, db3Capabilities(8, true)); err != nil {
@@ -248,8 +248,8 @@ func TestDB3RouterSelectionRequiresFreshReadyCompatibleEvidence(t *testing.T) {
 	}
 }
 
-func TestDB3RouterAcceptsAuthenticatedSlotZero(t *testing.T) {
-	router := newTestDB3Router(t,
+func TestVectorRouterAcceptsAuthenticatedSlotZero(t *testing.T) {
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},
@@ -269,9 +269,9 @@ func TestDB3RouterAcceptsAuthenticatedSlotZero(t *testing.T) {
 	}
 }
 
-func TestDB3RouterBindsSelectionGenerationAndRequiresExactFiltering(t *testing.T) {
+func TestVectorRouterBindsSelectionGenerationAndRequiresExactFiltering(t *testing.T) {
 	var externalCalls atomic.Int32
-	router := newTestDB3Router(t,
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},
@@ -325,7 +325,7 @@ func TestDB3RouterBindsSelectionGenerationAndRequiresExactFiltering(t *testing.T
 	}
 }
 
-func TestDB3RouterFailClosedAndExplicitFallback(t *testing.T) {
+func TestVectorRouterFailClosedAndExplicitFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		external    DB3ExternalSearcher
@@ -333,7 +333,7 @@ func TestDB3RouterFailClosedAndExplicitFallback(t *testing.T) {
 		wantFailure protocol.SearchFailureCode
 	}{
 		{"transport-unavailable", func(context.Context, uint32, protocol.SearchRequest) (DB3SearchResponse, error) {
-			return DB3SearchResponse{}, ErrDB3Unavailable
+			return DB3SearchResponse{}, ErrVectorUnavailable
 		}, DB3Unavailable, 0},
 		{"transport-failure", func(context.Context, uint32, protocol.SearchRequest) (DB3SearchResponse, error) {
 			return DB3SearchResponse{}, errors.New("provider failed")
@@ -358,7 +358,7 @@ func TestDB3RouterFailClosedAndExplicitFallback(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var internalCalls atomic.Int32
-			router := newTestDB3Router(t,
+			router := newTestVectorRouter(t,
 				func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 					internalCalls.Add(1)
 					return db3Reply(request, 50), nil
@@ -385,9 +385,9 @@ func TestDB3RouterFailClosedAndExplicitFallback(t *testing.T) {
 	}
 }
 
-func TestDB3RouterGenerationLimitsAndAuthorizationErrors(t *testing.T) {
+func TestVectorRouterGenerationLimitsAndAuthorizationErrors(t *testing.T) {
 	var externalCalls atomic.Int32
-	router := newTestDB3Router(t,
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},
@@ -432,9 +432,9 @@ func TestDB3RouterGenerationLimitsAndAuthorizationErrors(t *testing.T) {
 	}
 }
 
-func TestDB3RouterDoesNotFallbackAfterCancellation(t *testing.T) {
+func TestVectorRouterDoesNotFallbackAfterCancellation(t *testing.T) {
 	var internalCalls atomic.Int32
-	router := newTestDB3Router(t,
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			internalCalls.Add(1)
 			return db3Reply(request, 1), nil
@@ -455,10 +455,10 @@ func TestDB3RouterDoesNotFallbackAfterCancellation(t *testing.T) {
 	}
 }
 
-func TestDB3RouterSnapshotsSelectionAndCopiesTrustBoundaries(t *testing.T) {
+func TestVectorRouterSnapshotsSelectionAndCopiesTrustBoundaries(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	providerVector := make(chan []float32, 1)
-	router := newTestDB3Router(t,
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},
@@ -493,8 +493,8 @@ func TestDB3RouterSnapshotsSelectionAndCopiesTrustBoundaries(t *testing.T) {
 	}
 }
 
-func TestDB3RouterConcurrentEvidenceRouteAndSearch(t *testing.T) {
-	router := newTestDB3Router(t,
+func TestVectorRouterConcurrentEvidenceRouteAndSearch(t *testing.T) {
+	router := newTestVectorRouter(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			return db3Reply(request, 1), nil
 		},

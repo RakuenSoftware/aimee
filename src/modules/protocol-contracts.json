@@ -9,9 +9,9 @@
   "protocols": [
     {
       "id": 3,
-      "name": "db3",
+      "name": "vector",
       "owner": "db2",
-      "catalog": "src/modules/db2/eventcontract/db3.json"
+      "catalog": "src/modules/db2/eventcontract/vector.json"
     }
   ]
 }

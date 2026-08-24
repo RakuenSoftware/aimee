@@ -1,29 +1,29 @@
-#include <aimee/db2/db3_route.h>
+#include <aimee/db2/vector_route.h>
 
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
 
-#define SEARCH_REQUEST_MAGIC      AIMEE_DB3_SEARCH_REQUEST_MAGIC
-#define SEARCH_REPLY_MAGIC        AIMEE_DB3_SEARCH_REPLY_MAGIC
-#define APPLY_MAGIC               AIMEE_DB3_APPLY_MAGIC
-#define WIRE_VERSION              AIMEE_DB3_WIRE_VERSION
-#define SEARCH_REQUEST_HEADER     AIMEE_DB3_SEARCH_REQUEST_HEADER
-#define SEARCH_REQUEST_V2_HEADER  AIMEE_DB3_SEARCH_REQUEST_V2_HEADER
-#define SEARCH_REQUEST_V2_VERSION AIMEE_DB3_SEARCH_REQUEST_V2_VERSION
-#define SEARCH_REPLY_HEADER       AIMEE_DB3_SEARCH_REPLY_HEADER
-#define APPLY_HEADER              AIMEE_DB3_APPLY_HEADER
-#define APPLY_V2_HEADER           AIMEE_DB3_APPLY_V2_HEADER
-#define APPLY_V2_VERSION          AIMEE_DB3_APPLY_V2_VERSION
-#define LABEL_HEADER              AIMEE_DB3_LABEL_HEADER
+#define SEARCH_REQUEST_MAGIC      AIMEE_VECTOR_SEARCH_REQUEST_MAGIC
+#define SEARCH_REPLY_MAGIC        AIMEE_VECTOR_SEARCH_REPLY_MAGIC
+#define APPLY_MAGIC               AIMEE_VECTOR_APPLY_MAGIC
+#define WIRE_VERSION              AIMEE_VECTOR_WIRE_VERSION
+#define SEARCH_REQUEST_HEADER     AIMEE_VECTOR_SEARCH_REQUEST_HEADER
+#define SEARCH_REQUEST_V2_HEADER  AIMEE_VECTOR_SEARCH_REQUEST_V2_HEADER
+#define SEARCH_REQUEST_V2_VERSION AIMEE_VECTOR_SEARCH_REQUEST_V2_VERSION
+#define SEARCH_REPLY_HEADER       AIMEE_VECTOR_SEARCH_REPLY_HEADER
+#define APPLY_HEADER              AIMEE_VECTOR_APPLY_HEADER
+#define APPLY_V2_HEADER           AIMEE_VECTOR_APPLY_V2_HEADER
+#define APPLY_V2_VERSION          AIMEE_VECTOR_APPLY_V2_VERSION
+#define LABEL_HEADER              AIMEE_VECTOR_LABEL_HEADER
 
 _Static_assert(sizeof(float) == 4, "DB3 wire requires 32-bit float");
 _Static_assert(sizeof(double) == 8, "DB3 wire requires 64-bit double");
-_Static_assert(AIMEE_DB3_MAX_DIM <= UINT16_MAX, "DB3 dimension must fit its wire field");
-_Static_assert(AIMEE_DB3_MAX_TOP_K <= UINT16_MAX, "DB3 top-K must fit its wire field");
-_Static_assert(AIMEE_DB3_MAX_LABELS <= UINT16_MAX, "DB3 label count must fit its wire field");
-_Static_assert(AIMEE_DB3_MAX_LABEL_BYTES <= UINT16_MAX, "DB3 label bytes must fit its wire field");
-_Static_assert(sizeof(aimee_db3_apply_t) <= 24u * 1024u,
+_Static_assert(AIMEE_VECTOR_MAX_DIM <= UINT16_MAX, "DB3 dimension must fit its wire field");
+_Static_assert(AIMEE_VECTOR_MAX_TOP_K <= UINT16_MAX, "DB3 top-K must fit its wire field");
+_Static_assert(AIMEE_VECTOR_MAX_LABELS <= UINT16_MAX, "DB3 label count must fit its wire field");
+_Static_assert(AIMEE_VECTOR_MAX_LABEL_BYTES <= UINT16_MAX, "DB3 label bytes must fit its wire field");
+_Static_assert(sizeof(aimee_vector_apply_t) <= 24u * 1024u,
                "DB3 apply stack value exceeds its explicit budget");
 
 static void put_u16(uint8_t *out, uint16_t value)
@@ -99,7 +99,7 @@ static int vectors_valid(const float *vector, uint32_t dimension)
 
 static int label_key_valid(const char *key)
 {
-   size_t length = text_length(key, AIMEE_DB3_MAX_LABEL_KEY);
+   size_t length = text_length(key, AIMEE_VECTOR_MAX_LABEL_KEY);
    if (length == 0 || length == SIZE_MAX || key[0] < 'a' || key[0] > 'z')
       return 0;
    for (size_t i = 1; i < length; ++i)
@@ -114,7 +114,7 @@ static int label_key_valid(const char *key)
 
 static int label_value_valid(const char *value)
 {
-   size_t length = text_length(value, AIMEE_DB3_MAX_LABEL_VALUE);
+   size_t length = text_length(value, AIMEE_VECTOR_MAX_LABEL_VALUE);
    if (length == SIZE_MAX)
       return 0;
    for (size_t i = 0; i < length; ++i)
@@ -126,14 +126,14 @@ static int label_value_valid(const char *value)
    return 1;
 }
 
-static int labels_size(const aimee_db3_apply_t *apply, size_t *size)
+static int labels_size(const aimee_vector_apply_t *apply, size_t *size)
 {
-   if (!apply || !size || apply->label_count > AIMEE_DB3_MAX_LABELS)
+   if (!apply || !size || apply->label_count > AIMEE_VECTOR_MAX_LABELS)
       return -1;
    *size = 0;
    for (uint32_t i = 0; i < apply->label_count; ++i)
    {
-      const aimee_db3_exact_label_t *label = &apply->labels[i];
+      const aimee_vector_exact_label_t *label = &apply->labels[i];
       if (!label_key_valid(label->key) || !label_value_valid(label->value) ||
           (i > 0 && strcmp(apply->labels[i - 1].key, label->key) >= 0))
          return -1;
@@ -142,7 +142,7 @@ static int labels_size(const aimee_db3_apply_t *apply, size_t *size)
       if (key > SIZE_MAX - LABEL_HEADER || value > SIZE_MAX - LABEL_HEADER - key)
          return -1;
       size_t entry = LABEL_HEADER + key + value;
-      if (entry > AIMEE_DB3_MAX_LABEL_BYTES - *size)
+      if (entry > AIMEE_VECTOR_MAX_LABEL_BYTES - *size)
          return -1;
       *size += entry;
    }
@@ -166,7 +166,7 @@ static int copy_scope(char *destination, size_t capacity, const char *value)
 }
 
 /* How many predicates this filter set becomes. */
-static size_t predicate_count(const aimee_db3_search_filters_t *filters)
+static size_t predicate_count(const aimee_vector_search_filters_t *filters)
 {
    size_t count = filters->label_count;
    if (filters->kinds && filters->kind_count > 0)
@@ -180,7 +180,7 @@ static size_t predicate_count(const aimee_db3_search_filters_t *filters)
    return count;
 }
 
-int aimee_db3_search_filters_expressible(const aimee_db3_search_filters_t *filters)
+int aimee_vector_search_filters_expressible(const aimee_vector_search_filters_t *filters)
 {
    if (!filters)
       return 0;
@@ -200,30 +200,30 @@ int aimee_db3_search_filters_expressible(const aimee_db3_search_filters_t *filte
       return 0;
    if ((filters->visibility_count > 0) != (filters->visibility != NULL))
       return 0;
-   if (predicate_count(filters) > AIMEE_DB3_MAX_FILTERS)
+   if (predicate_count(filters) > AIMEE_VECTOR_MAX_FILTERS)
       return 0;
-   if (filters->kind_count > AIMEE_DB3_MAX_FILTER_VALUES ||
-       filters->visibility_count > AIMEE_DB3_MAX_FILTER_VALUES)
+   if (filters->kind_count > AIMEE_VECTOR_MAX_FILTER_VALUES ||
+       filters->visibility_count > AIMEE_VECTOR_MAX_FILTER_VALUES)
       return 0;
    return 1;
 }
 
-int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, uint64_t request_id,
+int aimee_vector_search_request_build(const aimee_vector_search_filters_t *filters, uint64_t request_id,
                                    uint64_t required_generation, const float *vector,
                                    uint32_t dimension, uint32_t top_k,
-                                   aimee_db3_filter_t *predicates, size_t predicate_capacity,
-                                   aimee_db3_search_request_t *request)
+                                   aimee_vector_filter_t *predicates, size_t predicate_capacity,
+                                   aimee_vector_search_request_t *request)
 {
    if (!filters || !request || !vector || !predicates || predicate_capacity < 1)
       return -1;
    /* Checked BEFORE anything is written, so a refusal leaves no half-built
     * request for a caller to use by mistake. */
-   if (!aimee_db3_search_filters_expressible(filters))
+   if (!aimee_vector_search_filters_expressible(filters))
       return -1;
    if (predicate_count(filters) > predicate_capacity)
       return -1;
 
-   aimee_db3_search_request_t built = {0};
+   aimee_vector_search_request_t built = {0};
    if (copy_scope(built.workspace, sizeof(built.workspace), filters->workspace) != 0 ||
        copy_scope(built.project, sizeof(built.project), filters->project) != 0 ||
        copy_scope(built.record_type, sizeof(built.record_type), filters->record_type) != 0 ||
@@ -236,7 +236,7 @@ int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, ui
    size_t at = 0;
    for (size_t i = 0; i < filters->label_count; ++i)
    {
-      predicates[at].op = AIMEE_DB3_FILTER_EQ;
+      predicates[at].op = AIMEE_VECTOR_FILTER_EQ;
       predicates[at].key = filters->label_keys[i];
       predicates[at].values = &filters->label_values[i];
       predicates[at].value_count = 1;
@@ -244,7 +244,7 @@ int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, ui
    }
    if (filters->kinds && filters->kind_count > 0)
    {
-      predicates[at].op = AIMEE_DB3_FILTER_IN;
+      predicates[at].op = AIMEE_VECTOR_FILTER_IN;
       predicates[at].key = "kind";
       predicates[at].values = filters->kinds;
       predicates[at].value_count = filters->kind_count;
@@ -252,7 +252,7 @@ int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, ui
    }
    if (filters->exclude_project && filters->exclude_project[0])
    {
-      predicates[at].op = AIMEE_DB3_FILTER_NE;
+      predicates[at].op = AIMEE_VECTOR_FILTER_NE;
       predicates[at].key = "project";
       predicates[at].values = &filters->exclude_project;
       predicates[at].value_count = 1;
@@ -262,7 +262,7 @@ int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, ui
    {
       /* The four-way scope disjunction, as one set-membership question over a
        * multi-valued label. This is the predicate that made OR unnecessary. */
-      predicates[at].op = AIMEE_DB3_FILTER_IN;
+      predicates[at].op = AIMEE_VECTOR_FILTER_IN;
       predicates[at].key = "visibility";
       predicates[at].values = filters->visibility;
       predicates[at].value_count = filters->visibility_count;
@@ -272,7 +272,7 @@ int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, ui
    {
       /* A point's generation is fixed when it is written, so this asks for a
        * label rather than requiring anything to be relabelled. */
-      predicates[at].op = AIMEE_DB3_FILTER_EQ;
+      predicates[at].op = AIMEE_VECTOR_FILTER_EQ;
       predicates[at].key = "generation";
       predicates[at].values = &filters->current_generation;
       predicates[at].value_count = 1;
@@ -286,7 +286,7 @@ int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, ui
    built.vector = vector;
    built.filters = at ? predicates : NULL;
    built.filter_count = at;
-   if (aimee_db3_search_request_validate(&built) != 0)
+   if (aimee_vector_search_request_validate(&built) != 0)
       return -1;
    *request = built;
    return 0;
@@ -297,43 +297,43 @@ int aimee_db3_search_request_build(const aimee_db3_search_filters_t *filters, ui
  * Every bound here is a refusal rather than a clamp. A filter set silently
  * trimmed is a search with a predicate missing, which returns more rows than it
  * should and looks exactly like a correct answer. */
-static int filters_size(const aimee_db3_filter_t *filters, size_t count, size_t *size)
+static int filters_size(const aimee_vector_filter_t *filters, size_t count, size_t *size)
 {
    if (!size)
       return -1;
    *size = 0;
    if (count == 0)
       return filters ? -1 : 0;
-   if (!filters || count > AIMEE_DB3_MAX_FILTERS)
+   if (!filters || count > AIMEE_VECTOR_MAX_FILTERS)
       return -1;
    size_t total = 0;
    for (size_t i = 0; i < count; ++i)
    {
-      const aimee_db3_filter_t *filter = &filters[i];
-      if (filter->op != AIMEE_DB3_FILTER_EQ && filter->op != AIMEE_DB3_FILTER_NE &&
-          filter->op != AIMEE_DB3_FILTER_IN)
+      const aimee_vector_filter_t *filter = &filters[i];
+      if (filter->op != AIMEE_VECTOR_FILTER_EQ && filter->op != AIMEE_VECTOR_FILTER_NE &&
+          filter->op != AIMEE_VECTOR_FILTER_IN)
          return -1;
       /* EQ and NE are about one value. A set of two cannot mean "equals", and
        * accepting it would leave the provider to pick which one. */
-      if (filter->op != AIMEE_DB3_FILTER_IN && filter->value_count != 1)
+      if (filter->op != AIMEE_VECTOR_FILTER_IN && filter->value_count != 1)
          return -1;
-      if (filter->value_count == 0 || filter->value_count > AIMEE_DB3_MAX_FILTER_VALUES ||
+      if (filter->value_count == 0 || filter->value_count > AIMEE_VECTOR_MAX_FILTER_VALUES ||
           !filter->values || !filter->key)
          return -1;
       size_t key_len = strlen(filter->key);
-      if (key_len == 0 || key_len >= AIMEE_DB3_MAX_LABEL_KEY)
+      if (key_len == 0 || key_len >= AIMEE_VECTOR_MAX_LABEL_KEY)
          return -1;
-      total += AIMEE_DB3_FILTER_HEADER + key_len;
+      total += AIMEE_VECTOR_FILTER_HEADER + key_len;
       for (size_t v = 0; v < filter->value_count; ++v)
       {
          if (!filter->values[v])
             return -1;
          size_t value_len = strlen(filter->values[v]);
-         if (value_len == 0 || value_len >= AIMEE_DB3_MAX_LABEL_VALUE)
+         if (value_len == 0 || value_len >= AIMEE_VECTOR_MAX_LABEL_VALUE)
             return -1;
          total += 2 + value_len;
       }
-      if (total > AIMEE_DB3_MAX_FILTER_BYTES)
+      if (total > AIMEE_VECTOR_MAX_FILTER_BYTES)
          return -1;
    }
    *size = total;
@@ -350,19 +350,19 @@ static int filter_region_valid(const uint8_t *bytes, size_t length, size_t count
    size_t offset = 0;
    for (size_t i = 0; i < count; ++i)
    {
-      if (offset + AIMEE_DB3_FILTER_HEADER > length)
+      if (offset + AIMEE_VECTOR_FILTER_HEADER > length)
          return -1;
       uint8_t op = bytes[offset];
       size_t key_len = bytes[offset + 1];
       size_t value_count = get_u16(bytes + offset + 2);
-      if ((op != AIMEE_DB3_FILTER_EQ && op != AIMEE_DB3_FILTER_NE && op != AIMEE_DB3_FILTER_IN) ||
-          key_len == 0 || key_len >= AIMEE_DB3_MAX_LABEL_KEY || value_count == 0 ||
-          value_count > AIMEE_DB3_MAX_FILTER_VALUES)
+      if ((op != AIMEE_VECTOR_FILTER_EQ && op != AIMEE_VECTOR_FILTER_NE && op != AIMEE_VECTOR_FILTER_IN) ||
+          key_len == 0 || key_len >= AIMEE_VECTOR_MAX_LABEL_KEY || value_count == 0 ||
+          value_count > AIMEE_VECTOR_MAX_FILTER_VALUES)
          return -1;
       /* EQ and NE are about one value; a set of two cannot mean "equals". */
-      if (op != AIMEE_DB3_FILTER_IN && value_count != 1)
+      if (op != AIMEE_VECTOR_FILTER_IN && value_count != 1)
          return -1;
-      offset += AIMEE_DB3_FILTER_HEADER + key_len;
+      offset += AIMEE_VECTOR_FILTER_HEADER + key_len;
       if (offset > length)
          return -1;
       for (size_t v = 0; v < value_count; ++v)
@@ -371,7 +371,7 @@ static int filter_region_valid(const uint8_t *bytes, size_t length, size_t count
             return -1;
          size_t value_len = get_u16(bytes + offset);
          offset += 2;
-         if (value_len == 0 || value_len >= AIMEE_DB3_MAX_LABEL_VALUE ||
+         if (value_len == 0 || value_len >= AIMEE_VECTOR_MAX_LABEL_VALUE ||
              offset + value_len > length)
             return -1;
          offset += value_len;
@@ -382,22 +382,22 @@ static int filter_region_valid(const uint8_t *bytes, size_t length, size_t count
    return offset == length ? 0 : -1;
 }
 
-int aimee_db3_filter_next(aimee_db3_filter_view_t *view, aimee_db3_filter_entry_t *entry)
+int aimee_vector_filter_next(aimee_vector_filter_view_t *view, aimee_vector_filter_entry_t *entry)
 {
    if (!view || !entry || !view->bytes)
       return -1;
    if (view->remaining == 0)
       return 0;
-   if (view->offset + AIMEE_DB3_FILTER_HEADER > view->length)
+   if (view->offset + AIMEE_VECTOR_FILTER_HEADER > view->length)
       return -1;
    const uint8_t *at = view->bytes + view->offset;
    entry->op = at[0];
    entry->key_length = at[1];
    entry->value_count = get_u16(at + 2);
-   size_t consumed = AIMEE_DB3_FILTER_HEADER + entry->key_length;
+   size_t consumed = AIMEE_VECTOR_FILTER_HEADER + entry->key_length;
    if (view->offset + consumed > view->length)
       return -1;
-   entry->key = (const char *)(at + AIMEE_DB3_FILTER_HEADER);
+   entry->key = (const char *)(at + AIMEE_VECTOR_FILTER_HEADER);
    entry->value_offset = view->offset + consumed;
    /* Step over the values so the next call lands on the next filter. */
    size_t at_value = entry->value_offset;
@@ -416,8 +416,8 @@ int aimee_db3_filter_next(aimee_db3_filter_view_t *view, aimee_db3_filter_entry_
    return 1;
 }
 
-int aimee_db3_filter_value(const aimee_db3_filter_view_t *view,
-                           const aimee_db3_filter_entry_t *entry, size_t index, const char **value,
+int aimee_vector_filter_value(const aimee_vector_filter_view_t *view,
+                           const aimee_vector_filter_entry_t *entry, size_t index, const char **value,
                            size_t *value_length)
 {
    if (!view || !entry || !value || !value_length || index >= entry->value_count)
@@ -445,16 +445,16 @@ int aimee_db3_filter_value(const aimee_db3_filter_view_t *view,
 /* The fields, without the caller-side filter structs.
  *
  * Decode produces a request whose filters live in the input buffer rather than
- * in an array of aimee_db3_filter_t, so the public validate below -- which
+ * in an array of aimee_vector_filter_t, so the public validate below -- which
  * checks that array -- would refuse every decoded request that carried one. The
  * encoded region is validated by filter_region_valid during decode instead, so
  * nothing goes unchecked; what differs is WHICH representation is being
  * checked. */
-static int search_request_fields_valid(const aimee_db3_search_request_t *request)
+static int search_request_fields_valid(const aimee_vector_search_request_t *request)
 {
    if (!request || request->request_id == 0 || request->required_generation == 0 ||
-       request->dimension == 0 || request->dimension > AIMEE_DB3_MAX_DIM || request->top_k == 0 ||
-       request->top_k > AIMEE_DB3_MAX_TOP_K ||
+       request->dimension == 0 || request->dimension > AIMEE_VECTOR_MAX_DIM || request->top_k == 0 ||
+       request->top_k > AIMEE_VECTOR_MAX_TOP_K ||
        !text_valid(request->workspace, sizeof(request->workspace), 1) ||
        !text_valid(request->project, sizeof(request->project), 1) ||
        (!request->workspace[0] && !request->project[0]) ||
@@ -465,7 +465,7 @@ static int search_request_fields_valid(const aimee_db3_search_request_t *request
    return 0;
 }
 
-int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
+int aimee_vector_search_request_validate(const aimee_vector_search_request_t *request)
 {
    if (search_request_fields_valid(request) != 0)
       return -1;
@@ -475,12 +475,12 @@ int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
    return 0;
 }
 
-int aimee_db3_search_reply_validate(const aimee_db3_search_request_t *request,
-                                    const aimee_db3_search_reply_t *reply)
+int aimee_vector_search_reply_validate(const aimee_vector_search_request_t *request,
+                                    const aimee_vector_search_reply_t *reply)
 {
    if (!request || !reply || reply->request_id != request->request_id ||
        reply->generation != request->required_generation || reply->count > request->top_k ||
-       reply->count > AIMEE_DB3_MAX_TOP_K)
+       reply->count > AIMEE_VECTOR_MAX_TOP_K)
       return -1;
    for (uint32_t i = 0; i < reply->count; ++i)
    {
@@ -493,20 +493,20 @@ int aimee_db3_search_reply_validate(const aimee_db3_search_request_t *request,
    return 0;
 }
 
-int aimee_db3_apply_validate(const aimee_db3_apply_t *apply)
+int aimee_vector_apply_validate(const aimee_vector_apply_t *apply)
 {
    size_t ignored = 0;
    if (!apply || apply->operation_id == 0 || apply->generation == 0 || apply->point_id <= 0 ||
        !text_valid(apply->collection, sizeof(apply->collection), 0) ||
        labels_size(apply, &ignored) != 0)
       return -1;
-   if (apply->kind == AIMEE_DB3_APPLY_UPSERT)
+   if (apply->kind == AIMEE_VECTOR_APPLY_UPSERT)
    {
-      if (apply->dimension == 0 || apply->dimension > AIMEE_DB3_MAX_DIM ||
+      if (apply->dimension == 0 || apply->dimension > AIMEE_VECTOR_MAX_DIM ||
           !vectors_valid(apply->vector, apply->dimension))
          return -1;
    }
-   else if ((apply->kind != AIMEE_DB3_APPLY_DELETE && apply->kind != AIMEE_DB3_APPLY_TOMBSTONE) ||
+   else if ((apply->kind != AIMEE_VECTOR_APPLY_DELETE && apply->kind != AIMEE_VECTOR_APPLY_TOMBSTONE) ||
             apply->dimension != 0 || apply->label_count != 0)
       return -1;
    return 0;
@@ -530,12 +530,12 @@ static int checked_total(size_t header, size_t a, size_t b, size_t c, size_t ite
    return 0;
 }
 
-int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, uint8_t *output,
+int aimee_vector_search_request_encode(const aimee_vector_search_request_t *request, uint8_t *output,
                                     size_t capacity, size_t *length)
 {
    if (length)
       *length = 0;
-   if (!output || !length || aimee_db3_search_request_validate(request) != 0)
+   if (!output || !length || aimee_vector_search_request_validate(request) != 0)
       return -1;
    size_t workspace_len = text_length(request->workspace, sizeof(request->workspace));
    size_t project_len = text_length(request->project, sizeof(request->project));
@@ -591,12 +591,12 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
       offset += collection_len;
       for (size_t i = 0; i < request->filter_count; ++i)
       {
-         const aimee_db3_filter_t *filter = &request->filters[i];
+         const aimee_vector_filter_t *filter = &request->filters[i];
          size_t key_len = strlen(filter->key);
          output[offset] = filter->op;
          output[offset + 1] = (uint8_t)key_len;
          put_u16(output + offset + 2, (uint16_t)filter->value_count);
-         offset += AIMEE_DB3_FILTER_HEADER;
+         offset += AIMEE_VECTOR_FILTER_HEADER;
          memcpy(output + offset, filter->key, key_len);
          offset += key_len;
          for (size_t v = 0; v < filter->value_count; ++v)
@@ -620,9 +620,9 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
    return 0;
 }
 
-int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
-                                    aimee_db3_search_request_t *request, float *vector_out,
-                                    size_t vector_capacity, aimee_db3_filter_view_t *filters_out)
+int aimee_vector_search_request_decode(const uint8_t *input, size_t length,
+                                    aimee_vector_search_request_t *request, float *vector_out,
+                                    size_t vector_capacity, aimee_vector_filter_view_t *filters_out)
 {
    if (!input || !request || !vector_out || !filters_out || length < SEARCH_REQUEST_HEADER ||
        get_u32(input) != SEARCH_REQUEST_MAGIC || get_u16(input + 34) != 0)
@@ -639,8 +639,8 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
       collection_len = get_u16(input + 36);
       filter_count = get_u16(input + 38);
       filter_bytes = get_u16(input + 40);
-      if (collection_len >= AIMEE_DB3_MAX_COLLECTION || filter_count > AIMEE_DB3_MAX_FILTERS ||
-          filter_bytes > AIMEE_DB3_MAX_FILTER_BYTES || (filter_count == 0) != (filter_bytes == 0))
+      if (collection_len >= AIMEE_VECTOR_MAX_COLLECTION || filter_count > AIMEE_VECTOR_MAX_FILTERS ||
+          filter_bytes > AIMEE_VECTOR_MAX_FILTER_BYTES || (filter_count == 0) != (filter_bytes == 0))
          return -1;
    }
    else if (version != WIRE_VERSION || get_u16(input + 6) != SEARCH_REQUEST_HEADER)
@@ -648,10 +648,10 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
    uint16_t workspace_len = get_u16(input + 24), project_len = get_u16(input + 26);
    uint16_t record_len = get_u16(input + 28), dimension = get_u16(input + 30);
    uint16_t top_k = get_u16(input + 32);
-   if (workspace_len >= AIMEE_DB3_MAX_SCOPE || project_len >= AIMEE_DB3_MAX_SCOPE ||
-       record_len == 0 || record_len >= AIMEE_DB3_MAX_RECORD_TYPE || dimension == 0 ||
-       dimension > AIMEE_DB3_MAX_DIM || dimension > vector_capacity || top_k == 0 ||
-       top_k > AIMEE_DB3_MAX_TOP_K)
+   if (workspace_len >= AIMEE_VECTOR_MAX_SCOPE || project_len >= AIMEE_VECTOR_MAX_SCOPE ||
+       record_len == 0 || record_len >= AIMEE_VECTOR_MAX_RECORD_TYPE || dimension == 0 ||
+       dimension > AIMEE_VECTOR_MAX_DIM || dimension > vector_capacity || top_k == 0 ||
+       top_k > AIMEE_VECTOR_MAX_TOP_K)
       return -1;
    size_t total = 0;
    if (checked_total(header, workspace_len, project_len, record_len, sizeof(float), dimension,
@@ -702,13 +702,13 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
    return search_request_fields_valid(request);
 }
 
-int aimee_db3_search_reply_encode(const aimee_db3_search_reply_t *reply, uint8_t *output,
+int aimee_vector_search_reply_encode(const aimee_vector_search_reply_t *reply, uint8_t *output,
                                   size_t capacity, size_t *length)
 {
    if (length)
       *length = 0;
    if (!reply || !output || !length || reply->request_id == 0 || reply->generation == 0 ||
-       reply->count > AIMEE_DB3_MAX_TOP_K)
+       reply->count > AIMEE_VECTOR_MAX_TOP_K)
       return -1;
    size_t total = SEARCH_REPLY_HEADER + (size_t)reply->count * 16u;
    if (total > capacity)
@@ -738,14 +738,14 @@ int aimee_db3_search_reply_encode(const aimee_db3_search_reply_t *reply, uint8_t
    return 0;
 }
 
-int aimee_db3_search_reply_decode(const uint8_t *input, size_t length,
-                                  aimee_db3_search_reply_t *reply)
+int aimee_vector_search_reply_decode(const uint8_t *input, size_t length,
+                                  aimee_vector_search_reply_t *reply)
 {
    if (!input || !reply || length < SEARCH_REPLY_HEADER || get_u32(input) != SEARCH_REPLY_MAGIC ||
        get_u16(input + 4) != WIRE_VERSION || get_u16(input + 6) != SEARCH_REPLY_HEADER)
       return -1;
    uint32_t count = get_u32(input + 24);
-   if (count > AIMEE_DB3_MAX_TOP_K || length != SEARCH_REPLY_HEADER + (size_t)count * 16u)
+   if (count > AIMEE_VECTOR_MAX_TOP_K || length != SEARCH_REPLY_HEADER + (size_t)count * 16u)
       return -1;
    memset(reply, 0, sizeof(*reply));
    reply->request_id = get_u64(input + 8);
@@ -772,12 +772,12 @@ int aimee_db3_search_reply_decode(const uint8_t *input, size_t length,
    return 0;
 }
 
-int aimee_db3_apply_encode(const aimee_db3_apply_t *apply, uint8_t *output, size_t capacity,
+int aimee_vector_apply_encode(const aimee_vector_apply_t *apply, uint8_t *output, size_t capacity,
                            size_t *length)
 {
    if (length)
       *length = 0;
-   if (!output || !length || aimee_db3_apply_validate(apply) != 0)
+   if (!output || !length || aimee_vector_apply_validate(apply) != 0)
       return -1;
    size_t collection_len = text_length(apply->collection, sizeof(apply->collection));
    size_t label_bytes = 0;
@@ -829,7 +829,7 @@ int aimee_db3_apply_encode(const aimee_db3_apply_t *apply, uint8_t *output, size
    return 0;
 }
 
-int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_t *apply,
+int aimee_vector_apply_decode(const uint8_t *input, size_t length, aimee_vector_apply_t *apply,
                            float *vector_out, size_t vector_capacity)
 {
    if (!input || !apply || length < APPLY_HEADER || get_u32(input) != APPLY_MAGIC || input[7] != 0)
@@ -844,20 +844,20 @@ int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_
       header = APPLY_V2_HEADER;
       label_count = get_u16(input + 36);
       label_bytes = get_u16(input + 38);
-      if (label_count == 0 || label_count > AIMEE_DB3_MAX_LABELS ||
-          label_bytes > AIMEE_DB3_MAX_LABEL_BYTES)
+      if (label_count == 0 || label_count > AIMEE_VECTOR_MAX_LABELS ||
+          label_bytes > AIMEE_VECTOR_MAX_LABEL_BYTES)
          return -1;
    }
    else if (version != WIRE_VERSION)
       return -1;
    uint16_t collection_len = get_u16(input + 32), dimension = get_u16(input + 34);
-   if (collection_len == 0 || collection_len >= AIMEE_DB3_MAX_COLLECTION ||
-       dimension > AIMEE_DB3_MAX_DIM ||
+   if (collection_len == 0 || collection_len >= AIMEE_VECTOR_MAX_COLLECTION ||
+       dimension > AIMEE_VECTOR_MAX_DIM ||
        (dimension > 0 && (!vector_out || dimension > vector_capacity)) ||
        length != header + (size_t)collection_len + (size_t)dimension * sizeof(float) + label_bytes)
       return -1;
    memset(apply, 0, sizeof(*apply));
-   apply->kind = (aimee_db3_apply_kind_t)input[6];
+   apply->kind = (aimee_vector_apply_kind_t)input[6];
    apply->operation_id = get_u64(input + 8);
    apply->generation = get_u64(input + 16);
    uint64_t point_bits = get_u64(input + 24);
@@ -883,7 +883,7 @@ int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_
          return -1;
       uint16_t key = get_u16(input + offset), value = get_u16(input + offset + 2);
       offset += LABEL_HEADER;
-      if (key == 0 || key >= AIMEE_DB3_MAX_LABEL_KEY || value >= AIMEE_DB3_MAX_LABEL_VALUE ||
+      if (key == 0 || key >= AIMEE_VECTOR_MAX_LABEL_KEY || value >= AIMEE_VECTOR_MAX_LABEL_VALUE ||
           (size_t)key + value > labels_end - offset)
          return -1;
       memcpy(apply->labels[i].key, input + offset, key);
@@ -895,12 +895,12 @@ int aimee_db3_apply_decode(const uint8_t *input, size_t length, aimee_db3_apply_
    }
    if (offset != labels_end)
       return -1;
-   return aimee_db3_apply_validate(apply);
+   return aimee_vector_apply_validate(apply);
 }
 
-int aimee_db3_route_init(aimee_db3_route_t *route, aimee_db3_search_fn internal_pgvector_search,
+int aimee_vector_route_init(aimee_vector_route_t *route, aimee_vector_search_fn internal_pgvector_search,
                          void *internal_context,
-                         aimee_db3_candidate_authorize_fn authorize_candidate,
+                         aimee_vector_candidate_authorize_fn authorize_candidate,
                          void *authorize_context)
 {
    if (!route || !internal_pgvector_search || !authorize_candidate)
@@ -913,8 +913,8 @@ int aimee_db3_route_init(aimee_db3_route_t *route, aimee_db3_search_fn internal_
    return 0;
 }
 
-int aimee_db3_route_select(aimee_db3_route_t *route, uint32_t principal, int ready,
-                           int fallback_enabled, aimee_db3_search_fn external_search,
+int aimee_vector_route_select(aimee_vector_route_t *route, uint32_t principal, int ready,
+                           int fallback_enabled, aimee_vector_search_fn external_search,
                            void *external_context)
 {
    if (!route || principal == 0 || !external_search)
@@ -927,7 +927,7 @@ int aimee_db3_route_select(aimee_db3_route_t *route, uint32_t principal, int rea
    return 0;
 }
 
-void aimee_db3_route_clear(aimee_db3_route_t *route)
+void aimee_vector_route_clear(aimee_vector_route_t *route)
 {
    if (!route)
       return;
@@ -938,21 +938,21 @@ void aimee_db3_route_clear(aimee_db3_route_t *route)
    route->external_context = NULL;
 }
 
-static aimee_db3_result_t call_and_validate(aimee_db3_search_fn search, void *context,
-                                            const aimee_db3_search_request_t *request,
-                                            aimee_db3_search_reply_t *reply, int external)
+static aimee_vector_result_t call_and_validate(aimee_vector_search_fn search, void *context,
+                                            const aimee_vector_search_request_t *request,
+                                            aimee_vector_search_reply_t *reply, int external)
 {
    memset(reply, 0, sizeof(*reply));
    if (search(context, request, reply) != 0)
-      return external ? AIMEE_DB3_PROVIDER_FAILURE : AIMEE_DB3_INTERNAL;
-   if (aimee_db3_search_reply_validate(request, reply) != 0)
-      return AIMEE_DB3_INVALID_RESPONSE;
-   return AIMEE_DB3_OK;
+      return external ? AIMEE_VECTOR_PROVIDER_FAILURE : AIMEE_VECTOR_INTERNAL;
+   if (aimee_vector_search_reply_validate(request, reply) != 0)
+      return AIMEE_VECTOR_INVALID_RESPONSE;
+   return AIMEE_VECTOR_OK;
 }
 
-static aimee_db3_result_t authorize(aimee_db3_route_t *route,
-                                    const aimee_db3_search_request_t *request,
-                                    aimee_db3_search_reply_t *reply)
+static aimee_vector_result_t authorize(aimee_vector_route_t *route,
+                                    const aimee_vector_search_request_t *request,
+                                    aimee_vector_search_reply_t *reply)
 {
    uint32_t kept = 0;
    for (uint32_t i = 0; i < reply->count; ++i)
@@ -960,55 +960,55 @@ static aimee_db3_result_t authorize(aimee_db3_route_t *route,
       int allowed = route->authorize_candidate(route->authorize_context, request->workspace,
                                                request->project, reply->candidates[i].point_id);
       if (allowed < 0)
-         return AIMEE_DB3_INTERNAL;
+         return AIMEE_VECTOR_INTERNAL;
       if (allowed)
          reply->candidates[kept++] = reply->candidates[i];
    }
    reply->count = kept;
-   return AIMEE_DB3_OK;
+   return AIMEE_VECTOR_OK;
 }
 
-aimee_db3_result_t aimee_db3_memory_candidates_search(aimee_db3_route_t *route,
-                                                      const aimee_db3_search_request_t *request,
-                                                      aimee_db3_search_outcome_t *outcome)
+aimee_vector_result_t aimee_vector_memory_candidates_search(aimee_vector_route_t *route,
+                                                      const aimee_vector_search_request_t *request,
+                                                      aimee_vector_search_outcome_t *outcome)
 {
    if (!outcome)
-      return AIMEE_DB3_INVALID_REQUEST;
+      return AIMEE_VECTOR_INVALID_REQUEST;
    memset(outcome, 0, sizeof(*outcome));
-   outcome->result = AIMEE_DB3_INVALID_REQUEST;
+   outcome->result = AIMEE_VECTOR_INVALID_REQUEST;
    if (!route || !route->internal_pgvector_search || !route->authorize_candidate ||
-       aimee_db3_search_request_validate(request) != 0)
+       aimee_vector_search_request_validate(request) != 0)
       return outcome->result;
 
    outcome->selected_principal = route->selected_principal;
    if (route->selected_principal == 0)
    {
-      outcome->route = AIMEE_DB3_ROUTE_DEFAULT_PGVECTOR;
+      outcome->route = AIMEE_VECTOR_ROUTE_DEFAULT_PGVECTOR;
       outcome->result = call_and_validate(route->internal_pgvector_search, route->internal_context,
                                           request, &outcome->reply, 0);
    }
    else if (route->selected_ready)
    {
-      outcome->route = AIMEE_DB3_ROUTE_EXTERNAL;
+      outcome->route = AIMEE_VECTOR_ROUTE_EXTERNAL;
       outcome->result = call_and_validate(route->external_search, route->external_context, request,
                                           &outcome->reply, 1);
-      if (outcome->result != AIMEE_DB3_OK)
+      if (outcome->result != AIMEE_VECTOR_OK)
          outcome->external_error = (int)outcome->result;
    }
    else
    {
-      outcome->route = AIMEE_DB3_ROUTE_EXTERNAL;
-      outcome->result = AIMEE_DB3_UNAVAILABLE;
-      outcome->external_error = AIMEE_DB3_UNAVAILABLE;
+      outcome->route = AIMEE_VECTOR_ROUTE_EXTERNAL;
+      outcome->result = AIMEE_VECTOR_UNAVAILABLE;
+      outcome->external_error = AIMEE_VECTOR_UNAVAILABLE;
    }
 
-   if (route->selected_principal != 0 && outcome->result != AIMEE_DB3_OK && route->fallback_enabled)
+   if (route->selected_principal != 0 && outcome->result != AIMEE_VECTOR_OK && route->fallback_enabled)
    {
-      outcome->route = AIMEE_DB3_ROUTE_EXPLICIT_FALLBACK;
+      outcome->route = AIMEE_VECTOR_ROUTE_EXPLICIT_FALLBACK;
       outcome->result = call_and_validate(route->internal_pgvector_search, route->internal_context,
                                           request, &outcome->reply, 0);
    }
-   if (outcome->result == AIMEE_DB3_OK)
+   if (outcome->result == AIMEE_VECTOR_OK)
       outcome->result = authorize(route, request, &outcome->reply);
    return outcome->result;
 }

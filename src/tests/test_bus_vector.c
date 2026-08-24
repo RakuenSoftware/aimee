@@ -4,7 +4,7 @@
 #include <aimee/core/event_bus/bus_endpoint.h>
 #include <aimee/core/event_bus/bus_host.h>
 #include <aimee/core/event_bus/bus_runtime.h>
-#include <aimee/db2/db3_route.h>
+#include <aimee/db2/vector_route.h>
 
 #include "platform_test_util.h"
 
@@ -75,11 +75,11 @@ static void receive_apply(bus_client_t *client, fake_provider_t *state, uint64_t
 {
    bus_event_t event;
    assert(bus_client_poll(client, &event) == BUS_CLIENT_OK);
-   assert(event.frame.event_kind == AIMEE_DB3_EVENT_APPLY && event.frame.seq == expected_seq);
-   aimee_db3_apply_t apply;
-   float apply_out[AIMEE_DB3_MAX_DIM];
-   assert(aimee_db3_apply_decode(event.payload, event.payload_len, &apply, apply_out,
-                                 AIMEE_DB3_MAX_DIM) == 0);
+   assert(event.frame.event_kind == AIMEE_VECTOR_EVENT_APPLY && event.frame.seq == expected_seq);
+   aimee_vector_apply_t apply;
+   float apply_out[AIMEE_VECTOR_MAX_DIM];
+   assert(aimee_vector_apply_decode(event.payload, event.payload_len, &apply, apply_out,
+                                 AIMEE_VECTOR_MAX_DIM) == 0);
    if (state->operation_id == apply.operation_id && state->generation == apply.generation)
       state->duplicates++;
    else
@@ -93,14 +93,14 @@ static void receive_apply(bus_client_t *client, fake_provider_t *state, uint64_t
 int main(void)
 {
    char directory[256];
-   snprintf(directory, sizeof(directory), "%s/aimee-db3-bus-XXXXXX", platform_tmpdir());
+   snprintf(directory, sizeof(directory), "%s/aimee-vector-bus-XXXXXX", platform_tmpdir());
    assert(mkdtemp(directory) != NULL);
    char socket_path[512], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
 
-   const uint32_t apply_kind[] = {AIMEE_DB3_EVENT_APPLY};
-   const uint32_t search_kind[] = {AIMEE_DB3_EVENT_SEARCH};
+   const uint32_t apply_kind[] = {AIMEE_VECTOR_EVENT_APPLY};
+   const uint32_t search_kind[] = {AIMEE_VECTOR_EVENT_SEARCH};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = DB2_REF,
@@ -162,29 +162,29 @@ int main(void)
    assert(bus_endpoint_close(&denied_fd) == 0);
 
    pthread_mutex_lock(&lock);
-   assert(bus_host_serve_kind(&host, slot_for(&host, PROVIDER_B_REF), AIMEE_DB3_EVENT_SEARCH) !=
+   assert(bus_host_serve_kind(&host, slot_for(&host, PROVIDER_B_REF), AIMEE_VECTOR_EVENT_SEARCH) !=
           BUS_HOST_OK);
    pthread_mutex_unlock(&lock);
 
    float apply_vec[3] = {0.1f, 0.2f, 0.3f};
-   aimee_db3_apply_t apply = {.operation_id = 1001,
+   aimee_vector_apply_t apply = {.operation_id = 1001,
                               .generation = 7,
                               .point_id = 41,
-                              .kind = AIMEE_DB3_APPLY_UPSERT,
+                              .kind = AIMEE_VECTOR_APPLY_UPSERT,
                               .collection = "memory",
                               .dimension = 3,
                               .vector = apply_vec};
    uint8_t wire[256];
    size_t length = 0;
-   assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
-   assert(bus_client_publish(&db2, AIMEE_DB3_EVENT_APPLY, wire, (uint32_t)length) == BUS_CLIENT_OK);
+   assert(aimee_vector_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
+   assert(bus_client_publish(&db2, AIMEE_VECTOR_EVENT_APPLY, wire, (uint32_t)length) == BUS_CLIENT_OK);
    pump(&host, &lock);
    fake_provider_t state_a = {0}, state_b = {0};
    receive_apply(&provider_a, &state_a, 1);
    receive_apply(&provider_b, &state_b, 1);
    assert(state_a.effects == 1 && state_b.effects == 1);
 
-   assert(bus_client_publish(&db2, AIMEE_DB3_EVENT_APPLY, wire, (uint32_t)length) == BUS_CLIENT_OK);
+   assert(bus_client_publish(&db2, AIMEE_VECTOR_EVENT_APPLY, wire, (uint32_t)length) == BUS_CLIENT_OK);
    pump(&host, &lock);
    receive_apply(&provider_a, &state_a, 2);
    receive_apply(&provider_b, &state_b, 2);
@@ -192,7 +192,7 @@ int main(void)
    assert(state_a.duplicates == 1 && state_b.duplicates == 1);
 
    float request_vec[3] = {0.3f, 0.2f, 0.1f};
-   aimee_db3_search_request_t request = {.request_id = 77,
+   aimee_vector_search_request_t request = {.request_id = 77,
                                          .required_generation = 7,
                                          .workspace = "workspace-a",
                                          .project = "project-a",
@@ -200,37 +200,37 @@ int main(void)
                                          .dimension = 3,
                                          .top_k = 2,
                                          .vector = request_vec};
-   assert(aimee_db3_search_request_encode(&request, wire, sizeof(wire), &length) == 0);
-   assert(bus_client_request(&db2, AIMEE_DB3_EVENT_SEARCH, 9001, wire, (uint32_t)length) ==
+   assert(aimee_vector_search_request_encode(&request, wire, sizeof(wire), &length) == 0);
+   assert(bus_client_request(&db2, AIMEE_VECTOR_EVENT_SEARCH, 9001, wire, (uint32_t)length) ==
           BUS_CLIENT_OK);
    pump(&host, &lock);
 
    bus_event_t event;
    assert(bus_client_poll(&provider_a, &event) == BUS_CLIENT_OK);
    assert((event.frame.hdr_flags & BUS_F_REQUEST) != 0 &&
-          event.frame.event_kind == AIMEE_DB3_EVENT_SEARCH);
+          event.frame.event_kind == AIMEE_VECTOR_EVENT_SEARCH);
    uint64_t server_correlation = event.frame.correlation_id;
-   aimee_db3_search_request_t decoded_request;
-   float decoded_vec[AIMEE_DB3_MAX_DIM];
-   aimee_db3_filter_view_t decoded_filters;
-   assert(aimee_db3_search_request_decode(event.payload, event.payload_len, &decoded_request,
-                                          decoded_vec, AIMEE_DB3_MAX_DIM, &decoded_filters) == 0);
+   aimee_vector_search_request_t decoded_request;
+   float decoded_vec[AIMEE_VECTOR_MAX_DIM];
+   aimee_vector_filter_view_t decoded_filters;
+   assert(aimee_vector_search_request_decode(event.payload, event.payload_len, &decoded_request,
+                                          decoded_vec, AIMEE_VECTOR_MAX_DIM, &decoded_filters) == 0);
    assert(decoded_request.request_id == request.request_id);
    assert(bus_client_poll(&provider_b, &event) == BUS_CLIENT_EMPTY);
 
-   aimee_db3_search_reply_t reply = {.request_id = request.request_id,
+   aimee_vector_search_reply_t reply = {.request_id = request.request_id,
                                      .generation = request.required_generation,
                                      .count = 2,
                                      .candidates = {{41, 0.95}, {42, 0.75}}};
-   assert(aimee_db3_search_reply_encode(&reply, wire, sizeof(wire), &length) == 0);
-   assert(bus_client_reply(&provider_a, AIMEE_DB3_EVENT_SEARCH, server_correlation, wire,
+   assert(aimee_vector_search_reply_encode(&reply, wire, sizeof(wire), &length) == 0);
+   assert(bus_client_reply(&provider_a, AIMEE_VECTOR_EVENT_SEARCH, server_correlation, wire,
                            (uint32_t)length) == BUS_CLIENT_OK);
    pump(&host, &lock);
    assert(bus_client_poll(&db2, &event) == BUS_CLIENT_OK);
    assert((event.frame.hdr_flags & BUS_F_REPLY) != 0 && event.frame.correlation_id == 9001);
-   aimee_db3_search_reply_t decoded_reply;
-   assert(aimee_db3_search_reply_decode(event.payload, event.payload_len, &decoded_reply) == 0);
-   assert(aimee_db3_search_reply_validate(&request, &decoded_reply) == 0);
+   aimee_vector_search_reply_t decoded_reply;
+   assert(aimee_vector_search_reply_decode(event.payload, event.payload_len, &decoded_reply) == 0);
+   assert(aimee_vector_search_reply_validate(&request, &decoded_reply) == 0);
    assert(decoded_reply.count == 2 && decoded_reply.candidates[0].point_id == 41);
 
    bus_client_detach(&db2);
@@ -240,6 +240,6 @@ int main(void)
    bus_host_destroy(&host);
    pthread_mutex_destroy(&lock);
    assert(rmdir(directory) == 0);
-   puts("test_bus_db3: two write observers and one read server passed");
+   puts("test_bus_vector: two write observers and one read server passed");
    return 0;
 }

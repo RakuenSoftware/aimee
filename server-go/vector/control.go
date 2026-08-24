@@ -1,4 +1,4 @@
-package db3
+package vector
 
 import "encoding/binary"
 

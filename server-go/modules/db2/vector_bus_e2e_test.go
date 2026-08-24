@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	protocol "github.com/JBailes/aimee/server-go/db3"
+	protocol "github.com/JBailes/aimee/server-go/vector"
 	"golang.org/x/sys/unix"
 )
 
@@ -86,7 +86,7 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
-	socket := filepath.Join(directory, "db3.sock")
+	socket := filepath.Join(directory, "vector.sock")
 	command := exec.Command(harness, socket, executable)
 	var output bytes.Buffer
 	command.Stdout, command.Stderr = &output, &output
@@ -124,7 +124,7 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 	defer cancel()
 	var internalCalls atomic.Int32
 	acknowledgements := make(chan uint32, 8)
-	router, endpoint, err := NewDB3BusRouter(ctx, db2Client,
+	router, endpoint, err := NewVectorBusRouter(ctx, db2Client,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
 			internalCalls.Add(1)
 			return db3Reply(request, 90), nil

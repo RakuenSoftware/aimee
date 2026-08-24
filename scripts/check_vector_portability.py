@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed unless every pgvector declaration has a reviewed DB3 disposition.
+"""Fail closed unless every pgvector declaration has a reviewed vector-module disposition.
 
 The audit is metadata, not a numeric data format: JSON integers are allowed but
 floating-point tokens are deliberately rejected along with NaN and Infinity.
@@ -19,7 +19,7 @@ from typing import NoReturn
 ROOT = Path(__file__).resolve().parent.parent
 AUDIT = Path("src/modules/db2/eventcontract/vector-portability.json")
 LEDGER = Path("tests/baselines/db2/declarations-v1.json")
-ROUTE_SOURCE = Path("src/modules/db2/db3_route.c")
+ROUTE_SOURCE = Path("src/modules/db2/vector_route.c")
 MAX_BYTES = 2_097_152
 MAX_DEPTH = 32
 MAX_ARRAY = 4096
@@ -169,13 +169,13 @@ def validate_route_boundary(root: Path) -> None:
         if not match:
             fail("route-boundary", f"cannot classify include directive {line!r}")
         delimiter, header = match.groups()
-        if header == "aimee/db2/db3_route.h" and delimiter == "<":
+        if header == "aimee/db2/vector_route.h" and delimiter == "<":
             imports.append(header)
         elif delimiter == "<" and header in STANDARD_HEADERS:
             continue
         else:
             fail("route-boundary", f"forbidden non-standard or private include {header!r}")
-    if imports != ["aimee/db2/db3_route.h"]:
+    if imports != ["aimee/db2/vector_route.h"]:
         fail("route-boundary", "the public DB3 route header must be included exactly once")
 
 
@@ -185,8 +185,8 @@ def validate(audit_value: object, ledger_value: object) -> dict[str, int]:
     }, "audit")
     if type(audit["schema_version"]) is not int or audit["schema_version"] != 1:
         fail("schema-version", "schema_version must equal 1")
-    if audit["module"] != "db3":
-        fail("module", "module must equal 'db3'")
+    if audit["module"] != "vector":
+        fail("module", "module must equal 'vector'")
     if audit["source"] != LEDGER.as_posix():
         fail("source", f"source must equal {LEDGER.as_posix()!r}")
     source = source_symbols(ledger_value)
@@ -201,10 +201,10 @@ def validate(audit_value: object, ledger_value: object) -> dict[str, int]:
     summary: dict[str, int] = {}
     for index, (raw, expected) in enumerate(zip(groups, CLASSIFICATIONS, strict=True)):
         group = _object(raw, {
-            "id", "disposition", "db3_operation_family", "rationale", "symbols",
+            "id", "disposition", "vector_operation_family", "rationale", "symbols",
         }, f"classifications[{index}]")
         identifier, disposition, family = expected
-        if (group["id"], group["disposition"], group["db3_operation_family"]) != expected:
+        if (group["id"], group["disposition"], group["vector_operation_family"]) != expected:
             fail("classification-identity", f"classification {index} must equal {expected!r}")
         _text(group["rationale"], f"{identifier}.rationale", 512)
         symbols = group["symbols"]
@@ -245,10 +245,10 @@ def main() -> int:
             return 0
         summary = run(args.root.resolve())
     except PortabilityError as exc:
-        print(f"check_db3_portability: error: {exc}", file=sys.stderr)
+        print(f"check_vector_portability: error: {exc}", file=sys.stderr)
         return 1
     rendered = ", ".join(f"{name}={count}" for name, count in summary.items())
-    print(f"check_db3_portability: ok (total={sum(summary.values())}; {rendered})")
+    print(f"check_vector_portability: ok (total={sum(summary.values())}; {rendered})")
     return 0
 
 

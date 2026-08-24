@@ -50,7 +50,7 @@ Detection is the whole of the switching logic. There is no configuration key
 that names a provider, because a named provider that is not installed is a
 deployment that fails at the first search rather than at boot.
 
-`aimee_db3_route_select()` takes a `fallback_enabled` flag, which decides the
+`aimee_vector_route_select()` takes a `fallback_enabled` flag, which decides the
 one genuinely ambiguous case: an external store that is selected but errors. A
 deployment whose vectors only exist in the external store must not fall back,
 because falling back would search a corpus that is missing them and return a
@@ -73,7 +73,7 @@ stage kinds, because a vector store is addressed as a protocol peer:
 
 Every message is a fixed header followed by variable-length fields, checked
 against a magic and a declared length. The generated constants in
-`src/modules/db2/include/aimee/db2/db3_contract.h` are authoritative and carry a
+`src/modules/db2/include/aimee/db2/vector_contract.h` are authoritative and carry a
 SHA-256 of the contract they were generated from.
 
 ### Bounds
@@ -107,13 +107,13 @@ This is a consequence of the ceiling above. An embedded array makes the struct's
 size the dimension ceiling, so a 32k-capable contract would mean 128 KB structs
 passed and copied by value.
 
-## What v1 cannot ask for
+## What search version 2 added, and why it was needed
 
-None of the fourteen vector searches DB2 holds can cross this contract today,
-and the blocker is the search model rather than a shortage of fields.
+Version 1 could not carry a single one of the fourteen vector searches DB2
+holds, and the blocker was the search model rather than a shortage of fields.
 
-**The model is: filter by attributes carried on the point.** Every DB2 vector
-search instead filters by a relational predicate, in two families:
+**Version 1's model was: filter by attributes carried on the point.** Every DB2
+vector search instead filters by a relational predicate, in two families:
 
 | family | the predicate | who |
 |---|---|---|
@@ -142,7 +142,30 @@ project, and the legacy-untagged case has to be computed because it is the
 absence of rows rather than the presence of one. Worth deciding before a
 provider exists rather than discovering while wiring one.
 
-`vector-portability.json` records all fourteen as `portable-after-db3-v2`.
+**Version 2 carries all of it, with three additions and no filter language.**
+
+A `collection` on search, symmetric with apply: `which_vec` is not a filter, it
+names which of several vector columns on one row to rank against.
+
+A conjunction of `(key, op, values)` predicates with `op` in `eq`, `ne`, `in`.
+No OR, no nesting, no precedence. `kinds` is one `in`; `exclude_project` is one
+`ne`; the curator filters are `eq`.
+
+Multi-valued labels, which is what removes the need for OR. Scope visibility is
+a four-way disjunction in SQL and becomes ONE set-membership predicate when a
+point carries every scope it belongs to as separate values of one key.
+
+And currency needed no protocol feature at all, which was the objection to
+denormalising it: a point's generation is fixed when it is written, so it is a
+label written once, and the SEARCH carries the current generation, which the
+caller already read from `projects`. Nothing is relabelled when a project is
+re-ingested.
+
+A request with no collection and no filters encodes as version 1 byte for byte,
+so a provider speaking only version 1 keeps receiving every request it could
+already serve, and refuses on the version the ones it cannot.
+
+`vector-portability.json` records all fourteen as `portable-now`.
 
 **A missing filter is refused at the build, not dropped.** This is the one rule
 worth stating twice. A request built without a filter it was given is
@@ -153,9 +176,9 @@ Everything else here is loud about skew, because framing is exact-length and a
 provider handed a message it does not understand refuses to decode it. That
 protection lives on the reading side; this failure happens on the writing side,
 where there is no wire to be strict about. So
-`aimee_db3_search_request_build()` takes the full filter set a caller has and
+`aimee_vector_search_request_build()` takes the full filter set a caller has and
 refuses if any of it has nowhere to go, and
-`aimee_db3_search_filters_expressible()` answers the same question for a caller
+`aimee_vector_search_filters_expressible()` answers the same question for a caller
 deciding whether to route externally at all.
 
 That guard covers filters a caller PASSES, which is not enough on its own. The
@@ -191,13 +214,34 @@ and they gate every search rather than four of them.
 ## Trust boundary
 
 A vector store is a separate process holding embeddings. It is not trusted to
-enforce tenancy: `aimee_db3_memory_candidates_search()` runs every returned
+enforce tenancy: `aimee_vector_memory_candidates_search()` runs every returned
 candidate through an authorize callback before the result is used. A provider
 that returned another workspace's point ids would have them dropped.
 
 Scores are validated finite, point ids positive, and duplicates in a reply are
 refused, so a provider cannot make one point appear repeatedly to crowd out
 others.
+
+## The name, and where it stops
+
+This is the vector module. It was called `db3`, which read as a third database
+tier and is the wrong mental model for an optional external store sitting beside
+a `postgres` module that owns PostgreSQL.
+
+The protocol's own surface carries the new name: its contract, its C API, its Go
+package, its generator, its portability audit, its baseline, its documents.
+
+**Database tables and DB2 operation names keep the old spelling** -- `db3_outbox`,
+`db3_backfill`, `db3_provider_*` and the rest. Renaming a table is a data
+migration against every existing database, and renaming an operation is a change
+to DB2's wire contract, its 445-entry catalogue, its generated code and its
+baselines. Neither is a rename; both are migrations with their own risk, and
+neither is what makes this legible. The protocol id stays 3 for the same reason:
+it is on the wire.
+
+So a reader will still meet `db3` in table names. That is a smaller confusion
+than the one being fixed, and it is written down here rather than left to be
+rediscovered.
 
 ## State
 

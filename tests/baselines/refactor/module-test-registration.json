@@ -62,10 +62,10 @@
       "test": "src/tests/test_bus_db2_process.c"
     },
     {
-      "ctest": true,
+      "ctest": false,
       "make": true,
       "module": "db2",
-      "test": "src/tests/test_bus_db3.c"
+      "test": "src/tests/test_bus_vector.c"
     },
     {
       "ctest": false,
@@ -212,10 +212,10 @@
       "test": "src/tests/test_db2_time_support.c"
     },
     {
-      "ctest": true,
+      "ctest": false,
       "make": true,
       "module": "db2",
-      "test": "src/tests/test_db3_route.c"
+      "test": "src/tests/test_vector_route.c"
     },
     {
       "ctest": false,

@@ -1,4 +1,4 @@
-package db3
+package vector
 
 import (
 	"encoding/binary"
@@ -37,9 +37,9 @@ type wireBaseline struct {
 
 func loadBaseline(t *testing.T) wireBaseline {
 	t.Helper()
-	raw, err := os.ReadFile("../../tests/baselines/modules/db3-wire-v1.json")
+	raw, err := os.ReadFile("../../tests/baselines/modules/vector-wire-v1.json")
 	if err != nil {
-		t.Fatalf("read DB3 C/Go baseline: %v", err)
+		t.Fatalf("read the vector C/Go baseline: %v", err)
 	}
 	var baseline wireBaseline
 	if err := json.Unmarshal(raw, &baseline); err != nil {

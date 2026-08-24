@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate DB3's provider protocol and generate its C/Go wire contract."""
+"""Validate the vector module's provider protocol and generate its C/Go wire contract."""
 
 from __future__ import annotations
 
@@ -15,19 +15,19 @@ from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = Path("src/modules/protocol-contracts.json")
-CATALOG = Path("src/modules/db2/eventcontract/db3.json")
+CATALOG = Path("src/modules/db2/eventcontract/vector.json")
 DESCRIPTOR = Path("src/modules/db2/module.yaml")
 PROCESS_CONTRACTS = Path("src/modules/process-contracts.json")
 DB1_CATALOG = Path("src/modules/db1/eventcontract/operations.json")
 DB2_CATALOG = Path("src/modules/db2/eventcontract/operations.json")
-HEADER = Path("src/modules/db2/include/aimee/db2/db3_contract.h")
-GO_CONTRACT = Path("server-go/db3/contract_generated.go")
-BASELINE = Path("tests/baselines/modules/db3-wire-v1.json")
+HEADER = Path("src/modules/db2/include/aimee/db2/vector_contract.h")
+GO_CONTRACT = Path("server-go/vector/contract_generated.go")
+BASELINE = Path("tests/baselines/modules/vector-wire-v1.json")
 MAX_BYTES = 1_048_576
 MAX_DEPTH = 32
 MAX_ARRAY = 4096
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
-STALE_DB3_EVENT = re.compile(r"(?<![0-9A-Za-z_])(?:1177[7-9]|1178[01]|0[xX]2[eE]0[1-5])(?:[uUlL]*)(?![0-9A-Za-z_])")
+STALE_VECTOR_EVENT = re.compile(r"(?<![0-9A-Za-z_])(?:1177[7-9]|1178[01]|0[xX]2[eE]0[1-5])(?:[uUlL]*)(?![0-9A-Za-z_])")
 
 
 class ContractError(ValueError):
@@ -130,7 +130,7 @@ def validate_registry(value: object) -> tuple[dict[str, object], dict[str, objec
         fail("registry-protocols", "protocols must be a nonempty array")
     seen_ids: set[int] = set()
     seen_names: set[str] = set()
-    db3 = None
+    vector = None
     previous = 0
     for index, raw in enumerate(protocols):
         item = _keys(raw, {"id", "name", "owner", "catalog"}, f"protocols[{index}]")
@@ -147,11 +147,13 @@ def validate_registry(value: object) -> tuple[dict[str, object], dict[str, objec
         previous = identifier
         seen_ids.add(identifier)
         seen_names.add(name)
-        if name == "db3":
-            db3 = item
-    if db3 != {"id": 3, "name": "db3", "owner": "db2", "catalog": CATALOG.as_posix()}:
-        fail("registry-db3", "DB3 must own canonical protocol ID 3 under DB2")
-    return namespace, db3
+        if name == "vector":
+            vector = item
+    if vector != {"id": 3, "name": "vector", "owner": "db2",
+                  "catalog": CATALOG.as_posix()}:
+        fail("registry-vector",
+             "the vector protocol must own canonical ID 3 under DB2")
+    return namespace, vector
 
 
 def validate_catalog(value: object) -> dict[str, object]:
@@ -163,14 +165,14 @@ def validate_catalog(value: object) -> dict[str, object]:
     )
     if catalog["schema_version"] != 1 or catalog["wire_version"] != 1:
         fail("catalog-version", "schema_version and wire_version must equal 1")
-    if catalog["protocol"] != "db3" or catalog["protocol_id"] != 3 or catalog["owner"] != "db2":
+    if catalog["protocol"] != "vector" or catalog["protocol_id"] != 3 or catalog["owner"] != "db2":
         fail("catalog-identity", "catalog must describe DB2-owned protocol DB3/id 3")
     expected_events = (
         (1, "capabilities", "notification", "provider", "db2"),
         (2, "apply", "notification", "db2", "all-providers"),
         (3, "applied", "notification", "provider", "db2"),
         (4, "search", "request-reply", "db2", "selected-provider"),
-        (5, "route", "request-reply", "control", "db3-router"),
+        (5, "route", "request-reply", "control", "vector-router"),
     )
     events = catalog["events"]
     if not isinstance(events, list) or len(events) != len(expected_events):
@@ -307,12 +309,12 @@ def _collect_event_kinds(value: object) -> set[int]:
 
 
 def validate_repository(root: Path, catalog: dict[str, object], namespace: dict[str, object],
-                        registry_db3: dict[str, object]) -> list[dict[str, object]]:
+                        registry_vector: dict[str, object]) -> list[dict[str, object]]:
     descriptor = load_json(root / DESCRIPTOR)
     if not isinstance(descriptor, dict) or not isinstance(descriptor.get("contracts"), list) or \
             descriptor["contracts"].count(CATALOG.as_posix()) != 1:
         fail("descriptor-ownership", f"{DESCRIPTOR} must own {CATALOG} exactly once")
-    if registry_db3["owner"] != descriptor.get("id"):
+    if registry_vector["owner"] != descriptor.get("id"):
         fail("registry-owner", "registry owner must match the module descriptor")
     events = catalog["events"]
     assert isinstance(events, list)
@@ -336,7 +338,7 @@ def validate_repository(root: Path, catalog: dict[str, object], namespace: dict[
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             fail("stale-event-scan", f"cannot inspect {path}: {exc}")
-        match = STALE_DB3_EVENT.search(source)
+        match = STALE_VECTOR_EVENT.search(source)
         if match:
             fail("stale-event-kind", f"{path} embeds retired DB3 event {match.group(0)}")
     return generated
@@ -358,68 +360,68 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
     assert isinstance(limits, dict) and isinstance(wire, dict) and isinstance(ops, dict)
     event_width = max(len(str(event["name"])) for event in events)
     event_lines = "\n".join(
-        f"#define AIMEE_DB3_EVENT_{str(event['name']).upper():<{event_width}} 0x{int(event['event_kind']):08x}u"
+        f"#define AIMEE_VECTOR_EVENT_{str(event['name']).upper():<{event_width}} 0x{int(event['event_kind']):08x}u"
         for event in events
     )
-    text = f'''/* Generated by scripts/gen_db3_contract.py; do not edit. */
-#ifndef AIMEE_DB2_DB3_CONTRACT_H
-#define AIMEE_DB2_DB3_CONTRACT_H 1
+    text = f'''/* Generated by scripts/gen_vector_contract.py; do not edit. */
+#ifndef AIMEE_DB2_VECTOR_CONTRACT_H
+#define AIMEE_DB2_VECTOR_CONTRACT_H 1
 
-#define AIMEE_DB3_CONTRACT_SHA256 "{fingerprint(catalog, registry)}"
-#define AIMEE_DB3_PROTOCOL_KIND_FLAG 0x{int(registry['namespace']['kind_flag']):08x}u
-#define AIMEE_DB3_PROTOCOL_ID        {catalog['protocol_id']}u
-#define AIMEE_DB3_WIRE_VERSION       {catalog['wire_version']}u
+#define AIMEE_VECTOR_CONTRACT_SHA256 "{fingerprint(catalog, registry)}"
+#define AIMEE_VECTOR_PROTOCOL_KIND_FLAG 0x{int(registry['namespace']['kind_flag']):08x}u
+#define AIMEE_VECTOR_PROTOCOL_ID        {catalog['protocol_id']}u
+#define AIMEE_VECTOR_WIRE_VERSION       {catalog['wire_version']}u
 
 {event_lines}
 
-#define AIMEE_DB3_MAX_SCOPE       {limits['scope_bytes']}u
-#define AIMEE_DB3_MAX_RECORD_TYPE {limits['record_type_bytes']}u
-#define AIMEE_DB3_MAX_COLLECTION  {limits['collection_bytes']}u
-#define AIMEE_DB3_MAX_LABELS       {limits['label_count']}u
-#define AIMEE_DB3_MAX_LABEL_KEY    {limits['label_key_bytes']}u
-#define AIMEE_DB3_MAX_LABEL_VALUE  {limits['label_value_bytes']}u
-#define AIMEE_DB3_MAX_LABEL_BYTES  {limits['labels_bytes']}u
-#define AIMEE_DB3_MAX_DIM         {limits['dimension']}u
-#define AIMEE_DB3_MAX_TOP_K       {limits['top_k']}u
-#define AIMEE_DB3_MAX_FILTERS       {limits['filter_count']}u
-#define AIMEE_DB3_MAX_FILTER_VALUES {limits['filter_values']}u
-#define AIMEE_DB3_MAX_FILTER_BYTES  {limits['filters_bytes']}u
+#define AIMEE_VECTOR_MAX_SCOPE       {limits['scope_bytes']}u
+#define AIMEE_VECTOR_MAX_RECORD_TYPE {limits['record_type_bytes']}u
+#define AIMEE_VECTOR_MAX_COLLECTION  {limits['collection_bytes']}u
+#define AIMEE_VECTOR_MAX_LABELS       {limits['label_count']}u
+#define AIMEE_VECTOR_MAX_LABEL_KEY    {limits['label_key_bytes']}u
+#define AIMEE_VECTOR_MAX_LABEL_VALUE  {limits['label_value_bytes']}u
+#define AIMEE_VECTOR_MAX_LABEL_BYTES  {limits['labels_bytes']}u
+#define AIMEE_VECTOR_MAX_DIM         {limits['dimension']}u
+#define AIMEE_VECTOR_MAX_TOP_K       {limits['top_k']}u
+#define AIMEE_VECTOR_MAX_FILTERS       {limits['filter_count']}u
+#define AIMEE_VECTOR_MAX_FILTER_VALUES {limits['filter_values']}u
+#define AIMEE_VECTOR_MAX_FILTER_BYTES  {limits['filters_bytes']}u
 
 /* Filter operators. A conjunction of these, and nothing else: no OR, no
  * nesting, no precedence. Scope visibility is a disjunction in SQL and becomes
- * one AIMEE_DB3_FILTER_IN over a multi-valued label, which is why OR is not
+ * one AIMEE_VECTOR_FILTER_IN over a multi-valued label, which is why OR is not
  * needed rather than merely not offered. */
-#define AIMEE_DB3_FILTER_EQ {ops['eq']}u
-#define AIMEE_DB3_FILTER_NE {ops['ne']}u
-#define AIMEE_DB3_FILTER_IN {ops['in']}u
+#define AIMEE_VECTOR_FILTER_EQ {ops['eq']}u
+#define AIMEE_VECTOR_FILTER_NE {ops['ne']}u
+#define AIMEE_VECTOR_FILTER_IN {ops['in']}u
 
-#define AIMEE_DB3_SEARCH_REQUEST_MAGIC  0x{wire['search_request']['magic']:08x}u
-#define AIMEE_DB3_SEARCH_REPLY_MAGIC    0x{wire['search_reply']['magic']:08x}u
-#define AIMEE_DB3_APPLY_MAGIC           0x{wire['apply']['magic']:08x}u
-#define AIMEE_DB3_APPLY_V2_VERSION      {wire['apply_v2']['wire_version']}u
-#define AIMEE_DB3_CAPABILITIES_MAGIC    0x{wire['capabilities']['magic']:08x}u
-#define AIMEE_DB3_APPLY_CHUNK_MAGIC     0x{wire['apply_chunk']['magic']:08x}u
-#define AIMEE_DB3_APPLIED_MAGIC         0x{wire['applied']['magic']:08x}u
-#define AIMEE_DB3_SEARCH_FAILURE_MAGIC  0x{wire['search_failure']['magic']:08x}u
-#define AIMEE_DB3_ROUTE_REQUEST_MAGIC   0x{wire['route_request']['magic']:08x}u
-#define AIMEE_DB3_ROUTE_REPLY_MAGIC     0x{wire['route_reply']['magic']:08x}u
-#define AIMEE_DB3_SEARCH_REQUEST_HEADER {wire['search_request']['header_bytes']}u
-#define AIMEE_DB3_SEARCH_REQUEST_V2_VERSION {wire['search_request_v2']['wire_version']}u
-#define AIMEE_DB3_SEARCH_REQUEST_V2_HEADER  {wire['search_request_v2']['header_bytes']}u
-#define AIMEE_DB3_FILTER_HEADER             {wire['search_request_v2']['filter_header_bytes']}u
-#define AIMEE_DB3_SEARCH_REPLY_HEADER   {wire['search_reply']['header_bytes']}u
-#define AIMEE_DB3_CANDIDATE_BYTES       {wire['search_reply']['candidate_bytes']}u
-#define AIMEE_DB3_APPLY_HEADER          {wire['apply']['header_bytes']}u
-#define AIMEE_DB3_APPLY_V2_HEADER       {wire['apply_v2']['header_bytes']}u
-#define AIMEE_DB3_LABEL_HEADER          {wire['apply_v2']['label_header_bytes']}u
-#define AIMEE_DB3_CAPABILITIES_HEADER   {wire['capabilities']['header_bytes']}u
-#define AIMEE_DB3_APPLY_CHUNK_HEADER    {wire['apply_chunk']['header_bytes']}u
-#define AIMEE_DB3_APPLIED_HEADER        {wire['applied']['header_bytes']}u
-#define AIMEE_DB3_SEARCH_FAILURE_HEADER {wire['search_failure']['header_bytes']}u
-#define AIMEE_DB3_ROUTE_REQUEST_HEADER  {wire['route_request']['header_bytes']}u
-#define AIMEE_DB3_ROUTE_REPLY_HEADER    {wire['route_reply']['header_bytes']}u
+#define AIMEE_VECTOR_SEARCH_REQUEST_MAGIC  0x{wire['search_request']['magic']:08x}u
+#define AIMEE_VECTOR_SEARCH_REPLY_MAGIC    0x{wire['search_reply']['magic']:08x}u
+#define AIMEE_VECTOR_APPLY_MAGIC           0x{wire['apply']['magic']:08x}u
+#define AIMEE_VECTOR_APPLY_V2_VERSION      {wire['apply_v2']['wire_version']}u
+#define AIMEE_VECTOR_CAPABILITIES_MAGIC    0x{wire['capabilities']['magic']:08x}u
+#define AIMEE_VECTOR_APPLY_CHUNK_MAGIC     0x{wire['apply_chunk']['magic']:08x}u
+#define AIMEE_VECTOR_APPLIED_MAGIC         0x{wire['applied']['magic']:08x}u
+#define AIMEE_VECTOR_SEARCH_FAILURE_MAGIC  0x{wire['search_failure']['magic']:08x}u
+#define AIMEE_VECTOR_ROUTE_REQUEST_MAGIC   0x{wire['route_request']['magic']:08x}u
+#define AIMEE_VECTOR_ROUTE_REPLY_MAGIC     0x{wire['route_reply']['magic']:08x}u
+#define AIMEE_VECTOR_SEARCH_REQUEST_HEADER {wire['search_request']['header_bytes']}u
+#define AIMEE_VECTOR_SEARCH_REQUEST_V2_VERSION {wire['search_request_v2']['wire_version']}u
+#define AIMEE_VECTOR_SEARCH_REQUEST_V2_HEADER  {wire['search_request_v2']['header_bytes']}u
+#define AIMEE_VECTOR_FILTER_HEADER             {wire['search_request_v2']['filter_header_bytes']}u
+#define AIMEE_VECTOR_SEARCH_REPLY_HEADER   {wire['search_reply']['header_bytes']}u
+#define AIMEE_VECTOR_CANDIDATE_BYTES       {wire['search_reply']['candidate_bytes']}u
+#define AIMEE_VECTOR_APPLY_HEADER          {wire['apply']['header_bytes']}u
+#define AIMEE_VECTOR_APPLY_V2_HEADER       {wire['apply_v2']['header_bytes']}u
+#define AIMEE_VECTOR_LABEL_HEADER          {wire['apply_v2']['label_header_bytes']}u
+#define AIMEE_VECTOR_CAPABILITIES_HEADER   {wire['capabilities']['header_bytes']}u
+#define AIMEE_VECTOR_APPLY_CHUNK_HEADER    {wire['apply_chunk']['header_bytes']}u
+#define AIMEE_VECTOR_APPLIED_HEADER        {wire['applied']['header_bytes']}u
+#define AIMEE_VECTOR_SEARCH_FAILURE_HEADER {wire['search_failure']['header_bytes']}u
+#define AIMEE_VECTOR_ROUTE_REQUEST_HEADER  {wire['route_request']['header_bytes']}u
+#define AIMEE_VECTOR_ROUTE_REPLY_HEADER    {wire['route_reply']['header_bytes']}u
 
-#endif /* AIMEE_DB2_DB3_CONTRACT_H */
+#endif /* AIMEE_DB2_VECTOR_CONTRACT_H */
 '''
     return text.encode("utf-8")
 
@@ -438,10 +440,10 @@ def go_bytes(catalog: dict[str, object], registry: dict[str, object],
         f"const Event{_go_name(str(event['name']))} uint32 = 0x{int(event['event_kind']):08x}"
         for event in events
     )
-    text = f'''// Code generated by scripts/gen_db3_contract.py; DO NOT EDIT.
+    text = f'''// Code generated by scripts/gen_vector_contract.py; DO NOT EDIT.
 
-// Package db3 is the public provider-neutral vector database protocol.
-package db3
+// Package vector is the public provider-neutral vector database protocol.
+package vector
 
 import (
 \t"encoding/binary"
@@ -504,7 +506,7 @@ const searchFailureHeader = {wire['search_failure']['header_bytes']}
 const routeRequestHeader = {wire['route_request']['header_bytes']}
 const routeReplyHeader = {wire['route_reply']['header_bytes']}
 
-var ErrMalformed = errors.New("db3: malformed version-1 frame")
+var ErrMalformed = errors.New("vector: malformed version-1 frame")
 
 type ApplyKind uint8
 
@@ -890,9 +892,9 @@ def baseline_bytes(catalog: dict[str, object], registry: dict[str, object],
 
 def generated(root: Path) -> tuple[bytes, bytes, bytes]:
     raw_registry = load_json(root / REGISTRY)
-    namespace, db3 = validate_registry(raw_registry)
+    namespace, vector = validate_registry(raw_registry)
     catalog = validate_catalog(load_json(root / CATALOG))
-    events = validate_repository(root, catalog, namespace, db3)
+    events = validate_repository(root, catalog, namespace, vector)
     assert isinstance(raw_registry, dict)
     return (
         header_bytes(catalog, raw_registry, events),
@@ -930,10 +932,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         run(args.root.resolve(), args.write)
     except (ContractError, OSError, UnicodeError, ValueError) as exc:
-        print(f"gen_db3_contract: error: {exc}", file=sys.stderr)
+        print(f"gen_vector_contract: error: {exc}", file=sys.stderr)
         return 1
     action = "wrote" if args.write else "ok"
-    print(f"gen_db3_contract: {action} ({HEADER}, {GO_CONTRACT}, {BASELINE})")
+    print(f"gen_vector_contract: {action} ({HEADER}, {GO_CONTRACT}, {BASELINE})")
     return 0
 
 

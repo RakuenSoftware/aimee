@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
-  "module": "db3",
+  "module": "vector",
   "source": "tests/baselines/db2/declarations-v1.json",
   "source_symbols_sha256": "19bcee569917149aae81ecf98e10a83e4b62addb42514fa002da73149e4e72b3",
   "classifications": [
     {
       "id": "portable-search",
       "disposition": "portable-now",
-      "db3_operation_family": "candidate-search",
       "rationale": "Portable to the vector module's search version 2: a bounded vector and filters the wire carries, returning only opaque candidate IDs and scores, which DB2 rehydrates and authorizes. Labels become eq, kinds in, exclude_project ne, which_vec the collection. Scope visibility -- a four-way disjunction in SQL -- is one in over a multi-valued label. Currency is one eq on a generation label fixed when a point is written, so nothing is relabelled when a project is re-ingested.",
       "symbols": [
         "pgvec_code_search",
@@ -24,12 +23,12 @@
         "pgvec_memory_search",
         "pgvec_memory_vector_search_record_type",
         "pgvec_memory_vector_search_with_kinds"
-      ]
+      ],
+      "vector_operation_family": "candidate-search"
     },
     {
       "id": "committed-mutation",
       "disposition": "portable-after-commit",
-      "db3_operation_family": "apply",
       "rationale": "The pgvector call remains DB2's canonical transactional write, while a provider-neutral upsert, delete, or tombstone is safe to fan out from the committed DB2 outbox.",
       "symbols": [
         "pgvec_code_delete",
@@ -64,12 +63,12 @@
         "pgvec_memory_vector_delete_point",
         "pgvec_memory_vector_upsert_memory",
         "pgvec_memory_vector_upsert_unit"
-      ]
+      ],
+      "vector_operation_family": "apply"
     },
     {
       "id": "provider-control",
       "disposition": "provider-local",
-      "db3_operation_family": "provider-control",
       "rationale": "Index layout, collection naming, implementation health, statistics, and tuning are provider-local concerns exposed only through bounded DB3 capabilities and readiness evidence.",
       "symbols": [
         "pgvec_ensure_corpus_index",
@@ -85,12 +84,12 @@
         "pgvec_point_count",
         "pgvec_search_latency_snapshot",
         "pgvec_table_ready"
-      ]
+      ],
+      "vector_operation_family": "provider-control"
     },
     {
       "id": "db2-authority",
       "disposition": "retained-db2",
-      "db3_operation_family": "none",
       "rationale": "The operation depends on canonical PostgreSQL rows, schema or recovery authority, or process-local state and therefore remains inside DB2 even when an external DB3 provider serves portable work.",
       "symbols": [
         "pgvec_code_exists_by_hash",
@@ -105,18 +104,19 @@
         "pgvec_vector_status_json",
         "pgvec_verify_snapshot",
         "pgvec_verify_snapshot_cleanup"
-      ]
+      ],
+      "vector_operation_family": "none"
     },
     {
       "id": "portable-analytics",
       "disposition": "deferred",
-      "db3_operation_family": "candidate-analytics",
       "rationale": "The current API returns authority-bearing paths or performs provider-specific pair analytics; a later bounded contract must return opaque candidates for DB2 revalidation before this work can move.",
       "symbols": [
         "pgvec_code_search_paths",
         "pgvec_code_similar_pairs",
         "pgvec_memory_vector_near_duplicate_pairs"
-      ]
+      ],
+      "vector_operation_family": "candidate-analytics"
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 #include <aimee/core/event_bus/bus_host.h>
 #include <aimee/core/event_bus/bus_runtime.h>
-#include <aimee/db2/db3_contract.h>
+#include <aimee/db2/vector_contract.h>
 
 #include <pthread.h>
 #include <signal.h>
@@ -35,14 +35,14 @@ int main(int argc, char **argv)
    signal(SIGTERM, stop_now);
    signal(SIGINT, stop_now);
 
-   const uint32_t db2_publish[] = {AIMEE_DB3_EVENT_APPLY};
-   const uint32_t db2_subscribe[] = {AIMEE_DB3_EVENT_CAPABILITIES, AIMEE_DB3_EVENT_APPLIED};
-   const uint32_t db2_request[] = {AIMEE_DB3_EVENT_SEARCH};
-   const uint32_t db2_serve[] = {AIMEE_DB3_EVENT_ROUTE};
-   const uint32_t provider_publish[] = {AIMEE_DB3_EVENT_CAPABILITIES, AIMEE_DB3_EVENT_APPLIED};
-   const uint32_t provider_subscribe[] = {AIMEE_DB3_EVENT_APPLY};
-   const uint32_t provider_serve[] = {AIMEE_DB3_EVENT_SEARCH};
-   const uint32_t control_request[] = {AIMEE_DB3_EVENT_ROUTE};
+   const uint32_t db2_publish[] = {AIMEE_VECTOR_EVENT_APPLY};
+   const uint32_t db2_subscribe[] = {AIMEE_VECTOR_EVENT_CAPABILITIES, AIMEE_VECTOR_EVENT_APPLIED};
+   const uint32_t db2_request[] = {AIMEE_VECTOR_EVENT_SEARCH};
+   const uint32_t db2_serve[] = {AIMEE_VECTOR_EVENT_ROUTE};
+   const uint32_t provider_publish[] = {AIMEE_VECTOR_EVENT_CAPABILITIES, AIMEE_VECTOR_EVENT_APPLIED};
+   const uint32_t provider_subscribe[] = {AIMEE_VECTOR_EVENT_APPLY};
+   const uint32_t provider_serve[] = {AIMEE_VECTOR_EVENT_SEARCH};
+   const uint32_t control_request[] = {AIMEE_VECTOR_EVENT_ROUTE};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
         .principal_ref = DB2_REF,

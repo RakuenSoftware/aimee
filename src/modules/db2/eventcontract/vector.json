@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "protocol": "db3",
+  "protocol": "vector",
   "protocol_id": 3,
   "owner": "db2",
   "wire_version": 1,
@@ -38,7 +38,7 @@
       "name": "route",
       "pattern": "request-reply",
       "source": "control",
-      "delivery": "db3-router"
+      "delivery": "vector-router"
     }
   ],
   "limits": {

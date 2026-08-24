@@ -15,8 +15,8 @@ import unittest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CHECKER = REPO_ROOT / "scripts/check_db3_portability.py"
-SPEC = importlib.util.spec_from_file_location("check_db3_portability", CHECKER)
+CHECKER = REPO_ROOT / "scripts/check_vector_portability.py"
+SPEC = importlib.util.spec_from_file_location("check_vector_portability", CHECKER)
 assert SPEC and SPEC.loader
 checker = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(checker)

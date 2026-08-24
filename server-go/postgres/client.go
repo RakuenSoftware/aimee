@@ -1,7 +1,7 @@
 // Package postgres is the caller side of the postgres module's storage wire.
 //
 // The module serves storage; this is how a module that owns rows reaches it.
-// It lives beside server-go/db1, server-go/db2 and server-go/db3 for the same
+// It lives beside server-go/db1, server-go/db2 and server-go/vector for the same
 // reason those do: a caller needs the contract without importing the
 // implementation, and a module that imported the postgres module would be
 // linking a database into a process whose whole point is not to have one.

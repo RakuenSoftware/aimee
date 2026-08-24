@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "9e7ee16fe8a39037dd82c1bb963dc88052a119d780a346f56ccb96df2f0c4f0e"
+const ContractSHA256 = "45564829f0ca612b4e5795a4d556c5a3fe70a5cef539517f75b715ba355e0831"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1

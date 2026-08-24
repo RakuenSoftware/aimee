@@ -1,4 +1,4 @@
-package db3
+package vector
 
 import (
 	"context"
@@ -14,7 +14,7 @@ const (
 	maxProviderAssemblies = 64
 )
 
-var ErrProviderConfig = errors.New("db3 provider: invalid configuration")
+var ErrProviderConfig = errors.New("vector provider: invalid configuration")
 
 type ProviderSearchFunc func(context.Context, SearchRequest) (SearchReply, SearchFailureCode)
 

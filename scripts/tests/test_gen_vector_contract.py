@@ -15,8 +15,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-GENERATOR = ROOT / "scripts/gen_db3_contract.py"
-SPEC = importlib.util.spec_from_file_location("gen_db3_contract", GENERATOR)
+GENERATOR = ROOT / "scripts/gen_vector_contract.py"
+SPEC = importlib.util.spec_from_file_location("gen_vector_contract", GENERATOR)
 assert SPEC and SPEC.loader
 generator = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(generator)
@@ -58,9 +58,9 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(parsed["protocol_id"], 3)
         self.assertEqual([row["event_kind"] for row in parsed["events"]],
                          [0x80030001, 0x80030002, 0x80030003, 0x80030004, 0x80030005])
-        self.assertIn(b"AIMEE_DB3_EVENT_APPLY", header)
+        self.assertIn(b"AIMEE_VECTOR_EVENT_APPLY", header)
         self.assertIn(b"func DecodeSearchRequest", go_contract)
-        self.assertIn(b"AIMEE_DB3_CAPABILITIES_MAGIC", header)
+        self.assertIn(b"AIMEE_VECTOR_CAPABILITIES_MAGIC", header)
         self.assertIn(b"const capabilitiesMagic", go_contract)
         for field in (
             "capabilities_hex", "apply_v2_hex", "apply_chunk_hex", "applied_hex", "search_failure_hex",
@@ -75,11 +75,11 @@ class ContractTests(unittest.TestCase):
             (lambda value: value.__setitem__("schema_version", 2), "registry-version"),
             (lambda value: value["namespace"].__setitem__("kind_flag", 0), "registry-namespace"),
             (lambda value: value["protocols"][0].__setitem__("id", 0), "integer"),
-            (lambda value: value["protocols"][0].__setitem__("id", 4), "registry-db3"),
+            (lambda value: value["protocols"][0].__setitem__("id", 4), "registry-vector"),
             (lambda value: value["protocols"].append(copy.deepcopy(value["protocols"][0])),
              "registry-duplicate"),
             (lambda value: value["protocols"][0].__setitem__("catalog", "elsewhere"),
-             "registry-db3"),
+             "registry-vector"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):
@@ -212,7 +212,7 @@ class ContractTests(unittest.TestCase):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("gen_db3_contract: ok", result.stdout)
+        self.assertIn("gen_vector_contract: ok", result.stdout)
 
 
 if __name__ == "__main__":

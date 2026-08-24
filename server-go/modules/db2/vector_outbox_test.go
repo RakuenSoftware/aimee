@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	protocol "github.com/JBailes/aimee/server-go/db3"
+	protocol "github.com/JBailes/aimee/server-go/vector"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -122,14 +122,14 @@ func (db *db3FakeSQL) Exec(_ context.Context, sql string, args ...any) (pgconn.C
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
-func TestPGDB3OutboxClaimsCanonicalLabeledAndDeleteOperations(t *testing.T) {
+func TestPGVectorOutboxClaimsCanonicalLabeledAndDeleteOperations(t *testing.T) {
 	rows := &db3FakeRows{data: [][]any{
 		{uint64(11), uint64(7), int64(41), "upsert", "memory", "[0.1, 0.2,0.3]",
 			[]byte(`{"workspace":"w","project":"p","record_type":"memory"}`)},
 		{uint64(12), uint64(7), int64(42), "delete", "memory", "", []byte(`{}`)},
 	}}
 	database := &db3FakeSQL{rows: rows}
-	store, err := NewPGDB3Outbox(database, "worker-1")
+	store, err := NewPGVectorOutbox(database, "worker-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestPGDB3OutboxClaimsCanonicalLabeledAndDeleteOperations(t *testing.T) {
 	}
 }
 
-func TestPGDB3OutboxRejectsMalformedDurableRows(t *testing.T) {
+func TestPGVectorOutboxRejectsMalformedDurableRows(t *testing.T) {
 	for name, row := range map[string][]any{
 		"vector": {uint64(11), uint64(7), int64(41), "upsert", "memory", "[NaN]",
 			[]byte(`{"project":"p"}`)},
@@ -165,21 +165,21 @@ func TestPGDB3OutboxRejectsMalformedDurableRows(t *testing.T) {
 		"kind": {uint64(11), uint64(7), int64(41), "unknown", "memory", "", []byte(`{}`)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			store, _ := NewPGDB3Outbox(&db3FakeSQL{rows: &db3FakeRows{data: [][]any{row}}},
+			store, _ := NewPGVectorOutbox(&db3FakeSQL{rows: &db3FakeRows{data: [][]any{row}}},
 				"worker")
-			if _, err := store.Claim(context.Background(), 1); !errors.Is(err, ErrDB3MalformedRow) {
+			if _, err := store.Claim(context.Background(), 1); !errors.Is(err, ErrVectorMalformedRow) {
 				t.Fatalf("error = %v", err)
 			}
 		})
 	}
 }
 
-func TestPGDB3OutboxAdmitAndAppliedAreFailClosed(t *testing.T) {
+func TestPGVectorOutboxAdmitAndAppliedAreFailClosed(t *testing.T) {
 	capabilities := protocol.Capabilities{
 		Generation: 7, Operations: protocol.OperationApply, MaxBatch: 16, Ready: true,
 	}
 	database := &db3FakeSQL{row: db3FakeRow{values: []any{2}}}
-	store, _ := NewPGDB3Outbox(database, "worker")
+	store, _ := NewPGVectorOutbox(database, "worker")
 	if err := store.AdmitProvider(context.Background(), 1001, 41, 9, capabilities); err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +188,11 @@ func TestPGDB3OutboxAdmitAndAppliedAreFailClosed(t *testing.T) {
 		t.Fatalf("admit query args = %v", database.queryArgs)
 	}
 	database.row = db3FakeRow{values: []any{1}}
-	if err := store.AdmitProvider(context.Background(), 1001, 41, 10, capabilities); !errors.Is(err, ErrDB3ProviderNotCaughtUp) {
+	if err := store.AdmitProvider(context.Background(), 1001, 41, 10, capabilities); !errors.Is(err, ErrVectorProviderNotCaughtUp) {
 		t.Fatalf("catch-up gate = %v", err)
 	}
 	database.row = db3FakeRow{values: []any{0}}
-	if err := store.AdmitProvider(context.Background(), 1002, 42, 1, capabilities); !errors.Is(err, ErrDB3CorpusGeneration) {
+	if err := store.AdmitProvider(context.Background(), 1002, 42, 1, capabilities); !errors.Is(err, ErrVectorCorpusGeneration) {
 		t.Fatalf("generation conflict = %v", err)
 	}
 
@@ -207,18 +207,18 @@ func TestPGDB3OutboxAdmitAndAppliedAreFailClosed(t *testing.T) {
 		t.Fatalf("applied args = %v", database.queryArgs)
 	}
 	database.row = db3FakeRow{values: []any{false}}
-	if err := store.Applied(context.Background(), 1001, applied); !errors.Is(err, ErrDB3UnknownAppliedAck) {
+	if err := store.Applied(context.Background(), 1001, applied); !errors.Is(err, ErrVectorUnknownAppliedAck) {
 		t.Fatalf("unknown ack = %v", err)
 	}
 }
 
-func TestPGDB3OutboxBackfillUsesBoundedIndependentTransactions(t *testing.T) {
+func TestPGVectorOutboxBackfillUsesBoundedIndependentTransactions(t *testing.T) {
 	database := &db3FakeSQL{rowQueue: []pgx.Row{
 		db3FakeRow{values: []any{1}},
 		db3FakeRow{values: []any{1}},
 		db3FakeRow{values: []any{0}},
 	}}
-	store, _ := NewPGDB3Outbox(database, "worker")
+	store, _ := NewPGVectorOutbox(database, "worker")
 	if err := store.BackfillProvider(context.Background(), 1001); err != nil {
 		t.Fatal(err)
 	}
@@ -230,14 +230,14 @@ func TestPGDB3OutboxBackfillUsesBoundedIndependentTransactions(t *testing.T) {
 	}
 }
 
-func TestPGDB3OutboxBackfillRetriesAndExposesTransientFailure(t *testing.T) {
+func TestPGVectorOutboxBackfillRetriesAndExposesTransientFailure(t *testing.T) {
 	transient := errors.New("connection unavailable")
 	database := &db3FakeSQL{rowQueue: []pgx.Row{
 		db3FakeRow{err: transient},
 		db3FakeRow{values: []any{1}},
 		db3FakeRow{values: []any{0}},
 	}}
-	store, _ := NewPGDB3Outbox(database, "worker")
+	store, _ := NewPGVectorOutbox(database, "worker")
 	store.backfillRetry = time.Millisecond
 	if err := store.runBackfillWorker(context.Background(), 1001); err != nil {
 		t.Fatal(err)
@@ -247,10 +247,10 @@ func TestPGDB3OutboxBackfillRetriesAndExposesTransientFailure(t *testing.T) {
 	}
 }
 
-func TestPGDB3OutboxBackfillStopsAndExposesTerminalFailure(t *testing.T) {
+func TestPGVectorOutboxBackfillStopsAndExposesTerminalFailure(t *testing.T) {
 	terminal := &pgconn.PgError{Code: "23514", Message: "invalid provider state"}
 	database := &db3FakeSQL{row: db3FakeRow{err: terminal}}
-	store, _ := NewPGDB3Outbox(database, "worker")
+	store, _ := NewPGVectorOutbox(database, "worker")
 	store.startBackfill(context.Background(), 1001)
 	for range 100 {
 		if errors.Is(store.LastBackfillError(1001), terminal) {
@@ -261,9 +261,9 @@ func TestPGDB3OutboxBackfillStopsAndExposesTerminalFailure(t *testing.T) {
 	t.Fatalf("terminal error was not exposed: %v", store.LastBackfillError(1001))
 }
 
-func TestPGDB3OutboxBackfillRetryStopsOnCancellation(t *testing.T) {
+func TestPGVectorOutboxBackfillRetryStopsOnCancellation(t *testing.T) {
 	database := &db3FakeSQL{row: db3FakeRow{err: errors.New("database unavailable")}}
-	store, _ := NewPGDB3Outbox(database, "worker")
+	store, _ := NewPGVectorOutbox(database, "worker")
 	store.backfillRetry = time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -272,9 +272,9 @@ func TestPGDB3OutboxBackfillRetryStopsOnCancellation(t *testing.T) {
 	}
 }
 
-func TestPGDB3OutboxPublishedRecordsReplayDeadlineAndTimestamp(t *testing.T) {
+func TestPGVectorOutboxPublishedRecordsReplayDeadlineAndTimestamp(t *testing.T) {
 	database := &db3FakeSQL{}
-	store, _ := NewPGDB3Outbox(database, "worker")
+	store, _ := NewPGVectorOutbox(database, "worker")
 	if err := store.Published(context.Background(), 11); err != nil {
 		t.Fatal(err)
 	}
@@ -324,11 +324,11 @@ func (store *db3DispatcherStore) Release(_ context.Context, operation uint64, _ 
 	return nil
 }
 
-func TestRunDB3OutboxReleasesPublishWhenLedgerMarkFails(t *testing.T) {
+func TestRunVectorOutboxReleasesPublishWhenLedgerMarkFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &db3DispatcherStore{cancel: cancel, markError: 1}
 	publisher := &db3DispatcherPublisher{}
-	err := RunDB3Outbox(ctx, store, publisher)
+	err := RunVectorOutbox(ctx, store, publisher)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("run error = %v", err)
 	}
@@ -353,11 +353,11 @@ func (publisher *db3DispatcherPublisher) PublishApply(_ context.Context,
 	return nil
 }
 
-func TestRunDB3OutboxRecordsPublishAndReleaseSeparately(t *testing.T) {
+func TestRunVectorOutboxRecordsPublishAndReleaseSeparately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &db3DispatcherStore{cancel: cancel}
 	publisher := &db3DispatcherPublisher{}
-	err := RunDB3Outbox(ctx, store, publisher)
+	err := RunVectorOutbox(ctx, store, publisher)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("run error = %v", err)
 	}
@@ -369,14 +369,14 @@ func TestRunDB3OutboxRecordsPublishAndReleaseSeparately(t *testing.T) {
 	}
 }
 
-func TestPGDB3OutboxConfigurationValidation(t *testing.T) {
-	if _, err := NewPGDB3Outbox(nil, "worker"); !errors.Is(err, ErrDB3OutboxConfig) {
+func TestPGVectorOutboxConfigurationValidation(t *testing.T) {
+	if _, err := NewPGVectorOutbox(nil, "worker"); !errors.Is(err, ErrVectorOutboxConfig) {
 		t.Fatalf("nil db = %v", err)
 	}
-	if _, err := NewPGDB3Outbox(&db3FakeSQL{}, "bad worker"); !errors.Is(err, ErrDB3OutboxConfig) {
+	if _, err := NewPGVectorOutbox(&db3FakeSQL{}, "bad worker"); !errors.Is(err, ErrVectorOutboxConfig) {
 		t.Fatalf("bad owner = %v", err)
 	}
-	if err := RunDB3Outbox(nil, nil, nil); !errors.Is(err, ErrDB3OutboxConfig) {
+	if err := RunVectorOutbox(nil, nil, nil); !errors.Is(err, ErrVectorOutboxConfig) {
 		t.Fatalf("nil dispatcher = %v", err)
 	}
 }

@@ -828,8 +828,8 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db2-time-support \
-                $(TESTPREFIX)/unit-test-db3-route \
-                $(TESTPREFIX)/unit-test-bus-db3
+                $(TESTPREFIX)/unit-test-vector-route \
+                $(TESTPREFIX)/unit-test-bus-vector
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/memory.o \
@@ -3446,19 +3446,19 @@ db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-r
 	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
 	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
 
-$(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
-$(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
-$(TESTPREFIX)/unit-test-db3-route: $(OBJDIR)/tests/test_db3_route.o \
-                                      $(OBJDIR)/modules/db2/db3_route.o
+$(OBJDIR)/tests/test_vector_route.o: C_FLAGS += -Imodules/db2/include
+$(OBJDIR)/modules/db2/vector_route.o: C_FLAGS += -Imodules/db2/include
+$(TESTPREFIX)/unit-test-vector-route: $(OBJDIR)/tests/test_vector_route.o \
+                                      $(OBJDIR)/modules/db2/vector_route.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-.PHONY: unit-test-db3-route
-unit-test-db3-route: $(TESTPREFIX)/unit-test-db3-route
+.PHONY: unit-test-vector-route
+unit-test-vector-route: $(TESTPREFIX)/unit-test-vector-route
 	$<
 
-$(OBJDIR)/tests/test_bus_db3.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
-$(TESTPREFIX)/unit-test-bus-db3: $(OBJDIR)/tests/test_bus_db3.o \
-                                $(OBJDIR)/modules/db2/db3_route.o \
+$(OBJDIR)/tests/test_bus_vector.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
+$(TESTPREFIX)/unit-test-bus-vector: $(OBJDIR)/tests/test_bus_vector.o \
+                                $(OBJDIR)/modules/db2/vector_route.o \
                                 $(OBJDIR)/core/event_bus/bus_runtime.o \
                                 $(OBJDIR)/core/event_bus/bus_endpoint.o \
                                 $(OBJDIR)/core/event_bus/bus_client.o \
@@ -3472,8 +3472,8 @@ $(TESTPREFIX)/unit-test-bus-db3: $(OBJDIR)/tests/test_bus_db3.o \
                                 $(OBJDIR)/core/event_bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lm
 
-.PHONY: unit-test-bus-db3
-unit-test-bus-db3: $(TESTPREFIX)/unit-test-bus-db3
+.PHONY: unit-test-bus-vector
+unit-test-bus-vector: $(TESTPREFIX)/unit-test-bus-vector
 	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that
@@ -3497,8 +3497,8 @@ bus-conformance-host: $(TESTPREFIX)/bus-conformance-host
 # Strict C host for the Go DB3 provider/router interoperability test. The host
 # owns transport only; every provider, selection, fallback, and idempotency
 # decision in the test runs in Go over authenticated grants.
-$(OBJDIR)/tests/test_bus_db3_go_host.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
-$(TESTPREFIX)/db3-go-host: $(OBJDIR)/tests/test_bus_db3_go_host.o \
+$(OBJDIR)/tests/test_bus_vector_go_host.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
+$(TESTPREFIX)/vector-go-host: $(OBJDIR)/tests/test_bus_vector_go_host.o \
                             $(OBJDIR)/core/event_bus/bus_runtime.o \
                             $(OBJDIR)/core/event_bus/bus_endpoint.o \
                             $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -3511,8 +3511,8 @@ $(TESTPREFIX)/db3-go-host: $(OBJDIR)/tests/test_bus_db3_go_host.o \
                             $(OBJDIR)/core/event_bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
-.PHONY: db3-go-host
-db3-go-host: $(TESTPREFIX)/db3-go-host
+.PHONY: vector-go-host
+vector-go-host: $(TESTPREFIX)/vector-go-host
 
 # Event-bus capture + observational replay (feature tree slice 11).
 $(OBJDIR)/tests/test_bus_capture.o: C_FLAGS += -Icore/event_bus/include

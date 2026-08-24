@@ -5,14 +5,14 @@ import (
 	"errors"
 	"sync"
 
-	protocol "github.com/JBailes/aimee/server-go/db3"
+	protocol "github.com/JBailes/aimee/server-go/vector"
 )
 
 var (
-	ErrDB3RouterConfig    = errors.New("db3 router: invalid configuration")
-	ErrDB3StaleCapability = errors.New("db3 router: stale capability evidence")
-	ErrDB3Unavailable     = errors.New("db3 router: selected provider unavailable")
-	ErrDB3InvalidResponse = errors.New("db3 router: invalid provider response")
+	ErrVectorRouterConfig    = errors.New("vector router: invalid configuration")
+	ErrVectorStaleCapability = errors.New("vector router: stale capability evidence")
+	ErrVectorUnavailable     = errors.New("vector router: selected provider unavailable")
+	ErrVectorInvalidResponse = errors.New("vector router: invalid provider response")
 )
 
 type DB3Result uint8
@@ -65,10 +65,10 @@ type db3Selection struct {
 	explicit   bool
 }
 
-// DB3Router is DB2's selection policy between its own pgvector implementation
+// VectorRouter is DB2's selection policy between its own pgvector implementation
 // and an authenticated external DB3 provider. The external search function is
 // a transport seam: production binds it to the event bus, never provider code.
-type DB3Router struct {
+type VectorRouter struct {
 	mu        sync.RWMutex
 	providers map[uint32]db3Provider
 	selection db3Selection
@@ -77,12 +77,12 @@ type DB3Router struct {
 	authorize DB3CandidateAuthorizer
 }
 
-func NewDB3Router(internal DB3InternalSearcher, external DB3ExternalSearcher,
-	authorize DB3CandidateAuthorizer) (*DB3Router, error) {
+func NewVectorRouter(internal DB3InternalSearcher, external DB3ExternalSearcher,
+	authorize DB3CandidateAuthorizer) (*VectorRouter, error) {
 	if internal == nil || external == nil || authorize == nil {
-		return nil, ErrDB3RouterConfig
+		return nil, ErrVectorRouterConfig
 	}
-	return &DB3Router{
+	return &VectorRouter{
 		providers: make(map[uint32]db3Provider), internal: internal, external: external,
 		authorize: authorize,
 	}, nil
@@ -92,16 +92,16 @@ func NewDB3Router(internal DB3InternalSearcher, external DB3ExternalSearcher,
 // and handle come from the bus frame, not the provider payload. Sequence is
 // monotonic within one attachment; a new handle represents a new attachment
 // and may restart its sequence.
-func (r *DB3Router) ObserveCapabilities(principal, handle uint32, sequence uint64,
+func (r *VectorRouter) ObserveCapabilities(principal, handle uint32, sequence uint64,
 	capabilities protocol.Capabilities) error {
 	if r == nil || principal == 0 || sequence == 0 || capabilities.Validate() != nil {
-		return ErrDB3RouterConfig
+		return ErrVectorRouterConfig
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, exists := r.providers[principal]
 	if exists && current.handle == handle && sequence <= current.sequence {
-		return ErrDB3StaleCapability
+		return ErrVectorStaleCapability
 	}
 	r.providers[principal] = db3Provider{
 		handle: handle, sequence: sequence, capabilities: capabilities,
@@ -124,7 +124,7 @@ func eligibleDB3Provider(capabilities protocol.Capabilities) bool {
 // lowest eligible principal serves portable reads unless control installed an
 // explicit override. Principal identities are deployment-owned and unique, so
 // the result does not depend on capability arrival order.
-func (r *DB3Router) selectDeployedDefaultLocked() {
+func (r *VectorRouter) selectDeployedDefaultLocked() {
 	selection := db3Selection{}
 	for principal, provider := range r.providers {
 		if !eligibleDB3Provider(provider.capabilities) ||
@@ -141,7 +141,7 @@ func (r *DB3Router) selectDeployedDefaultLocked() {
 // deterministically advances to the next deployed provider (or pgvector when
 // none remains). An explicit route stays pinned and therefore fails closed if
 // its selected provider disappears.
-func (r *DB3Router) RemoveProvider(principal, handle uint32) bool {
+func (r *VectorRouter) RemoveProvider(principal, handle uint32) bool {
 	if r == nil || principal == 0 {
 		return false
 	}
@@ -158,7 +158,7 @@ func (r *DB3Router) RemoveProvider(principal, handle uint32) bool {
 	return true
 }
 
-func (r *DB3Router) routeSnapshot(requestID uint64, result protocol.RouteResult) protocol.RouteReply {
+func (r *VectorRouter) routeSnapshot(requestID uint64, result protocol.RouteResult) protocol.RouteReply {
 	selection := r.selection
 	return protocol.RouteReply{
 		RequestID: requestID, Result: result, SelectedPrincipal: selection.principal,
@@ -169,7 +169,7 @@ func (r *DB3Router) routeSnapshot(requestID uint64, result protocol.RouteResult)
 // Route applies one validated control request atomically. Selection is a CAS
 // against the provider generation observed by the controller, preventing a
 // stale readiness snapshot from becoming the search route.
-func (r *DB3Router) Route(request protocol.RouteRequest) protocol.RouteReply {
+func (r *VectorRouter) Route(request protocol.RouteRequest) protocol.RouteReply {
 	if r == nil || request.Validate() != nil {
 		return protocol.RouteReply{RequestID: request.RequestID, Result: protocol.RouteInvalid}
 	}
@@ -216,7 +216,7 @@ func cloneSearchReply(reply protocol.SearchReply) protocol.SearchReply {
 	return reply
 }
 
-func (r *DB3Router) callInternal(ctx context.Context,
+func (r *VectorRouter) callInternal(ctx context.Context,
 	request protocol.SearchRequest) (protocol.SearchReply, DB3Result) {
 	reply, err := r.internal(ctx, cloneSearchRequest(request))
 	if err != nil {
@@ -228,17 +228,17 @@ func (r *DB3Router) callInternal(ctx context.Context,
 	return cloneSearchReply(reply), DB3OK
 }
 
-func (r *DB3Router) callExternal(ctx context.Context, principal uint32,
+func (r *VectorRouter) callExternal(ctx context.Context, principal uint32,
 	request protocol.SearchRequest) (protocol.SearchReply, DB3Result, protocol.SearchFailureCode) {
 	response, err := r.external(ctx, principal, cloneSearchRequest(request))
 	if err != nil {
 		if ctx.Err() != nil {
 			return protocol.SearchReply{}, DB3Internal, 0
 		}
-		if errors.Is(err, ErrDB3Unavailable) {
+		if errors.Is(err, ErrVectorUnavailable) {
 			return protocol.SearchReply{}, DB3Unavailable, 0
 		}
-		if errors.Is(err, ErrDB3InvalidResponse) {
+		if errors.Is(err, ErrVectorInvalidResponse) {
 			return protocol.SearchReply{}, DB3InvalidResponse, 0
 		}
 		return protocol.SearchReply{}, DB3ProviderFailure, 0
@@ -261,7 +261,7 @@ func (r *DB3Router) callExternal(ctx context.Context, principal uint32,
 	return cloneSearchReply(*response.Reply), DB3OK, 0
 }
 
-func (r *DB3Router) authorizeReply(ctx context.Context, request protocol.SearchRequest,
+func (r *VectorRouter) authorizeReply(ctx context.Context, request protocol.SearchRequest,
 	reply *protocol.SearchReply) DB3Result {
 	kept := reply.Candidates[:0]
 	for _, candidate := range reply.Candidates {
@@ -277,7 +277,7 @@ func (r *DB3Router) authorizeReply(ctx context.Context, request protocol.SearchR
 	return DB3OK
 }
 
-func (r *DB3Router) Search(ctx context.Context, request protocol.SearchRequest) DB3SearchOutcome {
+func (r *VectorRouter) Search(ctx context.Context, request protocol.SearchRequest) DB3SearchOutcome {
 	outcome := DB3SearchOutcome{Result: DB3InvalidRequest}
 	if r == nil || request.Validate() != nil {
 		return outcome

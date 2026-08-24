@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	protocol "github.com/JBailes/aimee/server-go/db3"
+	protocol "github.com/JBailes/aimee/server-go/vector"
 )
 
 const (
@@ -57,12 +57,12 @@ type DB3BusObservers struct {
 	Applied      DB3AppliedObserver
 }
 
-// DB3BusRouter owns the DB2-side DB3 attachment. One poller multiplexes
+// VectorBusRouter owns the DB2-side DB3 attachment. One poller multiplexes
 // provider notifications, route-control requests, and concurrent search
 // replies so no goroutine races another consumer on the shared inbound ring.
-type DB3BusRouter struct {
+type VectorBusRouter struct {
 	client       db3WireClient
-	router       *DB3Router
+	router       *VectorRouter
 	capabilities DB3CapabilitiesObserver
 	applied      DB3AppliedObserver
 	appliedCh    chan db3AppliedEvent
@@ -79,36 +79,36 @@ type DB3BusRouter struct {
 	pollDelay    time.Duration
 }
 
-func NewDB3BusRouter(ctx context.Context, client *bus.Client, internal DB3InternalSearcher,
-	authorize DB3CandidateAuthorizer, applied DB3AppliedObserver) (*DB3Router, *DB3BusRouter, error) {
+func NewVectorBusRouter(ctx context.Context, client *bus.Client, internal DB3InternalSearcher,
+	authorize DB3CandidateAuthorizer, applied DB3AppliedObserver) (*VectorRouter, *VectorBusRouter, error) {
 	if client == nil {
-		return nil, nil, ErrDB3RouterConfig
+		return nil, nil, ErrVectorRouterConfig
 	}
-	return newDB3BusRouter(ctx, client, internal, authorize, applied)
+	return newVectorBusRouter(ctx, client, internal, authorize, applied)
 }
 
-func NewDB3BusRouterWithObservers(ctx context.Context, client *bus.Client,
+func NewVectorBusRouterWithObservers(ctx context.Context, client *bus.Client,
 	internal DB3InternalSearcher, authorize DB3CandidateAuthorizer,
-	observers DB3BusObservers) (*DB3Router, *DB3BusRouter, error) {
+	observers DB3BusObservers) (*VectorRouter, *VectorBusRouter, error) {
 	if client == nil {
-		return nil, nil, ErrDB3RouterConfig
+		return nil, nil, ErrVectorRouterConfig
 	}
-	return newDB3BusRouterWithObservers(ctx, client, internal, authorize, observers)
+	return newVectorBusRouterWithObservers(ctx, client, internal, authorize, observers)
 }
 
-func newDB3BusRouter(ctx context.Context, client db3WireClient, internal DB3InternalSearcher,
-	authorize DB3CandidateAuthorizer, applied DB3AppliedObserver) (*DB3Router, *DB3BusRouter, error) {
-	return newDB3BusRouterWithObservers(ctx, client, internal, authorize,
+func newVectorBusRouter(ctx context.Context, client db3WireClient, internal DB3InternalSearcher,
+	authorize DB3CandidateAuthorizer, applied DB3AppliedObserver) (*VectorRouter, *VectorBusRouter, error) {
+	return newVectorBusRouterWithObservers(ctx, client, internal, authorize,
 		DB3BusObservers{Applied: applied})
 }
 
-func newDB3BusRouterWithObservers(ctx context.Context, client db3WireClient,
+func newVectorBusRouterWithObservers(ctx context.Context, client db3WireClient,
 	internal DB3InternalSearcher, authorize DB3CandidateAuthorizer,
-	observers DB3BusObservers) (*DB3Router, *DB3BusRouter, error) {
+	observers DB3BusObservers) (*VectorRouter, *VectorBusRouter, error) {
 	if ctx == nil || client == nil || client.InlineBudget() == 0 {
-		return nil, nil, ErrDB3RouterConfig
+		return nil, nil, ErrVectorRouterConfig
 	}
-	endpoint := &DB3BusRouter{
+	endpoint := &VectorBusRouter{
 		client: client, capabilities: observers.Capabilities, applied: observers.Applied,
 		pending: make(map[uint64]db3BusPending),
 		replies: make(map[uint64]db3BusAssembly), routes: make(map[uint64]db3BusAssembly),
@@ -118,7 +118,7 @@ func newDB3BusRouterWithObservers(ctx context.Context, client db3WireClient,
 		endpoint.appliedCh = make(chan db3AppliedEvent, db3BusMaxPending)
 		go endpoint.observeApplied(ctx)
 	}
-	router, err := NewDB3Router(internal, endpoint.Search, authorize)
+	router, err := NewVectorRouter(internal, endpoint.Search, authorize)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -127,7 +127,7 @@ func newDB3BusRouterWithObservers(ctx context.Context, client db3WireClient,
 	return router, endpoint, nil
 }
 
-func (b *DB3BusRouter) observeApplied(ctx context.Context) {
+func (b *VectorBusRouter) observeApplied(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -140,7 +140,7 @@ func (b *DB3BusRouter) observeApplied(ctx context.Context) {
 	}
 }
 
-func (b *DB3BusRouter) finish(err error) {
+func (b *VectorBusRouter) finish(err error) {
 	b.closeOnce.Do(func() {
 		b.errMu.Lock()
 		b.err = err
@@ -157,16 +157,16 @@ func (b *DB3BusRouter) finish(err error) {
 	})
 }
 
-func (b *DB3BusRouter) Err() error {
+func (b *VectorBusRouter) Err() error {
 	if b == nil {
-		return ErrDB3RouterConfig
+		return ErrVectorRouterConfig
 	}
 	b.errMu.Lock()
 	defer b.errMu.Unlock()
 	return b.err
 }
 
-func (b *DB3BusRouter) poll(ctx context.Context) {
+func (b *VectorBusRouter) poll(ctx context.Context) {
 	idle := b.pollDelay
 	for {
 		select {
@@ -200,10 +200,10 @@ func (b *DB3BusRouter) poll(ctx context.Context) {
 	}
 }
 
-func (b *DB3BusRouter) handleEvent(ctx context.Context, event bus.Event) {
+func (b *VectorBusRouter) handleEvent(ctx context.Context, event bus.Event) {
 	switch event.Frame.EventKind {
 	case bus.KindCapabilityAbsent, bus.KindError:
-		b.deliver(event.Frame.CorrelationID, db3BusSearchResult{err: ErrDB3Unavailable})
+		b.deliver(event.Frame.CorrelationID, db3BusSearchResult{err: ErrVectorUnavailable})
 	case protocol.EventCapabilities:
 		if event.Frame.HdrFlags&bus.FNotification == 0 {
 			return
@@ -242,7 +242,7 @@ func (b *DB3BusRouter) handleEvent(ctx context.Context, event bus.Event) {
 	}
 }
 
-func (b *DB3BusRouter) handleSearchReply(event bus.Event) {
+func (b *VectorBusRouter) handleSearchReply(event bus.Event) {
 	id := event.Frame.CorrelationID
 	b.mu.Lock()
 	pending, exists := b.pending[id]
@@ -255,7 +255,7 @@ func (b *DB3BusRouter) handleSearchReply(event bus.Event) {
 		(assembly.principal != 0 && assembly.principal != event.Frame.PrincipalRef) ||
 		uint64(len(assembly.body))+uint64(len(event.Payload)) > uint64(bus.MaxPayload) {
 		b.mu.Unlock()
-		b.deliver(id, db3BusSearchResult{err: ErrDB3InvalidResponse})
+		b.deliver(id, db3BusSearchResult{err: ErrVectorInvalidResponse})
 		return
 	}
 	assembly.principal = event.Frame.PrincipalRef
@@ -276,10 +276,10 @@ func (b *DB3BusRouter) handleSearchReply(event bus.Event) {
 		b.deliver(id, db3BusSearchResult{response: DB3SearchResponse{Failure: &failure}})
 		return
 	}
-	b.deliver(id, db3BusSearchResult{err: ErrDB3InvalidResponse})
+	b.deliver(id, db3BusSearchResult{err: ErrVectorInvalidResponse})
 }
 
-func (b *DB3BusRouter) handleRouteRequest(ctx context.Context, event bus.Event) {
+func (b *VectorBusRouter) handleRouteRequest(ctx context.Context, event bus.Event) {
 	id := event.Frame.CorrelationID
 	b.mu.Lock()
 	assembly := b.routes[id]
@@ -333,7 +333,7 @@ func (b *DB3BusRouter) handleRouteRequest(ctx context.Context, event bus.Event) 
 	}
 }
 
-func (b *DB3BusRouter) deliver(id uint64, result db3BusSearchResult) {
+func (b *VectorBusRouter) deliver(id uint64, result db3BusSearchResult) {
 	b.mu.Lock()
 	pending, exists := b.pending[id]
 	delete(b.pending, id)
@@ -344,14 +344,14 @@ func (b *DB3BusRouter) deliver(id uint64, result db3BusSearchResult) {
 	}
 }
 
-func (b *DB3BusRouter) sendFragments(ctx context.Context, reply bool, kind uint32,
+func (b *VectorBusRouter) sendFragments(ctx context.Context, reply bool, kind uint32,
 	correlation uint64, payload []byte) error {
 	budget := int(b.client.InlineBudget())
 	if budget > int(bus.MaxPayload) {
 		budget = int(bus.MaxPayload)
 	}
 	if budget <= 0 {
-		return ErrDB3RouterConfig
+		return ErrVectorRouterConfig
 	}
 	first := true
 	for offset := 0; first || offset < len(payload); {
@@ -375,7 +375,7 @@ func (b *DB3BusRouter) sendFragments(ctx context.Context, reply bool, kind uint3
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-b.closed:
-				return ErrDB3Unavailable
+				return ErrVectorUnavailable
 			case <-time.After(b.pollDelay):
 			}
 		}
@@ -387,10 +387,10 @@ func (b *DB3BusRouter) sendFragments(ctx context.Context, reply bool, kind uint3
 	return nil
 }
 
-func (b *DB3BusRouter) Search(ctx context.Context, principal uint32,
+func (b *VectorBusRouter) Search(ctx context.Context, principal uint32,
 	request protocol.SearchRequest) (DB3SearchResponse, error) {
 	if b == nil || principal == 0 || request.Validate() != nil {
-		return DB3SearchResponse{}, ErrDB3RouterConfig
+		return DB3SearchResponse{}, ErrVectorRouterConfig
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -405,12 +405,12 @@ func (b *DB3BusRouter) Search(ctx context.Context, principal uint32,
 	select {
 	case <-b.closed:
 		b.mu.Unlock()
-		return DB3SearchResponse{}, ErrDB3Unavailable
+		return DB3SearchResponse{}, ErrVectorUnavailable
 	default:
 	}
 	if len(b.pending) >= db3BusMaxPending {
 		b.mu.Unlock()
-		return DB3SearchResponse{}, ErrDB3Unavailable
+		return DB3SearchResponse{}, ErrVectorUnavailable
 	}
 	b.pending[id] = db3BusPending{principal: principal, reply: result}
 	b.mu.Unlock()
@@ -434,11 +434,11 @@ func (b *DB3BusRouter) Search(ctx context.Context, principal uint32,
 		b.sendMu.Unlock()
 		return DB3SearchResponse{}, ctx.Err()
 	case <-b.closed:
-		return DB3SearchResponse{}, ErrDB3Unavailable
+		return DB3SearchResponse{}, ErrVectorUnavailable
 	}
 }
 
-func (b *DB3BusRouter) publish(ctx context.Context, payload []byte) error {
+func (b *VectorBusRouter) publish(ctx context.Context, payload []byte) error {
 	for {
 		err := b.client.Publish(protocol.EventApply, payload)
 		if !errors.Is(err, bus.ErrWouldBlock) {
@@ -448,7 +448,7 @@ func (b *DB3BusRouter) publish(ctx context.Context, payload []byte) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-b.closed:
-			return ErrDB3Unavailable
+			return ErrVectorUnavailable
 		case <-time.After(b.pollDelay):
 		}
 	}
@@ -457,9 +457,9 @@ func (b *DB3BusRouter) publish(ctx context.Context, payload []byte) error {
 // PublishApply fans one committed DB2 operation out to every admitted provider.
 // Small operations retain the v1 direct frame. Larger operations use the DB3
 // notification chunk envelope because F_MORE is intentionally request/reply-only.
-func (b *DB3BusRouter) PublishApply(ctx context.Context, apply protocol.Apply) error {
+func (b *VectorBusRouter) PublishApply(ctx context.Context, apply protocol.Apply) error {
 	if b == nil {
-		return ErrDB3RouterConfig
+		return ErrVectorRouterConfig
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -473,7 +473,7 @@ func (b *DB3BusRouter) PublishApply(ctx context.Context, apply protocol.Apply) e
 		budget = int(bus.MaxPayload)
 	}
 	if budget <= 0 {
-		return ErrDB3RouterConfig
+		return ErrVectorRouterConfig
 	}
 	b.sendMu.Lock()
 	defer b.sendMu.Unlock()

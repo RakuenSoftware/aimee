@@ -116,7 +116,7 @@ internal and currently unconsumed surfaces. It distinguishes provider-neutral ca
 post-commit mutation fanout, provider-local control, necessarily retained DB2 authority, and deferred
 analytics. The provider-specific C names remain private DB2 implementation details; the audit records
 which logical effects may later receive DB3 operations without leaking those names onto the wire.
-See `docs/db3.md` for routing, admission, fallback, and revalidation invariants.
+See `docs/modules/vectordb.md` for routing, admission, fallback, and revalidation invariants.
 
 The descriptor also owns the database-free C reference route and wire codecs for the first portable
 memory-candidate operation. Its internal pgvector, external provider, and authoritative candidate

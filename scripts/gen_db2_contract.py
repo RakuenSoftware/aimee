@@ -288,7 +288,7 @@ def validate_catalog(value: object, scope_filtered: frozenset[str] | None = None
     for index, raw in enumerate(raw_operations):
         operation = _keys(raw, {
             "family", "id", "name", "wire_format", "scope", "transaction", "idempotency",
-            "results", "db3_placement", "db3_reason", "c_symbols", "request", "reply",
+            "results", "vector_placement", "vector_reason", "c_symbols", "request", "reply",
         }, f"operations[{index}]")
         family_name = operation["family"]
         if family_name not in families:
@@ -452,9 +452,9 @@ def validate_catalog(value: object, scope_filtered: frozenset[str] | None = None
                 fail("operation-scope",
                      f"{name} is session-scoped, so its request must carry scope_flags, "
                      "workspace and project")
-        if operation["db3_placement"] != "retained-db2":
-            fail("db3-placement", f"{name} must remain in DB2")
-        _string(operation["db3_reason"], f"{name}.db3_reason", 256)
+        if operation["vector_placement"] != "retained-db2":
+            fail("vector-placement", f"{name} must remain in DB2")
+        _string(operation["vector_reason"], f"{name}.vector_reason", 256)
         if not isinstance(operation["c_symbols"], list) or not operation["c_symbols"] or not all(
                 isinstance(symbol, str) and NAME.fullmatch(symbol)
                 for symbol in operation["c_symbols"]):
@@ -3764,7 +3764,7 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
         symbols = operation["c_symbols"]
         assert isinstance(symbols, list)
         for symbol in symbols:
-            expected[str(symbol)] = (str(operation["family"]), str(operation["db3_placement"]))
+            expected[str(symbol)] = (str(operation["family"]), str(operation["vector_placement"]))
     actual: dict[str, tuple[str, str]] = {}
     for index, row in enumerate(review["reviews"]):
         if not isinstance(row, dict):
@@ -3773,7 +3773,7 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
             continue
         symbol = row.get("symbol")
         family = row.get("family")
-        placement = row.get("db3_placement")
+        placement = row.get("vector_placement")
         if not all(isinstance(value, str) for value in (symbol, family, placement)):
             fail("declaration-review", f"wire review row {index} has invalid fields")
         actual[str(symbol)] = (str(family), str(placement))

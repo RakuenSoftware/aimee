@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	protocol "github.com/JBailes/aimee/server-go/db3"
+	protocol "github.com/JBailes/aimee/server-go/vector"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -26,11 +26,11 @@ const (
 )
 
 var (
-	ErrDB3OutboxConfig        = errors.New("db3 outbox: invalid configuration")
-	ErrDB3CorpusGeneration    = errors.New("db3 outbox: corpus generation conflict")
-	ErrDB3ProviderNotCaughtUp = errors.New("db3 outbox: provider backfill is not acknowledged")
-	ErrDB3UnknownAppliedAck   = errors.New("db3 outbox: unknown applied acknowledgement")
-	ErrDB3MalformedRow        = errors.New("db3 outbox: malformed durable operation")
+	ErrVectorOutboxConfig        = errors.New("vector outbox: invalid configuration")
+	ErrVectorCorpusGeneration    = errors.New("vector outbox: corpus generation conflict")
+	ErrVectorProviderNotCaughtUp = errors.New("vector outbox: provider backfill is not acknowledged")
+	ErrVectorUnknownAppliedAck   = errors.New("vector outbox: unknown applied acknowledgement")
+	ErrVectorMalformedRow        = errors.New("vector outbox: malformed durable operation")
 )
 
 type db3SQL interface {
@@ -39,10 +39,10 @@ type db3SQL interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-// PGDB3Outbox is DB2's PostgreSQL-backed delivery ledger. It stores no DB
+// PGVectorOutbox is DB2's PostgreSQL-backed delivery ledger. It stores no DB
 // handles in the wire protocol and treats a bus publish only as an attempt;
 // authenticated Applied notifications are the durable completion evidence.
-type PGDB3Outbox struct {
+type PGVectorOutbox struct {
 	db         db3SQL
 	leaseOwner string
 	backfillMu sync.Mutex
@@ -54,16 +54,16 @@ type PGDB3Outbox struct {
 	backfillRetry  time.Duration
 }
 
-func NewPGDB3Outbox(db db3SQL, leaseOwner string) (*PGDB3Outbox, error) {
+func NewPGVectorOutbox(db db3SQL, leaseOwner string) (*PGVectorOutbox, error) {
 	if db == nil || len(leaseOwner) == 0 || len(leaseOwner) > 64 {
-		return nil, ErrDB3OutboxConfig
+		return nil, ErrVectorOutboxConfig
 	}
 	for index := range len(leaseOwner) {
 		if leaseOwner[index] < 0x21 || leaseOwner[index] > 0x7e {
-			return nil, ErrDB3OutboxConfig
+			return nil, ErrVectorOutboxConfig
 		}
 	}
-	return &PGDB3Outbox{
+	return &PGVectorOutbox{
 		db: db, leaseOwner: leaseOwner, backfills: make(map[uint32]struct{}),
 		backfillErrors: make(map[uint32]error), backfillRetry: db3IdlePollInterval,
 	}, nil
@@ -73,13 +73,13 @@ const db3AdmitProviderSQL = `SELECT public.db3_admit_provider($1,$2,$3,$4,$5)`
 
 // AdmitProvider durably registers one authenticated apply-capable principal.
 // All active providers share one corpus epoch because Apply is broadcast.
-func (store *PGDB3Outbox) AdmitProvider(ctx context.Context, principal, handle uint32,
+func (store *PGVectorOutbox) AdmitProvider(ctx context.Context, principal, handle uint32,
 	sequence uint64, capabilities protocol.Capabilities) error {
 	if store == nil || principal == 0 || sequence == 0 ||
 		capabilities.Validate() != nil ||
 		capabilities.Operations&protocol.OperationApply == 0 ||
 		capabilities.Generation == 0 {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	var result int
 	if err := store.db.QueryRow(ctx, db3AdmitProviderSQL, principal, capabilities.Generation,
@@ -87,10 +87,10 @@ func (store *PGDB3Outbox) AdmitProvider(ctx context.Context, principal, handle u
 		return err
 	}
 	if result == 1 {
-		return ErrDB3ProviderNotCaughtUp
+		return ErrVectorProviderNotCaughtUp
 	}
 	if result != 2 {
-		return ErrDB3CorpusGeneration
+		return ErrVectorCorpusGeneration
 	}
 	return nil
 }
@@ -101,9 +101,9 @@ const db3BackfillChunkSQL = `SELECT public.db3_backfill_provider_chunk($1,$2)`
 // separate PostgreSQL transaction and the SQL owner caps it at 256 rows, so the
 // live-capture advisory lock is released between bounded chunks. Reattachment
 // resumes the durable cursor rows left by cancellation or process failure.
-func (store *PGDB3Outbox) BackfillProvider(ctx context.Context, principal uint32) error {
+func (store *PGVectorOutbox) BackfillProvider(ctx context.Context, principal uint32) error {
 	if store == nil || principal == 0 {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	for {
 		var result int
@@ -117,7 +117,7 @@ func (store *PGDB3Outbox) BackfillProvider(ctx context.Context, principal uint32
 		case 1:
 			continue
 		default:
-			return ErrDB3OutboxConfig
+			return ErrVectorOutboxConfig
 		}
 	}
 }
@@ -126,9 +126,9 @@ func (store *PGDB3Outbox) BackfillProvider(ctx context.Context, principal uint32
 // A new admission attempt clears the previous observation before it starts its
 // worker. The returned error is diagnostic; provider state in PostgreSQL stays
 // authoritative for readiness.
-func (store *PGDB3Outbox) LastBackfillError(principal uint32) error {
+func (store *PGVectorOutbox) LastBackfillError(principal uint32) error {
 	if store == nil || principal == 0 {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	store.backfillMu.Lock()
 	defer store.backfillMu.Unlock()
@@ -137,7 +137,7 @@ func (store *PGDB3Outbox) LastBackfillError(principal uint32) error {
 
 func retryDB3Backfill(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrDB3OutboxConfig) {
+		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrVectorOutboxConfig) {
 		return false
 	}
 	var postgresError *pgconn.PgError
@@ -162,7 +162,7 @@ func retryDB3Backfill(err error) bool {
 	}
 }
 
-func (store *PGDB3Outbox) runBackfillWorker(ctx context.Context, principal uint32) error {
+func (store *PGVectorOutbox) runBackfillWorker(ctx context.Context, principal uint32) error {
 	delay := store.backfillRetry
 	if delay <= 0 {
 		delay = db3IdlePollInterval
@@ -192,7 +192,7 @@ func (store *PGDB3Outbox) runBackfillWorker(ctx context.Context, principal uint3
 	}
 }
 
-func (store *PGDB3Outbox) startBackfill(ctx context.Context, principal uint32) {
+func (store *PGVectorOutbox) startBackfill(ctx context.Context, principal uint32) {
 	store.backfillMu.Lock()
 	if _, exists := store.backfills[principal]; exists {
 		store.backfillMu.Unlock()
@@ -243,21 +243,21 @@ SELECT operation_id,corpus_generation,point_id,operation_kind,collection,vector_
 
 func parseDB3Vector(value string) ([]float32, error) {
 	if len(value) < 2 || value[0] != '[' || value[len(value)-1] != ']' {
-		return nil, ErrDB3MalformedRow
+		return nil, ErrVectorMalformedRow
 	}
 	body := value[1 : len(value)-1]
 	if body == "" {
-		return nil, ErrDB3MalformedRow
+		return nil, ErrVectorMalformedRow
 	}
 	parts := strings.Split(body, ",")
 	if len(parts) > protocol.MaxDimension {
-		return nil, ErrDB3MalformedRow
+		return nil, ErrVectorMalformedRow
 	}
 	vector := make([]float32, len(parts))
 	for index, part := range parts {
 		parsed, err := strconv.ParseFloat(strings.TrimSpace(part), 32)
 		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
-			return nil, ErrDB3MalformedRow
+			return nil, ErrVectorMalformedRow
 		}
 		vector[index] = float32(parsed)
 	}
@@ -268,7 +268,7 @@ func parseDB3Labels(raw []byte) ([]protocol.ExactLabel, error) {
 	var labels map[string]string
 	if err := json.Unmarshal(raw, &labels); err != nil || len(labels) == 0 ||
 		len(labels) > protocol.MaxLabelCount {
-		return nil, ErrDB3MalformedRow
+		return nil, ErrVectorMalformedRow
 	}
 	keys := make([]string, 0, len(labels))
 	for key := range labels {
@@ -308,17 +308,17 @@ func scanDB3Apply(rows pgx.Rows) (protocol.Apply, error) {
 	case "tombstone":
 		apply.Kind = protocol.ApplyTombstone
 	default:
-		return protocol.Apply{}, ErrDB3MalformedRow
+		return protocol.Apply{}, ErrVectorMalformedRow
 	}
 	if apply.Validate() != nil {
-		return protocol.Apply{}, ErrDB3MalformedRow
+		return protocol.Apply{}, ErrVectorMalformedRow
 	}
 	return apply, nil
 }
 
-func (store *PGDB3Outbox) Claim(ctx context.Context, limit int) ([]protocol.Apply, error) {
+func (store *PGVectorOutbox) Claim(ctx context.Context, limit int) ([]protocol.Apply, error) {
 	if store == nil || limit <= 0 || limit > db3ClaimLimit {
-		return nil, ErrDB3OutboxConfig
+		return nil, ErrVectorOutboxConfig
 	}
 	rows, err := store.db.Query(ctx, db3ClaimSQL, limit, store.leaseOwner,
 		db3LeaseDuration.Milliseconds())
@@ -355,9 +355,9 @@ UPDATE db3_delivery d SET attempts=attempts+1,updated_at=pg_catalog.clock_timest
  WHERE d.operation_id=r.operation_id AND d.principal=p.principal
    AND d.state='pending' AND p.state='active'`
 
-func (store *PGDB3Outbox) Published(ctx context.Context, operationID uint64) error {
+func (store *PGVectorOutbox) Published(ctx context.Context, operationID uint64) error {
 	if store == nil || operationID == 0 {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	_, err := store.db.Exec(ctx, db3PublishedSQL, operationID, store.leaseOwner,
 		db3AckRetryDelay.Milliseconds())
@@ -369,9 +369,9 @@ UPDATE db3_outbox SET lease_owner='',lease_until=NULL,last_error=$3,
   next_attempt_at=pg_catalog.clock_timestamp()+($4*interval '1 millisecond')
  WHERE operation_id=$1 AND lease_owner=$2`
 
-func (store *PGDB3Outbox) Release(ctx context.Context, operationID uint64, cause error) error {
+func (store *PGVectorOutbox) Release(ctx context.Context, operationID uint64, cause error) error {
 	if store == nil || operationID == 0 {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	message := "publish failed"
 	if cause != nil {
@@ -418,10 +418,10 @@ WITH recorded AS (
 )
 SELECT EXISTS(SELECT 1 FROM recorded)`
 
-func (store *PGDB3Outbox) Applied(ctx context.Context, principal uint32,
+func (store *PGVectorOutbox) Applied(ctx context.Context, principal uint32,
 	applied protocol.Applied) error {
 	if store == nil || principal == 0 || applied.Validate() != nil {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	var recorded bool
 	if err := store.db.QueryRow(ctx, db3AppliedSQL, principal, applied.OperationID,
@@ -429,7 +429,7 @@ func (store *PGDB3Outbox) Applied(ctx context.Context, principal uint32,
 		return err
 	}
 	if !recorded {
-		return ErrDB3UnknownAppliedAck
+		return ErrVectorUnknownAppliedAck
 	}
 	return nil
 }
@@ -447,9 +447,9 @@ DELETE FROM db3_outbox o
       WHERE d.operation_id=o.operation_id AND p.state='active' AND d.state<>'acked'
    )`
 
-func (store *PGDB3Outbox) RetireProvider(ctx context.Context, principal uint32) error {
+func (store *PGVectorOutbox) RetireProvider(ctx context.Context, principal uint32) error {
 	if store == nil || principal == 0 {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	_, err := store.db.Exec(ctx, db3RetireSQL, principal)
 	return err
@@ -458,7 +458,7 @@ func (store *PGDB3Outbox) RetireProvider(ctx context.Context, principal uint32) 
 // BusObservers binds the durable ledger to authenticated bus evidence. A
 // failed admission keeps that provider out of search routing; a transient ack
 // write failure is repaired when the leased operation is replayed.
-func (store *PGDB3Outbox) BusObservers(ctx context.Context) DB3BusObservers {
+func (store *PGVectorOutbox) BusObservers(ctx context.Context) DB3BusObservers {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -466,7 +466,7 @@ func (store *PGDB3Outbox) BusObservers(ctx context.Context) DB3BusObservers {
 		Capabilities: func(callCtx context.Context, principal, handle uint32, sequence uint64,
 			capabilities protocol.Capabilities) error {
 			err := store.AdmitProvider(callCtx, principal, handle, sequence, capabilities)
-			if errors.Is(err, ErrDB3ProviderNotCaughtUp) {
+			if errors.Is(err, ErrVectorProviderNotCaughtUp) {
 				store.startBackfill(ctx, principal)
 			}
 			return err
@@ -487,11 +487,11 @@ type db3ApplyPublisher interface {
 	PublishApply(context.Context, protocol.Apply) error
 }
 
-// RunDB3Outbox replays committed operations until cancellation. Multiple
+// RunVectorOutbox replays committed operations until cancellation. Multiple
 // dispatchers are safe because Claim uses PostgreSQL SKIP LOCKED leases.
-func RunDB3Outbox(ctx context.Context, store db3OutboxStore, publisher db3ApplyPublisher) error {
+func RunVectorOutbox(ctx context.Context, store db3OutboxStore, publisher db3ApplyPublisher) error {
 	if ctx == nil || store == nil || publisher == nil {
-		return ErrDB3OutboxConfig
+		return ErrVectorOutboxConfig
 	}
 	timer := time.NewTimer(0)
 	defer timer.Stop()

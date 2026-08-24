@@ -61,12 +61,12 @@ class DeclarationLedgerTests(unittest.TestCase):
                     and row["status"] == "reviewed"]
         self.assertEqual(len(pgvector), 60)
         self.assertTrue(all(row["review"]["disposition"] == "private-db2" and
-                            row["review"]["db3_placement"] == "retained-db2"
+                            row["review"]["vector_placement"] == "retained-db2"
                             for row in pgvector))
         health = next(row for row in value["declarations"]
                       if row["symbol"] == "db2_health_probe")
         self.assertEqual(health["review"]["disposition"], "wire-operation")
-        self.assertEqual(health["review"]["db3_placement"], "retained-db2")
+        self.assertEqual(health["review"]["vector_placement"], "retained-db2")
 
     def test_parser_handles_linkage_multiline_callbacks_and_comments(self) -> None:
         source = r'''
@@ -160,7 +160,7 @@ int db2_public(void);
                 "signature_sha256": "a" * 64,
                 "disposition": "private-db2",
                 "family": "index",
-                "db3_placement": "retained-db2",
+                "vector_placement": "retained-db2",
                 "reason": "provider-specific implementation",
             }],
         }
@@ -168,7 +168,7 @@ int db2_public(void);
         cases = (
             (lambda value: value["reviews"][0].__setitem__("signature_sha256", "b" * 64),
              "review-signature"),
-            (lambda value: value["reviews"][0].__setitem__("db3_placement", "db3-eligible"),
+            (lambda value: value["reviews"][0].__setitem__("vector_placement", "vector-eligible"),
              "pgvector-placement"),
             (lambda value: value["reviews"][0].__setitem__("family", "unknown"),
              "review-value"),
