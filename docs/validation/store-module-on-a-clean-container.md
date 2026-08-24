@@ -669,3 +669,49 @@ the two faults were stacked, and the first hid the second.
 `test_agent_responses.c` were in `UNBUILT_SOURCES`, orphaned when `test_agent`
 was deleted, and are built again now. Its stale-entry rule caught that without
 being asked — the one guard in this sweep that needed no repair.
+
+## test_memory_advanced restored — all four back
+
+513 assertions, deleted for four lines: the `db1_init`/`db1_shutdown` fixture
+pair and two cognify enqueues.
+
+Three blocks here are genuinely store-backed and are **gated on
+`db1_store_ready()` rather than stubbed**, because what they assert *is* store
+behaviour:
+
+- the cognify queue's UNIQUE constraint — a duplicate enqueue leaves `pending`
+  unchanged;
+- `memory_cognify_drain` reading that queue;
+- `memory_maintenance_run`'s idle guard, which records its own last-run time and
+  reads it back, so with no store every run looks like the first and
+  `s2.skipped` comes back 0.
+
+A stub would have to reimplement each of those constraints to be worth anything,
+and then the test would be checking the stub. The postgres family suites already
+exercise all three against a real database. This binary links `module_bus_stub`,
+whose honest default is "no module attached", so the gate is closed here and the
+other ~500 assertions run.
+
+Inverting the assertions to match a storeless run would have been the wrong
+repair in the same way editing a validation count is: it encodes "no store" as
+the expected shape.
+
+### The four, finished
+
+| file | assertions | how the store dependency was cut |
+|---|---|---|
+| `test_guardrails.c` | 673 | stubs, two doing real work (state round trip, event counting) |
+| `test_mcp_git.c` | 675 | stub with a real per-`(repo, branch)` map |
+| `test_agent.c` (+ delegate_root) | 826 + 103 | real `$(DB1_CLIENT_OBJS)`; 3 tests gated on the fixture |
+| `test_memory_advanced.c` | 513 | `module_bus_stub`; 3 blocks gated on `db1_store_ready()` |
+
+**2790 assertions** back in the tree, none of them about storage, all of them
+deleted because a scan for `db1_|sqlite3|db1/` matched the fixture lines that
+let them run.
+
+Four different answers to the same question, and the differences are the point.
+A stub is right when the store is scaffolding; a *behaving* stub is right when
+the test reads back what it wrote and the subject is the writer; the real client
+is right when the symbol surface is too large to fake; and a gate is right when
+the assertion's subject is the store itself. Choosing one by habit would have
+produced a vacuous test in at least three of the four.

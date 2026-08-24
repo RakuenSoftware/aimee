@@ -1018,6 +1018,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_memory_advanced.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_memory_audit_hook.c"
     },
     {
@@ -1406,7 +1410,8 @@
     },
     {
       "consumers": [
-        "src/tests/aimee_pg_sqlite_shim.c"
+        "src/tests/aimee_pg_sqlite_shim.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -1436,6 +1441,7 @@
         "src/tests/test_management_action_journal.c",
         "src/tests/test_management_client_instance.c",
         "src/tests/test_management_identity_journal.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_org_vault_rewrap.c",
         "src/tests/test_tool_prompts.c"
@@ -1479,6 +1485,7 @@
         "src/tests/test_management_identity_journal.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
@@ -1569,6 +1576,7 @@
         "src/tests/test_management_identity_journal.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
@@ -1729,6 +1737,7 @@
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_roadmap.c",
         "src/tests/test_workspace_memory.c"
       ],
@@ -1888,6 +1897,7 @@
         "src/tests/test_management_identity_journal.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
         "src/tests/test_planner.c",
@@ -1965,6 +1975,7 @@
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_rules.c",
         "src/tests/test_schema_subst.c",
         "src/tests/test_tool_prompts.c",
@@ -2092,6 +2103,7 @@
         "src/tests/test_management_identity_journal.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
@@ -2280,6 +2292,7 @@
         "src/tests/test_kb_vault_rotation_ops_live.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
@@ -2339,6 +2352,7 @@
       "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_kb_vault_rewrap_live.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_vault_reseal_orchestrator_live.c"
       ],
       "locations": [
@@ -2454,6 +2468,7 @@
         "src/tests/test_management_identity_journal.c",
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
@@ -2966,7 +2981,8 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_agent.c"
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -2981,7 +2997,8 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_agent.c"
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -2997,7 +3014,8 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
-        "src/tests/test_guardrails.c"
+        "src/tests/test_guardrails.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -3048,6 +3066,7 @@
         "src/modules/memory/memory_advanced.c",
         "src/tests/test_context_assembly.c",
         "src/tests/test_guardrails.c",
+        "src/tests/test_memory_advanced.c",
         "src/trace_analysis.c"
       ],
       "locations": [
@@ -3065,7 +3084,8 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/memory/memory_assemble.c",
-        "src/tests/test_guardrails.c"
+        "src/tests/test_guardrails.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -3776,7 +3796,8 @@
     {
       "consumers": [
         "src/kb/kb_intel_payload.c",
-        "src/tests/test_kb_http_routes.c"
+        "src/tests/test_kb_http_routes.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -4954,6 +4975,7 @@
         "src/tests/test_management_action_journal.c",
         "src/tests/test_management_client_instance.c",
         "src/tests/test_management_identity_journal.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_planner.c",
@@ -6238,7 +6260,8 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_agent.c"
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -6255,7 +6278,8 @@
       "consumers": [
         "src/dashboard_kb.c",
         "src/kb/db2_adapters/kb_service_backend_agent.c",
-        "src/modules/memory/memory_advanced.c"
+        "src/modules/memory/memory_advanced.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -6320,7 +6344,8 @@
     {
       "consumers": [
         "src/kb/http/kb_http_governance.c",
-        "src/tests/test_kb_http_routes.c"
+        "src/tests/test_kb_http_routes.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -15666,7 +15691,8 @@
     },
     {
       "consumers": [
-        "src/cmd_doctor.c"
+        "src/cmd_doctor.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -18717,7 +18743,8 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c"
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -20303,6 +20330,7 @@
     {
       "consumers": [
         "src/modules/memory/memory_advanced.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_rules.c"
       ],
       "locations": [
@@ -21761,6 +21789,7 @@
         "src/tests/test_learning_metrics.c",
         "src/tests/test_learning_synth.c",
         "src/tests/test_learning_version.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_notes.c",
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_pgvec.c",
@@ -21897,6 +21926,7 @@
         "src/tests/test_learning_metrics.c",
         "src/tests/test_learning_synth.c",
         "src/tests/test_learning_version.c",
+        "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_audit_hook.c",
         "src/tests/test_memory_embed_dim_guard.c",
         "src/tests/test_memory_filter.c",
@@ -25760,7 +25790,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "da0d874eeb297f39503ac7158f11964b206aee56460dd5b14824cb71025b0be8",
+  "fingerprint": "ab05819a790648304da44e582d5f0083c817ff62b17adeab922dc0817203f529",
   "module": "db2",
   "schema_version": 1,
   "summary": {

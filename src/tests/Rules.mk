@@ -308,6 +308,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-guardrails \
                $(TESTPREFIX)/unit-test-mcp-git \
                $(TESTPREFIX)/unit-test-agent \
+               $(TESTPREFIX)/unit-test-memory-advanced \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-conn-accept \
@@ -1747,6 +1748,19 @@ $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOC
                                $(OBJDIR)/db2/cross_repo_resolver.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+
+# Restored. 513 assertions about memory behaviour, deleted with the C store for
+# four lines: the db1_init/db1_shutdown fixture pair and two cognify enqueues.
+#
+# The cognify block is gated on db1_store_ready() rather than stubbed, because
+# what it asserts IS store behaviour -- a duplicate enqueue leaves pending
+# unchanged, which is the queue's UNIQUE constraint. A stub would have to
+# reimplement that constraint to be worth anything, and then the test would be
+# checking the stub; the postgres family suites cover it against a real
+# database. This binary links module_bus_stub, whose honest default is "no
+# module attached", so the gate is closed here and the other 511 assertions run.
+$(TESTPREFIX)/unit-test-memory-advanced: $(OBJDIR)/tests/test_memory_advanced.o $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/db1_store_ready.o $(DB1_CLIENT_OBJS) $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-feedback-shadow: $(OBJDIR)/tests/test_feedback_shadow.o \
     $(TEST_DATA_OBJS_MOCK)
