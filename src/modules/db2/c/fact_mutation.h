@@ -50,8 +50,21 @@ extern "C"
 
    /* Capture the verifier-derived actor beside a stored memory before its
     * asynchronous fact job is enqueued, then restore that exact principal in
-    * the worker.  Missing request context is recorded as model authority. */
-   int db2_fact_actor_capture_memory(int64_t memory_id);
+    * the worker.  Missing request context is recorded as model authority.
+    *
+    * `user_authority` is the authority the WRITE itself claims (nonzero for
+    * MEMORY_AUTHORITY_USER), and it CAPS the captured actor. The caller's
+    * identity may lower the recorded authority but never raise it above what the
+    * note claims: a person storing agent-composed text is still storing
+    * agent-composed text.
+    *
+    * Without the cap the actor came from the request alone, so an authenticated
+    * person storing a note with provenance `agent_message` recorded a USER actor
+    * -- and the drain, which reads this row rather than the provenance, then
+    * minted Class-A facts from model-composed text. That is the same hazard
+    * §5 exists to prevent, reached from the store side instead of the write
+    * side. The two derivations of one fact must not be able to disagree. */
+   int db2_fact_actor_capture_memory(int64_t memory_id, int user_authority);
    int db2_fact_actor_for_memory(int64_t memory_id, fact_actor_t *out);
 
 #define FACT_KIND_WORLD_FACT   "world_fact"

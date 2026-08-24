@@ -832,9 +832,9 @@ static void *drain_thread_main(void *arg)
 
       /* Typed-fact extraction drain — runs every poll, independent of the
        * curator extract gates. Pulls "memory_facts" jobs enqueued by memory.store
-       * and runs the general LLM extractor over each memory's content. Gated on
-       * typed_facts_enabled (a no-op when off). */
-      if (config_typed_facts_enabled())
+       * and runs the general LLM extractor over each memory's content. No longer
+       * gated: config.typed_facts_enabled is retired and the layer is
+       * unconditional. */
       {
          int n = kb_memory_facts_drain(8);
          if (n > 0)
@@ -1092,24 +1092,15 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
       return;
    memset(ctx, 0, sizeof(*ctx));
 
-   if (!config_kb_curator_extract_docs_enabled() && !config_kb_curator_extract_code_enabled() &&
-       !config_kb_curator_resolve_entities_enabled() &&
-       !config_kb_curator_index_narrative_enabled() && !config_kb_curator_index_claims_enabled() &&
-       !config_kb_curator_detect_contradictions_enabled() &&
-       !config_kb_curator_index_code_unit_enabled() &&
-       !config_kb_curator_link_artifacts_enabled() && !config_kb_curator_synthesize_enabled() &&
-       !config_kb_curator_promote_entity_enabled() &&
-       !config_kb_curator_projection_graph_enabled() && !config_kb_evidence_embed_enabled() &&
-       !config_learning_synthesize_enabled() && !config_typed_facts_enabled())
-   {
-      aimee_log(LOG_DEBUG, "kb.curator.drain",
-                "all gates off (kb_curator_extract_docs_enabled=0,"
-                " kb_curator_extract_code_enabled=0, kb_curator_resolve_entities_enabled=0,"
-                " kb_curator_index_narrative_enabled=0, kb_curator_index_claims_enabled=0,"
-                " kb_evidence_embed_enabled=0, learning_synthesize_enabled=0);"
-                " drain thread not started");
-      return;
-   }
+   /* THE "ALL GATES OFF" EARLY RETURN IS GONE, because one of the gates it
+    * tested no longer exists and the work behind it is now unconditional.
+    *
+    * This skipped starting the drain thread when every curator gate was off,
+    * with config.typed_facts_enabled as the last term. The typed-fact drain runs
+    * every poll and is no longer gated, so the thread always has work to do:
+    * keeping the check would mean an install with the curator stages off never
+    * drains "memory_facts" jobs, and typed facts would silently stop being
+    * extracted -- exactly the class of silent-disable this retirement removes. */
 
    ctx->stop = 0;
 

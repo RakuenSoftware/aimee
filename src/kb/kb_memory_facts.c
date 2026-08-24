@@ -497,7 +497,7 @@ static int mf_process_one(const mf_job_t *job)
 
 int kb_memory_facts_drain(int batch)
 {
-   if (!config_typed_facts_enabled() || batch <= 0)
+   if (batch <= 0)
       return 0;
    if (!db2_conn())
       return 0;

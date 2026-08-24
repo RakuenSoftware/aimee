@@ -16,7 +16,11 @@ if [ ! -S "$SOCK" ]; then
   echo "module bus socket never appeared at $SOCK" >&2
   exit 1
 fi
-pkill -f aimee-module-memory 2>/dev/null
+# Kill only THIS bus's instance. A bare `pkill -f aimee-module-memory` also
+# takes down the server-side module, which runs the same binary against a
+# different socket -- and then a RERANK probe reports the server module missing
+# for no visible reason.
+pkill -f "aimee-module-memory $SOCK" 2>/dev/null
 sleep 1
 cd /root
 AIMEE_HOME=/root/.config/aimee \

@@ -99,6 +99,16 @@ $(TESTPREFIX)/unit-test-server-management-tls: $(OBJDIR)/tests/test_server_manag
                                                 $(CORE_CONNECTION_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lssl -lcrypto -lpthread
 
+.PHONY: unit-test-server-tls-init-cause
+unit-test-server-tls-init-cause: $(TESTPREFIX)/unit-test-server-tls-init-cause
+	$<
+
+$(TESTPREFIX)/unit-test-server-tls-init-cause: $(OBJDIR)/tests/test_server_tls_init_cause.o \
+                                                $(OBJDIR)/server/server_tls.o \
+                                                $(OBJDIR)/cJSON.o \
+                                                $(CORE_CONNECTION_LIB)
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lssl -lcrypto -lpthread
+
 .PHONY: unit-test-server-management-listener-live
 unit-test-server-management-listener-live: $(TESTPREFIX)/unit-test-server-management-listener-live
 	$<
@@ -839,6 +849,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-identity-jti \
                $(TESTPREFIX)/unit-test-server-management-jti \
                $(TESTPREFIX)/unit-test-server-management-tls \
+               $(TESTPREFIX)/unit-test-server-tls-init-cause \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
                $(TESTPREFIX)/unit-test-kb-management-health-exchange \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-client \

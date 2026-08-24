@@ -388,7 +388,7 @@ aimee_mode_t config_current_mode(void);
 void config_current_persona(char *out, size_t n);
 int config_persist_mode(const char *mode);
 int config_set(const char *key, const char *value);
-int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold);
+int config_set_typed_facts(int auto_promote, int promote_threshold);
 int config_workspace_add(const char *path, const char *provider, const char *remote,
                          const char *head);
 int config_workspace_remove(const char *path);
@@ -422,7 +422,6 @@ int config_kb_pdf_vector_enabled(void);
 int config_memory_derive_facts_enabled(void);
 int config_memory_routing_enabled(void);
 int config_transport_kb_pool_enabled(void);
-int config_typed_facts_enabled(void);
 int config_wfe_live_forge_enabled(void);
 double config_memory_semantic_floor_scale(void);
 int config_ingress_audit_async(void);

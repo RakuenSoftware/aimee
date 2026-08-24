@@ -358,27 +358,49 @@ int server_ct_equal(const char *a, const char *b);
 uint32_t server_capability_for_method(const char *method);
 const method_policy_t *server_policy_for_method(const char *method);
 
-/* Does this connection's attestation identify a PERSON?
+/* Does this request come from a PERSON?
  *
  * Capability answers what a caller may do; this answers who it is, which is a
  * different question and the one the memory and typed-fact layers ask before
- * letting a write speak as the user (typed-fact §5, memory_authority.h). Only
- * the two kernel/root-attested local shapes qualify:
+ * letting a write speak as the user (typed-fact §5, memory_authority.h).
  *
- *   UDS_PEERCRED     a local OS user the kernel vouched for      -> 1
- *   WEBCHAT_TRUSTED  a named webuser asserted over the root UDS  -> 1
- *   TCP/TLS bearer   a shared token, which is what agent and     -> 0
- *   MTLS_CLIENT      service processes present, not a person     -> 0
- *   NONE             un-attested; a missed hop must not become   -> 0
- *                    a user, as everywhere else attestation is read
+ * The answer is the ACCOUNT, and nothing else. Authentication happens once, at
+ * message receipt: the channel (mTLS), the session (bearer) and the account
+ * (OIDC / PAM host account / webuser / enrolled first-user cert) are each
+ * verified there, and a request that fails any of them never reaches a handler.
+ * By the time this is asked, identity is already proven -- so the only question
+ * left is whether the proven identity names a person, which is exactly "is
+ * there an account".
  *
- * A caller this returns 0 for is not refused anything: it acts with model
- * authority, which is non-destructive and cannot outrank the user's own facts. */
-int server_attested_is_person(attested_transport_t transport);
+ * This deliberately does NOT look at the transport. An earlier version keyed
+ * off attested_transport_t and treated UDS/webchat as people and everything
+ * else -- including mTLS and OIDC-over-TCP -- as anonymous agents. That was
+ * wrong twice over: an mTLS client cert names a specific enrolled machine
+ * (narrower than a person, not weaker), and an OIDC subject is the same account
+ * whichever socket carried it. It also disagreed with aimee-kb, which derives
+ * the same decision from the authenticated principal, so one caller could be a
+ * person to one daemon and an agent to the other.
+ *
+ * The account comes from request_context_caller_subject(), which is
+ * verify-then-trust at every entry: a kernel-verified UDS peer uid resolved to
+ * a host account, a verified KB-signed identity token's subject, an enrolled
+ * client certificate's grant, or a proxy stamp honoured only from the root UDS
+ * hop or a caller presenting the vaulted ingress secret. A plain authorized TCP
+ * client cannot choose its own.
+ *
+ * Empty account -> 0. That is a bare bearer: it authorizes the call but names
+ * nobody, so it cannot speak as the user. Such a caller is not refused
+ * anything -- it acts with model authority, which is non-destructive and cannot
+ * outrank the user's own facts. */
+int server_account_is_person(const char *account);
 
-/* The memory-write authority such a connection has earned. Shorthand for the
- * above at the memory surfaces, so the mapping lives in exactly one place. */
-memory_authority_t server_attested_memory_authority(attested_transport_t transport);
+/* The memory-write authority a request from `account` has earned. Shorthand for
+ * the above at the memory surfaces, so the mapping lives in exactly one place. */
+memory_authority_t server_account_memory_authority(const char *account);
+
+/* The verified account for the request being handled, or "" if it proved none.
+ * The single point every surface below ingress asks "who is this". */
+const char *server_request_account(void);
 
 /* Session handlers (server_session.c) */
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -412,17 +434,18 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
-/* Takes the attested transport because only a person's delete DESTROYS; an
- * un-attested caller that clears CAP_MEMORY_ADMIN retires the row instead. The
- * response reports which happened via `destroyed`. */
-cJSON *memory_delete_command(cJSON *req, attested_transport_t transport);
+/* Takes the request's authenticated ACCOUNT because only a person's delete
+ * DESTROYS; a caller with no account that clears CAP_MEMORY_ADMIN retires the
+ * row instead. The response reports which happened via `destroyed`. */
+cJSON *memory_delete_command(cJSON *req, const char *account);
 /* Typed-fact correction surface (§3 / §4); all CAP_MEMORY_WRITE.
  *
- * facts_retract_command takes the connection's ATTESTED transport because a
+ * facts_retract_command takes the request's authenticated ACCOUNT because a
  * retraction's authority (typed-fact §5) decides whether it may delete a
- * user-stated Class-A fact. It is derived from that attestation via
- * server_attested_is_person(), never from the request body. */
-cJSON *facts_retract_command(cJSON *req, attested_transport_t transport);
+ * user-stated Class-A fact. It is derived from that account via
+ * server_account_is_person(), never from the request body and never from which
+ * socket the request arrived on. */
+cJSON *facts_retract_command(cJSON *req, const char *account);
 cJSON *entities_merge_command(cJSON *req);
 cJSON *entities_unmerge_command(cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

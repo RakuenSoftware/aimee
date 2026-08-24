@@ -229,7 +229,12 @@ int main(void)
     * server identity certificate needed to bring up HTTPS. Fail at the stubbed
     * client-CA step so this assertion stays independent of filesystem fixtures. */
    g_default_mtls_mode = 1;
-   assert(server_tls_init_default() == -1);
+   /* Asserts WHICH step failed, which is what this case was always about: the
+    * comment above already says "fail at the stubbed client-CA step", and a bare
+    * -1 could not tell that apart from a ramp refusal or a bad certificate.
+    * Those three now have their own codes precisely so a caller (and this test)
+    * stops treating them as one outcome. */
+   assert(server_tls_init_default() == SERVER_TLS_INIT_ERR_CLIENT_CA);
    assert(g_server_cert_ensure_calls == 1);
    assert(g_client_ca_ensure_calls == 1);
 

@@ -5,7 +5,8 @@
 #include "log.h"
 #include "platform_process.h"
 #include "cJSON.h"
-#include "json_fluent.h" /* jo_ok */
+#include "json_fluent.h"     /* jo_ok */
+#include "request_context.h" /* request_context_caller_subject: the account ingress proved */
 #include <aimee/core/connection/auth.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -464,14 +465,25 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* --- Attested identity: who, not what-may-they-do. See server.h. --- */
+/* --- Authenticated identity: who, not what-may-they-do. See server.h. --- */
 
-int server_attested_is_person(attested_transport_t transport)
+int server_account_is_person(const char *account)
 {
-   return transport == ATTEST_UDS_PEERCRED || transport == ATTEST_WEBCHAT_TRUSTED;
+   /* No re-verification here, deliberately. The channel, the session and the
+    * account were each verified once at message receipt; a request that failed
+    * any of them never reached a handler. This reads the result ingress already
+    * carried on the request -- checking it again at every surface would cost
+    * work to re-learn something already proven. */
+   return account && account[0] ? 1 : 0;
 }
 
-memory_authority_t server_attested_memory_authority(attested_transport_t transport)
+memory_authority_t server_account_memory_authority(const char *account)
 {
-   return server_attested_is_person(transport) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+   return server_account_is_person(account) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+}
+
+const char *server_request_account(void)
+{
+   const char *account = request_context_caller_subject();
+   return account ? account : "";
 }

@@ -6,6 +6,7 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
+#include "log.h" /* aimee_log — a failed recall must not read as an empty one */
 #include "modules/db2/c/memory_lint.h"
 #include "config.h"
 #include "modules/db2/c/entity_registry.h"  /* db2_entity_merge / db2_entity_unmerge */
@@ -1248,8 +1249,31 @@ cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const ch
     * synchronous fact work on the store hot path; the drain's pattern pass now
     * captures the high-precision triples the old inline call did. */
    {
-      if (config_typed_facts_enabled() && out.id > 0 && db2_fact_actor_capture_memory(out.id) == 0)
-         (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
+      /* The note's own authority caps the captured actor: it is the same value
+       * that chose provenance_category just above, and the two must not be able
+       * to disagree about one memory. */
+      if (out.id > 0)
+      {
+         /* BOTH STEPS ARE SILENT DROPS IF THEY FAIL, and this is the only thing
+          * that starts fact extraction for a stored memory. The capture failing
+          * skips the enqueue entirely; the enqueue failing was discarded with a
+          * (void). Either way the memory is stored, the caller is told "ok", and
+          * its facts are never mined -- with nothing anywhere to say so.
+          *
+          * That mattered less while the drain was gated off and did no work
+          * regardless. Now that the typed-fact layer is unconditional, this
+          * enqueue is the whole path, so a lost job is lost extraction. */
+         if (db2_fact_actor_capture_memory(out.id, authority == (int)MEMORY_AUTHORITY_USER) != 0)
+            aimee_log(LOG_WARN, "memory",
+                      "could not record the fact actor for memory %lld; not enqueuing "
+                      "extraction, so its facts will not be mined",
+                      (long long)out.id);
+         else if (db2_kb_async_enqueue("memory_facts", out.id, "memory") != 0)
+            aimee_log(LOG_WARN, "memory",
+                      "could not enqueue memory_facts for memory %lld; it is stored but "
+                      "its facts will not be mined",
+                      (long long)out.id);
+      }
    }
    cJSON *obj = kbs_memory_row_to_json(&out);
    if (obj)
@@ -1282,8 +1306,9 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
    if (!resp)
       return NULL;
 
-   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Default-off via
-    * typed_facts_enabled (writes facts="" when off); orchestration in fact_ingest.
+   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Unconditional:
+    * the config.typed_facts_enabled master gate is retired. Orchestration lives
+    * in fact_ingest.
     * `authority` is the caller's authenticated write authority, resolved by the
     * RPC handler — this call can retract facts, so it must not be inferred from
     * `query`, which the caller supplies. */
@@ -1320,16 +1345,34 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
 }
 
 /* Read-only typed-fact recall (§7), PII-gated: the cheap path ingress_preinject
- * calls every turn. No write; no-op (facts="") when the layer is off. */
+ * calls every turn. No write; facts="" when there are none. */
 cJSON *db2_kb_service_memory_facts_json(const char *query)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
    char facts[2048] = "";
-   if (config_typed_facts_enabled() && query && query[0])
-      (void)db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
-                                     sizeof(facts));
+   if (query && query[0])
+   {
+      /* A FAILED RECALL IS NOT AN EMPTY ONE. This discarded the return, so a
+       * negative (db2 unavailable) produced facts="" and a "status":"ok"
+       * response -- indistinguishable from "this turn has no facts", on the path
+       * ingress_preinject calls EVERY turn. The model would then answer without
+       * the user's facts and nothing would say why.
+       *
+       * db2_typed_fact_ingress() already logs this exact condition, with the
+       * note that "recall affects prompt content, so a persistent failure is
+       * worth surfacing". The same call on this sibling path was left silent --
+       * the defect repeating where the reasoning had already been written down.
+       *
+       * Still a soft failure: the turn proceeds without facts rather than
+       * erroring, which is the right trade for a read. It must not be silent. */
+      int fr = db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
+                                        sizeof(facts));
+      if (fr < 0)
+         aimee_log(LOG_WARN, "memory",
+                   "typed-fact recall failed (db2 unavailable?); answering with no facts");
+   }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "facts", facts);
    return resp;

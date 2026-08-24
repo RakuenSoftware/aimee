@@ -134,9 +134,12 @@ int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *
    if (!query || !query[0])
       return 0;
 
-   if (!config_typed_facts_enabled())
-      return 0;
-
+   /* The typed-fact layer is unconditional. It used to sit behind
+    * config.typed_facts_enabled, a master gate that defaulted OFF and turned the
+    * whole layer -- retraction, recall, class keying -- into a silent no-op.
+    * A gate that silently disables a correctness feature is worse than no
+    * feature: this one returned 0 here, so a turn asking to forget a fact
+    * completed normally with the fact still standing and nothing logged. */
    int requests_sensitive = memory_pii_turn_requests_sensitive(query);
 
    /* §4: a retraction turn corrects rather than asserts — retract the named
@@ -162,11 +165,65 @@ int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *
    else if (is_retraction && has_attr)
    {
       fact_actor_t actor;
-      if (db2_fact_actor_from_request(0, &actor) != 0 &&
-          db2_fact_actor_internal(
-              authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
+      /* THE DECLARED AUTHORITY CAPS THE ACTOR; it is not a fallback for it.
+       *
+       * This used to try db2_fact_actor_from_request() FIRST and only fall back
+       * to |authority| when that failed. But that function returns
+       * FACT_ACTOR_USER for ANY authenticated principal, so whenever a request
+       * context existed it silently overrode the authority the caller had
+       * deliberately passed. kb_handle_memory_context_block() passes
+       * FACT_AUTHORITY_MODEL precisely because get_context_block's `query` is
+       * composed by the MODEL inside an authenticated human's turn -- and that
+       * is exactly the case where a request context DOES exist, so the
+       * structural MODEL was discarded every single time.
+       *
+       * Measured before the fix: a Class-A row at authority_rank 30 went
+       * lifecycle_state persistent -> invalidated from the agent's own
+       * "please forget my email". That is gap 1, in the path this layer's own
+       * comment calls the sharpest form of it.
+       *
+       * Same reasoning, and same shape, as db2_fact_actor_capture_memory(): a
+       * turn composed at MODEL authority is model-composed text whoever was
+       * authenticated while it ran, so the request identity must not raise its
+       * rank. Under FACT_ACTOR_MODEL, db2_fact_mutation_invalidate skips Class-A
+       * rows and refuses an immutable relation, which is what a model-issued
+       * correction should do. */
+      if (authority != FACT_AUTHORITY_USER)
+      {
+         if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0)
+            return 0;
+      }
+      else if (db2_fact_actor_from_request(0, &actor) != 0 &&
+               db2_fact_actor_internal(FACT_ACTOR_USER, &actor) != 0)
          return 0;
-      (void)db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
+      /* A REFUSED RETRACTION IS NOT A SUCCESSFUL ONE, and this used to discard
+       * the difference. db2_fact_mutation_invalidate() distinguishes its
+       * outcomes -- -2 when the target is an episode/experience that may only
+       * be annotated, -1 when it is a policy needing operator authority or the
+       * write failed -- and every one of them was thrown away with a (void)
+       * cast. The turn then completed normally with the fact still standing, so
+       * "I forgot it" and "I refused to forget it" looked identical from
+       * outside and left nothing in the log.
+       *
+       * That cost real time: a retraction silently not landing under real
+       * Postgres, while succeeding under the sqlite shim, presented only as a
+       * unit-test count assertion three layers away with no indication that the
+       * mutation had been declined at all.
+       *
+       * Refusals are legitimate outcomes here, not errors -- an annotate-only
+       * target SHOULD survive -- so this logs rather than fails the turn. What
+       * it must not do is stay silent. */
+      int inv = db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
+      if (inv == -2)
+         LOG_WARN("memory",
+                  "retraction declined for '%s': target is an episode/experience "
+                  "(annotate-only); the fact still stands",
+                  attr);
+      else if (inv < 0)
+         LOG_WARN("memory",
+                  "retraction of '%s' did not land (rank=%d): refused as policy "
+                  "without operator authority, or the write failed",
+                  attr, (int)actor.rank);
    }
 
    /* §7 read: the user's facts + facts about any entity named in the turn,

@@ -96,9 +96,8 @@ char *kb_client_health_json(void);
  * projection. The runtime merges this into its client-facing capabilities. */
 char *kb_client_agent_surfaces_json(void);
 
-/* Cached read of the KB's advertised typed-facts state (proposal §8). aimee-server
- * gates per-turn fact injection on this instead of owning typed_facts_enabled. */
-int kb_client_typed_facts_enabled(void);
+/* kb_client_typed_facts_enabled() is retired: the typed-fact layer is
+ * unconditional, so aimee-server has nothing to ask the KB about. */
 /* §2c: POST /v1/reembed; raw response JSON (caller frees) or NULL on transport
  * failure; *status_out (optional) gets the HTTP status. target_dim>0 pins the
  * reset target (bypasses the embedder probe); clear_maintenance!=0 instead just

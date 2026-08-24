@@ -17,6 +17,7 @@
 #include "modules/db2/c/collab_rules.h"
 #include "modules/db2/c/decision_log.h"
 #include "modules/db2/c/entity_edges.h"
+#include "modules/memory/memory_ontology.h"
 #include "modules/db2/c/db2_learning.h"
 #include "modules/learning/learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
 #include "modules/learning/learning_implicit.h"
@@ -133,14 +134,26 @@ cJSON *db2_kb_service_relations_schema_list_json(void)
       return NULL;
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON *rows = cJSON_AddArrayToObject(resp, "rows");
-   db2_relation_schema_row_t buf[256];
-   int n = db2_relation_schema_list(buf, (int)(sizeof(buf) / sizeof(buf[0])));
-   for (int i = 0; i < n; i++)
+   /* Served from the ontology's static table, which is what
+    * memory_ontology_validate() actually enforces.  This used to read
+    * `memory_relation_schema`: a table with DDL and an index but no writer
+    * anywhere in the tree, so the surface returned an empty list on every
+    * deployment and the client quietly omitted the section rather than
+    * reporting it had nothing.  Reading the enforcing table means the
+    * published schema cannot drift from the enforced one. */
+   const memory_ontology_rule_t *rules = NULL;
+   int n = memory_ontology_rules(&rules);
+   for (int i = 0; i < n && rules; i++)
    {
       cJSON *row = cJSON_CreateObject();
-      cJSON_AddNumberToObject(row, "relation_id", buf[i].relation_id);
-      cJSON_AddNumberToObject(row, "subject_kind", buf[i].subject_kind);
-      cJSON_AddNumberToObject(row, "object_kind", buf[i].object_kind);
+      if (!row)
+         break;
+      cJSON_AddNumberToObject(row, "relation_id", (double)rules[i].rel);
+      cJSON_AddNumberToObject(row, "subject_kind", (double)rules[i].sk);
+      cJSON_AddNumberToObject(row, "object_kind", (double)rules[i].ok);
+      cJSON_AddStringToObject(row, "relation", memory_ontology_relation_to_text(rules[i].rel));
+      cJSON_AddStringToObject(row, "subject", memory_ontology_node_kind_to_text(rules[i].sk));
+      cJSON_AddStringToObject(row, "object", memory_ontology_node_kind_to_text(rules[i].ok));
       cJSON_AddItemToArray(rows, row);
    }
    return resp;

@@ -266,16 +266,58 @@ static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *q
  * reach bypasses that: its tool calls go through the server, which resolves
  * authority from attestation and never from the payload. Over mTLS the human
  * arrives as an asserted host actor instead, handled above. */
+/* Who is this request, in the only terms that decide whether it may speak as the
+ * user: is there an authenticated account?
+ *
+ * Authentication happens once, at message receipt -- the channel, the session
+ * and the account are each verified there, and a request that fails any of them
+ * never reaches an action. `actor` IS that result, so this reads it rather than
+ * re-deriving anything: only the constructors in kb_identity.h set
+ * authenticated = 1, and a zero-initialized principal is unauthenticated.
+ *
+ * An account NAMES SOMEONE, and that is what separates the four kinds:
+ *
+ *   OIDC   an issuer-scoped subject -- the same account whatever carried it
+ *   HOST   a local host account PAM accepted
+ *   CERT   a verified mTLS peer, which names one enrolled machine
+ *   OWNER  a SHARED install credential, which names nobody in particular
+ *
+ * The first three identify a principal, so no transport qualifier applies to
+ * them: an OIDC subject is the same person over any socket, and a client cert
+ * names one enrolled machine.
+ *
+ * OWNER is different in kind, not merely weaker. It is one bearer for the whole
+ * install, so it cannot say WHICH person is acting; loopback is what makes it
+ * stand for "the operator at this machine" rather than "whoever holds the
+ * token". Dropping that qualifier was measured, from a genuinely non-loopback
+ * peer, and it let a remote holder of the bearer destroy a user-stated Class-A
+ * fact:
+ *
+ *     alice before: A current
+ *     remote peer, authority=user -> {"status":"ok","retracted":1}
+ *     alice after:  A gone
+ *
+ * That is a real widening of what a leaked bearer can do, and it is not what
+ * the account model argues for -- the model says the ACCOUNT decides, and a
+ * shared credential is precisely the case where there is no account to decide
+ * with. The qualifier is kept for OWNER alone.
+ *
+ * CERT was previously excluded, mirroring a matching exclusion of
+ * ATTEST_MTLS_CLIENT on the server, and the two together were the bug: a client
+ * presenting a verified certificate was an authenticated principal everywhere
+ * else in the tree (vault_capability.c puts it with UDS/webchat precisely
+ * because it "makes the grant expressible per client") yet an anonymous agent
+ * here. A caller could be a person to one daemon and not to the other. */
 static fact_authority_t kb_memory_request_authority(void)
 {
    const kb_principal_t *actor = kb_reqctx_actor(); /* NULL unless authenticated */
-   if (!actor)
+   if (!actor || !actor->authenticated || actor->kind == KB_PRIN_NONE)
       return FACT_AUTHORITY_MODEL;
-   if (actor->kind == KB_PRIN_OIDC || actor->kind == KB_PRIN_HOST)
-      return FACT_AUTHORITY_USER;
-   if (actor->kind == KB_PRIN_OWNER && kb_login_throttle_peer_is_loopback())
-      return FACT_AUTHORITY_USER;
-   return FACT_AUTHORITY_MODEL;
+   /* A shared install bearer only stands for a person at the machine it is
+    * installed on. Every other kind names one. */
+   if (actor->kind == KB_PRIN_OWNER)
+      return kb_login_throttle_peer_is_loopback() ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
+   return FACT_AUTHORITY_USER;
 }
 
 static int kb_memory_scope_begin(cJSON *req, int force, int *missing_out)

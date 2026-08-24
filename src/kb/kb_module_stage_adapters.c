@@ -33,6 +33,7 @@
 #include <aimee/learning/learning.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
+#include "modules/db2/support/db2_pii_classifier.h" /* the §7 PII gate provider seam */
 #include <aimee/postgres/module_api.h>
 
 #include <limits.h>
@@ -343,6 +344,77 @@ static int extract_facts(const char *text, aimee_db2_fact_candidate_t *out, int 
    return rc;
 }
 
+/* The §7 PII recall gate, module-backed.
+ *
+ * The gate's only callers are in db2 (fact_recall, fact_ingest, rel_types_store)
+ * and those run HERE, in the kb -- but the kb registered no provider, so
+ * memory_pii_turn_requests_sensitive() and the sensitivity batch fell back to
+ * the in-process cue list in pii_classifier_primitives.c. That is precisely the
+ * silent fallback docs/modules/memory.md warns about: "a registered provider
+ * that is authoritative and never falls back to the local implementation,
+ * because a silent fallback lets a broken module look healthy."
+ *
+ * aimee-server registered these and calls RETRIEVE, but nothing in the server
+ * invokes the gate -- the mirror image of the placement gap, with the capability
+ * wired on one side and consumed on the other. Registering here puts the
+ * decision on the module in the daemon that actually asks the question.
+ *
+ * Failure stays fail-closed by construction: a turn classifier that errors reads
+ * as "did not ask for sensitive data" (withhold), and a sensitivity batch that
+ * errors makes fact_recall abandon the candidates rather than inject them. */
+static int kb_memory_pii_turn(const char *turn_text, int *requests_sensitive)
+{
+   if (!turn_text || !requests_sensitive)
+      return -1;
+   size_t request_len = aimee_memory_pii_request_size(turn_text);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   uint8_t *request = malloc(request_len);
+   uint8_t response[AIMEE_MEMORY_PII_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (!request)
+      return -1;
+   int rc =
+       aimee_memory_pii_request_encode(turn_text, request, request_len) == 0 &&
+               call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
+                           (uint32_t)request_len, response, sizeof(response), &response_len) == 0
+           ? aimee_memory_pii_response_decode(response, response_len, requests_sensitive)
+           : -1;
+   free(request);
+   return rc;
+}
+
+/* db2's seam is int-based (db2_pii_classifier.h); the wire tiers and
+ * rel_sensitivity_t share their numbering, asserted at the server's adapter. */
+static int kb_memory_pii_sensitivity(const char *const *rel_types, int count, int *out)
+{
+   if (!rel_types || !out || count <= 0)
+      return -1;
+   size_t request_len = aimee_memory_sens_request_size(rel_types, count);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   size_t response_cap = AIMEE_MEMORY_SENS_RESPONSE_MAX(count);
+   uint8_t *request = malloc(request_len);
+   uint8_t *response = malloc(response_cap);
+   aimee_memory_sensitivity_t *tiers = calloc((size_t)count, sizeof(*tiers));
+   uint32_t response_len = 0;
+   int rc = -1;
+   if (request && response && tiers && response_cap <= UINT32_MAX &&
+       aimee_memory_sens_request_encode(rel_types, count, request, request_len) == 0 &&
+       call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &response_len) == 0 &&
+       aimee_memory_sens_response_decode(response, response_len, tiers, count) == 0)
+   {
+      for (int i = 0; i < count; ++i)
+         out[i] = (int)tiers[i];
+      rc = 0;
+   }
+   free(request);
+   free(response);
+   free(tiers);
+   return rc;
+}
+
 _Static_assert(AIMEE_DB2_FACT_ATTR_MAX == AIMEE_MEMORY_SCAN_ATTR_MAX,
                "memory wire attribute capacity must match the DB2 host contract");
 
@@ -565,6 +637,8 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_fact_gate_provider(check_fact_gate);
    aimee_db2_register_fact_extract_provider(extract_facts);
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
+   memory_pii_register_turn_classifier(kb_memory_pii_turn);
+   memory_pii_register_sensitivity_batch(kb_memory_pii_sensitivity);
    aimee_db2_register_embed_provider(embed_text);
    aimee_db2_register_identity_key_provider(identity_key);
    aimee_db2_register_css_render_compare_provider(css_render_compare);

@@ -17,7 +17,11 @@ set -u
 SB="$(cat /root/server-bearer.txt)"
 P=/root/psql.sh
 
-state() { $P "select confidence_class || ' ' || case when superseded_at='' and suppressed=0 then 'current' else 'gone' end from entity_edges where source='$1' and relation='works_for'" | tail -1; }
+# A retired fact is lifecycle_state='invalidated' + invalidated_at; only a
+# supersession sets superseded_at. Judging liveness by superseded_at/suppressed
+# alone calls an invalidated row "current", which makes a successful retraction
+# read as a blocked one.
+state() { $P "select confidence_class || ' ' || case when superseded_at='' and invalidated_at='' and suppressed=0 then 'current' else 'gone' end from entity_edges where source='$1' and relation='works_for'" | tail -1; }
 
 uds()  { curl -s -m 20 --unix-socket /root/aimee-http.sock -H 'content-type: application/json' \
               -X POST --data "{\"source\":\"$1\",\"relation\":\"works_for\",\"authority\":\"user\"}" \
@@ -30,12 +34,12 @@ tcp()  { curl -s -m 20 -H "Authorization: Bearer ${SB}" -H 'content-type: applic
 bash /root/seed-facts.sh >/dev/null 2>&1
 echo "seeded:  alice=$(state alice)   bob=$(state bob)"
 echo
-echo "=== TCP + bearer (what an AGENT presents), asking for user authority ==="
+echo "=== bearer only, NO account (what an agent presents) ==="
 echo "  alice (Class A): $(tcp alice)   -> $(state alice)"
 echo "  bob   (Class B): $(tcp bob)   -> $(state bob)"
 
 bash /root/seed-facts.sh >/dev/null 2>&1
 echo
-echo "=== UDS, kernel-attested local uid (what a PERSON at the terminal gets) ==="
+echo "=== an authenticated account (PAM host account here) ==="
 echo "  alice (Class A): $(uds alice)   -> $(state alice)"
 echo "  bob   (Class B): $(uds bob)   -> $(state bob)"
