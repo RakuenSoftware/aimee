@@ -226,6 +226,12 @@ int kb_handle_learning_propose_signal(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to record learning signal");
 }
 
+int kb_handle_learning_record_application(int fd, cJSON *req)
+{
+   cJSON *resp = db2_kb_service_learning_record_application_json(req);
+   return kb_reply_or_error(fd, resp, "failed to record learning application");
+}
+
 int kb_handle_agent_outcome_record(int fd, cJSON *req)
 {
    cJSON *agent_j = cJSON_GetObjectItemCaseSensitive(req, "agent_name");

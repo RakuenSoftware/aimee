@@ -16,12 +16,15 @@
 #include "modules/db2/c/anti_patterns.h"
 #include "modules/db2/c/collab_rules.h"
 #include "modules/db2/c/decision_log.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 #include "modules/db2/c/entity_edges.h"
 #include "modules/memory/memory_ontology.h"
 #include "modules/db2/c/db2_learning.h"
 #include "modules/learning/learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
 #include "modules/learning/learning_implicit.h"
 #include "memory.h"
+#include "modules/db2/c/mining.h"
 #include "modules/db2/c/feedback.h"
 #include "modules/db2/c/rules.h"
 #include "modules/db2/c/tool_registry.h"
@@ -29,6 +32,8 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <time.h>
 
 cJSON *db2_kb_service_rules_list_json(int max_rules)
 {
@@ -442,6 +447,311 @@ cJSON *db2_kb_service_learning_propose_signal_json(const cJSON *req)
    cJSON *dispatch_obj = learning_dispatch_result_to_json(&dispatch);
    if (dispatch_obj)
       cJSON_AddItemToObject(resp, "dispatch", dispatch_obj);
+   return resp;
+}
+
+static const char *kbs_req_string(const cJSON *req, const char *key)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, key);
+   return cJSON_IsString(value) ? value->valuestring : "";
+}
+
+static int kbs_req_bool(const cJSON *req, const char *key)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, key);
+   return cJSON_IsBool(value) && cJSON_IsTrue(value);
+}
+
+static uint64_t kbs_learning_hash(const char *value)
+{
+   uint64_t hash = 1469598103934665603ULL;
+   for (const unsigned char *p = (const unsigned char *)(value ? value : ""); *p; p++)
+   {
+      hash ^= *p;
+      hash *= 1099511628211ULL;
+   }
+   return hash;
+}
+
+static void kbs_learning_expiry(char out[32])
+{
+   time_t value = time(NULL) + 30 * 24 * 60 * 60;
+   struct tm tmv;
+   gmtime_r(&value, &tmv);
+   strftime(out, 32, "%Y-%m-%d %H:%M:%S", &tmv);
+}
+
+static int kbs_copy_ref_array(const cJSON *req, const char *key, char *out, size_t out_len)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, key);
+   if (!value)
+   {
+      snprintf(out, out_len, "[]");
+      return 0;
+   }
+   if (!cJSON_IsArray(value))
+      return -1;
+   char *json = cJSON_PrintUnformatted(value);
+   if (!json || strlen(json) >= out_len)
+   {
+      free(json);
+      return -1;
+   }
+   snprintf(out, out_len, "%s", json);
+   free(json);
+   return 0;
+}
+
+static int kbs_propose_unstable_procedure(const learning_application_event_t *application,
+                                          const char *unstable_observation_id)
+{
+   char target_key[192];
+   snprintf(target_key, sizeof(target_key), "procedure-revision:%s",
+            application->procedure_artifact_id);
+   int existing = db2_learning_proposal_find_pending("artifact", target_key, 0);
+   if (existing > 0)
+   {
+      (void)db2_learning_proposal_bump_corroboration(existing);
+      return existing;
+   }
+
+   cJSON *refs = cJSON_CreateArray();
+   cJSON *obs = cJSON_CreateObject();
+   cJSON *attempt = cJSON_CreateObject();
+   if (!refs || !obs || !attempt)
+   {
+      cJSON_Delete(refs);
+      cJSON_Delete(obs);
+      cJSON_Delete(attempt);
+      return -1;
+   }
+   cJSON_AddStringToObject(obs, "kind", "learning_observation");
+   cJSON_AddStringToObject(obs, "id", unstable_observation_id);
+   cJSON_AddItemToArray(refs, obs);
+   cJSON_AddStringToObject(attempt, "kind", "interaction_event");
+   cJSON_AddNumberToObject(attempt, "stable_id", (double)application->source_event_id);
+   cJSON_AddStringToObject(attempt, "stance", "contradicts");
+   cJSON_AddItemToArray(refs, attempt);
+   char *refs_json = cJSON_PrintUnformatted(refs);
+   cJSON_Delete(refs);
+   if (!refs_json)
+      return -1;
+
+   learning_signal_input_t signal;
+   memset(&signal, 0, sizeof(signal));
+   snprintf(signal.signal_type, sizeof(signal.signal_type), "failed_procedure");
+   snprintf(signal.source, sizeof(signal.source), "attributed-application");
+   snprintf(signal.title, sizeof(signal.title), "Applied procedure failed: %s",
+            application->procedure_artifact_id);
+   snprintf(signal.description, sizeof(signal.description),
+            "An explicitly applied procedure failed in task family '%s' with class '%s'.",
+            application->task_family, application->failure_class);
+   snprintf(signal.target_key, sizeof(signal.target_key), "%s", target_key);
+   signal.evidence_refs_json = refs_json;
+   int signal_id = db2_learning_signal_insert(&signal, application->session_id);
+   if (signal_id <= 0)
+   {
+      free(refs_json);
+      return -1;
+   }
+
+   char revision_id[64];
+   snprintf(revision_id, sizeof(revision_id), "procedure-revision-%016llx",
+            (unsigned long long)kbs_learning_hash(target_key));
+   cJSON *action = cJSON_CreateObject();
+   cJSON_AddStringToObject(action, "artifact_id", revision_id);
+   cJSON_AddStringToObject(action, "artifact_kind", "workflow_pattern");
+   cJSON_AddStringToObject(action, "scope_kind",
+                           application->scope_kind[0] ? application->scope_kind : "workspace");
+   cJSON_AddStringToObject(action, "scope_id", application->scope_id);
+   cJSON_AddStringToObject(action, "observation_id", unstable_observation_id);
+   cJSON_AddStringToObject(action, "prior_procedure_id", application->procedure_artifact_id);
+   cJSON_AddStringToObject(action, "triggering_preconditions", application->task_family);
+   cJSON_AddStringToObject(
+       action, "proposed_action",
+       "Review the failed application and narrow, revise, or retire the prior procedure.");
+   cJSON_AddStringToObject(action, "expected_outcome",
+                           "Avoid repeating the attributed failure without negative transfer.");
+   cJSON_AddStringToObject(action, "do_not_apply_when",
+                           "Do not replace the prior procedure before review and promotion.");
+   cJSON_AddStringToObject(
+       action, "rollback",
+       "Archive this revision and restore the preserved prior procedure version.");
+   cJSON_AddStringToObject(action, "payload_json", "{}");
+   cJSON_AddNumberToObject(action, "confidence", 0.6);
+   char *action_json = cJSON_PrintUnformatted(action);
+   cJSON_Delete(action);
+   if (!action_json)
+   {
+      free(refs_json);
+      return -1;
+   }
+   char expires[32];
+   kbs_learning_expiry(expires);
+   int proposal_id = db2_learning_proposal_insert(signal_id, "artifact", target_key, 0, action_json,
+                                                  refs_json, expires);
+   free(action_json);
+   free(refs_json);
+   return proposal_id;
+}
+
+cJSON *db2_kb_service_learning_record_application_json(const cJSON *req)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   const cJSON *event_id_j = req ? cJSON_GetObjectItemCaseSensitive(req, "source_event_id") : NULL;
+   const char *application_id = req ? kbs_req_string(req, "application_id") : "";
+   const char *outcome = req ? kbs_req_string(req, "outcome") : "";
+   if (!req || !application_id[0] || !cJSON_IsNumber(event_id_j) || !outcome[0])
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message",
+                              "application_id, source_event_id, and outcome are required");
+      return resp;
+   }
+
+   learning_application_event_t application;
+   memset(&application, 0, sizeof(application));
+   snprintf(application.application_id, sizeof(application.application_id), "%s", application_id);
+   application.source_event_id = (int64_t)event_id_j->valuedouble;
+   snprintf(application.session_id, sizeof(application.session_id), "%s",
+            kbs_req_string(req, "session_id"));
+   snprintf(application.scope_kind, sizeof(application.scope_kind), "%s",
+            kbs_req_string(req, "scope_kind")[0] ? kbs_req_string(req, "scope_kind") : "workspace");
+   snprintf(application.scope_id, sizeof(application.scope_id), "%s",
+            kbs_req_string(req, "scope_id"));
+   snprintf(application.task_family, sizeof(application.task_family), "%s",
+            kbs_req_string(req, "task_family"));
+   snprintf(application.observation_id, sizeof(application.observation_id), "%s",
+            kbs_req_string(req, "observation_id"));
+   snprintf(application.procedure_artifact_id, sizeof(application.procedure_artifact_id), "%s",
+            kbs_req_string(req, "procedure_artifact_id"));
+   const cJSON *proposal_j = cJSON_GetObjectItemCaseSensitive(req, "proposal_id");
+   application.proposal_id = cJSON_IsNumber(proposal_j) ? (int)proposal_j->valuedouble : 0;
+   application.retrieved = kbs_req_bool(req, "retrieved");
+   application.rendered = kbs_req_bool(req, "rendered");
+   application.selected = kbs_req_bool(req, "selected");
+   application.applied = kbs_req_bool(req, "applied");
+   snprintf(application.outcome, sizeof(application.outcome), "%s", outcome);
+   snprintf(application.failure_class, sizeof(application.failure_class), "%s",
+            kbs_req_string(req, "failure_class"));
+   snprintf(application.human_correction, sizeof(application.human_correction), "%s",
+            kbs_req_string(req, "human_correction"));
+   const cJSON *latency_j = cJSON_GetObjectItemCaseSensitive(req, "latency_ms");
+   const cJSON *tools_j = cJSON_GetObjectItemCaseSensitive(req, "tool_count");
+   const cJSON *turns_j = cJSON_GetObjectItemCaseSensitive(req, "turn_count");
+   const cJSON *tokens_j = cJSON_GetObjectItemCaseSensitive(req, "token_count");
+   application.latency_ms = cJSON_IsNumber(latency_j) ? (int64_t)latency_j->valuedouble : 0;
+   application.tool_count = cJSON_IsNumber(tools_j) ? (int)tools_j->valuedouble : 0;
+   application.turn_count = cJSON_IsNumber(turns_j) ? (int)turns_j->valuedouble : 0;
+   application.token_count = cJSON_IsNumber(tokens_j) ? (int64_t)tokens_j->valuedouble : 0;
+   if (kbs_copy_ref_array(req, "retrieved_refs", application.retrieved_refs,
+                          sizeof(application.retrieved_refs)) != 0 ||
+       kbs_copy_ref_array(req, "rendered_refs", application.rendered_refs,
+                          sizeof(application.rendered_refs)) != 0 ||
+       kbs_copy_ref_array(req, "selected_refs", application.selected_refs,
+                          sizeof(application.selected_refs)) != 0 ||
+       kbs_copy_ref_array(req, "applied_refs", application.applied_refs,
+                          sizeof(application.applied_refs)) != 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "attribution refs must be bounded arrays");
+      return resp;
+   }
+
+   db2_mining_event_t event;
+   memset(&event, 0, sizeof(event));
+   event.source_event_id = application.source_event_id;
+   snprintf(event.session_id, sizeof(event.session_id), "%s", application.session_id);
+   snprintf(event.event_type, sizeof(event.event_type), "task_attempt");
+   snprintf(event.role, sizeof(event.role), "%s", kbs_req_string(req, "role"));
+   snprintf(event.failure_mode, sizeof(event.failure_mode), "%s", application.failure_class);
+   snprintf(event.scope_kind, sizeof(event.scope_kind), "%s", application.scope_kind);
+   snprintf(event.scope_id, sizeof(event.scope_id), "%s", application.scope_id);
+   snprintf(event.task_family, sizeof(event.task_family), "%s", application.task_family);
+   snprintf(event.action_sequence, sizeof(event.action_sequence), "%s",
+            kbs_req_string(req, "action_sequence"));
+   snprintf(event.error_signature, sizeof(event.error_signature), "%s",
+            kbs_req_string(req, "error_signature"));
+   snprintf(event.environment, sizeof(event.environment), "%s", kbs_req_string(req, "environment"));
+   snprintf(event.preconditions, sizeof(event.preconditions), "%s",
+            kbs_req_string(req, "preconditions"));
+   snprintf(event.outcome, sizeof(event.outcome), "%s", application.outcome);
+   snprintf(event.recovery_action, sizeof(event.recovery_action), "%s",
+            kbs_req_string(req, "recovery_action"));
+   snprintf(event.payload_json, sizeof(event.payload_json), "{}");
+   void *conn = db2_conn();
+   char transaction_error[256] = "";
+   int persisted =
+       conn && aimee_pg_exec(conn, "BEGIN", transaction_error, sizeof(transaction_error)) == 0;
+   if (persisted &&
+       (db2_mining_event_upsert(&event) != 0 || db2_learning_application_record(&application) != 0))
+      persisted = 0;
+   if (persisted &&
+       aimee_pg_exec(conn, "COMMIT", transaction_error, sizeof(transaction_error)) != 0)
+      persisted = 0;
+   if (!persisted)
+   {
+      if (conn)
+         (void)aimee_pg_exec(conn, "ROLLBACK", transaction_error, sizeof(transaction_error));
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "invalid or unpersisted application attribution");
+      return resp;
+   }
+
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "application_id", application.application_id);
+   cJSON_AddBoolToObject(resp, "direct_mutation", 0);
+   if (application.applied && strcmp(application.outcome, "failure") == 0 &&
+       application.procedure_artifact_id[0])
+   {
+      int source_observation_updated = 1;
+      if (application.observation_id[0])
+         source_observation_updated =
+             db2_learning_observation_add_evidence(
+                 application.observation_id, application.source_event_id, "", "contradicts") == 0;
+      char unstable_key[512];
+      snprintf(unstable_key, sizeof(unstable_key), "%s:%s:%s:%s", application.scope_kind,
+               application.scope_id, application.task_family, application.procedure_artifact_id);
+      char unstable_id[64];
+      snprintf(unstable_id, sizeof(unstable_id), "unstable-procedure-%016llx",
+               (unsigned long long)kbs_learning_hash(unstable_key));
+      char title[256];
+      snprintf(title, sizeof(title), "Unstable procedure: %s", application.procedure_artifact_id);
+      char summary[512];
+      snprintf(summary, sizeof(summary),
+               "Procedure %s was explicitly applied and failed in task family '%s' (%s).",
+               application.procedure_artifact_id, application.task_family,
+               application.failure_class);
+      learning_observation_evidence_input_t evidence = {application.source_event_id, "",
+                                                        "contradicts"};
+      if (db2_learning_observation_refresh(unstable_id, application.scope_kind,
+                                           application.scope_id, "unstable_procedure", title,
+                                           summary, "applied-outcome-v1", &evidence, 1, "") == 0)
+      {
+         int revision_id = kbs_propose_unstable_procedure(&application, unstable_id);
+         cJSON_AddStringToObject(resp, "unstable_observation_id", unstable_id);
+         if (revision_id > 0)
+            cJSON_AddNumberToObject(resp, "revision_proposal_id", revision_id);
+         else
+         {
+            cJSON_AddStringToObject(resp, "learning_status", "degraded");
+            cJSON_AddStringToObject(resp, "learning_reason", "revision proposal unavailable");
+         }
+      }
+      else
+      {
+         cJSON_AddStringToObject(resp, "learning_status", "degraded");
+         cJSON_AddStringToObject(resp, "learning_reason", "unstable observation unavailable");
+      }
+      if (!source_observation_updated && !cJSON_GetObjectItemCaseSensitive(resp, "learning_status"))
+      {
+         cJSON_AddStringToObject(resp, "learning_status", "degraded");
+         cJSON_AddStringToObject(resp, "learning_reason",
+                                 "source observation contradiction could not be linked");
+      }
+   }
    return resp;
 }
 
