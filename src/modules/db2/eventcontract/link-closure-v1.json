@@ -2,7 +2,7 @@
   "schema_version": 2,
   "module": "db2",
   "source_revision": "4b8d5feccdf65b455eb35f94924a5a6d652e51be",
-  "source_fingerprint": "8f45ff25f925078f181719d8faac9b3365af1290eeb4bfe157896095e864fa81",
+  "source_fingerprint": "64c3a5b419c54985928df1e8528ab3e066e73df86924854c79495851b8932019",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2041,6 +2041,14 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
+      "symbol": "aimee_vector_capabilities_decode",
+      "references": [
+        "src/modules/db2/c/memory_vectors.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/modules/db2/vector_route.c, a DB2 source outside the c/ data-layer boundary; the standalone DB2 bundle packages it rather than inheriting it from the monolith."
+    },
+    {
       "symbol": "aimee_vector_memory_candidates_search",
       "references": [
         "src/modules/db2/c/memory_vectors.c"
@@ -2050,6 +2058,14 @@
     },
     {
       "symbol": "aimee_vector_route_init",
+      "references": [
+        "src/modules/db2/c/memory_vectors.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/modules/db2/vector_route.c, a DB2 source outside the c/ data-layer boundary; the standalone DB2 bundle packages it rather than inheriting it from the monolith."
+    },
+    {
+      "symbol": "aimee_vector_route_observe_capabilities",
       "references": [
         "src/modules/db2/c/memory_vectors.c"
       ],
@@ -2504,6 +2520,30 @@
       "symbol": "pthread_once",
       "references": [
         "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/memory_vectors.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_rwlock_rdlock",
+      "references": [
+        "src/modules/db2/c/memory_vectors.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_rwlock_unlock",
+      "references": [
+        "src/modules/db2/c/memory_vectors.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_rwlock_wrlock",
+      "references": [
         "src/modules/db2/c/memory_vectors.c"
       ],
       "disposition": "system-link",
@@ -3200,15 +3240,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 141,
+    "unresolved_symbols": 146,
     "dispositions": {
-      "descriptor-owned-copy/generated-input": 2,
+      "descriptor-owned-copy/generated-input": 4,
       "injected-module-contract": 0,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
-      "system-link": 139
+      "system-link": 142
     }
   },
-  "fingerprint": "9ec74c27f491eb2d9d1ac5b5d50fa32a4350e8b061f24fee618a917d93144c69"
+  "fingerprint": "73bfc45261d172a8738d06f0bb32125698f9d80d0c248965c63407b7ed1d2d99"
 }

@@ -77,17 +77,38 @@ extern "C"
     * returns 0. Returns 0 on success, -1 if the bus could not be created. */
    int obs_bus_start(void);
 
+   /* Observe a notification kind the audit bus itself knows nothing about.
+    *
+    * The consumer thread already polls every routed event. This hands the bytes
+    * of one more kind to a caller that understands them, so a module-owned wire
+    * -- the vector provider protocol, say -- can be observed without the audit
+    * module learning its shape.
+    *
+    * May be called before or after obs_bus_start(): a registration made first is
+    * subscribed when the bus starts, and one made later subscribes immediately.
+    * Neither silently does nothing.
+    *
+    * `fn` RUNS ON THE CONSUMER THREAD, the same one that drains audit rows, so a
+    * handler that blocks stops audit delivery. Decode and record; do not do work.
+    * `payload` is valid only for the duration of the call.
+    *
+    * Returns 0, or -1 if the kind is already observed or the table is full. */
+   typedef void (*obs_bus_notification_fn)(uint32_t event_kind, uint32_t principal_ref,
+                                           uint32_t src_handle, uint64_t sequence,
+                                           const uint8_t *payload, uint32_t payload_len, void *ctx);
+   int obs_bus_observe_kind(uint32_t event_kind, obs_bus_notification_fn fn, void *ctx);
+
    /* Invoke a separately shipped process module on this daemon's local bus.
     * This is the shared server/KB bridge into the core module client: AMOD
     * framing, correlation, monotonic deadline enforcement, cancellation, and
     * response validation remain in aimee-core-c. The optional cancellation
     * callback is also combined with daemon shutdown, so stop cannot strand a
     * caller. */
-   aimee_module_call_result_t obs_bus_module_call(
-       uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
-       const void *request_body, uint32_t request_len, void *response_body,
-       uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
-       void *cancel_context);
+   aimee_module_call_result_t
+   obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
+                       uint64_t deadline_ns, const void *request_body, uint32_t request_len,
+                       void *response_body, uint32_t response_capacity, uint32_t *response_len,
+                       aimee_module_cancelled_fn cancelled, void *cancel_context);
 
    /* Highest number of module calls that have held a client at the same time.
     *

@@ -30,7 +30,7 @@
 #include <aimee/core/event_bus/bus_runtime.h>
 #include <aimee/core/event_bus/module_client.h>
 #include <errno.h>
-#include "config.h"     /* config_default_dir */
+#include "config.h" /* config_default_dir */
 #include "log.h"
 #include "headers/aimee_sha256.h" /* aimee_sha256_raw — obs_bus_key_fingerprint */
 
@@ -79,16 +79,16 @@ static struct
    } module_clients[OBS_BUS_MODULE_CLIENTS];
    pthread_mutex_t module_client_lock;
    pthread_cond_t module_client_free;
-   int module_in_flight;   /* calls currently holding a client */
+   int module_in_flight;      /* calls currently holding a client */
    int module_peak_in_flight; /* high-water mark, for diagnosing serialization */
    pthread_t thread;
-   pthread_mutex_t pub_lock; /* serializes the single producer ring */
+   pthread_mutex_t pub_lock;  /* serializes the single producer ring */
    pthread_mutex_t host_lock; /* serializes pump/reap with external admission */
    bus_runtime_t *runtime;
    bus_runtime_policy_t *runtime_policy;
-   atomic_int emitting;      /* 1 while accepting emits */
-   atomic_int stop;          /* 1 tells the consumer to final-drain and exit */
-   atomic_int publishers;    /* # producers inside the emit window (see enter_emit) */
+   atomic_int emitting;        /* 1 while accepting emits */
+   atomic_int stop;            /* 1 tells the consumer to final-drain and exit */
+   atomic_int publishers;      /* # producers inside the emit window (see enter_emit) */
    atomic_int accepting_calls; /* module RPC admission during daemon lifetime */
    atomic_int module_stop;     /* cancels an in-flight module RPC on shutdown */
    atomic_int module_callers;  /* calls using module_client during teardown */
@@ -279,6 +279,20 @@ static int write_guardrail(const uint8_t *p, uint32_t len)
    return 1;
 }
 
+/* Kinds a caller asked to observe. Small and fixed: this is a registration
+ * table, not a routing layer, and a bus that needed dozens of these would be
+ * telling us the dispatch belongs somewhere else. */
+#define OBS_BUS_OBSERVERS 8
+
+static struct
+{
+   uint32_t kind;
+   obs_bus_notification_fn fn;
+   void *ctx;
+   int subscribed;
+} g_observers[OBS_BUS_OBSERVERS];
+static pthread_mutex_t g_observer_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /* ---------------------------------------------------------- consumer ----- */
 
 static uint32_t drain(void)
@@ -294,7 +308,26 @@ static uint32_t drain(void)
       else if (ev.frame.event_kind == KIND_GUARDRAIL_EVENT)
          wrote = write_guardrail(ev.payload, ev.payload_len);
       else
+      {
+         /* A kind somebody registered for. The principal and handle come from
+          * the FRAME and are passed on unchanged: a payload that could name its
+          * own principal could name somebody else's. */
+         obs_bus_notification_fn fn = NULL;
+         void *ctx = NULL;
+         pthread_mutex_lock(&g_observer_lock);
+         for (int i = 0; i < OBS_BUS_OBSERVERS; ++i)
+            if (g_observers[i].fn && g_observers[i].kind == ev.frame.event_kind)
+            {
+               fn = g_observers[i].fn;
+               ctx = g_observers[i].ctx;
+               break;
+            }
+         pthread_mutex_unlock(&g_observer_lock);
+         if (fn)
+            fn(ev.frame.event_kind, ev.frame.principal_ref, ev.frame.src_handle, ev.frame.seq,
+               ev.payload, ev.payload_len, ctx);
          continue;
+      }
       if (wrote)
       {
          atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
@@ -573,6 +606,58 @@ static int attach(bus_client_t *c)
    return rc == BUS_CLIENT_OK ? 0 : -1;
 }
 
+int obs_bus_observe_kind(uint32_t event_kind, obs_bus_notification_fn fn, void *ctx)
+{
+   if (event_kind == 0 || !fn)
+      return -1;
+   /* start_lock guards g.started, and start_locked() subscribes whatever it
+    * finds registered. Holding it across the whole registration is what makes
+    * "before or after start" a guarantee rather than a race: a caller arriving
+    * alongside obs_bus_start() is either seen by that sweep or subscribes itself
+    * here -- never neither, which is the case that would present as a provider
+    * announcing into a process that had simply stopped listening. */
+   pthread_mutex_lock(&start_lock);
+   pthread_mutex_lock(&g_observer_lock);
+   int slot = -1;
+   for (int i = 0; i < OBS_BUS_OBSERVERS; ++i)
+   {
+      if (g_observers[i].fn && g_observers[i].kind == event_kind)
+      {
+         pthread_mutex_unlock(&g_observer_lock);
+         pthread_mutex_unlock(&start_lock);
+         return -1; /* two observers of one kind is an ownership question */
+      }
+      if (!g_observers[i].fn && slot < 0)
+         slot = i;
+   }
+   if (slot < 0)
+   {
+      pthread_mutex_unlock(&g_observer_lock);
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   g_observers[slot].kind = event_kind;
+   g_observers[slot].fn = fn;
+   g_observers[slot].ctx = ctx;
+   /* Registering after the bus is up must still subscribe. A registration that
+    * quietly did nothing because it arrived on the wrong side of startup would
+    * look exactly like a provider that never announced. */
+   g_observers[slot].subscribed = 0;
+   pthread_mutex_unlock(&g_observer_lock);
+
+   if (g.started)
+   {
+      pthread_mutex_lock(&g.host_lock);
+      bus_host_subscribe(&g.host, g.consumer.reply.handle_id, event_kind);
+      pthread_mutex_unlock(&g.host_lock);
+      pthread_mutex_lock(&g_observer_lock);
+      g_observers[slot].subscribed = 1;
+      pthread_mutex_unlock(&g_observer_lock);
+   }
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
 /* ------------------------------------------------------- lifecycle ------- */
 
 /* Bring the bus up. start_lock MUST be held and g.started MUST be false. */
@@ -595,7 +680,7 @@ static int start_locked(void)
 
    bus_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
-   cfg.max_slots = 64; /* three internal clients plus separately shipped modules */
+   cfg.max_slots = 64;   /* three internal clients plus separately shipped modules */
    cfg.slot_size = 2048; /* an audit row (7 short strings + an int) fits inline */
    cfg.inline_budget = 1900;
    cfg.queue_capacity = 1024; /* absorb bursts between drain ticks */
@@ -631,6 +716,17 @@ static int start_locked(void)
    bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
    if (sinks.guardrail)
       bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
+   /* Anything registered before the bus came up. The other half of this is in
+    * obs_bus_observe_kind, which subscribes immediately when the bus is already
+    * running; between them, registration order does not matter. */
+   pthread_mutex_lock(&g_observer_lock);
+   for (int i = 0; i < OBS_BUS_OBSERVERS; ++i)
+      if (g_observers[i].fn && !g_observers[i].subscribed)
+      {
+         bus_host_subscribe(&g.host, g.consumer.reply.handle_id, g_observers[i].kind);
+         g_observers[i].subscribed = 1;
+      }
+   pthread_mutex_unlock(&g_observer_lock);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
@@ -645,8 +741,7 @@ static int start_locked(void)
          goto start_fail;
       }
       size_t grant_count = 0;
-      const bus_runtime_grant_t *grants =
-          bus_runtime_policy_grants(g.runtime_policy, &grant_count);
+      const bus_runtime_grant_t *grants = bus_runtime_policy_grants(g.runtime_policy, &grant_count);
       bus_runtime_config_t runtime_cfg = {.socket_path = sinks.module_socket,
                                           .socket_mode = 0600,
                                           .backlog = 32,
@@ -708,11 +803,11 @@ static int module_call_cancelled(void *context)
           (state->external && state->external(state->context));
 }
 
-aimee_module_call_result_t obs_bus_module_call(
-    uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
-    const void *request_body, uint32_t request_len, void *response_body,
-    uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
-    void *cancel_context)
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
    if (response_len)
       *response_len = 0;
@@ -791,8 +886,7 @@ int obs_bus_configure_module_runtime(const char *socket_path, const char *policy
    return 0;
 }
 
-int obs_bus_configure_daemon_module_runtime(const char *daemon_name,
-                                            const char *config_directory)
+int obs_bus_configure_daemon_module_runtime(const char *daemon_name, const char *config_directory)
 {
    if (!daemon_name || !daemon_name[0] || strchr(daemon_name, '/') || !config_directory ||
        config_directory[0] != '/')
@@ -800,16 +894,14 @@ int obs_bus_configure_daemon_module_runtime(const char *daemon_name,
    const char *socket_override = getenv("AIMEE_MODULE_BUS_SOCKET");
    const char *policy_override = getenv("AIMEE_MODULE_POLICY_DIR");
    char socket_path[108], policy_dir[4096];
-   int socket_length =
-       socket_override && socket_override[0]
-           ? snprintf(socket_path, sizeof(socket_path), "%s", socket_override)
-           : snprintf(socket_path, sizeof(socket_path), "%s/%s-module-bus.sock", config_directory,
-                      daemon_name);
-   int policy_length =
-       policy_override && policy_override[0]
-           ? snprintf(policy_dir, sizeof(policy_dir), "%s", policy_override)
-           : snprintf(policy_dir, sizeof(policy_dir), "%s/modules.d/%s", config_directory,
-                      daemon_name);
+   int socket_length = socket_override && socket_override[0]
+                           ? snprintf(socket_path, sizeof(socket_path), "%s", socket_override)
+                           : snprintf(socket_path, sizeof(socket_path), "%s/%s-module-bus.sock",
+                                      config_directory, daemon_name);
+   int policy_length = policy_override && policy_override[0]
+                           ? snprintf(policy_dir, sizeof(policy_dir), "%s", policy_override)
+                           : snprintf(policy_dir, sizeof(policy_dir), "%s/modules.d/%s",
+                                      config_directory, daemon_name);
    if (socket_length <= 0 || (size_t)socket_length >= sizeof(socket_path) || policy_length <= 0 ||
        (size_t)policy_length >= sizeof(policy_dir))
       return -1;
@@ -973,7 +1065,7 @@ void obs_bus_stop(void)
     * inside publish(). The consumer is still running, so any producer mid-publish
     * still drains and completes. Bounded: a producer waits at most AB_PUB_MAX
     * backoffs. */
-   atomic_store(&g.emitting, 0);                                    /* seq_cst */
+   atomic_store(&g.emitting, 0);        /* seq_cst */
    atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
    atomic_store_explicit(&g.module_stop, 1, memory_order_release);
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000}; /* 50 us */

@@ -71,6 +71,12 @@
       "ctest": false,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_bus_vector_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_cert_serial_support.c"
     },
     {

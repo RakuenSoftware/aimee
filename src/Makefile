@@ -350,7 +350,8 @@ DB2_SRCS += modules/db2/c/server_registry.c modules/db2/c/management_client_inst
 DB2_SRCS += modules/db2/vector_route.c
 DB2_SRCS += modules/db2/c/db2_witness_checkpoint.c
 DB2_SRCS += modules/db2/c/db2_witness_emit.c
-DB2_HOST_ADAPTER_SRCS = kb/db2_adapters/kb_service_backend_agent.c \
+DB2_HOST_ADAPTER_SRCS = kb/db2_adapters/kb_vector_provider.c \
+                        kb/db2_adapters/kb_service_backend_agent.c \
                         kb/db2_adapters/kb_service_backend_export.c \
                         kb/db2_adapters/kb_service_backend_memory.c \
                         kb/db2_adapters/kb_service_backend_runtime.c
@@ -619,7 +620,9 @@ $(OBJDIR)/kb/kb_module_stage_adapters.o $(DB2_CLIENT_OBJS): C_FLAGS += \
 # included unconditionally, so that one is not repeated here.
 $(OBJDIR)/kb/modules/db2/vector_route.o \
 $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/modules/db2/c/memory_vectors.o \
-$(OBJDIR)/kb/modules/db2/c/memory_vectors.o: C_FLAGS += -Imodules/db2/include
+$(OBJDIR)/kb/modules/db2/c/memory_vectors.o \
+$(OBJDIR)/kb/kb/db2_adapters/kb_vector_provider.o \
+$(OBJDIR)/db2/kb_vector_provider.o: C_FLAGS += -Imodules/db2/include
 KB_SRCS += kb/managed_server_identity.c kb/managed_server_identity_install.c
 KB_SRCS += kb/http/kb_http_content_policy.c
 KB_SRCS += kb/http/kb_http_entry.c

@@ -730,20 +730,27 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 141)
-        # Two, and both are db2's own: memory_vectors.c calls the vector route,
-        # which lives at src/modules/db2/vector_route.c rather than under c/, so
-        # the probe -- which compiles only the c/ boundary -- cannot see its
-        # definitions. The standalone bundle packages that file; nothing is owed
-        # to the monolith. Pinned at 2 so a THIRD such row has to be argued for.
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 146)
+        # Four, and every one is db2's own: memory_vectors.c calls the vector
+        # route, which lives at src/modules/db2/vector_route.c rather than under
+        # c/, so the probe -- which compiles only the c/ boundary -- cannot see
+        # its definitions. The standalone bundle packages that file; nothing is
+        # owed to the monolith. The symbol list is pinned rather than the count
+        # alone, so a row from somewhere else has to be argued for by name.
         self.assertEqual(
-            contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 2
+            contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 4
         )
         self.assertEqual(sorted(
             row["symbol"] for row in contract["unresolved"]
             if row["disposition"] == "descriptor-owned-copy/generated-input"
-        ), ["aimee_vector_memory_candidates_search", "aimee_vector_route_init"])
-        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 139)
+        ), ["aimee_vector_capabilities_decode", "aimee_vector_memory_candidates_search",
+            "aimee_vector_route_init", "aimee_vector_route_observe_capabilities"])
+        # 142: three more than the 139 this batch started at, and all three are
+        # pthread_rwlock_*, which the memory route now takes because the bus
+        # observer writes it while searches read it. Exactly as much pthread ABI
+        # as the pthread_mutex_* rows already here -- the classifier simply had
+        # never been shown a reader/writer lock.
+        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 142)
         self.assertEqual(
             contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )

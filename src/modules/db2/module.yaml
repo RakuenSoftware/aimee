@@ -388,6 +388,7 @@
     "src/tests/test_db2_text_support.c",
     "src/tests/test_db2_time_support.c",
     "src/tests/test_vector_route.c",
+    "src/tests/test_bus_vector_provider.c",
     "src/tests/test_vector_route_pgvec.c"
   ],
   "docs": [

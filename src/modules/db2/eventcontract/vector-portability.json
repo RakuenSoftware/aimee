@@ -2,7 +2,7 @@
   "schema_version": 1,
   "module": "vector",
   "source": "tests/baselines/db2/declarations-v1.json",
-  "source_symbols_sha256": "13c3928e64621eb4e38fca9e595143557a12895159f64de242229e93f8340f61",
+  "source_symbols_sha256": "516743539d4b2d3ae48303b7398d4e21a796447654cc68c6adbb1599acf76e19",
   "classifications": [
     {
       "id": "portable-search",
@@ -98,9 +98,13 @@
         "pgvec_kb_service_code_exists_by_hash",
         "pgvec_kb_service_reconcile_orphans",
         "pgvec_memory_point_visible",
+        "pgvec_memory_vector_capabilities_rejected",
+        "pgvec_memory_vector_capabilities_seen",
+        "pgvec_memory_vector_on_capabilities",
         "pgvec_memory_vector_routed_searches",
         "pgvec_memory_vector_scope_hint_clear",
         "pgvec_memory_vector_scope_hint_set",
+        "pgvec_memory_vector_selected_provider",
         "pgvec_schema_version",
         "pgvec_scroll",
         "pgvec_vector_status_json",

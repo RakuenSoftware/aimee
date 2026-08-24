@@ -143,6 +143,23 @@ static aimee_vector_route_t memory_route;
 static pthread_once_t memory_route_once = PTHREAD_ONCE_INIT;
 static int memory_route_init_failed;
 
+/* The route became shared the moment something started delivering announcements
+ * to it: the provider registry, the selected principal and the ready flag are
+ * now written by whichever thread the host observes the bus on, while searches
+ * on every request thread read them.
+ *
+ * A rwlock rather than a mutex because the asymmetry is total. Announcements
+ * arrive on a provider's timer -- seconds apart, and zero in the deployments
+ * that have no provider at all. Searches are the product's hot path and are
+ * concurrent by design; serialising them behind the writer's lock would make an
+ * optional accelerator a global bottleneck for everyone who never attached one.
+ *
+ * Readers hold it across the whole search, not just the selection read. The
+ * search consults the route repeatedly -- selected principal, ready flag,
+ * fallback policy, the transport and authorisation callbacks -- and a selection
+ * that changed midway would mix two providers' policy in one answer. */
+static pthread_rwlock_t memory_route_lock = PTHREAD_RWLOCK_INITIALIZER;
+
 /* Searches that were expressible in the contract and went through the route.
  *
  * The routed and direct paths return identical results by design, so this is
@@ -225,6 +242,89 @@ static void memory_route_init(void)
       memory_route_init_failed = 1;
 }
 
+/* ------------------------------------------------- provider announcements
+ *
+ * The delivery half of provider detection. Without it the registry below can
+ * decide which provider should serve reads and never hears about one.
+ */
+
+/* Announcements this build could not read. A provider looping on a bad frame
+ * would otherwise write a log line per announcement; what is worth knowing is
+ * that this deployment is receiving announcements it cannot read, and that is a
+ * number rather than a stream. */
+static _Atomic uint64_t capabilities_rejected;
+
+/* Announcements that reached this process at all.
+ *
+ * Separates the three states an operator has to tell apart: nothing announcing
+ * (seen == 0), announcing in a dialect this build cannot read (rejected > 0),
+ * and announcing fine but not eligible to serve reads (seen > 0, rejected == 0,
+ * selected == 0). Without this, all three look identical from outside -- which
+ * is exactly the position the first run of the observation test left me in. */
+static _Atomic uint64_t capabilities_seen;
+
+uint64_t pgvec_memory_vector_capabilities_seen(void)
+{
+   return atomic_load(&capabilities_seen);
+}
+
+uint64_t pgvec_memory_vector_capabilities_rejected(void)
+{
+   return atomic_load(&capabilities_rejected);
+}
+
+uint32_t pgvec_memory_vector_selected_provider(void)
+{
+   pthread_once(&memory_route_once, memory_route_init);
+   if (memory_route_init_failed)
+      return 0;
+   pthread_rwlock_rdlock(&memory_route_lock);
+   uint32_t selected = memory_route.selected_principal;
+   pthread_rwlock_unlock(&memory_route_lock);
+   return selected;
+}
+
+int pgvec_memory_vector_on_capabilities(uint32_t principal_ref, uint32_t src_handle,
+                                        uint64_t sequence, const uint8_t *payload,
+                                        uint32_t payload_len)
+{
+   pthread_once(&memory_route_once, memory_route_init);
+   if (memory_route_init_failed)
+      return -1;
+
+   atomic_fetch_add(&capabilities_seen, 1);
+
+   aimee_vector_capabilities_t capabilities;
+   if (aimee_vector_capabilities_decode(payload, payload_len, &capabilities) != 0)
+   {
+      atomic_fetch_add(&capabilities_rejected, 1);
+      return -1;
+   }
+   /* principal_ref and src_handle are the CALLER's statement of who sent this,
+    * which the KB takes from the bus frame. Nothing here reads an identity out
+    * of the payload: a provider that could name its own principal could name
+    * somebody else's. */
+   pthread_rwlock_wrlock(&memory_route_lock);
+   int observed = aimee_vector_route_observe_capabilities(&memory_route, principal_ref, src_handle,
+                                                          sequence, &capabilities);
+   /* Read the resulting selection under the same lock that produced it: reported
+    * separately it could name a provider a later announcement had already
+    * replaced, which is worse than not logging it. */
+   uint32_t selected = memory_route.selected_principal;
+   pthread_rwlock_unlock(&memory_route_lock);
+   if (observed != 0)
+   {
+      /* Stale within an attachment, or a full registry. Neither is malformed,
+       * and neither is worth a log line per announcement. */
+      return -1;
+   }
+   LOG_INFO("vector_provider",
+            "capabilities principal=%u handle=%u ready=%d generation=%llu selected=%u",
+            principal_ref, src_handle, capabilities.ready,
+            (unsigned long long)capabilities.generation, selected);
+   return 0;
+}
+
 /* Fill a request, or return -1 if this search is not expressible in the
  * contract. Nothing here is a failure: it is a search that must take the
  * direct path. */
@@ -301,7 +401,10 @@ static int routed_search(const char *record_type, const float *vec, int dim,
       /* A search the contract cannot carry still has to run. It says so louder
        * when a provider is selected, because then the deployment asked for
        * acceleration and is silently not getting it. */
-      if (memory_route.selected_principal != 0)
+      pthread_rwlock_rdlock(&memory_route_lock);
+      uint32_t selected = memory_route_init_failed ? 0 : memory_route.selected_principal;
+      pthread_rwlock_unlock(&memory_route_lock);
+      if (selected != 0)
          LOG_WARN("vector_route_bypass",
                   "search not expressible, using pgvector record_type=%.32s dim=%d limit=%d",
                   record_type ? record_type : "", dim, limit);
@@ -316,8 +419,10 @@ static int routed_search(const char *record_type, const float *vec, int dim,
    internal_call.max = max;
 
    aimee_vector_search_outcome_t outcome;
+   pthread_rwlock_rdlock(&memory_route_lock);
    aimee_vector_result_t rc =
        aimee_vector_memory_candidates_search(&memory_route, &request, &outcome);
+   pthread_rwlock_unlock(&memory_route_lock);
    if (rc != AIMEE_VECTOR_OK)
       return -1;
 

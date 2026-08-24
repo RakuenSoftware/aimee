@@ -306,14 +306,66 @@ sides assert against, produced by running the Go encoder rather than by hand.
 Verified to catch a swapped pair of offsets -- which a round trip through one
 implementation's own encoder would not.
 
-**Nothing delivers an announcement to it.** CAPABILITIES is a notification, the
-KB's only bus surface is the request/reply `obs_bus_module_call()`, and no C
-subscriber exists. So `aimee_vector_route_observe_capabilities()` has the same
-status the route itself had this morning: implemented, tested, and uncalled. The
-missing piece is a `bus_client_poll()` subscriber in the KB and a search
-transport to reach the selected provider; the client machinery exists
-(`src/core/event_bus/include/aimee/core/event_bus/bus_client.h`), it is simply
-not wired.
+**Announcements are delivered.** `obs_bus_observe_kind()` hands the bytes of a
+registered notification kind to whoever understands them -- the audit bus never
+learns what a vector announcement is.
+
+**The subscriber is the host's, not db2's.** `src/kb/db2_adapters/kb_vector_provider.c`
+registers for CAPABILITIES and calls `pgvec_memory_vector_on_capabilities()` with
+the two things only the host can know: the principal the bus authenticated and
+the attachment handle that sent the frame. Registering from inside db2 worked and
+was wrong, and the link-closure gate said so immediately -- it gave db2's C
+boundary a dependency on the AUDIT module. The dependency also pointed the wrong
+way: db2 owns what an announcement MEANS, and where announcements come from is
+the host's business, exactly as where connections come from is.
+
+`kb_vector_provider_start()` runs from `kb_service_init()`, which in the KB is
+BEFORE `obs_bus_start()` -- so a registration made before the bus exists is
+subscribed by the sweep inside start, and one made after subscribes itself. A
+registration that quietly did nothing because it arrived on the wrong side of
+startup would look exactly like a provider that never announced. Both orderings
+are separate code paths and both are exercised: the test forks and runs its whole
+scenario once each way, because obs_bus is process-global and does not restart,
+and because covering only the convenient ordering would leave the shipped one
+untested.
+
+Failure to register is not fatal: a KB that cannot observe announcements searches
+with pgvector, which is what every deployment without a provider does anyway, and
+refusing to start would turn an optional accelerator into a boot dependency. It
+logs, because a deployment that DID attach a provider needs to be told why
+nothing is using it.
+
+The route is shared state from here on -- written by the thread the host observes
+the bus on, read by every search -- so it is behind a rwlock. Readers hold it
+across the whole search rather than just the selection read: the search consults
+the route repeatedly, and a selection that changed midway would mix two
+providers' policy into one answer.
+
+Verified end to end by `unit-test-bus-vector-provider`: a provider authenticated
+by uid and executable against a `.grant` file attaches to the module runtime
+socket, announces, and the route selects it by the principal **the host stamped
+on the frame**.
+
+The first version of that test published on obs_bus's in-process producer and
+failed -- such frames carry `principal_ref` 0, and the registry refuses principal
+0 because a provider that cannot be identified cannot be selected. The guard was
+right and the test was cheap, so the test moved to the production path. Any
+publisher that does not authenticate is exercising a path production does not
+have.
+
+Three counters separate the three states an operator has to tell apart, which
+otherwise all look like "no provider":
+
+| | meaning |
+|---|---|
+| `pgvec_memory_vector_capabilities_seen() == 0` | nothing is announcing |
+| `pgvec_memory_vector_capabilities_rejected() > 0` | announcing in a dialect this build cannot read |
+| seen > 0, rejected == 0, `pgvec_memory_vector_selected_provider() == 0` | announcing, but not eligible |
+
+**A selected provider still serves no searches.** `memory_candidates_search()`
+needs `route->external_search`, and no transport is installed -- so selection is
+correct and observable and changes no query's answer. The transport is the
+remaining piece.
 
 **Also still missing**: the apply path does not write the multi-valued
 `visibility` and `generation` labels the searches filter on --

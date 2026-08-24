@@ -19,6 +19,7 @@
 #include "kb_reasoning.h"
 #include "kb_reflection.h"
 #include "kb_service.h"
+#include "db2_adapters/kb_vector_provider.h"
 #include "config.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/kb_service_backend.h"
@@ -280,6 +281,13 @@ int kb_service_init(kb_service_ctx_t *ctx)
    if (reset > 0)
       aimee_log(LOG_INFO, "kb.service", "crash recovery: reset %d running job(s) to pending",
                 reset);
+
+   /* Vector provider announcements. Registered here rather than beside
+    * obs_bus_start() because obs_bus subscribes pending registrations when it
+    * starts, so this works on either side of it -- and because kb_main.c is at
+    * its line limit, which is the codebase saying new startup wiring belongs
+    * with the subsystem rather than in the entry point. */
+   kb_vector_provider_start();
 
    /* Drive KB ingest in-process (claim from DB2, build, store). */
    kb_ingest_workers_start(ctx);

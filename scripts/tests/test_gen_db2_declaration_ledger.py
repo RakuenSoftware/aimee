@@ -46,17 +46,20 @@ class DeclarationLedgerTests(unittest.TestCase):
         value = ledger.build(REPO_ROOT)
         self.assertEqual(value["summary"], {
             "headers": 138,
-            "declarations": 1397,
+            "declarations": 1401,
             "reviewed": 759,
-            "audit_pending": 199,
-            # The route wiring added two declarations, and both land here rather
-            # than in internal_unconsumed: pgvec_memory_point_visible and
-            # pgvec_memory_vector_routed_searches are used inside db2 (by
-            # memory_vectors.c) and by one test, and the ledger counts consumers
-            # OUTSIDE the module -- so the test is the only consumer it sees.
-            # That is the right bucket: neither is part of db2's public surface.
+            "audit_pending": 200,
+            # The vector route and provider-detection work added six
+            # declarations, and they land in private_test_only rather than
+            # internal_unconsumed: pgvec_memory_point_visible,
+            # pgvec_memory_vector_routed_searches, the two capability counters,
+            # selected_provider and on_capabilities are used INSIDE db2 (by
+            # memory_vectors.c) and by tests, and the ledger counts consumers
+            # OUTSIDE the module -- so a test is the only consumer it can see.
+            # That is the right bucket: none of them is part of db2's public
+            # surface. audit_pending gained the KB-side adapter's header.
             "internal_unconsumed": 151,
-            "private_test_only": 288,
+            "private_test_only": 291,
         })
         self.assertFalse(value["declarations_complete"])
         self.assertEqual(

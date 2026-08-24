@@ -14,6 +14,36 @@ int pgvec_memory_vector_upsert_memory(int64_t memory_id, const float *vec, int d
 int pgvec_memory_vector_upsert_unit(int64_t unit_id, const float *vec, int dim,
                                     const char *payload_json);
 int pgvec_memory_vector_delete_point(int64_t point_id);
+/* One provider CAPABILITIES announcement, from wherever the host receives them.
+ *
+ * db2 does not subscribe to anything: it does not know where announcements come
+ * from, any more than it knows where its connections come from. The host reads
+ * the frame, takes `principal_ref` and `src_handle` FROM THAT FRAME rather than
+ * from the payload, and calls this. Returns 0 if the announcement was recorded,
+ * -1 if it was malformed, stale for its attachment, or the registry is full.
+ *
+ * NOTE: selection alone changes no query's answer. A selected provider serves
+ * searches only once a search transport is installed on the route; until then
+ * this makes the selection correct and observable and nothing else. */
+int pgvec_memory_vector_on_capabilities(uint32_t principal_ref, uint32_t src_handle,
+                                        uint64_t sequence, const uint8_t *payload,
+                                        uint32_t payload_len);
+
+/* The principal currently selected to serve vector reads, or 0 for pgvector.
+ * The first question an operator asks about an attached provider. */
+uint32_t pgvec_memory_vector_selected_provider(void);
+
+/* Announcements that reached this process at all. Zero means nothing is
+ * announcing; compare with the rejected count and the selected principal to tell
+ * "none attached" from "announcing but unreadable" from "announcing but not
+ * eligible". */
+uint64_t pgvec_memory_vector_capabilities_seen(void);
+
+/* Announcements that arrived and could not be decoded. Non-zero means this
+ * deployment is receiving provider announcements it cannot read -- a version
+ * skew, not a quiet absence. */
+uint64_t pgvec_memory_vector_capabilities_rejected(void);
+
 /* How many memory vector searches went through the vector route rather than
  * straight to pgvector. The two paths return identical results by design, so
  * this is the only way to tell whether an attached provider is seeing traffic

@@ -6,10 +6,10 @@
     "c_files": 138,
     "headers": 138,
     "sql_files": 6,
-    "consumer_files": 307,
-    "production_consumers": 151,
-    "test_consumers": 156,
-    "include_directives": 1005,
+    "consumer_files": 309,
+    "production_consumers": 152,
+    "test_consumers": 157,
+    "include_directives": 1007,
     "outbound_dependency_rows": 578,
     "outbound_include_directives": 578
   },
@@ -560,6 +560,16 @@
       "includes": [
         {
           "header": "modules/db2/c/kb_service_backend.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/kb/db2_adapters/kb_vector_provider.c",
+      "classification": "kb-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/c/memory_vectors.h",
           "count": 1
         }
       ]
@@ -3494,6 +3504,16 @@
         },
         {
           "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_bus_vector_provider.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/memory_vectors.h",
           "count": 1
         }
       ]
@@ -10215,5 +10235,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "1d1594a6e67f415b6b12fcd8c7dbb24f6d3f9cbecdee5ebc372220e62eac1632"
+  "fingerprint": "b96caeb2d1915a3d397f637c9296751a2deee231f48b7d8f5e5758ab99e70c37"
 }
