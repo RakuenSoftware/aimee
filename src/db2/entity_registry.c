@@ -242,8 +242,8 @@ int db2_entity_aliases_for(int64_t canonical_id, char (*out)[128], int max)
 
 static int er_actor_ok(const fact_actor_t *actor)
 {
-   return actor && actor->principal[0] && actor->role[0] &&
-          actor->rank >= FACT_ACTOR_MODEL && actor->rank <= FACT_ACTOR_OPERATOR;
+   return actor && actor->principal[0] && actor->role[0] && actor->rank >= FACT_ACTOR_MODEL &&
+          actor->rank <= FACT_ACTOR_OPERATOR;
 }
 
 int64_t db2_entity_merge_as(const fact_actor_t *actor, int64_t from_id, int64_t into_id,
