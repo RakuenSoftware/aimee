@@ -871,3 +871,59 @@ honestly (`unknown_sender` / `unavailable`) rather than silently.
 calls it. So `is_reply` can only ever be `0` through this surface, and threading
 is done with `conversation_id` instead. The field is still reported honestly —
 it says what the module stamped — but it is unexercised in production.
+
+## The live-model attempt (2026-08-24, CT 9104) — what it settled and what it did not
+
+The operator supplied a one-session MiniMax key to close the last gap: a REAL
+MODEL calling `peer_send` through aimee's own agent loop, rather than curl
+driving `/v1/mcp/call`. The key was pushed as a file, exported by sourcing so it
+never reached a command line, and destroyed with the container.
+
+**It settled the half of the question that mattered most.** `server_sessions`
+ends the run holding:
+
+```
+driver|chat|
+listener|mcp|uid:0
+```
+
+`driver` is the session a native chat turn ran as, registered by
+`chat_session_register`. So **a native aimee session IS addressable by peers** —
+previously an open question I could only reason about. The tool being registered
+into a real toolset was already gated; this shows the other half, that the
+identity a native caller would send as reaches the directory.
+
+**It did not settle whether a model emits the call.** Five attempts, each
+stopped by credential provisioning in a bare container, none by anything in peer
+messaging. The turn ends `no agent available for role 'code'`, which resolves to
+`AGENT_ROUTE_NO_CREDENTIALS` from `agent_has_resolvable_credentials`: the env
+importer stores `MINIMAX_API_KEY` under the vault's `environment` agent slot
+(`ENV_AGENT`), while the routing probe asks
+`vault_service_has_server_principal(agent->name, ...)` — a slot named for the
+agent. The roster is fine: `/v1/agents` shows `mm | enabled True | roles ['all']
+| provider minimax`.
+
+That is a provisioning path, not a peer-messaging one, and chasing it further
+was out of scope.
+
+### Three rig faults on the way, all mine, all the same shape
+
+- `run()` wraps its argument in double quotes for `pct exec ... bash -lc "$1"`,
+  so a `"$MINIMAX_API_KEY"` written inside the command expanded on the HOST,
+  where it is unset. The container received an empty value. The correct form —
+  `set -a` plus sourcing — is also the one that never puts the value on a
+  command line.
+- `p=$(pgrep -f ...)` returning several pids makes `/proc/$p/environ` invalid and
+  the grep count zero, which reads exactly like "the variable is absent".
+- And the absence was the wrong conclusion anyway: `vault_env_bootstrap` calls
+  `unsetenv(name)` after importing, so a scrubbed environment is what SUCCESS
+  looks like. Third time in this session an absence was read as a failure.
+
+### The standing gap, stated exactly
+
+Everything between a model's tool call and the wire is proven: the tool is on
+the floor a default client is shown, the family entry dispatches, the client
+speaks the module's grammar, delivery and drain-once work, refusals differ, and
+the sender's session registers in the directory. What has never been observed is
+a model choosing to emit the call. That needs a container with a provisioned
+provider credential, which is a different subsystem's setup.

@@ -132,6 +132,14 @@ an argument. A `from` parameter would let any caller claim to be any session,
 putting the forgery a layer above the provenance stamping that exists to stop
 exactly that.
 
+Both tools are also NATIVE (`core`), so aimee's own agents get them. A live-model
+run confirmed the identity half of that: a native chat turn's session reaches the
+directory, appearing in `server_sessions` as `driver|chat` via
+`chat_session_register`, so what a native caller sends as is addressable. What has
+never been observed is a MODEL choosing to emit the call -- that run stopped at
+provider credential provisioning, not at anything here. See
+docs/validation/aimee-module-on-a-clean-container.md.
+
 Bus stages are the module's interface to other modules. A `/v1` HTTP edge in
 `peer/http.go` serves thin clients directly: `GET /v1/sessions/peers`,
 `POST /v1/sessions/{id}/peer`, `GET /v1/sessions/{id}/inbox`,
