@@ -99,11 +99,34 @@ evidence rather than reasoning:
 | `wfe_advance_register_decision_provider` | `wfe_advance.c` is linked, but `wfe_engine.c` and `wfe_advance_exec.c` are not in the KB build. Unreachable. |
 | `agent_tools_register_classifier` | The strongest candidate: `posix/agent_runtime.c` *is* in the KB build and calls `dispatch_tool_call_ctx`. Settled at the binary: strings unique to that path (`error: spill store unavailable`, `git tools are not available on this surface`) are present in `aimee-server` and **absent from `aimee-kb`** -- the linker's `--gc-sections` dropped the whole path because nothing in the KB reaches it. |
 
-The reverse direction is clean too: every provider only the KB registers is an
-`aimee_db2_*` host contract, compiled out of the server by
-`-DAIMEE_DB2_DISABLED`, or a `kb_`-prefixed provider with no server consumer.
+The reverse direction holds up too, though the first pass reached that verdict
+from naming rather than evidence. Two providers the KB registers are owned by
+files `aimee-server` also builds -- `kb_route_acl.c` and
+`kb_curator_grounding.c` -- and both were settled the same way as the third
+candidate above: `control-web authorization unavailable` and `sidecar temp path
+too long to quote safely` appear in `aimee-kb` and are **absent from
+`aimee-server`**. The rest are `aimee_db2_*` host contracts, compiled out of the
+server by `-DAIMEE_DB2_DISABLED`.
 
 **The learning classifier was the only live instance.**
+
+## What now stops it recurring
+
+The fix had no regression protection: `check-module-placement.py` guards the
+neighbouring gap -- a stage no placed module serves -- but not this one, where
+the module is placed and present and nothing registers the provider. No test
+could have caught it either, because every test registers its own provider and
+so can never observe that production does not.
+
+`scripts/check_provider_registration.py` closes that, and runs in `make lint`
+(now 64 checks). For each provider some daemon registers through its
+module-stage adapter, any daemon that *builds* the file owning that function
+pointer must register it too, or record why the code cannot run there. The five
+unreachable entries each carry binary-level evidence rather than an argument
+from source, and a stale entry fails the check so it cannot outlive its reason.
+
+It was proved against the bug it was written for: deleting the registration line
+reproduces the original defect and the check reports it.
 
 ## The full environment
 
