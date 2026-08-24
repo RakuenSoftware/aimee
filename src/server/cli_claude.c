@@ -28,8 +28,8 @@
  * `Bash(*)` carries a Claude Code argument pattern; the gate sees the bare tool
  * name, so the accounting test strips the suffix. */
 static const char *const CLAUDE_ALLOWED_TOOLS[] = {
-    "Bash(*)", "Edit", "Read", "Write", "Glob", "Grep", "NotebookEdit",
-    "mcp__aimee", /* the aimee MCP server's tools (same trust domain) */
+    "Bash(*)", "Edit",         "Read",       "Write", "Glob",
+    "Grep",    "NotebookEdit", "mcp__aimee", /* the aimee MCP server's tools (same trust domain) */
 };
 
 const char *const *cli_claude_allowed_tools(void)

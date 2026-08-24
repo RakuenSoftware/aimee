@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "log.h"
+#include "platform_test_util.h"
 #include "server/delegate_egress_adapter.h"
 
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
@@ -27,8 +28,10 @@ static void test_rejects_non_unix_listener(void)
 static void test_hands_exact_bytes_and_unix_fd_to_helper(void)
 {
    char helper[256], record[256];
-   snprintf(helper, sizeof(helper), "/tmp/aimee-egress-adapter-%d.sh", (int)getpid());
-   snprintf(record, sizeof(record), "/tmp/aimee-egress-adapter-%d.request", (int)getpid());
+   snprintf(helper, sizeof(helper), "%s/aimee-egress-adapter-%d.sh", platform_tmpdir(),
+            (int)getpid());
+   snprintf(record, sizeof(record), "%s/aimee-egress-adapter-%d.request", platform_tmpdir(),
+            (int)getpid());
    unlink(record);
    FILE *f = fopen(helper, "w");
    assert(f != NULL);

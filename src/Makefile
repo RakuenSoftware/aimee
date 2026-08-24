@@ -1386,11 +1386,11 @@ $(RUNTIME_WEB): $(RUNTIME_WEB_GO_SRCS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	cd ../runtime-web && go build -buildvcs=false -o "$(CURDIR)/$@" .
 
-DELEGATE_EGRESS_GO_SRCS := $(shell find ../server-go/modules/delegates ../server-go/modules/sandbox ../server-go/cmd/aimee-delegate-egress -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
+DELEGATE_EGRESS_GO_SRCS := $(shell find ../server-go/modules/delegates ../server-go/modules/sandbox -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
 $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@test -n "$(GO)" || { echo "aimee-delegate-egress: ERROR Go is required"; exit 1; }
-	cd ../server-go && CGO_ENABLED=0 "$(GO)" build -trimpath -o "$(CURDIR)/$@" ./cmd/aimee-delegate-egress
+	cd ../server-go && CGO_ENABLED=0 "$(GO)" build -trimpath -o "$(CURDIR)/$@" ./modules/delegates/cmd/aimee-delegate-egress
 
 # Server (daemon). DB2-bound work routes through kb_client to aimee-kb;
 # keep this target free of DB2_OBJS and libpq.

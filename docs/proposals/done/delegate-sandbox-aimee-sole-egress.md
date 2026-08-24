@@ -218,7 +218,7 @@ The sole-egress boundary is implemented in Go:
   the delegation.
 - `server-go/modules/sandbox` owns destination policy, DNS resolution, numeric-IP
   pinning, request sanitization, deadlines, and byte limits for the package proxy.
-- `server-go/cmd/aimee-delegate-egress` exposes the narrow `acquire` and inherited
+- `server-go/modules/delegates/cmd/aimee-delegate-egress` exposes the narrow `acquire` and inherited
   Unix-fd `proxy` entry points. Callers provide filesystem/runtime facts only;
   there is no policy or isolation-bypass argument.
 - C retains only server integration: canonical source/socket discovery,

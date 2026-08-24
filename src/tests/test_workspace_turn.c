@@ -14,6 +14,8 @@
 #include <aimee/workspace/module_api.h>
 #include <stdint.h>
 
+static const char test_shared_workspace[] = "/tmp/ws-shared";
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -118,7 +120,7 @@ static void register_standard_workspaces(void)
    (void)config_workspace_remove("/");
    (void)config_workspace_remove("/tmp/ws-mirror-unresolvable");
    (void)config_workspace_remove("/tmp/ws-detached");
-   (void)config_workspace_remove("/tmp/ws-shared");
+   (void)config_workspace_remove(test_shared_workspace);
    assert(config_workspace_add("/tmp/ws-detached", "detached", NULL, NULL) == 0);
    assert(config_workspace_add("/tmp/ws-shared", "shared", NULL, NULL) == 0);
 }
@@ -240,9 +242,9 @@ int main(void)
        * a delegate runs in its own container or not at all. */
       {
          g_acquires = g_releases = 0;
-         mkdir("/tmp/ws-shared", 0700);
+         mkdir(test_shared_workspace, 0700);
          assert(workspace_turn_container_bound() == 0); /* nothing bound yet */
-         assert(workspace_turn_bind_container("deleg-2", NULL, "/tmp/ws-shared", 0) == 1);
+         assert(workspace_turn_bind_container("deleg-2", NULL, test_shared_workspace, 0) == 1);
          assert(g_acquires == 1);
          const workspace_provider_t *p = workspace_provider_active();
          assert(p != shared);
@@ -417,7 +419,7 @@ int main(void)
       {
          g_acquires = g_releases = 0;
          g_acquire_fails = 1;
-         assert(workspace_turn_bind_container("deleg-3", NULL, "/tmp/ws-shared", 0) == -1);
+         assert(workspace_turn_bind_container("deleg-3", NULL, test_shared_workspace, 0) == -1);
          assert(g_acquires == 1);
          assert(g_releases == 0); /* nothing to release: it never took one */
          assert(workspace_provider_active() == shared);
@@ -437,7 +439,7 @@ int main(void)
       {
          delegate_backend_reset_for_test();
          g_acquires = 0;
-         assert(workspace_turn_bind_container("deleg-4", NULL, "/tmp/ws-shared", 0) == -1);
+         assert(workspace_turn_bind_container("deleg-4", NULL, test_shared_workspace, 0) == -1);
          assert(workspace_provider_active() == shared);
       }
       delegate_backend_reset_for_test();

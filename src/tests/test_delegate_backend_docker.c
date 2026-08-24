@@ -125,14 +125,14 @@ static void setup_fake_egress_fixture(void)
 {
    if (!g_fixture_workspace[0])
    {
-      snprintf(g_fixture_workspace, sizeof(g_fixture_workspace),
-               "/tmp/aimee-egress-workspace-%d", (int)getpid());
+      snprintf(g_fixture_workspace, sizeof(g_fixture_workspace), "%s/aimee-egress-workspace-%d",
+               platform_tmpdir(), (int)getpid());
       assert(mkdir(g_fixture_workspace, 0700) == 0);
       char gitdir[320];
       snprintf(gitdir, sizeof(gitdir), "%s/.git", g_fixture_workspace);
       assert(mkdir(gitdir, 0700) == 0);
 
-      snprintf(g_fixture_home, sizeof(g_fixture_home), "/tmp/aimee-egress-home-%d",
+      snprintf(g_fixture_home, sizeof(g_fixture_home), "%s/aimee-egress-home-%d", platform_tmpdir(),
                (int)getpid());
       assert(mkdir(g_fixture_home, 0700) == 0);
       char socket_path[320];
@@ -1127,8 +1127,7 @@ static void test_docker_workspace_validation_refusals(void)
    fprintf(dbk2, "%s/somewhere-else/.git\n", base);
    fclose(dbk2);
    cfg.workspace = dwt;
-   assert(b->acquire(b, "task-disjoint-bad", &cfg, &state) ==
-          DELEGATE_ACQUIRE_REFUSED_ISOLATION);
+   assert(b->acquire(b, "task-disjoint-bad", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", base);
    (void)system(cmd);
@@ -1218,8 +1217,8 @@ int main(void)
    if (g_fixture_workspace[0])
    {
       char gitdir[320], socket_path[320];
-      const char *files[] = {"a.txt", "b.txt", "empty.txt", "exact.txt", "hello.txt",
-                             "note.txt", "note2.txt"};
+      const char *files[] = {"a.txt",     "b.txt",    "empty.txt", "exact.txt",
+                             "hello.txt", "note.txt", "note2.txt"};
       for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
       {
          char path[320];

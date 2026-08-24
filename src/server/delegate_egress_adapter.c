@@ -93,8 +93,13 @@ int delegate_egress_adapter_serve(int client_fd, int is_uds, const char *head, s
          close(client_fd);
       if (inherited_client != STDIN_FILENO && inherited_client != 3)
          close(inherited_client);
-      char *const argv[] = {(char *)helper, (char *)"proxy", (char *)"--fd", (char *)"3",
-                            (char *)"--tag", (char *)tag, NULL};
+      char *const argv[] = {(char *)helper,
+                            (char *)"proxy",
+                            (char *)"--fd",
+                            (char *)"3",
+                            (char *)"--tag",
+                            (char *)tag,
+                            NULL};
       execvp(helper, argv);
       _exit(127);
    }

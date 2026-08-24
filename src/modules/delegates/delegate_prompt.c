@@ -1208,7 +1208,7 @@ char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
              "mirror-sync`, so it may be behind what the caller currently has. If what you find "
              "contradicts the task description, suspect the tree is stale before concluding the "
              "task is wrong.\n"
-       : NULL; /* the caller's own workspace: nothing surprising to declare */
+           : NULL; /* the caller's own workspace: nothing surprising to declare */
    if (what)
    {
       w = snprintf(buf + pos, (size_t)rem, "%s", what);

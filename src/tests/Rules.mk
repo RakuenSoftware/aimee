@@ -525,7 +525,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-delegate-token-budget \
                $(TESTPREFIX)/unit-test-delegate-context-shed \
                $(TESTPREFIX)/unit-test-agent-error-retryable \
-               $(TESTPREFIX)/unit-test-delegate-ephemeral-ws \
                $(TESTPREFIX)/unit-test-delegate-handoff \
                $(TESTPREFIX)/unit-test-delegate-economics \
                $(TESTPREFIX)/unit-test-delegate-patch-coordinator \

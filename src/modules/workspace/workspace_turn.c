@@ -599,8 +599,7 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    t_turn_bound = 1;
    LOG_INFO("delegate-sandbox",
             "delegate '%s': file/exec bound to its container (image=%s, workspace=%s, mode=%s)",
-            task_id, bcfg.image ? bcfg.image : "<default>",
-            bcfg.workspace,
+            task_id, bcfg.image ? bcfg.image : "<default>", bcfg.workspace,
             bcfg.workspace_read_only ? "ro" : "rw");
    return 1;
 }

@@ -126,7 +126,7 @@ typedef struct
 } docker_state_t;
 
 /* The in-container forwarder the package proxy bridges through. */
-#define DELEGATE_PKG_PROXY_URL "http://127.0.0.1:3129"
+#define DELEGATE_PKG_PROXY_URL  "http://127.0.0.1:3129"
 #define DOCKER_DEFAULT_IMAGE    "ubuntu:22.04"
 #define DOCKER_WORKDIR_DEFAULT  "/workspace"
 #define DOCKER_PROBE_TIMEOUT_MS 15000
@@ -738,7 +738,7 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
    if ((size_t)snprintf(st->workspace_host, sizeof(st->workspace_host), "%s", real) >=
-          sizeof(st->workspace_host) ||
+           sizeof(st->workspace_host) ||
        (size_t)snprintf(st->workdir, sizeof(st->workdir), "%s", real) >= sizeof(st->workdir))
    {
       free(st);
@@ -763,8 +763,7 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
    }
-   int socket_path_result =
-       docker_host_path_for_self(container_sock, host_sock, sizeof(host_sock));
+   int socket_path_result = docker_host_path_for_self(container_sock, host_sock, sizeof(host_sock));
    if (socket_path_result < 0 || (server_runs_in_container() && socket_path_result != 1))
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
@@ -835,9 +834,10 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       name++;
    if (!name[0] || strpbrk(name, " \t\r\n") ||
        (size_t)snprintf(st->container_name, sizeof(st->container_name), "%s", name) >=
-          sizeof(st->container_name))
+           sizeof(st->container_name))
    {
-      aimee_log(LOG_ERROR, "delegate-sandbox", "Go egress module returned an invalid container name");
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "Go egress module returned an invalid container name");
       free(out);
       free(st);
       return DELEGATE_ACQUIRE_REFUSED_ISOLATION;

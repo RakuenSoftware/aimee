@@ -1586,8 +1586,8 @@ void delegate_worker(void *arg)
       const char *shell_root = run_cmd_get_cwd();
       const char *file_root =
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : NULL);
-      delegate_root_kind_t root_kind = turn_root[0] ? DELEGATE_ROOT_RECONSTRUCTED
-                                                    : DELEGATE_ROOT_NAMED;
+      delegate_root_kind_t root_kind =
+          turn_root[0] ? DELEGATE_ROOT_RECONSTRUCTED : DELEGATE_ROOT_NAMED;
       aimee_log(LOG_INFO, "delegate", "delegate %s: bound root %s (%s)%s%s", deleg_id,
                 shell_root ? shell_root : (file_root ? file_root : "(none)"),
                 root_kind == DELEGATE_ROOT_RECONSTRUCTED ? "server-side reconstruction"
@@ -1676,9 +1676,9 @@ void delegate_worker(void *arg)
     * A WFE implement slice normally owns a dedicated per-slice worktree, so
     * container_ws points at that tree read-write. */
    int container_bound =
-       detached_bound ? -1
-                      : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws,
-                                                      container_ws_ro);
+       detached_bound
+           ? -1
+           : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
    if (cost_limit_failed)
    {
