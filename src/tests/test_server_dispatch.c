@@ -246,7 +246,6 @@ int platform_exec_capture(const char *cmd, char **out, size_t *out_len, int time
    return 0;
 }
 
-
 int compute_pool_init(compute_pool_t *pool, int num_threads)
 {
    (void)pool;
@@ -365,11 +364,11 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
    return 1;
 }
 
-
-/* The eval.candidates surface reaches DB1 and the endogeneity gate. Neither is
- * what this test exercises — it proves the dispatch table routes — so both are
- * stubbed to a quiet, empty installation. */
-
+/* The eval.candidates surface reaches the endogeneity gate, which is not what
+ * this test exercises -- it proves the dispatch table routes -- so the gate is
+ * stubbed open. The store side of that surface is no longer stubbed here: it
+ * runs through the real db1_client over module_bus_stub, whose default is "no
+ * module attached". */
 
 learning_gate_state_t learning_gate_check(learning_endogeneity_t *out)
 {

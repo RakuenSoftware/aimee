@@ -573,6 +573,16 @@ const agentJobColumns = `id, role, prompt, agent_name, participant_token, status
 	    to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
 	    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`
 
+// agentJobLightColumns is agentJobColumns with prompt and result blanked. Same
+// arity, so the reply decodes identically -- the caller that passed
+// include_heavy = 0 simply reads empty strings there, which is what the C did.
+const agentJobLightColumns = `id, role, '' AS prompt, agent_name, participant_token, status,
+	    '' AS result, cursor, lease_owner,
+	    coalesce(to_char(heartbeat_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), ''),
+	    current_tool, api_call_count, cost_usd, cost_known,
+	    to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+	    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`
+
 var agentJobCols = []col{
 	num("id", false), text("role", false), text("prompt", false), text("agent_name", false),
 	text("participant_token", false), text("status", false), text("result", false),
@@ -583,8 +593,13 @@ var agentJobCols = []col{
 }
 
 const (
+	// The participant token is minted here, not supplied: it is a bearer
+	// capability -- db1_agent_job_get_by_participant() returns the job to
+	// whoever presents it -- so it has to be unguessable, and it carries a
+	// unique index that a caller-supplied string would collide on.
 	agentJobCreateSQL = `INSERT INTO agent_jobs (role, prompt, agent_name, participant_token, status)
-	                     VALUES ($1, $2, $3, $4, 'pending') RETURNING id`
+	                     VALUES ($1, $2, $3, replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''), 'pending')
+	                     RETURNING id`
 
 	agentJobUpdateSQL = `UPDATE agent_jobs
 	                        SET status = $2, cursor = $3, result = $4, updated_at = now()
@@ -613,6 +628,9 @@ const (
 	                              FROM agent_jobs WHERE participant_token = $1`
 
 	agentJobListRecentSQL = `SELECT ` + agentJobColumns + `
+	                           FROM agent_jobs ORDER BY created_at DESC, id DESC LIMIT $1`
+
+	agentJobListRecentLightSQL = `SELECT ` + agentJobLightColumns + `
 	                           FROM agent_jobs ORDER BY created_at DESC, id DESC LIMIT $1`
 
 	agentJobListRunningSQL = `SELECT id FROM agent_jobs
@@ -671,8 +689,11 @@ const (
 )
 
 func agentJobCreate(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	// f[3] is the caller's lease owner. The C ignored it here and so does this:
+	// a lease is taken through agent_job_take_lease, which is what writes the
+	// lease_owner column.
 	var id int64
-	if err := q.QueryRow(ctx, agentJobCreateSQL, f[0], f[1], f[2], f[3]).Scan(&id); err != nil {
+	if err := q.QueryRow(ctx, agentJobCreateSQL, f[0], f[1], f[2]).Scan(&id); err != nil {
 		return 0, nil, err
 	}
 	return store.StatusOK, []string{store.I64toa(id)}, nil
@@ -877,11 +898,22 @@ func agentJobTakeLease(ctx context.Context, q store.Queryer, f []string) (uint32
 }
 
 func agentJobListRecent(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	max, ok := store.Atoi(f[1])
+	max, ok := store.Atoi(f[0])
 	if !ok || max <= 0 || max > delegationListMax {
 		return store.StatusInvalid, nil, nil
 	}
-	return readMany(ctx, q, agentJobListRecentSQL, agentJobCols, max)
+	// prompt and result are the heavy columns. A caller that does not need them
+	// says so, and gets empty strings rather than a reply that can overrun the
+	// operation's 1 MiB cap.
+	heavy, ok := store.Atoi(f[1])
+	if !ok {
+		return store.StatusInvalid, nil, nil
+	}
+	sql := agentJobListRecentLightSQL
+	if heavy != 0 {
+		sql = agentJobListRecentSQL
+	}
+	return readMany(ctx, q, sql, agentJobCols, max)
 }
 
 func agentJobListRunningIDs(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {

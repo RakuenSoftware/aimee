@@ -16,6 +16,7 @@
 #include "../platform_test_util.h"
 
 #include <aimee/audit/obs_bus.h>
+#include "module_json_call.h" /* aimee_module_call_deadline_ns */
 
 /* The store's principal reference, and the kinds derived from it:
  * kind = 4096 + ref*256 + stage. Stages 1..19 are the served families, so the
@@ -100,6 +101,55 @@ void store_module_fixture_stop(void)
       snprintf(command, sizeof(command), "rm -rf '%s'", g_root);
       (void)system(command);
       g_root[0] = '\0';
+   }
+}
+
+/* The SQL stage's request frame: op, a statement id, a transaction handle (0
+ * for "on the pool"), the statement, and an argument count. Little-endian, the
+ * same encoding server-go/modules/postgres/sql.go reads. */
+#define PG_STAGE_SQL 2u
+#define PG_OP_EXEC   1u
+
+static void put_u32(unsigned char *p, uint32_t v)
+{
+   for (unsigned i = 0; i < 4; ++i)
+      p[i] = (unsigned char)((v >> (i * 8u)) & 0xffu);
+}
+
+static void store_module_fixture_reset_schema(void)
+{
+   static const char *const id = "fixture-reset";
+   /* CASCADE because the store's tables reference each other; recreating the
+    * schema immediately afterwards leaves the database as initdb left it. */
+   static const char *const sql = "DROP SCHEMA public CASCADE; CREATE SCHEMA public";
+
+   unsigned char frame[256];
+   uint32_t at = 0;
+   put_u32(frame + at, PG_OP_EXEC);
+   at += 4u;
+   put_u32(frame + at, (uint32_t)strlen(id));
+   at += 4u;
+   memcpy(frame + at, id, strlen(id));
+   at += (uint32_t)strlen(id);
+   memset(frame + at, 0, 8); /* handle 0: not inside a transaction */
+   at += 8u;
+   put_u32(frame + at, (uint32_t)strlen(sql));
+   at += 4u;
+   memcpy(frame + at, sql, strlen(sql));
+   at += (uint32_t)strlen(sql);
+   put_u32(frame + at, 0u); /* no bound arguments */
+   at += 4u;
+
+   unsigned char reply[512];
+   uint32_t reply_len = 0;
+   aimee_module_call_result_t rc =
+       obs_bus_module_call(PG_KIND_SQL, PG_STAGE_SQL, 0, aimee_module_call_deadline_ns(30000),
+                           frame, at, reply, (uint32_t)sizeof reply, &reply_len, NULL, NULL);
+   if (rc != AIMEE_MODULE_CALL_OK)
+   {
+      char why[128];
+      snprintf(why, sizeof why, "the SQL stage refused the schema reset (result %d)", (int)rc);
+      die(why);
    }
 }
 
@@ -214,6 +264,10 @@ void store_module_fixture_start(void)
       struct timespec pause = {0, 50 * 1000 * 1000};
       nanosleep(&pause, NULL);
    }
+
+   /* Empty the database before the store reads it, so every run starts where
+      db1_init(":memory:") used to leave these suites. */
+   store_module_fixture_reset_schema();
 
    pid_t child = fork();
    if (child < 0)

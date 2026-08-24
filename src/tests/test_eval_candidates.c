@@ -18,10 +18,10 @@
 #include "agent_eval.h" /* eval_task_t + the real agent_eval_load_tasks */
 #include "agent_jobs.h"
 #include "cJSON.h"
-#include "db.h"
 #include "db1.h"
 #include "eval.h"
 #include "eval_synthesis.h"
+#include "support/store_module_fixture.h"
 #include "kb_client.h"
 #include "modules/db2/c/db2.h"
 #include "modules/db2/c/db2_test_shim.h"
@@ -334,8 +334,24 @@ int main(void)
 {
    printf("eval_candidates: ");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
+
+   /* Refused on their arguments before any call leaves the client, so these
+      hold with or without a store and run everywhere. */
+   assert(eval_synthesis_observe(NULL, "regressions", "s") == -1);
+   assert(eval_synthesis_admit_pending(NULL, "test", 2) == -1);
+   assert(eval_synthesis_admit_pending("", "test", 2) == -1);
+   assert(db1_eval_candidate_list(NULL, NULL, 0) == -1);
+   assert(db1_eval_candidate_get_by_signature("", NULL) == -1);
+
+   /* Every test below reads the store back. The store is a module now, so bring
+      the real one up -- or skip, saying why, where there is no database. */
+   if (!store_module_fixture_available())
+   {
+      printf("\n");
+      return 0;
+   }
+   store_module_fixture_start();
 
    char suite_dir[256];
    snprintf(suite_dir, sizeof(suite_dir), "build/test-suites/regressions-%d", (int)getpid());
@@ -347,13 +363,6 @@ int main(void)
    test_rejection_is_terminal();
    test_retirement_needs_evidence_and_quiet(suite_dir);
    test_scan_reads_the_failure_ledger(suite_dir);
-
-   /* Bad args are refused rather than guessed. */
-   assert(eval_synthesis_observe(NULL, "regressions", "s") == -1);
-   assert(eval_synthesis_admit_pending(NULL, "test", 2) == -1);
-   assert(eval_synthesis_admit_pending("", "test", 2) == -1);
-   assert(db1_eval_candidate_list(NULL, NULL, 0) == -1);
-   assert(db1_eval_candidate_get_by_signature("", NULL) == -1);
 
    rm_rf_suite(suite_dir);
    printf("ok\n");
