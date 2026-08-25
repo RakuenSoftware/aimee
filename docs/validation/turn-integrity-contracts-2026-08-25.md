@@ -2,72 +2,102 @@
 
 ## Scope
 
-Validation covered the complete integration branch, including turn manifests,
-context authority and freshness, effect contracts, retrieval continuations,
-checker failure policy, and benchmark manifests. The original working tree was
-not used for build or deployment.
+This validation covers the integrated turn-integrity work: explicit turn and
+effect lifecycles, freshness authority, typed retrieval outcomes, bounded
+failure behavior, immutable evaluation manifests, external-effect uncertainty,
+and recovery after daemon or dependency loss. The original working tree was not
+used for build or deployment.
 
 ## Environment
 
 - Proxmox host: `root@192.168.1.252`, `pve-manager/9.2.6`
-- Fresh guest: CT 9104, `aimee-turn-integrity`, Debian 13
+- Fresh guest: unprivileged CT 9104 (`aimee-turn-integrity`), Debian 13
 - Guest address: `192.168.0.217`
 - Resources: 6 vCPU, 12 GiB RAM, 2 GiB swap, 32 GiB disk
-- Source transfer: Git bundle, checked out detached at
-  `8d05bb283ac5f05740d8fc4b343ea94561b1e358`
-- PostgreSQL: 17.11, with `vector` and `pg_trgm`
-- Final database: freshly created `aimee_turn_integrity_final`
+- Source transfer: Git bundles into `/opt/aimee`, checked out detached
+- Product code under full-stack test: `ac85c674f3ee1597fb883954b5a40e338c70fa51`
+- PostgreSQL: 17.11 with `vector` and `pg_trgm`
+- Final full-stack database: freshly created `aimee_ti_final10`
+- Final focused-test checkout: `ca4832f7f8f02e268054ad876710fe012fab19a4`
 
-The guest was created with `pct create` from
-`debian-13-standard_13.6-1_amd64.tar.zst`; no existing Aimee guest or service was
-used. CT 9104 is intentionally left running for inspection.
+CT 9104 was created from the Debian 13 standard template for this validation;
+no existing Aimee service was used. The CT is intentionally retained for
+inspection.
+
+## Real embedding service
+
+The final run required a real embedding service and refused degraded/hash-only
+operation. Its health contract reported:
+
+```json
+{
+  "status": "ok",
+  "dim": 1024,
+  "model": "Qwen3-Embedding-0.6B",
+  "serving_id": "Qwen3-Embedding-0.6B/pooling=last/prefix=none/dim=1024"
+}
+```
+
+The model was Qwen3-Embedding-0.6B Q8_0 served by `llama-server` on CPU. The KB
+stored a marker-bearing fact, then recalled it with a lexically disjoint natural
+language query through the ranked semantic memory-search surface. The final
+database retained 109 `memory_embeddings` rows and reported no dimension
+mismatch.
 
 ## Full-stack result
 
-`scripts/aimee-local-stack-e2e.sh --mode full` ran the real `aimee-server`,
-`aimee-kb`, server DB1/config/Postgres modules, and KB config/Postgres modules.
-The final run reported:
+The final command ran `scripts/aimee-local-stack-e2e.sh --mode full` with the
+real `aimee-server`, `aimee-kb`, all required server process modules, both KB
+process modules, the real embedder, a deterministic model provider, and a real
+stdio MCP peer. It exited 0 and reported:
 
-- top-level full-stack suite: **6 passed, 0 failed**;
-- nested persistent write/read suite: **3 passed, 0 failed**;
-- first-user claim and thin-client certificate enrollment succeeded;
-- bearer-only mutation was denied before certificate presentation;
-- mTLS advanced from optional enrollment to application-required;
-- server and KB version endpoints reported `8d05bb283`;
-- server-to-KB status and search succeeded;
-- a memory was stored, listed, found by keyword search, and remained present in
-  PostgreSQL;
-- pgvector was ready and the write path did not report a dimension mismatch.
+- outer full-stack suite: **9 passed, 0 failed**;
+- deep turn-integrity probe: **11 checks passed**;
+- nested persistent write/read suite: **3 passed, 0 failed**.
 
-The KB health document correctly reported degraded synthesis capacity because
-the clean guest had no external embedder or synthesis model configured. The
-server-facing KB contract remained available with pgvector status `ok`. This is
-an explicit capacity verdict, not a hidden fallback.
+The run proved:
 
-## Exploratory probes
+- first-user claim, thin-client certificate enrollment, and mTLS-bound writes;
+- bearer-only mutation denial;
+- live server-to-KB vector status and search;
+- a genuinely empty corpus producing a typed `empty` result with an inert,
+  unauthorized continuation;
+- model-backed `write_file` and `edit_file` with exact readback;
+- an authorized `git_push` reaching a disposable bare Git remote;
+- a configured server-hosted stdio MCP mutation reaching the peer and timing out
+  as `unknown_outcome`, rather than being treated as safely retryable;
+- knowledge invalidation appearing as a stale-knowledge instruction on the next
+  turn;
+- benchmark execution storing immutable dataset and target hashes, harness
+  version 2, hardware profile, and seed 4242;
+- a WORM lifecycle containing turn, effect, postcondition, freshness, and
+  uncertain-outcome events without raw tool arguments;
+- a frozen KB producing a bounded typed failure with no unsafe external
+  continuation, followed by live server-to-KB recovery;
+- memory store/list/keyword retrieval and semantic retrieval; and
+- server restart preserving mTLS identity and memory, followed by KB restart
+  restoring the server-to-KB search path.
 
-While the green stack was held open:
+The final database retained 5 memories, 109 embedding rows, 30 execution-trace
+rows, and one evaluation result. Its evaluation manifest was:
 
-- unauthenticated `GET /v1/health` returned HTTP 401;
-- authenticated server health returned `status=ok`;
-- all seven service/module processes were live;
-- two `curator.invalidated` calls advanced both scoped and global knowledge
-  epochs from 1 to 2;
-- the WORM ledger contained four corresponding `knowledge.invalidated` rows
-  (scoped and global for each call), at sequences 175, 176, 181, and 182;
-- an empty KB query returned a typed zero-hit response;
-- a malformed KB search returned HTTP 400;
-- the final database contained the persisted memory row;
-- no module attach denial remained after startup.
+```text
+suite=turn-integrity-eval
+success=true
+dataset_hash=5a292b0bcbdbf24c028c0eba5f01b9d375c22648988506f1003c30960f0132b8
+target_hash=eb61233ec7ada0b0b0c3eaf06182b7a6176d418c003dc74ac4b0e8ad9d66f1aa
+harness_version=2
+hardware_profile=Linux/x86_64/cpus=6
+seed=4242
+```
 
-The WORM implementation's independent test also passed append-only triggers,
-cross-store determinism, tamper detection, checkpoint binding, and sealed-snapshot
-verification. Immutable filesystem flags are unavailable in the unprivileged
-LXC, so the seal was cryptographic-only, as reported by the test.
+The retained final scratch tree is `/tmp/tmp.ZTzCcOi7VH` in CT 9104. Its WORM
+database contains 1,858 rows, including exactly one `unknown_outcome` effect and
+two `knowledge.invalidated` events.
 
-## Focused regression suite in CT 9104
+## Focused regression suite
 
-All of these passed against the final commit:
+All focused binaries compiled and passed inside CT 9104:
 
 - `unit-test-turn-integrity`
 - `unit-test-td-search-render`
@@ -78,25 +108,42 @@ All of these passed against the final commit:
 - `unit-test-agent`
 - `unit-test-audit-worm`
 
-The MCP test's two federated-KB cases were skipped because that unit process was
-not given `AIMEE_KB_API_URL`; the same server-to-KB surface passed in the live
-full-stack run. Agent tests that explicitly require `AIMEE_STORE_URL` were also
-skipped by that unit binary; DB1/Postgres operation was exercised by the live
-stack.
+`unit-test-agent` used a separately created PostgreSQL database and the real
+store process module, so its execution-trace case was not skipped. The audit
+suite passed append-only enforcement, cross-store determinism, tamper detection,
+checkpoint binding, and sealed-snapshot verification. The unprivileged CT cannot
+set immutable filesystem flags, so sealed snapshots correctly reported
+cryptographic-only sealing.
 
-## Failure-path discoveries
+The MCP unit binary skipped its two optional federated-KB cases because that
+standalone process was not given a live `AIMEE_KB_API_URL`. The corresponding
+server-to-KB and server-hosted MCP paths were both exercised successfully by the
+full live-stack run.
 
-The clean guest exposed two validation-state problems rather than feature-code
-failures:
+## Failures discovered by real-environment validation
 
-1. The base image lacked Go, required to build the event-bus fixture. Installing
-   Go 1.24 allowed the pinned module dependencies and toolchain to build.
-2. The local full-stack harness had drifted behind the DB1 module boundary: it
-   omitted the server-side Postgres module and the narrow DB1-to-Postgres client
-   grant. The event bus correctly refused the undeclared edge, and TLS correctly
-   stayed disabled while DB1 PKI was unavailable. The harness now declares and
-   starts that dependency explicitly.
+The iterative clean-guest runs exposed and repaired issues that local or
+fixture-only checks had hidden:
 
-A repeated scratch-home run also confirmed that first-user enrollment is durable
-in PostgreSQL. The final run therefore used a new database instead of deleting or
-reusing the prior successful run's identity state.
+1. An empty-retrieval assertion ran after feedback memories existed; it now runs
+   before the first corpus write.
+2. Semantic evidence used a context-assembly route rather than ranked fact
+   search; it now proves lexically disjoint recall through the semantic ranker.
+3. Daemon-only restarts did not re-arm supervised process modules; the harness
+   now reproduces service-manager behavior and removes stale bus sockets only
+   after their owner exits.
+4. Trusted-local tool execution did not carry its out-of-band authorization into
+   external effect contracts; capability-limited remote callers remain
+   unauthorized.
+5. The MCP registry trusted a hidden scalar count instead of the documented
+   `mcp_clients` array, so a valid server-hosted client was incorrectly routed to
+   KB. The array is now authoritative.
+6. The optional post-summary hold setting dereferenced an unset variable under
+   `set -u`; the final run deliberately left it unset and exited cleanly.
+7. A store-backed agent test used a fabricated execution-plan foreign key and
+   its focused target omitted the store-module prerequisite. The test now creates
+   a real plan and the target builds its required module.
+
+Earlier failed attempts were retained long enough for diagnosis rather than
+being reported as acceptance. Only the exit-zero final10 run above is the
+full-stack acceptance result.
