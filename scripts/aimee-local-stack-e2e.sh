@@ -140,8 +140,12 @@ KB_POLICY="$AIMEE_HOME/modules.d/kb"
 mkdir -p "$SERVER_POLICY" "$KB_POLICY"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
   "$BUNDLE/grants/server/aimee.grant" > "$SERVER_POLICY/aimee.grant"
+sed "s|^executable=.*|executable=$DB1_MODULE|" \
+  "$BUNDLE/grants/server/aimee-postgres.grant" > "$SERVER_POLICY/aimee-postgres.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/server/config.grant" > "$SERVER_POLICY/config.grant"
+sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
+  "$BUNDLE/grants/server/postgres.grant" > "$SERVER_POLICY/postgres.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/kb/config.grant" > "$KB_POLICY/config.grant"
 sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
@@ -149,7 +153,7 @@ sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
 chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
 
 kb_pid=""; server_pid=""
-server_db1_pid=""; server_config_pid=""
+server_db1_pid=""; server_config_pid=""; server_postgres_pid=""
 kb_config_pid=""; kb_postgres_pid=""
 
 arm_module() { # executable socket policy log pid-variable [environment...]
@@ -171,12 +175,13 @@ arm_module() { # executable socket policy log pid-variable [environment...]
 
 stop_modules() {
   local pid
-  for pid in "$server_db1_pid" "$server_config_pid" "$kb_config_pid" "$kb_postgres_pid"; do
+  for pid in "$server_db1_pid" "$server_config_pid" "$server_postgres_pid" \
+             "$kb_config_pid" "$kb_postgres_pid"; do
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
-  server_db1_pid=""; server_config_pid=""
+  server_db1_pid=""; server_config_pid=""; server_postgres_pid=""
   kb_config_pid=""; kb_postgres_pid=""
 }
 
@@ -194,6 +199,10 @@ ulimit -S -s 65536 || true
 if [[ "$MODE" == "full" ]]; then
   bold "==> Mode FULL (T5): local server + local kb"
   export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql:///aimee_shared}"
+  # DB1 is a module-owned family too. Its aimee module reaches storage only
+  # through the Postgres module on the SERVER bus; an unset store URL leaves
+  # that declared edge present but unusable and the mTLS ramp correctly refuses.
+  export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$AIMEE_DB2_URL}"
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
@@ -241,6 +250,9 @@ else
 fi
 
 bold "==> Starting aimee-server"
+arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+  "$AIMEE_HOME/server-postgres-module.log" server_postgres_pid \
+  "AIMEE_STORE_URL=$AIMEE_STORE_URL"
 arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
   "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
   "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
