@@ -638,8 +638,8 @@ echo
 bold "==> Summary (${MODE}): ${PASS} passed, ${FAIL} failed"
 [[ "$FAIL" == 0 ]] || exit 1
 green "local ${MODE} stack is up and serving."
-if [[ "${AIMEE_E2E_HOLD_SECONDS:-0}" =~ ^[0-9]+$ ]] &&
-   (( AIMEE_E2E_HOLD_SECONDS > 0 )); then
-  yellow "holding green scratch stack for ${AIMEE_E2E_HOLD_SECONDS}s (exploratory probes)"
-  sleep "$AIMEE_E2E_HOLD_SECONDS"
+hold_seconds="${AIMEE_E2E_HOLD_SECONDS:-0}"
+if [[ "$hold_seconds" =~ ^[0-9]+$ ]] && (( hold_seconds > 0 )); then
+  yellow "holding green scratch stack for ${hold_seconds}s (exploratory probes)"
+  sleep "$hold_seconds"
 fi
