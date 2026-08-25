@@ -17,6 +17,7 @@
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
 #include "client_config.h"
+#include "client_session_worktree.h"
 #include "aimee_home.h"
 #include "agent_code_capabilities.h"
 #include "platform_path.h"
@@ -32,6 +33,134 @@
 #include <time.h>
 #include <sys/stat.h> /* stat, S_ISDIR — telling a file target from a directory */
 #include <unistd.h>   /* getcwd */
+
+static const char *attn_hook_cwd(const cJSON *hook, char *fallback, size_t cap)
+{
+   const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "cwd"));
+   if (cwd && cwd[0])
+      return cwd;
+   if (getcwd(fallback, cap))
+      return fallback;
+   fallback[0] = '\0';
+   return fallback;
+}
+
+static const char *attn_hook_sid(const cJSON *hook, char *fallback, size_t cap)
+{
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "session_id"));
+   static const char *const envs[] = {"AIMEE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID",
+                                      NULL};
+   for (int i = 0; (!sid || !sid[0]) && envs[i]; i++)
+      sid = getenv(envs[i]);
+   if (!sid || !sid[0])
+      return NULL;
+   snprintf(fallback, cap, "%s", sid);
+   return fallback;
+}
+
+static int attn_tool_is_shell(const char *tool)
+{
+   return tool && (strcmp(tool, "Bash") == 0 || strcmp(tool, "terminal") == 0 ||
+                   strcmp(tool, "shell") == 0 || strcmp(tool, "exec_command") == 0 ||
+                   strcmp(tool, "execute_command") == 0);
+}
+
+/* Client-neutral route. Adapters only translate lifecycle events into this
+ * common payload; worktree ownership and path semantics stay here. */
+int attn_route_tool_input(const char *sid, const char *cwd, const char *tool, const cJSON *input,
+                          cJSON **updated_out)
+{
+   *updated_out = NULL;
+   if (!sid || !cwd || !tool || !cJSON_IsObject(input))
+      return 1;
+   cJSON *updated = cJSON_Duplicate(input, 1);
+   if (!updated)
+      return -2;
+   int changed = 0;
+
+   static const char *const path_keys[] = {"file_path", "filePath", "path", "notebook_path",
+                                           "directory", "workdir",  NULL};
+   for (int i = 0; path_keys[i]; i++)
+   {
+      cJSON *item = cJSON_GetObjectItemCaseSensitive(updated, path_keys[i]);
+      if (!cJSON_IsString(item) || !item->valuestring[0])
+         continue;
+      char routed[16384];
+      int rc =
+          client_session_worktree_route_path(sid, cwd, item->valuestring, routed, sizeof routed);
+      if (rc < 0)
+      {
+         cJSON_Delete(updated);
+         return rc;
+      }
+      if (rc == 0 && strcmp(routed, item->valuestring) != 0)
+      {
+         cJSON_SetValuestring(item, routed);
+         changed = 1;
+      }
+   }
+
+   static const char *const command_keys[] = {"command", "cmd", NULL};
+   for (int i = 0; command_keys[i]; i++)
+   {
+      cJSON *command = cJSON_GetObjectItemCaseSensitive(updated, command_keys[i]);
+      if (!cJSON_IsString(command) || !command->valuestring[0])
+         continue;
+      char routed[32768];
+      int rc = 1;
+      if (strcmp(tool, "apply_patch") == 0 && strcmp(command_keys[i], "command") == 0)
+         rc = client_session_worktree_route_patch(sid, cwd, command->valuestring, routed,
+                                                  sizeof routed);
+      else if (attn_tool_is_shell(tool))
+         rc = client_session_worktree_route_command(sid, cwd, command->valuestring, routed,
+                                                    sizeof routed);
+      if (rc < 0)
+      {
+         cJSON_Delete(updated);
+         return rc;
+      }
+      if (rc == 0 && strcmp(routed, command->valuestring) != 0)
+      {
+         cJSON_SetValuestring(command, routed);
+         changed = 1;
+      }
+   }
+
+   if (!changed)
+   {
+      cJSON_Delete(updated);
+      return 1;
+   }
+   *updated_out = updated;
+   return 0;
+}
+
+static void attn_emit_updated_input(cJSON *updated)
+{
+   const char *client = getenv("AIMEE_HOOK_CLIENT");
+   cJSON *out = cJSON_CreateObject();
+   if (client && strcmp(client, "hermes") == 0)
+   {
+      cJSON_AddStringToObject(out, "action", "modify");
+      cJSON_AddItemToObject(out, "args", cJSON_Duplicate(updated, 1));
+   }
+   else if (client && strcmp(client, "opencode") == 0)
+      cJSON_AddItemToObject(out, "updatedInput", cJSON_Duplicate(updated, 1));
+   else
+   {
+      cJSON *specific = cJSON_AddObjectToObject(out, "hookSpecificOutput");
+      cJSON_AddStringToObject(specific, "hookEventName", "PreToolUse");
+      cJSON_AddStringToObject(specific, "permissionDecision", "allow");
+      cJSON_AddItemToObject(specific, "updatedInput", cJSON_Duplicate(updated, 1));
+   }
+   char *json = cJSON_PrintUnformatted(out);
+   if (json)
+   {
+      puts(json);
+      free(json);
+   }
+   cJSON_Delete(out);
+}
 
 double attn_score(const attn_record_t *recs, int n, const char *path, long now_ts)
 {
@@ -1463,7 +1592,9 @@ int handle_attention_guard(void)
    }
 
    const char *tool = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "tool_name"));
-   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "session_id"));
+   char sid_buf[128], cwd_buf[4096];
+   const char *sid = attn_hook_sid(hook, sid_buf, sizeof sid_buf);
+   const char *payload_cwd = attn_hook_cwd(hook, cwd_buf, sizeof cwd_buf);
    cJSON *ti = cJSON_GetObjectItemCaseSensitive(hook, "tool_input");
    const char *bash_cmd =
        ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "command")) : NULL;
@@ -1489,17 +1620,14 @@ int handle_attention_guard(void)
     * block. */
    if (attn_config_require_aimee_memory())
    {
-      char mcwd[1024];
-      if (!getcwd(mcwd, sizeof(mcwd)))
-         mcwd[0] = '\0';
       const char *mfp = NULL;
       if (ti)
       {
-         const char *keys[] = {"file_path", "path", "notebook_path"};
+         const char *keys[] = {"file_path", "filePath", "path", "notebook_path"};
          for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]) && !mfp; k++)
             mfp = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, keys[k]));
       }
-      if (attn_external_memory_blocked(op, tool, mfp, bash_cmd, mcwd))
+      if (attn_external_memory_blocked(op, tool, mfp, bash_cmd, payload_cwd))
       {
          fprintf(stderr,
                  "aimee attention-guard: refusing a direct write to an external agent-memory "
@@ -1515,17 +1643,40 @@ int handle_attention_guard(void)
       }
    }
 
+   /* Provisioning happens at SessionStart; this idempotent per-tool route is the
+    * enforcement backstop for clients that resume oddly or skip a lifecycle
+    * event. Successful routing is silent and applies to reads as well as writes,
+    * so a session never reads one checkout and edits another. */
+   cJSON *updated_input = NULL;
+   int route_rc = attn_route_tool_input(sid, payload_cwd, tool, ti, &updated_input);
+   if (route_rc == -2 || route_rc == -3)
+   {
+      fprintf(stderr, "aimee: internal session workspace isolation failed; tool call blocked\n");
+      cJSON_Delete(hook);
+      free(stdin_data);
+      return 2;
+   }
+   if (updated_input)
+   {
+      ti = updated_input;
+      bash_cmd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "command"));
+   }
+
    /* Session-isolation guard (default on via require_session_worktree). Fails
     * closed on a mutating op outside an aimee-managed worktree, so a client that
     * bypassed `aimee launch` cannot mutate the primary checkout/default branch.
     * A SessionStart hook supplies context only and is never treated as cwd state. */
    if ((op == ATTN_OP_SOFT || op == ATTN_OP_HARD) && attn_config_require_session_worktree())
    {
-      char cwd[1024];
-      if (!getcwd(cwd, sizeof(cwd)))
-         cwd[0] = '\0';
+      char routed_cwd[8192];
+      const char *cwd = payload_cwd;
+      if (client_session_worktree_route_path(sid, payload_cwd, NULL, routed_cwd,
+                                             sizeof routed_cwd) == 0)
+         cwd = routed_cwd;
       const char *fp =
           ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "file_path")) : NULL;
+      if (!fp && ti)
+         fp = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "filePath"));
       /* Branch lineage: being INSIDE a managed worktree is not enough. The worktree
        * must have been created by the launcher (so a registry row exists) and rooted
        * correctly -- a primary on the default branch, a delegate on its parent's.
@@ -1564,18 +1715,9 @@ int handle_attention_guard(void)
                 resolved && attn_git_shares_foreign_session_history(gitdir, defref, gitown);
             if (attn_unregistered_lineage_blocked(resolved, foreign))
             {
-               fprintf(stderr,
-                       "aimee attention-guard: refusing a mutating op — the worktree at '%s' is on "
-                       "branch '%s', which has no launcher registry row and %s. A primary session "
-                       "must branch off the default branch ('%s'); a delegate off its parent. "
-                       "Recreate the session worktree with the launcher (Claude Code: "
-                       "EnterWorktree; aimee: launch `aimee`) instead of `git worktree add` by "
-                       "hand.\n",
-                       lin_target, gitown[0] ? gitown : "(unknown)",
-                       resolved ? "carries commits from another session's branch"
-                                : "could not be checked, because the default branch does not "
-                                  "resolve here",
-                       defbr[0] ? defbr : "(unresolved)");
+               fputs("aimee: internal session workspace isolation failed; tool call blocked\n",
+                     stderr);
+               cJSON_Delete(updated_input);
                cJSON_Delete(hook);
                free(stdin_data);
                return 2;
@@ -1584,15 +1726,9 @@ int handle_attention_guard(void)
          else if (reg_state == 2 && base[0] &&
                   attn_session_branch_blocked(base, defbr, parent_registered))
          {
-            fprintf(stderr,
-                    "aimee attention-guard: refusing a mutating op — the worktree at '%s' is on "
-                    "branch '%s' rooted at '%s', which is neither the default branch ('%s') nor a "
-                    "registered parent session branch. A primary session must branch off the "
-                    "default branch; a delegate off its parent. Recreate the session worktree "
-                    "with the launcher (Claude Code: EnterWorktree; aimee: launch `aimee`) instead "
-                    "of `git worktree add` by hand.\n",
-                    lin_target, own[0] ? own : "(unknown)", base,
-                    defbr[0] ? defbr : "(unresolved)");
+            fputs("aimee: internal session workspace isolation failed; tool call blocked\n",
+                  stderr);
+            cJSON_Delete(updated_input);
             cJSON_Delete(hook);
             free(stdin_data);
             return 2;
@@ -1603,13 +1739,8 @@ int handle_attention_guard(void)
        * isolation check below only sees the cwd for a Bash call. */
       if (bash_cmd && bash_cmd[0] && attn_bash_escapes_worktree(bash_cmd, cwd))
       {
-         fprintf(stderr,
-                 "aimee attention-guard: refusing a Bash command that writes outside this "
-                 "session's worktree. The command changes directory to, or redirects into, an "
-                 "absolute path that is not under .aimee/worktrees/ or .claude/worktrees/. The "
-                 "cwd being a valid worktree is not enough — what the command TOUCHES has to "
-                 "stay inside it. Do the work in the session worktree, or ask the operator to "
-                 "make the change.\n");
+         fputs("aimee: internal session workspace isolation failed; tool call blocked\n", stderr);
+         cJSON_Delete(updated_input);
          cJSON_Delete(hook);
          free(stdin_data);
          return 2;
@@ -1617,29 +1748,8 @@ int handle_attention_guard(void)
 
       if (attn_session_isolation_blocked(op, fp, cwd, sid))
       {
-         /* Name the path that was actually judged. When an absolute file_path is
-          * given it IS the effective target, and the cwd may be a perfectly good
-          * managed worktree — saying otherwise sends the reader off diagnosing a
-          * worktree that is not the problem. */
-         char target[2048];
-         attn_session_isolation_target(fp, cwd, target, sizeof(target));
-         char where[2300];
-         if (fp && fp[0])
-            snprintf(where, sizeof(where), "the write target '%s' is not inside a managed worktree",
-                     target);
-         else
-            snprintf(where, sizeof(where),
-                     "this session is operating in '%s', which is not a "
-                     "managed worktree",
-                     cwd[0] ? cwd : "(unknown cwd)");
-         fprintf(stderr,
-                 "aimee attention-guard: refusing a mutating op outside a session worktree — %s "
-                 "(.aimee/worktrees/... or .claude/worktrees/...). aimee requires each mutating "
-                 "session to run in an isolated worktree+branch off the default branch: create "
-                 "one (Claude Code: EnterWorktree; aimee: launch `aimee`, which materializes a "
-                 "worktree and chdirs into it). An operator may set require_session_worktree: "
-                 "false in aimee.yaml to disable this — there is no env-var bypass.\n",
-                 where);
+         fputs("aimee: internal session workspace isolation failed; tool call blocked\n", stderr);
+         cJSON_Delete(updated_input);
          cJSON_Delete(hook);
          free(stdin_data);
          return 2;
@@ -1686,6 +1796,7 @@ int handle_attention_guard(void)
       if (!recs)
       {
          cJSON_Delete(arr);
+         cJSON_Delete(updated_input);
          cJSON_Delete(hook);
          free(stdin_data);
          return 0;
@@ -1714,7 +1825,7 @@ int handle_attention_guard(void)
    else if (ti)
    {
       /* Accrue attention for the touched file (Read / edit-class). */
-      const char *keys[] = {"file_path", "path", "notebook_path"};
+      const char *keys[] = {"file_path", "filePath", "path", "notebook_path"};
       for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
       {
          const char *fp = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, keys[k]));
@@ -1725,6 +1836,9 @@ int handle_attention_guard(void)
 
    attn_save(path, arr, now_ts);
    cJSON_Delete(arr);
+   if (exit_code == 0 && updated_input)
+      attn_emit_updated_input(updated_input);
+   cJSON_Delete(updated_input);
    cJSON_Delete(hook);
    free(stdin_data);
    return exit_code;

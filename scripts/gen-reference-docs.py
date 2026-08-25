@@ -200,7 +200,7 @@ CFG_KEY_DESC = {
     "cost_reward_enabled": "Factor token cost into the reward signal.",
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
-    "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs: Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
+    "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, and lifecycle adapters) into detected AI-tool user configs: Claude Code (~/.claude), Codex, OpenCode, Hermes, Gemini, and Copilot. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
     "cross_verify": "Enable cross-model verification of outputs.",
     "wfe_live_forge_enabled": "Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail.",
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
@@ -258,8 +258,8 @@ CFG_KEY_DESC = {
     "clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the "
     "prompt + history; the context-economizer (aggressive tier) compresses older results to keep "
     "history bounded.",
-    "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
-    "(session-isolation guard; default off).",
+    "require_session_worktree": "Fail closed on mutating ops outside this session's isolated worktree "
+    "(session-isolation guard; default on).",
     "subagent_ban_enabled": "Prevent provider-native sub-agent tools when an aimee delegate is "
     "available, and install the matching client guardrails (default on).",
     "require_aimee_memory": "Block agent writes to external file-based agent-memory stores "
@@ -311,10 +311,12 @@ CFG_KEY_DESC = {
     "kb_api_http_port": "HTTP port the aimee-kb API listens on.",
     "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
     "kb_fusion_mode": "KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha.",
-    "session_worktree_base": "What a new primary session's branch+worktree is cut from. Order: configured -> "
-                              "remote default -> main -> master. Values: remote_default (default), "
-                              "local_default, current (opt-in only, never a fallback), or an explicit "
-                              "ref. Env: AIMEE_SESSION_WORKTREE_BASE.",
+    "session_worktree_base": "What a new primary session's branch+worktree is cut from. "
+                              "remote_default (default) performs a bounded fetch and pins the "
+                              "remote's current HEAD; fetch failure stops session start. An explicit "
+                              "feature/release ref is preserved and receives the fetched default tip "
+                              "when needed. local_default and current are explicit offline/stale "
+                              "overrides. Env: AIMEE_SESSION_WORKTREE_BASE.",
     "pr_base_mode": "What a PR opened from a session targets. feature (default): the session's "
                     "durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on "
                     "one branch and reach the default branch through a single reviewed PR. "

@@ -305,10 +305,10 @@ int agent_tools_knowledge_write_allowed(void);
 void agent_tools_write_capable_set(int capable);
 int agent_tools_readonly_delegate_blocks(void);
 
-/* Session-isolation backstop (Layer 2, opt-in via require_session_worktree):
+/* Session-isolation backstop (Layer 2, default-on via require_session_worktree):
  * returns 1 to BLOCK a server-side agent write whose normalized target is not
- * inside an aimee-managed worktree, else 0. No-op (returns 0) unless the
- * require_session_worktree config flag is enabled. Mirrors the client-side
+ * inside this session's aimee-managed worktree, else 0. No-op (returns 0) only
+ * when require_session_worktree is explicitly false. Mirrors the client-side
  * attention-guard isolation policy for aimee's own in-process agent writes. */
 int agent_tools_session_isolation_blocks(const char *path, const char *cwd);
 

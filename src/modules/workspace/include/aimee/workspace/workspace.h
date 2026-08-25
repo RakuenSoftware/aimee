@@ -135,9 +135,10 @@ int count_active_worktrees_for_root(const char *git_root);
 /* Decide whether the session needs to relocate into its per-session
  * worktree for isolation. Returns 1 and fills `target` with the worktree
  * path when cwd is inside a main (non-aimee) git checkout; returns 0 when
- * cwd is already inside an aimee-managed worktree, is not in a git repo, or
- * the path/creation lookup fails. When create_if_missing is non-zero the
- * worktree is created on demand (idempotent; reuses an existing one). */
+ * cwd is already inside an aimee-managed worktree or is not in a git repo.
+ * Returns -1 when an applicable worktree cannot be resolved or created. When
+ * create_if_missing is non-zero the worktree is created on demand (idempotent;
+ * reuses an existing one). */
 int session_isolation_target(const char *cwd, const char *sid, char *target, size_t target_len,
                              int create_if_missing);
 

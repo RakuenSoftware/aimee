@@ -1203,9 +1203,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
           delegate_permissions_allow(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE, here);
    }
    if (worktree_branch && worktree_branch[0] && !delegate_allows_writes)
-      fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
-            "use the parent worktree");
-   int delegate_needs_worktree = delegate_allows_writes;
+      fatal("--worktree is only valid for write-capable delegates; a read-only delegate's "
+            "dedicated branch cannot be retargeted");
+   /* Every repository-backed delegate gets a distinct checkout. Read-only is
+    * enforced later by the container mount/tool policy; sharing the parent's
+    * directory would still couple its view to another session's live files. */
+   int delegate_needs_worktree = 1;
    if (source_path_count > 0)
    {
       const char *base = effective_prompt ? effective_prompt : prompt;
@@ -1225,8 +1228,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          final_prompt = handoff_prompt;
    }
 
-   /* Worktree: read-only delegates inspect the parent workspace directly.
-    * Only write-capable delegates get an isolated sibling worktree. */
+   /* Worktree: every repository-backed delegate gets an isolated sibling. */
    char worktree_path[MAX_PATH_LEN] = "";
    char original_cwd[MAX_PATH_LEN] = "";
    char delegate_git_root[MAX_PATH_LEN] = "";
@@ -1291,14 +1293,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                if (stat(target, &tst) == 0 && S_ISDIR(tst.st_mode))
                {
                   if (chdir(target) != 0)
-                     LOG_WARN("delegate", "could not chdir to worktree: %s", target);
+                     fatal("could not enter isolated delegate worktree %s", target);
                   else
                      LOG_INFO("delegate", "delegate running in worktree %s", worktree_path);
                }
                else if (chdir(worktree_path) != 0)
-               {
-                  LOG_WARN("delegate", "could not chdir to worktree: %s", worktree_path);
-               }
+                  fatal("could not enter isolated delegate worktree %s", worktree_path);
                else
                {
                   LOG_INFO("delegate", "delegate running in worktree %s", worktree_path);
@@ -1319,10 +1319,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                }
             }
             else
-            {
-               LOG_WARN("delegate", "could not create sibling worktree for %s", delegate_git_root);
-               delegate_git_root[0] = '\0';
-            }
+               fatal("could not create isolated delegate worktree for %s", delegate_git_root);
          }
       }
    }

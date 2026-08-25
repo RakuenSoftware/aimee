@@ -68,31 +68,41 @@ should contain only knowledge appropriate for every member.
 
 ## Writes and worktrees
 
-Sessions and delegates do not write directly into a shared base checkout when isolation is required.
-The server or workflow plane creates a managed worktree and branch on first write.
+Sessions and delegates never operate from another session's checkout when isolation is required.
+The launcher or workflow plane creates a managed worktree and branch before the client or container
+starts. Read-only delegates receive a dedicated worktree too; its bind mount is read-only.
 
 A new session gets its own branch and its own worktree at session start, not on first write. This
 covers a Claude Code session through the SessionStart hook and an MCP session through
 `aimee mcp-serve`. Both land at `<repo>/.aimee/worktrees/<key>/main` on branch
 `aimee/session/<key>`.
 
-The branch is cut from the repository's default branch, never from whatever branch the shared
-checkout happens to have checked out. `session_worktree_base` selects the base; the default resolves
-`origin/HEAD`. When no default can be resolved, session start fails and says so rather than guessing
-a base, because guessing put new sessions on another session's work. Fix the remote with
-`git remote set-head origin -a`, or set an explicit ref.
+At session start Aimee performs a bounded, non-interactive fetch and pins the exact commit returned
+by the remote's current `HEAD`. A failed fetch stops the launch; stale remote-tracking state is not a
+fallback. `session_worktree_base` may select a feature or release ref. If that ref already contains
+the fetched default tip, Aimee changes nothing. Otherwise it merges the default tip only into the new
+session branch, never into the user's source branch; a conflict stops the launch and removes the
+empty failed session tree. `current` and `local_default` are the explicit offline/stale overrides.
 
 `<key>` is derived from the whole session id, so two sessions never share a worktree or a branch. It
 was previously the first 16 characters of the id, which collided for ids built on a shared prefix and
-let concurrent sessions overwrite each other in one checkout.
+let concurrent sessions overwrite each other in one checkout. Aimee adds the internal worktree store
+to the repository's local `info/exclude`; it does not change the project's committed `.gitignore` and
+ordinary Git status stays clean.
 
-An MCP session enters its worktree itself, so aimee's file and shell tools already run there. A hook
-cannot change its host's directory, so a Claude Code session is told the path and enters it with
-`EnterWorktree`.
+`aimee launch -- <client>` allocates the session before `exec`, changes into the worktree, and then
+starts any local executable. Client hooks are the compatibility path for clients launched directly:
+they provision the same tree and route every supported file/shell tool into it while rejecting a
+different session's tree. `aimee launch --gateway -- <client>` additionally routes provider traffic
+through Aimee; workspace isolation itself does not require changing the client's model endpoint.
 
-A delegate does not get a session worktree. A write-capable delegate gets a copy of its parent's
-branch and current working tree, so it starts from what the parent has now rather than from the
-parent's last commit.
+A delegate gets a sibling worktree containing its parent's branch and current working-tree state, so
+it starts from what the parent has now rather than from the parent's last commit. Container creation
+binds that exact directory and sets it as the container working directory. The runtime mount set is
+inspected before the container is handed to the agent; a mismatch destroys the container. The
+parent checkout's working files are not mounted into the container. Linked worktrees receive only
+their common Git metadata (read-only) plus their own checkout; write roles additionally receive a
+writable per-worktree index mount.
 
 ### Worktrees created before the key changed
 

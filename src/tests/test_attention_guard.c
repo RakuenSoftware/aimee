@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "cli_attention_guard.h"
+#include "client_session_worktree.h"
 #include "client_config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
@@ -122,7 +123,7 @@ static void test_score(void)
 
 /* Hook input for a recursive raw scan (the Bash `grep -r` form). */
 #define RAW_SCAN_HOOK                                                                              \
-   "{\"session_id\":\"agtest\",\"tool_name\":\"Bash\","                                            \
+   "{\"session_id\":\"agtest\",\"cwd\":\"/home/u/nonrepo\",\"tool_name\":\"Bash\","                \
    "\"tool_input\":{\"command\":\"grep -r TODO src\"}}"
 
 static void write_config(const char *body)
@@ -659,13 +660,14 @@ static void test_isolation_enforcement(void)
    mkdir(g_home, 0700);
 
 #define EDIT_PRIMARY_HOOK                                                                          \
-   "{\"session_id\":\"isotest\",\"tool_name\":\"Edit\","                                           \
+   "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/repo\",\"tool_name\":\"Edit\","                  \
    "\"tool_input\":{\"file_path\":\"/home/u/repo/src/x.c\"}}"
 #define EDIT_WORKTREE_HOOK                                                                         \
-   "{\"session_id\":\"isotest\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":"             \
+   "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/"                                                \
+   "repo\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":"                                  \
    "\"/home/u/repo/.aimee/worktrees/ab/main/src/x.c\"}}"
 #define READ_PRIMARY_HOOK                                                                          \
-   "{\"session_id\":\"isotest\",\"tool_name\":\"Read\","                                           \
+   "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/repo\",\"tool_name\":\"Read\","                  \
    "\"tool_input\":{\"file_path\":\"/home/u/repo/src/x.c\"}}"
 
    /* (1) Default ON: with no config, a mutating op on the primary checkout is
@@ -683,8 +685,19 @@ static void test_isolation_enforcement(void)
    write_config("require_session_worktree: true\n");
    assert(handle_attention_guard() == 2);
 
-   /* (4) Enabled: an Edit whose target is inside a managed worktree is allowed. */
+   /* (4) Another session's managed worktree is not ours and is blocked. */
    g_stdin_json = EDIT_WORKTREE_HOOK;
+   assert(handle_attention_guard() == 2);
+
+   /* This session's own keyed worktree remains allowed. */
+   char own_key[80], own_hook[1024];
+   client_session_worktree_key("isotest", own_key, sizeof own_key);
+   snprintf(own_hook, sizeof own_hook,
+            "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/repo\",\"tool_name\":\"Edit\","
+            "\"tool_input\":{\"file_path\":"
+            "\"/home/u/repo/.aimee/worktrees/%s/main/src/x.c\"}}",
+            own_key);
+   g_stdin_json = own_hook;
    assert(handle_attention_guard() == 0);
 
    /* (5) Enabled: a Read on the primary checkout is allowed (non-mutating). */
@@ -698,11 +711,8 @@ static void test_isolation_enforcement(void)
    assert(handle_attention_guard() == 2);
    unsetenv("AIMEE_GUARD");
 
-   /* (7) The refusal must name the path it JUDGED. With an absolute file_path
-    *     the effective target is that file — and the cwd can be a perfectly
-    *     good managed worktree. Reporting the cwd as "not a managed worktree"
-    *     there is a false statement that sends the reader diagnosing the wrong
-    *     thing (observed: a whole session lost to it). */
+   /* (7) Isolation is an implementation detail. Even a fail-closed response
+    * must not tell the agent/user to create or reason about worktrees. */
    char wtcwd[512];
    snprintf(wtcwd, sizeof(wtcwd), "%s/repo/.aimee/worktrees/ab/main", g_home);
    platform_mkdir_p(wtcwd, 0700);
@@ -713,8 +723,9 @@ static void test_isolation_enforcement(void)
    g_stdin_json = EDIT_PRIMARY_HOOK; /* target /home/u/repo/src/x.c, cwd IS managed */
    char msg[4096];
    assert(capture_stderr(&msg[0], sizeof(msg)) == 2);
-   assert(strstr(msg, "/home/u/repo/src/x.c") != NULL); /* names the real offender */
-   assert(strstr(msg, wtcwd) == NULL);                  /* does not accuse the good cwd */
+   assert(strstr(msg, "internal session workspace isolation failed") != NULL);
+   assert(strstr(msg, "/home/u/repo/src/x.c") == NULL);
+   assert(strstr(msg, "worktree") == NULL);
 
    /* A Bash mutation has no file_path, so the cwd IS the judged target and
     * naming it is correct. Same cwd, and now it is allowed — which is exactly
@@ -730,6 +741,30 @@ static void test_isolation_enforcement(void)
    printf("isolation enforcement OK\n");
 }
 
+static void test_camel_case_client_path_routing(void)
+{
+   char repo[512], cmd[2048], absolute[640];
+   snprintf(repo, sizeof repo, "%s/aimee_camel_route_%d", platform_tmpdir(), (int)getpid());
+   snprintf(cmd, sizeof cmd,
+            "rm -rf '%s' && git init -q -b main '%s' && git -C '%s' config user.email t@t && "
+            "git -C '%s' config user.name t && touch '%s/seed' && git -C '%s' add seed && "
+            "git -C '%s' commit -qm seed",
+            repo, repo, repo, repo, repo, repo, repo);
+   assert(system(cmd) == 0);
+   snprintf(absolute, sizeof absolute, "%s/new.txt", repo);
+   cJSON *input = cJSON_CreateObject(), *updated = NULL;
+   cJSON_AddStringToObject(input, "filePath", absolute);
+   assert(attn_route_tool_input("camel-session", repo, "Write", input, &updated) == 0);
+   const char *routed = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(updated, "filePath"));
+   assert(routed && strstr(routed, "/.aimee/worktrees/") != NULL);
+   assert(strcmp(routed, absolute) != 0);
+   cJSON_Delete(updated);
+   cJSON_Delete(input);
+   snprintf(cmd, sizeof cmd, "rm -rf '%s'", repo);
+   system(cmd);
+   printf("camelCase client path routing OK\n");
+}
+
 int main(void)
 {
    client_config_set_provider(test_config_value);
@@ -741,6 +776,7 @@ int main(void)
    test_required_discovery_activation();
    test_session_isolation_decision();
    test_isolation_enforcement();
+   test_camel_case_client_path_routing();
    test_external_memory_decision();
    test_external_memory_enforcement();
    printf("all tests passed\n");

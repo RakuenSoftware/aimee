@@ -15,6 +15,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "computer_use.h"
 #include "config.h"
+#include "config_client.h"
 #include "diff.h"
 #include "dstr.h"
 #include "guardrails.h"
@@ -186,23 +187,46 @@ int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd)
    return agent_tools_path_under_root(norm, g_parent_ro_root);
 }
 
-/* Session-isolation backstop (Layer 2, opt-in via require_session_worktree).
+static size_t agent_tools_managed_root_len(const char *path)
+{
+   const char *marker = strstr(path, "/.aimee/worktrees/");
+   if (marker)
+   {
+      const char *key = marker + strlen("/.aimee/worktrees/");
+      const char *slash = strchr(key, '/');
+      if (!slash || strncmp(slash, "/main", 5) != 0 || (slash[5] != '\0' && slash[5] != '/'))
+         return 0;
+      return (size_t)(slash + 5 - path);
+   }
+   marker = strstr(path, "/wfe-worktrees/");
+   if (marker)
+   {
+      const char *id = marker + strlen("/wfe-worktrees/");
+      const char *slash = strchr(id, '/');
+      return (size_t)((slash ? slash : id + strlen(id)) - path);
+   }
+   return 0;
+}
+
+/* Session-isolation backstop (Layer 2, enforced unless require_session_worktree
+ * is explicitly false).
  * Blocks a server-side agent/delegate write whose normalized target is NOT
  * inside an aimee-managed worktree (path component .aimee/worktrees/...). This
  * mirrors the client-side attention-guard
  * (Layer 1) so aimee's own in-process agent writes obey the same isolation
  * policy that a thin client's PreToolUse hook enforces — covering the case
- * where session-start never provisioned a worktree. Default off (the config
- * flag defaults to 0), so this is a no-op unless explicitly enabled. */
+ * where session-start never provisioned a worktree. */
 int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
 {
    if (!path || !path[0])
       return 0;
-   /* legacy_config_read here mirrors the per-call pattern already used elsewhere in
-    * this file (it is cheap and reads the cached config). Default-off: when the
-    * flag is unset — or the config is unreadable, which leaves the default 0 —
-    * this is a no-op, matching the feature's opt-in nature. */
-   if (!config_require_session_worktree())
+   /* Fail closed if the independently running config authority is unavailable.
+    * Its generated convenience accessor returns zero for both explicit false
+    * and transport failure, which would silently disable isolation. */
+   double require_worktree = 1.0;
+   if (config_client_read_number("require_session_worktree", &require_worktree) != 0)
+      require_worktree = 1.0;
+   if (require_worktree == 0.0)
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
     * escapes. Match the canonical managed-worktree location plus the workflow
@@ -217,10 +241,15 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * preferences. */
    char norm[MAX_PATH_LEN];
    normalize_path(path, cwd, norm, sizeof(norm));
-   if (strstr(norm, "/.aimee/worktrees/") != NULL)
-      return 0;
-   if (strstr(norm, "/wfe-worktrees/") != NULL)
-      return 0;
+   size_t root_len = agent_tools_managed_root_len(norm);
+   if (root_len && cwd && cwd[0])
+   {
+      char norm_cwd[MAX_PATH_LEN];
+      normalize_path(cwd, NULL, norm_cwd, sizeof(norm_cwd));
+      size_t cwd_root_len = agent_tools_managed_root_len(norm_cwd);
+      if (cwd_root_len == root_len && strncmp(norm, norm_cwd, root_len) == 0)
+         return 0;
+   }
    return 1;
 }
 

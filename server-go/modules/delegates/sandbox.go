@@ -52,6 +52,10 @@ type SandboxMountKind int
 const (
 	// SandboxWorkspace is repository content.
 	SandboxWorkspace SandboxMountKind = iota
+	// SandboxGitMetadata is the repository's administration directory. Linked
+	// worktrees point at it from their .git file, so it must be present even
+	// though the parent checkout itself must not be exposed to the delegate.
+	SandboxGitMetadata
 	// SandboxControlSocket is the single outward channel to the parent.
 	SandboxControlSocket
 )
@@ -90,14 +94,14 @@ type SandboxRequest struct {
 	// into a tree the caller had already ruled read-only.
 	WritesAllowed bool
 
-	// RepoRoot is the parent checkout. Mounted read-only for a write delegate
-	// so the tree is readable but only the worktree is writable.
+	// RepoRoot is the parent checkout. Its working files are never mounted;
+	// linked worktrees need only RepoRoot/.git as their common object store.
 	RepoRoot string
-	// Worktree is this delegate's own worktree when the role writes, or the
-	// PARENT's worktree when it does not.
+	// Worktree is this delegate's own worktree for both write and read roles.
 	Worktree string
-	// GitDir is this delegate's git metadata directory. Only meaningful for a
-	// write delegate; `git status` refreshes its index there.
+	// GitDir is this delegate's per-worktree git metadata directory. It remains
+	// part of the checkout identity for every role; write delegates receive a
+	// writable nested mount because `git status` refreshes the index there.
 	GitDir string
 	// IsGitCheckout is the caller's answer to "is Worktree a git checkout".
 	IsGitCheckout bool
@@ -183,11 +187,11 @@ func cleanAbs(p string) (string, bool) {
 
 // BuildSandboxSpec decides the container's shape for one delegate run.
 //
-// A write role gets three mounts: the repo read-only so the whole tree is
-// readable and a write outside its worktree fails, then its own worktree and
-// git directory read-write nested inside. A read-only role gets exactly one
-// mount -- the parent's worktree -- and it is read-only because that is the
-// supervisor's live branch and the mode is the enforcement, not the request.
+// A linked worktree gets its own files plus the common Git administration
+// directory needed by its .git pointer. The parent checkout's working files
+// are never mounted, so one session cannot even read another session's WIP.
+// Write delegates additionally receive their per-worktree index directory as
+// a nested writable mount; the common object/ref store remains read-only.
 func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 	var spec SandboxSpec
 
@@ -202,22 +206,23 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 	write := req.WritesAllowed
 	spec.ReadOnly = !write
 
+	repo, ok := cleanAbs(req.RepoRoot)
+	if !ok {
+		return spec, fmt.Errorf("repo root must be an absolute path, got %q", req.RepoRoot)
+	}
+	if repo != worktree {
+		commonGit := path.Join(repo, ".git")
+		spec.Mounts = append(spec.Mounts,
+			SandboxMount{Source: commonGit, Target: commonGit, ReadOnly: true, Kind: SandboxGitMetadata})
+	}
+
 	if write {
-		repo, ok := cleanAbs(req.RepoRoot)
-		if !ok {
-			return spec, fmt.Errorf("repo root must be an absolute path, got %q", req.RepoRoot)
-		}
 		// A PLAIN checkout carries its own .git, so the repo root IS the
 		// worktree. It needs one writable mount, not a read-only mount of the
 		// same path with a writable one layered over it: two binds on one target
 		// is not a layering, and the delegate would get whichever docker
 		// resolved last -- a coin flip between a writable tree and a read-only
 		// one, discovered only when a write failed.
-		if repo != worktree {
-			// The tree is readable; only the worktree below is writable.
-			spec.Mounts = append(spec.Mounts,
-				SandboxMount{Source: repo, Target: repo, ReadOnly: true})
-		}
 		spec.Mounts = append(spec.Mounts,
 			SandboxMount{Source: worktree, Target: worktree, ReadOnly: false})
 		if gitDir, ok := cleanAbs(req.GitDir); ok {
@@ -225,11 +230,10 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 			// it. `git commit` still fails, because objects live in the
 			// read-only repo -- intended, commits run module-side.
 			spec.Mounts = append(spec.Mounts,
-				SandboxMount{Source: gitDir, Target: gitDir, ReadOnly: false})
+				SandboxMount{Source: gitDir, Target: gitDir, ReadOnly: false, Kind: SandboxGitMetadata})
 		}
 	} else {
-		// The parent's worktree. Read-only is enforced by the mount, not by
-		// asking the delegate not to write.
+		// The delegate's dedicated worktree, enforced read-only by the mount.
 		spec.Mounts = append(spec.Mounts,
 			SandboxMount{Source: worktree, Target: worktree, ReadOnly: true})
 	}
@@ -310,11 +314,11 @@ func ValidateSandboxSpec(spec SandboxSpec) error {
 		if _, ok := cleanAbs(m.Target); !ok {
 			return fmt.Errorf("mount target must be an absolute path, got %q", m.Target)
 		}
-		// A read-only role must not receive a writable WORKSPACE mount by any
-		// route. The control socket is the sole exemption and must stay
-		// writable to be connectable.
-		if spec.ReadOnly && m.Kind == SandboxWorkspace && !m.ReadOnly {
-			return fmt.Errorf("read-only delegate given a writable workspace mount: %s", m.Target)
+		// A read-only role must not receive any writable filesystem mount. The
+		// control socket is the sole exemption and must stay writable to be
+		// connectable.
+		if spec.ReadOnly && m.Kind != SandboxControlSocket && !m.ReadOnly {
+			return fmt.Errorf("read-only delegate given a writable filesystem mount: %s", m.Target)
 		}
 		if m.Kind == SandboxControlSocket {
 			controlMounts++

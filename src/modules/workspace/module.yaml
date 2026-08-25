@@ -15,6 +15,7 @@
   "sources": [
     "src/modules/workspace/cli_workspace_serve.c",
     "src/modules/workspace/workspace.c",
+    "src/modules/workspace/workspace_session_lookup.c",
     "src/modules/workspace/workspace_client_diff.c",
     "src/modules/workspace/workspace_handle.c",
     "src/modules/workspace/workspace_manifest.c",

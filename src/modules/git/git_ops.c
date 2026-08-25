@@ -255,7 +255,14 @@ static int resolve_session_dir(const char *principal, const char *project, const
    if (session_id && session_id[0] && g_session_isolation_target)
    {
       char wt[GO_PATH_MAX];
-      if (g_session_isolation_target(dir, session_id, wt, sizeof(wt), 1 /*create_if_missing*/) == 1)
+      int iso_rc =
+          g_session_isolation_target(dir, session_id, wt, sizeof(wt), 1 /*create_if_missing*/);
+      if (iso_rc < 0)
+      {
+         snprintf(err, errlen, "could not initialize isolated session workspace");
+         return -1;
+      }
+      if (iso_rc == 1)
          snprintf(dir, dir_len, "%s", wt);
    }
    return 0;

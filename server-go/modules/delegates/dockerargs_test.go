@@ -47,8 +47,12 @@ func TestDockerArgsAlwaysDisablesNetwork(t *testing.T) {
 // the enforcement was only ever a comment.
 func TestDockerArgsReadOnlyRoleGetsReadOnlyBind(t *testing.T) {
 	args := argsFor(t, readReq())
-	if !hasFlagValue(args, "-v", "/srv/repo:/srv/repo:ro") {
-		t.Errorf("the parent worktree was not bound read-only: %v", args)
+	wt := "/srv/repo/.aimee/worktrees/r1/main"
+	if !hasFlagValue(args, "-v", wt+":"+wt+":ro") {
+		t.Errorf("the dedicated worktree was not bound read-only: %v", args)
+	}
+	if !hasFlagValue(args, "-v", "/srv/repo/.git:/srv/repo/.git:ro") {
+		t.Errorf("the common Git metadata was not bound read-only: %v", args)
 	}
 	// Only the control socket may be writable.
 	for i := 0; i+1 < len(args); i++ {
@@ -65,11 +69,11 @@ func TestDockerArgsReadOnlyRoleGetsReadOnlyBind(t *testing.T) {
 	}
 }
 
-// A write role gets the tree readable and only its worktree writable.
+// A write role gets only common Git metadata readable and its worktree writable.
 func TestDockerArgsWriteRoleMountModes(t *testing.T) {
 	args := argsFor(t, writeReq())
-	if !hasFlagValue(args, "-v", "/srv/repo:/srv/repo:ro") {
-		t.Errorf("repo not bound read-only: %v", args)
+	if !hasFlagValue(args, "-v", "/srv/repo/.git:/srv/repo/.git:ro") {
+		t.Errorf("common Git metadata not bound read-only: %v", args)
 	}
 	wt := "/srv/repo/.aimee/worktrees/w1/main"
 	if !hasFlagValue(args, "-v", wt+":"+wt) {

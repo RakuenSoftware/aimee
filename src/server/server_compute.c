@@ -1304,23 +1304,20 @@ void delegate_worker(void *arg)
                 deleg_id, role, cwd[0] ? cwd : "(no workspace named)");
    if (branch && !delegate_allows_writes)
    {
-      delegation_compute_error(cctx, "read-only delegates must use the parent worktree; branch "
-                                     "requests require a sibling delegate worktree");
+      delegation_compute_error(cctx, "read-only delegates cannot retarget their dedicated branch");
       goto delegate_fail;
    }
-   /* Isolate a write delegate in its own sibling worktree only when it runs
-    * concurrently — a background job, a parallel (coord) task, or an explicit
-    * branch. A foreground delegate is the sole writer (the parent turn blocks on
-    * it), so it shares the parent worktree and works on its live state. */
-   int delegate_concurrent = (cctx->background_job_id > 0) || (cctx->coord_task_id > 0);
-   int delegate_needs_worktree = delegate_allows_writes && (delegate_concurrent || branch != NULL);
+   /* Every repository-backed delegate receives a distinct checkout. This is
+    * independent of write permission and foreground/background scheduling:
+    * sharing a path would still expose another session's live files. */
+   int delegate_needs_worktree = 1;
 
    /* Set thread-local CWD for delegate execution (validate: absolute, no traversal) */
    if (cwd[0] && cwd[0] == '/' && !strstr(cwd, "/../") && !strstr(cwd, "/.."))
       run_cmd_set_cwd(cwd);
 
-   /* Read-only delegates use parent workspace; write-capable delegates use sibling worktrees.
-    * (worktree path/git_root/work_name are hoisted for delegate_fail: cleanup.) */
+   /* Every repository-backed delegate uses a sibling worktree. The path fields
+    * are hoisted for delegate_fail cleanup. */
    int delegate_worktree_attempted = 0;
    int delegate_shared_worktree = 0;
    int delegate_dedicated_worktree = 0;
@@ -1336,12 +1333,12 @@ void delegate_worker(void *arg)
       delegate_dedicated_worktree = wt.dedicated;
    }
 
-   if (delegate_allows_writes && delegate_worktree_attempted && !delegate_worktree_path[0])
+   if (delegate_worktree_attempted && !delegate_worktree_path[0])
    {
       char errmsg[512];
       snprintf(errmsg, sizeof(errmsg),
-               "refusing to run write-capable delegate in parent worktree '%s': "
-               "could not create an isolated delegate worktree",
+               "refusing to run delegate in parent worktree '%s': "
+               "could not create a dedicated delegate worktree",
                cwd[0] ? cwd : delegate_git_root);
       delegation_compute_error(cctx, errmsg);
       goto delegate_fail;

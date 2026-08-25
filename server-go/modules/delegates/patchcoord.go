@@ -57,26 +57,26 @@ type PatchTaskReport struct {
 
 // PatchReport mirrors delegate_patch_report_t.
 type PatchReport struct {
-	ImplementationPackets    int
-	Planned                  int
-	Running                  int
-	Returned                 int
-	Verified                 int
-	Reviewable               int
-	Accepted                 int
-	Failed                   int
-	NeedsSupervisor          int
-	InvalidHandoffs          int
-	OutsideOwnershipTouches  int
-	PatchOverlaps            int
-	StaleWorktrees           int
-	FocusedTestsPassed       int
-	ReviewerPackets          int
-	ReviewerBlockingFindings int
+	ImplementationPackets     int
+	Planned                   int
+	Running                   int
+	Returned                  int
+	Verified                  int
+	Reviewable                int
+	Accepted                  int
+	Failed                    int
+	NeedsSupervisor           int
+	InvalidHandoffs           int
+	OutsideOwnershipTouches   int
+	PatchOverlaps             int
+	StaleWorktrees            int
+	FocusedTestsPassed        int
+	ReviewerPackets           int
+	ReviewerBlockingFindings  int
 	ReviewerOwnerPacketRoutes int
-	ReviewerStatus           string
-	RecommendedNextCommand   string
-	Tasks                    []PatchTaskReport
+	ReviewerStatus            string
+	RecommendedNextCommand    string
+	Tasks                     []PatchTaskReport
 }
 
 func isSchema(v *jsonValue, name string) bool {

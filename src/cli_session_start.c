@@ -1,5 +1,5 @@
-/* cli_session_start.c: legacy client hooks. SessionStart itself is a compatibility
- * no-op; behavior is attached to shared model ingress, not lifecycle callbacks. */
+/* cli_session_start.c: client lifecycle hooks. SessionStart provisions the
+ * session's hidden checkout; model context still enters through shared ingress. */
 #include "cli_client.h"
 #include "cli_session_start.h"
 #include "cJSON.h"
@@ -414,11 +414,50 @@ int handle_session_start(int json_output)
    if (sid && sid[0])
       (void)client_session_id_publish(sid, aimee_home());
 
-   /* Compatibility no-op for clients that still have an old SessionStart hook
-    * installed. The launcher owns session id, worktree, and cwd before the host
-    * process starts; editable persona content is prepended at model ingress.
-    * Emitting additionalContext here would reintroduce client/version-specific
-    * delivery and duplicate the first-message payload. */
+   /* A lifecycle hook cannot chdir its parent, but it can materialize the
+    * checkout before the first tool call. The PreToolUse adapter then routes
+    * inputs without emitting model context or asking the user to manage git. */
+   char cwd[4096];
+   const char *payload_cwd = NULL;
+   cJSON *jcwd = hook_json ? cJSON_GetObjectItemCaseSensitive(hook_json, "cwd") : NULL;
+   if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
+      payload_cwd = jcwd->valuestring;
+   else if (getcwd(cwd, sizeof cwd))
+      payload_cwd = cwd;
+   char worktree[4096];
+   int wt = client_session_worktree_ensure_at(sid, payload_cwd, worktree, sizeof worktree);
+   if (wt == -2)
+   {
+      fprintf(stderr, "aimee: could not initialize this session's isolated workspace\n");
+      cJSON_Delete(hook_json);
+      free(stdin_data);
+      return 2;
+   }
+
+   /* Success is deliberately empty. Emitting additionalContext would expose an
+    * implementation detail and duplicate shared model-ingress context. */
+   if (json_output)
+      puts("{\"exit_code\":0}");
+   cJSON_Delete(hook_json);
+   free(stdin_data);
+   return 0;
+}
+
+int handle_session_end(int json_output)
+{
+   char *stdin_data = read_stdin();
+   cJSON *hook_json = stdin_data ? cJSON_Parse(stdin_data) : NULL;
+   char hook_sid[64] = "";
+   const char *sid =
+       client_hook_payload_session_id(hook_json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
+   char cwd[4096];
+   const char *payload_cwd = NULL;
+   cJSON *jcwd = hook_json ? cJSON_GetObjectItemCaseSensitive(hook_json, "cwd") : NULL;
+   if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
+      payload_cwd = jcwd->valuestring;
+   else if (getcwd(cwd, sizeof cwd))
+      payload_cwd = cwd;
+   (void)client_session_worktree_release_at(sid, payload_cwd);
    if (json_output)
       puts("{\"exit_code\":0}");
    cJSON_Delete(hook_json);
