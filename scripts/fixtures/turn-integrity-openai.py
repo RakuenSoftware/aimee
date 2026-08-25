@@ -39,7 +39,11 @@ def response_for(body):
         elif "TI_GIT_PUSH" in wire:
             content = "TURN_INTEGRITY_PUSH_OBSERVED"
         elif "TI_MCP_TIMEOUT" in wire:
-            content = "TURN_INTEGRITY_UNKNOWN_OUTCOME_OBSERVED"
+            content = (
+                "TURN_INTEGRITY_UNKNOWN_OUTCOME_OBSERVED"
+                if "transport timeout" in wire
+                else "TURN_INTEGRITY_TIMEOUT_NOT_OBSERVED"
+            )
         return completion(content)
 
     name = None
