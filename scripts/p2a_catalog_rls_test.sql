@@ -7,7 +7,7 @@
 --   (b) org_catalog_entitled() EXCLUDES enabled=false catalog rows;
 --   (c) the runtime role has NO direct SELECT on org_model_catalog (privilege denied) —
 --       every catalog read must funnel through the definer function;
---   (d) a WORM kb_audit_event row is appended atomically on a catalog mutation;
+--   (d) a WORM kb_audit_outbox row is appended atomically on a catalog mutation;
 --   (e) a non-admin principal cannot mutate the catalog (admin gate raises).
 -- Any failed assertion aborts with an ERROR (non-zero psql exit): a hard CI gate.
 --
@@ -54,18 +54,18 @@ BEGIN
   END IF;
 END $$;
 
--- (d) A WORM kb_audit_event row is appended atomically on a catalog mutation. Capture
+-- (d) A WORM kb_audit_outbox row is appended atomically on a catalog mutation. Capture
 -- the count, do one more upsert, and assert exactly one new row with the right action.
 DO $$
 DECLARE n0 bigint; n1 bigint; last_action text;
 BEGIN
-  SELECT count(*) INTO n0 FROM kb_audit_event;
+  SELECT count(*) INTO n0 FROM kb_audit_outbox;
   PERFORM org_catalog_upsert('p2a-audited', 'Audited', 'gemini', 'gemini', '', true);
-  SELECT count(*) INTO n1 FROM kb_audit_event;
+  SELECT count(*) INTO n1 FROM kb_audit_outbox;
   IF n1 <> n0 + 1 THEN
     RAISE EXCEPTION 'P2a FAIL: catalog upsert did not append exactly one audit row (% -> %)', n0, n1;
   END IF;
-  SELECT action INTO last_action FROM kb_audit_event ORDER BY seq DESC LIMIT 1;
+  SELECT action INTO last_action FROM kb_audit_outbox ORDER BY outbox_id DESC LIMIT 1;
   IF last_action <> 'org_catalog_upsert' THEN
     RAISE EXCEPTION 'P2a FAIL: newest audit action = % (want org_catalog_upsert)', last_action;
   END IF;

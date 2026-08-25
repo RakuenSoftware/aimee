@@ -1,6 +1,6 @@
-/* kb_audit_worm.h: aimee-kb Postgres WORM audit store (S5). Same hash-chained
- * record as the aimee-server store (audit_worm_chain); WORM enforced by the
- * kb_audit_event triggers + a writer role granted only INSERT/SELECT. */
+/* kb_audit_worm.h: aimee-kb Postgres WORM audit producer seam (S5). Producers
+ * commit immutable outbox intents; the separately credentialed aimee-kb-worm
+ * process constructs the shared hash-chain record. */
 #ifndef AIMEE_DB2_KB_AUDIT_WORM_H
 #define AIMEE_DB2_KB_AUDIT_WORM_H 1
 
@@ -20,14 +20,14 @@ extern "C"
     * <aimee/db2/host_contracts.h>. NULL removes the provider. */
    void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider);
 
-   /* Append one governed kb action, hash-chained to the current head. detail is
-    * bounded to AUDIT_WORM_DETAIL_MAX. Returns 0 on success, -1 on failure. */
+   /* Submit one governed action to the durable WORM outbox. detail is bounded
+    * to AUDIT_WORM_DETAIL_MAX. Returns 0 when the intent commits, -1 on failure. */
    int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
                            const char *subject, const char *verdict, const char *detail);
 
-   /* Transaction-owned variant used when a destructive mutation and its audit
-    * row must commit atomically. |conn| must already be inside BEGIN; this
-    * function neither commits nor rolls back. */
+   /* Transaction-owned variant used when a mutation and its immutable audit
+    * intent must commit atomically. |conn| must already be inside BEGIN; this
+    * function neither commits nor rolls back and never writes the chain. */
    int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
                                   const char *action, const char *subject, const char *verdict,
                                   const char *detail);
@@ -38,6 +38,11 @@ extern "C"
 
    /* Row count (test/introspection). -1 on error. */
    long db2_kb_audit_count(void);
+
+   /* Durable producer backlog. Returns 0 and fills the available outputs, or
+    * -1 when the database/function is unavailable. Age is zero for an empty
+    * queue. Runtime has read-only EXECUTE on the aggregate, never table access. */
+   int db2_kb_audit_pending(long long *count, long long *oldest_age_seconds);
 
    /* Capture gate: the aimee-kb service enables this at init from
     * config.audit_worm_enabled; the central kb audit seam (db2_audit_event_write)

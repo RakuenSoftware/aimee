@@ -368,6 +368,23 @@ if [ "$external_db" -eq 0 ]; then
     fi
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
+    # The self-contained tier still runs audit construction in a separate OS
+    # process and under a separate PostgreSQL role. Local trust auth means this
+    # is not the hardened credential boundary (that requires the external
+    # worker service), but it preserves the process/control-flow split and keeps
+    # the development image functional without giving aimee-kb a worker thread.
+    "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet >/dev/null <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_worm_worker') THEN
+    CREATE ROLE aimee_kb_worm_worker LOGIN NOINHERIT NOBYPASSRLS;
+  END IF;
+END $$;
+ALTER ROLE aimee_kb_worm_worker LOGIN NOINHERIT NOBYPASSRLS
+  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+SQL
+    embedded_worm_dsn="postgresql:///$DB?host=$PGSOCK&user=aimee_kb_worm_worker"
+
     # POSIX sh has no portable wait -n. Monitor both children, including Linux
     # zombies: kill -0 still succeeds for a dead-but-unreaped postmaster, which
     # previously left the container running unhealthy forever after PostgreSQL
@@ -381,6 +398,41 @@ if [ "$external_db" -eq 0 ]; then
         [ "$_stat_state" != Z ]
     }
 
+    start_embedded_worm() {
+        (
+            # aimee-kb owns schema migration. Wait until the bounded drainer
+            # exists, then install exactly the worker grants and drop every
+            # direct storage/function capability before authenticating as it.
+            while process_alive "$kb"; do
+                if "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet --tuples-only \
+                    --command="SELECT to_regprocedure('aimee_kb_worm_api.drain(integer)') IS NOT NULL" \
+                    2>/dev/null | grep -q t; then
+                    break
+                fi
+                sleep 0.1
+            done
+            process_alive "$kb" || exit 1
+            "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet >/dev/null <<'SQL'
+  -- Revoking the role itself is not enough: PostgreSQL grants schema public
+  -- USAGE to PUBLIC by default, and privileges inherited through PUBLIC cannot
+  -- be denied per-role.  The embedded cluster's database owner retains access
+  -- through pg_database_owner; close the inherited path before asserting that
+  -- the worker can resolve only its private API schema.
+  REVOKE USAGE ON SCHEMA public FROM PUBLIC;
+  REVOKE ALL ON SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON SCHEMA aimee_kb_worm_api FROM PUBLIC;
+  GRANT USAGE ON SCHEMA aimee_kb_worm_api TO aimee_kb_worm_worker;
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA aimee_kb_worm_api FROM aimee_kb_worm_worker;
+  GRANT EXECUTE ON FUNCTION aimee_kb_worm_api.drain(INTEGER) TO aimee_kb_worm_worker;
+SQL
+            exec env AIMEE_WORM_DB2_URL="$embedded_worm_dsn" aimee-kb-worm
+        ) &
+        worm=$!
+    }
+
     start_embedder "$@"
     start_modules
 
@@ -388,6 +440,7 @@ if [ "$external_db" -eq 0 ]; then
     # cleanly. Forward the stop signal so the kb still gets its own shutdown.
     aimee-kb "$@" &
     kb=$!
+    start_embedded_worm
     shutdown_embedded() {
         # A signal trap that only forwards to the KB returns to the monitor loop
         # below. Docker then reaches its stop timeout and SIGKILLs PID 1 plus the
@@ -396,6 +449,7 @@ if [ "$external_db" -eq 0 ]; then
         # bounded lifecycle. Reset the traps first so the explicit exit below
         # cannot run this handler a second time.
         trap - EXIT HUP INT TERM
+        kill -TERM "$worm" 2>/dev/null || true
         kill -TERM "$kb" 2>/dev/null || true
         stop_modules
         "$PGBIN/pg_ctl" --pgdata="$PGDATA" --mode=fast --wait --silent stop || true
@@ -408,6 +462,7 @@ if [ "$external_db" -eq 0 ]; then
             echo "aimee-kb: KB did not stop after 3s; forcing shutdown after database stop" >&2
             kill -KILL "$kb" 2>/dev/null || true
         fi
+        wait "$worm" 2>/dev/null || true
         wait "$kb" 2>/dev/null || true
     }
     trap 'shutdown_embedded' EXIT
@@ -421,6 +476,8 @@ if [ "$external_db" -eq 0 ]; then
             first=kb
         elif ! process_alive "$pg_pid"; then
             first=postgres
+        elif ! process_alive "$worm"; then
+            first=worm
         else
             sleep 0.1
         fi
@@ -428,6 +485,7 @@ if [ "$external_db" -eq 0 ]; then
 
     if [ "$first" = postgres ]; then
         echo "aimee-kb: embedded PostgreSQL exited; restarting the KB container as one unit" >&2
+        kill -TERM "$worm" 2>/dev/null || true
         kill -TERM "$kb" 2>/dev/null || true
         # A database failure can leave worker threads blocked in libpq while
         # the kb is trying to shut down.  Do not let PID 1 wait forever: that
@@ -443,7 +501,25 @@ if [ "$external_db" -eq 0 ]; then
             kill -KILL "$kb" 2>/dev/null || true
         fi
         wait "$kb" 2>/dev/null || true
+        wait "$worm" 2>/dev/null || true
         wait "$pg_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    if [ "$first" = worm ]; then
+        echo "aimee-kb: WORM audit worker exited; restarting the KB container as one unit" >&2
+        kill -TERM "$kb" 2>/dev/null || true
+        _stop_ticks=0
+        while process_alive "$kb" && [ "$_stop_ticks" -lt 50 ]; do
+            sleep 0.1
+            _stop_ticks=$((_stop_ticks + 1))
+        done
+        if process_alive "$kb"; then
+            echo "aimee-kb: KB did not stop after 5s following WORM worker exit; forcing shutdown" >&2
+            kill -KILL "$kb" 2>/dev/null || true
+        fi
+        wait "$kb" 2>/dev/null || true
+        wait "$worm" 2>/dev/null || true
         exit 1
     fi
 

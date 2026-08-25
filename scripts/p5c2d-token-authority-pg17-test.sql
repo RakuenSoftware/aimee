@@ -298,7 +298,7 @@ RESET ROLE;
 DO $$ BEGIN
  IF (SELECT count(*) FROM public.kb_management_token_key_use_intent
       WHERE correlation_id=repeat('6',64) AND purpose='management.token.sign.v1')<>1 OR
-    (SELECT count(*) FROM public.kb_audit_event WHERE action='vault.key_use'
+    (SELECT count(*) FROM public.kb_audit_outbox WHERE action='vault.key_use'
       AND actor_principal='management-token-authority' AND detail NOT LIKE '%ciphertext%')<>1 THEN
    RAISE EXCEPTION 'P5-C2d WORM admission cardinality mismatch'; END IF;
 END $$;

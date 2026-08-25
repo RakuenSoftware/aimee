@@ -111,7 +111,7 @@ BEGIN
   IF n <> 1 THEN
     RAISE EXCEPTION 'FAIL: the local operator could not create the first grant (appliance would be permanently write-dead)';
   END IF;
-  IF NOT EXISTS(SELECT 1 FROM kb_audit_event WHERE action='authz.write_tier.set') THEN
+  IF NOT EXISTS(SELECT 1 FROM kb_audit_outbox WHERE action='authz.write_tier.set') THEN
     RAISE EXCEPTION 'FAIL: bootstrap grant left no WORM audit row';
   END IF;
   -- and the operator can undo it, so a fat-fingered bootstrap is recoverable.
@@ -175,14 +175,14 @@ SELECT set_tenant_context('oidc:test:carol', 910001);
 DO $$
 DECLARE t TEXT; before_n INT; after_n INT;
 BEGIN
-  SELECT count(*) INTO before_n FROM kb_audit_event WHERE action='authz.write_tier.set';
+  SELECT count(*) INTO before_n FROM kb_audit_outbox WHERE action='authz.write_tier.set';
   PERFORM kb_write_tier_grant_set('wt-srv-alpha', 910001, 'oidc:test:dave', 'data',
                                   'oidc:test:carol');
   SELECT tier INTO t FROM kb_write_tier_grant WHERE subject='oidc:test:dave';
   IF t <> 'data' THEN
     RAISE EXCEPTION 'FAIL: team lead grant did not land (tier=%)', t;
   END IF;
-  SELECT count(*) INTO after_n FROM kb_audit_event WHERE action='authz.write_tier.set';
+  SELECT count(*) INTO after_n FROM kb_audit_outbox WHERE action='authz.write_tier.set';
   IF after_n <> before_n + 1 THEN
     RAISE EXCEPTION 'FAIL: granting a write tier left no WORM audit row';
   END IF;
@@ -193,7 +193,7 @@ BEGIN
                  WHERE subject='oidc:test:dave' AND revoked_at IS NOT NULL) THEN
     RAISE EXCEPTION 'FAIL: revocation did not retain the grant row';
   END IF;
-  IF NOT EXISTS(SELECT 1 FROM kb_audit_event WHERE action='authz.write_tier.revoke') THEN
+  IF NOT EXISTS(SELECT 1 FROM kb_audit_outbox WHERE action='authz.write_tier.revoke') THEN
     RAISE EXCEPTION 'FAIL: revoking a write tier left no WORM audit row';
   END IF;
 END $$;
@@ -226,7 +226,7 @@ SELECT set_tenant_context('oidc:test:carol', 910001);
 DO $$
 DECLARE r RECORD; n_before BIGINT; n_after BIGINT;
 BEGIN
-  SELECT count(*) INTO n_before FROM kb_audit_event WHERE action='authz.write_tier.set';
+  SELECT count(*) INTO n_before FROM kb_audit_outbox WHERE action='authz.write_tier.set';
 
   -- Created: changed, and no previous tier (NULL, not 'off', which is a real tier).
   SELECT * INTO r FROM kb_write_tier_grant_set_reporting(
@@ -263,7 +263,7 @@ BEGIN
   END IF;
 
   -- IT STILL AUDITS, because it delegates. Four successful sets above.
-  SELECT count(*) INTO n_after FROM kb_audit_event WHERE action='authz.write_tier.set';
+  SELECT count(*) INTO n_after FROM kb_audit_outbox WHERE action='authz.write_tier.set';
   IF n_after <> n_before + 4 THEN
     RAISE EXCEPTION 'FAIL: the reporting wrapper wrote % audit rows, expected 4',
       n_after - n_before;

@@ -175,7 +175,7 @@ DO $$ BEGIN
         AND hwm_attestation_digest=encode(sha256('\xaabbcc'::bytea),'hex')) THEN
     RAISE EXCEPTION 'fresh admission did not persist attestation-bound intent';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM kb_audit_event
+  IF NOT EXISTS (SELECT 1 FROM kb_audit_outbox
       WHERE action='management.status.sign.v1' AND subject='fixture-target'
         AND detail LIKE '%"hwm_attestation_digest"%'
         AND detail LIKE '%'||encode(sha256('\xaabbcc'::bytea),'hex')||'%') THEN
@@ -207,7 +207,7 @@ RESET ROLE;
 
 CREATE FUNCTION pg_temp.p5b1_fail_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'injected audit failure'; END $$;
-CREATE TRIGGER p5b1_fail_audit BEFORE INSERT ON kb_audit_event
+CREATE TRIGGER p5b1_fail_audit BEFORE INSERT ON kb_audit_outbox
   FOR EACH ROW EXECUTE FUNCTION pg_temp.p5b1_fail_audit();
 SET LOCAL ROLE aimee_kb_status;
 DO $$ BEGIN
@@ -222,7 +222,7 @@ DO $$ BEGIN
   END;
 END $$;
 RESET ROLE;
-DROP TRIGGER p5b1_fail_audit ON kb_audit_event;
+DROP TRIGGER p5b1_fail_audit ON kb_audit_outbox;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM kb_management_status_key_use_intent WHERE use_id=repeat('7',64)) THEN
     RAISE EXCEPTION 'audit failure did not roll back intent';

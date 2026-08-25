@@ -167,7 +167,7 @@ int main(void)
    assert(scalar("SELECT count(*) FROM org_vault_secret WHERE "
                  "principal='org:test:p7-ops-live' AND "
                  "ciphertext=convert_to('vendor-secret-live','UTF8')") == 0);
-   assert(scalar("SELECT count(*) FROM kb_audit_event WHERE action LIKE 'vault.rotation.%' AND "
+   assert(scalar("SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'vault.rotation.%' AND "
                  "detail ILIKE '%vendor-secret-live%'") == 0);
    assert(db2_tenant_scope_commit() == 0);
 

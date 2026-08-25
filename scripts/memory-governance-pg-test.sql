@@ -120,7 +120,9 @@ DELETE FROM fact_graph_commits WHERE commit_id='atlas-fact-reassert';
 DO $$
 DECLARE audit_n integer; retained_n integer;
 BEGIN
-  SELECT count(*) INTO audit_n FROM kb_audit_event
+  -- The request process proves durable submission here. Chain construction is
+  -- intentionally asynchronous and is covered by run-worm-worker-pg-test.sh.
+  SELECT count(*) INTO audit_n FROM kb_audit_outbox
    WHERE action IN ('memory.assert','memory.reject','memory.invalidate','memory.restore');
   SELECT count(*) INTO retained_n FROM memories WHERE id=990001 AND content='project A value';
   IF audit_n<5 OR retained_n<>1 THEN

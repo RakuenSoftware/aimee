@@ -3,8 +3,9 @@
 -- Applied AFTER schema_roles.sql (roles exist) AND schema.sql (tables exist), by
 -- the migration/owner path — NEVER by the runtime service. Gives the non-owner,
 -- NOBYPASSRLS runtime role DML on the tenant tables (RLS still constrains every
--- row), INSERT/SELECT-only on the WORM audit store, sequence usage, and EXECUTE on
--- the one context setter. Dev/single-owner deployments skip this file entirely
+-- row), submit-only WORM authority, sequence usage, and EXECUTE on the context
+-- setter. The WORM login receives only the bounded drain definer. Dev/single-owner
+-- deployments skip this file entirely
 -- (they run no three-role split); it is a no-op-safe re-run on a hardened tier.
 
 DO $$
@@ -93,9 +94,25 @@ BEGIN
     kb_team, kb_project, kb_team_membership, kb_project_membership,
     kb_admin_grant, kb_oidc_jwks TO aimee_kb_runtime;
 
-  -- WORM audit store: runtime may INSERT/SELECT only, never UPDATE/DELETE.
-  REVOKE UPDATE, DELETE, TRUNCATE ON kb_audit_event FROM aimee_kb_runtime;
-  GRANT INSERT, SELECT ON kb_audit_event TO aimee_kb_runtime;
+  -- WORM split: runtime can submit immutable intents through the definer and
+  -- inspect audit state, but cannot write any queue, delivery, or chain table.
+  -- In particular, remove the historical direct INSERT on kb_audit_event: a
+  -- compromised request process must not possess chain-writer authority.
+  REVOKE ALL ON TABLE kb_audit_event,kb_audit_outbox,kb_audit_delivery
+    FROM aimee_kb_runtime;
+  -- Read access preserves the existing audit-inspection surface across the
+  -- enqueue window; all three stores remain write-inaccessible to runtime.
+  GRANT SELECT ON kb_audit_event,kb_audit_outbox,kb_audit_delivery
+    TO aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION kb_audit_worm_submit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    kb_audit_worm_append_internal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    kb_audit_worm_drain(INTEGER),kb_audit_worm_pending()
+    FROM aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_audit_worm_submit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    kb_audit_worm_pending() TO aimee_kb_runtime;
+
+  -- Memory governance uses the compatibility definer, which now submits an
+  -- outbox intent rather than appending the chain in the runtime process.
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT)
     TO aimee_kb_runtime;
 
@@ -105,8 +122,8 @@ BEGIN
   REVOKE DELETE, TRUNCATE ON memory_rejection_tombstones FROM aimee_kb_runtime;
   GRANT SELECT, INSERT, UPDATE ON memory_rejection_tombstones TO aimee_kb_runtime;
 
-  -- Every fact-graph changeset close carries a WORM row in its own transaction.
-  -- The C mutation API seals its own closes (fm_commit_finish); the SQL close
+  -- Every fact-graph changeset close carries a durable WORM intent in its own
+  -- transaction. The C mutation API seals its own closes (fm_commit_finish); the SQL close
   -- paths -- the evidence trigger, changeset revert, document lifecycle, operator
   -- review and ontology migration -- run as THIS role, which is deliberately not
   -- granted EXECUTE on kb_audit_worm_append. kb_fact_commit_worm_seal is the
@@ -400,6 +417,26 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_telemetry_allow(TEXT,TEXT[],BOOLEAN) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_telemetry_allow_show() TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_metrics_snapshot() TO aimee_kb_runtime;
+END
+$$;
+
+-- Dedicated WORM consumer compartment. It has no table, sequence, mutation,
+-- or internal-appender privileges; the SECURITY DEFINER drain is its complete
+-- database surface. Reapplying this file first strips accidental privilege
+-- growth and then restores exactly the two intended calls.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_worm_worker') THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON SCHEMA aimee_kb_worm_api FROM PUBLIC;
+  GRANT USAGE ON SCHEMA aimee_kb_worm_api TO aimee_kb_worm_worker;
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA aimee_kb_worm_api FROM aimee_kb_worm_worker;
+  GRANT EXECUTE ON FUNCTION aimee_kb_worm_api.drain(INTEGER) TO aimee_kb_worm_worker;
 END
 $$;
 
@@ -1067,7 +1104,7 @@ BEGIN
   GRANT SELECT,INSERT,UPDATE ON public.kb_enrollments TO aimee_kb_owner;
   GRANT SELECT,INSERT ON public.kb_team_membership TO aimee_kb_owner;
   GRANT SELECT,UPDATE ON public.kb_cert_revocation_generation TO aimee_kb_owner;
-  GRANT SELECT ON public.kb_audit_event TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_audit_event,public.kb_audit_outbox TO aimee_kb_owner;
   GRANT USAGE,SELECT ON SEQUENCE public.kb_enrollments_id_seq,
     public.kb_team_membership_id_seq TO aimee_kb_owner;
   GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
@@ -1161,7 +1198,7 @@ BEGIN
   GRANT SELECT,INSERT,UPDATE ON public.kb_management_status_key,
     public.org_vault_secret,public.org_vault_current,public.org_vault_rotation
     TO aimee_kb_owner;
-  GRANT SELECT ON public.kb_audit_event TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_audit_event,public.kb_audit_outbox TO aimee_kb_owner;
   GRANT USAGE,SELECT ON SEQUENCE public.org_vault_secret_id_seq,
     public.org_vault_rotation_id_seq TO aimee_kb_owner;
   REVOKE ALL ON FUNCTION

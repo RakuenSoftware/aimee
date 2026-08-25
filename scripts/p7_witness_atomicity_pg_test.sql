@@ -102,9 +102,10 @@ BEGIN
 
   BEGIN
     PERFORM public.kb_audit_worm_append('kb','uid:0','vault.key_use','anthropic:default','allow','');
-    RAISE EXCEPTION 'simulated kill after audit+witness write';
+    PERFORM public.kb_audit_worm_drain(1000);
+    RAISE EXCEPTION 'simulated kill after audit delivery+witness write';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM <> 'simulated kill after audit+witness write' THEN RAISE; END IF;
+    IF SQLERRM <> 'simulated kill after audit delivery+witness write' THEN RAISE; END IF;
   END;
 
   IF (SELECT count(*) FROM public.kb_audit_event) <> v_before THEN
@@ -126,6 +127,7 @@ DO $$
 DECLARE v_w BIGINT;
 BEGIN
   PERFORM public.kb_audit_worm_append('kb','uid:0','vault.key_use','anthropic:s2','allow','');
+  PERFORM public.kb_audit_worm_drain(1000);
   SELECT count(*) INTO v_w FROM public.kb_vault_witness_log
     WHERE tenant='!kb' AND provider='!audit';
   IF v_w < 1 THEN
@@ -181,27 +183,28 @@ BEGIN
     '2026-07-23T00:00:00Z',1,1);
   RAISE NOTICE 'ATOMICITY setup: pre-planted a conflicting witness row at shard_seq %', v_next;
 
-  -- The append is genuinely reached and must fail ONLY on its own witness INSERT.
+  -- Delivery is genuinely reached and must fail ONLY on its witness INSERT.
   SELECT count(*) INTO v_before FROM public.kb_audit_event;
   BEGIN
     PERFORM public.kb_audit_worm_append('kb','uid:0','vault.key_use','anthropic:s3','allow','');
+    PERFORM public.kb_audit_worm_drain(1000);
   EXCEPTION WHEN OTHERS THEN
     v_failed := true;
     v_msg := SQLERRM;
     v_state := SQLSTATE;
   END;
-  -- The load-bearing assertion: the append FAILED rather than committing an audit
+  -- The load-bearing assertion: delivery FAILED rather than committing an audit
   -- event with no evidence. If the witness INSERT were ever unwired from this path,
   -- the pre-planted conflict would be irrelevant and the append would succeed.
   IF NOT v_failed THEN
-    RAISE EXCEPTION 'ATOMICITY FAIL: the append succeeded despite a pre-planted witness conflict — '
+    RAISE EXCEPTION 'ATOMICITY FAIL: delivery succeeded despite a pre-planted witness conflict — '
       'the witness INSERT is not on the audit path';
   END IF;
   -- The failure must be the witness INSERT's primary-key conflict, not something
   -- else. 23505 is unique_violation, and only the append's witness INSERT can hit
   -- the row we planted at that exact (tenant, provider, shard_seq).
   IF v_state <> '23505' THEN
-    RAISE EXCEPTION 'ATOMICITY FAIL: append failed with % (%), expected the witness PK conflict 23505',
+    RAISE EXCEPTION 'ATOMICITY FAIL: delivery failed with % (%), expected the witness PK conflict 23505',
       v_state, v_msg;
   END IF;
   IF (SELECT count(*) FROM public.kb_audit_event) <> v_before THEN
