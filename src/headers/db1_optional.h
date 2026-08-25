@@ -24,6 +24,8 @@
 #define db1_context_snapshot_count_memories_with_min_samples  ((int (*)())0)
 #define db1_context_snapshot_has_memory                       ((int (*)())0)
 #define db1_context_snapshot_insert                           ((int (*)())0)
+#define db1_context_snapshot_insert_turn                      ((int (*)())0)
+#define db1_context_snapshot_activation                       ((int (*)())0)
 #define db1_context_snapshot_list_memory_ids_with_min_samples ((int (*)())0)
 #define db1_context_snapshot_list_sessions_for_memory         ((int (*)())0)
 #define db1_decision_record                                   ((int (*)())0)
@@ -62,6 +64,8 @@
 #pragma weak db1_context_snapshot_count_memories_with_min_samples
 #pragma weak db1_context_snapshot_has_memory
 #pragma weak db1_context_snapshot_insert
+#pragma weak db1_context_snapshot_insert_turn
+#pragma weak db1_context_snapshot_activation
 #pragma weak db1_context_snapshot_list_memory_ids_with_min_samples
 #pragma weak db1_context_snapshot_list_sessions_for_memory
 #pragma weak db1_decision_record

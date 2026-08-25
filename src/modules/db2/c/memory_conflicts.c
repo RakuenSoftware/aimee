@@ -24,8 +24,15 @@ int db2_memory_conflict_record(int64_t mem_a, int64_t mem_b)
    char ts[32];
    db2_now_utc(ts, sizeof(ts));
 
-   static const char *sql = "INSERT INTO memory_conflicts (memory_a, memory_b, detected_at,"
-                            " resolved) VALUES (?1, ?2, ?3, 0)";
+   /* Replaying the detector before disposition is idempotent too. Without this,
+    * resolving one duplicate leaves another unresolved row behind, making a
+    * later resolved-pair check appear ineffective even though it correctly
+    * refuses to add anything new. */
+   static const char *sql =
+       "INSERT INTO memory_conflicts (memory_a, memory_b, detected_at, resolved)"
+       " SELECT ?1, ?2, ?3, 0 WHERE NOT EXISTS ("
+       " SELECT 1 FROM memory_conflicts WHERE resolved=0"
+       " AND ((memory_a=?1 AND memory_b=?2) OR (memory_a=?2 AND memory_b=?1)))";
    char err[MC_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -129,6 +136,32 @@ int db2_memory_conflict_get_pair(int64_t conflict_id, int64_t *mem_a, int64_t *m
    }
    aimee_pg_finalize(st);
    return rc;
+}
+
+int db2_memory_conflict_pair_resolved(int64_t mem_a, int64_t mem_b)
+{
+   if (mem_a <= 0 || mem_b <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   /* Order-insensitive: the pair is the same contradiction whichever side the
+    * detector happened to see first. Without this the next extraction pass
+    * re-raises a contradiction someone already adjudicated -- a disposition that
+    * the write path cannot see is undone by the pipeline that follows it. */
+   static const char *sql = "SELECT 1 FROM memory_conflicts WHERE resolved = 1"
+                            " AND ((memory_a = ?1 AND memory_b = ?2)"
+                            "   OR (memory_a = ?2 AND memory_b = ?1)) LIMIT 1";
+   char err[MC_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_int64(st, "?1", mem_a);
+   aimee_pg_bind_int64(st, "?2", mem_b);
+   int resolved = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW) ? 1 : 0;
+   aimee_pg_finalize(st);
+   return resolved;
 }
 
 int db2_memory_conflict_resolve(int64_t conflict_id, const char *resolution)

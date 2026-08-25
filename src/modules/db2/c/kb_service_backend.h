@@ -258,8 +258,10 @@ extern "C"
    cJSON *db2_kb_service_memory_prospective_sweep_expired_json(void);
    cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force, int dry_run);
    cJSON *db2_kb_service_memory_alerts_json(const char *since);
+   struct memory_activation;
    cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens,
-                                            int session_start);
+                                            int session_start,
+                                            const struct memory_activation *activation);
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,
                                                      const char *session_id);

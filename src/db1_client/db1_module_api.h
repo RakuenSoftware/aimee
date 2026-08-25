@@ -325,6 +325,12 @@
 #define AIMEE_DB1_OP_MCP_OSV_CACHE_UPSERT                 58u
 #define AIMEE_DB1_OP_MCP_OSV_CACHE_LIST                   59u
 #define AIMEE_DB1_OP_MCP_OSV_AUDIT                        60u
+/* Retrieval hysteresis: a unit's activation state across the turns of one
+ * conversation. The pre-existing snapshot ops answer "was this ever injected",
+ * which cannot express sticky (eligible for N turns after firing) or cooldown
+ * (refuses to fire for M) -- both need "how many turns ago". */
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_INSERT_TURN         61u
+#define AIMEE_DB1_OP_CONTEXT_SNAPSHOT_ACTIVATION          62u
 
 /* Family 8: what the system spent and what it noticed: token and cost ledgers,
  * guardrail and interaction events, eval results and diagnoses. */

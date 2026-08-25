@@ -9,6 +9,7 @@
 #endif
 #include "modules/learning/learning_evidence.h"
 #include "memory.h"
+#include "memory_activation.h"
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "cJSON.h"
@@ -826,22 +827,49 @@ static int recall_approx_tokens(cJSON *obj)
  * injection reasons. */
 #if !defined(AIMEE_DB2_DISABLED)
 static int recall_fill_from_rows(const db2_memory_cand_row_t *src_rows, int src_count, cJSON *arr,
-                                 const char *why, int max_rows)
+                                 const char *why, int max_rows,
+                                 const memory_activation_t *activation, int *activation_held)
 {
    if (!src_rows || !arr)
       return 0;
    int n = 0;
-   for (int i = 0; i < src_count && n < max_rows; i++)
+   /* Sticky candidates receive the section's small hysteresis reserve first;
+    * the ordinary relevance order fills what remains. With no loaded state,
+    * pass zero admits nothing and pass one is byte-for-byte the old order. */
+   for (int pass = 0; pass < 2 && n < max_rows; pass++)
+      for (int i = 0; i < src_count && n < max_rows; i++)
    {
+      int sticky = memory_activation_is_sticky(activation, src_rows[i].id,
+                                                src_rows[i].activation_sticky_turns);
+      if ((pass == 0) != sticky)
+         continue;
+      /* Relevance is the section query above this helper. The remaining gate
+       * order is fixed: delay -> cooldown -> suppression -> inject. Fetchers
+       * supply more rows than the section cap so a held row is backfilled by
+       * the next eligible candidate rather than silently shrinking recall. */
+      if (memory_activation_is_delayed(activation, src_rows[i].activation_delay_turns) ||
+          memory_activation_in_cooldown(activation, src_rows[i].id,
+                                        src_rows[i].activation_cooldown_turns) ||
+          src_rows[i].activation_suppressed)
+      {
+         if (activation_held)
+            (*activation_held)++;
+         continue;
+      }
       cJSON *row = cJSON_CreateObject();
       if (!row)
          break;
       cJSON_AddNumberToObject(row, "memory_id", (double)src_rows[i].id);
+      /* Only rows emitted from DB2's memory table participate in activation
+       * bookkeeping.  The server later merges user-local DB1 rows into some
+       * of these same sections, where numeric IDs are from a different ID
+       * space and must never be recorded as DB2 memory activations. */
+      cJSON_AddBoolToObject(row, "activation_managed", 1);
       cJSON_AddStringToObject(row, "tier", src_rows[i].tier);
       cJSON_AddStringToObject(row, "kind", src_rows[i].kind);
       cJSON_AddStringToObject(row, "key", src_rows[i].key);
       cJSON_AddStringToObject(row, "text", src_rows[i].content);
-      cJSON_AddStringToObject(row, "why", why ? why : "");
+      cJSON_AddStringToObject(row, "why", sticky ? "sticky activation" : (why ? why : ""));
       cJSON_AddItemToArray(arr, row);
       n++;
    }
@@ -850,62 +878,75 @@ static int recall_fill_from_rows(const db2_memory_cand_row_t *src_rows, int src_
 #endif
 
 /* Section 1: identity facts. */
-static int recall_fill_identity(cJSON *arr, int max_rows)
+static int recall_fill_identity(cJSON *arr, int max_rows, const memory_activation_t *activation,
+                                int *activation_held)
 {
 #if defined(AIMEE_DB2_DISABLED)
    (void)arr;
    (void)max_rows;
+   (void)activation;
+   (void)activation_held;
    return 0;
 #else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "identity key prefix", max_rows);
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "identity key prefix", max_rows, activation,
+                                activation_held);
 #endif
 }
 
 /* Section 2: stable preferences. */
-static int recall_fill_preferences(cJSON *arr, int max_rows)
+static int recall_fill_preferences(cJSON *arr, int max_rows,
+                                   const memory_activation_t *activation, int *activation_held)
 {
 #if defined(AIMEE_DB2_DISABLED)
    (void)arr;
    (void)max_rows;
+   (void)activation;
+   (void)activation_held;
    return 0;
 #else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_PREFERENCES, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "stable preference", max_rows);
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_PREFERENCES, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "stable preference", max_rows, activation,
+                                activation_held);
 #endif
 }
 
 /* Section 3: active project / task context. */
-static int recall_fill_active_context(cJSON *arr, int max_rows)
+static int recall_fill_active_context(cJSON *arr, int max_rows,
+                                      const memory_activation_t *activation, int *activation_held)
 {
 #if defined(AIMEE_DB2_DISABLED)
    (void)arr;
    (void)max_rows;
+   (void)activation;
+   (void)activation_held;
    return 0;
 #else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_ACTIVE_CONTEXT, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "recent active context", max_rows);
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_ACTIVE_CONTEXT, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "recent active context", max_rows, activation,
+                                activation_held);
 #endif
 }
 
 /* Section 4: open commitments. */
-static int recall_fill_open_commitments(cJSON *arr, int max_rows)
+static int recall_fill_open_commitments(cJSON *arr, int max_rows,
+                                        const memory_activation_t *activation,
+                                        int *activation_held)
 {
 #if defined(AIMEE_DB2_DISABLED)
    (void)arr;
    (void)max_rows;
+   (void)activation;
+   (void)activation_held;
    return 0;
 #else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_OPEN_COMMITMENTS, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "pending commitment", max_rows);
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_OPEN_COMMITMENTS, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "pending commitment", max_rows, activation,
+                                activation_held);
 #endif
 }
 
@@ -1044,6 +1085,12 @@ static int recall_collect_ids(const cJSON *bundle, int64_t *out, int max)
 
 cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
 {
+   return memory_recall_activated(task_hint, limit_tokens, session_start, NULL);
+}
+
+cJSON *memory_recall_activated(const char *task_hint, int limit_tokens, int session_start,
+                               const memory_activation_t *activation)
+{
 
    if (limit_tokens <= 0)
       limit_tokens = session_start ? MEMORY_RECALL_DEFAULT_LIMIT_TOKENS_SESSION
@@ -1099,13 +1146,15 @@ cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
    int cap_reminders = session_start ? 5 : 3;
    int cap_directives = session_start ? 5 : 2;
 
+   int activation_held = 0;
    recall_fill_always_on_rules(always_on_rules, cap_rules);
-   recall_fill_identity(identity, cap_identity);
-   recall_fill_preferences(preferences, cap_preferences);
-   recall_fill_active_context(active_context, cap_active);
-   recall_fill_open_commitments(open_commitments, cap_commitments);
+   recall_fill_identity(identity, cap_identity, activation, &activation_held);
+   recall_fill_preferences(preferences, cap_preferences, activation, &activation_held);
+   recall_fill_active_context(active_context, cap_active, activation, &activation_held);
+   recall_fill_open_commitments(open_commitments, cap_commitments, activation, &activation_held);
    recall_fill_reminders(task_hint, reminders, cap_reminders);
    recall_fill_directives(task_hint, directives, cap_directives);
+   cJSON_AddNumberToObject(bundle, "activation_held", activation_held);
 
    /* Trim order inverts priority — directives/reminders/commitments/rules
     * get trimmed first so identity and preferences survive under pressure.

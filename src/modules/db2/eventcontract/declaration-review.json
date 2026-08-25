@@ -1701,11 +1701,11 @@
     },
     {
       "symbol": "db2_memory_session_l0_purge",
-      "signature_sha256": "4e517dde22542cf42658f3ae08648c3a9297d256e7a5ffcf988d73060ca7d831",
+      "signature_sha256": "5ed60bf8363726a7f84f87b4fe0a1e25059e3d0fe9106fc8159157d015c990a5",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "Purging a session's L0 memories and provenance is a private mutation inside the future memory.session_fold transaction; it cannot be an independent wire operation without risking loss between checkpoint creation and deletion."
+      "reason": "Purging the exact L0 source set and its provenance is a private transactional step of memory.session_fold; exposing it independently would permit deletion without the derived checkpoint and its complete lineage."
     },
     {
       "symbol": "db2_memory_set_valid_from",

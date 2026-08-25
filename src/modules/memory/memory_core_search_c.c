@@ -801,12 +801,11 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
 
    count = memory_filter_scope(candidates, count, scope_type, scope_value);
 
-   /* Lifecycle archival filter: when the feature is enabled and
-    * hide_archived is set, drop any candidate whose lifecycle_state is
-    * `archived` before reranking.  memory_get() keeps returning them;
-    * this only affects the recall surface. */
+   /* Negative retrieval is unconditional: corrected, archived and explicitly
+    * suppressed memories must not re-enter through lexical, dense or graph-
+    * fused candidates. memory_get() remains an audit/read-by-id surface. */
    {
-      if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived() && count > 0)
+      if (count > 0)
       {
          /* Batch-probe archive state via db2 and drop any archived ids from
           * the candidate array. */
@@ -814,25 +813,25 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
          int probe_n = count < MEMORY_RERANK_BUFFER ? count : MEMORY_RERANK_BUFFER;
          for (int i = 0; i < probe_n; i++)
             cand_ids[i] = candidates[i].id;
-         int64_t archived_ids[MEMORY_RERANK_BUFFER];
-         int n_arch =
-             db2_memory_filter_archived_ids(cand_ids, probe_n, archived_ids, MEMORY_RERANK_BUFFER);
+         int64_t withheld_ids[MEMORY_RERANK_BUFFER];
+         int n_withheld =
+             db2_memory_filter_archived_ids(cand_ids, probe_n, withheld_ids, MEMORY_RERANK_BUFFER);
          {
 
             int write = 0;
             for (int i = 0; i < count; i++)
             {
-               int is_archived = 0;
-               for (int a = 0; a < n_arch; a++)
-                  if (archived_ids[a] == candidates[i].id)
+               int is_withheld = 0;
+               for (int a = 0; a < n_withheld; a++)
+                  if (withheld_ids[a] == candidates[i].id)
                   {
-                     is_archived = 1;
+                     is_withheld = 1;
                      break;
                   }
-               if (!is_archived)
+               if (!is_withheld)
                   candidates[write++] = candidates[i];
                else
-                  memory_recall_trace_reject(candidates[i].id, "candidate", "lifecycle_archived");
+                  memory_recall_trace_reject(candidates[i].id, "candidate", "withheld_state");
             }
             count = write;
          }

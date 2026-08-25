@@ -229,8 +229,9 @@ static void test_ws_cross_workspace_high_confidence(void)
    memory_t m;
 
    /* Insert a high-confidence memory in another workspace */
-   memory_insert(TIER_L2, KIND_FACT, "other-ws-fact", "critical pattern from other project", 0.95,
-                 "s1", &m);
+   assert(memory_insert_ex(TIER_L2, KIND_FACT, "other-ws-fact",
+                           "critical pattern from other project", "", 0.95, "s1",
+                           MEMORY_AUTHORITY_USER, &m) == 0);
    memory_tag_workspace(m.id, "other-project");
 
    /* Bump use_count to >= 5 */
@@ -333,18 +334,18 @@ static void test_upsert_workflow_dedupes_and_bumps(void)
    assert(second == first);
    assert(count_key("workflow:smoothnas:pr-target") == 1);
 
-   /* Confidence bumped by +0.2 per repeat observation (capped at 1.0). */
+   /* Confidence bumps toward the durable model-authored provenance ceiling. */
    double c2 = conf_for_key("workflow:smoothnas:pr-target");
    assert(c2 >= 0.79 && c2 <= 0.81);
 
    memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s3");
    double c3 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c3 >= 0.99 && c3 <= 1.01);
+   assert(c3 >= 0.79 && c3 <= 0.81);
 
-   /* Further observations must not overflow past 1.0. */
+   /* Re-exposure cannot lift belief above the provenance ceiling. */
    memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s4");
    double c4 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c4 <= 1.0001);
+   assert(c4 >= 0.79 && c4 <= 0.81);
 
    teardown();
 }

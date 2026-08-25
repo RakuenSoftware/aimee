@@ -146,6 +146,11 @@ extern "C"
    void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type,
                                     const char *scope_value);
 
+   /* Atomically replace every canonical/legacy scope tag with exactly one
+    * resolved scope. Derived writers use this to prevent ambient cwd tags from
+    * widening a row whose identity belongs to another scope. */
+   int db2_memory_scope_replace(int64_t memory_id, const char *scope_type, const char *scope_value);
+
    /* INSERT OR IGNORE into memory_workspaces. Best-effort. */
    void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace);
 
@@ -171,9 +176,18 @@ extern "C"
     * a key to look for contradictions. Returns count written. */
    int db2_memory_list_by_key(const char *key, db2_memory_id_content_row_t *out, int max);
 
-   /* (key, content) pair returned by db2_memory_session_l0_list. */
+   /* Cursored form of the above, ordered by id ascending and returning only
+    * rows with id > `after_id`. Callers whose scan must be complete -- a
+    * contradiction check is one, since a missed row is a missed contradiction --
+    * drain this in a loop instead of sizing a buffer and hoping. Returns count
+    * written; fewer than `max` means the key is exhausted. */
+   int db2_memory_list_by_key_after(const char *key, int64_t after_id,
+                                    db2_memory_id_content_row_t *out, int max);
+
+   /* (id, key, content) row returned by db2_memory_session_l0_list. */
    typedef struct
    {
+      int64_t id;
       char key[512];
       char content[2048];
    } db2_memory_session_l0_row_t;
@@ -266,11 +280,13 @@ extern "C"
                                     const char *session_id, const char *ts, const char *sensitivity,
                                     double evidence_strength, double salience, double surprise,
                                     const char *provenance_category);
-   int64_t db2_memory_row_insert_epistemic_ex(
-       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
-       const char *content, const char *use_cases, double confidence, const char *session_id,
-       const char *ts, const char *sensitivity, double evidence_strength, double salience,
-       double surprise, const char *provenance_category);
+   int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
+                                              const char *epistemic_kind, const char *key,
+                                              const char *content, const char *use_cases,
+                                              double confidence, const char *session_id,
+                                              const char *ts, const char *sensitivity,
+                                              double evidence_strength, double salience,
+                                              double surprise, const char *provenance_category);
    int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap);
    double db2_memory_outcome_adjustment(int64_t memory_id);
    int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
@@ -357,6 +373,15 @@ extern "C"
     * Returns the number of clusters written. */
    int db2_memory_summarise_clusters(double max_confidence, int min_count,
                                      db2_memory_summary_cluster_t *rows, int max);
+
+   /* Source ids for one summary cluster. max is deliberately caller-owned: a
+    * safety walk asks for cap+1 and refuses derivation if the cap is hit. */
+   int db2_memory_summary_source_ids(const char *session_id, double max_confidence, int64_t *ids,
+                                     int max);
+
+   /* 0 = usable source, 1 = rejected/suppressed, -1 = missing/store error.
+    * Derivation treats every non-zero result as a refusal (fail closed). */
+   int db2_memory_derivation_source_refused(int64_t memory_id);
 
    /* UPDATE memories SET merged_into = ? WHERE tier='L1' AND kind='fact'
     * AND merged_into=0 AND source_session=? AND confidence<=?. Best-effort. */
@@ -503,6 +528,14 @@ extern "C"
        * created_at for never-recalled rows. */
       char last_used_at[32];
       char created_at[32];
+      /* Origin identity for envelope diversity: which session this row came
+       * from. Empty for rows with no originating session, which are each
+       * treated as their own origin rather than pooled together. */
+      char source_session[128];
+      int activation_sticky_turns;
+      int activation_cooldown_turns;
+      int activation_delay_turns;
+      int activation_suppressed;
    } db2_memory_cand_row_t;
 
    /* Tier filter selecting which set of candidates to load. */
@@ -516,6 +549,11 @@ extern "C"
     * the count written. */
    int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_row_t *rows,
                                   int max);
+
+   /* Human-authorable per-unit activation policy. All turn counts are
+    * independent and non-negative; suppression is boolean. */
+   int db2_memory_activation_policy_set(int64_t memory_id, int sticky_turns, int cooldown_turns,
+                                        int delay_turns, int suppressed);
 
    /* Row shape for db2_memory_l1_session_clusters. */
    typedef struct
@@ -542,11 +580,14 @@ extern "C"
    int db2_memory_l1_session_created_at(const char *session_id, db2_memory_created_at_row_t *rows,
                                         int max);
 
-   /* Fetch up to `max` content strings (NUL-terminated, truncated to fit) for
-    * L1 memories with the given source_session, ordered ASC by created_at.
-    * Returns count written. */
+   /* Fetch up to `max` source ids and content strings (NUL-terminated,
+    * truncated to fit) for eligible current L1 memories with the given
+    * source_session, ordered ASC by created_at. A completeness-sensitive
+    * caller requests cap+1 and refuses the derivation when the extra row is
+    * present. Returns count written. */
    typedef struct
    {
+      int64_t id;
       char content[2048];
    } db2_memory_content_row_t;
 
@@ -562,10 +603,10 @@ extern "C"
       DB2_MEM_RECALL_OPEN_COMMITMENTS,
    } db2_memory_recall_section_t;
 
-   /* Fetch (id, tier, kind, key, content) rows for a fixed recall section
-    * (memory_recall in memory_context.c). Reuses db2_memory_cand_row_t as
-    * the row shape; confidence/use_count are not populated by these queries
-    * and remain zero. Returns the count written. */
+   /* Fetch (id, tier, kind, key, content, activation policy) rows for a fixed
+    * recall section (memory_recall in memory_context.c). Reuses
+    * db2_memory_cand_row_t as the row shape; confidence/use_count are not
+    * populated by these queries and remain zero. Returns the count written. */
    int db2_memory_list_recall_section(db2_memory_recall_section_t section,
                                       db2_memory_cand_row_t *rows, int max);
 
@@ -574,10 +615,11 @@ extern "C"
     * elevated retention. Returns 0 on error or no rows. */
    int db2_memory_count_l2_for_session(const char *source_session);
 
-   /* Delete every L0 memory for `session_id` along with its provenance rows.
-    * Best-effort. Used by session folding after the L1 episode checkpoint
-    * has been written. */
-   void db2_memory_session_l0_purge(const char *session_id);
+   /* Delete exactly the listed L0 memories for `session_id` along with their
+    * provenance rows. The delete is transactional and refuses if any listed
+    * row is no longer an L0 member of that session, so a fold never purges a
+    * concurrent/unread source. Returns the number removed, or -1 on error. */
+   int db2_memory_session_l0_purge(const char *session_id, const int64_t *memory_ids, int count);
 
    /* Read the most recent contradiction_log row marked details='retroactive_scan'.
     * Writes the timestamp string into `out` (truncated to fit) on hit.
@@ -726,8 +768,16 @@ extern "C"
    void db2_memory_provenance_delete(int64_t memory_id);
 
    /* SELECT id FROM memory_units WHERE memory_id = ?. Up to `max` ids
-    * written; returns count. */
+    * written; returns count. This compatibility wrapper is for deliberately
+    * bounded callers; exhaustive iteration must use the cursor form below. */
    int db2_memory_unit_list_ids(int64_t memory_id, int64_t *out, int max);
+
+   /* Cursor form for callers that genuinely need to enumerate units. Rows are
+    * ordered by id and strictly follow `after_id`. `has_more_out` is set when
+    * another page exists, so filling the caller's buffer cannot masquerade as
+    * completion. Returns rows written, or -1 on SQL failure. */
+   int db2_memory_unit_list_ids_after(int64_t memory_id, int64_t after_id, int64_t *out, int max,
+                                      int *has_more_out);
 
    /* DELETE FROM memories WHERE id = ?. Returns rows changed (0 or 1). */
    int db2_memory_delete_row(int64_t memory_id);
