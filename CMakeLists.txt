@@ -658,6 +658,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/payload_rewrite.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_semantic.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     # THE session worktree/branch key, shared with the thin client.
     ${AIMEE_SRC_DIR}/session_worktree_key.c
     ${AIMEE_SRC_DIR}/worktree_gc.c
@@ -1181,6 +1182,7 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_gate.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_profile_pack.c
     ${AIMEE_SRC_DIR}/wiki_render.c

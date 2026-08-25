@@ -77,10 +77,7 @@ def client_env_cmd(command):
     return command
 
 def pre_hook_cmd():
-    cmd = client_env_cmd(bin_path + ' hooks pre')
-    if client_id == 'codex':
-        return cmd + ' || true'
-    return cmd
+    return client_env_cmd(bin_path + ' hooks pre')
 
 def add_hook(event, matcher, command, extra_commands=None):
     entries = hooks.get(event, [])
@@ -91,7 +88,10 @@ def add_hook(event, matcher, command, extra_commands=None):
     hook_list = [{'type': 'command', 'command': command}]
     for ec in (extra_commands or []):
         hook_list.append({'type': 'command', 'command': ec})
-    entries.append({'matcher': matcher, 'hooks': hook_list})
+    entry = {'hooks': hook_list}
+    if matcher:
+        entry['matcher'] = matcher
+    entries.append(entry)
     hooks[event] = entries
 
 redirect_cmd = None
@@ -102,7 +102,10 @@ if redirect_script and os.path.exists(redirect_script):
         redirect_cmd = f'AIMEE_HOOK_CLIENT={client_id} python3 {redirect_script} 2>/dev/null || true'
 
 if '$session_event' != 'NONE':
-    add_hook('$session_event', 'startup|resume|compact', bin_path + ' session-start')
+    add_hook('$session_event', 'startup|resume|clear|compact',
+             client_env_cmd(bin_path + ' session-start'))
+if client_id in ('claude', 'codex'):
+    add_hook('SessionEnd', '', client_env_cmd(bin_path + ' session-end'))
 if '$pre_event' != 'NONE':
     add_hook('$pre_event', '$pre_matcher', pre_hook_cmd(),
              extra_commands=[redirect_cmd] if redirect_cmd else None)
@@ -190,7 +193,7 @@ if [ -d "$HOME_DIR/.claude" ] || command -v claude &>/dev/null; then
     configure_json_hooks "Claude Code" \
         "$CLAUDE_SETTINGS" \
         "PreToolUse" "PostToolUse" "SessionStart" \
-        "Edit|Write|MultiEdit|Bash|Read|Glob|Grep|Task" "Edit|Write|MultiEdit" \
+        ".*" "Edit|Write|MultiEdit" \
         "$CLAUDE_SETTINGS" "claude"
 
     # Ensure Gemini is in the auto-allow list if permissions are already set
@@ -251,8 +254,45 @@ if [ -d "$HOME_DIR/.codex" ] || command -v codex &>/dev/null; then
     configure_json_hooks "Codex CLI" \
         "$HOME_DIR/.codex/hooks.json" \
         "PreToolUse" "PostToolUse" "SessionStart" \
-        "Bash" "Bash" \
+        ".*" "Bash" \
         "$HOME_DIR/.codex/mcp-config.json" "codex"
+fi
+
+# OpenCode and Hermes expose mutable lifecycle/plugin APIs rather than the
+# hooks.json dialect above. Ask the installed Aimee binary to generate their
+# thin adapters from the same client-neutral routing core used by every host.
+OPENCODE_DETECTED=0
+HERMES_DETECTED=0
+if [ -d "$HOME_DIR/.config/opencode" ] || command -v opencode &>/dev/null; then
+    OPENCODE_DETECTED=1
+fi
+if [ -d "$HOME_DIR/.hermes" ] || command -v hermes &>/dev/null || command -v hermes-agent &>/dev/null; then
+    HERMES_DETECTED=1
+fi
+if [ "$OPENCODE_DETECTED" -eq 1 ] || [ "$HERMES_DETECTED" -eq 1 ]; then
+    opencode_was=0
+    hermes_was=0
+    [ -f "$HOME_DIR/.config/opencode/plugins/aimee-worktrees.js" ] && opencode_was=1
+    [ -f "$HOME_DIR/.hermes/plugins/aimee-worktrees/__init__.py" ] && hermes_was=1
+    AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY=1 "$AIMEE_BIN" help >/dev/null
+    if [ "$OPENCODE_DETECTED" -eq 1 ]; then
+        if [ "$opencode_was" -eq 1 ]; then
+            info "Refreshed OpenCode session adapter"
+            REFRESHED=$((REFRESHED + 1))
+        else
+            info "Configured OpenCode session adapter"
+            CONFIGURED=$((CONFIGURED + 1))
+        fi
+    fi
+    if [ "$HERMES_DETECTED" -eq 1 ]; then
+        if [ "$hermes_was" -eq 1 ]; then
+            info "Refreshed Hermes session adapter"
+            REFRESHED=$((REFRESHED + 1))
+        else
+            info "Configured Hermes session adapter"
+            CONFIGURED=$((CONFIGURED + 1))
+        fi
+    fi
 fi
 
 # GitHub Copilot
@@ -329,7 +369,7 @@ configure_vscode_variant "VSCodium"         "$VSCODE_USER_BASE/VSCodium/User"   
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     TOTAL_ACTIVE=$((CONFIGURED + REFRESHED))
     if [ "$TOTAL_ACTIVE" -eq 0 ]; then
-        warn "No supported AI coding tools detected (checked for Claude Code, Gemini CLI, Codex CLI, GitHub Copilot, VS Code)."
+        warn "No supported AI coding tools detected (checked for Claude Code, Gemini CLI, Codex CLI, OpenCode, Hermes, GitHub Copilot, VS Code)."
     elif [ "$CONFIGURED" -gt 0 ] && [ "$REFRESHED" -eq 0 ]; then
         info "aimee configured for $CONFIGURED new tool(s)."
     elif [ "$REFRESHED" -gt 0 ] && [ "$CONFIGURED" -eq 0 ]; then

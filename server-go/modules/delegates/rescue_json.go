@@ -29,13 +29,13 @@ const (
 )
 
 type jsonValue struct {
-	kind   jsonKind
-	str    string
-	num    float64
+	kind    jsonKind
+	str     string
+	num     float64
 	boolean bool
-	keys   []string
-	vals   []*jsonValue
-	items  []*jsonValue
+	keys    []string
+	vals    []*jsonValue
+	items   []*jsonValue
 }
 
 func (v *jsonValue) isObject() bool { return v != nil && v.kind == jsonObject }

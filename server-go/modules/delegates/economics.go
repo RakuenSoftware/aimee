@@ -14,24 +14,24 @@ const tierBuckets = 4
 
 // EconomicsReport mirrors delegate_economics_report_t.
 type EconomicsReport struct {
-	DelegateCount                    int
-	TierCounts                       [tierBuckets]int
-	UnknownTierCount                 int
-	PromptTokensTotal                int
-	CompletionTokensTotal            int
-	DelegateTokensEstimated          int
-	TokenizedDelegateResults         int
-	SupervisorPromptTokensEstimated  int
-	HandoffCount                     int
-	ValidHandoffs                    int
-	InvalidHandoffs                  int
-	FocusedTestsRunByDelegates       int
-	DelegatesWithFocusedTests        int
-	ManualIntegrationEvents          int
-	SupervisorActionsRequired        int
-	ReviewerFindingsBlocking         int
-	Verdict                          string
-	Recommendation                   string
+	DelegateCount                   int
+	TierCounts                      [tierBuckets]int
+	UnknownTierCount                int
+	PromptTokensTotal               int
+	CompletionTokensTotal           int
+	DelegateTokensEstimated         int
+	TokenizedDelegateResults        int
+	SupervisorPromptTokensEstimated int
+	HandoffCount                    int
+	ValidHandoffs                   int
+	InvalidHandoffs                 int
+	FocusedTestsRunByDelegates      int
+	DelegatesWithFocusedTests       int
+	ManualIntegrationEvents         int
+	SupervisorActionsRequired       int
+	ReviewerFindingsBlocking        int
+	Verdict                         string
+	Recommendation                  string
 }
 
 // EconomicsTask is one coordinated task, as the caller knows it. Only the four

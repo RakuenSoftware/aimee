@@ -3459,25 +3459,18 @@ static void test_session_isolation_guard(void)
    const char *primary = "/some/repo/src/x.c";
    const char *worktree = "/some/repo/.aimee/worktrees/ab12/main/src/x.c";
 
-   /* (1) Default ON (no aimee.yaml): a primary-checkout target is blocked, since
-    *     session-worktree isolation is required by default. */
+   /* Default ON, including when config authority is unavailable: a
+    * primary-checkout target is blocked. */
    remove(cfg);
    assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
 
-   /* (2) Explicit false: still no block. */
-   FILE *f = fopen(cfg, "w");
-   assert(f != NULL);
-   fputs("require_session_worktree: false\n", f);
-   fclose(f);
-   assert(agent_tools_session_isolation_blocks(primary, NULL) == 0);
-
-   /* (3) Enabled: primary-checkout target blocked, managed-worktree target allowed. */
-   f = fopen(cfg, "w");
-   assert(f != NULL);
-   fputs("require_session_worktree: true\n", f);
-   fclose(f);
+   /* Only the managed worktree that owns cwd is allowed. */
    assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
-   assert(agent_tools_session_isolation_blocks(worktree, NULL) == 0);
+   assert(agent_tools_session_isolation_blocks(worktree, NULL) == 1);
+   assert(agent_tools_session_isolation_blocks(worktree, "/some/repo/.aimee/worktrees/ab12/main") ==
+          0);
+   assert(agent_tools_session_isolation_blocks("/some/repo/.aimee/worktrees/other/main/src/x.c",
+                                               "/some/repo/.aimee/worktrees/ab12/main") == 1);
    /* Traversal escape out of the worktree normalizes + blocks. */
    assert(agent_tools_session_isolation_blocks(
               "/some/repo/.aimee/worktrees/ab12/main/../../../src/y.c", NULL) == 1);
@@ -3490,7 +3483,9 @@ static void test_session_isolation_guard(void)
     * server-side mirror of #1314's guardrail fix): a wfe delegate's writes into
     * its own wfe worktree must not be refused by this backstop. */
    assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_ab12.s3/src/x.c",
-                                               NULL) == 0);
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
+   assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_other.s3/src/x.c",
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 1);
    assert(agent_tools_session_isolation_blocks("src/x.c",
                                                "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
    /* Traversal OUT of a wfe worktree still blocks. */

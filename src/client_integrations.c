@@ -535,27 +535,26 @@ static int format_codex_cli_skill(char *buf, size_t cap, const char *cli_only,
    return 0;
 }
 
-/* Codex PreToolUse registration. Persona delivery happens at shared model
- * ingress, not through a client lifecycle hook. aimee already HAS the guard -- `aimee hooks`
- * implements the full wire contract (permissionDecision / permissionDecisionReason,
- * and updatedInput where the client supports it), and require_aimee_git is ON by
- * default with a deny that names git_status / git_log / git_diff_summary and the
- * rest. It simply never ran under codex, because this plugin shipped no hooks at
- * all: only .mcp.json and the skill.
- *
- * Observed consequence in ordinary coding sessions was repeated shell `git` use
- * and no calls to the already-registered Aimee git route. The rule was written,
- * defaulted on, and left unwired.
- *
- * Codex does not honour updatedInput on PreToolUse, so the guard's codex path
- * denies with an instruction to retry through the tool. That costs one turn and
- * redirects the remaining ones. */
+/* Codex supports updatedInput for Bash, apply_patch, MCP, and local functions.
+ * SessionStart provisions the checkout; PreToolUse routes inputs into it. */
 static const char *codex_hooks_json(const char *aimee_bin, const char *transport)
 {
-   static char buf[1536];
+   static char buf[3072];
    snprintf(buf, sizeof(buf),
             "{\n"
             "  \"hooks\": {\n"
+            "    \"SessionStart\": [\n"
+            "      {\n"
+            "        \"matcher\": \"startup|resume|clear|compact\",\n"
+            "        \"hooks\": [\n"
+            "          {\n"
+            "            \"type\": \"command\",\n"
+            "            \"command\": \"AIMEE_HOOK_CLIENT=codex %s session-start\",\n"
+            "            \"timeout\": 30\n"
+            "          }\n"
+            "        ]\n"
+            "      }\n"
+            "    ],\n"
             "    \"PreToolUse\": [\n"
             "      {\n"
             "        \"hooks\": [\n"
@@ -570,10 +569,23 @@ static const char *codex_hooks_json(const char *aimee_bin, const char *transport
             "          }\n"
             "        ]\n"
             "      }\n"
+            "    ],\n"
+            "    \"SessionEnd\": [\n"
+            "      {\n"
+            "        \"hooks\": [\n"
+            "          {\n"
+            "            \"type\": \"command\",\n"
+            "            \"command\": \"AIMEE_HOOK_CLIENT=codex %s session-end\",\n"
+            "            \"timeout\": 30\n"
+            "          }\n"
+            "        ]\n"
+            "      }\n"
             "    ]\n"
             "  }\n"
             "}\n",
+            aimee_bin && aimee_bin[0] ? aimee_bin : "aimee",
             transport && strcmp(transport, "mcp") == 0 ? "mcp" : "cli",
+            aimee_bin && aimee_bin[0] ? aimee_bin : "aimee",
             aimee_bin && aimee_bin[0] ? aimee_bin : "aimee",
             aimee_bin && aimee_bin[0] ? aimee_bin : "aimee");
    return buf;
@@ -1452,7 +1464,7 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
 {
    const char *aimee_bin = resolved_aimee_bin_path();
    char cmd[512];
-   if (strcmp(subcommand, "attention-guard") == 0 || strcmp(subcommand, "user-prompt-submit") == 0)
+   if (strcmp(subcommand, "hooks pre") == 0 || strcmp(subcommand, "user-prompt-submit") == 0)
    {
       const char *transport =
           client_tool_transport_preference() == CLIENT_TOOL_TRANSPORT_MCP_FIRST ? "mcp" : "cli";
@@ -1774,24 +1786,21 @@ static void ensure_claude_code_hooks(const char *settings_path)
       }
    }
 
-   /* Remove the former persona-delivery hook from existing installations.
-    * Persona content is prepended at shared model ingress; leaving this entry
-    * behind would make delivery client- and version-dependent again. */
-   remove_aimee_event_hook(hooks, "SessionStart", "session-start", &dirty);
+   /* SessionStart owns only silent workspace provisioning + session-id capture;
+    * persona content remains at shared model ingress. */
+   ensure_aimee_event_hook(hooks, "SessionStart", "session-start", "startup|resume|clear|compact",
+                           &dirty);
+   /* Recycle only clean generated checkouts; dirty state is retained. */
+   ensure_aimee_event_hook(hooks, "SessionEnd", "session-end", NULL, &dirty);
    /* Context pre-injection hooks: the P1 per-turn UserPromptSubmit envelope and
     * the P3 PreCompact re-prime. Both fire with no matcher and soft-fail, so
     * they never block a turn. */
    ensure_aimee_event_hook(hooks, "UserPromptSubmit", "user-prompt-submit", NULL, &dirty);
    ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", NULL, &dirty);
-   /* P3 attention guard: PreToolUse hook scoped to read/edit/destructive tools;
-    * accrues per-file attention and blocks hard-destructive ops on files the
-    * session has actively touched. It does NOT gate sub-agent tools — that is the
-    * dedicated `subagent-guard` hook installed by ensure_subagent_ban below (this
-    * matcher deliberately no longer lists Task|Agent). */
-   ensure_aimee_event_hook(hooks, "PreToolUse", "attention-guard",
-                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob|"
-                           "mcp__aimee__.*|aimee__.*",
-                           &dirty);
+   /* Run for every tool: one composed hook performs server policy and the local
+    * client-neutral routing fallback. Remove the superseded direct hook. */
+   remove_aimee_event_hook(hooks, "PreToolUse", "attention-guard", &dirty);
+   ensure_aimee_event_hook(hooks, "PreToolUse", "hooks pre", NULL, &dirty);
 
    /* Sub-agent ban (delegate-only): gated at setup on subagent_ban_enabled AND a
     * one-shot delegate probe; installs/removes the subagent-guard hook + the
@@ -2190,6 +2199,209 @@ static void ensure_copilot_integration(const char *home)
    cJSON_Delete(root);
 }
 
+static char *integration_json_string(const char *value)
+{
+   cJSON *item = cJSON_CreateString(value ? value : "");
+   char *out = item ? cJSON_PrintUnformatted(item) : NULL;
+   cJSON_Delete(item);
+   return out;
+}
+/* OpenCode's plugin API exposes both the real session id and a mutable tool
+ * argument object. The adapter is intentionally policy-free: it translates
+ * those events to Aimee's common hook payload and applies the returned input. */
+static void ensure_opencode_worktree_integration(const char *home)
+{
+   const char *aimee_bin = resolved_aimee_bin_path();
+   char *bin = integration_json_string(aimee_bin);
+   if (!bin)
+      return;
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof path, "%s/.config/opencode/plugins/aimee-worktrees.js", home);
+   char plugin[12288];
+   snprintf(plugin, sizeof plugin,
+            "// Generated by Aimee. Session worktrees are an internal workspace detail.\n"
+            "const AIMEE = %s;\n"
+            "const names = { bash: 'Bash', read: 'Read', write: 'Write', edit: 'Edit', "
+            "patch: 'apply_patch', glob: 'Glob', grep: 'Grep' };\n"
+            "function call(command, payload, directory) {\n"
+            "  const env = { ...process.env, AIMEE_HOOK_CLIENT: 'opencode' };\n"
+            "  const p = Bun.spawnSync([AIMEE, command], { cwd: directory, env, "
+            "stdin: new TextEncoder().encode(JSON.stringify(payload)), stdout: 'pipe', "
+            "stderr: 'pipe' });\n"
+            "  const stdout = new TextDecoder().decode(p.stdout).trim();\n"
+            "  if (p.exitCode !== 0) throw new Error('Aimee could not initialize the isolated "
+            "session workspace');\n"
+            "  return stdout ? JSON.parse(stdout) : {};\n"
+            "}\n"
+            "export const AimeeWorktrees = async ({ directory }) => ({\n"
+            "  event: async ({ event }) => {\n"
+            "    const sid = event.properties?.info?.id;\n"
+            "    if (!sid) return;\n"
+            "    if (event.type === 'session.created') call('session-start', { session_id: sid, "
+            "cwd: directory, source: 'startup' }, directory);\n"
+            "    if (event.type === 'session.deleted') call('session-end', { session_id: sid, "
+            "cwd: directory }, directory);\n"
+            "  },\n"
+            "  'tool.execute.before': async (input, output) => {\n"
+            "    const result = call('attention-guard', { session_id: input.sessionID, "
+            "cwd: directory, tool_name: names[input.tool] || input.tool, "
+            "tool_input: output.args }, directory);\n"
+            "    if (result.updatedInput) Object.assign(output.args, result.updatedInput);\n"
+            "  },\n"
+            "});\n",
+            bin);
+   free(bin);
+   (void)write_text_file(path, plugin, 0600);
+}
+static int integration_insert(char **text, size_t *len, size_t at, const char *insert)
+{
+   size_t n = strlen(insert);
+   char *next = realloc(*text, *len + n + 1);
+   if (!next)
+      return -1;
+   memmove(next + at + n, next + at, *len - at + 1);
+   memcpy(next + at, insert, n);
+   *text = next;
+   *len += n;
+   return 0;
+}
+/* Add one generated plugin to Hermes' opt-in list while preserving every other
+ * YAML key and plugin. This handles the conventional block form and the common
+ * inline [] form; unfamiliar scalar forms are left untouched. */
+static void ensure_hermes_plugin_enabled(const char *config_path)
+{
+   dstr_t data;
+   dstr_init(&data);
+   int read_ok = dstr_read_file(&data, config_path) == 0;
+   const char *initial = read_ok ? dstr_cstr(&data) : "";
+   if (strstr(initial, "aimee-worktrees"))
+   {
+      dstr_free(&data);
+      return;
+   }
+   size_t len = strlen(initial);
+   char *text = strdup(initial);
+   dstr_free(&data);
+   if (!text)
+      return;
+   const char *plugins = strstr(text, "plugins:");
+   while (plugins && plugins != text && plugins[-1] != '\n')
+      plugins = strstr(plugins + 1, "plugins:");
+   if (!plugins)
+   {
+      const char *block = "\nplugins:\n  enabled:\n    - aimee-worktrees\n";
+      if (integration_insert(&text, &len, len, block) == 0)
+         (void)write_text_file(config_path, text, 0600);
+      free(text);
+      return;
+   }
+   char *section_end = strchr(plugins, '\n');
+   if (!section_end)
+      section_end = text + len;
+   else
+   {
+      section_end++;
+      while (*section_end && (*section_end == ' ' || *section_end == '\t' || *section_end == '\n' ||
+                              *section_end == '\r'))
+      {
+         char *next = strchr(section_end, '\n');
+         if (!next)
+         {
+            section_end = text + len;
+            break;
+         }
+         if (section_end[0] != ' ' && section_end[0] != '\t' && section_end[0] != '\n' &&
+             section_end[0] != '\r')
+            break;
+         section_end = next + 1;
+      }
+   }
+   char *enabled = strstr(plugins, "  enabled:");
+   if (!enabled || enabled >= section_end)
+   {
+      char *after = strchr(plugins, '\n');
+      size_t at = after ? (size_t)(after + 1 - text) : len;
+      if (integration_insert(&text, &len, at, "  enabled:\n    - aimee-worktrees\n") == 0)
+         (void)write_text_file(config_path, text, 0600);
+      free(text);
+      return;
+   }
+   char *line_end = strchr(enabled, '\n');
+   if (!line_end)
+      line_end = text + len;
+   char *open = strchr(enabled, '[');
+   char *close = open && open < line_end ? strchr(open, ']') : NULL;
+   if (close && close <= line_end)
+   {
+      const char *value = close == open + 1 ? "aimee-worktrees" : ", aimee-worktrees";
+      if (integration_insert(&text, &len, (size_t)(close - text), value) == 0)
+         (void)write_text_file(config_path, text, 0600);
+   }
+   else if (enabled + strlen("  enabled:") == line_end)
+   {
+      size_t at = line_end < text + len ? (size_t)(line_end + 1 - text) : len;
+      if (integration_insert(&text, &len, at, "    - aimee-worktrees\n") == 0)
+         (void)write_text_file(config_path, text, 0600);
+   }
+   free(text);
+}
+static void ensure_hermes_worktree_integration(const char *home)
+{
+   const char *aimee_bin = resolved_aimee_bin_path();
+   char *bin = integration_json_string(aimee_bin);
+   if (!bin)
+      return;
+   char manifest[MAX_PATH_LEN], init[MAX_PATH_LEN], config[MAX_PATH_LEN];
+   snprintf(manifest, sizeof manifest, "%s/.hermes/plugins/aimee-worktrees/plugin.yaml", home);
+   snprintf(init, sizeof init, "%s/.hermes/plugins/aimee-worktrees/__init__.py", home);
+   snprintf(config, sizeof config, "%s/.hermes/config.yaml", home);
+   (void)write_text_file(manifest,
+                         "name: aimee-worktrees\nversion: \"1.0\"\n"
+                         "description: Transparent per-session workspace isolation\n"
+                         "provides_hooks:\n"
+                         "  - on_session_start\n"
+                         "  - pre_tool_call\n"
+                         "  - on_session_end\n",
+                         0600);
+   char plugin[12288];
+   snprintf(plugin, sizeof plugin,
+            "\"\"\"Generated by Aimee: client adapter, no worktree policy lives here.\"\"\"\n"
+            "import json, os, subprocess\n"
+            "AIMEE = %s\n"
+            "NAMES = {'terminal':'Bash','read_file':'Read','write_file':'Write',"
+            "'patch':'Edit','search_files':'Grep'}\n"
+            "def _call(command, payload):\n"
+            "    env = dict(os.environ, AIMEE_HOOK_CLIENT='hermes')\n"
+            "    p = subprocess.run([AIMEE, command], input=json.dumps(payload), text=True, "
+            "capture_output=True, cwd=os.getcwd(), env=env)\n"
+            "    if p.returncode != 0:\n"
+            "        return {'action':'block','message':'Aimee could not initialize the isolated "
+            "session workspace'}\n"
+            "    try: return json.loads(p.stdout) if p.stdout.strip() else {}\n"
+            "    except json.JSONDecodeError: return {'action':'block','message':'Aimee workspace "
+            "adapter returned invalid data'}\n"
+            "def register(ctx):\n"
+            "    active_sid = [f'hermes-{os.getpid()}']\n"
+            "    def start(session_id=None, **kwargs):\n"
+            "        active_sid[0] = session_id or active_sid[0]\n"
+            "        _call('session-start', {'session_id':active_sid[0],'cwd':os.getcwd(),"
+            "'source':'startup'})\n"
+            "    def before(tool_name, args, session_id=None, **kwargs):\n"
+            "        sid = session_id or active_sid[0]\n"
+            "        return _call('attention-guard', {'session_id':sid,'cwd':os.getcwd(),"
+            "'tool_name':NAMES.get(tool_name,tool_name),'tool_input':args})\n"
+            "    def end(session_id=None, **kwargs):\n"
+            "        _call('session-end', {'session_id':session_id or active_sid[0],"
+            "'cwd':os.getcwd()})\n"
+            "    ctx.register_hook('on_session_start', start)\n"
+            "    ctx.register_hook('pre_tool_call', before)\n"
+            "    ctx.register_hook('on_session_end', end)\n",
+            bin);
+   free(bin);
+   (void)write_text_file(init, plugin, 0600);
+   ensure_hermes_plugin_enabled(config);
+}
+
 static client_tool_transport_preference_t client_tool_transport_preference(void)
 {
    char value[32];
@@ -2211,6 +2423,31 @@ static int client_integrations_allowed(void)
    return client_config_bool("client_integrations_enabled", 1);
 }
 
+/* Installation-time discovery must not depend on the client having already
+ * created its home directory. Detect an installed executable without a shell;
+ * the directory check remains for clients launched outside the current PATH. */
+static int client_command_installed(const char *name)
+{
+   const char *path = getenv("PATH");
+   if (!name || !name[0] || !path)
+      return 0;
+   const char *part = path;
+   while (part)
+   {
+      const char *end = strchr(part, ':');
+      size_t n = end ? (size_t)(end - part) : strlen(part);
+      char candidate[MAX_PATH_LEN];
+      if (n > 0 && n + 1 + strlen(name) < sizeof(candidate))
+      {
+         snprintf(candidate, sizeof(candidate), "%.*s/%s", (int)n, part, name);
+         if (access(candidate, X_OK) == 0)
+            return 1;
+      }
+      part = end ? end + 1 : NULL;
+   }
+   return 0;
+}
+
 void ensure_client_integrations(void)
 {
    if (!client_integrations_allowed())
@@ -2226,7 +2463,7 @@ void ensure_client_integrations(void)
 
    char codex_dir[MAX_PATH_LEN];
    snprintf(codex_dir, sizeof(codex_dir), "%s/.codex", home);
-   if (stat(codex_dir, &st) == 0 && S_ISDIR(st.st_mode))
+   if ((stat(codex_dir, &st) == 0 && S_ISDIR(st.st_mode)) || client_command_installed("codex"))
    {
       client_tool_surface_requirements_t requirements = client_projected_surface_requirements();
       ensure_codex_plugin_files(home, client_tool_transport_preference(), &requirements);
@@ -2235,7 +2472,7 @@ void ensure_client_integrations(void)
 
    char claude_dir[MAX_PATH_LEN];
    snprintf(claude_dir, sizeof(claude_dir), "%s/.claude", home);
-   if (stat(claude_dir, &st) == 0 && S_ISDIR(st.st_mode))
+   if ((stat(claude_dir, &st) == 0 && S_ISDIR(st.st_mode)) || client_command_installed("claude"))
       ensure_claude_code_integration(home);
 
    char gemini_dir[MAX_PATH_LEN];
@@ -2247,4 +2484,16 @@ void ensure_client_integrations(void)
    snprintf(copilot_dir, sizeof(copilot_dir), "%s/.copilot", home);
    if (stat(copilot_dir, &st) == 0 && S_ISDIR(st.st_mode))
       ensure_copilot_integration(home);
+
+   char opencode_dir[MAX_PATH_LEN];
+   snprintf(opencode_dir, sizeof opencode_dir, "%s/.config/opencode", home);
+   if ((stat(opencode_dir, &st) == 0 && S_ISDIR(st.st_mode)) ||
+       client_command_installed("opencode"))
+      ensure_opencode_worktree_integration(home);
+
+   char hermes_dir[MAX_PATH_LEN];
+   snprintf(hermes_dir, sizeof hermes_dir, "%s/.hermes", home);
+   if ((stat(hermes_dir, &st) == 0 && S_ISDIR(st.st_mode)) || client_command_installed("hermes") ||
+       client_command_installed("hermes-agent"))
+      ensure_hermes_worktree_integration(home);
 }

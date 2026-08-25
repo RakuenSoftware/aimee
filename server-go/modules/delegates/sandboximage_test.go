@@ -16,10 +16,10 @@ func TestSandboxDockerfileRefusesShellInPackageNames(t *testing.T) {
 		"`id`",
 		"pkg|tee",
 		"pkg>out",
-		"pkg out",          // a space is two arguments
-		"pkg\nRUN evil",    // a newline is a new Dockerfile instruction
-		"-flag",            // must start alphanumeric
-		"",                 // empty
+		"pkg out",       // a space is two arguments
+		"pkg\nRUN evil", // a newline is a new Dockerfile instruction
+		"-flag",         // must start alphanumeric
+		"",              // empty
 		"pkg'quote",
 		"pkg\"quote",
 		"pkg\\escape",

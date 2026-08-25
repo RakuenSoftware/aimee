@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include "platform_test_util.h"
 #if defined(__linux__)
 #include <sys/prctl.h>
 #endif
@@ -118,8 +119,30 @@ static void test_base_prefers_remote_default(void)
 
    char base[192];
    assert(client_session_worktree_base(clone, base, sizeof base) == 0);
-   assert(strcmp(base, "origin/testing") == 0);
+   char resolved[192], upstream_head[192];
+   capture(resolved, sizeof resolved, "git -C '%s' rev-parse '%s'", clone, base);
+   capture(upstream_head, sizeof upstream_head, "git -C '%s' rev-parse HEAD", upstream);
+   assert(resolved[0] && strcmp(resolved, upstream_head) == 0);
    printf("  base = remote default, not the checkout's branch: ok\n");
+}
+
+static void test_base_fetches_default_tip_at_session_start(void)
+{
+   char upstream[512], clone[512];
+   make_repo("upstream-fresh", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "clone-fresh", clone, sizeof clone);
+   shell("printf latest > '%s/latest.txt' && git -C '%s' add latest.txt && "
+         "git -C '%s' commit -qm latest",
+         upstream, upstream, upstream);
+
+   char stale[192], latest[192], base[192], resolved[192];
+   capture(stale, sizeof stale, "git -C '%s' rev-parse origin/testing", clone);
+   capture(latest, sizeof latest, "git -C '%s' rev-parse HEAD", upstream);
+   assert(strcmp(stale, latest) != 0);
+   assert(client_session_worktree_base(clone, base, sizeof base) == 0);
+   capture(resolved, sizeof resolved, "git -C '%s' rev-parse '%s'", clone, base);
+   assert(strcmp(resolved, latest) == 0);
+   printf("  base fetches the exact default tip at session start: ok\n");
 }
 
 static void test_base_never_falls_back_to_current_branch(void)
@@ -210,6 +233,18 @@ static void test_ensure_creates_branch_and_worktree(void)
    struct stat st;
    assert(stat(wt, &st) == 0 && S_ISDIR(st.st_mode));
 
+   /* The implementation is intentionally invisible to ordinary Git status.
+    * Use info/exclude, not a committed .gitignore edit in the user's project. */
+   char source_status[512];
+   capture(source_status, sizeof source_status,
+           "git -C '%s' status --porcelain=v1 --untracked-files=all", clone);
+   assert(source_status[0] == '\0');
+   char exclude_path[1024], exclude_entry[128];
+   capture(exclude_path, sizeof exclude_path,
+           "git -C '%s' rev-parse --path-format=absolute --git-path info/exclude", clone);
+   capture(exclude_entry, sizeof exclude_entry, "grep -Fx '/.aimee/worktrees/' '%s'", exclude_path);
+   assert(strcmp(exclude_entry, "/.aimee/worktrees/") == 0);
+
    /* ...on its OWN session branch... */
    char branch[192];
    capture(branch, sizeof branch, "git -C '%s' rev-parse --abbrev-ref HEAD", wt);
@@ -237,6 +272,80 @@ static void test_ensure_creates_branch_and_worktree(void)
    printf("  ensure: own branch off the default branch, idempotent, per-session: ok\n");
 }
 
+static void test_explicit_feature_base_incorporates_latest_default(void)
+{
+   char upstream[512], clone[512];
+   make_repo("upstream-feature", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "clone-feature", clone, sizeof clone);
+   shell("git -C '%s' checkout -qb feature/work && printf feature > '%s/feature.txt' && "
+         "git -C '%s' add feature.txt && git -C '%s' commit -qm feature",
+         clone, clone, clone, clone);
+   char feature_oid[192];
+   capture(feature_oid, sizeof feature_oid, "git -C '%s' rev-parse HEAD", clone);
+
+   shell("printf latest > '%s/latest.txt' && git -C '%s' add latest.txt && "
+         "git -C '%s' commit -qm latest",
+         upstream, upstream, upstream);
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "feature/work", 1);
+   char wt[4200];
+   assert(client_session_worktree_ensure_at("feature-with-fresh-default", clone, wt, sizeof wt) ==
+          0);
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+
+   assert(shell("git -C '%s' merge-base --is-ancestor '%s' HEAD", wt, feature_oid) == 0);
+   assert(shell("git -C '%s' merge-base --is-ancestor origin/testing HEAD", wt) == 0);
+   char feature_path[4300], latest_path[4300];
+   snprintf(feature_path, sizeof feature_path, "%s/feature.txt", wt);
+   snprintf(latest_path, sizeof latest_path, "%s/latest.txt", wt);
+   assert(access(feature_path, F_OK) == 0);
+   assert(access(latest_path, F_OK) == 0);
+   printf("  explicit feature base incorporates freshly fetched default: ok\n");
+}
+
+static void test_concurrent_session_starts_get_distinct_worktrees(void)
+{
+   char upstream[512], clone[512];
+   make_repo("upstream-concurrent", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "clone-concurrent", clone, sizeof clone);
+
+   enum
+   {
+      N = 6
+   };
+   pid_t children[N];
+   for (int i = 0; i < N; i++)
+   {
+      children[i] = fork();
+      assert(children[i] >= 0);
+      if (children[i] == 0)
+      {
+         char sid[64], wt[4200];
+         snprintf(sid, sizeof sid, "concurrent-session-%d", i);
+         _exit(client_session_worktree_ensure_at(sid, clone, wt, sizeof wt) == 0 ? 0 : 1);
+      }
+   }
+   for (int i = 0; i < N; i++)
+   {
+      int status = 1;
+      assert(waitpid(children[i], &status, 0) == children[i]);
+      assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   }
+
+   char paths[N][4200];
+   for (int i = 0; i < N; i++)
+   {
+      char sid[64], key[80];
+      snprintf(sid, sizeof sid, "concurrent-session-%d", i);
+      client_session_worktree_key(sid, key, sizeof key);
+      snprintf(paths[i], sizeof paths[i], "%s/.aimee/worktrees/%s/main", clone, key);
+      struct stat st;
+      assert(stat(paths[i], &st) == 0 && S_ISDIR(st.st_mode));
+      for (int j = 0; j < i; j++)
+         assert(strcmp(paths[i], paths[j]) != 0);
+   }
+   printf("  concurrent starts serialize and receive distinct worktrees: ok\n");
+}
+
 static void test_ensure_requires_a_session_id_and_a_repo(void)
 {
    char repo[512];
@@ -259,6 +368,102 @@ static void test_ensure_requires_a_session_id_and_a_repo(void)
 
    assert(chdir(cwd_before) == 0);
    printf("  ensure: no session id / no repo -> not applicable: ok\n");
+}
+
+static void test_routes_reads_writes_shell_and_patch_per_session(void)
+{
+   char upstream[512], clone[512];
+   make_repo("upstream-route", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "clone-route", clone, sizeof clone);
+   shell("mkdir -p '%s/src'", clone);
+
+   const char *a = "route-session-a";
+   const char *b = "route-session-b";
+   char wt_a[4200], wt_b[4200];
+   assert(client_session_worktree_ensure_at(a, clone, wt_a, sizeof wt_a) == 0);
+   assert(client_session_worktree_ensure_at(b, clone, wt_b, sizeof wt_b) == 0);
+   assert(strcmp(wt_a, wt_b) != 0);
+
+   char routed[32768], expect[4200];
+   assert(client_session_worktree_route_path(a, clone, "src/new.c", routed, sizeof routed) == 0);
+   snprintf(expect, sizeof expect, "%s/src/new.c", wt_a);
+   assert(strcmp(routed, expect) == 0);
+
+   /* Once a host adopts the session checkout as cwd, model-generated absolute
+    * paths may still name the original checkout. They must remain isolated. */
+   char source_seed[4200];
+   snprintf(source_seed, sizeof source_seed, "%s/seed.txt", clone);
+   assert(client_session_worktree_route_path(a, wt_a, source_seed, routed, sizeof routed) == 0);
+   snprintf(expect, sizeof expect, "%s/seed.txt", wt_a);
+   assert(strcmp(routed, expect) == 0);
+   assert(client_session_worktree_route_path(a, clone, expect, routed, sizeof routed) == 0);
+   assert(strcmp(routed, expect) == 0); /* repeated host callbacks are idempotent */
+   char source_cmd[8400];
+   snprintf(source_cmd, sizeof source_cmd, "printf adopted > '%s/adopted.txt'", clone);
+   assert(client_session_worktree_route_command(a, wt_a, source_cmd, routed, sizeof routed) == 0);
+   char expected_cmd[8400];
+   snprintf(expected_cmd, sizeof expected_cmd, "printf adopted > '%s/adopted.txt'", wt_a);
+   assert(strcmp(routed, expected_cmd) == 0);
+
+   /* Explicit access to B's tree from A is never accepted merely because both
+    * paths contain the managed-worktree marker. */
+   snprintf(expect, sizeof expect, "%s/seed.txt", wt_b);
+   assert(client_session_worktree_route_path(a, clone, expect, routed, sizeof routed) == -3);
+   assert(client_session_worktree_route_command(a, clone, expect, routed, sizeof routed) == -3);
+   assert(client_session_worktree_route_path(a, clone, "/tmp/.claude/worktrees/another/src/x.c",
+                                             routed, sizeof routed) == -3);
+   assert(client_session_worktree_route_command(
+              a, clone, "cat /tmp/.codex/worktrees/another/src/x.c", routed, sizeof routed) == -3);
+
+   assert(client_session_worktree_route_command(a, clone, "printf routed > shell.txt", routed,
+                                                sizeof routed) == 0);
+   assert(strstr(routed, wt_a) != NULL);
+   char routed_again[32768];
+   assert(client_session_worktree_route_command(a, clone, routed, routed_again,
+                                                sizeof routed_again) == 0);
+   assert(strcmp(routed, routed_again) == 0);
+   assert(shell("%s", routed) == 0);
+   snprintf(expect, sizeof expect, "%s/shell.txt", wt_a);
+   assert(access(expect, F_OK) == 0);
+   snprintf(expect, sizeof expect, "%s/shell.txt", clone);
+   assert(access(expect, F_OK) != 0); /* shared checkout stayed untouched */
+
+   const char *patch = "*** Begin Patch\n*** Add File: src/from-patch.c\n+x\n*** End Patch\n";
+   assert(client_session_worktree_route_patch(a, clone, patch, routed, sizeof routed) == 0);
+   char key[80];
+   client_session_worktree_key(a, key, sizeof key);
+   char fragment[256];
+   snprintf(fragment, sizeof fragment, ".aimee/worktrees/%s/main/src/from-patch.c", key);
+   assert(strstr(routed, fragment) != NULL);
+
+   /* Starting from B's checkout still resolves A's checkout, never reuses B. */
+   char from_foreign[4200];
+   assert(client_session_worktree_ensure_at(a, wt_b, from_foreign, sizeof from_foreign) == 0);
+   assert(strcmp(from_foreign, wt_a) == 0);
+   printf("  route: reads/writes/shell/patch isolated and cross-session access blocked: ok\n");
+}
+
+static void test_release_recycles_only_clean_session_worktrees(void)
+{
+   char upstream[512], clone[512];
+   make_repo("upstream-release", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "clone-release", clone, sizeof clone);
+
+   char clean[4200], dirty[4200], marker[4300];
+   assert(client_session_worktree_ensure_at("release-clean", clone, clean, sizeof clean) == 0);
+   assert(client_session_worktree_ensure_at("release-dirty", clone, dirty, sizeof dirty) == 0);
+   snprintf(marker, sizeof marker, "%s/unsaved.txt", dirty);
+   assert(shell("printf unsaved > '%s'", marker) == 0);
+
+   assert(client_session_worktree_release_at("release-clean", clone) == 0);
+   assert(access(clean, F_OK) != 0);
+
+   /* SessionEnd is cleanup, never data loss. git's non-force removal refuses
+    * the dirty checkout and the user's file remains available. */
+   assert(client_session_worktree_release_at("release-dirty", clone) == 1);
+   assert(access(dirty, F_OK) == 0);
+   assert(access(marker, F_OK) == 0);
+   printf("  release: clean recycled, dirty retained: ok\n");
 }
 
 /* Reproduce the pre-rekey layout by hand: <root>/.aimee/worktrees/<old_key>/main
@@ -505,8 +710,7 @@ int main(void)
 {
    printf("client session worktree bootstrap\n");
 
-   const char *tmp = getenv("TMPDIR");
-   snprintf(g_tmp_root, sizeof g_tmp_root, "%s/aimee-csw-test-%d", (tmp && tmp[0]) ? tmp : "/tmp",
+   snprintf(g_tmp_root, sizeof g_tmp_root, "%s/aimee-csw-test-%d", platform_tmpdir(),
             (int)getpid());
    shell("rm -rf '%s' && mkdir -p '%s'", g_tmp_root, g_tmp_root);
    /* Keep the harness's own env from steering base resolution. */
@@ -514,11 +718,16 @@ int main(void)
 
    test_key_is_collision_free();
    test_base_prefers_remote_default();
+   test_base_fetches_default_tip_at_session_start();
    test_base_never_falls_back_to_current_branch();
    test_base_local_default_fallback();
    test_base_explicit_ref_override();
    test_ensure_creates_branch_and_worktree();
+   test_explicit_feature_base_incorporates_latest_default();
+   test_concurrent_session_starts_get_distinct_worktrees();
    test_ensure_requires_a_session_id_and_a_repo();
+   test_routes_reads_writes_shell_and_patch_per_session();
+   test_release_recycles_only_clean_session_worktrees();
    test_ensure_reclaims_pre_rekey_worktree();
    test_reclaim_keeps_a_dirty_pre_rekey_worktree();
    test_publish_reaches_the_parent();

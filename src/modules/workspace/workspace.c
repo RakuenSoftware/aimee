@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 #ifndef O_CLOEXEC
@@ -768,9 +769,55 @@ char *resolve_proposal_path(const char *proposal)
  * other. The key now hashes the FULL id. See session_worktree_key.h. */
 #define WORKTREE_SID_KEY_LEN (SESSION_WORKTREE_KEY_MAX - 1)
 
-static void worktree_session_key(const char *sid, char *out, size_t cap)
+/* Worktrees live beneath the repository so bind paths remain stable for local
+ * and container sessions. Hide that internal store through the repository's
+ * local exclude file; never add noise to the project's committed .gitignore.
+ * The caller holds the Git-common-dir provisioning lock. */
+static int worktree_exclude_internal_store(const char *git_root)
 {
-   session_worktree_key(sid, out, cap);
+   char *esc = shell_escape(git_root);
+   if (!esc)
+      return -1;
+   char cmd[MAX_PATH_LEN * 2 + 128];
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null",
+            esc);
+   free(esc);
+   int rc = 0;
+   char *exclude_path = run_cmd(cmd, &rc);
+   if (rc != 0 || !exclude_path || !exclude_path[0])
+   {
+      free(exclude_path);
+      return -1;
+   }
+   exclude_path[strcspn(exclude_path, "\r\n")] = '\0';
+
+   static const char entry[] = "/.aimee/worktrees/";
+   FILE *f = fopen(exclude_path, "r");
+   if (f)
+   {
+      char line[4096];
+      while (fgets(line, sizeof(line), f))
+      {
+         line[strcspn(line, "\r\n")] = '\0';
+         if (strcmp(line, entry) == 0)
+         {
+            fclose(f);
+            free(exclude_path);
+            return 0;
+         }
+      }
+      fclose(f);
+   }
+
+   f = fopen(exclude_path, "a");
+   free(exclude_path);
+   if (!f)
+      return -1;
+   int ok = fprintf(f, "\n%s\n", entry) > 0;
+   if (fclose(f) != 0)
+      ok = 0;
+   return ok ? 0 : -1;
 }
 
 /* The worktree this session owned under the PREVIOUS (truncating) key, if any.
@@ -794,7 +841,7 @@ int worktree_sibling_path(const char *git_root, const char *sid, const char *wor
       return -1;
 
    char short_id[WORKTREE_SID_KEY_LEN + 1];
-   worktree_session_key(sid, short_id, sizeof(short_id));
+   session_worktree_key(sid, short_id, sizeof(short_id));
 
    if (work_name && work_name[0])
       snprintf(wt_buf, wt_len, "%s/.aimee/worktrees/%s/%s", git_root, short_id, work_name);
@@ -821,7 +868,7 @@ int worktree_delegate_work_name(const char *sid, char *out, size_t cap)
    if (!sid || !out || cap < 9)
       return -1;
    char short_id[WORKTREE_SID_KEY_LEN + 1];
-   worktree_session_key(sid, short_id, sizeof(short_id));
+   session_worktree_key(sid, short_id, sizeof(short_id));
    /* FNV-1a (32-bit) over the session key — stable across processes and builds. */
    uint32_t h = 2166136261u;
    for (const char *p = short_id; *p; p++)
@@ -1279,30 +1326,20 @@ int worktree_find_branch_registered(const char *branch, char *out_dir, size_t ou
  * A fresh session must start from the repository's DEFAULT branch, not from
  * whatever branch the source checkout happens to be sitting on — otherwise a
  * session forks off a random feature branch and inherits unrelated WIP. Order:
- *   1. origin/HEAD  — the remote default branch (e.g. "origin/main"); fetched
- *      fresh and used as origin/<default> so the worktree tracks the latest
- *      upstream rather than a stale remote-tracking ref.
- *   2. local main / master / trunk — common defaults when no remote HEAD is set;
- *      fetched and resolved to origin/<default> when an upstream exists.
- *   3. current HEAD — last resort (detached/empty repo, or a default-less repo).
- * Basing a fresh session on a stale local copy of the default produced spurious
- * merge conflicts at integration time, so we refresh from origin first (cf. the
- * session-checkout path, which already fetches origin/<primary>). The fetch is
- * best-effort: offline or remote-less repos fall back to the local default.
+ * With origin configured, a bounded non-interactive fetch is mandatory and the
+ * exact fetched HEAD commit is pinned. A failed fetch fails session start;
+ * stale tracking data is never silently accepted. `current` and
+ * `local_default` are explicit offline/stale overrides.
  * Callers that want a specific base (delegates inheriting a parent, or the
  * session-checkout path that bases on origin/<primary>) pass base_ref instead
  * and never reach here. */
 /* Resolve the base ref for a NEW session worktree.
  *
  * Order, in full:
- *   1. CONFIGURED  session_worktree_base / AIMEE_SESSION_WORKTREE_BASE, when it names an
- *                  explicit ref. Verified to exist rather than handed to git blind.
- *   2. DEFAULT     the remote's advertised default branch (origin/HEAD), fetched fresh.
- *   3. main
- *   4. master
- * Each of 2-4 prefers the remote-tracking ref (origin/<x>) and accepts the local branch
- * only when no remote-tracking ref exists, so a repo WITH a remote never silently starts
- * from a stale local copy.
+ * A configured feature/release ref selects the work to continue, but does not
+ * waive freshness: the new session branch incorporates the freshly fetched
+ * default tip when it is not already an ancestor. main/master are the local
+ * authority only when no origin exists.
  *
  * What is deliberately NOT in the chain: the currently checked-out branch. The old code
  * ended at `rev-parse --abbrev-ref HEAD`, so when the shared checkout happened to sit on
@@ -1343,11 +1380,39 @@ static int wt_resolve_candidate(const char *git_root, const char *name, char *ou
    return 0;
 }
 
-int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len)
+static int wt_ref_oid(const char *git_root, const char *ref, char *out, size_t cap)
 {
-   if (!git_root || !buf || buf_len == 0)
+   if (!git_root || !git_root[0] || !ref || !ref[0] || !out || cap == 0)
       return -1;
-   buf[0] = '\0';
+   out[0] = '\0';
+   char cmd[MAX_PATH_LEN + 192];
+   int rc = 0;
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify '%s^{commit}' 2>/dev/null", git_root,
+            ref);
+   char *oid = run_cmd(cmd, &rc);
+   if (rc == 0 && oid && oid[0])
+   {
+      oid[strcspn(oid, "\r\n")] = '\0';
+      snprintf(out, cap, "%s", oid);
+   }
+   free(oid);
+   return out[0] ? 0 : -1;
+}
+
+/* selected is the requested starting branch/ref; default_oid is the exact
+ * default tip observed at this session start. The caller must make
+ * default_oid an ancestor of the newly-created session branch whenever
+ * enforce_default is set. `current` and `local_default` are explicit operator
+ * overrides for offline/stale starts. */
+static int wt_session_bases(const char *git_root, char *selected, size_t selected_len,
+                            char *default_oid, size_t default_len, int *enforce_default)
+{
+   if (!git_root || !selected || selected_len == 0 || !default_oid || default_len == 0 ||
+       !enforce_default)
+      return -1;
+   selected[0] = '\0';
+   default_oid[0] = '\0';
+   *enforce_default = 0;
 
    char cmd[MAX_PATH_LEN + 160];
    int rc;
@@ -1375,100 +1440,96 @@ int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len)
          while (l && (cur[l - 1] == '\n' || cur[l - 1] == '\r'))
             cur[--l] = '\0';
          if (cur[0])
-            snprintf(buf, buf_len, "%s", cur);
+            snprintf(selected, selected_len, "%s", cur);
       }
       free(cur);
-      return buf[0] ? 0 : -1;
-   }
-   if (strcmp(mode, "remote_default") != 0 && strcmp(mode, "local_default") != 0)
-   {
-      snprintf(cmd, sizeof(cmd),
-               "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", git_root,
-               mode);
-      free(run_cmd(cmd, &rc));
-      if (rc != 0)
-         return -1; /* an explicit ref that does not exist is an operator error */
-      snprintf(buf, buf_len, "%s", mode);
-      return 0;
+      return selected[0] ? 0 : -1;
    }
 
-   /* ---- 2. the remote's advertised default ---- */
-   char def[96] = {0};
-   snprintf(cmd, sizeof(cmd),
-            "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", git_root);
-   char *out = run_cmd(cmd, &rc);
-   if (rc == 0 && out && out[0])
+   int explicit_ref = strcmp(mode, "remote_default") != 0 && strcmp(mode, "local_default") != 0;
+   if (explicit_ref)
    {
-      size_t len = strlen(out);
-      while (len && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
-         out[--len] = '\0';
-      const char *name = out;
-      if (strncmp(name, "origin/", 7) == 0)
-         name += 7;
-      if (name[0])
-         snprintf(def, sizeof(def), "%s", name);
+      snprintf(selected, selected_len, "%s", mode);
    }
-   free(out);
 
-   /* origin/HEAD is unset on repos whose remote was added after clone -- repair once. */
-   if (!def[0])
+   snprintf(cmd, sizeof(cmd), "git -C '%s' remote get-url origin 2>/dev/null", git_root);
+   char *origin = run_cmd(cmd, &rc);
+   int have_origin = rc == 0 && origin && origin[0];
+   free(origin);
+
+   if (have_origin && strcmp(mode, "local_default") != 0)
    {
-      const char *setargv[] = {"remote", "set-head", "origin", "-a", NULL};
-      git_net_exec(git_root, setargv, NULL, 0);
-      snprintf(cmd, sizeof(cmd),
-               "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", git_root);
-      out = run_cmd(cmd, &rc);
-      if (rc == 0 && out && out[0])
+      const char *fetch_all[] = {"fetch", "--quiet", "--prune", "origin", NULL};
+      const char *fetch_head[] = {"fetch", "--quiet", "origin", "HEAD", NULL};
+      if (git_net_exec(git_root, fetch_all, NULL, 0) != 0 ||
+          git_net_exec(git_root, fetch_head, NULL, 0) != 0 ||
+          wt_ref_oid(git_root, "FETCH_HEAD", default_oid, default_len) != 0)
       {
-         size_t len = strlen(out);
-         while (len && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
-            out[--len] = '\0';
-         const char *name = out;
-         if (strncmp(name, "origin/", 7) == 0)
-            name += 7;
-         if (name[0])
-            snprintf(def, sizeof(def), "%s", name);
+         fprintf(stderr,
+                 "aimee: cannot verify the latest default branch for '%s'; fetch from origin "
+                 "failed. Select session_worktree_base=current or local_default only for an "
+                 "explicit offline/stale start.\n",
+                 git_root);
+         return -1;
       }
-      free(out);
-   }
-
-   if (def[0])
-   {
-      /* Start from the latest upstream. Best-effort and hang-proof; offline leaves the
-       * existing remote-tracking ref in place. */
-      const char *fetch_argv[] = {"fetch", "--quiet", "origin", def, NULL};
-      git_net_exec(git_root, fetch_argv, NULL, 0);
-
-      if (strcmp(mode, "local_default") == 0)
+      *enforce_default = 1;
+      if (strcmp(mode, "remote_default") == 0)
       {
-         snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-                  git_root, def);
-         free(run_cmd(cmd, &rc));
-         if (rc == 0)
-         {
-            snprintf(buf, buf_len, "%s", def);
-            return 0;
-         }
-      }
-      else if (wt_resolve_candidate(git_root, def, buf, buf_len))
+         snprintf(selected, selected_len, "%s", default_oid);
          return 0;
+      }
+      char selected_oid[96] = "";
+      return wt_ref_oid(git_root, selected, selected_oid, sizeof(selected_oid));
    }
 
-   /* ---- 3. main, then 4. master ---- */
-   if (wt_resolve_candidate(git_root, "main", buf, buf_len))
-      return 0;
-   if (wt_resolve_candidate(git_root, "master", buf, buf_len))
-      return 0;
+   /* local_default is an explicit stale/offline override. */
+   if (strcmp(mode, "local_default") == 0)
+   {
+      if (wt_ref_oid(git_root, "main", cmd, sizeof(cmd)) == 0)
+      {
+         snprintf(selected, selected_len, "%s", "main");
+         return 0;
+      }
+      if (wt_ref_oid(git_root, "master", cmd, sizeof(cmd)) == 0)
+      {
+         snprintf(selected, selected_len, "%s", "master");
+         return 0;
+      }
+      return -1;
+   }
 
-   buf[0] = '\0';
-   return -1;
+   /* No remote exists. main/master is the only default authority available. */
+   char local_default[64] = "";
+   if (!wt_resolve_candidate(git_root, "main", local_default, sizeof(local_default)) &&
+       !wt_resolve_candidate(git_root, "master", local_default, sizeof(local_default)))
+      return -1;
+   if (!selected[0])
+      snprintf(selected, selected_len, "%s", local_default);
+   if (wt_ref_oid(git_root, selected, cmd, sizeof(cmd)) != 0 ||
+       wt_ref_oid(git_root, local_default, default_oid, default_len) != 0)
+      return -1;
+   *enforce_default = 1;
+   return 0;
 }
 
-static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
-                                          const char *work_name, const char *base_ref)
+int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len)
+{
+   char default_oid[96];
+   int enforce_default = 0;
+   return wt_session_bases(git_root, buf, buf_len, default_oid, sizeof(default_oid),
+                           &enforce_default);
+}
+
+static int worktree_create_sibling_at_ref_unlocked(const char *git_root, const char *sid,
+                                                   const char *work_name, const char *base_ref)
 {
    if (!git_root || !sid)
       return -1;
+   if (worktree_exclude_internal_store(git_root) != 0)
+   {
+      LOG_ERROR("workspace", "could not hide internal worktree store for %s", git_root);
+      return -1;
+   }
 
    char wt_path[MAX_PATH_LEN];
    if (worktree_sibling_path(git_root, sid, work_name, wt_path, sizeof(wt_path)) != 0)
@@ -1476,7 +1537,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
 
    /* Create branch name from session ID (and optional work name) */
    char short_id[WORKTREE_SID_KEY_LEN + 1];
-   worktree_session_key(sid, short_id, sizeof(short_id));
+   session_worktree_key(sid, short_id, sizeof(short_id));
    char branch_name[128];
    if (work_name && work_name[0])
       snprintf(branch_name, sizeof(branch_name), "aimee/session/%s/%s", short_id, work_name);
@@ -1502,7 +1563,9 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       rmdir(wt_path);
    }
 
-   char base_branch[64];
+   char base_branch[192];
+   char default_oid[96] = "";
+   int enforce_default = 0;
    if (base_ref && base_ref[0])
       snprintf(base_branch, sizeof(base_branch), "%s", base_ref);
    else
@@ -1510,16 +1573,17 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       /* Detect base branch: root the worktree on the repository's DEFAULT
        * branch so a fresh session always starts from there rather than from
        * whatever branch the source checkout happens to have checked out.
-       * Falls back to main / master / trunk / HEAD when no default is known. */
+       * Refuses when no authoritative default is known. */
       /* Remote default by policy. A hard failure here is deliberate: guessing a base
        * is what let sessions inherit another session's branch. */
-      if (worktree_detect_base_branch(git_root, base_branch, sizeof(base_branch)) != 0)
+      if (wt_session_bases(git_root, base_branch, sizeof(base_branch), default_oid,
+                           sizeof(default_oid), &enforce_default) != 0)
       {
          fprintf(stderr,
                  "aimee: cannot resolve the session worktree base for '%s'. The default is the "
                  "REMOTE default branch (origin/HEAD); it is unset or unreachable here. Fix the "
-                 "remote (git remote set-head origin -a) or set session_worktree_base / "
-                 "AIMEE_SESSION_WORKTREE_BASE to an explicit ref.\n",
+                 "remote or explicitly select the offline override current/local_default via "
+                 "session_worktree_base / AIMEE_SESSION_WORKTREE_BASE.\n",
                  git_root);
          return -1;
       }
@@ -1550,6 +1614,43 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
 
    if (rc == 0)
    {
+      if (enforce_default && default_oid[0])
+      {
+         snprintf(cmd, sizeof(cmd),
+                  "git -C '%s' merge-base --is-ancestor '%s' HEAD >/dev/null 2>&1", wt_path,
+                  default_oid);
+         free(run_cmd(cmd, &rc));
+         if (rc != 0)
+         {
+            snprintf(cmd, sizeof(cmd),
+                     "git -C '%s' -c user.name='Aimee Session' "
+                     "-c user.email='aimee-session@localhost' -c commit.gpgSign=false "
+                     "merge --no-edit '%s' 2>&1",
+                     wt_path, default_oid);
+            char *merge_out = run_cmd(cmd, &rc);
+            if (rc != 0)
+            {
+               LOG_ERROR("workspace", "session base could not incorporate latest default %s: %s",
+                         default_oid, merge_out ? merge_out : "unknown");
+               free(merge_out);
+               snprintf(cmd, sizeof(cmd), "git -C '%s' merge --abort >/dev/null 2>&1", wt_path);
+               free(run_cmd(cmd, &rc));
+               snprintf(cmd, sizeof(cmd),
+                        "git -C '%s' worktree remove --force '%s' >/dev/null 2>&1", git_root,
+                        wt_path);
+               free(run_cmd(cmd, &rc));
+               snprintf(cmd, sizeof(cmd), "git -C '%s' branch -D '%s' >/dev/null 2>&1", git_root,
+                        branch_name);
+               free(run_cmd(cmd, &rc));
+               fprintf(stderr,
+                       "aimee: the requested session base conflicts with the latest default "
+                       "branch; no workspace was bound\n");
+               free(out);
+               return -1;
+            }
+            free(merge_out);
+         }
+      }
       fprintf(stderr, "aimee: created worktree at %s\n", wt_path);
       free(out);
       worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
@@ -1615,6 +1716,40 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
    free(out);
    free(out2);
    return -1;
+}
+
+/* Fetch, ref creation, worktree registration, and lineage recording form one
+ * provisioning transaction from the caller's perspective. Serialize them per
+ * repository across processes so simultaneous clients queue instead of racing
+ * on FETCH_HEAD/ref locks or observing half-created administrative state. */
+static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
+                                          const char *work_name, const char *base_ref)
+{
+   if (!git_root || !git_root[0])
+      return -1;
+   char common[MAX_PATH_LEN], common_abs[MAX_PATH_LEN], lock_path[MAX_PATH_LEN];
+   if (workspace_git_line(git_root, "--git-common-dir", common, sizeof(common)) != 0)
+      return -1;
+   if (common[0] == '/')
+      snprintf(common_abs, sizeof(common_abs), "%s", common);
+   else if (snprintf(common_abs, sizeof(common_abs), "%s/%s", git_root, common) >=
+            (int)sizeof(common_abs))
+      return -1;
+   if (snprintf(lock_path, sizeof(lock_path), "%s/aimee-session-worktrees.lock", common_abs) >=
+       (int)sizeof(lock_path))
+      return -1;
+   int fd = open(lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+   if (fd < 0 || flock(fd, LOCK_EX) != 0)
+   {
+      if (fd >= 0)
+         close(fd);
+      LOG_ERROR("workspace", "could not lock worktree provisioning for %s", git_root);
+      return -1;
+   }
+   int rc = worktree_create_sibling_at_ref_unlocked(git_root, sid, work_name, base_ref);
+   (void)flock(fd, LOCK_UN);
+   close(fd);
+   return rc;
 }
 
 /* Replay the anchor worktree's uncommitted changes (tracked modifications +
@@ -1873,7 +2008,7 @@ void worktree_reclaim_legacy(const char *git_root, const char *sid, const char *
    char old_key[SESSION_WORKTREE_KEY_MAX];
    char new_key[SESSION_WORKTREE_KEY_MAX];
    worktree_session_key_old(sid, old_key, sizeof(old_key));
-   worktree_session_key(sid, new_key, sizeof(new_key));
+   session_worktree_key(sid, new_key, sizeof(new_key));
    /* Same key under both derivations (short ids map to themselves) -> the
     * "legacy" path IS the live one. Removing it would delete the session's
     * own worktree. */
@@ -2305,7 +2440,8 @@ int worktree_apply_delegate_changes_checked(const char *delegate_wt, const char 
  * worktree. A new top-level session must not reuse a previous session's
  * managed worktree: only the expected worktree for this same sid counts as
  * already isolated. Returns 1 and fills target with the worktree path when a
- * switch is required; 0 otherwise. */
+ * switch is required, 0 when not applicable/already isolated, and -1 when an
+ * applicable session worktree cannot be created. */
 int session_isolation_target(const char *cwd, const char *sid, char *target, size_t target_len,
                              int create_if_missing)
 {
@@ -2352,127 +2488,13 @@ int session_isolation_target(const char *cwd, const char *sid, char *target, siz
           * shared checkout, so surface it: this is the one path where session
           * isolation silently does not apply. */
          LOG_WARN("workspace", "session isolation worktree create failed for %s (sid=%s)", gr, sid);
-         return 0;
+         return -1;
       }
       if (stat(wt_path, &wst) != 0)
-         return 0;
+         return -1;
    }
 
    snprintf(target, target_len, "%s", wt_path);
    return 1;
 #endif
-}
-
-/* Check if the current branch has a merged PR. Returns 1 if merged. */
-int check_merged_pr_for_branch(const char *git_dir)
-{
-   int rc;
-   char cmd_buf[MAX_PATH_LEN + 128];
-   if (git_dir && git_dir[0])
-      snprintf(cmd_buf, sizeof(cmd_buf), "git -C '%s' rev-parse --abbrev-ref HEAD 2>/dev/null",
-               git_dir);
-   else
-      snprintf(cmd_buf, sizeof(cmd_buf), "git rev-parse --abbrev-ref HEAD 2>/dev/null");
-   char *branch = run_cmd(cmd_buf, &rc);
-   if (rc != 0 || !branch)
-   {
-      free(branch);
-      return 0;
-   }
-   char *nl = strchr(branch, '\n');
-   if (nl)
-      *nl = '\0';
-
-   /* Skip default branches */
-   if (strcmp(branch, "main") == 0 || strcmp(branch, "master") == 0)
-   {
-      free(branch);
-      return 0;
-   }
-
-   /* Run `gh` inside the target repo. Without `cd`, `gh` inherits aimee-server's
-    * cwd (the aimee repo) and queries the wrong GitHub repo — producing
-    * false-positive merged-PR hits when a branch name collides across repos
-    * (e.g. `aimee/session/<id>` exists as a merged aimee PR while being the
-    * current session branch in an unrelated checkout). */
-   char cmd[MAX_PATH_LEN + 256];
-   if (git_dir && git_dir[0])
-      snprintf(cmd, sizeof(cmd),
-               "cd '%s' && gh pr list --head '%s' --state merged --json number --limit 1 "
-               "2>/dev/null",
-               git_dir, branch);
-   else
-      snprintf(cmd, sizeof(cmd),
-               "gh pr list --head '%s' --state merged --json number --limit 1 2>/dev/null", branch);
-   free(branch);
-
-   char *out = run_cmd(cmd, &rc);
-   if (rc != 0 || !out)
-   {
-      free(out);
-      return 0;
-   }
-
-   int has_merged = (strstr(out, "\"number\"") != NULL);
-   free(out);
-   if (!has_merged)
-      return 0;
-
-   /* A branch can have a merged PR and still be an active staging branch
-    * (e.g. proposal/next-cycle accumulates PRs and then merges to main
-    * repeatedly). Allow push when HEAD is ahead of origin/main — the branch
-    * has new commits that were not part of the merged PR. */
-   char ahead_cmd[MAX_PATH_LEN + 256];
-   if (git_dir && git_dir[0])
-      snprintf(ahead_cmd, sizeof(ahead_cmd),
-               "cd '%s' && git rev-list --count origin/main..HEAD 2>/dev/null", git_dir);
-   else
-      snprintf(ahead_cmd, sizeof(ahead_cmd), "git rev-list --count origin/main..HEAD 2>/dev/null");
-   char *ahead = run_cmd(ahead_cmd, &rc);
-   if (ahead)
-   {
-      int n = atoi(ahead);
-      free(ahead);
-      if (n > 0)
-         return 0;
-   }
-   return 1;
-}
-
-/* Look up the worktree path for a given CWD from session state.
- * Returns the worktree path if the CWD is inside a tracked git root. */
-const char *worktree_for_cwd(const session_state_t *state, const char *cwd)
-{
-   if (!state || !cwd || state->worktree_count == 0)
-      return NULL;
-
-   /* Find the most specific (longest) matching git root */
-   int best = -1;
-   size_t best_len = 0;
-   for (int i = 0; i < state->worktree_count; i++)
-   {
-      size_t rlen = strlen(state->worktrees[i].git_root);
-      if (rlen == 0)
-         continue;
-      if (strncmp(cwd, state->worktrees[i].git_root, rlen) == 0 &&
-          (cwd[rlen] == '/' || cwd[rlen] == '\0'))
-      {
-         if (rlen > best_len)
-         {
-            best = i;
-            best_len = rlen;
-         }
-      }
-   }
-
-   if (best >= 0)
-   {
-      /* Check if already in the worktree; don't redirect. */
-      size_t wt_len = strlen(state->worktrees[best].worktree_path);
-      if (strncmp(cwd, state->worktrees[best].worktree_path, wt_len) == 0 &&
-          (cwd[wt_len] == '/' || cwd[wt_len] == '\0'))
-         return NULL;
-      return state->worktrees[best].worktree_path;
-   }
-   return NULL;
 }

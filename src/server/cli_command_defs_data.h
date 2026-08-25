@@ -87,8 +87,8 @@
     {"worktree", "Manage session worktrees (gc abandoned ones)", AIMEE_CMD_TIER_ADVANCED, 0,
      "  gc               Garbage-collect abandoned session worktrees\n"
      "                   (--days N, default 14; --force; --dry-run)\n"},
-    {"insights", "Token usage totals over the last N days (--days N, default 30)", AIMEE_CMD_TIER_CORE,
-     0, NULL},
+    {"insights", "Token usage totals over the last N days (--days N, default 30)",
+     AIMEE_CMD_TIER_CORE, 0, NULL},
     {"server", "Manage the local aimee-server", AIMEE_CMD_TIER_ADVANCED, 0,
      "  start            Spawn aimee-server if not running\n"
      "                   (use systemctl --user start aimee-server on systemd\n"
@@ -99,9 +99,11 @@
      "  status           Show the loopback /v1 listener config and emit VS Code /\n"
      "                   OpenAI-compatible model-provider setup snippets\n"},
     {"launch", "Launch any client in an isolated Aimee session", AIMEE_CMD_TIER_CORE, 0,
-     "  -- <client> [args...]  Bind one session id and worktree, then exec the client\n"
+     "  [--gateway] -- <client> [args...]  Fetch the default tip, bind one session worktree,\n"
+     "                                      then exec the client\n"
      "                         (Codex, Claude, OpenCode, or any executable)\n"},
     {"session-start", "SessionStart hook entry point", AIMEE_CMD_TIER_CORE, 1, NULL},
+    {"session-end", "SessionEnd hook entry point", AIMEE_CMD_TIER_CORE, 1, NULL},
     {"delegate", "Delegate a task to a sub-agent", AIMEE_CMD_TIER_CORE, 0,
      "  <role> \"prompt\"   Run a delegate in <role>: code, review, explain,\n"
      "                   refactor, draft, execute, summarize, format, search,\n"
@@ -199,8 +201,7 @@
      "  list             List trigger runs\n"
      "  status           Show one trigger run\n"
      "  cancel           Cancel a queued trigger run\n"},
-    {"learning", "Learning-loop safety, regret, and negative knowledge",
-     AIMEE_CMD_TIER_ADVANCED, 0,
+    {"learning", "Learning-loop safety, regret, and negative knowledge", AIMEE_CMD_TIER_ADVANCED, 0,
      "  approaches \"<goal>\"\n"
      "                   Approaches that already failed against a similar goal\n"
      "                   (advisory recall for planning; never blocks)\n"
@@ -287,7 +288,8 @@
     {"mcp-serve", "MCP stdio bridge to aimee-server", AIMEE_CMD_TIER_ADMIN, 1, NULL},
     {"acp-serve", "ACP stdio server (Agent Client Protocol) for editors like Zed",
      AIMEE_CMD_TIER_ADMIN, 1, NULL},
-    {"profile", "Manage aimee profiles (create/list/show/delete/current)", AIMEE_CMD_TIER_ADVANCED, 0,
+    {"profile", "Manage aimee profiles (create/list/show/delete/current)", AIMEE_CMD_TIER_ADVANCED,
+     0,
      "  create <name>    Create a profile directory\n"
      "  list             List profiles\n"
      "  show <name>      Show profile details\n"

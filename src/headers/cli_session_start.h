@@ -15,6 +15,9 @@ int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out
  * directly. Returns the process exit code. */
 int handle_session_start(int json_output);
 
+/* `aimee session-end`: silent, best-effort cleanup of a clean session tree. */
+int handle_session_end(int json_output);
+
 /* `aimee user-prompt-submit` UserPromptSubmit-hook entry (cli_session_start.c).
  * Reads the host hook JSON (with `prompt`) from stdin and, against a remote /v1
  * endpoint, emits a per-turn <aimee-context> pre-injection envelope as the
