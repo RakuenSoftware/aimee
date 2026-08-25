@@ -221,6 +221,10 @@ if [[ "$MODE" == "full" ]]; then
   export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql:///aimee_shared}"
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
+  # Authenticate the local server-to-KB hop. Restore/undo is intentionally a
+  # human-authority operation and must not be made to pass by weakening KB's
+  # actor check just because this harness uses loopback HTTP.
+  export AIMEE_KB_API_BEARER_TOKEN="${AIMEE_KB_API_BEARER_TOKEN:-$BEARER}"
   echo "    DB2: ${AIMEE_DB2_URL}"
   arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
     "$AIMEE_HOME/kb-config-module.log" kb_config_pid
