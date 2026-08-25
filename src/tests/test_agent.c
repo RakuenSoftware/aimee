@@ -2872,6 +2872,22 @@ static void test_dispatch_tool_call(void)
    assert(strstr(result, "error") == NULL);
    free(result);
 
+   /* Reversible writes are contracted and independently read back before the
+    * dispatcher reports success. */
+   run_cmd_set_cwd(script_cwd);
+   result = dispatch_tool_call(
+       "write_file", "{\"path\":\"contract.txt\",\"content\":\"verified write\\n\"}", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "error:") == NULL);
+   free(result);
+   result = dispatch_tool_call("read_file", "{\"path\":\"contract.txt\",\"raw\":true}", 5000);
+   assert(result != NULL && strcmp(result, "verified write\n") == 0);
+   free(result);
+   result = dispatch_tool_call("write_file", "{\"content\":\"no target\"}", 5000);
+   assert(result != NULL && strstr(result, "effect contract refused") != NULL);
+   free(result);
+   run_cmd_set_cwd(NULL);
+
    /* Write file error includes recovery hint */
    run_cmd_set_cwd(script_cwd);
    result = dispatch_tool_call("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);

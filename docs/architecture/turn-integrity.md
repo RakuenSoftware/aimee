@@ -56,3 +56,11 @@ Shadow mode observes `proposed`, `validated` or `mismatch`, `executing`, and a
 terminal outcome without changing authorization. It provides a safe measurement
 period for contract coverage and drift before enforcement is enabled. Existing
 role, execution-policy, workflow, and guardrail decisions remain authoritative.
+
+Reversible enforcement is deliberately narrower than the write-tool category.
+It applies only where the dispatcher has a stable target and a mechanical
+postcondition: file creation/replacement, string or anchored file edits, and
+symbol edits with an explicit path. A contract mismatch or absent target refuses
+execution. A nominally successful mutation is not reported successful until a
+read-back check passes; failed verification reports an uncertain local state and
+requires inspection before retry. Other writes remain in shadow mode.
