@@ -2,6 +2,7 @@ package db2
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -43,6 +44,24 @@ type MemoryBackend interface {
 	FindIDByKeyKind(ctx context.Context, key, kind string) (bool, uint64, error)
 	// KeyExistsInTierPair reports whether the key exists in either tier.
 	KeyExistsInTierPair(ctx context.Context, key, tierA, tierB string) (bool, error)
+
+	// SetEffectiveness records an effectiveness score for one memory.
+	SetEffectiveness(ctx context.Context, memoryID uint64, value float64) error
+	// ClearEffectiveness returns one memory's effectiveness to unmeasured.
+	// This is a distinct operation from setting zero: zero is a score, and
+	// NULL is the absence of one, and the demotion sweep treats them
+	// differently.
+	ClearEffectiveness(ctx context.Context, memoryID uint64) error
+	// RetentionDelete removes memories of one sensitivity older than days,
+	// answering how many rows went.
+	RetentionDelete(ctx context.Context, sensitivity string, days uint32) (uint32, error)
+	// DemoteLowEffectiveness moves scored L2 memories below the threshold down
+	// to L1, answering how many moved.
+	DemoteLowEffectiveness(ctx context.Context, threshold float64) (uint32, error)
+	// EffectivenessStats summarises the effectiveness column.
+	EffectivenessStats(ctx context.Context, lowThreshold float64) (db2contract.EffectivenessStats, error)
+	// ListL2MemoryIDs lists L2 memory ids, bounded by max.
+	ListL2MemoryIDs(ctx context.Context, max uint32) ([]uint64, error)
 }
 
 // boolReply is the wire's spelling of a boolean: the contract carries these as
@@ -175,6 +194,80 @@ func NewMemoryHandler(backend MemoryBackend) bus.ModuleHandler {
 			return finish(func() ([]byte, error) {
 				return db2contract.EncodeKeyExistsInTierPairReply(boolReply(exists))
 			}, err)
+
+		case db2contract.OperationEffectivenessUpdate:
+			memoryID, hasValue, value, decodeErr := db2contract.DecodeEffectivenessUpdateRequest(request)
+			if decodeErr != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			// hasValue == 0 clears the score rather than storing zero. The
+			// contract already refuses a nonzero value with hasValue == 0, so
+			// the two cases cannot be confused on the wire.
+			var updateErr error
+			if hasValue == 0 {
+				updateErr = backend.ClearEffectiveness(ctx, memoryID)
+			} else {
+				updateErr = backend.SetEffectiveness(ctx, memoryID, value)
+			}
+			// This operation's reply is a closed result rather than a status:
+			// a memory that is not there is a state the caller must be told
+			// about, not a fault of the module.
+			result := uint32(db2contract.ResultOK)
+			if updateErr != nil {
+				if invocation.Cancelled() || ctx.Err() != nil {
+					return nil, bus.ModuleStatusCancelled
+				}
+				result = db2contract.ResultInvalidState
+			}
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeEffectivenessUpdateReply(result)
+			}, nil)
+
+		case db2contract.OperationRetentionEnforce:
+			if db2contract.DecodeRetentionEnforceRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			// Both sensitivities are swept in one operation, and the reply is
+			// their sum, because the caller's question is "how much did
+			// retention remove", not "how much of each".
+			restricted, err := backend.RetentionDelete(ctx,
+				db2contract.RetentionRestricted, db2contract.RetentionRestrictedDays)
+			if err == nil {
+				var sensitive uint32
+				sensitive, err = backend.RetentionDelete(ctx,
+					db2contract.RetentionSensitive, db2contract.RetentionSensitiveDays)
+				restricted += sensitive
+			}
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeRetentionEnforceReply(restricted)
+			}, err)
+
+		case db2contract.OperationEffectivenessDemote:
+			if db2contract.DecodeEffectivenessDemoteRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			demoted, err := backend.DemoteLowEffectiveness(ctx, effectivenessDemoteThreshold())
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeEffectivenessDemoteReply(demoted)
+			}, err)
+
+		case db2contract.OperationEffectivenessStats:
+			if db2contract.DecodeEffectivenessStatsRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			stats, err := backend.EffectivenessStats(ctx, effectivenessStatsLowThreshold())
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeEffectivenessStatsReply(stats)
+			}, err)
+
+		case db2contract.OperationL2MemoryIDs:
+			if db2contract.DecodeL2MemoryIDsRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			ids, err := backend.ListL2MemoryIDs(ctx, db2contract.L2MemoryIDsMax)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeL2MemoryIDsReply(ids)
+			}, err)
 		}
 
 		// An operation this stage does not serve. Reported as invalid rather
@@ -182,4 +275,18 @@ func NewMemoryHandler(backend MemoryBackend) bus.ModuleHandler {
 		// a caller to stop trying the whole stage.
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+}
+
+// The thresholds the contract fixes as float64 bit patterns.
+//
+// They are published as bits rather than decimals so the wire cannot drift from
+// the policy through a decimal literal that rounds differently in two
+// languages, which is a real hazard for a value compared against a stored
+// column.
+func effectivenessDemoteThreshold() float64 {
+	return math.Float64frombits(db2contract.EffectivenessDemoteThresholdBits)
+}
+
+func effectivenessStatsLowThreshold() float64 {
+	return math.Float64frombits(db2contract.EffectivenessStatsLowThresholdBits)
 }

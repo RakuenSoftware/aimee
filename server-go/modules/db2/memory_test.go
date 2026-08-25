@@ -21,6 +21,16 @@ type fakeMemory struct {
 
 	gotSession, gotKey, gotKind string
 	gotTierA, gotTierB          string
+
+	effStats           db2contract.EffectivenessStats
+	l2IDs              []uint64
+	retentionDeleted   map[string]uint32
+	demoted            uint32
+	gotThreshold       float64
+	gotLowThreshold    float64
+	gotEffectivenessID uint64
+	gotEffectiveness   float64
+	cleared            bool
 }
 
 func (f *fakeMemory) Level3Count(context.Context) (uint32, error) {
@@ -50,6 +60,41 @@ func (f *fakeMemory) FindIDByKeyKind(_ context.Context, key, kind string) (bool,
 func (f *fakeMemory) KeyExistsInTierPair(_ context.Context, key, a, b string) (bool, error) {
 	f.gotKey, f.gotTierA, f.gotTierB = key, a, b
 	return f.tierPairExists, f.err
+}
+func (f *fakeMemory) SetEffectiveness(_ context.Context, id uint64, v float64) error {
+	f.gotEffectivenessID, f.gotEffectiveness = id, v
+	return f.err
+}
+func (f *fakeMemory) ClearEffectiveness(_ context.Context, id uint64) error {
+	f.gotEffectivenessID, f.cleared = id, true
+	return f.err
+}
+func (f *fakeMemory) RetentionDelete(_ context.Context, sensitivity string, days uint32) (uint32, error) {
+	if f.retentionDeleted == nil {
+		f.retentionDeleted = map[string]uint32{}
+	}
+	f.retentionDeleted[sensitivity] = days
+	switch sensitivity {
+	case db2contract.RetentionRestricted:
+		return 2, f.err
+	case db2contract.RetentionSensitive:
+		return 3, f.err
+	}
+	return 0, f.err
+}
+func (f *fakeMemory) DemoteLowEffectiveness(_ context.Context, threshold float64) (uint32, error) {
+	f.gotThreshold = threshold
+	return f.demoted, f.err
+}
+func (f *fakeMemory) EffectivenessStats(_ context.Context, low float64) (db2contract.EffectivenessStats, error) {
+	f.gotLowThreshold = low
+	return f.effStats, f.err
+}
+func (f *fakeMemory) ListL2MemoryIDs(_ context.Context, max uint32) ([]uint64, error) {
+	if uint32(len(f.l2IDs)) > max {
+		return f.l2IDs[:max], f.err
+	}
+	return f.l2IDs, f.err
 }
 
 func memoryInvocation() bus.ModuleInvocation {
@@ -258,10 +303,10 @@ func (r fakeRow) Scan(dest ...any) error {
 
 func TestPGMemoryBackendCounts(t *testing.T) {
 	var gotQuery string
-	backend := NewPGMemoryBackend(func(_ context.Context, query string, _ ...any) HealthRow {
+	backend := NewPGMemoryBackend(MemorySeams{QueryRow: func(_ context.Context, query string, _ ...any) HealthRow {
 		gotQuery = query
 		return fakeRow{values: []any{int64(12)}}
-	})
+	}})
 	got, err := backend.Level3Count(context.Background())
 	if err != nil || got != 12 {
 		t.Fatalf("count = %d, err = %v", got, err)
@@ -274,9 +319,9 @@ func TestPGMemoryBackendCounts(t *testing.T) {
 // A negative COUNT would wrap to an enormous number: a wrong answer that looks
 // like a right one.
 func TestPGMemoryBackendRefusesNegativeCount(t *testing.T) {
-	backend := NewPGMemoryBackend(func(context.Context, string, ...any) HealthRow {
+	backend := NewPGMemoryBackend(MemorySeams{QueryRow: func(context.Context, string, ...any) HealthRow {
 		return fakeRow{values: []any{int64(-1)}}
-	})
+	}})
 	if _, err := backend.Level3Count(context.Background()); err == nil {
 		t.Fatal("expected an error for a negative count")
 	}
@@ -284,9 +329,9 @@ func TestPGMemoryBackendRefusesNegativeCount(t *testing.T) {
 
 // No rows means absent, not broken.
 func TestPGMemoryBackendExistsFoldsNoRows(t *testing.T) {
-	backend := NewPGMemoryBackend(func(context.Context, string, ...any) HealthRow {
+	backend := NewPGMemoryBackend(MemorySeams{QueryRow: func(context.Context, string, ...any) HealthRow {
 		return fakeRow{err: pgx.ErrNoRows}
-	})
+	}})
 	exists, err := backend.KeyExists(context.Background(), "k")
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -301,10 +346,10 @@ func TestPGMemoryBackendExistsFoldsNoRows(t *testing.T) {
 // count for a caller that meant to name a session.
 func TestPGMemoryBackendRefusesEmptyArgumentsWithoutQuerying(t *testing.T) {
 	queried := false
-	backend := NewPGMemoryBackend(func(context.Context, string, ...any) HealthRow {
+	backend := NewPGMemoryBackend(MemorySeams{QueryRow: func(context.Context, string, ...any) HealthRow {
 		queried = true
 		return fakeRow{values: []any{int64(1)}}
-	})
+	}})
 	ctx := context.Background()
 
 	if n, err := backend.SessionL2Count(ctx, ""); n != 0 || err != nil {
@@ -325,7 +370,7 @@ func TestPGMemoryBackendRefusesEmptyArgumentsWithoutQuerying(t *testing.T) {
 }
 
 func TestPGMemoryBackendWithoutQuerier(t *testing.T) {
-	backend := NewPGMemoryBackend(nil)
+	backend := NewPGMemoryBackend(MemorySeams{})
 	if _, err := backend.Level3Count(context.Background()); !errors.Is(err, ErrNoQuerier) {
 		t.Fatalf("err = %v, want ErrNoQuerier", err)
 	}
