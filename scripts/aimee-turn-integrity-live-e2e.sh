@@ -165,7 +165,7 @@ run_ir_turn() {
 run_ir_turn TI_FRESHNESS_BEFORE "$RUN_ROOT/fresh-before.out"
 curl -fksS --cert "$CLIENT_CERT" --key "$CLIENT_KEY" \
   -H "Authorization: Bearer $BEARER" -H 'content-type: application/json' -X POST \
-  -d '{"source_kind":"repository","source_id":"turn-integrity-e2e"}' \
+  -d '{"source_kind":"repository","source_id":"turn-integrity-e2e","artifacts_stale":1}' \
   "$SERVER_URL/v1/curator/invalidated" >/dev/null
 run_ir_turn TI_FRESHNESS_AFTER "$RUN_ROOT/fresh-after.out"
 grep -q 'aimee-freshness' "$provider_log" || \
