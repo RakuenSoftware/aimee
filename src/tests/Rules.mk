@@ -299,6 +299,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-cross-repo-route \
                $(TESTPREFIX)/unit-test-cross-repo-build \
                $(TESTPREFIX)/unit-test-cross-repo-review \
+               $(TESTPREFIX)/unit-test-turn-integrity \
                $(TESTPREFIX)/unit-test-turn-registry \
  $(TESTPREFIX)/unit-test-extractors-extra \
                $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-git-pr-ci-grade $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-roundtable-chair $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope $(TESTPREFIX)/unit-test-sweep-parse \
@@ -1939,7 +1940,14 @@ $(TESTPREFIX)/unit-test-presence: $(OBJDIR)/tests/test_presence.o \
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-turn-registry: $(OBJDIR)/tests/test_turn_registry.o \
-	                               $(OBJDIR)/server/turn_registry.o $(OBJDIR)/tests/support/log_stub.o
+	                               $(OBJDIR)/server/turn_registry.o \
+	                               $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+	                               $(OBJDIR)/cJSON.o $(OBJDIR)/tests/support/log_stub.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-turn-integrity: $(OBJDIR)/tests/test_turn_integrity.o \
+	                               $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+	                               $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-cli-launch: $(OBJDIR)/tests/test_cli_launch.o $(OBJDIR)/cli_launch.o \
