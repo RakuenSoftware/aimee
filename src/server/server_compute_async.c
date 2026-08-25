@@ -225,8 +225,13 @@ static void tool_execute_worker(void *arg)
       return;
    }
 
-   /* Execute tool */
+   /* Execute tool. External mutations require an authorization decision carried
+    * out-of-band from their model-supplied arguments. The local operator socket
+    * arrives with CAPS_ALL and is the trusted execution-policy boundary for this
+    * first-class API; capability-limited remote callers do not inherit it. */
+   agent_tools_set_effect_authorized(trusted_local);
    char *result = dispatch_tool_call(tool, args, timeout_ms);
+   agent_tools_set_effect_authorized(0);
 
    /* Clear thread-local CWD + the detached provider binding */
    run_cmd_set_cwd(NULL);
