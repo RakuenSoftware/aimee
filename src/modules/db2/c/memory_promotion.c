@@ -412,26 +412,63 @@ int db2_memory_promotion_l5_pattern_candidates(db2_memory_l5_candidate_t *out, i
    if (!conn)
       return -1;
    /* DB2 evaluates HAVING before SELECT aliases, so repeat the COUNT
-    * expression there. */
-   static const char *sql =
-       "SELECT m.id, m.key, m.content, COUNT(DISTINCT p.session_id) AS session_count"
-       " FROM memories m"
-       " JOIN memory_provenance p ON p.memory_id = m.id"
-       " WHERE m.tier = 'L2'"
-       "   AND m.kind IN ('fact', 'pattern')"
-       "   AND m.confidence >= 0.8"
-       "   AND NOT EXISTS (SELECT 1 FROM memory_links ml"
-       "                   JOIN memories ms ON ms.id = ml.source_id"
-       "                   WHERE ml.target_id = m.id"
-       "                     AND ms.tier = 'L5'"
-       "                     AND ml.relation = 'synthesizes')"
-       " GROUP BY m.id, m.key, m.content"
-       " HAVING COUNT(DISTINCT p.session_id) >= 3"
-       " LIMIT 20";
+    * expression there.
+    *
+    * The join to canonical memory_scopes makes scope part of the grouping key rather
+    * than a filter applied afterwards. Without it this query selected across
+    * the entire store with no workspace, project or user predicate, so a claim
+    * appearing in three sessions of three unrelated projects was promoted into
+    * the top tier and became globally reachable -- scope enforced on the read
+    * path but omitted from the background job and from the derived rows it
+    * writes. Recurrence is now counted strictly within one exact scope, and a row
+    * with no canonical tag is not a candidate at all: an unresolved scope is an
+    * error here, not a permissive default meaning "everything". */
+   static const char *sql = "SELECT m.id, m.key, m.content, s.scope_type, s.scope_value,"
+                            "       COUNT(DISTINCT p.session_id) AS session_count"
+                            " FROM memories m"
+                            " JOIN memory_provenance p ON p.memory_id = m.id"
+                            " JOIN memory_scopes s ON s.memory_id = m.id"
+                            " WHERE m.tier = 'L2'"
+                            "   AND m.kind IN ('fact', 'pattern')"
+                            "   AND m.confidence >= 0.8"
+                            "   AND m.lifecycle_state NOT IN ('archived','superseded')"
+                            "   AND s.scope_type IN ('project','workspace','global')"
+                            "   AND s.scope_value <> ''"
+                            "   AND NOT EXISTS (SELECT 1 FROM memory_scopes preferred"
+                            "                   WHERE preferred.memory_id = m.id"
+                            "                     AND preferred.scope_value <> ''"
+                            "                     AND CASE preferred.scope_type"
+                            "                           WHEN 'project' THEN 3"
+                            "                           WHEN 'workspace' THEN 2"
+                            "                           WHEN 'global' THEN 1 ELSE 0 END"
+                            "                         > CASE s.scope_type"
+                            "                           WHEN 'project' THEN 3"
+                            "                           WHEN 'workspace' THEN 2"
+                            "                           WHEN 'global' THEN 1 ELSE 0 END)"
+                            "   AND NOT EXISTS (SELECT 1 FROM memory_scopes ambiguous"
+                            "                   WHERE ambiguous.memory_id = m.id"
+                            "                     AND ambiguous.scope_value <> s.scope_value"
+                            "                     AND CASE ambiguous.scope_type"
+                            "                           WHEN 'project' THEN 3"
+                            "                           WHEN 'workspace' THEN 2"
+                            "                           WHEN 'global' THEN 1 ELSE 0 END"
+                            "                         = CASE s.scope_type"
+                            "                           WHEN 'project' THEN 3"
+                            "                           WHEN 'workspace' THEN 2"
+                            "                           WHEN 'global' THEN 1 ELSE 0 END)"
+                            "   AND NOT EXISTS (SELECT 1 FROM memory_links ml"
+                            "                   JOIN memories ms ON ms.id = ml.source_id"
+                            "                   WHERE ml.target_id = m.id"
+                            "                     AND ms.tier = 'L5'"
+                            "                     AND ml.relation = 'synthesizes')"
+                            " GROUP BY m.id, m.key, m.content, s.scope_type, s.scope_value"
+                            " HAVING COUNT(DISTINCT p.session_id) >= 3"
+                            " LIMIT ?1";
    char err[MP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
+   aimee_pg_bind_int(st, "?1", max);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -439,9 +476,14 @@ int db2_memory_promotion_l5_pattern_candidates(db2_memory_l5_candidate_t *out, i
       out[n].source_id = aimee_pg_column_int64(st, 0);
       const char *k = aimee_pg_column_text(st, 1);
       const char *c = aimee_pg_column_text(st, 2);
+      const char *scope_type = aimee_pg_column_text(st, 3);
+      const char *scope_value = aimee_pg_column_text(st, 4);
       snprintf(out[n].src_key, sizeof(out[n].src_key), "%s", k ? k : "");
       snprintf(out[n].src_content, sizeof(out[n].src_content), "%s", c ? c : "");
-      out[n].session_count = aimee_pg_column_int(st, 3);
+      snprintf(out[n].scope_type, sizeof(out[n].scope_type), "%s", scope_type ? scope_type : "");
+      snprintf(out[n].scope_value, sizeof(out[n].scope_value), "%s",
+               scope_value ? scope_value : "");
+      out[n].session_count = aimee_pg_column_int(st, 5);
       n++;
    }
    aimee_pg_finalize(st);

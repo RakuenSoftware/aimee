@@ -62,8 +62,11 @@ static void test_total_equals_component_sum(void)
    memset(&d, 0, sizeof(d));
    assert(memory_explain_match("docker deployment", m.id, &d) == 0);
 
-   /* parts.confidence must be populated post-ranking for display */
-   assert(d.parts.confidence > 0.9);
+   /* parts.confidence must be populated post-ranking for display. Model-authored
+    * memories are durably capped at 0.8, so this also checks that the displayed
+    * value is the persisted post-provenance value rather than the requested
+    * pre-cap 0.95. */
+   assert(d.parts.confidence > 0.79 && d.parts.confidence < 0.81);
 
    /* parts.total must equal the sum of ranking signals — no confidence term */
    double component_sum = d.parts.lexical + d.parts.coverage + d.parts.entity + d.parts.temporal +

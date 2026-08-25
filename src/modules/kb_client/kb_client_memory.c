@@ -16,8 +16,11 @@
 
 #include "kb_client.h"
 #include "kb_client_memory_internal.h"
+#include "db1_client/caches.h"
 #include "db1_client/user_memory.h"
+#include "db1_optional.h"
 #include "cJSON.h"
+#include "config.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"
 
@@ -29,6 +32,114 @@ static __thread int s_kbc_memory_scope_active;
 static __thread int s_kbc_memory_scope_all;
 static __thread char s_kbc_memory_workspace[512];
 static __thread char s_kbc_memory_project[512];
+
+#define KBC_MEMORY_ACTIVATION_MAX_ROWS 256
+
+typedef struct
+{
+   int64_t memory_id;
+   int64_t last_turn;
+} kbc_memory_activation_row_t;
+
+typedef struct
+{
+   kbc_memory_activation_row_t rows[KBC_MEMORY_ACTIVATION_MAX_ROWS];
+   int count;
+   int64_t current_turn;
+   int loaded;
+} kbc_memory_activation_t;
+
+static void kbc_memory_activation_load(kbc_memory_activation_t *activation)
+{
+   memset(activation, 0, sizeof(*activation));
+   const char *conversation_id = session_id();
+   if (!conversation_id || !conversation_id[0] || !db1_context_snapshot_activation)
+      return;
+
+   char rows[KBC_MEMORY_ACTIVATION_MAX_ROWS][DB1_CONTEXT_ACTIVATION_ROW_LEN];
+   int n = db1_context_snapshot_activation(conversation_id, rows, KBC_MEMORY_ACTIVATION_MAX_ROWS);
+   if (n < 0)
+      return;
+
+   for (int i = 0; i < n && activation->count < KBC_MEMORY_ACTIVATION_MAX_ROWS; i++)
+   {
+      char *end = NULL;
+      long long memory_id = strtoll(rows[i], &end, 10);
+      if (memory_id < 0 || !end)
+         continue;
+      long long turn = strtoll(end, NULL, 10);
+      if (turn < 0)
+         continue;
+      if (memory_id == 0)
+      {
+         activation->current_turn = (int64_t)turn;
+         continue;
+      }
+      activation->rows[activation->count].memory_id = (int64_t)memory_id;
+      activation->rows[activation->count].last_turn = (int64_t)turn;
+      activation->count++;
+   }
+   activation->loaded = activation->current_turn > 0;
+}
+
+static void kbc_memory_activation_add(cJSON *req, kbc_memory_activation_t *activation)
+{
+   kbc_memory_activation_load(activation);
+   if (!req || !activation->loaded)
+      return;
+   cJSON *obj = cJSON_AddObjectToObject(req, "activation");
+   cJSON *rows = obj ? cJSON_AddArrayToObject(obj, "rows") : NULL;
+   if (!obj || !rows)
+      return;
+   cJSON_AddNumberToObject(obj, "current_turn", (double)activation->current_turn);
+   for (int i = 0; i < activation->count; i++)
+   {
+      cJSON *row = cJSON_CreateObject();
+      if (!row)
+         break;
+      cJSON_AddNumberToObject(row, "memory_id", (double)activation->rows[i].memory_id);
+      cJSON_AddNumberToObject(row, "last_turn", (double)activation->rows[i].last_turn);
+      cJSON_AddItemToArray(rows, row);
+   }
+}
+
+static void kbc_memory_activation_record_recall(const cJSON *response,
+                                                const kbc_memory_activation_t *activation)
+{
+   static const char *sections[] = {"identity", "preferences", "active_context", "open_commitments",
+                                    NULL};
+   const cJSON *recall = cJSON_GetObjectItemCaseSensitive(response, "recall");
+   int64_t seen[64];
+   int seen_n = 0;
+   for (int s = 0; cJSON_IsObject(recall) && sections[s]; s++)
+   {
+      const cJSON *arr = cJSON_GetObjectItemCaseSensitive(recall, sections[s]);
+      const cJSON *item = NULL;
+      cJSON_ArrayForEach(item, arr)
+      {
+         const cJSON *managed = cJSON_GetObjectItemCaseSensitive(item, "activation_managed");
+         if (!cJSON_IsTrue(managed))
+            continue;
+         const cJSON *mid = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
+         if (!cJSON_IsNumber(mid) || mid->valuedouble <= 0.0)
+            continue;
+         int64_t id = (int64_t)mid->valuedouble;
+         int duplicate = 0;
+         for (int i = 0; i < seen_n; i++)
+            if (seen[i] == id)
+               duplicate = 1;
+         if (duplicate)
+            continue;
+         if (seen_n < (int)(sizeof(seen) / sizeof(seen[0])))
+            seen[seen_n++] = id;
+         const char *conversation_id = session_id();
+         if (activation->loaded && activation->current_turn > 0 && conversation_id &&
+             conversation_id[0] && db1_context_snapshot_insert_turn)
+            (void)db1_context_snapshot_insert_turn(conversation_id, id, 0.0,
+                                                   activation->current_turn);
+      }
+   }
+}
 
 void kb_client_memory_scope_context_set(const char *workspace, const char *project, int include_all)
 {
@@ -823,6 +934,7 @@ int kb_client_memory_query_health(memory_health_t *out)
    cJSON *tp = cJSON_GetObjectItemCaseSensitive(health, "total_promotions");
    cJSON *td = cJSON_GetObjectItemCaseSensitive(health, "total_demotions");
    cJSON *te = cJSON_GetObjectItemCaseSensitive(health, "total_expirations");
+   cJSON *lag = cJSON_GetObjectItemCaseSensitive(health, "write_to_readable_lag");
    if (cJSON_IsNumber(cy))
       out->cycles = (int)cy->valuedouble;
    if (cJSON_IsNumber(cr))
@@ -841,6 +953,18 @@ int kb_client_memory_query_health(memory_health_t *out)
       out->total_demotions = (int)td->valuedouble;
    if (cJSON_IsNumber(te))
       out->total_expirations = (int)te->valuedouble;
+   if (cJSON_IsObject(lag))
+   {
+      cJSON *samples = cJSON_GetObjectItemCaseSensitive(lag, "samples");
+      cJSON *p50 = cJSON_GetObjectItemCaseSensitive(lag, "p50_secs");
+      cJSON *p95 = cJSON_GetObjectItemCaseSensitive(lag, "p95_secs");
+      cJSON *p99 = cJSON_GetObjectItemCaseSensitive(lag, "p99_secs");
+      if (cJSON_IsNumber(samples))
+         out->write_to_readable_samples = (int64_t)samples->valuedouble;
+      out->write_to_readable_p50_secs = cJSON_IsNumber(p50) ? p50->valuedouble : -1.0;
+      out->write_to_readable_p95_secs = cJSON_IsNumber(p95) ? p95->valuedouble : -1.0;
+      out->write_to_readable_p99_secs = cJSON_IsNumber(p99) ? p99->valuedouble : -1.0;
+   }
    cJSON_Delete(resp);
    return 0;
 }
@@ -1098,6 +1222,8 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
 {
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
+   kbc_memory_activation_t activation;
+   kbc_memory_activation_add(req, &activation);
    if (task_hint && task_hint[0])
       cJSON_AddStringToObject(req, "task_hint", task_hint);
    if (limit_tokens > 0)
@@ -1115,7 +1241,15 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
     * wired), skip the parse/merge/reserialize entirely and pass the kb bundle
     * through verbatim — recall is on the primary agent's hot per-turn loop. */
    if (!db1_user_memory_any())
+   {
+      cJSON *response = cJSON_Parse(j);
+      if (response)
+      {
+         kbc_memory_activation_record_recall(response, &activation);
+         cJSON_Delete(response);
+      }
       return j;
+   }
 
    /* Merge this user's db1 identity/preferences on top of the org bundle. */
    cJSON *bundle = cJSON_Parse(j);
@@ -1129,6 +1263,7 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
          db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "preferences"),
                                           DB1_USER_RECALL_PREFERENCES, "user preference");
       }
+      kbc_memory_activation_record_recall(bundle, &activation);
       char *merged = cJSON_PrintUnformatted(bundle);
       cJSON_Delete(bundle);
       if (merged)

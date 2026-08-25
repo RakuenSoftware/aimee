@@ -22,6 +22,10 @@
 #define MR_PROFILE_EPISODE_RANK   DB2_MEMORY_SCOPE_RANK_SQL("mre.memory_id")
 #define MR_PROFILE_SUMMARY_SCOPE  DB2_MEMORY_SCOPE_FILTER_SQL("mrs.memory_id")
 #define MR_PROFILE_SUMMARY_RANK   DB2_MEMORY_SCOPE_RANK_SQL("mrs.memory_id")
+#define MR_CURRENT_SQL(memory_id_sql)                                                              \
+   " AND EXISTS (SELECT 1 FROM memories mcur WHERE mcur.id=" memory_id_sql                         \
+   " AND mcur.lifecycle_state NOT IN ('archived','superseded')"                                    \
+   " AND mcur.activation_suppressed=0)"
 
 int db2_memory_link_create(int64_t source_id, int64_t target_id, const char *relation)
 {
@@ -266,6 +270,8 @@ int db2_memory_collect_relation_token_matches(const char *token, int limit, memo
        " FROM memory_relations r"
        " JOIN memories m ON m.id = r.memory_id"
        " WHERE r.memory_id > 0"
+       "   AND m.lifecycle_state NOT IN ('archived','superseded')"
+       "   AND m.activation_suppressed=0"
        "   AND (LOWER(r.src_entity) = LOWER(?1)"
        "        OR LOWER(r.dst_entity) = LOWER(?2)"
        "        OR LOWER(r.relation) = LOWER(?3)"
@@ -337,14 +343,15 @@ int db2_memory_relations_search(const char *query, int limit, memory_relation_t 
        " WHERE (LOWER(r.src_entity) LIKE '%' || LOWER(?1) || '%'"
        "    OR LOWER(r.relation)   LIKE '%' || LOWER(?2) || '%'"
        "    OR LOWER(r.dst_entity) LIKE '%' || LOWER(?3) || '%'"
-       "    OR LOWER(r.fact_text)  LIKE '%' || LOWER(?4) || '%')" DB2_MEMORY_SCOPE_FILTER_SQL(
-           "r.memory_id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("r.memory_id") " DESC, r.weight "
-                                                                                "DESC, CASE WHEN "
-                                                                                "r.valid_at <> '' "
-                                                                                "THEN 0 ELSE 1 "
-                                                                                "END, r.created_at "
-                                                                                "DESC LIMIT "
-                                                                                "?5";
+       "    OR LOWER(r.fact_text)  LIKE '%' || LOWER(?4) || '%')" MR_CURRENT_SQL("r.memory_id")
+           DB2_MEMORY_SCOPE_FILTER_SQL("r.memory_id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+               "r.memory_id") " DESC, r.weight "
+                              "DESC, CASE WHEN "
+                              "r.valid_at <> '' "
+                              "THEN 0 ELSE 1 "
+                              "END, r.created_at "
+                              "DESC LIMIT "
+                              "?5";
    char err[MR_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -376,7 +383,7 @@ int db2_memory_relations_for_entity(const char *entity, int limit, memory_relati
        " r.dst_entity, r.fact_text, r.valid_at, r.invalid_at, r.weight, r.created_at"
        " FROM memory_relations r"
        " WHERE (LOWER(r.src_entity) = LOWER(?1) OR LOWER(r.dst_entity) = "
-       "LOWER(?2))" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "LOWER(?2))" MR_CURRENT_SQL("r.memory_id") DB2_MEMORY_SCOPE_FILTER_SQL(
            "r.memory_id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("r.memory_id") " DESC, r.weight "
                                                                                 "DESC, "
                                                                                 "r.created_at DESC "
@@ -405,10 +412,11 @@ int db2_memory_entity_profile_stats(const char *normalized_entity, int *mention_
    void *conn = db2_conn();
    if (!conn)
       return 0;
-   static const char *sql =
-       "SELECT"
-       " (SELECT COUNT(DISTINCT men.memory_id) FROM memory_entities men"
-       "   WHERE LOWER(men.entity) = LOWER(?1)" MR_PROFILE_MENTION_SCOPE "),"
+   static const char *sql = "SELECT"
+                            " (SELECT COUNT(DISTINCT men.memory_id) FROM memory_entities men"
+                            "   WHERE LOWER(men.entity) = LOWER(?1)" MR_CURRENT_SQL("men.memory_id")
+                                MR_PROFILE_MENTION_SCOPE
+       "),"
        /* memory_relations AND entity_edges. The typed-fact layer writes
         * entity_edges; this counted only the older table, so an entity known
         * ONLY through typed facts reported relation_count 0 -- and because
@@ -422,7 +430,9 @@ int db2_memory_entity_profile_stats(const char *normalized_entity, int *mention_
         * quarantined candidate is a proposal, not a relation this entity has. */
        " ((SELECT COUNT(*) FROM memory_relations mrc"
        "   WHERE (LOWER(mrc.src_entity) = LOWER(?2)"
-       "      OR LOWER(mrc.dst_entity) = LOWER(?3))" MR_PROFILE_RELATION_SCOPE ")"
+       "      OR LOWER(mrc.dst_entity) = LOWER(?3))" MR_CURRENT_SQL("mrc.memory_id")
+           MR_PROFILE_RELATION_SCOPE
+       ")"
        "  + (SELECT COUNT(*) FROM entity_edges eec"
        "      WHERE (LOWER(eec.source) = LOWER(?8) OR LOWER(eec.target) = LOWER(?9))"
        "        AND eec.edge_class = 'semantic'"
@@ -432,13 +442,14 @@ int db2_memory_entity_profile_stats(const char *normalized_entity, int *mention_
        " COALESCE((SELECT me.episode_key FROM memory_episodes me"
        "            JOIN memory_relations mre ON mre.episode_id = me.id"
        "            WHERE (LOWER(mre.src_entity) = LOWER(?4)"
-       "               OR LOWER(mre.dst_entity) = LOWER(?5))" MR_PROFILE_EPISODE_SCOPE
+       "               OR LOWER(mre.dst_entity) = LOWER(?5))" MR_CURRENT_SQL("mre.memory_id")
+           MR_PROFILE_EPISODE_SCOPE
        "            ORDER BY " MR_PROFILE_EPISODE_RANK " DESC, me.created_at DESC LIMIT 1), ''),"
        " COALESCE((SELECT mrs.fact_text FROM memory_relations mrs"
        "            WHERE (LOWER(mrs.src_entity) = LOWER(?6)"
-       "               OR LOWER(mrs.dst_entity) = LOWER(?7))" MR_PROFILE_SUMMARY_SCOPE
-       "            ORDER BY " MR_PROFILE_SUMMARY_RANK
-       " DESC, mrs.weight DESC, mrs.created_at DESC LIMIT 1), '')";
+       "               OR LOWER(mrs.dst_entity) = LOWER(?7))" MR_CURRENT_SQL("mrs.memory_id")
+           MR_PROFILE_SUMMARY_SCOPE "            ORDER BY " MR_PROFILE_SUMMARY_RANK
+                                    " DESC, mrs.weight DESC, mrs.created_at DESC LIMIT 1), '')";
    char err[MR_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -564,7 +575,7 @@ int db2_memory_relations_supporting(const char *entity_token, int limit, memory_
        " r.dst_entity, r.fact_text, r.valid_at, r.invalid_at, r.weight, r.created_at"
        " FROM memory_relations r"
        " WHERE (lower(r.src_entity) LIKE lower(?1) OR lower(r.dst_entity) LIKE lower(?2))"
-       " AND r.fact_text != ''" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " AND r.fact_text != ''" MR_CURRENT_SQL("r.memory_id") DB2_MEMORY_SCOPE_FILTER_SQL(
            "r.memory_id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("r.memory_id") " DESC, r.weight "
                                                                                 "DESC LIMIT ?3";
    char err[MR_ERRBUF] = "";

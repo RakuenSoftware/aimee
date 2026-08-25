@@ -447,6 +447,8 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/admin_grant.c
     ${AIMEE_SRC_DIR}/modules/db2/c/oidc_jwks.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/fact_identity.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/fact_identity_unicode.c
     ${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c
     ${AIMEE_SRC_DIR}/modules/db2/c/evidence_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_profiles.c
@@ -615,6 +617,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_advanced.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_activation.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_assemble.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_conflict.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_context.c

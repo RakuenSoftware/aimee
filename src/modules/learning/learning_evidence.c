@@ -597,6 +597,17 @@ int learning_evidence_write_retrieval_event(const char *query_fingerprint, const
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
 
+#if defined(AIMEE_DB2_DISABLED)
+   /* The server owns no DB2 connection. Its production retrieval path emits
+    * through kb_client_evidence_emit_retrieval_event_ex(); a shared/lean caller
+    * reaching this local writer must fail closed at the process boundary rather
+    * than making the server link a private DB2 implementation. */
+   (void)query_fingerprint;
+   (void)role;
+   (void)surfaced_ids;
+   (void)n_surfaced;
+   return -1;
+#else
    int rc = db2_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids, n_surfaced,
                                                id_out, id_out_len);
    if (rc != 0)
@@ -605,12 +616,20 @@ int learning_evidence_write_retrieval_event(const char *query_fingerprint, const
       return -1;
    }
    return 0;
+#endif
 }
 
 int learning_evidence_write_retrieval_attribution(const char *retrieval_event_id,
                                                   int64_t surfaced_row_id, const char *verdict,
                                                   double weight)
 {
+#if defined(AIMEE_DB2_DISABLED)
+   (void)retrieval_event_id;
+   (void)surfaced_row_id;
+   (void)verdict;
+   (void)weight;
+   return -1;
+#else
    if (!retrieval_event_id || !retrieval_event_id[0])
       return -1;
 
@@ -623,4 +642,5 @@ int learning_evidence_write_retrieval_attribution(const char *retrieval_event_id
       return -1;
    }
    return 0;
+#endif
 }

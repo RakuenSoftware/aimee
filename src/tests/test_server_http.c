@@ -137,6 +137,15 @@ static int stub_completion_handler(const char *body, char *resp, int cap)
    return 200;
 }
 
+static char g_recall_session_id[80];
+static int stub_recall_session_handler(const char *body, char *resp, int cap)
+{
+   (void)body;
+   snprintf(g_recall_session_id, sizeof(g_recall_session_id), "%s", session_id());
+   snprintf(resp, (size_t)cap, "{\"stub\":true}");
+   return 200;
+}
+
 /* Stub rules provider: returns a fixed heap JSON body (route frees it). */
 static char *stub_rules_provider(void)
 {
@@ -1072,6 +1081,32 @@ int main(void)
                              sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"stub\":true"));
+
+      /* The production activation seam must see the request's conversation id,
+       * and the override must not leak into a later request on this worker. */
+      server_http_set_memory_recall_handler(stub_recall_session_handler);
+      server_http_identity_capture(-1, 1,
+                                   "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
+                                   "aimee-session-id: activation-route-session\r\n\r\n");
+      g_recall_session_id[0] = '\0';
+      st = server_http_route("POST", "/v1/memory/recall", "{\"task_hint\":\"x\"}", 17, resp,
+                             sizeof(resp));
+      assert(st == 200);
+      assert(strcmp(g_recall_session_id, "activation-route-session") == 0);
+      assert(session_id_override_active() == 0);
+      server_http_identity_clear();
+
+      server_http_identity_capture(-1, 1,
+                                   "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
+                                   "aimee-session-id: invalid/session\r\n\r\n");
+      g_recall_session_id[0] = '\0';
+      st = server_http_route("POST", "/v1/memory/recall", "{\"task_hint\":\"x\"}", 17, resp,
+                             sizeof(resp));
+      assert(st == 400);
+      assert(g_recall_session_id[0] == '\0');
+      assert(session_id_override_active() == 0);
+      server_http_identity_clear();
+
       server_http_set_memory_recall_handler(NULL);
    }
 

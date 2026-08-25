@@ -10,6 +10,9 @@
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/lifecycle.h"
+#include "../modules/db2/c/memory_query.h"
+#include "../modules/db2/c/memory_relations.h"
+#include "../modules/db2/c/memory_vectors.h"
 
 static void setup(void)
 {
@@ -22,6 +25,184 @@ static void setup(void)
 static void teardown(void)
 {
    db2_test_shim_close();
+}
+
+static int count_text(const char *haystack, const char *needle)
+{
+   int count = 0;
+   size_t n = strlen(needle);
+   for (const char *p = haystack; n > 0 && (p = strstr(p, needle)) != NULL; p += n)
+      count++;
+   return count;
+}
+
+static void test_unit_cursor_drains_more_than_one_page(void)
+{
+   setup();
+   memory_t parent = {0};
+   assert(memory_insert(TIER_L2, KIND_FACT, "cursor-parent", "cursor parent fixture", 0.8,
+                        "cursor-origin", &parent) == 0);
+
+   char err[256] = "";
+   aimee_pg_stmt_t *insert =
+       aimee_pg_prepare(db2_conn(),
+                        "INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text)"
+                        " VALUES(?1,'chunk',?2,?3)",
+                        err, sizeof(err));
+   assert(insert != NULL);
+   for (int i = 0; i < 130; i++)
+   {
+      char key[32], text[64];
+      snprintf(key, sizeof(key), "unit-%03d", i);
+      snprintf(text, sizeof(text), "cursor unit %03d", i);
+      assert(aimee_pg_reset(insert) == 0);
+      aimee_pg_bind_int64(insert, "?1", parent.id);
+      aimee_pg_bind_text(insert, "?2", key);
+      aimee_pg_bind_text(insert, "?3", text);
+      assert(aimee_pg_step(insert, err, sizeof(err)) == AIMEE_PG_DONE);
+   }
+   aimee_pg_finalize(insert);
+
+   aimee_pg_stmt_t *count = aimee_pg_prepare(
+       db2_conn(), "SELECT COUNT(*) FROM memory_units WHERE memory_id=?1", err, sizeof(err));
+   assert(count != NULL);
+   aimee_pg_bind_int64(count, "?1", parent.id);
+   assert(aimee_pg_step(count, err, sizeof(err)) == AIMEE_PG_ROW);
+   int expected = aimee_pg_column_int(count, 0);
+   aimee_pg_finalize(count);
+   assert(expected >= 130);
+
+   int64_t after = 0;
+   int total = 0;
+   int has_more = 0;
+   do
+   {
+      int64_t ids[17];
+      int n = db2_memory_unit_list_ids_after(parent.id, after, ids, 17, &has_more);
+      assert(n > 0 && n <= 17);
+      for (int i = 0; i < n; i++)
+      {
+         assert(ids[i] > after);
+         after = ids[i];
+      }
+      total += n;
+   } while (has_more);
+   assert(total == expected);
+
+   /* Seed every synthetic point, including more than the old reclamation
+    * buffer, without a parent FK that could hide a missed delete. */
+   char sql[512];
+   snprintf(sql, sizeof(sql),
+            "INSERT INTO memory_embeddings(point_id)"
+            " SELECT id+%lld FROM memory_units WHERE memory_id=%lld",
+            (long long)PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   snprintf(sql, sizeof(sql), "INSERT INTO memory_embeddings(point_id) VALUES(%lld)",
+            (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   snprintf(sql, sizeof(sql),
+            "INSERT INTO vector_index_ops(point_id,memory_id)"
+            " SELECT id+%lld,NULL FROM memory_units WHERE memory_id=%lld",
+            (long long)PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   snprintf(sql, sizeof(sql), "INSERT INTO vector_index_ops(point_id,memory_id) VALUES(%lld,NULL)",
+            (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+
+   assert(memory_delete(parent.id) == 0);
+   aimee_pg_stmt_t *remaining = aimee_pg_prepare(db2_conn(),
+                                                 "SELECT (SELECT COUNT(*) FROM memory_embeddings)"
+                                                 "     + (SELECT COUNT(*) FROM vector_index_ops)",
+                                                 err, sizeof(err));
+   assert(remaining != NULL);
+   assert(aimee_pg_step(remaining, err, sizeof(err)) == AIMEE_PG_ROW);
+   assert(aimee_pg_column_int(remaining, 0) == 0);
+   aimee_pg_finalize(remaining);
+
+   teardown();
+}
+
+static void test_origin_diversity_and_labels_reach_production(void)
+{
+   setup();
+   memory_t m = {0};
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-alpha-one",
+                        "ORIGIN_ALPHA_ONE quota evidence about release signatures", 0.8,
+                        "origin-alpha", &m) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-alpha-two",
+                        "ORIGIN_ALPHA_TWO quota evidence about deployment regions", 0.8,
+                        "origin-alpha", &m) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-alpha-three",
+                        "ORIGIN_ALPHA_THREE quota evidence about database retention", 0.8,
+                        "origin-alpha", &m) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-beta-one",
+                        "ORIGIN_BETA_ONE quota evidence from an independent session", 0.2,
+                        "origin&beta", &m) == 0);
+
+   context_assemble_explain_entry_t explain[16];
+   context_budget_metrics_t metrics;
+   int explain_count = 0;
+   char *ctx =
+       memory_assemble_context_explain("quota evidence", explain, &explain_count, 16, &metrics);
+   assert(ctx != NULL);
+   assert(count_text(ctx, "origin_session=\"origin-alpha\"") == 2);
+   assert(count_text(ctx, "origin_session=\"origin&amp;beta\"") == 1);
+   assert(metrics.deferred_for_origin_quota >= 2);
+   int quota_rejected = 0;
+   for (int i = 0; i < explain_count; i++)
+      if (strcmp(explain[i].rejection_reason, "origin_quota_cap") == 0)
+         quota_rejected++;
+   assert(quota_rejected >= 1);
+   free(ctx);
+
+   teardown();
+}
+
+static void test_withheld_memories_cannot_reenter_production_reads(void)
+{
+   setup();
+   memory_t active = {0}, archived = {0}, suppressed = {0};
+   assert(memory_insert(TIER_L2, KIND_FACT, "negative-active", "NEGATIVE_ACTIVE_VISIBLE", 0.9,
+                        "origin-a", &active) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "negative-archived", "NEGATIVE_ARCHIVED_HIDDEN", 0.9,
+                        "origin-b", &archived) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "negative-suppressed", "NEGATIVE_SUPPRESSED_HIDDEN",
+                        0.9, "origin-c", &suppressed) == 0);
+   assert(memory_transition_lifecycle(archived.id, MEMORY_LIFECYCLE_STATE_ARCHIVED,
+                                      "negative retrieval fixture") == 0);
+   assert(memory_activation_policy_set(suppressed.id, 2, 1, 0, 1) == 0);
+
+   /* Envelope assembly drives the real candidate query and emitter. */
+   char *ctx = memory_assemble_context("negative reachability sentinel");
+   assert(ctx != NULL);
+   assert(strstr(ctx, "NEGATIVE_ACTIVE_VISIBLE") != NULL);
+   assert(strstr(ctx, "NEGATIVE_ARCHIVED_HIDDEN") == NULL);
+   assert(strstr(ctx, "NEGATIVE_SUPPRESSED_HIDDEN") == NULL);
+   free(ctx);
+
+   /* Graph recall is a separate production lane and must apply the same
+    * negative predicate rather than trusting envelope filtering downstream. */
+   db2_memory_relation_insert(active.id, "neggraph-active", "rel", "target", "active relation");
+   db2_memory_relation_insert(archived.id, "neggraph-archived", "rel", "target",
+                              "archived relation");
+   db2_memory_relation_insert(suppressed.id, "neggraph-suppressed", "rel", "target",
+                              "suppressed relation");
+   memory_relation_t relations[8];
+   assert(memory_search_graph("neggraph-active", 8, relations, 8) == 1);
+   assert(memory_search_graph("neggraph-archived", 8, relations, 8) == 0);
+   assert(memory_search_graph("neggraph-suppressed", 8, relations, 8) == 0);
+
+   /* Episode cards bypass the ordinary fact candidate pool, so exercise that
+    * production query too. */
+   db2_memory_unit_episode_card_insert(archived.id, "card-a", "ARCHIVED_CARD_HIDDEN");
+   db2_memory_unit_episode_card_insert(suppressed.id, "card-s", "SUPPRESSED_CARD_HIDDEN");
+   ctx = memory_assemble_context("what happened in the session overview?");
+   assert(ctx != NULL);
+   assert(strstr(ctx, "ARCHIVED_CARD_HIDDEN") == NULL);
+   assert(strstr(ctx, "SUPPRESSED_CARD_HIDDEN") == NULL);
+   free(ctx);
+
+   teardown();
 }
 
 static void test_null_hint_produces_same_as_original(void)
@@ -466,6 +647,9 @@ static void test_restatements_are_suppressed_but_distinct_facts_survive(void)
 
 int main(void)
 {
+   test_unit_cursor_drains_more_than_one_page();
+   test_origin_diversity_and_labels_reach_production();
+   test_withheld_memories_cannot_reenter_production_reads();
    test_restatements_are_suppressed_but_distinct_facts_survive();
    test_null_hint_produces_same_as_original();
    test_task_hint_prioritizes_relevant_memories();

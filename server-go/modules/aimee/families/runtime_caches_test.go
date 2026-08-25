@@ -1,6 +1,99 @@
 package families
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+
+	store "github.com/JBailes/aimee/server-go/modules/aimee"
+)
+
+type activationTestRow struct{ turn int64 }
+
+func (r activationTestRow) Scan(dest ...any) error {
+	*(dest[0].(*int64)) = r.turn
+	return nil
+}
+
+type activationTestRows struct {
+	rows [][2]int64
+	at   int
+}
+
+func (r *activationTestRows) Close()     {}
+func (r *activationTestRows) Err() error { return nil }
+func (r *activationTestRows) Next() bool {
+	if r.at >= len(r.rows) {
+		return false
+	}
+	r.at++
+	return true
+}
+func (r *activationTestRows) Scan(dest ...any) error {
+	row := r.rows[r.at-1]
+	*(dest[0].(*int64)) = row[0]
+	*(dest[1].(*int64)) = row[1]
+	return nil
+}
+
+type activationTestDB struct {
+	turn      int64
+	rows      [][2]int64
+	executed  []string
+	arguments [][]any
+}
+
+func (d *activationTestDB) Exec(_ context.Context, sql string, args ...any) (store.Tag, error) {
+	d.executed = append(d.executed, sql)
+	d.arguments = append(d.arguments, args)
+	return store.RowsAffected(1), nil
+}
+func (d *activationTestDB) Query(_ context.Context, sql string, args ...any) (store.Rows, error) {
+	d.executed = append(d.executed, sql)
+	d.arguments = append(d.arguments, args)
+	return &activationTestRows{rows: d.rows}, nil
+}
+func (d *activationTestDB) QueryRow(_ context.Context, sql string, args ...any) store.Row {
+	d.executed = append(d.executed, sql)
+	d.arguments = append(d.arguments, args)
+	return activationTestRow{turn: d.turn}
+}
+
+func TestContextSnapshotActivationAdvancesAndReturnsPersistedState(t *testing.T) {
+	db := &activationTestDB{turn: 7, rows: [][2]int64{{41, 6}, {52, 3}}}
+	status, cells, err := contextSnapshotActivation(t.Context(), db, []string{"session-a", "8"})
+	if err != nil || status != store.StatusOK {
+		t.Fatalf("activation status=%d err=%v", status, err)
+	}
+	want := []string{"0 7", "41 6", "52 3"}
+	if len(cells) != len(want) {
+		t.Fatalf("activation cells=%v, want %v", cells, want)
+	}
+	for i := range want {
+		if cells[i] != want[i] {
+			t.Errorf("activation cell %d=%q, want %q", i, cells[i], want[i])
+		}
+	}
+	if len(db.executed) != 2 ||
+		!strings.Contains(db.executed[0], "context_activation_turns") ||
+		!strings.Contains(db.executed[1], "context_activation_events") {
+		t.Fatalf("activation did not use the dedicated persisted turn/event tables: %v", db.executed)
+	}
+	if got := db.arguments[1][1]; got != 7 {
+		t.Errorf("state query limit=%v, want reply bound minus marker (7)", got)
+	}
+}
+
+func TestContextSnapshotInsertTurnRequiresPositiveTurn(t *testing.T) {
+	db := &activationTestDB{}
+	status, _, err := contextSnapshotInsertTurn(t.Context(), db, []string{"session-a", "41", "0.8", "0"})
+	if err != nil {
+		t.Fatalf("zero-turn refusal returned error: %v", err)
+	}
+	if status != store.StatusInvalid || len(db.executed) != 0 {
+		t.Fatalf("zero turn status=%d writes=%d, want invalid with no write", status, len(db.executed))
+	}
+}
 
 // URL canonicalisation decides what the web page cache keys on and, through
 // web_search_fuse, whether two search hits are one page. It moved here from C

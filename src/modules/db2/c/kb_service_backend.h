@@ -258,8 +258,10 @@ extern "C"
    cJSON *db2_kb_service_memory_prospective_sweep_expired_json(void);
    cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force, int dry_run);
    cJSON *db2_kb_service_memory_alerts_json(const char *since);
+   struct memory_activation;
    cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens,
-                                            int session_start);
+                                            int session_start,
+                                            const struct memory_activation *activation);
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,
                                                      const char *session_id);
@@ -313,10 +315,11 @@ extern "C"
                                                const char *content, const char *use_cases,
                                                double confidence, const char *session_id,
                                                int authority);
-   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(
-       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
-       const char *content, const char *use_cases, double confidence, const char *session_id,
-       int authority);
+   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
+                                                         const char *epistemic_kind,
+                                                         const char *key, const char *content,
+                                                         const char *use_cases, double confidence,
+                                                         const char *session_id, int authority);
    cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
    /* `authority` is the typed-fact write authority for the §4 retraction this
     * turn may perform; the RPC handler derives it from the request's

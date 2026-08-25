@@ -8,7 +8,9 @@
 #include "db1_optional.h"
 #include "modules/db2/c/fact_lifecycle.h" /* §5 fact-class lifecycle jobs */
 #include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/vector_index_ops.h"
 #include "kb.h"
 #include "log.h"
 #endif
@@ -283,8 +285,22 @@ int memory_enforce_retention(void)
  * This is the "Sleep Cycle" that creates high-density milestones. */
 static int memory_consolidate_l1_chains(void)
 {
-   db2_memory_l1_cluster_row_t clusters[64];
-   int cluster_count = db2_memory_l1_session_clusters("workflow_learning", 5, clusters, 64);
+   enum
+   {
+      CONSOLIDATE_CLUSTER_CAP = 64,
+      CONSOLIDATE_SOURCE_CAP = 256
+   };
+   db2_memory_l1_cluster_row_t clusters[CONSOLIDATE_CLUSTER_CAP + 1];
+   int cluster_count = db2_memory_l1_session_clusters("workflow_learning", 5, clusters,
+                                                      CONSOLIDATE_CLUSTER_CAP + 1);
+   if (cluster_count > CONSOLIDATE_CLUSTER_CAP)
+   {
+      LOG_WARN("memory.health",
+               "L1 consolidation cluster batch truncated at %d; remaining clusters defer to "
+               "the next maintenance pass",
+               CONSOLIDATE_CLUSTER_CAP);
+      cluster_count = CONSOLIDATE_CLUSTER_CAP;
+   }
 
    int consolidated = 0;
    for (int i = 0; i < cluster_count; i++)
@@ -302,8 +318,26 @@ static int memory_consolidate_l1_chains(void)
       if (recent_count < 5)
          continue;
 
-      db2_memory_content_row_t cs[256];
-      int cn = db2_memory_l1_session_content(session_id, cs, 256);
+      db2_memory_content_row_t cs[CONSOLIDATE_SOURCE_CAP + 1];
+      int cn = db2_memory_l1_session_content(session_id, cs, CONSOLIDATE_SOURCE_CAP + 1);
+      if (cn <= 0 || cn > CONSOLIDATE_SOURCE_CAP)
+      {
+         if (cn > CONSOLIDATE_SOURCE_CAP)
+            LOG_WARN("memory.health",
+                     "L1 consolidation refused for session %.96s: source cap %d reached",
+                     session_id, CONSOLIDATE_SOURCE_CAP);
+         continue;
+      }
+      int64_t source_ids[CONSOLIDATE_SOURCE_CAP];
+      for (int j = 0; j < cn; j++)
+         source_ids[j] = cs[j].id;
+      if (!memory_derived_sources_allowed(source_ids, cn))
+      {
+         LOG_WARN("memory.health",
+                  "L1 consolidation refused for session %.96s by recursive lineage gate",
+                  session_id);
+         continue;
+      }
       char summary[2048] = "";
       int pos = 0;
       for (int j = 0; j < cn; j++)
@@ -328,8 +362,29 @@ static int memory_consolidate_l1_chains(void)
                   summary);
 
          memory_t mem;
+         int milestone_existed = db2_memory_key_exists(key) == 1;
          if (memory_insert(TIER_L2, KIND_FACT, key, content, 0.8, session_id, &mem) == 0)
          {
+            int lineage_ok = 1;
+            for (int j = 0; j < cn; j++)
+            {
+               char ref[48];
+               snprintf(ref, sizeof(ref), "memory:%lld", (long long)source_ids[j]);
+               if (memory_lineage_insert("memory", mem.id, "memory", ref, 0.8) < 0)
+               {
+                  lineage_ok = 0;
+                  break;
+               }
+            }
+            if (!lineage_ok)
+            {
+               if (!milestone_existed)
+                  (void)memory_delete(mem.id);
+               LOG_WARN("memory.health",
+                        "L1 consolidation lineage write failed for derived memory %lld",
+                        (long long)mem.id);
+               continue;
+            }
             consolidated++;
             add_provenance(mem.id, session_id, "consolidate", "L1 chain distillation");
          }
@@ -500,6 +555,22 @@ int memory_query_health(memory_health_t *out)
 
    if (c.l2_total > 0)
       out->staleness = (double)c.l2_stale_30_days / c.l2_total;
+
+   /* This belongs on the ordinary health surface, not only the vector repair
+    * diagnostic: it is the user-visible interval in which a durable write is
+    * not yet recallable. No landed samples is represented by zero samples and
+    * -1 percentile sentinels, never by a misleading zero-second lag. */
+   out->write_to_readable_p50_secs = -1.0;
+   out->write_to_readable_p95_secs = -1.0;
+   out->write_to_readable_p99_secs = -1.0;
+   db2_vector_index_ops_summary_t vector_health;
+   if (db2_vector_index_ops_summary(1, &vector_health) == 0 && vector_health.lag_samples > 0)
+   {
+      out->write_to_readable_samples = vector_health.lag_samples;
+      out->write_to_readable_p50_secs = vector_health.lag_p50_secs;
+      out->write_to_readable_p95_secs = vector_health.lag_p95_secs;
+      out->write_to_readable_p99_secs = vector_health.lag_p99_secs;
+   }
 
    return 0;
 }

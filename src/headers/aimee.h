@@ -42,6 +42,16 @@
 #define TIER_L4 "L4"
 #define TIER_L5 "L5"
 
+/* Confidence a cross-session L5 synthesis enters at, and never rises above.
+ *
+ * Recurrence across sessions is a reachability and salience signal, not
+ * evidence: exposure does not validate. Synthesis previously scaled confidence
+ * with the session count toward 0.95, which converted popularity into truth and
+ * self-reinforced through ranking. A synthesized pattern is unproven inference
+ * and is priced as such; only independent evidence or explicit approval may
+ * raise belief, through the paths that already gate on those. */
+#define MEMORY_L5_SYNTHESIS_CONFIDENCE 0.5
+
 /* Human-readable functional tier names */
 #define TIER_L0_NAME "Experience"
 #define TIER_L1_NAME "Experience"

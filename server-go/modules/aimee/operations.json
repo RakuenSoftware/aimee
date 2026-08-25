@@ -414,8 +414,8 @@
       "name": "state_load",
       "wire_format": "db1-keyed-blob-v1",
       "scope": "conversation",
-      "transaction": "none",
-      "idempotency": "safe",
+      "transaction": "single",
+      "idempotency": "unsafe",
       "results": [
         "ok",
         "missing",
@@ -12908,6 +12908,107 @@
       "reply": {
         "fields": [],
         "max_bytes": 0
+      }
+    },
+    {
+      "family": "runtime",
+      "id": 61,
+      "name": "context_snapshot_insert_turn",
+      "c_name": "db1_context_snapshot_insert_turn",
+      "c_params": [
+        "session_id",
+        "memory_id",
+        "relevance_score",
+        "turn_index"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "single",
+      "idempotency": "unsafe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "memory_id",
+            "type": "int64",
+            "required": true
+          },
+          {
+            "name": "relevance_score",
+            "type": "double",
+            "required": true
+          },
+          {
+            "name": "turn_index",
+            "type": "int64",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "runtime",
+      "id": 62,
+      "name": "context_snapshot_activation",
+      "c_name": "db1_context_snapshot_activation",
+      "c_params": [
+        "session_id",
+        "out",
+        "max"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "single",
+      "idempotency": "unsafe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "max",
+            "type": "int",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "list": {
+          "out": "out",
+          "bound": "max",
+          "max_rows": 512,
+          "column": {
+            "kind": "text",
+            "width": "DB1_CONTEXT_ACTIVATION_ROW_LEN"
+          }
+        },
+        "fields": [
+          {
+            "name": "activation",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
       }
     },
     {

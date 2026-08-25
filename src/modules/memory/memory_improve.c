@@ -75,9 +75,20 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
    if (max_confidence <= 0.0)
       max_confidence = 0.5;
 
-   db2_memory_summary_cluster_t clusters[256];
-   int cluster_count =
-       db2_memory_summarise_clusters(max_confidence, min_cluster_size, clusters, 256);
+   enum
+   {
+      SUMMARY_CLUSTER_CAP = 256
+   };
+   db2_memory_summary_cluster_t clusters[SUMMARY_CLUSTER_CAP + 1];
+   int cluster_count = db2_memory_summarise_clusters(max_confidence, min_cluster_size, clusters,
+                                                     SUMMARY_CLUSTER_CAP + 1);
+   if (cluster_count > SUMMARY_CLUSTER_CAP)
+   {
+      LOG_WARN("memory.improve",
+               "summary cluster batch truncated at %d; remaining clusters defer to the next pass",
+               SUMMARY_CLUSTER_CAP);
+      cluster_count = SUMMARY_CLUSTER_CAP;
+   }
 
    int summaries = 0;
    for (int i = 0; i < cluster_count; i++)
@@ -94,6 +105,13 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
          continue;
       }
 
+      int64_t source_ids[MEMORY_DERIVATION_MAX_SOURCES + 1];
+      int source_count = db2_memory_summary_source_ids(session_id, max_confidence, source_ids,
+                                                       MEMORY_DERIVATION_MAX_SOURCES + 1);
+      if (source_count <= 0 || source_count > MEMORY_DERIVATION_MAX_SOURCES ||
+          !memory_derived_sources_allowed(source_ids, source_count))
+         continue;
+
       char summary_content[512];
       snprintf(summary_content, sizeof(summary_content),
                "Observation summary: %d low-confidence L1 facts from session %s"
@@ -104,9 +122,25 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
       snprintf(summary_key, sizeof(summary_key), "summary:%s", session_id);
 
       memory_t summary;
+      int summary_existed = db2_memory_key_exists(summary_key) == 1;
       int rc = memory_insert(TIER_L2, KIND_FACT, summary_key, summary_content,
                              avg_conf + 0.1 > 1.0 ? 1.0 : avg_conf + 0.1, session_id, &summary);
       if (rc != 0)
+         continue;
+
+      for (int j = 0; j < source_count; j++)
+      {
+         char ref[48];
+         snprintf(ref, sizeof(ref), "memory:%lld", (long long)source_ids[j]);
+         if (memory_lineage_insert("memory", summary.id, "memory", ref, avg_conf) < 0)
+         {
+            if (!summary_existed)
+               (void)memory_delete(summary.id);
+            summary.id = 0;
+            break;
+         }
+      }
+      if (summary.id <= 0)
          continue;
 
       db2_memory_mark_merged_into(summary.id, session_id, max_confidence);
@@ -421,6 +455,7 @@ int memory_cognify_unit(int64_t memory_id, const char *text, memory_cognify_resu
     * so the agent actually reads them on every turn, instead of leaving a
     * procedural preference stranded as a generic fact memory. */
    int procedural_memory = canon_kind && strcmp(canon_kind, MEMORY_UNIT_KIND_PROCEDURAL_STR) == 0;
+   int source_allowed = memory_derived_sources_allowed(&memory_id, 1);
    for (int i = 0; i < out->claim_count; i++)
    {
       cognify_claim_t *cl = &out->claims[i];
@@ -434,7 +469,19 @@ int memory_cognify_unit(int64_t memory_id, const char *text, memory_cognify_resu
       double confidence = (strcmp(kind, KIND_OPINION) == 0) ? 0.5 : 0.8;
 
       memory_t m;
-      memory_insert(TIER_L2, kind, key, cl->value, confidence, "cognify", &m);
+      memset(&m, 0, sizeof(m));
+      int claim_existed = db2_memory_key_exists(key) == 1;
+      if (!source_allowed ||
+          memory_insert(TIER_L2, kind, key, cl->value, confidence, "cognify", &m) != 0)
+         continue;
+      char source_ref[48];
+      snprintf(source_ref, sizeof(source_ref), "memory:%lld", (long long)memory_id);
+      if (memory_lineage_insert("memory", m.id, "memory", source_ref, confidence) < 0)
+      {
+         if (!claim_existed)
+            (void)memory_delete(m.id);
+         continue;
+      }
 
       int behavioural_claim =
           (strcmp(kind, KIND_PREFERENCE) == 0 || strcmp(kind, KIND_POLICY) == 0 ||

@@ -6,6 +6,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,22 +33,48 @@ void db2_memory_provenance_delete(int64_t memory_id)
 
 int db2_memory_unit_list_ids(int64_t memory_id, int64_t *out, int max)
 {
-   if (memory_id <= 0 || !out || max <= 0)
-      return 0;
+   int has_more = 0;
+   int n = db2_memory_unit_list_ids_after(memory_id, 0, out, max, &has_more);
+   return n < 0 ? 0 : n;
+}
+
+int db2_memory_unit_list_ids_after(int64_t memory_id, int64_t after_id, int64_t *out, int max,
+                                   int *has_more_out)
+{
+   if (has_more_out)
+      *has_more_out = 0;
+   if (memory_id <= 0 || after_id < 0 || !out || max <= 0 || max == INT_MAX)
+      return -1;
    void *conn = db2_conn();
    if (!conn)
-      return 0;
+      return -1;
 
    char err[MQB_ERRBUF] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT id FROM memory_units WHERE memory_id = ?1", err, sizeof(err));
+       aimee_pg_prepare(conn,
+                        "SELECT id FROM memory_units WHERE memory_id = ?1 AND id > ?2"
+                        " ORDER BY id ASC LIMIT ?3",
+                        err, sizeof(err));
    if (!st)
-      return 0;
+      return -1;
    aimee_pg_bind_int64(st, "?1", memory_id);
+   aimee_pg_bind_int64(st, "?2", after_id);
+   aimee_pg_bind_int(st, "?3", max + 1);
    int n = 0;
-   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      out[n++] = aimee_pg_column_int64(st, 0);
+   int more = 0;
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      if (n < max)
+         out[n++] = aimee_pg_column_int64(st, 0);
+      else
+      {
+         more = 1;
+         break;
+      }
+   }
    aimee_pg_finalize(st);
+   if (has_more_out)
+      *has_more_out = more;
    return n;
 }
 
