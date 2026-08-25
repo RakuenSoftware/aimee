@@ -143,6 +143,10 @@ KB_POLICY="$AIMEE_HOME/modules.d/kb"
 mkdir -p "$SERVER_POLICY" "$KB_POLICY"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
   "$BUNDLE/grants/server/aimee.grant" > "$SERVER_POLICY/aimee.grant"
+sed "s|^executable=.*|executable=$DB1_MODULE|" \
+  "$BUNDLE/grants/server/aimee-postgres.grant" > "$SERVER_POLICY/aimee-postgres.grant"
+sed "s|^executable=.*|executable=$PG_MODULE|" \
+  "$BUNDLE/grants/server/postgres.grant" > "$SERVER_POLICY/postgres.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/server/config.grant" > "$SERVER_POLICY/config.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
@@ -152,7 +156,7 @@ sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
 chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
 
 kb_pid=""; server_pid=""
-server_db1_pid=""; server_config_pid=""
+server_db1_pid=""; server_postgres_pid=""; server_config_pid=""
 kb_config_pid=""; kb_postgres_pid=""
 
 arm_module() { # executable socket policy log pid-variable [environment...]
@@ -174,12 +178,13 @@ arm_module() { # executable socket policy log pid-variable [environment...]
 
 stop_modules() {
   local pid
-  for pid in "$server_db1_pid" "$server_config_pid" "$kb_config_pid" "$kb_postgres_pid"; do
+  for pid in "$server_db1_pid" "$server_postgres_pid" "$server_config_pid" \
+             "$kb_config_pid" "$kb_postgres_pid"; do
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
-  server_db1_pid=""; server_config_pid=""
+  server_db1_pid=""; server_postgres_pid=""; server_config_pid=""
   kb_config_pid=""; kb_postgres_pid=""
 }
 
@@ -244,6 +249,9 @@ else
 fi
 
 bold "==> Starting aimee-server"
+arm_module "$PG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+  "$AIMEE_HOME/server-postgres-module.log" server_postgres_pid \
+  "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
 arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
   "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
   "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
