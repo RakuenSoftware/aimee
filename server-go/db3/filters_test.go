@@ -173,3 +173,41 @@ func TestTooManyFiltersRefused(t *testing.T) {
 		t.Fatal("more filters than the contract allows must be refused")
 	}
 }
+
+// A search scoped only by filters is legitimately scoped. The rule this relaxes
+// existed to stop an unscoped search reaching a provider, and a filter narrows
+// just as a workspace does -- the curator collections scope by scope_kind and
+// scope_id, which are labels rather than either fixed field.
+func TestFilterOnlyScopingIsAccepted(t *testing.T) {
+	request := SearchRequest{
+		RequestID: 1, RequiredGeneration: 1, RecordType: "curator_entity",
+		TopK: 5, Vector: []float32{1, 0, 0},
+		Filters: []ExactLabel{
+			{Key: "scope_id", Value: "s1"},
+			{Key: "scope_kind", Value: "repo"},
+		},
+	}
+	encoded, err := EncodeSearchRequest(request)
+	if err != nil {
+		t.Fatalf("a filter-scoped search must encode: %v", err)
+	}
+	decoded, err := DecodeSearchRequest(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(decoded.Filters) != 2 || decoded.Workspace != "" || decoded.Project != "" {
+		t.Fatalf("decoded = %+v", decoded)
+	}
+}
+
+// A search with neither scope nor filters would ask a provider to search
+// everything, and is still refused.
+func TestWhollyUnscopedSearchIsStillRefused(t *testing.T) {
+	request := SearchRequest{
+		RequestID: 1, RequiredGeneration: 1, RecordType: "memory",
+		TopK: 5, Vector: []float32{1, 0, 0},
+	}
+	if _, err := EncodeSearchRequest(request); err == nil {
+		t.Fatal("a search with no scope and no filters must be refused")
+	}
+}

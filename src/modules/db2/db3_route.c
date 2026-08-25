@@ -165,8 +165,8 @@ int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
        request->top_k > AIMEE_DB3_MAX_TOP_K ||
        !text_valid(request->workspace, sizeof(request->workspace), 1) ||
        !text_valid(request->project, sizeof(request->project), 1) ||
-       (!request->workspace[0] && !request->project[0]) ||
-       !text_valid(request->record_type, sizeof(request->record_type), 0) ||
+       (!request->workspace[0] && !request->project[0] && request->filter_count == 0) ||
+       !text_valid(request->record_type, sizeof(request->record_type), 1) ||
        !vectors_valid(request->vector, request->dimension))
       return -1;
    size_t filters_bytes = 0;
@@ -334,7 +334,7 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
    uint16_t record_len = get_u16(input + 28), dimension = get_u16(input + 30);
    uint16_t top_k = get_u16(input + 32);
    if (workspace_len >= AIMEE_DB3_MAX_SCOPE || project_len >= AIMEE_DB3_MAX_SCOPE ||
-       record_len == 0 || record_len >= AIMEE_DB3_MAX_RECORD_TYPE || dimension == 0 ||
+       record_len >= AIMEE_DB3_MAX_RECORD_TYPE || dimension == 0 ||
        dimension > AIMEE_DB3_MAX_DIM || top_k == 0 || top_k > AIMEE_DB3_MAX_TOP_K)
       return -1;
    size_t total = 0;

@@ -132,6 +132,10 @@ func scopeFilters(request db3.SearchRequest) []db3.ExactLabel {
 	if request.RecordType != "" {
 		filters = append(filters, db3.ExactLabel{Key: "record_type", Value: request.RecordType})
 	}
+	// The request's own filters are ANDed with the scope, never merged with it.
+	// A filter that contradicts the scope therefore matches nothing, which is
+	// the safe direction: the answer narrows rather than widens.
+	filters = append(filters, request.Filters...)
 	return filters
 }
 

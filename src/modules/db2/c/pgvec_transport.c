@@ -741,7 +741,7 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    if (routable)
    {
       int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vec, dim, record_type,
-                                        workspace, project, limit, ids, scores, max);
+                                        workspace, project, NULL, 0, limit, ids, scores, max);
       /* A negative answer means the route declined or produced nothing usable
        * — including the ordinary case of no route installed at all — so the
        * query runs here instead. Zero is a real empty result and is returned. */
@@ -1098,8 +1098,9 @@ int pgvec_curator_entity_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, const float *vec,
-                                int dim, int limit, int64_t *ids, double *scores, int max)
+static int pgvec_curator_entity_search_pgvector(const char *scope_kind, const char *scope_id,
+                                               const float *vec, int dim, int limit, int64_t *ids,
+                                               double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1183,6 +1184,37 @@ int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, co
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
 }
 
+int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, const float *vec,
+                                int dim, int limit, int64_t *ids, double *scores, int max)
+{
+   /* The curator entity search is a single-table exact filter on scope_kind and
+    * scope_id, and the projection captures both as labels -- so the whole
+    * condition is expressible and the search can route.
+    *
+    * With neither set the query is unscoped by design ("WHERE TRUE"), which the
+    * wire refuses and should: asking a provider to search everything is not the
+    * same question. */
+   int have_kind = scope_kind && scope_kind[0];
+   int have_id = scope_id && scope_id[0];
+   if (have_kind || have_id)
+   {
+      /* Keys ascending: scope_id before scope_kind. */
+      pgvec_db3_filter_t filters[2];
+      int count = 0;
+      if (have_id)
+         filters[count++] = (pgvec_db3_filter_t){"scope_id", scope_id};
+      if (have_kind)
+         filters[count++] = (pgvec_db3_filter_t){"scope_kind", scope_kind};
+      int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CURATOR_ENTITY, vec, dim, "", "", "",
+                                        filters, count, limit, ids, scores, max);
+      if (routed >= 0)
+         return routed;
+   }
+   return pgvec_curator_entity_search_pgvector(scope_kind, scope_id, vec, dim, limit, ids, scores,
+                                               max);
+}
+
+
 int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
                                    const char *artifact_id, const char *kind, const char *doc_id,
                                    const char *status, const char *priority,
@@ -1251,9 +1283,9 @@ int pgvec_curator_narrative_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int pgvec_curator_narrative_search(const char *kind, const char *status, const char *priority,
-                                   const float *vec, int dim, int limit, int64_t *ids,
-                                   double *scores, int max)
+static int pgvec_curator_narrative_search_pgvector(const char *kind, const char *status,
+                                                   const char *priority, const float *vec, int dim,
+                                                   int limit, int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1346,6 +1378,34 @@ int pgvec_curator_narrative_search(const char *kind, const char *status, const c
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
 }
 
+int pgvec_curator_narrative_search(const char *kind, const char *status, const char *priority,
+                                   const float *vec, int dim, int limit, int64_t *ids,
+                                   double *scores, int max)
+{
+   /* Single-table exact filters on labels the projection captures, so the whole
+    * condition travels. With none set the query is unscoped by design and the
+    * wire refuses it, which is the right answer. */
+   pgvec_db3_filter_t filters[3];
+   int count = 0;
+   /* Keys ascending: kind, priority, status. */
+   if (kind && kind[0])
+      filters[count++] = (pgvec_db3_filter_t){"kind", kind};
+   if (priority && priority[0])
+      filters[count++] = (pgvec_db3_filter_t){"priority", priority};
+   if (status && status[0])
+      filters[count++] = (pgvec_db3_filter_t){"status", status};
+   if (count > 0)
+   {
+      int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CURATOR_NARRATIVE, vec, dim, "", "",
+                                        "", filters, count, limit, ids, scores, max);
+      if (routed >= 0)
+         return routed;
+   }
+   return pgvec_curator_narrative_search_pgvector(kind, status, priority, vec, dim, limit, ids,
+                                                  scores, max);
+}
+
+
 int pgvec_curator_claim_upsert(int64_t point_id, const float *subj_attr_vec, const float *value_vec,
                                int dim, const char *artifact_id, const char *subject,
                                const char *attribute, const char *value, const char *claim_kind,
@@ -1424,8 +1484,9 @@ int pgvec_curator_claim_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, const float *vec,
-                               int dim, int limit, int64_t *ids, double *scores, int max)
+static int pgvec_curator_claim_search_pgvector(const char *which_vec, const char *claim_kind,
+                                               const float *vec, int dim, int limit, int64_t *ids,
+                                               double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1495,6 +1556,30 @@ int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, co
    record_latency(elapsed);
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
 }
+
+int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, const float *vec,
+                               int dim, int limit, int64_t *ids, double *scores, int max)
+{
+   /* claim_kind is a captured label. which_vec selects between two vector
+    * columns on the same row, and the projection gives each its own collection,
+    * so it chooses the route rather than becoming a filter. */
+   const char *collection = NULL;
+   if (which_vec && strcmp(which_vec, "value") == 0)
+      collection = PGVEC_DB3_COLLECTION_CURATOR_CLAIM_VAL;
+   else if (which_vec && strcmp(which_vec, "subj_attr") == 0)
+      collection = PGVEC_DB3_COLLECTION_CURATOR_CLAIM_SUBJ;
+   if (collection && claim_kind && claim_kind[0])
+   {
+      const pgvec_db3_filter_t filters[] = {{"claim_kind", claim_kind}};
+      int routed = pgvec_db3_candidates(collection, vec, dim, "", "", "", filters, 1, limit, ids,
+                                        scores, max);
+      if (routed >= 0)
+         return routed;
+   }
+   return pgvec_curator_claim_search_pgvector(which_vec, claim_kind, vec, dim, limit, ids, scores,
+                                              max);
+}
+
 
 int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
                                    const float *signature_vec, const float *body_vec, int dim,
@@ -1611,8 +1696,9 @@ int pgvec_curator_code_unit_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, const float *vec,
-                                   int dim, int limit, int64_t *ids, double *scores, int max)
+static int pgvec_curator_code_unit_search_pgvector(const char *which_vec, const char *def_kind,
+                                                   const float *vec, int dim, int limit,
+                                                   int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1684,6 +1770,31 @@ int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, 
    record_latency(elapsed);
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
 }
+
+int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, const float *vec,
+                                   int dim, int limit, int64_t *ids, double *scores, int max)
+{
+   /* As for claims: def_kind is a captured label, and which_vec picks among the
+    * row's three vector columns, each of which is its own collection. */
+   const char *collection = NULL;
+   if (which_vec && strcmp(which_vec, "intent") == 0)
+      collection = PGVEC_DB3_COLLECTION_CURATOR_CODE_INT;
+   else if (which_vec && strcmp(which_vec, "signature") == 0)
+      collection = PGVEC_DB3_COLLECTION_CURATOR_CODE_SIG;
+   else if (which_vec && strcmp(which_vec, "body") == 0)
+      collection = PGVEC_DB3_COLLECTION_CURATOR_CODE_BODY;
+   if (collection && def_kind && def_kind[0])
+   {
+      const pgvec_db3_filter_t filters[] = {{"def_kind", def_kind}};
+      int routed = pgvec_db3_candidates(collection, vec, dim, "", "", "", filters, 1, limit, ids,
+                                        scores, max);
+      if (routed >= 0)
+         return routed;
+   }
+   return pgvec_curator_code_unit_search_pgvector(which_vec, def_kind, vec, dim, limit, ids, scores,
+                                                  max);
+}
+
 
 /* --- Phase 5: code_embeddings operations --- */
 
@@ -1789,8 +1900,35 @@ int pgvec_code_delete_project(const char *project)
    return (rc == AIMEE_PG_DONE) ? changes : -1;
 }
 
-int pgvec_code_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
-                      double *scores, int max)
+/* Resolve a project's current generation, or 0 when it has none.
+ *
+ * The pgvector code query expresses "current" as a join: projects.lifecycle_state
+ * = 'current' AND ce.generation = p.current_generation. A provider cannot join,
+ * so routing that search means resolving the generation here and sending it as
+ * an exact filter. The two are equivalent because the join has exactly one
+ * matching projects row -- name is unique -- so a resolved generation reproduces
+ * both conditions, and a project that is not current resolves to nothing and the
+ * search must not route at all. */
+static int64_t code_current_generation(void *pg, const char *project)
+{
+   if (!pg || !project || !project[0])
+      return 0;
+   static const char *sql = "SELECT current_generation FROM projects"
+                            " WHERE name = :project AND lifecycle_state = 'current'";
+   char errbuf[256] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return 0;
+   aimee_pg_bind_text(stmt, "project", project);
+   int64_t generation = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+      generation = aimee_pg_column_int64(stmt, 0);
+   aimee_pg_finalize(stmt);
+   return generation > 0 ? generation : 0;
+}
+
+static int pgvec_code_search_pgvector(const char *project, const float *vec, int dim, int limit,
+                                      int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;

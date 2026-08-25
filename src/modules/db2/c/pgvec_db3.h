@@ -34,14 +34,21 @@ extern "C"
 
 /* The collections this seam can route, matching db3_projection.collection.
  *
- * Only collections whose scope is expressible as workspace/project appear here.
- * The curator collections scope by scope_kind/scope_id, which the DB3 search
- * request has no field for, so routing them would drop the scope and widen the
- * search rather than narrow it. */
-#define PGVEC_DB3_COLLECTION_MEMORY "memory"
-#define PGVEC_DB3_COLLECTION_KB     "kb"
-#define PGVEC_DB3_COLLECTION_KB_PDF "kb_pdf"
-#define PGVEC_DB3_COLLECTION_CODE   "code"
+ * A collection appears here once every condition its search applies can be
+ * expressed on the wire -- as the scope fields, or as exact-match filters. The
+ * curator collections qualify because their searches are single-table filters
+ * over labels the projection already captures. kb and kb_pdf do not: their
+ * searches filter on kb_documents.generation, which is not a column on the
+ * embedding row, so the capture trigger has nothing to label it with. */
+#define PGVEC_DB3_COLLECTION_MEMORY             "memory"
+#define PGVEC_DB3_COLLECTION_CODE               "code"
+#define PGVEC_DB3_COLLECTION_CURATOR_ENTITY     "curator_entity"
+#define PGVEC_DB3_COLLECTION_CURATOR_NARRATIVE  "curator_narrative"
+#define PGVEC_DB3_COLLECTION_CURATOR_CLAIM_SUBJ "curator_claim_subject"
+#define PGVEC_DB3_COLLECTION_CURATOR_CLAIM_VAL  "curator_claim_value"
+#define PGVEC_DB3_COLLECTION_CURATOR_CODE_INT   "curator_code_intent"
+#define PGVEC_DB3_COLLECTION_CURATOR_CODE_SIG   "curator_code_signature"
+#define PGVEC_DB3_COLLECTION_CURATOR_CODE_BODY  "curator_code_body"
 
    /* Install the route for one collection. `internal_search` is the pgvector
     * implementation the route falls back to and uses when no provider is
@@ -76,6 +83,15 @@ extern "C"
    /* 1 when the collection has a provider selected AND ready, else 0. */
    int pgvec_db3_route_serving(const char *collection);
 
+   /* A filter to send with a search, mirroring the wire's closed filter list.
+    * Keys must be strictly ascending; the encoder refuses anything else, so one
+    * filter set has exactly one encoding. */
+   typedef struct
+   {
+      const char *key;
+      const char *value;
+   } pgvec_db3_filter_t;
+
    /* Run one candidate search for `collection` through its route.
     *
     * Fills `ids` and `scores` with at most `max` candidates and returns the
@@ -87,13 +103,19 @@ extern "C"
     * an unscoped search cannot be expressed on the DB3 wire, and sending one
     * with both blank would ask a provider to search everything.
     *
-    * This is deliberately incapable of expressing a kind filter or an
-    * exclusion. The DB3 search request has no field for either, so such a
-    * search routed here would come back without the filter and look like a
-    * correct answer — callers holding one must not use this path. */
+    * `filters` carries any condition beyond the scope — a project generation,
+    * a lifecycle state — as exact label matches the provider must honour. A
+    * caller whose query depends on something it cannot express as a filter must
+    * not use this path: the search would come back answering a wider question
+    * while looking correct.
+    *
+    * A kind filter and a project exclusion are still inexpressible. Both are
+    * set membership and negation respectively, and the wire's grammar is exact
+    * match only. */
    int pgvec_db3_candidates(const char *collection, const float *vec, int dim,
                             const char *record_type, const char *workspace, const char *project,
-                            int limit, int64_t *ids, double *scores, int max);
+                            const pgvec_db3_filter_t *filters, int filter_count, int limit,
+                            int64_t *ids, double *scores, int max);
 
 #ifdef __cplusplus
 }

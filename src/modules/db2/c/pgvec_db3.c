@@ -20,9 +20,14 @@ typedef struct
 static pthread_mutex_t g_routes_mu = PTHREAD_MUTEX_INITIALIZER;
 static pgvec_db3_slot_t g_routes[] = {
     {PGVEC_DB3_COLLECTION_MEMORY, {0}, 0},
-    {PGVEC_DB3_COLLECTION_KB, {0}, 0},
-    {PGVEC_DB3_COLLECTION_KB_PDF, {0}, 0},
     {PGVEC_DB3_COLLECTION_CODE, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CURATOR_ENTITY, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CURATOR_NARRATIVE, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CURATOR_CLAIM_SUBJ, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CURATOR_CLAIM_VAL, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CURATOR_CODE_INT, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CURATOR_CODE_SIG, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CURATOR_CODE_BODY, {0}, 0},
 };
 
 #define PGVEC_DB3_SLOT_COUNT (sizeof(g_routes) / sizeof(g_routes[0]))
@@ -131,8 +136,12 @@ static int copy_scope(char *out, size_t capacity, const char *value)
 
 int pgvec_db3_candidates(const char *collection, const float *vec, int dim,
                          const char *record_type, const char *workspace, const char *project,
-                         int limit, int64_t *ids, double *scores, int max)
+                         const pgvec_db3_filter_t *filters, int filter_count, int limit,
+                         int64_t *ids, double *scores, int max)
 {
+   if (filter_count < 0 || filter_count > (int)AIMEE_DB3_MAX_LABELS ||
+       (filter_count > 0 && !filters))
+      return -1;
    if (!vec || dim <= 0 || dim > (int)AIMEE_DB3_MAX_DIM || !ids || !scores || max <= 0)
       return -1;
 
@@ -140,9 +149,11 @@ int pgvec_db3_candidates(const char *collection, const float *vec, int dim,
    if (top_k <= 0 || top_k > (int)AIMEE_DB3_MAX_TOP_K)
       return -1;
 
-   /* An unscoped search cannot be expressed on the wire, and sending one with
-    * both components blank would ask a provider to search everything. */
-   if ((!workspace || !workspace[0]) && (!project || !project[0]))
+   /* A search must be scoped by something. A filter narrows just as a workspace
+    * does -- the curator collections scope by scope_kind and scope_id, which are
+    * labels rather than either fixed field -- but a search with neither would
+    * ask a provider to return its whole corpus. */
+   if ((!workspace || !workspace[0]) && (!project || !project[0]) && filter_count == 0)
       return -1;
 
    aimee_db3_search_request_t request;
@@ -159,6 +170,22 @@ int pgvec_db3_candidates(const char *collection, const float *vec, int dim,
        copy_scope(request.record_type, sizeof(request.record_type), record_type) != 0)
       return -1;
    memcpy(request.vector, vec, (size_t)dim * sizeof(float));
+
+   /* Filters are copied verbatim, never reordered or de-duplicated here. The
+    * encoder requires strictly ascending keys and refuses anything else, so a
+    * caller that gets the order wrong is told so rather than having a different
+    * question silently sent on its behalf. */
+   for (int index = 0; index < filter_count; ++index)
+   {
+      if (!filters[index].key || !filters[index].value)
+         return -1;
+      if (copy_scope(request.filters[index].key, sizeof(request.filters[index].key),
+                     filters[index].key) != 0 ||
+          copy_scope(request.filters[index].value, sizeof(request.filters[index].value),
+                     filters[index].value) != 0)
+         return -1;
+   }
+   request.filter_count = (uint32_t)filter_count;
 
    aimee_db3_search_outcome_t outcome;
    pthread_mutex_lock(&g_routes_mu);

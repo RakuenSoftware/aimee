@@ -1709,8 +1709,15 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
         '{"def_kind":"def_kind"}'),
       (10,'curator_code_unit_vectors','curator_code_body','body_vec',
         '{"def_kind":"def_kind"}'),
+      -- generation is captured because a code search is only correct against
+      -- the project's CURRENT generation: the pgvector query joins projects and
+      -- filters ce.generation = p.current_generation. A provider cannot join, so
+      -- without this label the same search would answer from retired
+      -- generations. The column is on code_embeddings itself, so the capture
+      -- trigger can read it from the row it is already looking at.
       (11,'code_embeddings','code','embedding',
-        '{"project":"project","record_type":"record_type"}')
+        ('{"generation":"generation","project":"project",' ||
+        '"record_type":"record_type"}')::JSONB)
     ON CONFLICT(projection_id) DO UPDATE SET
       relation_name=EXCLUDED.relation_name,collection=EXCLUDED.collection,
       vector_column=EXCLUDED.vector_column,label_sources=EXCLUDED.label_sources;

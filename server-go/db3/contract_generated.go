@@ -183,8 +183,8 @@ func (request SearchRequest) Validate() error {
 		request.TopK == 0 || request.TopK > MaxTopK ||
 		!validText(request.Workspace, MaxScopeBytes, true) ||
 		!validText(request.Project, MaxScopeBytes, true) ||
-		(request.Workspace == "" && request.Project == "") ||
-		!validText(request.RecordType, MaxRecordTypeBytes, false) || !finite32(request.Vector) {
+		(request.Workspace == "" && request.Project == "" && len(request.Filters) == 0) ||
+		!validText(request.RecordType, MaxRecordTypeBytes, true) || !finite32(request.Vector) {
 		return ErrMalformed
 	}
 	// Filters reuse the label rules, including their sorted-unique key
@@ -324,7 +324,7 @@ func DecodeSearchRequest(input []byte) (SearchRequest, error) {
 	w, p, r := int(binary.LittleEndian.Uint16(input[24:26])), int(binary.LittleEndian.Uint16(input[26:28])), int(binary.LittleEndian.Uint16(input[28:30]))
 	dim, topK := int(binary.LittleEndian.Uint16(input[30:32])), uint32(binary.LittleEndian.Uint16(input[32:34]))
 	total := header + w + p + r + 4*dim + filtersBytes
-	if w >= MaxScopeBytes || p >= MaxScopeBytes || r == 0 || r >= MaxRecordTypeBytes ||
+	if w >= MaxScopeBytes || p >= MaxScopeBytes || r >= MaxRecordTypeBytes ||
 		dim == 0 || dim > MaxDimension || topK == 0 || topK > MaxTopK || total != len(input) {
 		return SearchRequest{}, ErrMalformed
 	}
