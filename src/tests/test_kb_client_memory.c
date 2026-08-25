@@ -285,9 +285,20 @@ static void test_ordered_readers_propagate_active_project_context(void)
    (void)kb_client_memory_top_l2_facts(mems, 8);
    (void)kb_client_memory_list_session_scope_priority(mems, 8);
    (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);
+   (void)kb_client_memory_insert("L2", "fact", "scoped-key", "scoped-content", 0.8, NULL, NULL);
+   (void)kb_client_memory_find_id_by_key_kind("scoped-key", "fact");
+   (void)kb_client_memory_supersede(42, "replacement", 0.9, NULL, NULL);
+   (void)kb_client_memory_update_as(42, "replacement", MEMORY_AUTHORITY_MODEL, NULL);
+   (void)kb_client_memory_delete_as(42, MEMORY_AUTHORITY_MODEL);
+   (void)kb_client_memory_touch(42);
+   (void)kb_client_memory_reject(42, "wrong");
+   (void)kb_client_memory_restore(42);
+   json = kb_client_memory_review_list_json(NULL, 8);
+   free(json);
+   (void)kb_client_memory_get(42, &mems[0]);
 
    kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 21);
+   assert(scoped_request_count == 31);
    mock_agent_http_reset();
    printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
 }

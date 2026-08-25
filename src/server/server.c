@@ -49,7 +49,6 @@
 #include <aimee/delegates/delegate_sandbox_image.h>
 #include "model_registry.h"
 #include "model_provider.h"
-#include "model_registry.h"
 #include "db1_client/db1.h"
 #include "db1_client/user_memory.h"
 #include "token_audit.h"
@@ -73,14 +72,12 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
-
 /* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
 extern volatile sig_atomic_t g_config_reload_requested;
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include <string.h>
-
 extern int hooks_ensure_cwd_worktree(session_state_t *state, const char *sid, const char *cwd);
 
 typedef int (*server_method_handler_t)(server_ctx_t *, server_conn_t *, cJSON *);
@@ -1460,6 +1457,9 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"memory.search", handle_memory_search},
     {"memory.store", handle_memory_store},
     {"memory.list", handle_memory_list},
+    {"memory.review_list", handle_memory_review_list},
+    {"memory.reject", handle_memory_reject},
+    {"memory.restore", handle_memory_restore},
     {"memory.stats", handle_memory_stats},
     {"memory.get", handle_memory_get},
     {"memory.delete", handle_memory_delete},

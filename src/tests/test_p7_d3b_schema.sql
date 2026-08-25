@@ -209,6 +209,7 @@ BEGIN
   END IF;
 END $$;
 RESET ROLE;
+SELECT public.kb_audit_worm_drain(1000);
 DO $$
 BEGIN
   IF (SELECT count(*) FROM public.kb_audit_event
@@ -216,6 +217,7 @@ BEGIN
     RAISE EXCEPTION 'idle open primary audit mismatch';
   END IF;
   PERFORM public.kb_audit_worm_append('test','test','unrelated.audit','test','allow','');
+  PERFORM public.kb_audit_worm_drain(1000);
 END $$;
 SET ROLE aimee_kb_vault_orchestrator;
 DO $$

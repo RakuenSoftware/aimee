@@ -16,6 +16,7 @@ import Settings from './pages/Settings';
 import Projects from './pages/Projects';
 import Graph from './pages/Graph';
 import Editor from './pages/Editor';
+import Memory from './pages/Memory';
 import { SessionProvider, useSessions } from './SessionContext';
 import TabTutorial from './components/TabTutorial';
 import SetupChip from './components/SetupChip';
@@ -277,6 +278,7 @@ export default function App() {
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/editor" element={<Editor />} />
+                <Route path="/memory" element={<Memory />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/chat" replace />} />
               </Routes>

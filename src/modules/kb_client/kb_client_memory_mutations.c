@@ -16,6 +16,7 @@ int kb_client_memory_supersede(int64_t old_id, const char *new_content, double c
       return -1;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "old_id", (double)old_id);
    cJSON_AddStringToObject(req, "new_content", new_content);
    cJSON_AddNumberToObject(req, "confidence", confidence);
@@ -331,6 +332,7 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind)
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddStringToObject(req, "key", key);
    cJSON_AddStringToObject(req, "kind", kind);
    char *json = kb_v1_action_request("memory.find_id_by_key_kind", req);
@@ -414,6 +416,7 @@ int kb_client_memory_insert_as(const char *tier, const char *kind, const char *k
       return -1;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    if (tier && tier[0])
       cJSON_AddStringToObject(req, "tier", tier);
    if (kind && kind[0])
@@ -658,6 +661,7 @@ int kb_client_memory_touch(int64_t id)
    if (id <= 0)
       return -1;
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
    char *json = kb_v1_action_request("memory.touch", req);
    if (!json)
@@ -680,6 +684,7 @@ int kb_client_memory_update_as(int64_t id, const char *content, memory_authority
    if (id <= 0 || !content || !content[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
    cJSON_AddStringToObject(req, "content", content);
    if (authority == MEMORY_AUTHORITY_USER)
@@ -713,6 +718,7 @@ int kb_client_memory_reject(int64_t id, const char *reason)
    if (id <= 0)
       return -1;
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
    if (reason && reason[0])
       cJSON_AddStringToObject(req, "reason", reason);
@@ -728,4 +734,33 @@ int kb_client_memory_reject(int64_t id, const char *reason)
    cJSON_Delete(resp);
    kb_client_memory_audit_note("memory.reject", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
+}
+
+int kb_client_memory_restore(int64_t id)
+{
+   if (id <= 0)
+      return -1;
+   cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
+   cJSON_AddNumberToObject(req, "id", (double)id);
+   char *json = kb_v1_action_request("memory.restore", req);
+   if (!json)
+      return -1;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
+   int rc = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 ? 0 : -1;
+   cJSON_Delete(resp);
+   kb_client_memory_audit_note("memory.restore", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
+   return rc;
+}
+
+char *kb_client_memory_review_list_json(const char *state, int limit)
+{
+   cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
+   if (state && state[0])
+      cJSON_AddStringToObject(req, "state", state);
+   cJSON_AddNumberToObject(req, "limit", limit > 0 ? limit : 64);
+   return kb_v1_action_request("memory.review_list", req);
 }

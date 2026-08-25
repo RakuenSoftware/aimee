@@ -677,8 +677,11 @@ int kb_handle_memory_tag_workspace(int fd, cJSON *req)
    cJSON *ws_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(ws_j))
       return kb_send_error(fd, "missing memory_id or workspace");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_tag_workspace_json((int64_t)id_j->valuedouble, ws_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to tag workspace");
 }
 
@@ -689,8 +692,11 @@ int kb_handle_memory_tag_scope(int fd, cJSON *req)
    cJSON *sv_j = cJSON_GetObjectItemCaseSensitive(req, "scope_value");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(st_j) || !cJSON_IsString(sv_j))
       return kb_send_error(fd, "missing memory_id, scope_type or scope_value");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_tag_scope_json((int64_t)id_j->valuedouble, st_j->valuestring,
                                                       sv_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to tag scope");
 }
 
@@ -932,8 +938,11 @@ int kb_handle_memory_delete(int fd, cJSON *req)
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "missing id");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_delete_json((int64_t)id_j->valuedouble, kb_memory_authority(req));
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to delete memory");
 }
 
@@ -942,7 +951,10 @@ int kb_handle_memory_touch(int fd, cJSON *req)
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "missing id");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_touch_json((int64_t)id_j->valuedouble);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to touch memory");
 }
 
@@ -952,8 +964,11 @@ int kb_handle_memory_update(int fd, cJSON *req)
    cJSON *content_j = cJSON_GetObjectItemCaseSensitive(req, "content");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(content_j))
       return kb_send_error(fd, "missing id or content");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_update_json(
        (int64_t)id_j->valuedouble, content_j->valuestring, kb_memory_authority(req));
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to update memory");
 }
 
@@ -964,8 +979,37 @@ int kb_handle_memory_reject(int fd, cJSON *req)
       return kb_send_error(fd, "missing id");
    cJSON *reason_j = cJSON_GetObjectItemCaseSensitive(req, "reason");
    const char *reason = cJSON_IsString(reason_j) ? reason_j->valuestring : NULL;
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_reject_json((int64_t)id_j->valuedouble, reason);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to reject memory");
+}
+
+int kb_handle_memory_restore(int fd, cJSON *req)
+{
+   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
+   if (!cJSON_IsNumber(id_j))
+      return kb_send_error(fd, "missing id");
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(0, &actor) != 0 || !actor.authenticated)
+      return kb_send_error(fd, "authenticated user required");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp = db2_kb_service_memory_restore_json((int64_t)id_j->valuedouble, actor.principal);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to restore memory");
+}
+
+int kb_handle_memory_review_list(int fd, cJSON *req)
+{
+   const char *state = jo_str(req, "state", "");
+   int limit = jo_int(req, "limit", 64);
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp = db2_kb_service_memory_review_list_json(state, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to list memory review rows");
 }
 
 int kb_handle_memory_stats(int fd, cJSON *req)
@@ -1140,7 +1184,10 @@ int kb_handle_memory_get(int fd, cJSON *req)
 
    /* Optional: was this memory in force at `as_of`, in EVENT time? */
    const char *as_of = jo_str(req, "as_of", "");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_get_json((int64_t)id_j->valuedouble, as_of);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to get memory");
 }
 
@@ -1713,8 +1760,11 @@ int kb_handle_memory_find_id_by_key_kind(int fd, cJSON *req)
    if (!cJSON_IsString(key_j) || !cJSON_IsString(kind_j))
       return kb_send_error(fd, "memory.find_id_by_key_kind requires key and kind");
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_find_id_by_key_kind_json(key_j->valuestring, kind_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to look up memory id");
 }
 
@@ -1745,8 +1795,11 @@ int kb_handle_memory_supersede(int fd, cJSON *req)
    double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 1.0;
    const char *sid = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_supersede_json((int64_t)id_j->valuedouble,
                                                       content_j->valuestring, conf, sid);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to supersede memory");
 }
 
@@ -2028,8 +2081,11 @@ int kb_handle_memory_store(int fd, cJSON *req)
     * every other authority on this surface: the body asks, the request's
     * authentication grants (kb_memory_authority). A caller that says nothing —
     * every internal writer — records the fail-closed agent provenance. */
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_insert_epistemic_ex_json(
        tier, kind, epistemic_kind, key_j->valuestring, content_j->valuestring, use_cases,
        confidence, session_id, (int)kb_memory_authority(req));
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to store memory");
 }

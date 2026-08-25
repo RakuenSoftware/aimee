@@ -524,8 +524,8 @@ int memory_expand_to_session_window(memory_t *out, int count, int max, int windo
    return count;
 }
 
-int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
-                             int limit, memory_t *out, int max)
+static int memory_find_facts_scoped_impl(const char *query, const char *scope_type,
+                                         const char *scope_value, int limit, memory_t *out, int max)
 {
    memory_recall_trace_capture_reset();
    if (!query || !query[0])
@@ -946,6 +946,18 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    pgvec_memory_vector_scope_hint_clear();
    free(candidates);
    return reranked;
+}
+
+int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
+                             int limit, memory_t *out, int max)
+{
+   db2_memory_scope_context_t previous;
+   db2_memory_scope_context_get(&previous);
+   db2_memory_scope_context_set_exact(previous.workspace, previous.project, scope_type, scope_value,
+                                      previous.include_all);
+   int count = memory_find_facts_scoped_impl(query, scope_type, scope_value, limit, out, max);
+   db2_memory_scope_context_restore(&previous);
+   return count;
 }
 
 static void memory_sort_scope_buckets(memory_t *matches, int count, int *scope_rank)

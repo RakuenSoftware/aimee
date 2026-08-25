@@ -73,26 +73,29 @@ END $$;
 -- 8. E2 audit wiring: kb_audit_worm_append witnesses each audit-chain row into the
 --    reserved ('!kb','!audit') shard with a source predecessor (the audit chain is
 --    itself hash-chained). Earlier sections' open events already produced audit
---    rows here, so assert an INCREMENT of exactly one and correct linkage.
+--    rows here, so identify the row from this operation and verify its exact
+--    witness linkage without assuming the worker's drain batch contains only it.
 -- ---------------------------------------------------------------------------
 DO $$
-DECLARE v_before BIGINT; v_after BIGINT; v_seq BIGINT; v_kind SMALLINT; v_hsp BOOLEAN;
+DECLARE v_n BIGINT; v_seq BIGINT; v_kind SMALLINT; v_hsp BOOLEAN;
 BEGIN
-  SELECT count(*) INTO v_before FROM public.kb_vault_witness_log
-    WHERE tenant='!kb' AND provider='!audit';
-
   PERFORM public.kb_audit_worm_append('kb','uid:5','vault.key_use','anthropic:default','allow','');
+  PERFORM public.kb_audit_worm_drain(1000);
 
-  SELECT count(*) INTO v_after FROM public.kb_vault_witness_log
-    WHERE tenant='!kb' AND provider='!audit';
-  IF v_after <> v_before + 1 THEN
-    RAISE EXCEPTION 'WITNESS FAIL: audit append did not witness exactly once (% -> %)',
-      v_before, v_after;
+  SELECT seq INTO v_seq FROM public.kb_audit_event
+    WHERE actor_role='kb' AND actor_principal='uid:5'
+      AND action='vault.key_use' AND subject='anthropic:default'
+      AND verdict='allow' AND detail=''
+    ORDER BY seq DESC LIMIT 1;
+  SELECT count(*) INTO v_n FROM public.kb_vault_witness_log
+    WHERE tenant='!kb' AND provider='!audit' AND source_id=v_seq::TEXT;
+  IF v_seq IS NULL OR v_n <> 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: audit row % has % witness rows', v_seq, v_n;
   END IF;
 
-  -- The newest audit witness row is source_kind 0 and carries a source predecessor.
+  -- This audit witness row is source_kind 0 and carries a source predecessor.
   SELECT source_kind, has_source_pred INTO v_kind, v_hsp FROM public.kb_vault_witness_log
-    WHERE tenant='!kb' AND provider='!audit' ORDER BY shard_seq DESC LIMIT 1;
+    WHERE tenant='!kb' AND provider='!audit' AND source_id=v_seq::TEXT;
   IF v_kind <> 0 OR NOT v_hsp THEN
     RAISE EXCEPTION 'WITNESS FAIL: audit witness kind/has_source_pred wrong: % / %', v_kind, v_hsp;
   END IF;

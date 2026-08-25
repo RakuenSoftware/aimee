@@ -21,6 +21,7 @@
 #   MODE          full | hybrid                 (default full; or pass --mode)
 #   AIMEE_DB2_URL Postgres URL for the kb        (full mode; default
 #                 postgresql://aimee@localhost/aimee_shared via local peer auth)
+#   AIMEE_STORE_URL PostgreSQL URL for server DB1 (optional; isolated per run)
 #   KB_URL        external kb base URL           (hybrid mode; default
 #                 http://localhost:8741)
 #   EMBEDDER_URL  embedder endpoint        (full mode; optional)
@@ -28,6 +29,7 @@
 #   SERVER_TLS_PORT server TLS /v1 port           (default SERVER_PORT + 3)
 #   BEARER        server first-boot bearer        (default random per run)
 #   WAIT_SECONDS  health wait budget             (default 90)
+#   AIMEE_E2E_SKIP_BUILD=1 reuse already-built binaries (exploratory reruns)
 #
 # Exit code: 0 = all checks passed.
 
@@ -75,13 +77,28 @@ check() {
 }
 
 # --- build ----------------------------------------------------------------
-bold "==> Building aimee client + server + kb + required modules"
-make -C src ../aimee ../aimee-server ../aimee-kb \
-  build/obj/aimee-module build/obj/aimee-module-config \
-  build/obj/aimee-module >/dev/null
+if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != 1 ]]; then
+  bold "==> Building aimee client + server + kb + required modules"
+  make -C src ../aimee ../aimee-server ../aimee-kb \
+    build/obj/aimee-module build/obj/aimee-module-config \
+    build/obj/aimee-module >/dev/null
+else
+  bold "==> Reusing already-built binaries for exploratory rerun"
+fi
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
 BUNDLE="$RUN_ROOT/module-bundle"
+# Give the DB1 store the same per-run PostgreSQL isolation as the integration
+# harness.  Without this, a second live run inherits the immutable first-user
+# claim and cannot exercise enrollment honestly.
+if [[ -n "${AIMEE_STORE_URL:-}" && "$AIMEE_STORE_URL" != *"search_path="* ]]; then
+  LIVE_STORE_SCHEMA="local_stack_${$}_${RANDOM}"
+  case "$AIMEE_STORE_URL" in
+    *\?*) AIMEE_STORE_URL="${AIMEE_STORE_URL}&search_path=${LIVE_STORE_SCHEMA}" ;;
+    *)    AIMEE_STORE_URL="${AIMEE_STORE_URL}?search_path=${LIVE_STORE_SCHEMA}" ;;
+  esac
+  export AIMEE_STORE_URL
+fi
 cleanup_run_root() { rm -rf "$RUN_ROOT"; }
 trap cleanup_run_root EXIT INT TERM
 python3 scripts/export_c_repositories.py \
@@ -130,7 +147,10 @@ export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
 DB1_MODULE="$REPO/src/build/obj/aimee-module-aimee"
-[ -x "$DB1_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
+# Integration and prior E2E runs can leave a named copy behind. Refresh it after
+# every build: the module grant is bound to the current executable identity, so
+# reusing an older copy is correctly denied and prevents the TLS ramp starting.
+cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
 PG_MODULE="$REPO/src/build/obj/aimee-module-postgres"
 [ -x "$PG_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
 CONFIG_MODULE="$REPO/src/build/obj/aimee-module-config"
@@ -140,6 +160,10 @@ KB_POLICY="$AIMEE_HOME/modules.d/kb"
 mkdir -p "$SERVER_POLICY" "$KB_POLICY"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
   "$BUNDLE/grants/server/aimee.grant" > "$SERVER_POLICY/aimee.grant"
+sed "s|^executable=.*|executable=$DB1_MODULE|" \
+  "$BUNDLE/grants/server/aimee-postgres.grant" > "$SERVER_POLICY/aimee-postgres.grant"
+sed "s|^executable=.*|executable=$PG_MODULE|" \
+  "$BUNDLE/grants/server/postgres.grant" > "$SERVER_POLICY/postgres.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/server/config.grant" > "$SERVER_POLICY/config.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
@@ -149,7 +173,7 @@ sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
 chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
 
 kb_pid=""; server_pid=""
-server_db1_pid=""; server_config_pid=""
+server_db1_pid=""; server_postgres_pid=""; server_config_pid=""
 kb_config_pid=""; kb_postgres_pid=""
 
 arm_module() { # executable socket policy log pid-variable [environment...]
@@ -171,12 +195,13 @@ arm_module() { # executable socket policy log pid-variable [environment...]
 
 stop_modules() {
   local pid
-  for pid in "$server_db1_pid" "$server_config_pid" "$kb_config_pid" "$kb_postgres_pid"; do
+  for pid in "$server_db1_pid" "$server_postgres_pid" "$server_config_pid" \
+             "$kb_config_pid" "$kb_postgres_pid"; do
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
-  server_db1_pid=""; server_config_pid=""
+  server_db1_pid=""; server_postgres_pid=""; server_config_pid=""
   kb_config_pid=""; kb_postgres_pid=""
 }
 
@@ -196,6 +221,10 @@ if [[ "$MODE" == "full" ]]; then
   export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql:///aimee_shared}"
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
+  # Authenticate the local server-to-KB hop. Restore/undo is intentionally a
+  # human-authority operation and must not be made to pass by weakening KB's
+  # actor check just because this harness uses loopback HTTP.
+  export AIMEE_KB_API_BEARER_TOKEN="${AIMEE_KB_API_BEARER_TOKEN:-$BEARER}"
   echo "    DB2: ${AIMEE_DB2_URL}"
   arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
     "$AIMEE_HOME/kb-config-module.log" kb_config_pid
@@ -241,6 +270,9 @@ else
 fi
 
 bold "==> Starting aimee-server"
+arm_module "$PG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+  "$AIMEE_HOME/server-postgres-module.log" server_postgres_pid \
+  "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
 arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
   "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
   "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
@@ -335,6 +367,14 @@ if SERVER_URL="$SERVER_URL" BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_K
   green "  PASS  write→read round-trip"; PASS=$((PASS + 1))
 else
   red   "  FAIL  write→read round-trip"; FAIL=$((FAIL + 1))
+fi
+
+bold "==> Memory governance (row scope + durable human rejection)"
+if SERVER_URL="$SERVER_URL" BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
+   "$REPO/scripts/aimee-memory-governance-e2e.sh"; then
+  green "  PASS  memory governance round-trip"; PASS=$((PASS + 1))
+else
+  red   "  FAIL  memory governance round-trip"; FAIL=$((FAIL + 1))
 fi
 
 # Embedder fidelity: the round-trip above passes on list + KEYWORD retrieval even

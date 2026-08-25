@@ -137,6 +137,15 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     ],
     seeAlso: '/projects',
   },
+  '/memory': {
+    title: 'Memory Center',
+    body: [
+      'Inspect the memories visible to the active project, including retained review history.',
+      'Reject marks a value wrong and creates a tombstone that blocks automatic re-extraction.',
+      'Restore is the explicit human decision that removes that refusal and makes the row recallable again.',
+    ],
+    seeAlso: '/logs',
+  },
   '/settings': {
     title: 'Settings',
     body: [
