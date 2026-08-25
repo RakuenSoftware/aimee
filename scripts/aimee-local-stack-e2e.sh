@@ -136,14 +136,15 @@ export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
 DB1_MODULE="$REPO/src/build/obj/aimee-module-aimee"
-[ -x "$DB1_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
+install -m0755 "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
 PG_MODULE="$REPO/src/build/obj/aimee-module-postgres"
-[ -x "$PG_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
+install -m0755 "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
 CONFIG_MODULE="$REPO/src/build/obj/aimee-module-config"
 POSTGRES_MODULE="$REPO/src/build/obj/aimee-module-postgres"
+MODULE_BIN_DIR="$RUN_ROOT/modules"
 SERVER_POLICY="$AIMEE_HOME/modules.d/server"
 KB_POLICY="$AIMEE_HOME/modules.d/kb"
-mkdir -p "$SERVER_POLICY" "$KB_POLICY"
+mkdir -p "$MODULE_BIN_DIR" "$SERVER_POLICY" "$KB_POLICY"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
   "$BUNDLE/grants/server/aimee.grant" > "$SERVER_POLICY/aimee.grant"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
@@ -156,11 +157,43 @@ sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/kb/config.grant" > "$KB_POLICY/config.grant"
 sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
   "$BUNDLE/grants/kb/postgres.grant" > "$KB_POLICY/postgres.grant"
+
+# A live chat/tool turn reaches process-owned policy in memory, routing,
+# delegates, tools, workspace, git, skills, response composition, execution
+# policy, runtime-web and sandbox. Starting only config + storage makes health
+# and CRUD green while every real agent turn fails at its first module call.
+# Reproduce the packaged server's required module manifest here, then add the
+# optional modules exercised by this harness's turn-integrity probe.
+feature_module_ids=()
+while IFS=$'\t' read -r module_id _; do
+  case "$module_id" in
+    config|postgres|aimee) ;;
+    *) feature_module_ids+=("$module_id") ;;
+  esac
+done < "$BUNDLE/server.modules"
+for module_id in ${AIMEE_E2E_OPTIONAL_SERVER_MODULES:-benchmarks governance roundtable}; do
+  [[ " ${feature_module_ids[*]} " == *" $module_id "* ]] || feature_module_ids+=("$module_id")
+done
+
+for module_id in "${feature_module_ids[@]}"; do
+  module_bin="$MODULE_BIN_DIR/aimee-module-$module_id"
+  install -m0755 "$REPO/src/build/obj/aimee-module" "$module_bin"
+  grant="$BUNDLE/grants/server/$module_id.grant"
+  [[ -r "$grant" ]] || { red "missing generated server grant: $grant"; exit 1; }
+  sed "s|^executable=/usr/local/libexec/aimee-modules/|executable=$MODULE_BIN_DIR/|" \
+    "$grant" > "$SERVER_POLICY/$module_id.grant"
+done
+if [[ " ${feature_module_ids[*]} " == *" roundtable "* ]]; then
+  sed "s|^executable=/usr/local/libexec/aimee-modules/|executable=$MODULE_BIN_DIR/|" \
+    "$BUNDLE/grants/server/roundtable-delegates.grant" \
+    > "$SERVER_POLICY/roundtable-delegates.grant"
+fi
 chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
 
 kb_pid=""; server_pid=""
 server_db1_pid=""; server_config_pid=""; server_postgres_pid=""
 kb_config_pid=""; kb_postgres_pid=""
+feature_module_pids=()
 
 arm_module() { # executable socket policy log pid-variable [environment...]
   local executable="$1" socket="$2" policy="$3" log="$4" pid_var="$5"
@@ -182,13 +215,14 @@ arm_module() { # executable socket policy log pid-variable [environment...]
 stop_modules() {
   local pid
   for pid in "$server_db1_pid" "$server_config_pid" "$server_postgres_pid" \
-             "$kb_config_pid" "$kb_postgres_pid"; do
+             "$kb_config_pid" "$kb_postgres_pid" "${feature_module_pids[@]}"; do
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
   server_db1_pid=""; server_config_pid=""; server_postgres_pid=""
   kb_config_pid=""; kb_postgres_pid=""
+  feature_module_pids=()
 }
 
 cleanup() {
@@ -264,6 +298,13 @@ arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
   "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
 arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
   "$AIMEE_HOME/server-config-module.log" server_config_pid
+for module_id in "${feature_module_ids[@]}"; do
+  feature_pid=""
+  arm_module "$MODULE_BIN_DIR/aimee-module-$module_id" \
+    "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+    "$AIMEE_HOME/server-$module_id-module.log" feature_pid
+  feature_module_pids+=("$feature_pid")
+done
 AIMEE_API_BEARER_TOKEN="$BEARER" \
   "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
