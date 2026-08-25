@@ -18,7 +18,7 @@ CORE = {
 }
 PROCESS_REQUIRED = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
-    "skills", "response-composition",
+    "skills", "response-composition", "sandbox",
     # aimee is the core server module: everything specific to aimee-server,
     # including the nineteen store families it absorbed from db1 and the peer
     # messaging that was written against it while it was still its own module.
