@@ -68,6 +68,54 @@ type MemoryBackend interface {
 	HealthCounters(ctx context.Context, promoteUseCount uint32, promoteConfidence float64) (db2contract.HealthCounters, error)
 	// StatsCounts breaks the corpus down by tier and kind.
 	StatsCounts(ctx context.Context) (db2contract.MemoryStats, error)
+
+	// --- expiry ---
+
+	// DeleteL0Provenance removes provenance rows for L0 memories. It runs
+	// before DeleteL0 so no memory row outlives the record of where it came
+	// from.
+	DeleteL0Provenance(ctx context.Context) (uint32, error)
+	// DeleteL0 removes the scratch tier outright.
+	DeleteL0(ctx context.Context) (uint32, error)
+	// ListKindsInTier lists the distinct kinds present in a tier, bounded by
+	// max, so the sweeps iterate only over kinds that actually exist.
+	ListKindsInTier(ctx context.Context, tier string, max uint32) ([]string, error)
+	// KindExpireDays is the idle window after which a kind's L1 rows expire.
+	KindExpireDays(ctx context.Context, kind string) (uint32, error)
+	// DeleteStaleL1Provenance mirrors DeleteL0Provenance for the stale sweep.
+	DeleteStaleL1Provenance(ctx context.Context, kind, window string) (uint32, error)
+	// DeleteStaleL1 removes a kind's stale L1 rows.
+	DeleteStaleL1(ctx context.Context, kind, window string) (uint32, error)
+
+	// --- demotion and promotion ---
+
+	// KindDemotePolicy is the confidence floor and idle window a kind must
+	// fall through before its L2 rows demote.
+	KindDemotePolicy(ctx context.Context, kind string) (confidence float64, days uint32, err error)
+	// DemoteKind demotes one kind's qualifying L2 rows, stamping them.
+	DemoteKind(ctx context.Context, stamp, kind string, confidence float64, window string) (uint32, error)
+	// DemoteCascade weakens the confidence of rows depending on what this
+	// call's stamp just demoted.
+	DemoteCascade(ctx context.Context, stamp string) (uint32, error)
+	// PromoteStable moves long-settled L2 rows to L3.
+	PromoteStable(ctx context.Context, stamp string) (uint32, error)
+	// ReclassifyDirectives moves directive-shaped L3 rows to L4.
+	ReclassifyDirectives(ctx context.Context, requireApproval bool) (uint32, error)
+	// RecordL4Approval records an operator's approval for an L4 promotion.
+	RecordL4Approval(ctx context.Context, memoryID uint64, approver, note string) error
+
+	// --- health snapshots ---
+
+	// CountMemories counts the whole corpus for a health snapshot.
+	CountMemories(ctx context.Context) (uint32, error)
+	// CountRecentConflicts counts conflicts detected inside the window.
+	CountRecentConflicts(ctx context.Context, days uint32) (uint32, error)
+	// HealthRecord writes one health-cycle snapshot.
+	HealthRecord(ctx context.Context, snapshot HealthSnapshot) error
+	// PruneHealth drops health snapshots past the retention window.
+	PruneHealth(ctx context.Context, days uint32) (uint32, error)
+	// PruneContradictions drops contradiction-log rows past the window.
+	PruneContradictions(ctx context.Context, days uint32) (uint32, error)
 }
 
 // boolReply is the wire's spelling of a boolean: the contract carries these as
@@ -293,6 +341,94 @@ func NewMemoryHandler(backend MemoryBackend) bus.ModuleHandler {
 			stats, err := backend.StatsCounts(ctx)
 			return finish(func() ([]byte, error) {
 				return db2contract.EncodeStatsCountsReply(stats)
+			}, err)
+
+		case db2contract.OperationExpire:
+			if db2contract.DecodeExpireRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			level0, stale, err := expireSweep(ctx, invocation, backend)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeExpireReply(level0, stale)
+			}, err)
+
+		case db2contract.OperationDemote:
+			if db2contract.DecodeDemoteRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			demoted, cascaded, err := demoteSweep(ctx, invocation, backend)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeDemoteReply(demoted, cascaded)
+			}, err)
+
+		case db2contract.OperationPromoteStable:
+			if db2contract.DecodePromoteStableRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			promoted, err := backend.PromoteStable(ctx, nowStamp(backend))
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodePromoteStableReply(promoted)
+			}, err)
+
+		case db2contract.OperationReclassifyDirectives:
+			requireApproval, decodeErr := db2contract.DecodeReclassifyDirectivesRequest(request)
+			if decodeErr != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			reclassified, err := backend.ReclassifyDirectives(ctx, requireApproval != 0)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeReclassifyDirectivesReply(reclassified)
+			}, err)
+
+		case db2contract.OperationRecordL4Approval:
+			memoryID, approver, note, decodeErr := db2contract.DecodeRecordL4ApprovalRequest(request)
+			if decodeErr != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			err := backend.RecordL4Approval(ctx, memoryID, approver, note)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeRecordL4ApprovalReply()
+			}, err)
+
+		case db2contract.OperationHealthRecord:
+			promotions, demotions, expirations, decodeErr := db2contract.DecodeHealthRecordRequest(request)
+			if decodeErr != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			// The caller reports what its cycle did; the module measures the
+			// corpus itself. Trusting a caller's totals would let one cycle's
+			// bad arithmetic become the recorded history.
+			total, err := backend.CountMemories(ctx)
+			var contradictions uint32
+			if err == nil {
+				contradictions, err = backend.CountRecentConflicts(ctx,
+					db2contract.HealthRecordConflictWindowDays)
+			}
+			if err == nil {
+				err = backend.HealthRecord(ctx, HealthSnapshot{
+					TotalMemories:          total,
+					ContradictionsDetected: contradictions,
+					Promotions:             promotions,
+					Demotions:              demotions,
+					Expirations:            expirations,
+				})
+			}
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeHealthRecordReply()
+			}, err)
+
+		case db2contract.OperationHealthRetention:
+			if db2contract.DecodeHealthRetentionRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			snapshots, err := backend.PruneHealth(ctx, db2contract.HealthRetentionSnapshotDays)
+			var contradictions uint32
+			if err == nil {
+				contradictions, err = backend.PruneContradictions(ctx,
+					db2contract.HealthRetentionContradictionDays)
+			}
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeHealthRetentionReply(snapshots, contradictions)
 			}, err)
 		}
 

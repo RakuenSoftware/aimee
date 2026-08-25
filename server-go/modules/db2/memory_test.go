@@ -32,6 +32,7 @@ type fakeMemory struct {
 	gotEffectiveness   float64
 	cleared            bool
 
+	lifecycle            fakeLifecycle
 	healthCounters       db2contract.HealthCounters
 	memoryStats          db2contract.MemoryStats
 	gotPromoteUseCount   uint32
