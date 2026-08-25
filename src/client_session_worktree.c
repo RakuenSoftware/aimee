@@ -930,16 +930,10 @@ int client_session_worktree_route_path(const char *sid, const char *cwd, const c
    if (csw_is_foreign_worktree(target, sid) || csw_is_foreign_native_path(target, cwd, sid))
       return -3;
 
-   char wt[4096];
-   int prepared = client_session_worktree_ensure_at(sid, cwd, wt, sizeof wt);
-   if (prepared != 0)
-      return prepared == -1 ? 1 : prepared;
-   if (csw_path_has_prefix(target, wt))
-   {
-      snprintf(out, cap, "%s", target);
-      return 0;
-   }
-
+   /* Decide whether the target belongs to this repository before provisioning
+    * anything. External paths (for example a read from a client-owned memory
+    * store) are intentionally left alone and must not depend on the repository
+    * having a reachable remote/default branch. */
    char source[4096], top[4096];
    int owned = 0;
    if (csw_repo_context(cwd, sid, source, sizeof source, top, sizeof top, &owned) != 0)
@@ -950,9 +944,6 @@ int client_session_worktree_route_path(const char *sid, const char *cwd, const c
       return 0;
    }
 
-   /* cwd may itself be another Aimee worktree. In that case paths are relative
-    * to its top-level checkout, but must land at the same repository-relative
-    * location in this session's checkout. */
    const char *relative = NULL;
    if (csw_path_has_prefix(target, top))
       relative = target + strlen(top);
@@ -963,6 +954,20 @@ int client_session_worktree_route_path(const char *sid, const char *cwd, const c
       snprintf(out, cap, "%s", target); /* non-repository path: unchanged */
       return 1;
    }
+
+   char wt[4096];
+   int prepared = client_session_worktree_ensure_at(sid, cwd, wt, sizeof wt);
+   if (prepared != 0)
+      return prepared == -1 ? 1 : prepared;
+   if (csw_path_has_prefix(target, wt))
+   {
+      snprintf(out, cap, "%s", target);
+      return 0;
+   }
+
+   /* cwd may itself be another Aimee worktree. In that case paths are relative
+    * to its top-level checkout, but must land at the same repository-relative
+    * location in this session's checkout. */
    if (snprintf(out, cap, "%s%s", wt, relative) >= (int)cap)
       return -2;
    return 0;
