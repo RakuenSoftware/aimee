@@ -77,17 +77,25 @@ func TestTheShippedProviderBinaryServesOverARealBus(t *testing.T) {
 	// The host grants provider A the provider binary's path, so this is the
 	// deployment's authorization check and not a test's convenience.
 	host := exec.Command(harness, socket, executable, provider)
-	hostOutput, err := host.StdoutPipe()
+	// Into a file rather than a pipe nothing reads: an unread pipe blocks the
+	// writer once the buffer fills, so a host that ever logged would hang here
+	// instead of failing.
+	hostLog, err := os.Create(filepath.Join(directory, "host.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = hostOutput
+	host.Stdout, host.Stderr = hostLog, hostLog
 	if err := host.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		_ = host.Process.Signal(unix.SIGTERM)
 		_ = host.Wait()
+		if t.Failed() {
+			if body, readErr := os.ReadFile(filepath.Join(directory, "host.log")); readErr == nil && len(body) > 0 {
+				t.Logf("DB3 C host output:\n%s", body)
+			}
+		}
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
