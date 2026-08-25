@@ -18697,6 +18697,7 @@
       "consumers": [
         "src/kb/http/kb_http_console.c",
         "src/modules/memory/memory_core_crud.c",
+        "src/tests/support/kb_http_route_stubs.c",
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
@@ -18856,6 +18857,7 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/http/kb_http_console.c",
+        "src/tests/support/kb_http_route_stubs.c",
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
@@ -18873,6 +18875,7 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/http/kb_http_console.c",
+        "src/tests/support/kb_http_route_stubs.c",
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
@@ -19007,6 +19010,7 @@
         "src/kb/http/kb_http_console.c",
         "src/kb/kb_service_memory.c",
         "src/modules/memory/memory_core_search_c.c",
+        "src/tests/support/kb_http_route_stubs.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_typed_facts.c",
         "src/tests/test_workspace_memory.c"
@@ -19096,6 +19100,7 @@
         "src/kb/http/kb_http_console.c",
         "src/kb/kb_service_memory.c",
         "src/modules/memory/memory_core_search_c.c",
+        "src/tests/support/kb_http_route_stubs.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_typed_facts.c",
         "src/tests/test_workspace_memory.c"
@@ -26873,7 +26878,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4098c23e730c731ee02a21d78cdc8829d417898077aebd93df2ddffc2ff17ee9",
+  "fingerprint": "7e7ffcc111bad37e36dcca0c865b173c484a7cfb5efa509de034947c254ebcad",
   "module": "db2",
   "schema_version": 1,
   "summary": {
