@@ -149,11 +149,49 @@ session_refs="$(git --git-dir="$git_bare" for-each-ref --format='%(refname)' ref
 ok "authorized external git_push reached a disposable real remote"
 
 # A real stdio MCP peer receives this non-idempotent external mutation and then
-# withholds its acknowledgement. The production dispatcher must terminate it as
-# unknown_outcome, never as a clean failure that implies retry is safe.
-run_turn ti-live-unknown TI_MCP_TIMEOUT "$workspace" "$RUN_ROOT/mcp-timeout-turn.out"
-grep -q 'TURN_INTEGRITY_UNKNOWN_OUTCOME_OBSERVED' "$RUN_ROOT/mcp-timeout-turn.out" || \
-  fail "model did not observe the external mutation timeout"
+# withholds its acknowledgement. Drive the production dispatcher through its
+# first-class trusted-local API: the primary code role intentionally cannot call
+# remote MCP tools, and accepting its policy refusal here used to be a false
+# positive. The response must prove the peer was reached and timed out; the WORM
+# assertion below independently proves that the timeout became unknown_outcome.
+python3 - "$uds" <<'PY' >"$RUN_ROOT/mcp-timeout-tool.out"
+import json
+import socket
+import sys
+
+sock_path = sys.argv[1]
+body = json.dumps({
+    "method": "tool.execute",
+    "tool": "ti_remote:mutate",
+    "arguments": json.dumps({"request": "turn-integrity-live-mutation"}),
+    "session_id": "ti-live-unknown",
+    "timeout_ms": 1000,
+}, separators=(",", ":"))
+request = (
+    "POST /v1/tools/execute HTTP/1.1\r\n"
+    "Host: localhost\r\n"
+    "Content-Type: application/json\r\n"
+    "Connection: close\r\n"
+    f"Content-Length: {len(body.encode())}\r\n\r\n{body}"
+).encode()
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.settimeout(15)
+sock.connect(sock_path)
+sock.sendall(request)
+chunks = []
+while True:
+    data = sock.recv(65536)
+    if not data:
+        break
+    chunks.append(data)
+response = b"".join(chunks)
+_, _, payload = response.partition(b"\r\n\r\n")
+sys.stdout.buffer.write(payload)
+PY
+grep -q 'remote mcp tool failed: transport timeout' "$RUN_ROOT/mcp-timeout-tool.out" || {
+  sed -n '1,20p' "$RUN_ROOT/mcp-timeout-tool.out" >&2
+  fail "external MCP mutation did not reach the production timeout boundary"
+}
 ok "non-idempotent external MCP timeout completed as an uncertain outcome"
 
 # Observe one session through the canonical OpenAI ingress, invalidate knowledge
