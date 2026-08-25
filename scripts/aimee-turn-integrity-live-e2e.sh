@@ -139,9 +139,13 @@ printf 'live\n' >"$git_work/live.txt"
 git -C "$git_work" add live.txt
 git -C "$git_work" commit -qm initial
 git -C "$git_work" remote add origin "$git_bare"
+git --git-dir="$git_bare" symbolic-ref HEAD refs/heads/main
+git -C "$git_work" push -qu origin main
+git -C "$git_work" remote set-head origin main
 run_turn ti-live-push TI_GIT_PUSH "$git_work" "$RUN_ROOT/push-turn.out"
-git --git-dir="$git_bare" show-ref --verify --quiet refs/heads/main || \
-  fail "authorized git_push did not reach the disposable remote"
+session_refs="$(git --git-dir="$git_bare" for-each-ref --format='%(refname)' refs/heads \
+  | grep -v '^refs/heads/main$' || true)"
+[[ -n "$session_refs" ]] || fail "authorized git_push did not publish the session branch"
 ok "authorized external git_push reached a disposable real remote"
 
 # Observe one session, invalidate knowledge through the public API, then observe
