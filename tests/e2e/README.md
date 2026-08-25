@@ -103,7 +103,7 @@ reports any it could not start rather than skipping it quietly.
 ```
 # in a throwaway box, with Postgres up and an empty aimee_shared database
 cd src && make -j$(nproc) all
-make build/obj/aimee-module build/obj/aimee-module-config build/obj/aimee-module-db1
+make build/obj/aimee-module build/obj/aimee-module-config build/obj/aimee-module-aimee
 
 AIMEE_ROOT=/path/to/aimee AIMEE_SRC=/path/to/aimee/src \
   tests/e2e/module-liveness-pg-e2e.sh
@@ -168,32 +168,43 @@ at all.
 ```
 # throwaway box, Postgres up, an empty aimee_shared database
 cd src && make -j$(nproc) all
-make build/obj/aimee-module build/obj/aimee-module-config build/obj/aimee-module-db1
+make build/obj/aimee-module build/obj/aimee-module-config build/obj/aimee-module-aimee
 
 AIMEE_ROOT=/path/to/aimee AIMEE_SRC=/path/to/aimee/src \
   tests/e2e/learning-loops-pg-e2e.sh
 ```
 
-It **deletes** the learning and curiosity tables it seeds.
+Or let the repository build the binaries and modules, create a scratch
+database, run the pair, and remove the database afterwards:
+
+```
+AIMEE_TEST_PG_URL=postgresql:///postgres make -C src learning-loop-evidence
+```
+
+The direct harness **deletes** rows from the learning, curiosity, eval, job and
+bandit tables it seeds. Use a throwaway database; the Make target creates one.
 
 ## What it covers
 
 | Section | Behaviour |
 | --- | --- |
-| 0 | Both services up, with the modules these loops need |
+| 0 | Both services and the PostgreSQL-backed daemon store up, with the modules these loops need |
 | 1 | An empty ledger leaves the gate open; a wholly self-referential one closes it; the daemon reports what the KB enforces |
 | 2 | A closed gate admits nothing *and writes no task file*; real outside evidence reopens it |
-| 3 | A later commit supersedes the earlier one unasked; an operator verdict reaches the ledger and counts as regret |
-| 4 | The drain runs a real probe, and leaves an uncovered gap **open** rather than closing it by assertion |
-| 5 | The policy layer answers with an arm this build declares |
-| 6 | The fate ledger's SQL on real Postgres: one row per proposal, latest verdict wins, and the delimited `LIKE` refusing to count `reverted_by_operator` as `reverted` |
-| 7 | Malformed and hostile input is refused rather than answered as though it parsed |
-| 8 | Neither log reports a missing provider; neither service crashed |
+| 3 | S1 turns two failed jobs into one admitted regression task and materialises it |
+| 4 | S3 stores the same repeated failure as a dead end and recalls it through the production route |
+| 5 | S2 reads a three-task paired grid and reports the expected attribution; this proves plumbing, not new-loop efficacy |
+| 6 | A later commit supersedes the earlier one unasked; an operator verdict reaches the ledger and counts as regret |
+| 7 | The drain closes a graph-covered gap and leaves an uncovered gap **open** |
+| 8 | Reward pressure selects a non-default policy arm without silently changing the default |
+| 9 | The fate ledger's SQL on real Postgres: one row per proposal, latest verdict wins, and the delimited `LIKE` refusing to count `reverted_by_operator` as `reverted` |
+| 10 | Malformed and hostile input is refused rather than answered as though it parsed |
+| 11 | Neither log reports a missing provider; neither service crashed; a six-loop evidence table is printed |
 
-Section 6 matters for the same reason the typed-fact suite does: those
+Section 9 matters for the same reason the typed-fact suite does: those
 statements run against the sqlite shim under `make unit-tests`, and sqlite
 accepts SQL that Postgres rejects.
 
-Section 7 pins one contract that otherwise reads as a bug: `--budget 0` is not
+Section 10 pins one contract that otherwise reads as a bug: `--budget 0` is not
 "do nothing". `curiosity_resolve_pass` treats any budget `<= 0` as unset and
 substitutes its default, so an operator asking for none still gets a full pass.

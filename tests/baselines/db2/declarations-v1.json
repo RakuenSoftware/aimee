@@ -3739,7 +3739,8 @@
     },
     {
       "consumers": [
-        "src/kb/kb_bandit.c"
+        "src/kb/kb_bandit.c",
+        "src/tests/test_bandit.c"
       ],
       "locations": [
         {
@@ -26944,7 +26945,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f401c3f954bcb26696852eabef154ac70ad90e1417ea5dfdd30bb5e9b992b7f8",
+  "fingerprint": "d05ba27617e0763fcb93ad38df03dfd6d78e8371f3ef043c4f1fbb4934a4ca9a",
   "module": "db2",
   "schema_version": 1,
   "summary": {
