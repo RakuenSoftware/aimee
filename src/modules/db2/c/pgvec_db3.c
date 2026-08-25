@@ -1,4 +1,4 @@
-/* pgvec_db3.c: the process's DB3 route, and the pgvec adapter over it. */
+/* pgvec_db3.c: the process's DB3 routes, and the pgvec adapter over them. */
 
 #include "pgvec_db3.h"
 
@@ -6,13 +6,26 @@
 #include <stdatomic.h>
 #include <string.h>
 
-/* The process holds one route. Selection is deployment-wide — which provider
- * serves portable reads is not a per-call choice — so a single guarded instance
- * is the whole state, and searches take it under a read-mostly lock rather than
- * copying a route per call. */
-static pthread_mutex_t g_route_mu = PTHREAD_MUTEX_INITIALIZER;
-static aimee_db3_route_t g_route;
-static int g_route_installed;
+/* One slot per routable collection. The set is closed and small, so the table
+ * is a fixed array rather than a map: a collection this build does not know is
+ * a programming error, and failing the lookup is how it surfaces instead of
+ * silently creating a route nothing ever selects a provider for. */
+typedef struct
+{
+   const char *collection;
+   aimee_db3_route_t route;
+   int installed;
+} pgvec_db3_slot_t;
+
+static pthread_mutex_t g_routes_mu = PTHREAD_MUTEX_INITIALIZER;
+static pgvec_db3_slot_t g_routes[] = {
+    {PGVEC_DB3_COLLECTION_MEMORY, {0}, 0},
+    {PGVEC_DB3_COLLECTION_KB, {0}, 0},
+    {PGVEC_DB3_COLLECTION_KB_PDF, {0}, 0},
+    {PGVEC_DB3_COLLECTION_CODE, {0}, 0},
+};
+
+#define PGVEC_DB3_SLOT_COUNT (sizeof(g_routes) / sizeof(g_routes[0]))
 
 /* Request ids are per-call and need only be unique and nonzero within the
  * process; the wire uses them to pair a reply with its request. Relaxed because
@@ -27,47 +40,78 @@ static uint64_t next_request_id(void)
    return id == 0 ? atomic_fetch_add_explicit(&g_request_id, 1, memory_order_relaxed) : id;
 }
 
-int pgvec_db3_route_install(aimee_db3_search_fn internal_search, void *internal_context,
-                            aimee_db3_candidate_authorize_fn authorize, void *authorize_context)
+/* Caller holds g_routes_mu. */
+static pgvec_db3_slot_t *slot_for(const char *collection)
+{
+   if (!collection || !collection[0])
+      return NULL;
+   for (size_t index = 0; index < PGVEC_DB3_SLOT_COUNT; index++)
+      if (strcmp(g_routes[index].collection, collection) == 0)
+         return &g_routes[index];
+   return NULL;
+}
+
+int pgvec_db3_route_install(const char *collection, aimee_db3_search_fn internal_search,
+                            void *internal_context, aimee_db3_candidate_authorize_fn authorize,
+                            void *authorize_context)
 {
    if (!internal_search || !authorize)
       return -1;
 
-   pthread_mutex_lock(&g_route_mu);
-   /* Any previously selected provider was selected against the callbacks being
-    * replaced, so it is dropped rather than carried across. */
-   int rc = aimee_db3_route_init(&g_route, internal_search, internal_context, authorize,
-                                 authorize_context);
-   g_route_installed = (rc == 0);
-   pthread_mutex_unlock(&g_route_mu);
-   return rc;
-}
-
-int pgvec_db3_route_select(uint32_t principal, int ready, int fallback_enabled,
-                           aimee_db3_search_fn external_search, void *external_context)
-{
-   pthread_mutex_lock(&g_route_mu);
+   pthread_mutex_lock(&g_routes_mu);
+   pgvec_db3_slot_t *slot = slot_for(collection);
    int rc = -1;
-   if (g_route_installed)
-      rc = aimee_db3_route_select(&g_route, principal, ready, fallback_enabled, external_search,
-                                  external_context);
-   pthread_mutex_unlock(&g_route_mu);
+   if (slot)
+   {
+      /* Any previously selected provider was selected against the callbacks
+       * being replaced, so it is dropped rather than carried across. */
+      rc = aimee_db3_route_init(&slot->route, internal_search, internal_context, authorize,
+                                authorize_context);
+      slot->installed = (rc == 0);
+   }
+   pthread_mutex_unlock(&g_routes_mu);
    return rc;
 }
 
-void pgvec_db3_route_clear(void)
+int pgvec_db3_route_select(const char *collection, uint32_t principal, int ready,
+                           int fallback_enabled, aimee_db3_search_fn external_search,
+                           void *external_context)
 {
-   pthread_mutex_lock(&g_route_mu);
-   if (g_route_installed)
-      aimee_db3_route_clear(&g_route);
-   pthread_mutex_unlock(&g_route_mu);
+   pthread_mutex_lock(&g_routes_mu);
+   pgvec_db3_slot_t *slot = slot_for(collection);
+   int rc = -1;
+   if (slot && slot->installed)
+      rc = aimee_db3_route_select(&slot->route, principal, ready, fallback_enabled, external_search,
+                                  external_context);
+   pthread_mutex_unlock(&g_routes_mu);
+   return rc;
 }
 
-int pgvec_db3_route_serving(void)
+void pgvec_db3_route_clear(const char *collection)
 {
-   pthread_mutex_lock(&g_route_mu);
-   int serving = g_route_installed && g_route.selected_principal != 0 && g_route.selected_ready;
-   pthread_mutex_unlock(&g_route_mu);
+   pthread_mutex_lock(&g_routes_mu);
+   if (!collection)
+   {
+      for (size_t index = 0; index < PGVEC_DB3_SLOT_COUNT; index++)
+         if (g_routes[index].installed)
+            aimee_db3_route_clear(&g_routes[index].route);
+   }
+   else
+   {
+      pgvec_db3_slot_t *slot = slot_for(collection);
+      if (slot && slot->installed)
+         aimee_db3_route_clear(&slot->route);
+   }
+   pthread_mutex_unlock(&g_routes_mu);
+}
+
+int pgvec_db3_route_serving(const char *collection)
+{
+   pthread_mutex_lock(&g_routes_mu);
+   pgvec_db3_slot_t *slot = slot_for(collection);
+   int serving = slot && slot->installed && slot->route.selected_principal != 0 &&
+                 slot->route.selected_ready;
+   pthread_mutex_unlock(&g_routes_mu);
    return serving;
 }
 
@@ -85,11 +129,11 @@ static int copy_scope(char *out, size_t capacity, const char *value)
    return 0;
 }
 
-int pgvec_db3_memory_candidates(const float *vec, int dim, const char *record_type,
-                                const char *workspace, const char *project, int limit,
-                                int64_t *ids, double *scores, int max)
+int pgvec_db3_candidates(const char *collection, const float *vec, int dim,
+                         const char *record_type, const char *workspace, const char *project,
+                         int limit, int64_t *ids, double *scores, int max)
 {
-   if (!vec || dim <= 0 || dim > (int)AIMEE_DB3_MAX_DIM || !record_type || !ids || !scores || max <= 0)
+   if (!vec || dim <= 0 || dim > (int)AIMEE_DB3_MAX_DIM || !ids || !scores || max <= 0)
       return -1;
 
    int top_k = (limit > 0 && limit < max) ? limit : max;
@@ -117,12 +161,13 @@ int pgvec_db3_memory_candidates(const float *vec, int dim, const char *record_ty
    memcpy(request.vector, vec, (size_t)dim * sizeof(float));
 
    aimee_db3_search_outcome_t outcome;
-   pthread_mutex_lock(&g_route_mu);
-   int installed = g_route_installed;
+   pthread_mutex_lock(&g_routes_mu);
+   pgvec_db3_slot_t *slot = slot_for(collection);
+   int installed = slot && slot->installed;
    aimee_db3_result_t result = AIMEE_DB3_UNAVAILABLE;
    if (installed)
-      result = aimee_db3_memory_candidates_search(&g_route, &request, &outcome);
-   pthread_mutex_unlock(&g_route_mu);
+      result = aimee_db3_memory_candidates_search(&slot->route, &request, &outcome);
+   pthread_mutex_unlock(&g_routes_mu);
 
    if (!installed || result != AIMEE_DB3_OK)
       return -1;

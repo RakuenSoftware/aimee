@@ -119,27 +119,38 @@ into `db3_outbox` inside the writing transaction, and enqueue is a no-op while
 no provider is `backfilling` or `active`, so nothing accumulates when nothing is
 attached.
 
-The search side is narrower than the portability classification implies, and the
-reason is a gap in the wire rather than in any call site. An `Apply` names its
-collection; a `SearchRequest` does not -- it carries only `workspace`, `project`
-and `record_type`. Two consequences follow:
+The search side is much narrower than the portability classification implies,
+and one cause explains every exclusion: **`SearchRequest` carries only
+`workspace`, `project` and `record_type`.** It has no closed filter list. Any
+search whose meaning depends on something else cannot be expressed, and routing
+it would answer a different question while looking correct.
 
-- A provider must be told which collection it serves, because it cannot infer
-  one per request. `record_type` is not that selector: the projection catalog
-  stores it as a *label* beside the vector (`memory_embeddings` maps it as one
-  of five; `kb_embeddings` pins it to the constant `kb`), so reading it as a
-  collection searches a namespace the caller never asked for.
-- Only searches whose scope is expressible as workspace/project can route.
-  `pgvec_memory_search` is wired. The curator searches take `scope_kind` and
-  `scope_id`, which the request has no field for, so routing them would drop
-  the scope and widen the search -- they stay on pgvector until the request
-  grows a closed filter list.
+What that rules out, from reading the implementations rather than the
+classification:
 
-`pgvec_db3_memory_candidates` refuses anything it cannot express rather than
-approximating it: a search carrying kind filters, an unscoped search, and a
-scope component too long for the wire all fall back to pgvector. The failure
-mode being avoided in each case is the same -- a routed search that silently
-answers a different question than the one asked.
+| Search | Why it cannot route |
+| --- | --- |
+| `pgvec_kb_search_scoped`, `pgvec_kbpdf_search` | join `kb_documents` and `projects`, filtering `lifecycle_state='current'` and `d.generation=p.current_generation`. Neither is a label in the projection, so a provider would return candidates from retired project generations. |
+| `pgvec_code_search` | same shape: `projects.lifecycle_state` plus `ce.generation = p.current_generation`. |
+| the four curator searches | scope by `scope_kind`/`scope_id`, for which the request has no field. Routing would drop the scope and widen the search. |
+| `pgvec_memory_search` **with an active request scope** | does not filter on the denormalized workspace/project columns at all. It computes a visibility rank from `memory_scopes` and `memory_workspaces`, including rows tagged in neither. That is a join against canonical rows, not a label match; routing it would return memories the request is not entitled to see and drop shared and global ones it is. |
+
+`pgvec_memory_search` therefore routes only for direct callers with no active
+scope context, an explicit workspace or project, and no kind filter. That is the
+one case whose whole meaning fits the three fields the wire carries.
+
+Routes are keyed by collection. A DB3 route selects one provider and a provider
+serves one collection — `record_type` cannot select one, because the projection
+catalog stores it as a *label* beside the vector (`memory_embeddings` maps it as
+one of five; `kb_embeddings` pins it to the constant `kb`). A single
+process-wide route could therefore serve exactly one collection, and a kb search
+sent through a memory provider's route would return memory candidates that
+looked like kb answers.
+
+Widening this needs a wire change, not more call sites: give `SearchRequest` the
+closed filter expression the boundary section above already contemplates, and
+add the corresponding labels to `db3_projection.label_sources`. Until then the
+adapter refuses what it cannot express rather than approximating it.
 
 ## Dependencies and consumers
 

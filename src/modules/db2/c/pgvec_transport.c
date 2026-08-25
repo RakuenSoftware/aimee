@@ -717,18 +717,31 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
                         const char *const *kinds, int n_kinds, const char *workspace,
                         const char *project, int limit, int64_t *ids, double *scores, int max)
 {
-   /* A kind filter cannot be expressed on the DB3 wire: the search request has
-    * no field for one. Routing a filtered search would return unfiltered
-    * candidates that look like a correct answer, so those stay on pgvector.
+   /* Three things make a search unroutable, and all three share one cause: the
+    * DB3 search request carries only workspace, project and record_type, so a
+    * search whose meaning depends on anything else would come back answering a
+    * different question while looking correct.
     *
-    * An unscoped search is excluded for the same class of reason — the wire
-    * requires a scope, and inventing one would change what was asked. */
-   int routable = !(kinds && n_kinds > 0) &&
+    *   - A kind filter. The request has no field for one, so a routed filtered
+    *     search returns unfiltered candidates.
+    *   - An unscoped search. The wire requires a scope and inventing one would
+    *     change what was asked.
+    *   - An ACTIVE REQUEST SCOPE. This is the subtle one. With a scope context
+    *     set, the query below does not filter on the denormalized workspace and
+    *     project columns at all — it computes a visibility rank from
+    *     memory_scopes and memory_workspaces, including the legacy case of rows
+    *     tagged in neither. No provider can express that: it is a join against
+    *     canonical relational rows, not a label match. Routing here would
+    *     return memories the request is not entitled to see, and drop shared
+    *     and global ones it is. */
+   db2_memory_scope_context_t routing_scope;
+   db2_memory_scope_context_get(&routing_scope);
+   int routable = !routing_scope.active && !(kinds && n_kinds > 0) &&
                   ((workspace && workspace[0]) || (project && project[0]));
    if (routable)
    {
-      int routed = pgvec_db3_memory_candidates(vec, dim, record_type, workspace, project, limit,
-                                               ids, scores, max);
+      int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vec, dim, record_type,
+                                        workspace, project, limit, ids, scores, max);
       /* A negative answer means the route declined or produced nothing usable
        * — including the ordinary case of no route installed at all — so the
        * query runs here instead. Zero is a real empty result and is returned. */
