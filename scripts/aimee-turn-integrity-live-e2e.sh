@@ -94,6 +94,27 @@ PY
   }
 }
 
+# Dense retrieval always has a nearest neighbor once any feedback has been
+# stored. Prove the typed empty-corpus contract before the first model turn can
+# write feedback memories, rather than manufacturing an impossible query later.
+empty_workspace="$RUN_ROOT/turn-integrity-empty-workspace"
+mkdir -p "$empty_workspace"
+run_turn ti-live-empty TI_SEARCH_EMPTY "$empty_workspace" "$RUN_ROOT/search-turn.out"
+python3 - "$provider_log" <<'PY' || fail "typed empty retrieval contract did not cross provider seam"
+import json
+import sys
+
+wire = "\n".join(open(sys.argv[1], encoding="utf-8"))
+required = [
+    '\\"status\\":\\"empty\\"',
+    '\\"action\\":\\"web_search\\"',
+    '\\"policy_recheck\\":true',
+    '\\"authorized\\":false',
+]
+raise SystemExit(0 if all(token in wire for token in required) else 1)
+PY
+ok "typed empty retrieval and inert continuation crossed server→KB→agent"
+
 workspace="$RUN_ROOT/turn-integrity-workspace"
 mkdir -p "$workspace"
 git init -q -b main "$workspace"
@@ -115,22 +136,6 @@ run_turn "$work_sid" TI_EDIT_FILE "$workspace" "$RUN_ROOT/edit-turn.out"
 [[ "$(<"$session_workspace/turn-integrity-live.txt")" == "live-contract-edited" ]] || \
   fail "edit_file did not produce the expected bytes"
 ok "model-backed edit_file executed with exact readback"
-
-run_turn ti-live-empty TI_SEARCH_EMPTY "$workspace" "$RUN_ROOT/search-turn.out"
-python3 - "$provider_log" <<'PY' || fail "typed empty retrieval contract did not cross provider seam"
-import json
-import sys
-
-wire = "\n".join(open(sys.argv[1], encoding="utf-8"))
-required = [
-    '\\"status\\":\\"empty\\"',
-    '\\"action\\":\\"web_search\\"',
-    '\\"policy_recheck\\":true',
-    '\\"authorized\\":false',
-]
-raise SystemExit(0 if all(token in wire for token in required) else 1)
-PY
-ok "typed empty retrieval and inert continuation crossed server→KB→agent"
 
 # Safe external mutation: the remote is a disposable bare repository in this CT.
 git_work="$RUN_ROOT/turn-integrity-git"
