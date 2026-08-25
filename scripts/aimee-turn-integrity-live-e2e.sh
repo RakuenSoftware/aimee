@@ -176,9 +176,18 @@ ok "live invalidation produced a stale-knowledge instruction on the next turn"
 AIMEE_HOME="$client_home" "$REPO/aimee" eval run \
   "$REPO/scripts/fixtures/turn-integrity-eval" --seed 4242 >/dev/null
 eval_json="$(AIMEE_HOME="$client_home" "$REPO/aimee" --json eval results \
-  "$REPO/scripts/fixtures/turn-integrity-eval")"
-[[ "$eval_json" == *'turn integrity live fixture'* ]] || fail "stored eval row missing"
-ok "live benchmark execution stored its result"
+  turn-integrity-eval)"
+[[ "$eval_json" == *'turn integrity live fixture'* && "$eval_json" == *'"success":true'* ]] || \
+  fail "stored eval row missing"
+manifest_row="$(psql "${AIMEE_STORE_URL:?}" -AtF '|' -c \
+  "select dataset_hash,target_hash,harness_version,hardware_profile,seed from eval_results where suite='turn-integrity-eval' order by id desc limit 1")"
+IFS='|' read -r dataset_hash target_hash harness_version hardware_profile eval_seed \
+  <<<"$manifest_row"
+[[ "$dataset_hash" =~ ^[0-9a-f]{64}$ && "$target_hash" =~ ^[0-9a-f]{64}$ ]] || \
+  fail "stored eval row has no immutable dataset/target identity"
+[[ "$harness_version" == 2 && -n "$hardware_profile" && "$eval_seed" == 4242 ]] || \
+  fail "stored eval manifest does not bind harness, hardware, and seed"
+ok "live benchmark execution stored its immutable manifest identity"
 
 python3 - "$SCRATCH/audit/worm-live.db" <<'PY' || fail "turn/effect audit evidence missing"
 import sqlite3
