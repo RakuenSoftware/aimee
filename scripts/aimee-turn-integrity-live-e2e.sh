@@ -49,7 +49,11 @@ set_primary() {
 }
 
 run_turn() {
-  local sid="$1" prompt="$2" cwd="$3" out="$4" socket_timeout="${5:-45}"
+  # A real CPU embedder also persists post-turn feedback before the stream closes.
+  # On the acceptance CT that takes tens of seconds in addition to model/tool I/O;
+  # keep the client bound above the product's dependency timeout without making
+  # it unbounded. Callers may still supply a tighter, purpose-specific budget.
+  local sid="$1" prompt="$2" cwd="$3" out="$4" socket_timeout="${5:-150}"
   set_primary "$sid"
   python3 - "$sid" "$prompt" "$cwd" "$socket_timeout" <<'PY' >"$out"
 import json
@@ -268,7 +272,7 @@ ok "WORM contains bounded turn/effect/freshness lifecycles without raw arguments
 # continuation, then resume and prove the server-to-KB path recovers.
 kill -STOP "$KB_PID"
 kb_stopped=1
-run_turn ti-live-kb-down TI_SEARCH_KB_DOWN "$workspace" "$RUN_ROOT/kb-down-turn.out" 90
+run_turn ti-live-kb-down TI_SEARCH_KB_DOWN "$workspace" "$RUN_ROOT/kb-down-turn.out" 150
 python3 - "$provider_log" <<'PY' || fail "KB transport failure was not typed or offered an external continuation"
 import json
 import sys
