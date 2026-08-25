@@ -37,6 +37,8 @@ int kb_handle_memory_delete(int fd, cJSON *req);
 int kb_handle_memory_touch(int fd, cJSON *req);
 int kb_handle_memory_update(int fd, cJSON *req);
 int kb_handle_memory_reject(int fd, cJSON *req);
+int kb_handle_memory_restore(int fd, cJSON *req);
+int kb_handle_memory_review_list(int fd, cJSON *req);
 int kb_handle_memory_stats(int fd, cJSON *req);
 int kb_handle_memory_list_conflicts(int fd, cJSON *req);
 int kb_handle_memory_query_health(int fd, cJSON *req);

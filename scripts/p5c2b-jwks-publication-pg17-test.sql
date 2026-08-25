@@ -174,7 +174,7 @@ BEGIN
   RAISE EXCEPTION 'injected P5-C2b use audit failure'; END IF;
  RETURN NEW;
 END $$;
-CREATE TRIGGER p5c2b_fail_use_audit BEFORE INSERT ON kb_audit_event
+CREATE TRIGGER p5c2b_fail_use_audit BEFORE INSERT ON kb_audit_outbox
  FOR EACH ROW EXECUTE FUNCTION pg_temp.p5c2b_fail_use_audit();
 DO $$ DECLARE f p5c2b_fixture%ROWTYPE; m TEXT; BEGIN
  SELECT * INTO STRICT f FROM p5c2b_fixture;
@@ -189,7 +189,7 @@ DO $$ DECLARE f p5c2b_fixture%ROWTYPE; m TEXT; BEGIN
  IF EXISTS(SELECT 1 FROM kb_management_jwks_manifest_key_use_intent) THEN
   RAISE EXCEPTION 'failed use audit left intent'; END IF;
 END $$;
-DROP TRIGGER p5c2b_fail_use_audit ON kb_audit_event;
+DROP TRIGGER p5c2b_fail_use_audit ON kb_audit_outbox;
 
 CREATE FUNCTION pg_temp.p5c2b_fail_publish_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -197,7 +197,7 @@ BEGIN
   RAISE EXCEPTION 'injected P5-C2b publish audit failure'; END IF;
  RETURN NEW;
 END $$;
-CREATE TRIGGER p5c2b_fail_publish_audit BEFORE INSERT ON kb_audit_event
+CREATE TRIGGER p5c2b_fail_publish_audit BEFORE INSERT ON kb_audit_outbox
  FOR EACH ROW EXECUTE FUNCTION pg_temp.p5c2b_fail_publish_audit();
 
 SET LOCAL ROLE aimee_kb_jwks_publish;
@@ -262,7 +262,7 @@ DO $$ DECLARE f p5c2b_fixture%ROWTYPE; m TEXT; n BOOLEAN; ep BIGINT;
   RAISE EXCEPTION 'failed publication audit leaked final row'; END IF;
 END $$;
 RESET ROLE;
-DROP TRIGGER p5c2b_fail_publish_audit ON kb_audit_event;
+DROP TRIGGER p5c2b_fail_publish_audit ON kb_audit_outbox;
 SET LOCAL ROLE aimee_kb_jwks_publish;
 DO $$ DECLARE f p5c2b_fixture%ROWTYPE; BEGIN
  SELECT * INTO STRICT f FROM p5c2b_fixture;
@@ -291,8 +291,8 @@ DO $$ BEGIN
     (SELECT count(*) FROM kb_management_jwks_publication_generation)<>1 OR
     (SELECT count(*) FROM kb_management_jwks_publication_registry)<>1 OR
     (SELECT count(*) FROM kb_management_jwks_manifest_key_use_intent)<>2 OR
-    (SELECT count(*) FROM kb_audit_event WHERE action='vault.key_use' AND actor_principal='management-jwks-publisher')<>2 OR
-    (SELECT count(*) FROM kb_audit_event WHERE action='management.jwks.publish')<>1 THEN
+    (SELECT count(*) FROM kb_audit_outbox WHERE action='vault.key_use' AND actor_principal='management-jwks-publisher')<>2 OR
+    (SELECT count(*) FROM kb_audit_outbox WHERE action='management.jwks.publish')<>1 THEN
   RAISE EXCEPTION 'P5-C2b final/WORM cardinality mismatch'; END IF;
  BEGIN UPDATE kb_management_jwks_publication_candidate SET envelope_bytes='x' WHERE generation=1;
   RAISE EXCEPTION 'candidate mutation accepted'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;

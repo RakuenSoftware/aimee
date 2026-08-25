@@ -10,6 +10,7 @@
 #include "kb_curator_provider.h"
 #include "json_fluent.h"
 #include "modules/db2/c/canonical_index.h"
+#include "modules/db2/c/kb_audit_worm.h"
 #include "modules/db2/c/kb_maintenance.h"
 #include "modules/db2/c/kb_payload.h"
 #include "modules/db2/c/kb_service_backend.h"
@@ -40,6 +41,8 @@ int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
 extern kb_service_ctx_t *g_kb_ctx;
+
+#define KB_WORM_MAX_PENDING_AGE_SECONDS 60
 
 /* Append the typed-fact backlog warning to `warnings`, if it applies.
  *
@@ -508,6 +511,37 @@ static cJSON *kb_service_health_object(void)
       cJSON_AddItemToArray(blockers, cJSON_CreateString("vector table missing: the KB chunk vector "
                                                         "table is absent, so search returns "
                                                         "nothing"));
+   }
+   /* Audit is an independent service, so liveness has to be visible from the
+    * process producing intents. A recent non-empty queue is normal; an intent
+    * older than one minute means the observer has stopped keeping up and is a
+    * blocker, even though application writes remain durable in the outbox. */
+   long long worm_pending = 0, worm_oldest_age = 0;
+   int worm_status = db2_ok ? db2_kb_audit_pending(&worm_pending, &worm_oldest_age) : -1;
+   cJSON *worm = cJSON_AddObjectToObject(resp, "worm_audit");
+   if (worm)
+   {
+      cJSON_AddBoolToObject(worm, "reachable", worm_status == 0);
+      cJSON_AddNumberToObject(worm, "pending", (double)worm_pending);
+      cJSON_AddNumberToObject(worm, "oldest_age_seconds", (double)worm_oldest_age);
+   }
+   if (db2_ok && worm_status != 0)
+   {
+      cJSON_AddItemToArray(warnings,
+                           cJSON_CreateString("WORM audit backlog status is unavailable"));
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("WORM audit observer status unavailable: apply the "
+                                              "audit outbox migration and grants"));
+   }
+   else if (worm_pending > 0 && worm_oldest_age > KB_WORM_MAX_PENDING_AGE_SECONDS)
+   {
+      char msg[320];
+      snprintf(msg, sizeof(msg),
+               "WORM audit observer stalled: %lld intent(s) pending, oldest %lld seconds; "
+               "restore the separately credentialed aimee-kb-worm service",
+               worm_pending, worm_oldest_age);
+      cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
+      cJSON_AddItemToArray(blockers, cJSON_CreateString(msg));
    }
    /* An unconfigured embedder is the single most common way this install reaches
     * "accepted, reports healthy, cannot work": deploy succeeds, the container goes

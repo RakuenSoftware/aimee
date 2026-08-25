@@ -1260,6 +1260,8 @@ static const struct
     {"memory.touch", kb_handle_memory_touch},
     {"memory.update", kb_handle_memory_update},
     {"memory.reject", kb_handle_memory_reject},
+    {"memory.restore", kb_handle_memory_restore},
+    {"memory.review_list", kb_handle_memory_review_list},
     {"memory.stats", kb_handle_memory_stats},
     {"memory.list_conflicts", kb_handle_memory_list_conflicts},
     {"memory.query_health", kb_handle_memory_query_health},

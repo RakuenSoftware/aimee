@@ -608,18 +608,21 @@ from the process that wrote it. See
 
 That verification is now committed rather than living in scratch, as
 [`tests/e2e/learning-loops-pg-e2e.sh`](../../../tests/e2e/learning-loops-pg-e2e.sh)
-— 28 assertions covering the S0 gate closing on a self-referential ledger and
-reopening, a closed gate admitting nothing and writing nothing, the S4 probe
-leaving an uncovered gap open rather than closing it by assertion, S5
-supersession and the operator verdict, and S6 answering with a declared arm —
+— 46 assertions covering the S0 gate, S1 admission, S2 paired-grid attribution,
+S3 dead-end recall, the two-way S4 evidence probe, S5 supersession and operator
+regret, and S6 selecting a rewarded non-default arm —
 alongside
 [`tests/e2e/module-liveness-pg-e2e.sh`](../../../tests/e2e/module-liveness-pg-e2e.sh),
 which proves every granted module attaches and no provider is silently null. The
 shape of the classifier defect is gated in `make lint` by
-`scripts/check_provider_registration.py`.
+`scripts/check_provider_registration.py`. The one-command reproduction is
+`AIMEE_TEST_PG_URL=postgresql:///postgres make -C src learning-loop-evidence`;
+see the
+[2026-08-25 validation report](../../validation/learning-loop-evidence-2026-08-25.md).
 
-**What this run does not prove.** The S4 pass resolved nothing, because the
-seeded gaps are genuinely uncovered — that proves the probe runs and reports
-honestly, not that it closes a gap when evidence exists. The S6 arm came back
-as the default; the sampler answering is what was inert before, and selection
-under reward pressure remains covered by unit tests only.
+**What this run does not prove.** The live S2 row proves that paired results
+reach attribution, but its established `no_rescue` outcomes are seeded. It does
+not establish that the new loops improve outcomes. Honest `no_evalgrow`,
+`no_deadend`, and `no_supersede` counterfactuals need a multi-phase benchmark:
+the loops run outside the current agent runner, so merely adding those names to
+its ablation vocabulary would not disable the capabilities being measured.

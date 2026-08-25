@@ -33,7 +33,7 @@ int db2_memory_briefing_list_key_facts(db2_memory_briefing_fact_t *out, int max)
        "  FROM memories m"
        " WHERE m.tier IN ('L2','L3','L4','L5')"
        "   AND m.kind != 'scratch'"
-       "   AND (m.sensitivity IS NULL OR m.sensitivity != 'secret')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "   AND (m.sensitivity IS NULL OR m.sensitivity != 'secret')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id")
        /* Final tiebreak by id keeps ordering stable across runs on the same
         * fixture even if two rows end up with identical scores. */
@@ -88,7 +88,7 @@ int db2_memory_briefing_list_recent_activity(db2_memory_briefing_activity_t *out
                           "BY " DB2_MEMORY_SCOPE_RANK_SQL(
                               "e.memory_id") " DESC, e.created_at DESC) AS rn"
                                              " FROM memory_episodes e WHERE e.source_session <> "
-                                             "''" DB2_MEMORY_SCOPE_FILTER_SQL(
+                                             "''" DB2_MEMORY_RECALL_FILTER_SQL(
                                                  "e.memory_id") ")"
                                                                 " SELECT source_session, "
                                                                 "episode_text, "
@@ -136,7 +136,7 @@ int db2_memory_briefing_list_active_entities(db2_memory_briefing_entity_t *out, 
        "  JOIN memories m ON m.id = me.memory_id"
        " WHERE me.entity <> ''"
        "   AND (m.last_used_at IS NULL"
-       "        OR m.last_used_at >= pg_now_text('-30 days'))" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "        OR m.last_used_at >= pg_now_text('-30 days'))" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " GROUP BY me.entity"
                    " ORDER BY MAX(" DB2_MEMORY_SCOPE_RANK_SQL(
                        "m.id") ") DESC, mentions DESC, last_seen DESC, me.entity ASC"

@@ -970,6 +970,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
     ${AIMEE_SRC_DIR}/server/server_state.c
+    ${AIMEE_SRC_DIR}/server/server_memory_review.c
     ${AIMEE_SRC_DIR}/server/server_audit_replay_routes.c
     ${AIMEE_SRC_DIR}/server/vault_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/sandbox_audit_bridge.c

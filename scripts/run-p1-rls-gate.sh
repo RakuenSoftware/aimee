@@ -51,6 +51,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/db2/c/schema_grants.sql"
 echo "== P1 RLS gate: running isolation assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p1_rls_isolation_test.sql"
 
+echo "== Memory row-scope, tombstone, and WORM assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/memory-governance-pg-test.sql"
+
 echo "== Per-user write-tier grant isolation assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/per-user-write-tier-rls-test.sql"
 

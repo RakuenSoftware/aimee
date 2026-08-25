@@ -254,7 +254,9 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
          {
             const char *slash = strrchr(config_workspaces(i), '/');
             const char *ws_name = slash ? slash + 1 : config_workspaces(i);
-            memory_tag_workspace(memory_id, ws_name);
+            /* Automatic discovery is a retrieval hint, never an ownership
+             * decision.  Only an explicit tag API may change row scope. */
+            db2_memory_workspace_tag_insert(memory_id, ws_name);
             break;
          }
       }
@@ -279,7 +281,7 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
        * cross-cutting infrastructure. */
       if (memory_keyword_present(lower_buf, shared_keywords[i]))
       {
-         memory_tag_workspace(memory_id, SHARED_WORKSPACE);
+         db2_memory_workspace_tag_insert(memory_id, SHARED_WORKSPACE);
          return 0;
       }
    }

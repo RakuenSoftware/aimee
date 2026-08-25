@@ -187,6 +187,11 @@ read_kb_env() {
     for p in /proc/[0-9]*; do
       [ -r "$p/comm" ] || continue
       if [ "$(cat "$p/comm" 2>/dev/null)" = "aimee-kb" ]; then
+        # The live HTTP daemon is the process started with --http-port. A
+        # short-lived KB helper can remain as a zombie with the same comm and
+        # an empty cmdline; /proc iteration can encounter that PID first.
+        cmdline=$(tr "\0" " " < "$p/cmdline" 2>/dev/null || true)
+        case " $cmdline " in *" --http-port=8741 "*) ;; *) continue ;; esac
         tr "\0" "\n" < "$p/environ" 2>/dev/null | sed -n "s/^'"$1"'=//p" | head -1
         return 0
       fi
@@ -203,6 +208,8 @@ if [[ -z "$emb_url" ]]; then
     for p in /proc/[0-9]*; do
       [ -r "$p/comm" ] || continue
       if [ "$(cat "$p/comm" 2>/dev/null)" = "aimee-kb" ]; then
+        cmdline=$(tr "\0" " " < "$p/cmdline" 2>/dev/null || true)
+        case " $cmdline " in *" --http-port=8741 "*) ;; *) continue ;; esac
         tr "\0" "\n" < "$p/environ" 2>/dev/null | grep -E "EMBEDDER|EMBEDDING" || echo "          (none)"
         return 0
       fi

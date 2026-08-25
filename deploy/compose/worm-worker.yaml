@@ -1,0 +1,17 @@
+# Hardened DB2 audit worker overlay. The DB2 server must be externally reachable;
+# the self-contained aimee-kb profile intentionally keeps its embedded PostgreSQL
+# socket inside the KB container and is not a hardened privilege-separated tier.
+services:
+  aimee-worm:
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    entrypoint: ["/usr/local/bin/aimee-kb-worm"]
+    command: ["--batch=128", "--poll-ms=1000"]
+    restart: unless-stopped
+    environment:
+      AIMEE_WORM_DB2_URL: ${AIMEE_WORM_DB2_URL:?dedicated WORM worker DSN required}
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=8m,mode=1777

@@ -14,6 +14,8 @@
 #include "modules/db2/c/kb_service_backend.h" /* async queue status */
 #include "modules/db2/c/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
 #include "modules/db2/c/fact_mutation.h"      /* assertion review/rollback/removal */
+#include "modules/db2/c/memory_query.h"       /* human memory review/restore */
+#include "modules/db2/c/memory_scope_query.h" /* operator all-scope review */
 #include "modules/db2/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
 #include "modules/db2/c/entity_registry.h"    /* entity merge/unmerge review */
 #include "rel_types.h"                        /* REL_TYPE_NAME_MAX */
@@ -25,6 +27,7 @@
 #include <string.h>
 
 extern kb_service_ctx_t *g_kb_ctx;
+static int console_send(cJSON *resp, int status, const char *fallback, char *out_buf, int out_cap);
 
 /* Compare path to route, tolerating a single trailing slash (matching the route
  * ACL's normalization so the ACL and the handler agree on which path is which). */
@@ -285,6 +288,92 @@ static int console_typed_facts(char *out_buf, int out_cap)
    }
    snprintf(out_buf, (size_t)out_cap, "%s", s);
    free(s);
+   return 200;
+}
+
+/* Memory rows are reviewable independently of recall.  This history surface is
+ * deliberately operator-all-scope; the surrounding console route has already
+ * authenticated a console administrator, and ordinary user recall remains
+ * constrained by row RLS and the canonical scope filter. */
+static int console_memories(char *out_buf, int out_cap)
+{
+   db2_memory_review_row_t rows[32];
+   db2_memory_scope_context_set("", "", 1);
+   int n = db2_memory_review_list("", 32, rows, 32);
+   db2_memory_scope_context_clear();
+   if (n < 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review unavailable\"}");
+      return 500;
+   }
+   cJSON *root = cJSON_CreateObject();
+   cJSON *items = root ? cJSON_AddArrayToObject(root, "memories") : NULL;
+   if (!root || !items)
+   {
+      cJSON_Delete(root);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review alloc failed\"}");
+      return 500;
+   }
+   cJSON_AddStringToObject(root, "schema", "console.memories.v1");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddNumberToObject(o, "id", (double)rows[i].id);
+      cJSON_AddStringToObject(o, "tier", rows[i].tier);
+      cJSON_AddStringToObject(o, "kind", rows[i].kind);
+      cJSON_AddStringToObject(o, "key", rows[i].key);
+      cJSON_AddStringToObject(o, "content", rows[i].content);
+      cJSON_AddNumberToObject(o, "confidence", rows[i].confidence);
+      cJSON_AddStringToObject(o, "lifecycle", rows[i].lifecycle_state);
+      cJSON_AddStringToObject(o, "review_reason", rows[i].review_reason);
+      cJSON_AddStringToObject(o, "scope_type", rows[i].scope_type);
+      cJSON_AddStringToObject(o, "scope_value", rows[i].scope_value);
+      cJSON_AddStringToObject(o, "created_at", rows[i].created_at);
+      cJSON_AddStringToObject(o, "updated_at", rows[i].updated_at);
+      cJSON_AddItemToArray(items, o);
+   }
+   cJSON_AddNumberToObject(root, "count", n);
+   return console_send(root, 200, "{\"schema\":\"console.memories.v1\",\"memories\":[]}", out_buf,
+                       out_cap);
+}
+
+static int console_memory_review(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const char *action =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
+   const char *reason =
+       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "reason")) : NULL;
+   cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "memory_id") : NULL;
+   int64_t id = cJSON_IsNumber(idj) && idj->valuedouble > 0 ? (int64_t)idj->valuedouble : 0;
+   if (!id || !action || (strcmp(action, "reject") != 0 && strcmp(action, "restore") != 0))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"positive memory_id and reject/restore action required\"}");
+      return 400;
+   }
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   char action_copy[16];
+   snprintf(action_copy, sizeof(action_copy), "%s", action);
+   db2_memory_scope_context_set("", "", 1);
+   int rc = strcmp(action, "reject") == 0 ? db2_memory_reject(id, reason)
+                                          : db2_memory_restore(id, actor.principal);
+   db2_memory_scope_context_clear();
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review transition failed\"}");
+      return 409;
+   }
+   snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"memory_id\":%lld,\"action\":\"%s\"}",
+            (long long)id, action_copy);
    return 200;
 }
 
@@ -1304,6 +1393,12 @@ int kb_http_console_route(const char *method, const char *path, const char *body
    if (route_is(path, "/v1/console/typed_facts"))
       return strcmp(method, "GET") == 0 ? console_typed_facts(out_buf, out_cap)
                                         : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/memories"))
+      return strcmp(method, "GET") == 0 ? console_memories(out_buf, out_cap)
+                                        : console_method_not_allowed(out_buf, out_cap);
+   if (route_is(path, "/v1/console/memories/review"))
+      return strcmp(method, "POST") == 0 ? console_memory_review(body, out_buf, out_cap)
+                                         : console_method_not_allowed(out_buf, out_cap);
    if (route_is(path, "/v1/console/typed_facts/config"))
       return strcmp(method, "POST") == 0 ? console_typed_facts_config(body, out_buf, out_cap)
                                          : console_method_not_allowed(out_buf, out_cap);

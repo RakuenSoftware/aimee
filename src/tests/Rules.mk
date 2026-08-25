@@ -1424,6 +1424,7 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/db2/entity_registry.o \
                                        $(OBJDIR)/db2/ontology_evolution.o \
                                        $(OBJDIR)/db2/memory_query.o \
+                                       $(OBJDIR)/db2/memory_scope_query.o \
                                        $(OBJDIR)/db2/memory_row_mapper_pg.o \
                                        $(OBJDIR)/modules/memory/memory_extract_patterns.o \
                                        $(OBJDIR)/modules/memory/memory_fact_gate.o \

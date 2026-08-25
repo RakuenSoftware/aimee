@@ -1,4 +1,5 @@
 /* Link-only stubs for routes outside test_kb_http_routes.c's focused surface. */
+#include "aimee.h"
 #include "kb_http_budget.h"
 #include "kb_http_insights.h"
 #include "kb_http_models.h"
@@ -9,6 +10,8 @@
 #include "modules/db2/c/evidence_lifecycle.h"
 #include "modules/db2/c/entity_registry.h"
 #include "modules/db2/c/management_identity_journal.h"
+#include "memory.h"
+#include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/write_tier_grant.h"
 #include "kb_oidc_token_exchange.h"
 #include "vault_service.h"
@@ -22,6 +25,40 @@ static int g_enrollment_authority = 1;
 void test_kb_enrollment_authority_set(int status)
 {
    g_enrollment_authority = status;
+}
+
+void db2_memory_scope_context_set(const char *workspace, const char *project, int allow_all)
+{
+   (void)workspace;
+   (void)project;
+   (void)allow_all;
+}
+
+void db2_memory_scope_context_clear(void)
+{
+}
+
+int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t *out, int max)
+{
+   (void)state;
+   (void)limit;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int db2_memory_reject(int64_t id, const char *reason)
+{
+   (void)id;
+   (void)reason;
+   return 0;
+}
+
+int db2_memory_restore(int64_t id, const char *actor)
+{
+   (void)id;
+   (void)actor;
+   return 0;
 }
 
 int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)

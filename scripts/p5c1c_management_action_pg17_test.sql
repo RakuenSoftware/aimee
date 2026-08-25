@@ -81,7 +81,7 @@ SELECT public.set_tenant_context('oidc:https%3A%25issuer:lead',9751);
 DO $$
 DECLARE r RECORD; a0 BIGINT;
 BEGIN
-  SELECT count(*) INTO a0 FROM public.kb_audit_event;
+  SELECT count(*) INTO a0 FROM public.kb_audit_outbox;
   SELECT * INTO r FROM public.kb_management_action_intent_start(
     repeat('c',64),repeat('d',64),9751,'srv-p5c1c','remote_writes',repeat('e',64),
     'https://kb.p5c1c.test','kid-1',90,repeat('3',32));
@@ -92,13 +92,13 @@ BEGIN
      r.target_mgmt_fingerprint<>repeat('2',64) THEN
     RAISE EXCEPTION 'intent snapshot mismatch';
   END IF;
-  IF (SELECT count(*) FROM public.kb_audit_event)<>a0+1 THEN
+  IF (SELECT count(*) FROM public.kb_audit_outbox)<>a0+1 THEN
     RAISE EXCEPTION 'intent WORM append mismatch';
   END IF;
   SELECT * INTO r FROM public.kb_management_action_intent_start(
     repeat('c',64),repeat('d',64),9751,'srv-p5c1c','remote_writes',repeat('e',64),
     'https://kb.p5c1c.test','kid-1',90,repeat('3',32));
-  IF NOT r.replayed OR (SELECT count(*) FROM public.kb_audit_event)<>a0+1 THEN
+  IF NOT r.replayed OR (SELECT count(*) FROM public.kb_audit_outbox)<>a0+1 THEN
     RAISE EXCEPTION 'exact intent replay did not converge';
   END IF;
   BEGIN
@@ -124,13 +124,13 @@ END $$;
 DO $$
 DECLARE r RECORD; a0 BIGINT;
 BEGIN
-  SELECT count(*) INTO a0 FROM public.kb_audit_event;
+  SELECT count(*) INTO a0 FROM public.kb_audit_outbox;
   SELECT * INTO r FROM public.kb_management_action_outcome_append(
     repeat('c',64),'succeeded','remote_success',200,repeat('f',64));
   IF r.replayed OR r.result<>'succeeded' THEN RAISE EXCEPTION 'outcome mismatch'; END IF;
   SELECT * INTO r FROM public.kb_management_action_outcome_append(
     repeat('c',64),'succeeded','remote_success',200,repeat('f',64));
-  IF NOT r.replayed OR (SELECT count(*) FROM public.kb_audit_event)<>a0+1 THEN
+  IF NOT r.replayed OR (SELECT count(*) FROM public.kb_audit_outbox)<>a0+1 THEN
     RAISE EXCEPTION 'exact outcome replay did not converge';
   END IF;
   BEGIN
@@ -145,25 +145,25 @@ RESET ROLE;
 SET LOCAL ROLE aimee_kb_runtime;
 SELECT public.set_tenant_context('oidc:https%3A%25issuer:member',9751);
 DO $$ DECLARE a0 BIGINT; BEGIN
-  SELECT count(*) INTO a0 FROM public.kb_audit_event;
+  SELECT count(*) INTO a0 FROM public.kb_audit_outbox;
   BEGIN
     PERFORM * FROM public.kb_management_action_intent_start(
       repeat('a',64),repeat('b',64),9751,'srv-p5c1c','remote_writes',repeat('c',64),
       'https://kb.p5c1c.test','kid-1',30,repeat('3',32));
     RAISE EXCEPTION 'ordinary member admitted';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
-  IF (SELECT count(*) FROM public.kb_audit_event)<>a0 THEN RAISE EXCEPTION 'member denial audited'; END IF;
+  IF (SELECT count(*) FROM public.kb_audit_outbox)<>a0 THEN RAISE EXCEPTION 'member denial audited'; END IF;
 END $$;
 SELECT public.set_tenant_context('oidc:https%3A%25issuer:other',9752);
 DO $$ DECLARE a0 BIGINT; BEGIN
-  SELECT count(*) INTO a0 FROM public.kb_audit_event;
+  SELECT count(*) INTO a0 FROM public.kb_audit_outbox;
   BEGIN
     PERFORM * FROM public.kb_management_action_intent_start(
       repeat('a',64),repeat('b',64),9752,'srv-p5c1c','remote_writes',repeat('c',64),
       'https://kb.p5c1c.test','kid-1',30,repeat('3',32));
     RAISE EXCEPTION 'cross-team target admitted';
   EXCEPTION WHEN invalid_authorization_specification THEN NULL; END;
-  IF (SELECT count(*) FROM public.kb_audit_event)<>a0 THEN RAISE EXCEPTION 'cross-team denial audited'; END IF;
+  IF (SELECT count(*) FROM public.kb_audit_outbox)<>a0 THEN RAISE EXCEPTION 'cross-team denial audited'; END IF;
 END $$;
 RESET ROLE;
 
@@ -173,13 +173,13 @@ UPDATE public.kb_server_registry SET status='pending' WHERE server_id='srv-p5c1c
 SET LOCAL ROLE aimee_kb_runtime;
 SELECT public.set_tenant_context('oidc:https%3A%25issuer:lead',9751);
 DO $$ DECLARE a0 BIGINT; BEGIN
-  SELECT count(*) INTO a0 FROM public.kb_audit_event;
+  SELECT count(*) INTO a0 FROM public.kb_audit_outbox;
   BEGIN PERFORM * FROM public.kb_management_action_intent_start(
     repeat('1',64),repeat('2',64),9751,'srv-p5c1c','remote_writes',repeat('3',64),
     'https://kb.p5c1c.test','kid-1',30,repeat('3',32));
     RAISE EXCEPTION 'inactive target admitted';
   EXCEPTION WHEN invalid_authorization_specification THEN NULL; END;
-  IF (SELECT count(*) FROM public.kb_audit_event)<>a0 THEN RAISE EXCEPTION 'inactive denial audited'; END IF;
+  IF (SELECT count(*) FROM public.kb_audit_outbox)<>a0 THEN RAISE EXCEPTION 'inactive denial audited'; END IF;
 END $$;
 RESET ROLE;
 UPDATE public.kb_server_registry SET status='active' WHERE server_id='srv-p5c1c';
@@ -194,13 +194,13 @@ UPDATE public.kb_server_registry SET mgmt_issuer='/CN=p5c1c-revoked-ca',mgmt_ser
 SET LOCAL ROLE aimee_kb_runtime;
 SELECT public.set_tenant_context('oidc:https%3A%25issuer:lead',9751);
 DO $$ DECLARE a0 BIGINT; BEGIN
-  SELECT count(*) INTO a0 FROM public.kb_audit_event;
+  SELECT count(*) INTO a0 FROM public.kb_audit_outbox;
   BEGIN PERFORM * FROM public.kb_management_action_intent_start(
     repeat('2',64),repeat('3',64),9751,'srv-p5c1c','remote_writes',repeat('4',64),
     'https://kb.p5c1c.test','kid-1',30,repeat('3',32));
     RAISE EXCEPTION 'revoked target certificate admitted';
   EXCEPTION WHEN invalid_authorization_specification THEN NULL; END;
-  IF (SELECT count(*) FROM public.kb_audit_event)<>a0 THEN RAISE EXCEPTION 'revoked denial audited'; END IF;
+  IF (SELECT count(*) FROM public.kb_audit_outbox)<>a0 THEN RAISE EXCEPTION 'revoked denial audited'; END IF;
 END $$;
 RESET ROLE;
 UPDATE public.kb_server_registry SET mgmt_issuer='/CN=p5c1c-target-ca',mgmt_serial_norm='22',
@@ -211,13 +211,13 @@ UPDATE public.kb_enrollments SET expires_at=to_char(now()-interval '1 minute','Y
 SET LOCAL ROLE aimee_kb_runtime;
 SELECT public.set_tenant_context('oidc:https%3A%25issuer:lead',9751);
 DO $$ DECLARE a0 BIGINT; BEGIN
-  SELECT count(*) INTO a0 FROM public.kb_audit_event;
+  SELECT count(*) INTO a0 FROM public.kb_audit_outbox;
   BEGIN PERFORM * FROM public.kb_management_action_intent_start(
     repeat('3',64),repeat('4',64),9751,'srv-p5c1c','remote_writes',repeat('5',64),
     'https://kb.p5c1c.test','kid-1',30,repeat('3',32));
     RAISE EXCEPTION 'expired local certificate admitted';
   EXCEPTION WHEN invalid_authorization_specification THEN NULL; END;
-  IF (SELECT count(*) FROM public.kb_audit_event)<>a0 THEN RAISE EXCEPTION 'expiry denial audited'; END IF;
+  IF (SELECT count(*) FROM public.kb_audit_outbox)<>a0 THEN RAISE EXCEPTION 'expiry denial audited'; END IF;
 END $$;
 RESET ROLE;
 UPDATE public.kb_enrollments SET expires_at=to_char(now()+interval '1 hour','YYYY-MM-DD HH24:MI:SS')
@@ -228,13 +228,13 @@ UPDATE public.kb_enrollments SET expires_at=to_char(now()+interval '1 hour','YYY
 DO $$
 DECLARE d TEXT;
 BEGIN
-  SELECT detail INTO d FROM public.kb_audit_event
+  SELECT detail INTO d FROM public.kb_audit_outbox
     WHERE action='management.action.intent' AND subject=repeat('c',64);
   IF d IS NULL OR d LIKE '%endpoint%' OR d LIKE '%request_body%' OR d LIKE '%response_body%' OR
      d LIKE '%authorization%' OR d LIKE '%jwt%' THEN
     RAISE EXCEPTION 'intent audit detail allowlist violated';
   END IF;
-  IF NOT EXISTS(SELECT 1 FROM public.kb_audit_event WHERE action='management.action.outcome'
+  IF NOT EXISTS(SELECT 1 FROM public.kb_audit_outbox WHERE action='management.action.outcome'
       AND subject=repeat('c',64) AND verdict='succeeded') THEN
     RAISE EXCEPTION 'outcome audit verdict mismatch';
   END IF;
@@ -258,7 +258,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER aa_p5c1c_fail_audit BEFORE INSERT ON public.kb_audit_event
+CREATE TRIGGER aa_p5c1c_fail_audit BEFORE INSERT ON public.kb_audit_outbox
   FOR EACH ROW EXECUTE FUNCTION pg_temp.p5c1c_fail_audit();
 SET LOCAL ROLE aimee_kb_runtime;
 SELECT public.set_tenant_context('oidc:https%3A%25issuer:lead',9751);
@@ -273,12 +273,12 @@ DO $$ BEGIN
   END;
 END $$;
 RESET ROLE;
-DROP TRIGGER aa_p5c1c_fail_audit ON public.kb_audit_event;
+DROP TRIGGER aa_p5c1c_fail_audit ON public.kb_audit_outbox;
 DO $$ BEGIN
   IF EXISTS(SELECT 1 FROM public.kb_management_token_intent_namespace
        WHERE correlation_id=repeat('9',64)) OR
      EXISTS(SELECT 1 FROM public.kb_management_action_intent WHERE correlation_id=repeat('9',64)) OR
-     EXISTS(SELECT 1 FROM public.kb_audit_event WHERE action='management.action.intent'
+     EXISTS(SELECT 1 FROM public.kb_audit_outbox WHERE action='management.action.intent'
        AND subject=repeat('9',64)) THEN
     RAISE EXCEPTION 'atomic intent/WORM rollback failed';
   END IF;
@@ -326,7 +326,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER aa_p5c1c_fail_outcome_audit BEFORE INSERT ON public.kb_audit_event
+CREATE TRIGGER aa_p5c1c_fail_outcome_audit BEFORE INSERT ON public.kb_audit_outbox
   FOR EACH ROW EXECUTE FUNCTION pg_temp.p5c1c_fail_outcome_audit();
 SET LOCAL ROLE aimee_kb_runtime;
 SELECT public.set_tenant_context('oidc:https%3A%25issuer:lead',9751);
@@ -345,11 +345,11 @@ DO $$ BEGIN
   EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
 END $$;
 RESET ROLE;
-DROP TRIGGER aa_p5c1c_fail_outcome_audit ON public.kb_audit_event;
+DROP TRIGGER aa_p5c1c_fail_outcome_audit ON public.kb_audit_outbox;
 DO $$ BEGIN
   IF EXISTS(SELECT 1 FROM public.kb_management_action_outcome
       WHERE correlation_id=repeat('6',64)) OR
-     EXISTS(SELECT 1 FROM public.kb_audit_event WHERE action='management.action.outcome'
+     EXISTS(SELECT 1 FROM public.kb_audit_outbox WHERE action='management.action.outcome'
        AND subject=repeat('6',64)) THEN
     RAISE EXCEPTION 'atomic outcome/WORM rollback failed';
   END IF;

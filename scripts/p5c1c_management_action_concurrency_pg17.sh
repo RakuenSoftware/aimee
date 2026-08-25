@@ -88,7 +88,7 @@ fi
 p5c1c_start_counts=$(psql -X -At -v ON_ERROR_STOP=1 "$p5c1c_url" <<'SQL'
 SELECT (SELECT count(*) FROM public.kb_management_action_intent
           WHERE correlation_id=repeat('a',64))::TEXT||':'||
-       (SELECT count(*) FROM public.kb_audit_event
+       (SELECT count(*) FROM public.kb_audit_outbox
           WHERE action='management.action.intent' AND subject=repeat('a',64))::TEXT;
 SQL
 )
@@ -122,7 +122,7 @@ fi
 p5c1c_counts=$(psql -X -At -v ON_ERROR_STOP=1 "$p5c1c_url" <<'SQL'
 SELECT (SELECT count(*) FROM public.kb_management_action_outcome
           WHERE correlation_id=repeat('f',64))::TEXT||':'||
-       (SELECT count(*) FROM public.kb_audit_event
+       (SELECT count(*) FROM public.kb_audit_outbox
           WHERE action='management.action.outcome' AND subject=repeat('f',64))::TEXT;
 SQL
 )
