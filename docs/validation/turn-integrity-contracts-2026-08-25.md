@@ -18,10 +18,10 @@ The original working tree was not used for build or deployment.
 - Guest address: `192.168.0.8`
 - Resources visible in the guest: 8 CPU, 24 GiB RAM, 4 GiB swap, 40 GiB disk
 - Source transfer: Git bundles into `/opt/aimee`, checked out detached
-- Product and harness revision: `19d9a9f05e06c5f185b0c50e65ee1e70d0149d29`
+- Product and harness revision: `efd730555b8031978c5e0c28b3f2647684633eb0`
 - PostgreSQL: 17.11 with `vector` and `pg_trgm`
-- Acceptance database: freshly created `aimee_turn_integrity_19d9a9f_b`
-- Retained scratch tree: `/tmp/tmp.JeZaDu06EF`
+- Acceptance database: freshly created `aimee_turn_integrity_efd73055_final`
+- Retained scratch tree: `/tmp/tmp.7f8adDfIJ2`
 
 CT 9106 was created from the Debian 13 standard template for this validation.
 No existing Aimee service, database, or build artifact was used. The CT is
@@ -109,6 +109,7 @@ Before the guest acceptance run, the feature checkout completed:
 - embedder environment/dynamic-batching tests (10 passed);
 - the embedder bake/retry test;
 - proposal reconciliation, pending-audit manifest, and documentation checks;
+- the complete repository lint gate (70 checks);
 - `unit-test-embedding-dim`; and
 - focused turn-integrity, agent, IR, memory-stage, MCP dispatch, roundtable, and
   search-render unit binaries.
