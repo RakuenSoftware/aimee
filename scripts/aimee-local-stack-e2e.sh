@@ -470,6 +470,21 @@ check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: applica
                                                -d '{"query":"local e2e","scope":"all","max_results":3}' \
                                                "${SERVER_URL}/v1/kb/search"
 
+# Run corpus-sensitive contract probes before the outer harness stores its
+# round-trip and semantic facts. The probe's typed empty-retrieval assertion is
+# meaningful only while this freshly provisioned database is genuinely empty.
+if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
+  bold "==> External live-stack probe: ${AIMEE_E2E_PROBE_SCRIPT}"
+  if REPO="$REPO" RUN_ROOT="$RUN_ROOT" SCRATCH="$SCRATCH" SERVER_URL="$SERVER_URL" \
+       BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
+       KB_PID="$kb_pid" SERVER_PID="$server_pid" \
+       "$AIMEE_E2E_PROBE_SCRIPT"; then
+    green "  PASS  external live-stack probe"; PASS=$((PASS + 1))
+  else
+    red "  FAIL  external live-stack probe"; FAIL=$((FAIL + 1))
+  fi
+fi
+
 bold "==> Write→read round-trip (store a memory, read it back)"
 if SERVER_URL="$SERVER_URL" BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
    "$REPO/scripts/aimee-write-read-e2e.sh"; then
@@ -551,18 +566,6 @@ PY
       red "  FAIL  real embedder did not semantically recall the stored fact"
       FAIL=$((FAIL + 1))
     fi
-  fi
-fi
-
-if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
-  bold "==> External live-stack probe: ${AIMEE_E2E_PROBE_SCRIPT}"
-  if REPO="$REPO" RUN_ROOT="$RUN_ROOT" SCRATCH="$SCRATCH" SERVER_URL="$SERVER_URL" \
-       BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
-       KB_PID="$kb_pid" SERVER_PID="$server_pid" \
-       "$AIMEE_E2E_PROBE_SCRIPT"; then
-    green "  PASS  external live-stack probe"; PASS=$((PASS + 1))
-  else
-    red "  FAIL  external live-stack probe"; FAIL=$((FAIL + 1))
   fi
 fi
 
