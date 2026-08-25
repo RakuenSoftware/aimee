@@ -484,8 +484,12 @@ static int messages_buffered(const char *body, char *resp, int cap)
    ag = resolve_requested_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
+      /* `model` points into req. Classify it before deleting the JSON tree;
+       * optimized builds otherwise read freed storage and can misreport an
+       * explicit unknown model as a missing default agent (503 vs 404). */
+      int explicit_model = model && model[0] && strcmp(model, "aimee") != 0;
       cJSON_Delete(req);
-      if (model && model[0] && strcmp(model, "aimee") != 0)
+      if (explicit_model)
          return write_error(resp, cap, 404, "not_found_error",
                             "the requested model is not available", 0);
       return write_error(resp, cap, 503, "api_error", "no primary agent configured",

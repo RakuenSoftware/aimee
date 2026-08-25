@@ -6,7 +6,6 @@
  * Every git invocation here is shell-free (fork/execvp): session ids and repo
  * paths reach argv directly, so there is nothing to quote or inject. */
 #include "client_session_worktree.h"
-#include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
 #include "session_worktree_key.h"
 #include <errno.h>
 #include <signal.h>
@@ -675,9 +674,6 @@ static int csw_ensure_at_unlocked(const char *sid, const char *cwd, char *out, s
    if (!out || !cap)
       return -1;
    out[0] = '\0';
-
-   if (!attn_require_session_worktree())
-      return -1; /* isolation not enforced -> nothing to prepare */
 
    /* Need a stable session id to name the worktree. */
    if (!sid || !sid[0] || !cwd || !cwd[0])
