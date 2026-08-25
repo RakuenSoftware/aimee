@@ -1708,6 +1708,7 @@ $(TESTPREFIX)/unit-test-gw-stage-memory: $(OBJDIR)/tests/test_gw_stage_memory.o 
                      $(OBJDIR)/server/request_context.o $(OBJDIR)/log.o \
                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/aimee_ir_session.o \
                      $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+                     $(OBJDIR)/aimee_sha256.o \
                      $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1943,13 +1944,15 @@ $(TESTPREFIX)/unit-test-presence: $(OBJDIR)/tests/test_presence.o \
 $(TESTPREFIX)/unit-test-turn-registry: $(OBJDIR)/tests/test_turn_registry.o \
 	                               $(OBJDIR)/server/turn_registry.o \
 	                               $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+	                               $(OBJDIR)/aimee_sha256.o \
 	                               $(OBJDIR)/cJSON.o $(OBJDIR)/tests/support/log_stub.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-turn-integrity: $(OBJDIR)/tests/test_turn_integrity.o \
 	                               $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+	                               $(OBJDIR)/aimee_sha256.o \
 	                               $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-cli-launch: $(OBJDIR)/tests/test_cli_launch.o $(OBJDIR)/cli_launch.o \
                             $(OBJDIR)/cJSON.o
@@ -2707,6 +2710,7 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+                                       $(OBJDIR)/aimee_sha256.o \
                                        $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5885,6 +5889,7 @@ $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                                        $(OBJDIR)/tests/test_mcp_native_dispatch.o \
                                        $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
+                                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                                        $(OBJDIR)/db1_store_ready.o \
                                        $(OBJDIR)/modules/tools/agent_tools_completion.o \
                                        $(OBJDIR)/server/agent_tools.o \
