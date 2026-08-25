@@ -1,4 +1,5 @@
 #include "pgvec_transport.h"
+#include "pgvec_db3.h"
 #include "memory_scope_query.h"
 #include "pgvec_scope_query.h"
 
@@ -571,9 +572,15 @@ int pgvec_scroll(const char *table, int64_t offset, int64_t *ids_out, int max,
  * Search
  * ---------------------------------------------------------------------- */
 
-int pgvec_memory_search(const float *vec, int dim, const char *record_type,
-                        const char *const *kinds, int n_kinds, const char *workspace,
-                        const char *project, int limit, int64_t *ids, double *scores, int max)
+/* The pgvector implementation of a memory candidate search.
+ *
+ * Named separately from pgvec_memory_search because it is also the callback the
+ * DB3 route falls back to: the route needs a function it can call, and that
+ * function must not itself consult the route. */
+static int pgvec_memory_search_pgvector(const float *vec, int dim, const char *record_type,
+                                        const char *const *kinds, int n_kinds,
+                                        const char *workspace, const char *project, int limit,
+                                        int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !record_type || !ids || !scores || max <= 0)
       return -1;
@@ -704,6 +711,32 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
                (double)elapsed / 1000.0, record_type);
 
    return (rc == AIMEE_PG_ERR) ? -1 : n;
+}
+
+int pgvec_memory_search(const float *vec, int dim, const char *record_type,
+                        const char *const *kinds, int n_kinds, const char *workspace,
+                        const char *project, int limit, int64_t *ids, double *scores, int max)
+{
+   /* A kind filter cannot be expressed on the DB3 wire: the search request has
+    * no field for one. Routing a filtered search would return unfiltered
+    * candidates that look like a correct answer, so those stay on pgvector.
+    *
+    * An unscoped search is excluded for the same class of reason — the wire
+    * requires a scope, and inventing one would change what was asked. */
+   int routable = !(kinds && n_kinds > 0) &&
+                  ((workspace && workspace[0]) || (project && project[0]));
+   if (routable)
+   {
+      int routed = pgvec_db3_memory_candidates(vec, dim, record_type, workspace, project, limit,
+                                               ids, scores, max);
+      /* A negative answer means the route declined or produced nothing usable
+       * — including the ordinary case of no route installed at all — so the
+       * query runs here instead. Zero is a real empty result and is returned. */
+      if (routed >= 0)
+         return routed;
+   }
+   return pgvec_memory_search_pgvector(vec, dim, record_type, kinds, n_kinds, workspace, project,
+                                       limit, ids, scores, max);
 }
 
 int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,

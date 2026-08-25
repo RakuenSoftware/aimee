@@ -868,6 +868,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db2-time-support \
                 $(TESTPREFIX)/unit-test-db3-route \
+                $(TESTPREFIX)/unit-test-pgvec-db3 \
                 $(TESTPREFIX)/unit-test-bus-db3
 
 MODULE_HANDLER_TEST_OBJS = \
@@ -3275,6 +3276,17 @@ $(TESTPREFIX)/unit-test-db3-route: $(OBJDIR)/tests/test_db3_route.o \
 
 .PHONY: unit-test-db3-route
 unit-test-db3-route: $(TESTPREFIX)/unit-test-db3-route
+	$<
+
+$(OBJDIR)/tests/test_pgvec_db3.o: C_FLAGS += -Imodules/db2/include -Imodules/db2/c
+$(OBJDIR)/modules/db2/c/pgvec_db3.o: C_FLAGS += -Imodules/db2/include
+$(TESTPREFIX)/unit-test-pgvec-db3: $(OBJDIR)/tests/test_pgvec_db3.o \
+                                      $(OBJDIR)/modules/db2/c/pgvec_db3.o \
+                                      $(OBJDIR)/modules/db2/db3_route.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
+
+.PHONY: unit-test-pgvec-db3
+unit-test-pgvec-db3: $(TESTPREFIX)/unit-test-pgvec-db3
 	$<
 
 $(OBJDIR)/tests/test_bus_db3.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
