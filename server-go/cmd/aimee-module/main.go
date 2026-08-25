@@ -758,6 +758,14 @@ func run(ctx context.Context, args []string) error {
 	if len(args) != 2 {
 		return errUsage
 	}
+	// A DB3 vector provider is dispatched before the module table, because it is
+	// not a module-runtime module: it serves the DB3 wire over a plain client
+	// rather than stages through a handler, so it never reaches
+	// bus.RunModuleProcess below.
+	if instance, isProvider := strings.CutPrefix(
+		strings.TrimPrefix(filepath.Base(args[0]), "aimee-module-"), db3ProviderPrefix); isProvider {
+		return runDB3Provider(ctx, instance, args[1])
+	}
 	config, ok := moduleConfigRuntime(ctx, args[0], args[1])
 	if !ok {
 		// A recognised module that could not start sets its name before giving
