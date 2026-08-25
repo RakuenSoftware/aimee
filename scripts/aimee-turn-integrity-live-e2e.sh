@@ -234,7 +234,22 @@ eval_json="$(AIMEE_HOME="$client_home" "$REPO/aimee" --json eval results \
   turn-integrity-eval)"
 [[ "$eval_json" == *'turn integrity live fixture'* && "$eval_json" == *'"success":true'* ]] || \
   fail "stored eval row missing"
-manifest_row="$(psql "${AIMEE_STORE_URL:?}" -AtF '|' -c \
+# The live-stack harness may isolate DB1 with its application-level
+# `search_path` URL parameter. libpq does not recognize that parameter, so
+# translate it to PGOPTIONS when querying the same schema with psql.
+store_url="${AIMEE_STORE_URL:?}"
+store_search_path="$(sed -nE 's/.*[?&]search_path=([^&]*).*/\1/p' <<<"$store_url")"
+psql_store_url="$(sed -E \
+  -e 's/([?&])search_path=[^&]*(&|$)/\1/' \
+  -e 's/\?&/?/' \
+  -e 's/[?&]$//' <<<"$store_url")"
+psql_env=()
+if [[ -n "$store_search_path" ]]; then
+  [[ "$store_search_path" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || \
+    fail "invalid store search_path for psql"
+  psql_env=(env "PGOPTIONS=-c search_path=$store_search_path")
+fi
+manifest_row="$("${psql_env[@]}" psql "$psql_store_url" -AtF '|' -c \
   "select dataset_hash,target_hash,harness_version,hardware_profile,seed from eval_results where suite='turn-integrity-eval' order by id desc limit 1")"
 IFS='|' read -r dataset_hash target_hash harness_version hardware_profile eval_seed \
   <<<"$manifest_row"
