@@ -25472,6 +25472,71 @@
       "symbol": "pgvec_curator_narrative_upsert"
     },
     {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/pgvec_db3.h",
+          "line": 117
+        }
+      ],
+      "signature": "int pgvec_db3_candidates ( const char * collection , const float * vec , int dim , const char * record_type , const char * workspace , const char * project , const pgvec_db3_filter_t * filters , int filter_count , int limit , int64_t * ids , double * scores , int max )",
+      "signature_sha256": "e2742155d840d82a6d11ad216b5b5693107de34c674f7197b2051e9eccac0974",
+      "status": "internal-unconsumed",
+      "symbol": "pgvec_db3_candidates"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/pgvec_db3.h",
+          "line": 83
+        }
+      ],
+      "signature": "void pgvec_db3_route_clear ( const char * collection )",
+      "signature_sha256": "b0d86774cba4f1de440ef3aa4d43ff4714846d438b5a270e3def2a87a9dcc3cf",
+      "status": "internal-unconsumed",
+      "symbol": "pgvec_db3_route_clear"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/pgvec_db3.h",
+          "line": 66
+        }
+      ],
+      "signature": "int pgvec_db3_route_install ( const char * collection , aimee_db3_search_fn internal_search , void * internal_context , aimee_db3_candidate_authorize_fn authorize , void * authorize_context )",
+      "signature_sha256": "03700fd59a44dee357526fe58f39ed4170c27ab08bc109469a02e270670f4bcf",
+      "status": "internal-unconsumed",
+      "symbol": "pgvec_db3_route_install"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/pgvec_db3.h",
+          "line": 77
+        }
+      ],
+      "signature": "int pgvec_db3_route_select ( const char * collection , uint32_t principal , int ready , int fallback_enabled , aimee_db3_search_fn external_search , void * external_context )",
+      "signature_sha256": "f495ac5186c182ba076bab238ba167eabd90372e7d885c215ca95ec29b668ea7",
+      "status": "internal-unconsumed",
+      "symbol": "pgvec_db3_route_select"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/pgvec_db3.h",
+          "line": 86
+        }
+      ],
+      "signature": "int pgvec_db3_route_serving ( const char * collection )",
+      "signature_sha256": "3a37da52b56190286f5d267133f7641ca5a0efa1dd96a3b3c4e49d2e22fd869a",
+      "status": "internal-unconsumed",
+      "symbol": "pgvec_db3_route_serving"
+    },
+    {
       "consumers": [
         "src/tests/test_pgvec.c"
       ],
@@ -26755,14 +26820,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c6c06671f145abf9da3a5cf83733eec13eb737b7216af06877346146ab96087f",
+  "fingerprint": "a62c13aeb2e99e7f289c43cb70b71d693fe41166a330ac6f6b51fdfebc731f9b",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 709,
-    "declarations": 1460,
-    "headers": 140,
-    "internal_unconsumed": 169,
+    "declarations": 1465,
+    "headers": 141,
+    "internal_unconsumed": 174,
     "private_test_only": 288,
     "reviewed": 294
   }
