@@ -3405,16 +3405,13 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    if (!store_module_fixture_available())
       return;
 
-   /* The store is a separate process now, so this used to be different: it
-    * opened a real sqlite3 handle on ":memory:", ran db1_apply_pragmas and
-    * db1_apply_schema_sqlite over it, and let the production path write there.
-    * None of that exists any more.
-    *
-    * The ASSERTION is unchanged, because its subject never was the database:
-    * agent_trace_log must fill turn and tool_name from the right arguments.
-    * tests/support/execution_trace_stub.c records the write and returns it, so
-    * what is checked here is still the function that built the row. */
-   agent_trace_log(7, 3, "call", "content", "bash", "{}", "ok", "abc123");
+   /* The real Postgres-backed store enforces execution_trace.plan_id as a
+    * foreign key. Seed the plan this trace declares instead of relying on the
+    * old in-process stub's acceptance of a fabricated id. The assertion remains
+    * about agent_trace_log mapping turn and tool_name into the stored row. */
+   int plan_id = db1_execution_plan_create("trace-fixture", "trace contract", "[]");
+   assert(plan_id > 0);
+   agent_trace_log(plan_id, 3, "call", "content", "bash", "{}", "ok", "abc123");
 
    db1_execution_trace_recent_row_t rows[4];
    int count = db1_execution_trace_list_recent(rows, 4);
