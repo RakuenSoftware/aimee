@@ -30,6 +30,10 @@
 #   WAIT_SECONDS  health wait budget             (default 90)
 #   AIMEE_E2E_HOLD_SECONDS keep a green scratch stack alive for exploratory
 #                 probes before cleanup           (default 0)
+#   AIMEE_E2E_PROBE_SCRIPT executable invoked after the built-in checks while
+#                 every service and enrolled identity remains live. The probe
+#                 receives scratch paths, endpoints, credentials, and PIDs in
+#                 its environment.                         (optional)
 #
 # Exit code: 0 = all checks passed.
 
@@ -371,6 +375,18 @@ if [[ -n "$mm" ]]; then
 else
   green "  PASS  memory vectors accepted (no dim mismatch) — real semantic path exercised"
   PASS=$((PASS + 1))
+fi
+
+if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
+  bold "==> External live-stack probe: ${AIMEE_E2E_PROBE_SCRIPT}"
+  if REPO="$REPO" RUN_ROOT="$RUN_ROOT" SCRATCH="$SCRATCH" SERVER_URL="$SERVER_URL" \
+       BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
+       KB_PID="$kb_pid" SERVER_PID="$server_pid" \
+       "$AIMEE_E2E_PROBE_SCRIPT"; then
+    green "  PASS  external live-stack probe"; PASS=$((PASS + 1))
+  else
+    red "  FAIL  external live-stack probe"; FAIL=$((FAIL + 1))
+  fi
 fi
 
 echo
