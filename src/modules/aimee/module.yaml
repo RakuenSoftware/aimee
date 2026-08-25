@@ -93,6 +93,7 @@
     "server-go/modules/aimee/families/guardrail_state_test.go",
     "server-go/modules/aimee/families/identity_test.go",
     "server-go/modules/aimee/families/jti_replay_test.go",
+    "server-go/modules/aimee/families/module_assembly_test.go",
     "server-go/modules/aimee/families/mgmt_jwks_test.go",
     "server-go/modules/aimee/families/mgmt_nonce_test.go",
     "server-go/modules/aimee/families/migrations_test.go",
