@@ -315,6 +315,31 @@ start_server_modules() {
   done
 }
 
+recycle_kb_daemon() {
+  local stop_deadline deadline
+  if [[ -n "$kb_pid" ]]; then
+    kill "$kb_pid" 2>/dev/null || true
+    stop_deadline=$((SECONDS + 10))
+    while kill -0 "$kb_pid" 2>/dev/null && (( SECONDS < stop_deadline )); do
+      sleep 0.1
+    done
+    kill -KILL "$kb_pid" 2>/dev/null || true
+    wait "$kb_pid" 2>/dev/null || true
+    kb_pid=""
+  fi
+  stop_kb_modules
+  rm -f "$AIMEE_HOME/kb-module-bus.sock"
+  start_kb_modules
+  "$REPO/aimee-kb" --http-port=8741 >>"$AIMEE_HOME/kb.log" 2>&1 &
+  kb_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! curl -fsS --max-time 3 "${AIMEE_KB_API_URL}/v1/health" >/dev/null 2>&1; do
+    kill -0 "$kb_pid" 2>/dev/null || return 1
+    (( SECONDS < deadline )) || return 1
+    sleep 1
+  done
+}
+
 cleanup() {
   stop_modules
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
@@ -506,6 +531,20 @@ if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
     green "  PASS  external live-stack probe"; PASS=$((PASS + 1))
   else
     red "  FAIL  external live-stack probe"; FAIL=$((FAIL + 1))
+  fi
+  # A probe that deliberately interrupts the KB can request a clean lifecycle
+  # boundary before unrelated outer checks run. Resuming a stopped process is
+  # sufficient to prove transport recovery, but it can leave expensive
+  # background work queued; recycling prevents that load from leaking into the
+  # next contract.
+  if [[ "$MODE" == "full" && -e "$RUN_ROOT/probe-recycle-kb" ]]; then
+    bold "==> Recycling aimee-kb after disruptive external probe"
+    if recycle_kb_daemon; then
+      green "    aimee-kb probe isolation restored"
+    else
+      red "    aimee-kb failed to recover after disruptive external probe"
+      exit 1
+    fi
   fi
 fi
 

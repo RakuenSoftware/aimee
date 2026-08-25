@@ -290,6 +290,7 @@ ok "WORM contains bounded turn/effect/freshness lifecycles without raw arguments
 
 # Freeze the real KB process, require a bounded typed failure with no external
 # continuation, then resume and prove the server-to-KB path recovers.
+touch "$RUN_ROOT/probe-recycle-kb"
 kill -STOP "$KB_PID"
 kb_stopped=1
 run_turn ti-live-kb-down TI_SEARCH_KB_DOWN "$workspace" "$RUN_ROOT/kb-down-turn.out" 150
