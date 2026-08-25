@@ -62,6 +62,12 @@ type MemoryBackend interface {
 	EffectivenessStats(ctx context.Context, lowThreshold float64) (db2contract.EffectivenessStats, error)
 	// ListL2MemoryIDs lists L2 memory ids, bounded by max.
 	ListL2MemoryIDs(ctx context.Context, max uint32) ([]uint64, error)
+
+	// HealthCounters aggregates the rolling health window the host derives its
+	// rates from.
+	HealthCounters(ctx context.Context, promoteUseCount uint32, promoteConfidence float64) (db2contract.HealthCounters, error)
+	// StatsCounts breaks the corpus down by tier and kind.
+	StatsCounts(ctx context.Context) (db2contract.MemoryStats, error)
 }
 
 // boolReply is the wire's spelling of a boolean: the contract carries these as
@@ -267,6 +273,26 @@ func NewMemoryHandler(backend MemoryBackend) bus.ModuleHandler {
 			ids, err := backend.ListL2MemoryIDs(ctx, db2contract.L2MemoryIDsMax)
 			return finish(func() ([]byte, error) {
 				return db2contract.EncodeL2MemoryIDsReply(ids)
+			}, err)
+
+		case db2contract.OperationHealthCounters:
+			if db2contract.DecodeHealthCountersRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			counters, err := backend.HealthCounters(ctx,
+				db2contract.HealthCountersPromoteUseCount,
+				math.Float64frombits(db2contract.HealthCountersPromoteConfidenceBits))
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeHealthCountersReply(counters)
+			}, err)
+
+		case db2contract.OperationStatsCounts:
+			if db2contract.DecodeStatsCountsRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			stats, err := backend.StatsCounts(ctx)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeStatsCountsReply(stats)
 			}, err)
 		}
 

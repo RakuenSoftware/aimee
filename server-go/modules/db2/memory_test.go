@@ -31,6 +31,11 @@ type fakeMemory struct {
 	gotEffectivenessID uint64
 	gotEffectiveness   float64
 	cleared            bool
+
+	healthCounters       db2contract.HealthCounters
+	memoryStats          db2contract.MemoryStats
+	gotPromoteUseCount   uint32
+	gotPromoteConfidence float64
 }
 
 func (f *fakeMemory) Level3Count(context.Context) (uint32, error) {
@@ -95,6 +100,13 @@ func (f *fakeMemory) ListL2MemoryIDs(_ context.Context, max uint32) ([]uint64, e
 		return f.l2IDs[:max], f.err
 	}
 	return f.l2IDs, f.err
+}
+func (f *fakeMemory) HealthCounters(_ context.Context, useCount uint32, confidence float64) (db2contract.HealthCounters, error) {
+	f.gotPromoteUseCount, f.gotPromoteConfidence = useCount, confidence
+	return f.healthCounters, f.err
+}
+func (f *fakeMemory) StatsCounts(context.Context) (db2contract.MemoryStats, error) {
+	return f.memoryStats, f.err
 }
 
 func memoryInvocation() bus.ModuleInvocation {
