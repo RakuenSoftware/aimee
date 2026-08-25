@@ -487,6 +487,10 @@ static void chat_stream_worker_pooled(void *arg)
       {
          cctx->turn_entry = cancel_entry; /* owner is set inside publish, under the lock */
          request_cancel = &cancel_entry->cancel;
+         (void)ti_turn_manifest_init(&cancel_entry->integrity, delta_turn, delta_session,
+                                     delta_session);
+         (void)ti_turn_transition(&cancel_entry->integrity, TI_TURN_CONTEXTUALIZED,
+                                  "async turn admitted");
       }
       else if (turn_registry_is_shutting_down())
       {
@@ -535,6 +539,14 @@ static void chat_stream_worker_pooled(void *arg)
       presence_turn_release(lock_session, lock_turn);
    else if (sid[0])
       presence_emit_turn_done(sid, turn_id); /* turn_done reaches the ring even on cancel */
+   if (cancel_entry)
+   {
+      ti_turn_state_t final_state = turn_entry_cancelled(cancel_entry) ? TI_TURN_CANCELLED
+                                                                       : TI_TURN_COMPLETED;
+      (void)ti_turn_transition(&cancel_entry->integrity, final_state,
+                               final_state == TI_TURN_CANCELLED ? "turn cancelled"
+                                                               : "turn worker returned");
+   }
    /* Clear the cancel-registry entry after the worker reaped its child and
     * turn_done was published. cancel_entry is a LOCAL pointer into the static
     * turn registry table (NOT into cctx, which the worker already freed), so
