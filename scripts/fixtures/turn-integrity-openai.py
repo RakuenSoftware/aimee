@@ -32,7 +32,9 @@ def response_for(body):
 
     if has_tool_result:
         content = "TURN_INTEGRITY_FIXTURE_DONE"
-        if "TI_SEARCH_EMPTY" in wire:
+        if "TI_SEARCH_KB_DOWN" in wire:
+            content = "TURN_INTEGRITY_KB_FAILURE_OBSERVED"
+        elif "TI_SEARCH_EMPTY" in wire:
             content = "TURN_INTEGRITY_EMPTY_OBSERVED"
         elif "TI_GIT_PUSH" in wire:
             content = "TURN_INTEGRITY_PUSH_OBSERVED"
@@ -50,7 +52,7 @@ def response_for(body):
             "old_string": "live-contract-ok",
             "new_string": "live-contract-edited",
         }
-    elif "TI_SEARCH_EMPTY" in wire:
+    elif "TI_SEARCH_EMPTY" in wire or "TI_SEARCH_KB_DOWN" in wire:
         name = "search_memory"
         args = {"query": "turn-integrity-no-such-fact-8f67c15c"}
     elif "TI_GIT_PUSH" in wire:
