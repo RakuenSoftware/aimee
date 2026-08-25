@@ -615,6 +615,13 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.scan");
 }
+
+int handle_index_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   return server_send_error(conn, "index.verify stub", NULL);
+}
 int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.ingest");

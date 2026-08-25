@@ -2107,6 +2107,180 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
       return 503;
    }
 
+   /* Complete remote scans are phased. Staged file bodies are not query-visible;
+    * only a successful seal publishes them and reconciles absent paths. The
+    * legacy files-only shape below remains incremental for older clients. */
+   cJSON *phase_j = cJSON_GetObjectItemCaseSensitive(root, "phase");
+   const char *phase = cJSON_IsString(phase_j) ? phase_j->valuestring : "";
+   cJSON *scan_id_j = cJSON_GetObjectItemCaseSensitive(root, "scan_id");
+   const char *scan_id = cJSON_IsString(scan_id_j) ? scan_id_j->valuestring : "";
+   if (phase[0])
+   {
+      if (strcmp(phase, "verify") == 0)
+      {
+         if (!root_path || !root_path[0])
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "missing root_path");
+         }
+         int deep = code_scan_bool(root, "deep", 0);
+         canonical_index_verify_result_t verified;
+         int rc = canonical_index_verify_project(project, root_path, deep, &verified);
+         if (rc != 0)
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "index verification failed");
+         }
+         cJSON *resp = cJSON_CreateObject();
+         cJSON_AddStringToObject(resp, "status", "ok");
+         cJSON_AddStringToObject(resp, "project", project);
+         cJSON_AddStringToObject(resp, "index_state", "current");
+         cJSON_AddNumberToObject(resp, "index_revision", (double)verified.index_revision);
+         cJSON_AddStringToObject(resp, "workspace_state",
+                                 verified.unavailable
+                                     ? "unavailable"
+                                     : (verified.modified_files || verified.unindexed_files
+                                            ? "modified"
+                                            : (verified.missing_files ? "missing" : "matched")));
+         cJSON_AddStringToObject(resp, "verification", deep ? "content_hash" : "manifest");
+         cJSON_AddNumberToObject(resp, "indexed_files", verified.indexed_files);
+         cJSON_AddNumberToObject(resp, "workspace_files", verified.workspace_files);
+         cJSON_AddNumberToObject(resp, "modified_files", verified.modified_files);
+         cJSON_AddNumberToObject(resp, "missing_files", verified.missing_files);
+         cJSON_AddNumberToObject(resp, "unindexed_files", verified.unindexed_files);
+         cJSON *examples = cJSON_AddArrayToObject(resp, "examples");
+         for (int i = 0; examples && i < verified.example_count; i++)
+            cJSON_AddItemToArray(examples, cJSON_CreateString(verified.examples[i]));
+         char *json = cJSON_PrintUnformatted(resp);
+         cJSON_Delete(resp);
+         if (!json || strlen(json) >= (size_t)out_cap)
+         {
+            free(json);
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "verification result too large");
+         }
+         snprintf(out_buf, (size_t)out_cap, "%s", json);
+         free(json);
+         cJSON_Delete(root);
+         return 200;
+      }
+      if (!scan_id[0])
+      {
+         cJSON_Delete(root);
+         return code_scan_write_error(out_buf, out_cap, "missing scan_id");
+      }
+      if (strcmp(phase, "begin") == 0)
+      {
+         long long baseline = -1;
+         int rc = canonical_index_scan_begin(
+             project, root_path && root_path[0] ? root_path : "remote", scan_id, &baseline);
+         if (rc != 0)
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "scan begin failed");
+         }
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"status\":\"ok\",\"phase\":\"begin\",\"project\":\"%s\","
+                  "\"scan_id\":\"%s\",\"baseline_revision\":%lld}",
+                  project, scan_id, baseline);
+         cJSON_Delete(root);
+         return 200;
+      }
+      if (strcmp(phase, "stage") == 0)
+      {
+         if (!cJSON_IsArray(files_j))
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "stage requires files array");
+         }
+         int n = cJSON_GetArraySize(files_j);
+         canonical_index_file_input_t *inputs = calloc((size_t)(n > 0 ? n : 1), sizeof(*inputs));
+         if (!inputs)
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "out of memory");
+         }
+         for (int i = 0; i < n; i++)
+         {
+            cJSON *entry = cJSON_GetArrayItem(files_j, i);
+            cJSON *path_j = cJSON_GetObjectItemCaseSensitive(entry, "rel_path");
+            cJSON *content_j = cJSON_GetObjectItemCaseSensitive(entry, "content");
+            if (!cJSON_IsString(path_j) || !path_j->valuestring[0] || !cJSON_IsString(content_j))
+            {
+               free(inputs);
+               cJSON_Delete(root);
+               return code_scan_write_error(out_buf, out_cap, "invalid files array");
+            }
+            inputs[i].rel_path = path_j->valuestring;
+            inputs[i].content = content_j->valuestring;
+         }
+         int accepted = 0;
+         int rc = canonical_index_scan_stage(scan_id, inputs, n, &accepted);
+         free(inputs);
+         if (rc != 0)
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "scan stage failed");
+         }
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"status\":\"ok\",\"phase\":\"stage\",\"scan_id\":\"%s\","
+                  "\"accepted\":%d}",
+                  scan_id, accepted);
+         cJSON_Delete(root);
+         return 200;
+      }
+      if (strcmp(phase, "seal") == 0)
+      {
+         cJSON *expected_j = cJSON_GetObjectItemCaseSensitive(root, "expected_files");
+         if (!cJSON_IsNumber(expected_j) || expected_j->valuedouble < 0)
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "missing expected_files");
+         }
+         int expected_files = (int)expected_j->valuedouble;
+         canonical_index_seal_result_t sealed;
+         int rc = canonical_index_scan_seal(scan_id, expected_files, &sealed);
+         if (rc == -2)
+         {
+            cJSON_Delete(root);
+            snprintf(out_buf, (size_t)out_cap,
+                     "{\"error\":\"stale or incomplete scan\",\"code\":\"scan_conflict\"}");
+            return 409;
+         }
+         if (rc != 0)
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "scan seal failed");
+         }
+         kb_curator_queue_code_units_for_project(project, root_path);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"status\":\"ok\",\"phase\":\"seal\",\"skipped\":false,"
+                  "\"project\":\"%s\",\"files\":%d,\"inspected\":%d,"
+                  "\"retracted\":%d,\"index_state\":\"current\","
+                  "\"index_revision\":%lld,\"workspace_state\":\"matched\","
+                  "\"verification\":\"content_hash\"}",
+                  project, sealed.files_indexed, expected_files,
+                  sealed.files_retracted, sealed.revision);
+         cJSON_Delete(root);
+         return 200;
+      }
+      if (strcmp(phase, "abort") == 0)
+      {
+         int rc = canonical_index_scan_abort(scan_id);
+         if (rc != 0)
+         {
+            cJSON_Delete(root);
+            return code_scan_write_error(out_buf, out_cap, "scan abort failed");
+         }
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"status\":\"ok\",\"phase\":\"abort\",\"scan_id\":\"%s\"}", scan_id);
+         cJSON_Delete(root);
+         return 200;
+      }
+      cJSON_Delete(root);
+      return code_scan_write_error(out_buf, out_cap, "invalid scan phase");
+   }
+
    int files = -1;
    int inspected = 0;
    int pushed_files = cJSON_IsArray(files_j);
@@ -2203,8 +2377,10 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
 
    snprintf(out_buf, (size_t)out_cap,
             "{\"status\":\"ok\",\"skipped\":false,\"project\":\"%s\",\"files\":%d,"
-            "\"inspected\":%d,\"hook_installed\":%s}",
-            project, files, inspected, hook_installed ? "true" : "false");
+            "\"inspected\":%d,\"hook_installed\":%s,\"index_state\":\"current\","
+            "\"workspace_state\":\"%s\",\"verification\":\"%s\"}",
+            project, files, inspected, hook_installed ? "true" : "false",
+            pushed_files ? "unavailable" : "matched", pushed_files ? "none" : "content_hash");
    cJSON_Delete(root);
    return 200;
 }

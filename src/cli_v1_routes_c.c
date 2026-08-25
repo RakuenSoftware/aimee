@@ -520,6 +520,22 @@ static void print_index_scan(cJSON *resp)
       printf("==> Scan complete: %d project(s), %d file(s) re-indexed\n", projects, files);
 }
 
+static void print_index_verify(cJSON *resp)
+{
+   const char *workspace = json_str(resp, "workspace_state");
+   printf("index_state=%s revision=%lld workspace_state=%s verification=%s\n",
+          json_str(resp, "index_state"),
+          (long long)json_int(resp, "index_revision", 0),
+          workspace[0] ? workspace : "unavailable", json_str(resp, "verification"));
+   printf("modified=%d missing=%d unindexed=%d\n", json_int(resp, "modified_files", 0),
+          json_int(resp, "missing_files", 0), json_int(resp, "unindexed_files", 0));
+   cJSON *examples = cJSON_GetObjectItemCaseSensitive(resp, "examples");
+   cJSON *example;
+   cJSON_ArrayForEach(example, examples)
+      if (cJSON_IsString(example))
+         printf("  %s\n", example->valuestring);
+}
+
 static void print_index_list(cJSON *resp)
 {
    cJSON *projects = cJSON_GetObjectItemCaseSensitive(resp, "projects");
@@ -1197,6 +1213,10 @@ void pt_print_memory_stats(const char *method, cJSON *resp)
 void pt_print_index_scan(const char *method, cJSON *resp)
 {
    print_index_scan(resp);
+}
+void pt_print_index_verify(const char *method, cJSON *resp)
+{
+   print_index_verify(resp);
 }
 void pt_print_index_list(const char *method, cJSON *resp)
 {

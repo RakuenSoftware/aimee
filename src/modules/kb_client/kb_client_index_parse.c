@@ -36,6 +36,16 @@ void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan
       cJSON_AddNumberToObject(resp, "files", res->files);
       if (res->inspected > 0)
          cJSON_AddNumberToObject(resp, "inspected", res->inspected);
+      if (res->retracted > 0)
+         cJSON_AddNumberToObject(resp, "retracted", res->retracted);
+      if (res->index_revision > 0)
+         cJSON_AddNumberToObject(resp, "index_revision", (double)res->index_revision);
+      if (res->index_state[0])
+         cJSON_AddStringToObject(resp, "index_state", res->index_state);
+      if (res->workspace_state[0])
+         cJSON_AddStringToObject(resp, "workspace_state", res->workspace_state);
+      if (res->verification[0])
+         cJSON_AddStringToObject(resp, "verification", res->verification);
       cJSON_AddBoolToObject(resp, "skipped", res->skipped);
       if (res->reason[0])
          jo_add_str(resp, "reason", res->reason);
@@ -83,6 +93,11 @@ int kb_client_index_scan_apply_response(const void *resp_v, kb_client_index_scan
       const cJSON *projects = cJSON_GetObjectItemCaseSensitive(resp, "projects");
       const cJSON *files = cJSON_GetObjectItemCaseSensitive(resp, "files");
       const cJSON *inspected = cJSON_GetObjectItemCaseSensitive(resp, "inspected");
+      const cJSON *retracted = cJSON_GetObjectItemCaseSensitive(resp, "retracted");
+      const cJSON *revision = cJSON_GetObjectItemCaseSensitive(resp, "index_revision");
+      const cJSON *index_state = cJSON_GetObjectItemCaseSensitive(resp, "index_state");
+      const cJSON *workspace_state = cJSON_GetObjectItemCaseSensitive(resp, "workspace_state");
+      const cJSON *verification = cJSON_GetObjectItemCaseSensitive(resp, "verification");
       out->skipped = cJSON_IsTrue(skipped) ? 1 : 0;
       if (cJSON_IsString(reason))
          snprintf(out->reason, sizeof(out->reason), "%s", reason->valuestring);
@@ -94,6 +109,17 @@ int kb_client_index_scan_apply_response(const void *resp_v, kb_client_index_scan
          out->files = (int)files->valuedouble;
       if (cJSON_IsNumber(inspected))
          out->inspected = (int)inspected->valuedouble;
+      if (cJSON_IsNumber(retracted))
+         out->retracted = (int)retracted->valuedouble;
+      if (cJSON_IsNumber(revision))
+         out->index_revision = (long long)revision->valuedouble;
+      if (cJSON_IsString(index_state))
+         snprintf(out->index_state, sizeof(out->index_state), "%s", index_state->valuestring);
+      if (cJSON_IsString(workspace_state))
+         snprintf(out->workspace_state, sizeof(out->workspace_state), "%s",
+                  workspace_state->valuestring);
+      if (cJSON_IsString(verification))
+         snprintf(out->verification, sizeof(out->verification), "%s", verification->valuestring);
    }
    return 0;
 }
