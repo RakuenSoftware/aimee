@@ -69,32 +69,32 @@ extern "C"
     * registry omits the stage when this returns 0. Default-ON, matching pre-registry. */
    int gw_stage_memory_enabled(void);
 
-/* Turn-level recall gate, exposed for tests. Returns 1 when the turn looks
- * conversational enough that stored evidence is not worth retrieving, writing
- * a short static reason to *reason_out (NULL when retrieving). Fails open:
- * every uncertain case returns 0. Mode is controlled by
- * AIMEE_MEMORY_RECALL_GATE (off | observe | enforce); observe is the default
- * and only logs, because nothing should be gated that has not been measured
- * ungated first. */
-int gw_stage_memory_recall_gate_should_skip(const char *query, const char **reason_out);
+   /* Turn-level recall gate, exposed for tests. Returns 1 when the turn looks
+    * conversational enough that stored evidence is not worth retrieving, writing
+    * a short static reason to *reason_out (NULL when retrieving). Fails open:
+    * every uncertain case returns 0. Mode is controlled by
+    * AIMEE_MEMORY_RECALL_GATE (off | observe | enforce); observe is the default
+    * and only logs, because nothing should be gated that has not been measured
+    * ungated first. */
+   int gw_stage_memory_recall_gate_should_skip(const char *query, const char **reason_out);
 
-/* Separately measurable recall-gate directions. A downstream authenticated
- * evaluator calls record_outcome once it knows whether a turn actually needed
- * retrieval. `wrongly_skipped` is missing evidence; `wrongly_performed` is
- * unnecessary work/injection. Keeping them separate prevents a single accuracy
- * number from hiding the more damaging direction. Counters are process-lifetime
- * telemetry and never affect the gate decision. */
-typedef struct
-{
-   unsigned long long predicted_skip;
-   unsigned long long predicted_retrieve;
-   unsigned long long wrongly_skipped;
-   unsigned long long wrongly_performed;
-} gw_memory_recall_gate_metrics_t;
+   /* Separately measurable recall-gate directions. A downstream authenticated
+    * evaluator calls record_outcome once it knows whether a turn actually needed
+    * retrieval. `wrongly_skipped` is missing evidence; `wrongly_performed` is
+    * unnecessary work/injection. Keeping them separate prevents a single accuracy
+    * number from hiding the more damaging direction. Counters are process-lifetime
+    * telemetry and never affect the gate decision. */
+   typedef struct
+   {
+      unsigned long long predicted_skip;
+      unsigned long long predicted_retrieve;
+      unsigned long long wrongly_skipped;
+      unsigned long long wrongly_performed;
+   } gw_memory_recall_gate_metrics_t;
 
-void gw_stage_memory_recall_gate_record_outcome(int gate_predicted_skip,
-                                                int retrieval_was_needed);
-void gw_stage_memory_recall_gate_metrics(gw_memory_recall_gate_metrics_t *out);
+   void gw_stage_memory_recall_gate_record_outcome(int gate_predicted_skip,
+                                                   int retrieval_was_needed);
+   void gw_stage_memory_recall_gate_metrics(gw_memory_recall_gate_metrics_t *out);
 
 #ifdef __cplusplus
 }

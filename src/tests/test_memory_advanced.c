@@ -1814,8 +1814,8 @@ int main(void)
                            "s1", &m) == 0);
       int64_t pref_cooldown_id = m.id;
       assert(memory_activation_policy_set(pref_cooldown_id, 2, 1, 0, 0) == 0);
-      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:delayed", "delay sentinel", 0.98,
-                           "s1", &m) == 0);
+      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:delayed", "delay sentinel", 0.98, "s1",
+                           &m) == 0);
       int64_t pref_delayed_id = m.id;
       assert(memory_activation_policy_set(pref_delayed_id, 0, 0, 2, 0) == 0);
 
@@ -1867,8 +1867,7 @@ int main(void)
       activation.rows[0].last_turn = 1;
       activation.rows[1].memory_id = pref_control_id;
       activation.rows[1].last_turn = 1;
-      cJSON *activated =
-          memory_recall_activated("routine edit", 0, 0, &activation);
+      cJSON *activated = memory_recall_activated("routine edit", 0, 0, &activation);
       assert(activated != NULL);
       cJSON *activated_prefs = cJSON_GetObjectItemCaseSensitive(activated, "preferences");
       int saw_control = 0, saw_cooldown = 0, saw_delayed = 0;
@@ -1883,8 +1882,7 @@ int main(void)
          saw_delayed |= id == pref_delayed_id;
          const char *why =
              cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(activated_it, "why"));
-         saw_sticky_reason |=
-             id == pref_control_id && why && strcmp(why, "sticky activation") == 0;
+         saw_sticky_reason |= id == pref_control_id && why && strcmp(why, "sticky activation") == 0;
       }
       assert(saw_control);
       assert(saw_sticky_reason);

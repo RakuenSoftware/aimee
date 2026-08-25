@@ -1719,7 +1719,7 @@ struct cJSON *memory_recall(const char *task_hint, int limit_tokens, int session
  * aimee-kb cannot load DB1 itself: it is the shared DB2 process, while DB1 is
  * user-local. A NULL/unloaded snapshot preserves the pre-activation path. */
 struct cJSON *memory_recall_activated(const char *task_hint, int limit_tokens, int session_start,
-                                     const struct memory_activation *activation);
+                                      const struct memory_activation *activation);
 
 /* Topic-pivot detection between consecutive user turns.  Pure
  * function — no DB access — so callers can invoke it cheaply and

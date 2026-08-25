@@ -838,41 +838,41 @@ static int recall_fill_from_rows(const db2_memory_cand_row_t *src_rows, int src_
     * pass zero admits nothing and pass one is byte-for-byte the old order. */
    for (int pass = 0; pass < 2 && n < max_rows; pass++)
       for (int i = 0; i < src_count && n < max_rows; i++)
-   {
-      int sticky = memory_activation_is_sticky(activation, src_rows[i].id,
-                                                src_rows[i].activation_sticky_turns);
-      if ((pass == 0) != sticky)
-         continue;
-      /* Relevance is the section query above this helper. The remaining gate
-       * order is fixed: delay -> cooldown -> suppression -> inject. Fetchers
-       * supply more rows than the section cap so a held row is backfilled by
-       * the next eligible candidate rather than silently shrinking recall. */
-      if (memory_activation_is_delayed(activation, src_rows[i].activation_delay_turns) ||
-          memory_activation_in_cooldown(activation, src_rows[i].id,
-                                        src_rows[i].activation_cooldown_turns) ||
-          src_rows[i].activation_suppressed)
       {
-         if (activation_held)
-            (*activation_held)++;
-         continue;
+         int sticky = memory_activation_is_sticky(activation, src_rows[i].id,
+                                                  src_rows[i].activation_sticky_turns);
+         if ((pass == 0) != sticky)
+            continue;
+         /* Relevance is the section query above this helper. The remaining gate
+          * order is fixed: delay -> cooldown -> suppression -> inject. Fetchers
+          * supply more rows than the section cap so a held row is backfilled by
+          * the next eligible candidate rather than silently shrinking recall. */
+         if (memory_activation_is_delayed(activation, src_rows[i].activation_delay_turns) ||
+             memory_activation_in_cooldown(activation, src_rows[i].id,
+                                           src_rows[i].activation_cooldown_turns) ||
+             src_rows[i].activation_suppressed)
+         {
+            if (activation_held)
+               (*activation_held)++;
+            continue;
+         }
+         cJSON *row = cJSON_CreateObject();
+         if (!row)
+            break;
+         cJSON_AddNumberToObject(row, "memory_id", (double)src_rows[i].id);
+         /* Only rows emitted from DB2's memory table participate in activation
+          * bookkeeping.  The server later merges user-local DB1 rows into some
+          * of these same sections, where numeric IDs are from a different ID
+          * space and must never be recorded as DB2 memory activations. */
+         cJSON_AddBoolToObject(row, "activation_managed", 1);
+         cJSON_AddStringToObject(row, "tier", src_rows[i].tier);
+         cJSON_AddStringToObject(row, "kind", src_rows[i].kind);
+         cJSON_AddStringToObject(row, "key", src_rows[i].key);
+         cJSON_AddStringToObject(row, "text", src_rows[i].content);
+         cJSON_AddStringToObject(row, "why", sticky ? "sticky activation" : (why ? why : ""));
+         cJSON_AddItemToArray(arr, row);
+         n++;
       }
-      cJSON *row = cJSON_CreateObject();
-      if (!row)
-         break;
-      cJSON_AddNumberToObject(row, "memory_id", (double)src_rows[i].id);
-      /* Only rows emitted from DB2's memory table participate in activation
-       * bookkeeping.  The server later merges user-local DB1 rows into some
-       * of these same sections, where numeric IDs are from a different ID
-       * space and must never be recorded as DB2 memory activations. */
-      cJSON_AddBoolToObject(row, "activation_managed", 1);
-      cJSON_AddStringToObject(row, "tier", src_rows[i].tier);
-      cJSON_AddStringToObject(row, "kind", src_rows[i].kind);
-      cJSON_AddStringToObject(row, "key", src_rows[i].key);
-      cJSON_AddStringToObject(row, "text", src_rows[i].content);
-      cJSON_AddStringToObject(row, "why", sticky ? "sticky activation" : (why ? why : ""));
-      cJSON_AddItemToArray(arr, row);
-      n++;
-   }
    return n;
 }
 #endif
@@ -896,8 +896,8 @@ static int recall_fill_identity(cJSON *arr, int max_rows, const memory_activatio
 }
 
 /* Section 2: stable preferences. */
-static int recall_fill_preferences(cJSON *arr, int max_rows,
-                                   const memory_activation_t *activation, int *activation_held)
+static int recall_fill_preferences(cJSON *arr, int max_rows, const memory_activation_t *activation,
+                                   int *activation_held)
 {
 #if defined(AIMEE_DB2_DISABLED)
    (void)arr;
@@ -933,8 +933,7 @@ static int recall_fill_active_context(cJSON *arr, int max_rows,
 
 /* Section 4: open commitments. */
 static int recall_fill_open_commitments(cJSON *arr, int max_rows,
-                                        const memory_activation_t *activation,
-                                        int *activation_held)
+                                        const memory_activation_t *activation, int *activation_held)
 {
 #if defined(AIMEE_DB2_DISABLED)
    (void)arr;

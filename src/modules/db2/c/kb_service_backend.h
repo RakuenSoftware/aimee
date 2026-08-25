@@ -315,10 +315,11 @@ extern "C"
                                                const char *content, const char *use_cases,
                                                double confidence, const char *session_id,
                                                int authority);
-   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(
-       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
-       const char *content, const char *use_cases, double confidence, const char *session_id,
-       int authority);
+   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
+                                                         const char *epistemic_kind,
+                                                         const char *key, const char *content,
+                                                         const char *use_cases, double confidence,
+                                                         const char *session_id, int authority);
    cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
    /* `authority` is the typed-fact write authority for the §4 retraction this
     * turn may perform; the RPC handler derives it from the request's

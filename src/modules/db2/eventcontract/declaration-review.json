@@ -925,11 +925,11 @@
     },
     {
       "symbol": "db2_kb_service_memory_recall_json",
-      "signature_sha256": "698211af653dd6e1c534bac254f6a6b9dae5939d169aaec8e7aecb2d4560cd63",
+      "signature_sha256": "93b9585aadd545ebd1ae4ea61685c8b5fb39b03688356b890f8480a5e21d46e4",
       "disposition": "private-db2",
       "family": "memory",
       "db3_placement": "retained-db2",
-      "reason": "The recall cJSON envelope remains local serialization; a typed request bounds query and scope fields and returns structured recall records."
+      "reason": "The recall cJSON envelope and activation input remain local serialization; a typed request bounds query, scope, and activation fields and returns structured recall records."
     },
     {
       "symbol": "db2_kb_service_memory_reject_json",

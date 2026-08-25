@@ -16,10 +16,11 @@
 
 #include "kb_client.h"
 #include "kb_client_memory_internal.h"
+#include "db1_client/caches.h"
 #include "db1_client/user_memory.h"
+#include "db1_optional.h"
 #include "cJSON.h"
 #include "config.h"
-#include "modules/memory/memory_activation.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"
 
@@ -32,9 +33,58 @@ static __thread int s_kbc_memory_scope_all;
 static __thread char s_kbc_memory_workspace[512];
 static __thread char s_kbc_memory_project[512];
 
-static void kbc_memory_activation_add(cJSON *req, memory_activation_t *activation)
+#define KBC_MEMORY_ACTIVATION_MAX_ROWS 256
+
+typedef struct
 {
-   memory_activation_load(activation, session_id());
+   int64_t memory_id;
+   int64_t last_turn;
+} kbc_memory_activation_row_t;
+
+typedef struct
+{
+   kbc_memory_activation_row_t rows[KBC_MEMORY_ACTIVATION_MAX_ROWS];
+   int count;
+   int64_t current_turn;
+   int loaded;
+} kbc_memory_activation_t;
+
+static void kbc_memory_activation_load(kbc_memory_activation_t *activation)
+{
+   memset(activation, 0, sizeof(*activation));
+   const char *conversation_id = session_id();
+   if (!conversation_id || !conversation_id[0] || !db1_context_snapshot_activation)
+      return;
+
+   char rows[KBC_MEMORY_ACTIVATION_MAX_ROWS][DB1_CONTEXT_ACTIVATION_ROW_LEN];
+   int n = db1_context_snapshot_activation(conversation_id, rows, KBC_MEMORY_ACTIVATION_MAX_ROWS);
+   if (n < 0)
+      return;
+
+   for (int i = 0; i < n && activation->count < KBC_MEMORY_ACTIVATION_MAX_ROWS; i++)
+   {
+      char *end = NULL;
+      long long memory_id = strtoll(rows[i], &end, 10);
+      if (memory_id < 0 || !end)
+         continue;
+      long long turn = strtoll(end, NULL, 10);
+      if (turn < 0)
+         continue;
+      if (memory_id == 0)
+      {
+         activation->current_turn = (int64_t)turn;
+         continue;
+      }
+      activation->rows[activation->count].memory_id = (int64_t)memory_id;
+      activation->rows[activation->count].last_turn = (int64_t)turn;
+      activation->count++;
+   }
+   activation->loaded = activation->current_turn > 0;
+}
+
+static void kbc_memory_activation_add(cJSON *req, kbc_memory_activation_t *activation)
+{
+   kbc_memory_activation_load(activation);
    if (!req || !activation->loaded)
       return;
    cJSON *obj = cJSON_AddObjectToObject(req, "activation");
@@ -54,10 +104,10 @@ static void kbc_memory_activation_add(cJSON *req, memory_activation_t *activatio
 }
 
 static void kbc_memory_activation_record_recall(const cJSON *response,
-                                                const memory_activation_t *activation)
+                                                const kbc_memory_activation_t *activation)
 {
-   static const char *sections[] = {
-       "identity", "preferences", "active_context", "open_commitments", NULL};
+   static const char *sections[] = {"identity", "preferences", "active_context", "open_commitments",
+                                    NULL};
    const cJSON *recall = cJSON_GetObjectItemCaseSensitive(response, "recall");
    int64_t seen[64];
    int seen_n = 0;
@@ -67,8 +117,7 @@ static void kbc_memory_activation_record_recall(const cJSON *response,
       const cJSON *item = NULL;
       cJSON_ArrayForEach(item, arr)
       {
-         const cJSON *managed =
-             cJSON_GetObjectItemCaseSensitive(item, "activation_managed");
+         const cJSON *managed = cJSON_GetObjectItemCaseSensitive(item, "activation_managed");
          if (!cJSON_IsTrue(managed))
             continue;
          const cJSON *mid = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
@@ -83,7 +132,11 @@ static void kbc_memory_activation_record_recall(const cJSON *response,
             continue;
          if (seen_n < (int)(sizeof(seen) / sizeof(seen[0])))
             seen[seen_n++] = id;
-         memory_activation_record(activation, session_id(), id, 0.0);
+         const char *conversation_id = session_id();
+         if (activation->loaded && activation->current_turn > 0 && conversation_id &&
+             conversation_id[0] && db1_context_snapshot_insert_turn)
+            (void)db1_context_snapshot_insert_turn(conversation_id, id, 0.0,
+                                                   activation->current_turn);
       }
    }
 }
@@ -1169,7 +1222,7 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
 {
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
-   memory_activation_t activation;
+   kbc_memory_activation_t activation;
    kbc_memory_activation_add(req, &activation);
    if (task_hint && task_hint[0])
       cJSON_AddStringToObject(req, "task_hint", task_hint);

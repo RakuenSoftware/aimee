@@ -1085,10 +1085,9 @@ int main(void)
       /* The production activation seam must see the request's conversation id,
        * and the override must not leak into a later request on this worker. */
       server_http_set_memory_recall_handler(stub_recall_session_handler);
-      server_http_identity_capture(
-          -1, 1,
-          "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
-          "aimee-session-id: activation-route-session\r\n\r\n");
+      server_http_identity_capture(-1, 1,
+                                   "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
+                                   "aimee-session-id: activation-route-session\r\n\r\n");
       g_recall_session_id[0] = '\0';
       st = server_http_route("POST", "/v1/memory/recall", "{\"task_hint\":\"x\"}", 17, resp,
                              sizeof(resp));
@@ -1097,10 +1096,9 @@ int main(void)
       assert(session_id_override_active() == 0);
       server_http_identity_clear();
 
-      server_http_identity_capture(
-          -1, 1,
-          "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
-          "aimee-session-id: invalid/session\r\n\r\n");
+      server_http_identity_capture(-1, 1,
+                                   "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
+                                   "aimee-session-id: invalid/session\r\n\r\n");
       g_recall_session_id[0] = '\0';
       st = server_http_route("POST", "/v1/memory/recall", "{\"task_hint\":\"x\"}", 17, resp,
                              sizeof(resp));

@@ -182,12 +182,12 @@ static int activation_recall_post_handler(const char *url, const char *auth_head
    assert(strstr(body, "\"memory_id\":41") != NULL);
    assert(strstr(body, "\"last_turn\":6") != NULL);
    if (response_buf)
-      *response_buf = strdup(
-          "{\"status\":\"ok\",\"recall\":{\"identity\":[{\"memory_id\":73,"
-          "\"activation_managed\":true,\"text\":\"kept\"},{\"memory_id\":74,"
-          "\"text\":\"user-local\"}],"
-          "\"preferences\":[],\"active_context\":[],\"open_commitments\":[],"
-          "\"reminders\":[{\"memory_id\":99}],\"directives\":[{\"memory_id\":100}]}}");
+      *response_buf =
+          strdup("{\"status\":\"ok\",\"recall\":{\"identity\":[{\"memory_id\":73,"
+                 "\"activation_managed\":true,\"text\":\"kept\"},{\"memory_id\":74,"
+                 "\"text\":\"user-local\"}],"
+                 "\"preferences\":[],\"active_context\":[],\"open_commitments\":[],"
+                 "\"reminders\":[{\"memory_id\":99}],\"directives\":[{\"memory_id\":100}]}}");
    return 200;
 }
 

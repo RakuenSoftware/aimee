@@ -3,16 +3,27 @@
 #ifndef AIMEE_FACT_IDENTITY_UNICODE_H
 #define AIMEE_FACT_IDENTITY_UNICODE_H
 #include <stdint.h>
-typedef struct { uint32_t cp, offset; uint16_t len; } fi_unicode_map_t;
-typedef struct { uint32_t cp; uint8_t ccc; } fi_unicode_ccc_t;
-typedef struct { uint32_t first, second, composed; } fi_unicode_compose_t;
-#define FI_NFKD_POOL_COUNT 9112u
-#define FI_NFKD_MAP_COUNT 5857u
-#define FI_CASEFOLD_POOL_COUNT 1650u
-#define FI_CASEFOLD_MAP_COUNT 1530u
-#define FI_UNICODE_CCC_COUNT 922u
+typedef struct
+{
+   uint32_t cp, offset;
+   uint16_t len;
+} fi_unicode_map_t;
+typedef struct
+{
+   uint32_t cp;
+   uint8_t ccc;
+} fi_unicode_ccc_t;
+typedef struct
+{
+   uint32_t first, second, composed;
+} fi_unicode_compose_t;
+#define FI_NFKD_POOL_COUNT       9112u
+#define FI_NFKD_MAP_COUNT        5857u
+#define FI_CASEFOLD_POOL_COUNT   1650u
+#define FI_CASEFOLD_MAP_COUNT    1530u
+#define FI_UNICODE_CCC_COUNT     922u
 #define FI_UNICODE_COMPOSE_COUNT 1088u
-#define FI_UNICODE_SPACES_COUNT 29u
+#define FI_UNICODE_SPACES_COUNT  29u
 extern const uint32_t FI_NFKD_POOL[FI_NFKD_POOL_COUNT];
 extern const fi_unicode_map_t FI_NFKD_MAP[FI_NFKD_MAP_COUNT];
 extern const uint32_t FI_CASEFOLD_POOL[FI_CASEFOLD_POOL_COUNT];
