@@ -111,6 +111,36 @@ vectors, a typed scope/filter expression, and bounded results.
 | mutations coupled to canonical rows, project lifecycle, WORM evidence, tenant transactions | bounded top-K candidate search |
 | SQL/RLS joins and final tenant/project/classification checks | provider-native prefilters via the closed filter grammar |
 
+## Which searches can route today
+
+The apply side is complete on the DB2 end: `db3_capture_vector_row` triggers on
+all eleven vector projections enqueue every committed insert, update and delete
+into `db3_outbox` inside the writing transaction, and enqueue is a no-op while
+no provider is `backfilling` or `active`, so nothing accumulates when nothing is
+attached.
+
+The search side is narrower than the portability classification implies, and the
+reason is a gap in the wire rather than in any call site. An `Apply` names its
+collection; a `SearchRequest` does not -- it carries only `workspace`, `project`
+and `record_type`. Two consequences follow:
+
+- A provider must be told which collection it serves, because it cannot infer
+  one per request. `record_type` is not that selector: the projection catalog
+  stores it as a *label* beside the vector (`memory_embeddings` maps it as one
+  of five; `kb_embeddings` pins it to the constant `kb`), so reading it as a
+  collection searches a namespace the caller never asked for.
+- Only searches whose scope is expressible as workspace/project can route.
+  `pgvec_memory_search` is wired. The curator searches take `scope_kind` and
+  `scope_id`, which the request has no field for, so routing them would drop
+  the scope and widen the search -- they stay on pgvector until the request
+  grows a closed filter list.
+
+`pgvec_db3_memory_candidates` refuses anything it cannot express rather than
+approximating it: a search carrying kind filters, an unscoped search, and a
+scope component too long for the wire all fall back to pgvector. The failure
+mode being avoided in each case is the same -- a routed search that silently
+answers a different question than the one asked.
+
 ## Dependencies and consumers
 
 - `config` supplies the provider's endpoint and credentials, per instance.
