@@ -12,10 +12,24 @@
 #include <string.h>
 #include <time.h>
 
+/* The two provider principals come from the band reserved for DB3 vector
+ * providers, because the Go router refuses one that does not: ObserveCapabilities
+ * calls ValidateProviderRef before it will route to anybody. These were 1001 and
+ * 1002 until the band was introduced, after which the router refused both and no
+ * route ever deployed -- the grants here were still valid, so the bus let the
+ * providers attach and the failure only showed up as a route query that never
+ * came good. The band itself is db3_provider_principal_ref_band in
+ * tests/baselines/modules/canonical-inventory.yaml, pinned to db3.ProviderRefFirst
+ * by server-go/db3/principal_inventory_test.go. These two grants only have to
+ * AGREE with what the Go test attaches as; if they ever stop agreeing, the bus
+ * refuses the attach and the test says which principal it was, rather than
+ * failing later on a route that never deploys. */
 #define DB2_REF        29u
-#define PROVIDER_A_REF 1001u
-#define PROVIDER_B_REF 1002u
-#define CONTROL_REF    1003u
+#define PROVIDER_A_REF 456u
+#define PROVIDER_B_REF 457u
+/* The control principal only REQUESTS routes; it is not a provider, so it is not
+ * band-checked and deliberately sits outside the band. */
+#define CONTROL_REF 1003u
 
 static volatile sig_atomic_t stopping;
 

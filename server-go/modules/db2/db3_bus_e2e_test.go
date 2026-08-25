@@ -76,6 +76,28 @@ func routeOverBus(t *testing.T, client *bus.Client, correlation uint64,
 	return protocol.RouteReply{}
 }
 
+// The principals the two providers attach as.
+//
+// They are DERIVED from the reserved band rather than written out, because a
+// provider outside it is refused: ObserveCapabilities calls ValidateProviderRef
+// before it will route to anyone. These were once literal 1001 and 1002, which
+// were valid until the provider band was introduced and then silently were not
+// -- the router refused both, no route ever deployed, and the test failed on a
+// route query with nothing to say why. Nothing in CI runs this test, so it went
+// on failing. Deriving them means moving the band moves the test with it.
+//
+// providerBPrincipal must stay a DIFFERENT ref in the same band: the test's
+// whole point is that two providers are told apart, so collapsing them to one
+// would let a broken router pass.
+const (
+	providerAPrincipal = protocol.ProviderRefFirst
+	providerBPrincipal = protocol.ProviderRefFirst + 1
+	// The control client only requests routes; it is not a provider and so is
+	// not band-checked. It stays outside the band on purpose, to keep it out of
+	// the space a provisioned provider draws from.
+	controlPrincipal = 1003
+)
+
 func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 	harness := os.Getenv("DB3_GO_HOST")
 	if harness == "" {
@@ -112,9 +134,9 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 	}
 
 	db2Client := attachDB3Client(t, socket, 29)
-	providerAClient := attachDB3Client(t, socket, 1001)
-	providerBClient := attachDB3Client(t, socket, 1002)
-	controlClient := attachDB3Client(t, socket, 1003)
+	providerAClient := attachDB3Client(t, socket, providerAPrincipal)
+	providerBClient := attachDB3Client(t, socket, providerBPrincipal)
+	controlClient := attachDB3Client(t, socket, controlPrincipal)
 	defer controlClient.Detach()
 	defer providerBClient.Detach()
 	defer providerAClient.Detach()
@@ -184,12 +206,12 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 		route = routeOverBus(t, controlClient, attempt, protocol.RouteRequest{
 			RequestID: attempt, Action: protocol.RouteQuery,
 		})
-		if route.Result == protocol.RouteOK && route.SelectedPrincipal == 1001 {
+		if route.Result == protocol.RouteOK && route.SelectedPrincipal == providerAPrincipal {
 			break
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	if route.Result != protocol.RouteOK || route.SelectedPrincipal != 1001 {
+	if route.Result != protocol.RouteOK || route.SelectedPrincipal != providerAPrincipal {
 		t.Fatalf("automatic deployed route = %+v", route)
 	}
 
@@ -202,10 +224,10 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 	// Deployment chooses the default without fallback. Control may then pin the
 	// same provider with explicit fallback for the readiness-loss case below.
 	route = routeOverBus(t, controlClient, 101, protocol.RouteRequest{
-		RequestID: 101, Action: protocol.RouteSelect, Principal: 1001,
+		RequestID: 101, Action: protocol.RouteSelect, Principal: providerAPrincipal,
 		CapabilityGeneration: 7, Fallback: true,
 	})
-	if route.Result != protocol.RouteOK || route.SelectedPrincipal != 1001 || !route.Fallback {
+	if route.Result != protocol.RouteOK || route.SelectedPrincipal != providerAPrincipal || !route.Fallback {
 		t.Fatalf("explicit fallback route = %+v", route)
 	}
 
@@ -221,7 +243,7 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 		t.Fatal(err)
 	}
 	counts := map[uint32]int{}
-	for len(counts) < 2 || counts[1001] < 2 || counts[1002] < 2 {
+	for len(counts) < 2 || counts[providerAPrincipal] < 2 || counts[providerBPrincipal] < 2 {
 		select {
 		case principal := <-acknowledgements:
 			counts[principal]++
@@ -229,7 +251,7 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 			t.Fatalf("acknowledgements = %v", counts)
 		}
 	}
-	for principal, state := range map[uint32]*applyState{1001: stateA, 1002: stateB} {
+	for principal, state := range map[uint32]*applyState{providerAPrincipal: stateA, providerBPrincipal: stateB} {
 		state.mu.Lock()
 		if state.effects != 1 || state.duplicates != 1 {
 			t.Fatalf("provider %d state = %+v", principal, state)

@@ -1023,6 +1023,8 @@ go-unit-tests:
 		(unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
 		 cd "$$module" && "$(GO)" test ./...); \
 	done
+	@echo "go-unit-tests: db3 providers over the authenticated C bus"
+	@cd .. && bash scripts/test_db3_go_bus.sh
 	@echo "go-unit-tests: ok"
 
 # The complete shipping build must finish before lint inspects its artifacts.
