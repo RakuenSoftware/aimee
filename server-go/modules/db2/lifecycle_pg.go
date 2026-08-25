@@ -31,17 +31,36 @@ type PoolStatsFunc func(ctx context.Context) (db2contract.PoolStatus, error)
 // LifecycleSeams is what the lifecycle provider needs from its host.
 type LifecycleSeams struct {
 	QueryRow  QueryRowFunc
+	Query     QueryFunc
+	Exec      ExecFunc
 	PoolStats PoolStatsFunc
+	// Runtime describes the running embedder process, which is state rather
+	// than storage. The C module owns it until the cutover.
+	Runtime RuntimeState
+	// ResetExecutor performs a dimension reset's transactional DDL. See
+	// DimensionResetExecutor for why this one step is delegated.
+	ResetExecutor DimensionResetExecutor
 }
 
 type pgLifecycleBackend struct {
-	queryRow  QueryRowFunc
-	poolStats PoolStatsFunc
+	queryRow      QueryRowFunc
+	query         QueryFunc
+	exec          ExecFunc
+	poolStats     PoolStatsFunc
+	runtime       RuntimeState
+	resetExecutor DimensionResetExecutor
 }
 
 // NewPGLifecycleBackend builds the lifecycle family's production backend.
 func NewPGLifecycleBackend(seams LifecycleSeams) LifecycleBackend {
-	return &pgLifecycleBackend{queryRow: seams.QueryRow, poolStats: seams.PoolStats}
+	return &pgLifecycleBackend{
+		queryRow:      seams.QueryRow,
+		query:         seams.Query,
+		exec:          seams.Exec,
+		poolStats:     seams.PoolStats,
+		runtime:       seams.Runtime,
+		resetExecutor: seams.ResetExecutor,
+	}
 }
 
 func (b *pgLifecycleBackend) HealthProbe(ctx context.Context) (db2contract.HealthEvidence, error) {

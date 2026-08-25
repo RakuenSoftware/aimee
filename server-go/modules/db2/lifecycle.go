@@ -2,6 +2,7 @@ package db2
 
 import (
 	"context"
+	"errors"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	db2contract "github.com/JBailes/aimee/server-go/db2"
@@ -9,13 +10,11 @@ import (
 
 // LifecycleBackend is the lifecycle family's seam.
 //
-// It covers the three operations whose answer the Go module can already
-// produce. The family's other seven — the embedding dimension, the refusal
-// counters, the re-embed progress and its two clears, the embedder serving id,
-// and the dimension reset — read or mutate process-local state that still lives
-// in the C module. They are deliberately absent rather than stubbed: a stub
-// would answer confidently with a default and make an unmigrated operation look
-// migrated.
+// It covers all ten of the family's operations, but they do not all come from
+// the same place. Three are SQL, one is the pool's own accounting, three
+// describe the running embedder process, and one performs destructive DDL. The
+// seam keeps them in one list because the contract does, while the fields of
+// LifecycleSeams say which host supplies what.
 type LifecycleBackend interface {
 	// HealthProbe answers the schema and extension evidence.
 	HealthProbe(ctx context.Context) (db2contract.HealthEvidence, error)
@@ -23,6 +22,35 @@ type LifecycleBackend interface {
 	PostgresStatus(ctx context.Context) (db2contract.PostgresStatus, error)
 	// PoolStatus reports the connection pool's own accounting.
 	PoolStatus(ctx context.Context) (db2contract.PoolStatus, error)
+
+	// --- embedder runtime state ---
+	//
+	// These three describe the running process rather than the database: the
+	// dimension it is serving, the widths it has refused, and which embedder
+	// build produced them. They are supplied by whoever owns that state, which
+	// is the C module until the cutover and this module afterwards.
+
+	// EmbeddingDimension is the width this process is serving.
+	EmbeddingDimension(ctx context.Context) (uint32, error)
+	// EmbeddingRefusals counts vector upserts refused for width disagreement.
+	EmbeddingRefusals(ctx context.Context) (db2contract.EmbeddingRefusals, error)
+	// EmbedderServingID names the embedder build behind those vectors.
+	EmbedderServingID(ctx context.Context) (string, error)
+
+	// --- re-embed maintenance ---
+
+	// ReembedStatus reports an in-flight dimension change, if there is one.
+	// The bool distinguishes "no re-embed running" from a zero-valued status.
+	ReembedStatus(ctx context.Context) (bool, db2contract.ReembedStatus, error)
+	// ReembedClear removes the maintenance marker.
+	ReembedClear(ctx context.Context) error
+	// ReembedClearMaintenance is the operator escape hatch: it clears a stuck
+	// marker, refusing unless forced when the recorded and running dimensions
+	// disagree. The bool reports whether the marker was actually cleared.
+	ReembedClearMaintenance(ctx context.Context, force bool) (bool, db2contract.ReembedClearMaintenance, error)
+
+	// DimensionReset re-shapes every derived vector table to a new width.
+	DimensionReset(ctx context.Context, target uint32, force, dryRun bool) (DimensionResetOutcome, db2contract.DimensionReset, error)
 }
 
 // NewLifecycleHandler builds the Go provider for the lifecycle family
@@ -67,7 +95,7 @@ func NewLifecycleHandler(backend LifecycleBackend) bus.ModuleHandler {
 				if invocation.Cancelled() || ctx.Err() != nil {
 					return nil, bus.ModuleStatusCancelled
 				}
-				return nil, bus.ModuleStatusInternal
+				return nil, statusForError(err)
 			}
 			if invocation.Cancelled() {
 				return nil, bus.ModuleStatusCancelled
@@ -102,6 +130,100 @@ func NewLifecycleHandler(backend LifecycleBackend) bus.ModuleHandler {
 			status, err := backend.PoolStatus(ctx)
 			return finish(func() ([]byte, error) {
 				return db2contract.EncodePoolStatusReply(db2contract.ResultOK, status)
+			}, err)
+
+		case db2contract.OperationEmbeddingDimension:
+			if db2contract.DecodeEmbeddingDimensionRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			dimension, err := backend.EmbeddingDimension(ctx)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeEmbeddingDimensionReply(db2contract.ResultOK, dimension)
+			}, err)
+
+		case db2contract.OperationEmbeddingRefusals:
+			if db2contract.DecodeEmbeddingRefusalsRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			refusals, err := backend.EmbeddingRefusals(ctx)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeEmbeddingRefusalsReply(db2contract.ResultOK, refusals)
+			}, err)
+
+		case db2contract.OperationEmbedderServingID:
+			if db2contract.DecodeEmbedderServingIDRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			servingID, err := backend.EmbedderServingID(ctx)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeEmbedderServingIDReply(db2contract.ResultOK, servingID)
+			}, err)
+
+		case db2contract.OperationReembedStatus:
+			if db2contract.DecodeReembedStatusRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			running, reembed, err := backend.ReembedStatus(ctx)
+			return finish(func() ([]byte, error) {
+				// No re-embed running is NotFound carrying no payload, which
+				// is a different answer from a running one whose fields happen
+				// to be zero — and the contract refuses the latter anyway.
+				if !running {
+					return db2contract.EncodeReembedStatusReply(db2contract.ResultNotFound,
+						db2contract.ReembedStatus{})
+				}
+				return db2contract.EncodeReembedStatusReply(db2contract.ResultOK, reembed)
+			}, err)
+
+		case db2contract.OperationReembedClear:
+			if db2contract.DecodeReembedClearRequest(request) != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			clearErr := backend.ReembedClear(ctx)
+			if clearErr != nil {
+				if invocation.Cancelled() || ctx.Err() != nil {
+					return nil, bus.ModuleStatusCancelled
+				}
+				// A seam this module does not have is a capability answer, not
+				// a claim about the marker's state.
+				if errors.Is(clearErr, ErrNoQuerier) {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+			}
+			result := uint32(db2contract.ResultOK)
+			if clearErr != nil {
+				result = db2contract.ResultInvalidState
+			}
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeReembedClearReply(result)
+			}, nil)
+
+		case db2contract.OperationReembedClearMaintenance:
+			force, decodeErr := db2contract.DecodeReembedClearMaintenanceRequest(request)
+			if decodeErr != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			cleared, status, err := backend.ReembedClearMaintenance(ctx, force != 0)
+			return finish(func() ([]byte, error) {
+				// A refusal is Conflict carrying the two disagreeing
+				// dimensions, because the operator's next decision depends on
+				// seeing them — telling them only that it failed would leave
+				// them with force as the sole remaining move.
+				if !cleared {
+					return db2contract.EncodeReembedClearMaintenanceReply(
+						db2contract.ResultConflict, status)
+				}
+				return db2contract.EncodeReembedClearMaintenanceReply(db2contract.ResultOK, status)
+			}, err)
+
+		case db2contract.OperationDimensionReset:
+			target, force, dryRun, decodeErr := db2contract.DecodeDimensionResetRequest(request)
+			if decodeErr != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			outcome, status, err := backend.DimensionReset(ctx, target, force != 0, dryRun != 0)
+			return finish(func() ([]byte, error) {
+				return db2contract.EncodeDimensionResetReply(outcome.result(), status)
 			}, err)
 		}
 

@@ -216,30 +216,6 @@ func (healthRow) Scan(dest ...any) error {
 	return nil
 }
 
-// The family's other seven operations read process-local state the Go module
-// does not own yet. They are absent rather than stubbed, and this records that
-// as a decision: a stub would answer confidently with a default and make an
-// unmigrated operation look migrated.
-func TestLifecycleHandlerDoesNotClaimUnmigratedOperations(t *testing.T) {
-	backend := NewPGLifecycleBackend(LifecycleSeams{
-		QueryRow: func(context.Context, string, ...any) HealthRow { return healthRow{} },
-	})
-	handler := NewLifecycleHandler(backend)
-
-	unmigrated := map[string][]byte{
-		"embedding_dimension": db2contract.EncodeEmbeddingDimensionRequest(),
-		"embedding_refusals":  db2contract.EncodeEmbeddingRefusalsRequest(),
-		"reembed_status":      db2contract.EncodeReembedStatusRequest(),
-		"reembed_clear":       db2contract.EncodeReembedClearRequest(),
-		"embedder_serving_id": db2contract.EncodeEmbedderServingIDRequest(),
-	}
-	for name, request := range unmigrated {
-		if _, status := handler(lifecycleInvocation(), request); status != bus.ModuleStatusInvalidRequest {
-			t.Errorf("%s answered %v; it is not implemented and must not pretend to be", name, status)
-		}
-	}
-}
-
 func TestLifecycleHandlerRejectsWrongStage(t *testing.T) {
 	invocation := bus.ModuleInvocation{StageID: db2contract.StageLevel3Count}
 	_, status := NewLifecycleHandler(NewPGLifecycleBackend(LifecycleSeams{}))(invocation,

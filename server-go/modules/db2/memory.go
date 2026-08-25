@@ -2,6 +2,7 @@ package db2
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
@@ -166,7 +167,7 @@ func NewMemoryHandler(backend MemoryBackend) bus.ModuleHandler {
 				if invocation.Cancelled() || ctx.Err() != nil {
 					return nil, bus.ModuleStatusCancelled
 				}
-				return nil, bus.ModuleStatusInternal
+				return nil, statusForError(err)
 			}
 			if invocation.Cancelled() {
 				return nil, bus.ModuleStatusCancelled
@@ -270,6 +271,11 @@ func NewMemoryHandler(backend MemoryBackend) bus.ModuleHandler {
 			if updateErr != nil {
 				if invocation.Cancelled() || ctx.Err() != nil {
 					return nil, bus.ModuleStatusCancelled
+				}
+				// A seam this module does not have is a capability answer, not
+				// a claim that the memory is in a bad state.
+				if errors.Is(updateErr, ErrNoQuerier) {
+					return nil, bus.ModuleStatusCapabilityAbsent
 				}
 				result = db2contract.ResultInvalidState
 			}
