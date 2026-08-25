@@ -73,6 +73,13 @@ for pass in 1 2 3 4 5 6; do
    previous=$built
 done
 
+# Which vector index the schema actually built. pgvectorscale's DiskANN is the
+# default and HNSW is the fallback, and until recently the tree said both at
+# once -- so this is asserted against the database rather than read from code.
+echo "########## vector index default ##########"
+su postgres -c "psql -X -d aimee_test_tpl -f $(dirname "$0")/verify-index-default.sql" 2>&1 \
+   | grep -E 'NOTICE|ERROR' || true
+
 {
    echo "PG-UNIT-EXIT=$rc"
    echo "binaries-run=$(grep -c 'build/obj/tests/unit-test' "$LOG")"

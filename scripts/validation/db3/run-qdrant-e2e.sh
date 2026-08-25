@@ -71,4 +71,6 @@ DB3_GO_HOST="$harness" AIMEE_TEST_QDRANT_URL="$QDRANT_URL" \
 [ $? -eq 0 ] || failed=1
 
 echo "QDRANT-E2E-FAILED=$failed"
+echo "# a vector database is OPTIONAL; the in-database default is checked by"
+echo "# run-pg-tests.sh, which asserts DiskANN where pgvectorscale is installed."
 exit $failed
