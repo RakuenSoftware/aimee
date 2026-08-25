@@ -18,3 +18,29 @@ dependencies.
   response content are excluded.
 - Mechanical policy remains authoritative. Observability is not an
   authorization boundary.
+
+## Context authority
+
+Canonical request blocks carry metadata independently from their wire content:
+origin, authority, trust, sensitivity, model visibility, and an optional
+knowledge revision. This keeps retrieved or tool-produced evidence distinct
+from task instructions and platform policy even when a provider ultimately
+renders both as text.
+
+Authority promotion is explicit and conservative. Model, tool, retrieval, and
+memory output cannot become a task instruction or policy. User content can be a
+task instruction but cannot become platform policy. Code-owned guidance and
+freshness notices are platform instructions; recalled material remains
+unverified evidence in its own block.
+
+## Knowledge freshness
+
+Knowledge is versioned by a domain and scope identifier. Live curator
+invalidations advance both the affected scope and the aggregate knowledge
+epoch. Each session records the aggregate epoch it last observed. When a later
+turn observes a newer epoch, the request gains a typed instruction to
+re-retrieve affected facts rather than silently relying on an earlier answer.
+
+The in-process epoch table is a bounded cache, not the source of truth. The
+durable curator feed remains authoritative across daemon restarts. An unseen
+session or scope is reported as `unknown`, never incorrectly asserted current.

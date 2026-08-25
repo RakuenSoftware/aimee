@@ -18,6 +18,7 @@
 #include "aimee.h"          /* size macros for agent_types.h */
 #include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
 #include <aimee/ir/aimee_ir.h>
+#include <aimee/core/turn_integrity.h>
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -58,6 +59,49 @@ static int ir_memory_enabled(void)
 {
    int tri = config_present() ? config_module_memory() : -1;
    return config_module_enabled(tri, gw_stage_memory_enabled());
+}
+
+static int ir_stage_context_authority(aimee_request_t *ir, void *ud)
+{
+   (void)ud;
+   /* Metadata only: classifying an existing block must not force a provider
+    * payload rebuild. Newly inserted blocks are dirtied by their own stage. */
+   (void)aimee_ir_classify_context(ir);
+   return 0;
+}
+
+static int ir_stage_knowledge_freshness(aimee_request_t *ir, void *ud)
+{
+   (void)ud;
+   const char *session = server_http_identity_session_hdr();
+   if (!ir || !session || !session[0])
+      return 0;
+   uint64_t current = ti_knowledge_epoch_current("knowledge", "global");
+   uint64_t previous = 0;
+   if (ti_session_knowledge_observe(session, current, &previous) != TI_FRESHNESS_STALE)
+      return 0;
+
+   char marker[384];
+   snprintf(marker, sizeof marker,
+            "<aimee-freshness status=\"stale\" previous_epoch=\"%llu\" "
+            "current_epoch=\"%llu\">Prior assistant factual claims may rely on older "
+            "knowledge. Re-retrieve affected facts before relying on them.</aimee-freshness>",
+            (unsigned long long)previous, (unsigned long long)current);
+   aimee_block_t *grown = realloc(ir->system, (size_t)(ir->n_system + 1) * sizeof *grown);
+   if (!grown)
+      return 0;
+   ir->system = grown;
+   aimee_block_t *block = &ir->system[ir->n_system];
+   memset(block, 0, sizeof *block);
+   block->type = AIMEE_BLK_TEXT;
+   block->text = strdup(marker);
+   if (!block->text)
+      return 0;
+   aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, "knowledge",
+                              "global", current);
+   ir->n_system++;
+   return 1;
 }
 
 static char *ir_resolve_persona_instructions(void)
@@ -186,6 +230,8 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    if (persona_first > 0)
       session_persona_delivery_finish(sid, persona_delivered);
    const aimee_ir_transform_t stages[] = {
+       {"context_authority", ir_stage_context_authority, NULL, 1},
+       {"knowledge_freshness", ir_stage_knowledge_freshness, NULL, 1},
        {"memory", ir_stage_memory, pristine_query, memory_enabled},
        /* Runs AFTER memory, so the opening turn already carries the guidance that
         * names what replaces the shell it is about to lose. Always on: an agent

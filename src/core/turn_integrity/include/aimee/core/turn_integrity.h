@@ -17,6 +17,8 @@ struct cJSON;
 #define TI_REVISION_MAX  96
 #define TI_EVENT_MAX     48
 #define TI_DETAIL_MAX    256
+#define TI_DOMAIN_MAX    48
+#define TI_SCOPE_MAX     128
 
 typedef enum
 {
@@ -65,6 +67,20 @@ typedef struct
 
 typedef void (*ti_event_callback_t)(const ti_event_t *event, void *userdata);
 
+typedef enum
+{
+   TI_FRESHNESS_UNKNOWN = 0,
+   TI_FRESHNESS_CURRENT,
+   TI_FRESHNESS_STALE
+} ti_freshness_t;
+
+typedef struct
+{
+   char domain[TI_DOMAIN_MAX];
+   char scope_id[TI_SCOPE_MAX];
+   uint64_t epoch;
+} ti_knowledge_basis_t;
+
 /* Installation must complete before worker threads start. NULL disables the
  * callback. Events contain bounded identity/enum metadata, never prompt, tool
  * argument, result, or model-response content. */
@@ -90,5 +106,22 @@ const char *ti_turn_state_name(ti_turn_state_t state);
 /* Return a newly allocated JSON object containing only bounded contract
  * metadata. Caller owns it. */
 struct cJSON *ti_turn_manifest_json(const ti_turn_manifest_t *manifest);
+
+/* Scoped knowledge epochs. The registry is process-local and thread-safe; the
+ * durable curator feed remains the authority that replays invalidations after a
+ * restart. An absent scope has epoch zero. */
+uint64_t ti_knowledge_epoch_current(const char *domain, const char *scope_id);
+uint64_t ti_knowledge_epoch_advance(const char *domain, const char *scope_id, const char *reason);
+ti_freshness_t ti_knowledge_basis_freshness(const ti_knowledge_basis_t *basis);
+
+/* Compare and atomically update a session's last observed epoch. Returns STALE
+ * only when this session observed an earlier epoch; a first observation is
+ * UNKNOWN because there is no prior answer to invalidate. */
+ti_freshness_t ti_session_knowledge_observe(const char *session_id, uint64_t current_epoch,
+                                            uint64_t *previous_epoch_out);
+
+/* Clears only the knowledge/session registries. Intended for process teardown
+ * tests; production lifetime is the daemon lifetime. */
+void ti_knowledge_reset_for_test(void);
 
 #endif /* AIMEE_CORE_TURN_INTEGRITY_H */

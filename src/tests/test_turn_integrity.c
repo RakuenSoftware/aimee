@@ -63,10 +63,38 @@ static void test_read_only_and_terminal_paths(void)
    assert(ti_turn_manifest_init(&turn, "", NULL, NULL) == -1);
 }
 
+static void test_scoped_knowledge_freshness(void)
+{
+   ti_knowledge_reset_for_test();
+   assert(ti_knowledge_epoch_current("repository", "aimee") == 0);
+   assert(ti_knowledge_epoch_advance("repository", "aimee", "commit changed") == 1);
+   assert(ti_knowledge_epoch_current("repository", "aimee") == 1);
+   assert(ti_knowledge_epoch_current("repository", "other") == 0);
+
+   ti_knowledge_basis_t basis = {0};
+   snprintf(basis.domain, sizeof basis.domain, "repository");
+   snprintf(basis.scope_id, sizeof basis.scope_id, "aimee");
+   basis.epoch = 1;
+   assert(ti_knowledge_basis_freshness(&basis) == TI_FRESHNESS_CURRENT);
+   assert(ti_knowledge_epoch_advance("repository", "aimee", "new commit") == 2);
+   assert(ti_knowledge_basis_freshness(&basis) == TI_FRESHNESS_STALE);
+
+   uint64_t previous = 99;
+   assert(ti_session_knowledge_observe("session-k", 2, &previous) == TI_FRESHNESS_UNKNOWN);
+   assert(previous == 0);
+   assert(ti_session_knowledge_observe("session-k", 2, &previous) == TI_FRESHNESS_CURRENT);
+   assert(previous == 2);
+   assert(ti_session_knowledge_observe("session-k", 3, &previous) == TI_FRESHNESS_STALE);
+   assert(previous == 2);
+   assert(ti_session_knowledge_observe("other-session", 3, NULL) == TI_FRESHNESS_UNKNOWN);
+   assert(ti_knowledge_epoch_advance("", "x", NULL) == 0);
+}
+
 int main(void)
 {
    test_lifecycle_and_json();
    test_read_only_and_terminal_paths();
+   test_scoped_knowledge_freshness();
    ti_set_event_callback(NULL, NULL);
    puts("all turn_integrity tests passed");
    return 0;

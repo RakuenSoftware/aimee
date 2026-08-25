@@ -264,24 +264,23 @@ static void mk_assistant_turn(aimee_request_t *ir)
    ir->n_messages += 1;
 }
 
-/* IR seam (P4 port): ir_stage_memory appends the envelope as a trailing system TEXT
- * block, derives the query from the last user message, and reports the mutation. The
- * appended env is byte-identical to the legacy ingress_preinject_build(query, 0). */
+/* IR seam: first-turn code-owned guidance and retrieved evidence are distinct
+ * system blocks with distinct authority metadata. */
 static void test_ir_stage_appends_system_block(void)
 {
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
    int rc = ir_stage_memory(&ir, NULL);
    assert(rc == 1);          /* changed typed fields -> runner marks ir->mutated */
-   assert(ir.n_system == 1); /* exactly one trailing block appended */
+   assert(ir.n_system == 2); /* guidance + evidence */
    assert(ir.system[0].type == AIMEE_BLK_TEXT);
    assert(ir.system[0].cache_control == NULL); /* trailing block stays uncached */
-   /* Session start, so the block is the guidance FOLLOWED BY this turn's recall
-    * envelope. The envelope itself is unchanged -- assert it is carried verbatim
-    * inside; byte-identity with the bare envelope is asserted mid-session, where
-    * the guidance is not repeated. */
+   assert(ir.system[0].context.origin == AIMEE_CTX_ORIGIN_PLATFORM);
+   assert(ir.system[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+   assert(ir.system[1].context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL);
+   assert(ir.system[1].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
    char *direct = ingress_preinject_build("deploy matrix", 0);
-   assert(direct && ir.system[0].text && strstr(ir.system[0].text, direct) != NULL);
+   assert(direct && ir.system[1].text && strcmp(ir.system[1].text, direct) == 0);
    assert(strstr(ir.system[0].text, "explore-with: ") != NULL);
    free(direct);
    aimee_request_free(&ir);
@@ -308,7 +307,8 @@ static void test_ir_stage_prefers_supplied_query(void)
 
    /* The envelope must be the one the CLEAN query produces. */
    char *direct = ingress_preinject_build("deploy matrix", 0);
-   assert(direct && ir.system[0].text && strstr(ir.system[0].text, direct) != NULL);
+   assert(direct && ir.n_system == 2 && ir.system[1].text &&
+          strcmp(ir.system[1].text, direct) == 0);
    free(direct);
    aimee_request_free(&ir);
 
@@ -317,7 +317,7 @@ static void test_ir_stage_prefers_supplied_query(void)
    aimee_request_t ir2;
    mk_user_ir(&ir2, "deploy matrix");
    assert(ir_stage_memory(&ir2, NULL) == 1);
-   assert(ir2.n_system == 1);
+   assert(ir2.n_system == 2);
    aimee_request_free(&ir2);
    printf("ir_stage_prefers_supplied_query OK\n");
 }

@@ -4,9 +4,32 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 
 static ti_event_callback_t g_event_callback;
 static void *g_event_userdata;
+
+#define TI_KNOWLEDGE_SLOTS 256
+#define TI_SESSION_SLOTS   256
+
+typedef struct
+{
+   char domain[TI_DOMAIN_MAX];
+   char scope_id[TI_SCOPE_MAX];
+   uint64_t epoch;
+   int in_use;
+} ti_knowledge_slot_t;
+
+typedef struct
+{
+   char session_id[TI_ID_MAX];
+   uint64_t epoch;
+   int in_use;
+} ti_session_slot_t;
+
+static ti_knowledge_slot_t g_knowledge[TI_KNOWLEDGE_SLOTS];
+static ti_session_slot_t g_sessions[TI_SESSION_SLOTS];
+static pthread_mutex_t g_knowledge_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void copy_bounded(char *dst, size_t cap, const char *src)
 {
@@ -164,4 +187,124 @@ struct cJSON *ti_turn_manifest_json(const ti_turn_manifest_t *manifest)
                            manifest->snapshots.context_manifest_id);
    cJSON_AddItemToObject(root, "snapshots", snapshots);
    return root;
+}
+
+static ti_knowledge_slot_t *knowledge_find_locked(const char *domain, const char *scope_id,
+                                                  int create)
+{
+   ti_knowledge_slot_t *free_slot = NULL;
+   for (int i = 0; i < TI_KNOWLEDGE_SLOTS; i++)
+   {
+      ti_knowledge_slot_t *slot = &g_knowledge[i];
+      if (!slot->in_use)
+      {
+         if (!free_slot)
+            free_slot = slot;
+         continue;
+      }
+      if (strcmp(slot->domain, domain) == 0 && strcmp(slot->scope_id, scope_id) == 0)
+         return slot;
+   }
+   if (!create || !free_slot)
+      return NULL;
+   memset(free_slot, 0, sizeof *free_slot);
+   copy_bounded(free_slot->domain, sizeof free_slot->domain, domain);
+   copy_bounded(free_slot->scope_id, sizeof free_slot->scope_id, scope_id);
+   free_slot->in_use = 1;
+   return free_slot;
+}
+
+uint64_t ti_knowledge_epoch_current(const char *domain, const char *scope_id)
+{
+   if (!domain || !domain[0] || !scope_id || !scope_id[0])
+      return 0;
+   pthread_mutex_lock(&g_knowledge_lock);
+   ti_knowledge_slot_t *slot = knowledge_find_locked(domain, scope_id, 0);
+   uint64_t epoch = slot ? slot->epoch : 0;
+   pthread_mutex_unlock(&g_knowledge_lock);
+   return epoch;
+}
+
+uint64_t ti_knowledge_epoch_advance(const char *domain, const char *scope_id, const char *reason)
+{
+   if (!domain || !domain[0] || !scope_id || !scope_id[0])
+      return 0;
+   pthread_mutex_lock(&g_knowledge_lock);
+   ti_knowledge_slot_t *slot = knowledge_find_locked(domain, scope_id, 1);
+   uint64_t epoch = slot ? ++slot->epoch : 0;
+   pthread_mutex_unlock(&g_knowledge_lock);
+
+   if (epoch && g_event_callback)
+   {
+      ti_event_t event;
+      memset(&event, 0, sizeof event);
+      copy_bounded(event.event, sizeof event.event, "knowledge.invalidated");
+      copy_bounded(event.turn_id, sizeof event.turn_id, scope_id);
+      copy_bounded(event.session_id, sizeof event.session_id, domain);
+      copy_bounded(event.detail, sizeof event.detail, reason);
+      event.state = TI_TURN_RECEIVED;
+      event.sequence = epoch;
+      g_event_callback(&event, g_event_userdata);
+   }
+   return epoch;
+}
+
+ti_freshness_t ti_knowledge_basis_freshness(const ti_knowledge_basis_t *basis)
+{
+   if (!basis || !basis->domain[0] || !basis->scope_id[0])
+      return TI_FRESHNESS_UNKNOWN;
+   return ti_knowledge_epoch_current(basis->domain, basis->scope_id) == basis->epoch
+              ? TI_FRESHNESS_CURRENT
+              : TI_FRESHNESS_STALE;
+}
+
+ti_freshness_t ti_session_knowledge_observe(const char *session_id, uint64_t current_epoch,
+                                            uint64_t *previous_epoch_out)
+{
+   if (previous_epoch_out)
+      *previous_epoch_out = 0;
+   if (!session_id || !session_id[0])
+      return TI_FRESHNESS_UNKNOWN;
+   pthread_mutex_lock(&g_knowledge_lock);
+   ti_session_slot_t *slot = NULL;
+   ti_session_slot_t *free_slot = NULL;
+   for (int i = 0; i < TI_SESSION_SLOTS; i++)
+   {
+      if (!g_sessions[i].in_use)
+      {
+         if (!free_slot)
+            free_slot = &g_sessions[i];
+      }
+      else if (strcmp(g_sessions[i].session_id, session_id) == 0)
+      {
+         slot = &g_sessions[i];
+         break;
+      }
+   }
+   if (!slot)
+   {
+      if (free_slot)
+      {
+         memset(free_slot, 0, sizeof *free_slot);
+         copy_bounded(free_slot->session_id, sizeof free_slot->session_id, session_id);
+         free_slot->epoch = current_epoch;
+         free_slot->in_use = 1;
+      }
+      pthread_mutex_unlock(&g_knowledge_lock);
+      return TI_FRESHNESS_UNKNOWN;
+   }
+   uint64_t previous = slot->epoch;
+   slot->epoch = current_epoch;
+   pthread_mutex_unlock(&g_knowledge_lock);
+   if (previous_epoch_out)
+      *previous_epoch_out = previous;
+   return previous == current_epoch ? TI_FRESHNESS_CURRENT : TI_FRESHNESS_STALE;
+}
+
+void ti_knowledge_reset_for_test(void)
+{
+   pthread_mutex_lock(&g_knowledge_lock);
+   memset(g_knowledge, 0, sizeof g_knowledge);
+   memset(g_sessions, 0, sizeof g_sessions);
+   pthread_mutex_unlock(&g_knowledge_lock);
 }
