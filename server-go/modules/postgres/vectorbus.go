@@ -71,11 +71,21 @@ func AttachVectorBus(ctx context.Context, client *bus.Client,
 	if registry == nil {
 		registry = db3.NewProviderRegistry()
 	}
-	caller, err := db3.NewSearchCaller(ctx, client)
+	attachment := &VectorBus{registry: registry}
+	// The caller reads every event on this client, so provider announcements
+	// arrive here rather than needing a second subscription. That is what makes
+	// the module DISCOVER a provider: anything else means being told a
+	// generation by something that guessed it, and the wire refuses a search at
+	// a generation the provider is not actually at.
+	caller, err := db3.NewSearchCallerWithObserver(ctx, client,
+		func(principal, handle uint32, sequence uint64, capabilities db3.Capabilities) {
+			registry.Observe(principal, handle, sequence, capabilities)
+		})
 	if err != nil {
 		return nil, err
 	}
-	return &VectorBus{caller: caller, registry: registry}, nil
+	attachment.caller = caller
+	return attachment, nil
 }
 
 // Registry is the provider registry this attachment feeds.
@@ -117,12 +127,12 @@ func NewBusVectorRouter(ctx context.Context, client *bus.Client,
 	return router, attachment, nil
 }
 
-// ObserveCapabilities records a provider announcement read off the bus.
+// ObserveCapabilities records a provider announcement.
 //
-// Separate from the caller's own read loop because capabilities arrive as a
-// PUBLISH on a different kind, and whoever owns this module's subscription
-// delivers them here. Kept as a method so the registry's band check and
-// staleness rules apply however the announcement arrived.
+// The attachment's own read loop already does this for every announcement on
+// its client. This exists for one that reached the module by some other route,
+// and it goes through the registry so the band check and the staleness rules
+// apply however it arrived.
 func (v *VectorBus) ObserveCapabilities(principal, handle uint32, sequence uint64,
 	capabilities db3.Capabilities) bool {
 	if v == nil {

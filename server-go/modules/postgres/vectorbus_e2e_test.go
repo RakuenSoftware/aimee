@@ -168,14 +168,15 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 		t.Fatalf("PostgreSQL was asked %d times, want 1", postgresCalls)
 	}
 
-	// Now feed the registry the provider's capabilities, exactly as the
-	// module's subscription would, and give it something to find.
-	seeded := seedProviderThroughTheBus(t, ctx, client, attachment)
+	// Give the provider something to find. Its capabilities are NOT supplied by
+	// this test: the module observes them off the bus, which is the point --
+	// a fabricated generation is one the provider is not at, and the wire
+	// refuses a search at a generation the provider is not at.
+	seedProviderThroughTheBus(t, ctx, client)
 
 	deadline = time.Now().Add(20 * time.Second)
 	var routed db3.SearchReply
 	for {
-		attachment.ObserveCapabilities(456, 1, uint64(time.Now().UnixNano()), seeded())
 		principal, generation, ok := attachment.Registry().Selected()
 		if ok && principal == 456 {
 			request.RequiredGeneration = generation
@@ -222,11 +223,10 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 	}
 }
 
-// seedProviderThroughTheBus applies points to the provider and reports the
-// capabilities the module should believe.
-func seedProviderThroughTheBus(t *testing.T, ctx context.Context, client *bus.Client,
-	attachment *VectorBus) func() db3.Capabilities {
+// seedProviderThroughTheBus applies points into the provider over the wire.
+func seedProviderThroughTheBus(t *testing.T, ctx context.Context, client *bus.Client) {
 	t.Helper()
+	_ = ctx
 	labels := []db3.ExactLabel{
 		{Key: "project", Value: "project-a"},
 		{Key: "record_type", Value: "memory"},
@@ -241,33 +241,16 @@ func seedProviderThroughTheBus(t *testing.T, ctx context.Context, client *bus.Cl
 		{43, []float32{0, 0, 1}},
 	}
 	for i, point := range points {
-		apply := db3.Apply{
+		wire, err := db3.EncodeApply(db3.Apply{
 			OperationID: uint64(i + 1), Generation: 1, PointID: point.id,
 			Kind: db3.ApplyUpsert, Collection: "memory",
 			Vector: point.vector, Labels: labels,
-		}
-		wire, err := db3.EncodeApply(apply)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := client.Publish(db3.EventApply, wire); err != nil {
 			t.Fatalf("publishing apply %d: %v", point.id, err)
-		}
-	}
-	_ = ctx
-	// The provider's generation moves with every apply and it republishes, but
-	// this module's subscription is not wired here, so the test supplies the
-	// announcement. The value it reports is read from the provider's own
-	// answers: capabilities carrying a generation the provider is not at would
-	// be refused by the wire, which is what the retry loop above detects.
-	generation := uint64(1)
-	return func() db3.Capabilities {
-		generation++
-		return db3.Capabilities{
-			Generation: generation,
-			Operations: db3.OperationSearch | db3.OperationApply,
-			Metrics:    db3.MetricCosine, Filters: db3.FilterExact,
-			MaxDimension: db3.MaxDimension, MaxBatch: 64, MaxTopK: db3.MaxTopK, Ready: true,
 		}
 	}
 }
