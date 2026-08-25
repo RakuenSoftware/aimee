@@ -142,6 +142,12 @@ fi
 # URL is used directly (aimee POSTs raw text to {url}/embed).
 if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${EMBEDDER_DIMS:-unset})"
+  # `embedding_command` is the request-side hint, while EMBEDDER_URL is the
+  # daemon runtime contract used by the KB's dimension probe and asynchronous
+  # memory embedding path. Supply both from the one E2E input: setting only the
+  # config field lets query requests embed but leaves startup reporting
+  # "no embed command configured" and stores zero corpus vectors.
+  export EMBEDDER_URL="$AIMEE_E2E_EMBEDDER_URL"
   # The server forwards embedding_command to the kb on memory.store / memory
   # search, and the kb reads the same installation document for direct embedding.
   set_embed_cmd() {  # $1 = config file
