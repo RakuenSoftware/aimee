@@ -12,11 +12,13 @@ import json
 import sys
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 LLAMA_PORT = int(sys.argv[1])
 SHIM_PORT = int(sys.argv[2])
 DIM = int(sys.argv[3])
 MODEL = sys.argv[4] if len(sys.argv) > 4 else "Qwen3-Embedding-0.6B"
+SERVING_ID = f"{MODEL}/pooling=last/prefix=none/dim={DIM}"
 
 
 def _embed_one(text):
@@ -43,7 +45,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send(200, {"status": "ok", "dim": DIM, "model": MODEL})
+            self._send(
+                200,
+                {
+                    "status": "ok",
+                    "dim": DIM,
+                    "model": MODEL,
+                    "serving_id": SERVING_ID,
+                },
+            )
         else:
             self._send(404, {"error": "not found"})
 
@@ -51,9 +61,10 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("content-length", 0))
         raw = self.rfile.read(n).decode("utf-8", "replace")
         try:
-            if self.path == "/embed":
+            path = urlsplit(self.path).path
+            if path == "/embed":
                 self._send(200, _embed_one(raw))
-            elif self.path == "/embed_batch":
+            elif path == "/embed_batch":
                 texts = json.loads(raw)
                 self._send(200, [_embed_one(t) for t in texts])
             else:
