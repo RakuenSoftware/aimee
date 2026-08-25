@@ -842,6 +842,13 @@
           "event_kind": 11266,
           "durability": "capture",
           "durability_reason": "internal high-volume SQL transport; owning domain stages record semantic decisions durably"
+        },
+        {
+          "id": 3,
+          "name": "postgres-vector-search",
+          "event_kind": 11267,
+          "durability": "capture",
+          "durability_reason": "read-only vector search; routed to a provisioned vector database or answered in-database, and the routing decision is a deployment fact rather than a per-request one"
         }
       ]
     },

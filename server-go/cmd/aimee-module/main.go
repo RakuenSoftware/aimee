@@ -497,6 +497,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		config.Stages = []bus.ModuleStage{
 			{EventKind: postgres.EventHealth, StageID: postgres.StageHealth},
 			{EventKind: postgres.EventSQL, StageID: postgres.StageSQL},
+			{EventKind: postgres.EventVectorSearch, StageID: postgres.StageVectorSearch},
 		}
 		// BOTH STAGES, ALWAYS. The SQL handler opens its pool on first use and
 		// answers with the reason when it cannot, so a missing DSN produces an
@@ -504,9 +505,20 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// Trimming the list here instead would make this process disagree with
 		// process-contracts.json exactly when the database is unreachable.
 		sqlHandler := postgres.NewSQLHandler()
+		// Every collection answered in-database until the grant says otherwise.
+		// Replaced below when a provider is provisioned, which happens before
+		// the loop serves its first request.
+		vectorSearch, localErr := postgres.NewVectorSearchHandler(postgres.VectorProvider{}, nil)
+		if localErr != nil {
+			log.Printf("postgres: %v", localErr)
+			return bus.ModuleProcessConfig{}, false
+		}
 		config.Handler = func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
-			if invocation.StageID == postgres.StageSQL {
+			switch invocation.StageID {
+			case postgres.StageSQL:
 				return sqlHandler(invocation, frame)
+			case postgres.StageVectorSearch:
+				return vectorSearch.Handle(invocation, frame)
 			}
 			return postgres.Handle(invocation, frame)
 		}
@@ -529,8 +541,9 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			// not being used and needs to know.
 			log.Printf("postgres: %v", err)
 		} else if provider.Principal != 0 {
-			log.Printf("postgres: vector provider %q (principal %d) is provisioned",
-				provider.Instance, provider.Principal)
+			log.Printf("postgres: vector provider %q (principal %d) serves collection %q; "+
+				"every other collection is answered in-database",
+				provider.Instance, provider.Principal, provider.Collection)
 			// The wire, on THIS process's attachment. Built when the loop hands
 			// over its client and torn down with it -- there is no second
 			// client and no separate identity; searches and applies leave as
@@ -553,6 +566,15 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 				// written to, so it answers correctly and emptily forever --
 				// which reads as a corpus with no matches rather than one
 				// nobody filled.
+				// The searches this provider can take. Built here because the
+				// transport only exists once the loop hands over its client,
+				// and installed before the loop serves anything.
+				routed, buildErr := postgres.NewVectorSearchHandler(provider, attachment.Searcher())
+				if buildErr != nil {
+					log.Printf("postgres: vector searches stay in-database: %v", buildErr)
+				} else {
+					vectorSearch = routed
+				}
 				postgres.StartVectorReplication(ctx, attachment, postgres.ReplicationLeaseOwner())
 			}
 			// Replies to those searches come back through the loop's single

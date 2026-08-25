@@ -32,6 +32,18 @@ type ProviderGrant struct {
 	// running from anywhere else is refused at attach, so this is what the
 	// deployment actually authorised rather than what is installed.
 	Executable string
+	// Collection is the one collection this provider serves.
+	//
+	// A provider serves exactly one -- the search wire has no collection field,
+	// only a record_type that narrows WITHIN a collection -- so the deployment
+	// has to say which. Declared here rather than discovered, for the same
+	// reason the grant itself is: the provider process is told the same thing
+	// through AIMEE_DB3_COLLECTION, and two sources that can disagree about
+	// which corpus is being searched is a wrong answer nobody can see.
+	//
+	// A search for any other collection is answered in-database. That is not a
+	// degraded path; it is the ordinary one.
+	Collection string
 }
 
 // grantPrefix is what the provisioner names a DB3 provider grant.
@@ -98,6 +110,8 @@ func readProviderGrant(path string) (ProviderGrant, bool) {
 			grant.PrincipalRef = uint32(ref)
 		case "executable":
 			grant.Executable = strings.TrimSpace(value)
+		case "collection":
+			grant.Collection = strings.TrimSpace(value)
 		}
 	}
 	if scanner.Err() != nil || ValidateProviderRef(grant.PrincipalRef) != nil {

@@ -32,11 +32,14 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"benchmarks", 25, []uint32{10497, 10498}},
 		{"sandbox", 26, []uint32{10753, 10754, 10755, 10756}},
 		{"economizer", 27, []uint32{11009, 11010, 11011, 11012, 11013, 11014, 11015}},
-		// Two stages: health, and the SQL stage every store call in the tree
-		// lands on. 11266 is not conditional -- the handler opens its pool on
-		// first use and answers with the reason when it cannot, so the stage is
-		// servable whether or not a database is reachable.
-		{"postgres", 28, []uint32{11265, 11266}},
+		// Three stages: health, the SQL stage every store call in the tree lands
+		// on, and vector search. None is conditional -- the SQL handler opens
+		// its pool on first use and answers with the reason when it cannot, and
+		// the vector stage answers in-database when no vector database was
+		// provisioned, which is the ordinary deployment. A stage that appeared
+		// only when a provider was installed would make the module's contract
+		// depend on the machine it booted on.
+		{"postgres", 28, []uint32{11265, 11266, 11267}},
 		// `aimee` is deliberately absent. It is the one module here whose
 		// config depends on the environment: it refuses to serve without a
 		// store backend, so in this test's process it has no stage table to

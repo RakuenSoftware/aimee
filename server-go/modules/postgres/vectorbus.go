@@ -89,6 +89,9 @@ type VectorProvider struct {
 	Principal uint32
 	// Instance names it, for logs that have to say which one.
 	Instance string
+	// Collection is the one collection it serves. A search for any other is
+	// answered in-database.
+	Collection string
 }
 
 // ProvisionedVectorProvider reports what this deployment provisioned.
@@ -104,7 +107,11 @@ func ProvisionedVectorProvider(policyDir string) (VectorProvider, error) {
 	case 0:
 		return VectorProvider{}, nil
 	case 1:
-		return VectorProvider{Principal: grants[0].PrincipalRef, Instance: grants[0].Instance}, nil
+		return VectorProvider{
+			Principal:  grants[0].PrincipalRef,
+			Instance:   grants[0].Instance,
+			Collection: grants[0].Collection,
+		}, nil
 	default:
 		names := make([]string, 0, len(grants))
 		for _, grant := range grants {
