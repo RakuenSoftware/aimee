@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "74b2de6d877c8eec38aa852c721a537f6cddec10f1bcd17b201be501fc5fd48d"
+#define AIMEE_DB2_CONTRACT_SHA256 "0cf66beb2c79344b28c30f125b9762b6bd59d97ae69c7b5d457e8b6b9cedea96"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u

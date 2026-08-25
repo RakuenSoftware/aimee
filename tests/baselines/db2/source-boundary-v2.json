@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "5f78eb9b05d3fb32589363b16fb4b0bb7a5679f2",
+  "source_revision": "2e006268ef784b7690086311983ec2e97bbccbbb",
   "source_boundary": "src/modules/db2/c",
   "summary": {
-    "c_files": 142,
-    "headers": 141,
+    "c_files": 141,
+    "headers": 140,
     "sql_files": 6,
-    "consumer_files": 309,
+    "consumer_files": 308,
     "production_consumers": 156,
-    "test_consumers": 153,
-    "include_directives": 1036,
-    "outbound_dependency_rows": 176,
-    "outbound_include_directives": 176
+    "test_consumers": 152,
+    "include_directives": 1033,
+    "outbound_dependency_rows": 175,
+    "outbound_include_directives": 175
   },
   "source_files": {
     "c": [
@@ -5650,10 +5650,6 @@
           "count": 1
         },
         {
-          "header": "../modules/db2/c/db_postgres.h",
-          "count": 1
-        },
-        {
           "header": "../modules/db2/c/kb_vectors.h",
           "count": 1
         },
@@ -5663,10 +5659,6 @@
         },
         {
           "header": "../modules/db2/c/memory_vectors.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/pgvec_db3.h",
           "count": 1
         },
         {
@@ -5683,16 +5675,6 @@
         },
         {
           "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/tests/test_pgvec_db3.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "../modules/db2/c/pgvec_db3.h",
           "count": 1
         }
       ]
@@ -7346,13 +7328,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/pgvec_db3.h",
-      "header": "aimee/db2/db3_route.h",
-      "resolved": "src/modules/db2/include/aimee/db2/db3_route.h",
-      "classification": "module-public-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/pgvec_transport.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -7542,5 +7517,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "2f68ee4660e039900bdb0586fb3000cfddef1c9fb1a67f119b16224d5d510fae"
+  "fingerprint": "9e910a323c129f6387fa5a1ee4228132439d44d824193a30244455295e5534f5"
 }
