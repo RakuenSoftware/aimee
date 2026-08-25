@@ -34,6 +34,10 @@
     },
     {
       "classification": "host-generated-client",
+      "path": "src/curiosity_resolve.c"
+    },
+    {
+      "classification": "host-generated-client",
       "path": "src/dashboard_kb.c"
     },
     {
@@ -274,7 +278,15 @@
     },
     {
       "classification": "kb-generated-client",
+      "path": "src/kb/kb_module_stage_adapters.c"
+    },
+    {
+      "classification": "kb-generated-client",
       "path": "src/kb/kb_neardup.c"
+    },
+    {
+      "classification": "kb-generated-client",
+      "path": "src/kb/kb_obs_bus_adapter.c"
     },
     {
       "classification": "kb-generated-client",
@@ -441,23 +453,23 @@
       "path": "src/modules/kb-synthesis/kb_curator_version.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_bundle.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_endogeneity.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_evidence.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_regret.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_router.c"
     },
     {
@@ -790,6 +802,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_curiosity_resolve.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_db2.c"
     },
     {
@@ -1094,11 +1110,23 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_pgvec_db3.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_pgvec_generation_pg.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_pgvec_neardup.c"
     },
     {
       "classification": "private-implementation-test",
       "path": "src/tests/test_planner.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_policy_arms.c"
     },
     {
       "classification": "private-implementation-test",
@@ -1212,6 +1240,7 @@
   "declarations": [
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_code_project_lifecycle.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c"
@@ -1224,11 +1253,12 @@
       ],
       "signature": "void aimee_db2_register_audit_hash_provider ( db2_audit_hash_fn provider )",
       "signature_sha256": "8b6a2fb7e64f7f358d82c66cc77537019be51faacfe5a92901fb97c977b73459",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_audit_hash_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_index.c"
       ],
       "locations": [
@@ -1239,11 +1269,12 @@
       ],
       "signature": "void aimee_db2_register_css_analysis_providers ( db2_css_analyze_fn analyze , db2_css_stylesheet_free_fn release , db2_css_extract_class_tokens_fn extract_class_tokens )",
       "signature_sha256": "eab4f81abd7f516c144b73c160309a940bf36b42fe0d3ce4a136f4bb5b0a9918",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_css_analysis_providers"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_css_render.c"
       ],
       "locations": [
@@ -1254,11 +1285,12 @@
       ],
       "signature": "void aimee_db2_register_css_render_compare_provider ( db2_css_render_compare_fn provider )",
       "signature_sha256": "2187e0e80cfbc43fc34bb1a88fe02368d545488cd36fcd1c0e330f274d9bd2e0",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_css_render_compare_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_kb.c"
       ],
       "locations": [
@@ -1269,11 +1301,12 @@
       ],
       "signature": "void aimee_db2_register_embed_provider ( db2_embed_fn provider )",
       "signature_sha256": "e9a01b47b5f663d3142a8d4006da6eaead8fce289f6c768e7f845be525558dc7",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_embed_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_fact_ingest.c"
       ],
       "locations": [
@@ -1284,11 +1317,12 @@
       ],
       "signature": "void aimee_db2_register_fact_extract_provider ( db2_fact_extract_fn provider )",
       "signature_sha256": "13d592fd1c7dc0e9416cd39e7911f080042abd2aa9c46537b64280161e84dd91",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_fact_extract_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fact_recall.c",
@@ -1303,11 +1337,12 @@
       ],
       "signature": "void aimee_db2_register_fact_gate_provider ( db2_fact_gate_fn provider )",
       "signature_sha256": "8f2225aa4902b730d36b0d307d6312d7ad44dc383db012512b86283e2c93ef94",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_fact_gate_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_fact_ingest.c"
       ],
       "locations": [
@@ -1318,11 +1353,12 @@
       ],
       "signature": "void aimee_db2_register_fact_scan_provider ( db2_fact_scan_fn provider )",
       "signature_sha256": "778769db9a9b8ed08848a401aaac428b3a2886f97b72b9d2ab1671285aba7401",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_fact_scan_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_kb.c"
       ],
       "locations": [
@@ -1333,11 +1369,12 @@
       ],
       "signature": "void aimee_db2_register_identity_key_provider ( db2_identity_key_fn provider )",
       "signature_sha256": "d448312cb8c977de2f4ec84e24b403686315382b4fab8179bd18b32da55c1b07",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_identity_key_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_artifacts.c"
       ],
       "locations": [
@@ -1348,7 +1385,7 @@
       ],
       "signature": "void aimee_db2_register_mdl_score_provider ( db2_mdl_score_fn provider )",
       "signature_sha256": "e5f7efdd10154625d6ac214c5b44fc9620a13ede315fb55308a0f399ff03b577",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_mdl_score_provider"
     },
     {
@@ -1368,6 +1405,7 @@
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_kb_p2b_egress_live.c",
         "src/tests/test_vault_pg.c"
       ],
@@ -1379,11 +1417,12 @@
       ],
       "signature": "void aimee_db2_register_vault_crypto_provider ( const db2_vault_crypto_provider_t * provider )",
       "signature_sha256": "49ffbc2614e7377a56b847ad015d93a11eb8754eb15ce8c445fa3dc775fd6e83",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_vault_crypto_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_org_vault_rewrap.c"
       ],
       "locations": [
@@ -1394,11 +1433,12 @@
       ],
       "signature": "void aimee_db2_register_vault_reseal_provider ( const db2_vault_reseal_provider_t * provider )",
       "signature_sha256": "96c7ff2d4be69462de24ddc7a3b22d880e5f75e153832c4ef9b0a963f5580deb",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_vault_reseal_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_witness_checkpoint_produce_pg.c",
         "src/tests/vault_witness_provider_fixture.h"
       ],
@@ -1410,7 +1450,7 @@
       ],
       "signature": "void aimee_db2_register_vault_witness_provider ( const db2_vault_witness_provider_t * provider )",
       "signature_sha256": "89a9422c9f7546f066acb0fb0e521be300f08e4d9c5a117acbee3135083908b1",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_vault_witness_provider"
     },
     {
@@ -1514,6 +1554,7 @@
         "src/tests/test_memory_advanced.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
         "src/tests/test_witness_checkpoint_produce_pg.c",
         "src/tests/test_workspace_memory.c"
@@ -1827,6 +1868,7 @@
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_vault_pg.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
         "src/tests/test_witness_canary_pg.c",
@@ -1858,7 +1900,8 @@
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_org_model_catalog_target.c",
-        "src/tests/test_org_vault_rewrap.c"
+        "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c"
       ],
       "locations": [
         {
@@ -2021,6 +2064,7 @@
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_rules.c",
         "src/tests/test_schema_subst.c",
         "src/tests/test_tool_prompts.c",
@@ -2159,6 +2203,7 @@
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
         "src/tests/test_pg_prepare_classification.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -2357,6 +2402,7 @@
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -2538,6 +2584,7 @@
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -5055,6 +5102,7 @@
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -6139,7 +6187,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_curiosity.c"
+        "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c"
       ],
       "locations": [
         {
@@ -6185,7 +6234,9 @@
     },
     {
       "consumers": [
-        "src/tests/test_curiosity.c"
+        "src/curiosity_resolve.c",
+        "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c"
       ],
       "locations": [
         {
@@ -6195,7 +6246,7 @@
       ],
       "signature": "int db2_curiosity_list ( const char * state , curiosity_item_t * out , int max )",
       "signature_sha256": "4e665504fe006eb931fc8254cc3644253a1805519525c9e662913008c0e94fc1",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_curiosity_list"
     },
     {
@@ -6244,7 +6295,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_curiosity.c"
+        "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c"
       ],
       "locations": [
         {
@@ -6290,6 +6342,7 @@
     },
     {
       "consumers": [
+        "src/curiosity_resolve.c",
         "src/tests/test_curiosity.c"
       ],
       "locations": [
@@ -6300,7 +6353,7 @@
       ],
       "signature": "int db2_curiosity_update_state ( int64_t id , const char * new_state )",
       "signature_sha256": "0db3fc4ee440a431dc831780273c48e1fa56fdc8609660bdb4debaebe17e1f56",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_curiosity_update_state"
     },
     {
@@ -7021,7 +7074,8 @@
     {
       "consumers": [
         "src/tests/test_db2.c",
-        "src/tests/test_embedding_dim.c"
+        "src/tests/test_embedding_dim.c",
+        "src/tests/test_pgvec_generation_pg.c"
       ],
       "locations": [
         {
@@ -9244,6 +9298,7 @@
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_kb_vault_rotation_live.c",
         "src/tests/test_kb_vault_rotation_ops_live.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_pgvec_neardup.c",
         "src/tests/test_vault_pg.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
@@ -9449,6 +9504,7 @@
     {
       "consumers": [
         "src/kb/kb_main.c",
+        "src/kb/kb_obs_bus_adapter.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c"
       ],
@@ -21686,6 +21742,7 @@
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_memory_embed_dim_guard.c",
         "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -22822,6 +22879,7 @@
         "src/tests/test_curator_synthesize.c",
         "src/tests/test_curator_version.c",
         "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c",
         "src/tests/test_decision_log.c",
         "src/tests/test_demotion.c",
         "src/tests/test_embedding_dim.c",
@@ -22856,6 +22914,7 @@
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_planner.c",
+        "src/tests/test_policy_arms.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_reasoning.c",
         "src/tests/test_rel_types_store.c",
@@ -25476,7 +25535,9 @@
       "symbol": "pgvec_curator_narrative_upsert"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec_db3.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_db3.h",
@@ -25485,12 +25546,13 @@
       ],
       "signature": "int pgvec_db3_candidates ( const char * collection , const float * vec , int dim , const char * record_type , const char * workspace , const char * project , const pgvec_db3_filter_t * filters , int filter_count , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "e2742155d840d82a6d11ad216b5b5693107de34c674f7197b2051e9eccac0974",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_db3_candidates"
     },
     {
       "consumers": [
-        "src/tests/test_pgvec.c"
+        "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_db3.c"
       ],
       "locations": [
         {
@@ -25505,7 +25567,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_pgvec.c"
+        "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_db3.c"
       ],
       "locations": [
         {
@@ -25520,7 +25583,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_pgvec.c"
+        "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_db3.c"
       ],
       "locations": [
         {
@@ -25534,7 +25598,9 @@
       "symbol": "pgvec_db3_route_select"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec_db3.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_db3.h",
@@ -25543,7 +25609,7 @@
       ],
       "signature": "int pgvec_db3_route_serving ( const char * collection )",
       "signature_sha256": "3a37da52b56190286f5d267133f7641ca5a0efa1dd96a3b3c4e49d2e22fd869a",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_db3_route_serving"
     },
     {
@@ -25839,7 +25905,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_pgvec.c"
+        "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_generation_pg.c"
       ],
       "locations": [
         {
@@ -26107,7 +26174,9 @@
       "symbol": "pgvec_kbpdf_search"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec_generation_pg.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
@@ -26116,7 +26185,7 @@
       ],
       "signature": "int pgvec_kbpdf_upsert ( int64_t point_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "0a202cc35beafcbdb44e49d073688f2c4d9f795cca47ae6d9a276db92bdc24fd",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_kbpdf_upsert"
     },
     {
@@ -26834,15 +26903,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7bfcf3b474d29723940d162cd0294a9cd9002fa703667337ac23106ab3c50314",
+  "fingerprint": "e2da94f145ccd75b1f3b22b11c17d57f8d473b0dd461f0399652c285d2ce7d12",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 709,
+    "audit_pending": 723,
     "declarations": 1465,
     "headers": 141,
-    "internal_unconsumed": 168,
-    "private_test_only": 294,
+    "internal_unconsumed": 165,
+    "private_test_only": 283,
     "reviewed": 294
   }
 }

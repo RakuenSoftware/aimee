@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "ba1cf0dd0df4b26687d9cecfea030ebd99d72419",
+  "source_revision": "5f78eb9b05d3fb32589363b16fb4b0bb7a5679f2",
   "source_boundary": "src/modules/db2/c",
   "summary": {
-    "c_files": 141,
+    "c_files": 142,
     "headers": 141,
     "sql_files": 6,
-    "consumer_files": 313,
-    "production_consumers": 155,
-    "test_consumers": 158,
-    "include_directives": 1040,
-    "outbound_dependency_rows": 172,
-    "outbound_include_directives": 172
+    "consumer_files": 309,
+    "production_consumers": 156,
+    "test_consumers": 153,
+    "include_directives": 1036,
+    "outbound_dependency_rows": 176,
+    "outbound_include_directives": 176
   },
   "source_files": {
     "c": [
@@ -19,7 +19,6 @@
       "src/modules/db2/c/agent_hints.c",
       "src/modules/db2/c/agent_outcomes.c",
       "src/modules/db2/c/anti_patterns.c",
-      "src/modules/db2/c/approach_failures.c",
       "src/modules/db2/c/artifacts.c",
       "src/modules/db2/c/bandit.c",
       "src/modules/db2/c/calibration.c",
@@ -82,6 +81,7 @@
       "src/modules/db2/c/kb_releases.c",
       "src/modules/db2/c/kb_runtime_state.c",
       "src/modules/db2/c/kb_service_backend.c",
+      "src/modules/db2/c/kb_service_backend_context.c",
       "src/modules/db2/c/kb_service_backend_ingest.c",
       "src/modules/db2/c/kb_vectors.c",
       "src/modules/db2/c/kind_lifecycle.c",
@@ -132,6 +132,7 @@
       "src/modules/db2/c/org_vault_key_use.c",
       "src/modules/db2/c/org_vault_rewrap.c",
       "src/modules/db2/c/org_vault_rotation.c",
+      "src/modules/db2/c/pgvec_db3.c",
       "src/modules/db2/c/pgvec_kb_service.c",
       "src/modules/db2/c/pgvec_transport.c",
       "src/modules/db2/c/pgvec_verify.c",
@@ -162,7 +163,6 @@
       "src/modules/db2/c/agent_hints.h",
       "src/modules/db2/c/agent_outcomes.h",
       "src/modules/db2/c/anti_patterns.h",
-      "src/modules/db2/c/approach_failures.h",
       "src/modules/db2/c/artifacts.h",
       "src/modules/db2/c/bandit.h",
       "src/modules/db2/c/calibration.h",
@@ -274,6 +274,7 @@
       "src/modules/db2/c/org_vault_key_use.h",
       "src/modules/db2/c/org_vault_rewrap.h",
       "src/modules/db2/c/org_vault_rotation.h",
+      "src/modules/db2/c/pgvec_db3.h",
       "src/modules/db2/c/pgvec_kb_service.h",
       "src/modules/db2/c/pgvec_scope_query.h",
       "src/modules/db2/c/pgvec_transport.h",
@@ -411,6 +412,16 @@
       ]
     },
     {
+      "path": "src/curiosity_resolve.c",
+      "classification": "host-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/c/curiosity.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/dashboard_kb.c",
       "classification": "host-generated-client",
       "includes": [
@@ -485,7 +496,15 @@
           "count": 1
         },
         {
+          "header": "modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/db2_learning.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
           "count": 1
         },
         {
@@ -498,6 +517,10 @@
         },
         {
           "header": "modules/db2/c/feedback.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/mining.h",
           "count": 1
         },
         {
@@ -1547,11 +1570,31 @@
       ]
     },
     {
+      "path": "src/kb/kb_module_stage_adapters.c",
+      "classification": "kb-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/support/db2_pii_classifier.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/kb/kb_neardup.c",
       "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/artifacts.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/kb/kb_obs_bus_adapter.c",
+      "classification": "kb-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/c/kb_audit_worm.h",
           "count": 1
         }
       ]
@@ -2057,16 +2100,6 @@
       ]
     },
     {
-      "path": "src/modules/execution-policy/execution_policy.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/tool_registry.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/modules/guardrails/guardrails_semantic.c",
       "classification": "module-placement-audit",
       "includes": [
@@ -2386,7 +2419,7 @@
     },
     {
       "path": "src/modules/learning/learning_bundle.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/evidence_vectors.h",
@@ -2396,7 +2429,7 @@
     },
     {
       "path": "src/modules/learning/learning_endogeneity.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/db2_learning.h",
@@ -2406,7 +2439,7 @@
     },
     {
       "path": "src/modules/learning/learning_evidence.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/anti_patterns.h",
@@ -2452,7 +2485,7 @@
     },
     {
       "path": "src/modules/learning/learning_regret.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/db2_learning.h",
@@ -2462,7 +2495,7 @@
     },
     {
       "path": "src/modules/learning/learning_router.c",
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/artifacts.h",
@@ -3491,20 +3524,6 @@
       ]
     },
     {
-      "path": "src/tests/fuzz_memory_search.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/tests/identity_mint_live_main.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -3573,10 +3592,6 @@
           "count": 1
         },
         {
-          "header": "modules/db2/c/approach_failures.h",
-          "count": 1
-        },
-        {
           "header": "modules/db2/c/db2.h",
           "count": 1
         },
@@ -3632,20 +3647,6 @@
       "includes": [
         {
           "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/tests/test_cmd_doctor.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2.h",
           "count": 1
         },
         {
@@ -4327,11 +4328,19 @@
       ]
     },
     {
-      "path": "src/tests/test_db.c",
+      "path": "src/tests/test_curiosity_resolve.c",
       "classification": "private-implementation-test",
       "includes": [
         {
-          "header": "../modules/db2/c/db_schema.h",
+          "header": "modules/db2/c/curiosity.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_test_shim.h",
           "count": 1
         }
       ]
@@ -4685,20 +4694,6 @@
       ]
     },
     {
-      "path": "src/tests/test_feedback.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/tests/test_feedback_shadow.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -4966,6 +4961,10 @@
       "path": "src/tests/test_kb_http_grants.c",
       "classification": "private-implementation-test",
       "includes": [
+        {
+          "header": "modules/db2/c/db2_tenant.h",
+          "count": 1
+        },
         {
           "header": "modules/db2/c/write_tier_grant.h",
           "count": 1
@@ -5413,44 +5412,6 @@
       ]
     },
     {
-      "path": "src/tests/test_memory.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "../modules/db2/c/code_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/demotion.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/lifecycle.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/tests/test_memory_advanced.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -5520,28 +5481,6 @@
       "path": "src/tests/test_memory_filter.c",
       "classification": "private-implementation-test",
       "includes": [
-        {
-          "header": "modules/db2/c/db2.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/tests/test_memory_health.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "../modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/db_postgres.h",
-          "count": 1
-        },
         {
           "header": "modules/db2/c/db2.h",
           "count": 1
@@ -5713,6 +5652,10 @@
           "count": 1
         },
         {
+          "header": "../modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
           "header": "../modules/db2/c/kb_vectors.h",
           "count": 1
         },
@@ -5722,6 +5665,10 @@
         },
         {
           "header": "../modules/db2/c/memory_vectors.h",
+          "count": 1
+        },
+        {
+          "header": "../modules/db2/c/pgvec_db3.h",
           "count": 1
         },
         {
@@ -5738,6 +5685,42 @@
         },
         {
           "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_pgvec_db3.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "../modules/db2/c/pgvec_db3.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_pgvec_generation_pg.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_internal.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_schema.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/pgvec_transport.h",
           "count": 1
         }
       ]
@@ -5766,6 +5749,20 @@
         },
         {
           "header": "../modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_policy_arms.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2.h",
           "count": 1
         },
         {
@@ -5931,20 +5928,6 @@
       ]
     },
     {
-      "path": "src/tests/test_tasks.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/tests/test_tool_prompts.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -5985,20 +5968,6 @@
       ]
     },
     {
-      "path": "src/tests/test_trace_analysis.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/tests/test_typed_facts.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -6019,7 +5988,19 @@
           "count": 1
         },
         {
+          "header": "modules/db2/c/db2.h",
+          "count": 1
+        },
+        {
           "header": "modules/db2/c/db2_test_shim.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db_postgres.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_scope_query.h",
           "count": 1
         }
       ]
@@ -6214,16 +6195,6 @@
         },
         {
           "header": "modules/db2/c/db_postgres.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/tests/test_working_profile.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
           "count": 1
         }
       ]
@@ -7118,6 +7089,27 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/kb_service_backend_context.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_context.c",
+      "header": "config.h",
+      "resolved": "src/headers/config.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_context.c",
+      "header": "memory.h",
+      "resolved": "src/headers/memory.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/kb_service_backend_ingest.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -7356,6 +7348,13 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/pgvec_db3.h",
+      "header": "aimee/db2/db3_route.h",
+      "resolved": "src/modules/db2/include/aimee/db2/db3_route.h",
+      "classification": "module-public-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/pgvec_transport.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -7545,5 +7544,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "a947472ebfc16ac7d356c918ad256d69bb11cbaffbcdb0d0daa42da4febe0b0a"
+  "fingerprint": "2f68ee4660e039900bdb0586fb3000cfddef1c9fb1a67f119b16224d5d510fae"
 }
