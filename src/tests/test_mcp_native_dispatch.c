@@ -169,6 +169,7 @@ static void test_kb_federated_tool_dispatches_to_kb(void)
       printf("  SKIP: kb_federated_tool_dispatches_to_kb (set AIMEE_KB_API_URL)\n");
       return;
    }
+   agent_tools_set_effect_authorized(1);
    char *out = dispatch_tool_call("echo:echo", "{\"text\":\"kb-routed\"}", 8000);
    assert(out != NULL);
    assert(strstr(out, "echo: kb-routed") != NULL); /* plugin echoed, routed server->kb */

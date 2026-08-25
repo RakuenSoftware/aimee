@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static ti_event_t events[16];
+static ti_event_t events[64];
 static int event_count;
 
 static void capture(const ti_event_t *event, void *userdata)
@@ -149,6 +149,28 @@ static void test_effect_postcondition_is_required_for_success(void)
    assert(ti_effect_contract_finish(&effect, TI_EFFECT_FAILED, "postcondition") == 0);
 }
 
+static void test_external_authorization_and_unknown_outcome(void)
+{
+   ti_effect_contract_t effect;
+   assert(ti_effect_contract_init(&effect, "session-e", "git_pr", "origin", "{}",
+                                  TI_EFFECT_EXTERNAL_COMMUNICATION, TI_EFFECT_MODE_ENFORCE) == 0);
+   assert(ti_effect_contract_set_authorization(&effect, 1, 0) == 0);
+   assert(ti_effect_contract_set_idempotency(&effect, TI_NON_IDEMPOTENT) == 0);
+   assert(ti_effect_contract_validate(&effect, "git_pr", "origin", "{}",
+                                      TI_EFFECT_EXTERNAL_COMMUNICATION) == 0);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_REFUSED, "authorization") == 0);
+
+   assert(ti_effect_contract_init(&effect, "session-e", "git_pr", "origin", "{}",
+                                  TI_EFFECT_EXTERNAL_COMMUNICATION, TI_EFFECT_MODE_ENFORCE) == 0);
+   assert(ti_effect_contract_set_authorization(&effect, 1, 1) == 0);
+   assert(ti_effect_contract_set_idempotency(&effect, TI_NON_IDEMPOTENT) == 0);
+   assert(ti_effect_contract_validate(&effect, "git_pr", "origin", "{}",
+                                      TI_EFFECT_EXTERNAL_COMMUNICATION) == 1);
+   assert(ti_effect_contract_mark_executing(&effect) == 0);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_UNKNOWN_OUTCOME, "timeout") == 0);
+   assert(strcmp(ti_effect_state_name(effect.state), "unknown_outcome") == 0);
+}
+
 int main(void)
 {
    test_lifecycle_and_json();
@@ -157,6 +179,7 @@ int main(void)
    test_effect_contract_shadow_lifecycle();
    test_effect_contract_detects_drift();
    test_effect_postcondition_is_required_for_success();
+   test_external_authorization_and_unknown_outcome();
    ti_set_event_callback(NULL, NULL);
    puts("all turn_integrity tests passed");
    return 0;
