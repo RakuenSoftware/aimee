@@ -5,6 +5,7 @@
 #include <aimee/core/turn_integrity.h>
 
 #include <stdio.h>
+#include <string.h>
 
 static void on_turn_integrity_event(const ti_event_t *event, void *userdata)
 {
@@ -13,10 +14,11 @@ static void on_turn_integrity_event(const ti_event_t *event, void *userdata)
       return;
    char subject[192];
    char detail[768];
-   snprintf(subject, sizeof subject, "turn:%s", event->turn_id);
-   snprintf(detail, sizeof detail, "session=%s principal=%s state=%s sequence=%llu detail=%s",
-            event->session_id, event->principal, ti_turn_state_name(event->state),
-            (unsigned long long)event->sequence, event->detail);
+   int knowledge = strcmp(event->event, "knowledge.invalidated") == 0;
+   snprintf(subject, sizeof subject, "%s:%s", knowledge ? "knowledge" : "turn", event->turn_id);
+   snprintf(detail, sizeof detail, "%s=%s principal=%s state=%s sequence=%llu detail=%s",
+            knowledge ? "domain" : "session", event->session_id, event->principal,
+            ti_turn_state_name(event->state), (unsigned long long)event->sequence, event->detail);
    obs_bus_emit_durable_event(event->event, subject,
                               ti_turn_state_terminal(event->state) ? "terminal" : "observed",
                               detail);
