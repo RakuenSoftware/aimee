@@ -111,6 +111,17 @@ BEGIN
   GRANT EXECUTE ON FUNCTION kb_audit_worm_submit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
     kb_audit_worm_pending() TO aimee_kb_runtime;
 
+  -- Memory governance uses the compatibility definer, which now submits an
+  -- outbox intent rather than appending the chain in the runtime process.
+  GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_runtime;
+
+  -- Rejections are durable state, not disposable queue rows. Runtime may create
+  -- a tombstone and may deactivate it during an explicitly authorized restore,
+  -- but it must never erase the review record outright.
+  REVOKE DELETE, TRUNCATE ON memory_rejection_tombstones FROM aimee_kb_runtime;
+  GRANT SELECT, INSERT, UPDATE ON memory_rejection_tombstones TO aimee_kb_runtime;
+
   -- Every fact-graph changeset close carries a durable WORM intent in its own
   -- transaction. The C mutation API seals its own closes (fm_commit_finish); the SQL close
   -- paths -- the evidence trigger, changeset revert, document lifecycle, operator

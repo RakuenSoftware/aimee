@@ -674,10 +674,15 @@ int kb_client_memory_update(int64_t id, const char *content);
 int kb_client_memory_update_as(int64_t id, const char *content, memory_authority_t authority,
                                int64_t *new_id_out);
 
-/* Apply negative reinforcement: reduce confidence by 0.1 (floor 0.0).
- * Optional reason is recorded for audit.
+/* Reject a memory: preserve it as reviewable history, remove it from recall,
+ * and install an exact-value tombstone that blocks automatic re-extraction.
+ * Optional reason is retained with the row and mutation evidence.
  * Returns 0 on success, -1 on failure / kb unreachable. */
 int kb_client_memory_reject(int64_t id, const char *reason);
+/* Explicit operator reversal of a rejection; retires the active tombstone. */
+int kb_client_memory_restore(int64_t id);
+/* Owned JSON response from memory.review_list; caller frees. */
+char *kb_client_memory_review_list_json(const char *state, int limit);
 
 /* Read aggregate memory stats via aimee-kb.  Returns 0 on success,
  * -1 on failure / kb unreachable.  Mirrors memory_stats(). */

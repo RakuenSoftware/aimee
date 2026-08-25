@@ -52,6 +52,8 @@ const method_policy_t method_registry[] = {
      * must not fall through to the memory.* read prefix below. */
     {"memory.update", CAP_MEMORY_WRITE, "update memory content"},
     {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
+    {"memory.restore", CAP_MEMORY_ADMIN, "restore a rejected memory"},
+    {"memory.review_list", CAP_MEMORY_READ, "review visible memories"},
     /* Typed-fact corrections sit at WRITE, not the ADMIN tier memory.delete was
      * just moved to, and for exactly the reason given there: writing and
      * destroying are different privileges. None of these destroys anything.

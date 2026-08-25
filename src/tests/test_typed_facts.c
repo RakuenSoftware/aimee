@@ -181,7 +181,8 @@ int main(void)
    /* A derived assertion is visible only if every scoped memory evidence item
     * is visible in the request-local partition. */
    assert(aimee_pg_exec(db2_conn(),
-                        "INSERT INTO memories(id,key,content) VALUES(9100,'scoped','evidence');"
+                        "INSERT INTO memories(id,key,content,scope_type,scope_value)"
+                        " VALUES(9100,'scoped','evidence','project','allowed-project');"
                         "INSERT INTO memory_scopes(memory_id,scope_type,scope_value)"
                         " VALUES(9100,'project','allowed-project');"
                         "INSERT INTO fact_evidence"
