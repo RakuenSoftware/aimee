@@ -27,7 +27,8 @@ done
 curl -fsS http://127.0.0.1:18991/v1/models >/dev/null || fail "fixture provider unavailable"
 ok "deterministic provider is reachable over HTTP"
 
-AIMEE_HOME="$SCRATCH" "$REPO/aimee" agent local turn-integrity-fixture \
+client_home="$SCRATCH/client"
+AIMEE_HOME="$client_home" "$REPO/aimee" agent local turn-integrity-fixture \
   http://127.0.0.1:18991/v1 --model turn-integrity-fixture --slots 1 --ctx 32768 \
   --timeout-ms 5000 --no-probe --no-fallback >/dev/null
 ok "fixture model registered through the live server"
@@ -137,9 +138,9 @@ grep -q 'aimee-freshness' "$provider_log" || \
 ok "live invalidation produced a stale-knowledge instruction on the next turn"
 
 # Run and store a real evaluation against the registered fixture model.
-AIMEE_HOME="$SCRATCH" "$REPO/aimee" eval run \
+AIMEE_HOME="$client_home" "$REPO/aimee" eval run \
   "$REPO/scripts/fixtures/turn-integrity-eval" --seed 4242 >/dev/null
-eval_json="$(AIMEE_HOME="$SCRATCH" "$REPO/aimee" --json eval results \
+eval_json="$(AIMEE_HOME="$client_home" "$REPO/aimee" --json eval results \
   "$REPO/scripts/fixtures/turn-integrity-eval")"
 [[ "$eval_json" == *'turn integrity live fixture'* ]] || fail "stored eval row missing"
 ok "live benchmark execution stored its result"
