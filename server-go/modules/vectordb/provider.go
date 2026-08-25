@@ -23,7 +23,7 @@ const maxBatch = 256
 // Every authority decision stays in DB2: this answers with opaque point ids and
 // scores and nothing else.
 type Provider struct {
-	index *Index
+	backend Backend
 	// collection is the namespace this provider serves.
 	//
 	// The DB3 search request has no collection field — only a record_type,
@@ -65,8 +65,17 @@ type Provider struct {
 
 // NewProvider builds a provider serving one collection out of an index.
 func NewProvider(index *Index, collection string) *Provider {
+	return NewProviderWithBackend(NewMemoryBackend(index), collection)
+}
+
+// NewProviderWithBackend builds a provider over any store.
+//
+// This is the constructor a deployment uses: which vector store sits behind the
+// DB3 contract is a deployment choice, and the provider is the same module
+// either way.
+func NewProviderWithBackend(backend Backend, collection string) *Provider {
 	return &Provider{
-		index: index, collection: collection, applied: map[uint64]bool{},
+		backend: backend, collection: collection, applied: map[uint64]bool{},
 		updates: make(chan db3.Capabilities, 1),
 	}
 }
@@ -78,11 +87,11 @@ func NewProvider(index *Index, collection string) *Provider {
 // provider's readiness is a fact about its backing store and not a constant.
 func (p *Provider) Capabilities() db3.Capabilities {
 	return db3.Capabilities{
-		Generation:   p.index.Generation(),
+		Generation:   p.generation(),
 		Operations:   db3.OperationSearch | db3.OperationApply,
 		Metrics:      p.metricSet(),
 		Filters:      db3.FilterExact,
-		MaxDimension: uint32(p.index.dimension),
+		MaxDimension: uint32(p.backend.Dimension()),
 		MaxBatch:     maxBatch,
 		MaxTopK:      db3.MaxTopK,
 		Ready:        true,
@@ -90,7 +99,7 @@ func (p *Provider) Capabilities() db3.Capabilities {
 }
 
 func (p *Provider) metricSet() db3.MetricSet {
-	switch p.index.metric {
+	switch p.backend.Metric() {
 	case L2:
 		return db3.MetricL2
 	case Dot:
@@ -111,14 +120,14 @@ func (p *Provider) Search(ctx context.Context, request db3.SearchRequest) (db3.S
 	if request.RequestID == 0 || request.TopK == 0 || len(request.Vector) == 0 {
 		return db3.SearchReply{}, db3.SearchFailureInvalidRequest
 	}
-	if len(request.Vector) != p.index.dimension {
+	if len(request.Vector) != p.backend.Dimension() {
 		return db3.SearchReply{}, db3.SearchFailureInvalidRequest
 	}
 	if err := ctx.Err(); err != nil {
 		return db3.SearchReply{}, db3.SearchFailureRetryable
 	}
 
-	generation := p.index.Generation()
+	generation := p.generation()
 	if request.RequiredGeneration > generation {
 		return db3.SearchReply{}, db3.SearchFailureRetryable
 	}
@@ -129,7 +138,14 @@ func (p *Provider) Search(ctx context.Context, request db3.SearchRequest) (db3.S
 	// even after refusing to return their content.
 	filters := scopeFilters(request)
 
-	candidates := p.index.Search(p.collection, request.Vector, int(request.TopK), filters)
+	candidates, err := p.backend.Search(ctx, p.collection, request.Vector, int(request.TopK), filters)
+	if err != nil {
+		// A backend that could not answer must not look like a corpus with no
+		// hits. Retryable rather than internal: a remote store is usually
+		// briefly unreachable rather than wrong, and DB2 falls back to pgvector
+		// either way.
+		return db3.SearchReply{}, db3.SearchFailureRetryable
+	}
 	return db3.SearchReply{
 		RequestID:  request.RequestID,
 		Generation: generation,
@@ -179,15 +195,21 @@ func (p *Provider) Apply(ctx context.Context, apply db3.Apply) db3.ProviderApply
 
 	switch apply.Kind {
 	case db3.ApplyUpsert:
-		if err := p.index.Upsert(apply.Collection, apply.PointID, apply.Vector, apply.Labels); err != nil {
+		if err := p.backend.Upsert(ctx, apply.Collection, apply.PointID, apply.Vector, apply.Labels); err != nil {
 			// A dimension mismatch is the caller's error and will never
 			// succeed on retry, so it is rejected rather than deferred.
 			return db3.ProviderApplyOutcome{Result: db3.AppliedRejected}
 		}
 	case db3.ApplyDelete:
-		p.index.Delete(apply.Collection, apply.PointID)
+		if err := p.backend.Delete(ctx, apply.Collection, apply.PointID); err != nil {
+			// Unlike a dimension mismatch, a store that was unreachable will
+			// succeed on redelivery, so the outbox must retry rather than skip.
+			return db3.ProviderApplyOutcome{Result: db3.AppliedRetryable}
+		}
 	case db3.ApplyTombstone:
-		p.index.Tombstone(apply.Collection, apply.PointID)
+		if err := p.backend.Tombstone(ctx, apply.Collection, apply.PointID); err != nil {
+			return db3.ProviderApplyOutcome{Result: db3.AppliedRetryable}
+		}
 	default:
 		return db3.ProviderApplyOutcome{Result: db3.AppliedRejected}
 	}
@@ -247,9 +269,9 @@ func (p *Provider) advanceLocked() uint64 {
 	for p.applied[p.contiguous+1] {
 		p.contiguous++
 	}
-	p.index.mu.Lock()
-	p.index.watermark = p.contiguous
-	p.index.mu.Unlock()
+	if memory, ok := p.backend.(*MemoryBackend); ok {
+		memory.setWatermark(p.contiguous)
+	}
 	return p.contiguous
 }
 
@@ -271,4 +293,19 @@ func (p *Provider) Run(ctx context.Context, client *bus.Client) error {
 		Search:            p.Search,
 		Apply:             p.Apply,
 	})
+}
+
+// generation reads the backend's version, treating an error as "no generation".
+//
+// Zero is not a valid generation on the wire, so a store that cannot report one
+// makes the provider advertise itself as having none -- which the router reads
+// as not ready, and no search is sent. That is the safe direction: answering at
+// a guessed generation would have DB2 accept results from a store whose version
+// it does not actually know.
+func (p *Provider) generation() uint64 {
+	generation, err := p.backend.Generation(context.Background())
+	if err != nil {
+		return 0
+	}
+	return generation
 }

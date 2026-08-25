@@ -11,6 +11,7 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db3"
 	"github.com/JBailes/aimee/server-go/modules/vectordb"
+	"github.com/JBailes/aimee/server-go/modules/vectordb/qdrant"
 )
 
 // DB3 vector providers run out of this multicall, like plugin instances and for
@@ -45,6 +46,11 @@ type db3ProviderConfig struct {
 	collection string
 	dimension  int
 	metric     vectordb.Metric
+	// backend names the store. "memory" is in-process and loses everything on
+	// restart, which makes it right for a smoke test and wrong for anything
+	// else; it is the default only because it needs no external service.
+	backend string
+	qdrant  qdrant.Config
 }
 
 func db3MetricFromEnv(raw string) (vectordb.Metric, error) {
@@ -96,7 +102,36 @@ func db3ProviderConfigFromEnv(instance string) (db3ProviderConfig, error) {
 	if err != nil {
 		return config, err
 	}
+
+	config.backend = strings.ToLower(strings.TrimSpace(os.Getenv("AIMEE_DB3_BACKEND")))
+	switch config.backend {
+	case "", "memory":
+		config.backend = "memory"
+	case "qdrant":
+		config.qdrant = qdrant.Config{
+			URL:              strings.TrimSpace(os.Getenv("AIMEE_DB3_QDRANT_URL")),
+			APIKey:           os.Getenv("AIMEE_DB3_QDRANT_API_KEY"),
+			CollectionPrefix: strings.TrimSpace(os.Getenv("AIMEE_DB3_QDRANT_PREFIX")),
+			Dimension:        config.dimension,
+			Metric:           config.metric,
+		}
+		if config.qdrant.URL == "" {
+			return config, fmt.Errorf("AIMEE_DB3_QDRANT_URL is unset; the qdrant backend needs an address")
+		}
+	default:
+		return config, fmt.Errorf("AIMEE_DB3_BACKEND=%q is not memory or qdrant", config.backend)
+	}
 	return config, nil
+}
+
+// newBackend builds the store this instance was configured for.
+func newBackend(config db3ProviderConfig) (vectordb.Backend, error) {
+	switch config.backend {
+	case "qdrant":
+		return qdrant.New(config.qdrant)
+	default:
+		return vectordb.NewMemoryBackend(vectordb.NewIndex(config.metric, config.dimension)), nil
+	}
 }
 
 // runDB3Provider attaches as a vector provider and serves until ctx ends.
@@ -113,9 +148,14 @@ func runDB3Provider(ctx context.Context, instance, socketPath string) error {
 	}
 	defer client.Detach()
 
-	index := vectordb.NewIndex(config.metric, config.dimension)
-	provider := vectordb.NewProvider(index, config.collection)
-	log.Printf("db3 provider %s: serving collection %q at %d dimensions as principal %d",
-		instance, config.collection, config.dimension, config.ref)
+	backend, err := newBackend(config)
+	if err != nil {
+		return fmt.Errorf("db3 provider %s: %w", instance, err)
+	}
+	defer backend.Close()
+
+	provider := vectordb.NewProviderWithBackend(backend, config.collection)
+	log.Printf("db3 provider %s: serving collection %q at %d dimensions from the %s backend as principal %d",
+		instance, config.collection, config.dimension, config.backend, config.ref)
 	return provider.Run(ctx, client)
 }

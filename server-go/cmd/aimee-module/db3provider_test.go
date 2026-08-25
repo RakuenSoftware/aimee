@@ -118,3 +118,50 @@ func TestDB3ProviderBandMatchesTheWireContract(t *testing.T) {
 		t.Fatal("ProviderRefLimit is accepted; the band is inclusive at the top")
 	}
 }
+
+func TestDB3ProviderSelectsItsBackend(t *testing.T) {
+	t.Setenv("AIMEE_MODULE_PRINCIPAL_REF", "456")
+	t.Setenv("AIMEE_DB3_COLLECTION", "memory")
+	t.Setenv("AIMEE_DB3_DIMENSION", "384")
+
+	// Default is in-process, because it needs no external service. It is right
+	// for a smoke test and wrong for anything else, which is why the log names
+	// which backend is serving.
+	t.Setenv("AIMEE_DB3_BACKEND", "")
+	config, err := db3ProviderConfigFromEnv("probe")
+	if err != nil || config.backend != "memory" {
+		t.Fatalf("default backend = %q (%v), want memory", config.backend, err)
+	}
+
+	// Qdrant needs an address, and a missing one is refused rather than
+	// defaulted to localhost: a provider silently pointed at the wrong store
+	// answers confidently from an empty one.
+	t.Setenv("AIMEE_DB3_BACKEND", "qdrant")
+	t.Setenv("AIMEE_DB3_QDRANT_URL", "")
+	if _, err := db3ProviderConfigFromEnv("probe"); err == nil {
+		t.Error("the qdrant backend was accepted with no URL")
+	}
+
+	t.Setenv("AIMEE_DB3_QDRANT_URL", "http://127.0.0.1:6333")
+	config, err = db3ProviderConfigFromEnv("probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.backend != "qdrant" || config.qdrant.URL != "http://127.0.0.1:6333" {
+		t.Fatalf("qdrant config = %+v", config.qdrant)
+	}
+	// The store must be built at the same width and metric the provider
+	// advertises, or DB2 is told one thing and answered by another.
+	if config.qdrant.Dimension != config.dimension || config.qdrant.Metric != config.metric {
+		t.Errorf("qdrant width/metric %d/%v disagree with the provider's %d/%v",
+			config.qdrant.Dimension, config.qdrant.Metric, config.dimension, config.metric)
+	}
+	if _, err := newBackend(config); err != nil {
+		t.Errorf("building the qdrant backend: %v", err)
+	}
+
+	t.Setenv("AIMEE_DB3_BACKEND", "milvus")
+	if _, err := db3ProviderConfigFromEnv("probe"); err == nil {
+		t.Error("an unimplemented backend name was accepted")
+	}
+}
