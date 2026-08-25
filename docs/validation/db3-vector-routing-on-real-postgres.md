@@ -12,14 +12,18 @@ returns an error value and the tests only assert that nothing crashes. A
 reduction that is wrong looks exactly as green under the shim as one that is
 right.
 
-This is the record of running the work on a container with real PostgreSQL 17
-and pgvector, and of the three defects that found.
+This is the record of running the work on containers with real PostgreSQL 17
+and pgvector, and of what that found: three defects that every existing check
+called green, one whole half of the routed path with no coverage at all, and a
+build edge that fourteen fixtures were missing.
 
 ## What was used
 
 - **Host**: Proxmox `pvetest` at 192.168.1.252, `pve-manager/9.2.6`.
-- **Container**: CT 9100 `aimee-db3-verify`, created for this and destroyed
-  afterwards. Debian 13 standard, unprivileged, DHCP, 6 cores / 12GB / 32GB.
+- **Containers**: CT 9100 `aimee-db3-verify` for the suites, and CT 9101
+  `aimee-gen-verify` for the write-path fixture. Both created for this and
+  destroyed afterwards. Debian 13 standard, unprivileged, DHCP, 6 cores / 12GB /
+  32GB.
 - **Database**: PostgreSQL 17.11 with `vector` 0.8.0 and `pg_trgm` 1.6, local to
   the container. Nothing pointed at a shared or production instance.
 - **Toolchain**: gcc 14.2, Go 1.24.4, clang-format 19, all from Debian.
@@ -29,6 +33,7 @@ and pgvector, and of the three defects that found.
 The harness is `scripts/validation/db3/`. `provision-container.sh` builds the
 container, `pg-setup.sh` creates the template database, `run-pg-tests.sh` runs
 the C suite against libpq, `run-go-e2e.sh` runs the Go suite and the bus proof,
+`run-generation-test.sh` runs the write-path fixture on a database of its own,
 and `code_verify.sql` is the equivalence check described below.
 
 ## What it found
@@ -84,6 +89,35 @@ excluding both a stale generation and an orphan, and re-applying the schema over
 a database that predated the `generation` column added it, backfilled it from
 `kb_documents`, and was idempotent.
 
+## The write half, which had nothing at all
+
+Everything above is about the READ side. The routed search only answers
+correctly if the embedding row carries the right generation in the first place,
+and nothing checked that it does: the one test touching `pgvec_kb_upsert`
+asserts it returns 0 or -1 and does not crash, and never looks at the row.
+
+That gap fails silently in the worst way. A NULL generation matches no filter,
+so a routed kb search returns nothing and reads as a corpus with no hits rather
+than a broken write.
+
+`unit-test-pgvec-generation-pg` closes it, driven by `run-generation-test.sh` on
+its own database. Against PostgreSQL 17 with pgvector 0.8.0, at the 384
+dimensions the schema was applied at, for both `kb_embeddings` and
+`kb_pdf_embeddings`:
+
+- the generation that lands is the document's, through a statement that binds
+  `:point_id` twice and relies on the parameter rewriter mapping a repeated name
+  to one `$N`
+- re-upserting after the document moves to a new generation carries the new
+  value through `ON CONFLICT`
+- a point with no `kb_documents` row takes NULL rather than failing or
+  defaulting
+
+Its first run failed, and the fault was the test rather than the code: it used a
+four-float vector, and the vector column's width is fixed when the schema is
+APPLIED. Worth recording, because a fixture that picks its own dimension will
+fail this way against any real database.
+
 ## Traps this harness records
 
 Two of them cost real time, and both produce failures that look like code
@@ -105,6 +139,16 @@ executes an empty file and reports a failure that is entirely self-inflicted.
 parallel makes in it corrupt each other's objects.
 
 ## What is still not proven here
+
+**No test drives the whole path.** Ingest, embed, then a routed search returning
+correct rows from a real external provider over real pgvector data is still
+inferred from parts rather than observed, because each half is tested against a
+fake of the other: `routed_test.go` has a real router and a real provider but a
+stub pgvector fallback, `TestDB3GoProvidersOperateOverAuthenticatedCBus` has a
+real bus and real providers but a fake search function, and `code_verify.sql`
+has real pgvector but is SQL rather than the C that generates it. Closing this
+means standing aimee-kb up with a provisioned provider, the shape
+`docs/validation/aimee-module-on-a-clean-container.md` already uses.
 
 The `unit-test-agent` failure seen on the developer's machine does not reproduce
 in the container, so it is environmental rather than a defect, but its cause is
