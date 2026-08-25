@@ -95,6 +95,18 @@ class WormWorkerBoundaryTest(unittest.TestCase):
             "roles: missing worker membership-edge repair", CHECK.audit(**data)
         )
 
+    def test_embedded_worker_public_inheritance_is_rejected(self) -> None:
+        data = sources()
+        data["entrypoint"] = data["entrypoint"].replace(
+            "REVOKE USAGE ON SCHEMA public FROM PUBLIC;",
+            "REVOKE USAGE ON SCHEMA public FROM aimee_kb_worm_worker;",
+            1,
+        )
+        self.assertIn(
+            "entrypoint: embedded worker inherits public schema access",
+            CHECK.audit(**data),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

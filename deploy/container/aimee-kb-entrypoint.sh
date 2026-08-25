@@ -413,6 +413,12 @@ SQL
             done
             process_alive "$kb" || exit 1
             "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet >/dev/null <<'SQL'
+  -- Revoking the role itself is not enough: PostgreSQL grants schema public
+  -- USAGE to PUBLIC by default, and privileges inherited through PUBLIC cannot
+  -- be denied per-role.  The embedded cluster's database owner retains access
+  -- through pg_database_owner; close the inherited path before asserting that
+  -- the worker can resolve only its private API schema.
+  REVOKE USAGE ON SCHEMA public FROM PUBLIC;
   REVOKE ALL ON SCHEMA public FROM aimee_kb_worm_worker;
   REVOKE ALL ON SCHEMA aimee_kb_worm_api FROM PUBLIC;
   GRANT USAGE ON SCHEMA aimee_kb_worm_api TO aimee_kb_worm_worker;
@@ -503,6 +509,15 @@ SQL
     if [ "$first" = worm ]; then
         echo "aimee-kb: WORM audit worker exited; restarting the KB container as one unit" >&2
         kill -TERM "$kb" 2>/dev/null || true
+        _stop_ticks=0
+        while process_alive "$kb" && [ "$_stop_ticks" -lt 50 ]; do
+            sleep 0.1
+            _stop_ticks=$((_stop_ticks + 1))
+        done
+        if process_alive "$kb"; then
+            echo "aimee-kb: KB did not stop after 5s following WORM worker exit; forcing shutdown" >&2
+            kill -KILL "$kb" 2>/dev/null || true
+        fi
         wait "$kb" 2>/dev/null || true
         wait "$worm" 2>/dev/null || true
         exit 1

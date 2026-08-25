@@ -99,6 +99,8 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
         failures.append("Dockerfile: WORM worker is not packaged")
     if 'exec env AIMEE_WORM_DB2_URL="$embedded_worm_dsn" aimee-kb-worm' not in entrypoint:
         failures.append("entrypoint: self-contained tier does not supervise a separate worker")
+    if "REVOKE USAGE ON SCHEMA public FROM PUBLIC;" not in entrypoint:
+        failures.append("entrypoint: embedded worker inherits public schema access")
     if 'entrypoint: ["/usr/local/bin/aimee-kb-worm"]' not in compose:
         failures.append("compose: hardened worker does not replace the KB entrypoint")
 
