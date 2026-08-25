@@ -8,6 +8,11 @@ aimee-forwarder
 /aimee-kb
 /aimee-witness-verify
 /aimee-kb-resolver
+# `make all` builds this beside the six above and it was the one left out, so a
+# built tree always showed one untracked binary -- the same shape as the note
+# below, which records that a `git add -A` over exactly this gap committed
+# artifacts once already.
+/aimee-delegate-egress
 # Provisioning and authority binaries. These were absent, so a `git add -A` after
 # building them committed the artifacts — which is exactly what happened once.
 /aimee-kb-jwks-publish
