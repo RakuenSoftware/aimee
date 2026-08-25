@@ -1610,8 +1610,8 @@ int db2_memory_delete_row(int64_t memory_id)
 
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "DELETE FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id"),
-       err, sizeof(err));
+       conn, "DELETE FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id"), err,
+       sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", memory_id);
@@ -1631,11 +1631,11 @@ int db2_memory_get(int64_t memory_id, memory_t *out)
    if (!conn)
       return -1;
 
-   static const char *sql = "SELECT id, tier, kind, key, content, confidence, use_count,"
-                            "       last_used_at, created_at, updated_at, source_session, salience,"
-                            "       provenance_category, use_cases"
-                            "  FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL(
-                                "memories.id");
+   static const char *sql =
+       "SELECT id, tier, kind, key, content, confidence, use_count,"
+       "       last_used_at, created_at, updated_at, source_session, salience,"
+       "       provenance_category, use_cases"
+       "  FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id");
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

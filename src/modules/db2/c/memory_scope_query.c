@@ -95,8 +95,7 @@ int db2_memory_scope_context_rank(int64_t memory_id)
       return 0;
    char err[MSQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT scope_type,scope_value FROM memories WHERE id=?1",
-       err, sizeof(err));
+       conn, "SELECT scope_type,scope_value FROM memories WHERE id=?1", err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", memory_id);
