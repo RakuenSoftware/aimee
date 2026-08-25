@@ -34,6 +34,8 @@
 #                 every service and enrolled identity remains live. The probe
 #                 receives scratch paths, endpoints, credentials, and PIDs in
 #                 its environment.                         (optional)
+#   AIMEE_E2E_TURN_INTEGRITY_MCP=1 configures the repository's deterministic
+#                 timeout MCP fixture as a server-owned client. (default 0)
 #
 # Exit code: 0 = all checks passed.
 
@@ -111,6 +113,18 @@ sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/" \
 sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
     deploy/container/aimee.yaml >> "$AIMEE_HOME/aimee.yaml"
 chmod 0600 "$AIMEE_HOME/aimee.yaml"
+if [[ "${AIMEE_E2E_TURN_INTEGRITY_MCP:-0}" == "1" ]]; then
+  cat >>"$AIMEE_HOME/aimee.yaml" <<YAML
+
+mcp_clients:
+  - name: ti_remote
+    transport: stdio
+    install: server
+    command:
+      - python3
+      - ${REPO}/scripts/fixtures/turn-integrity-mcp.py
+YAML
+fi
 # Optional: point memory embedding at a REAL small embedder so the semantic
 # vector path is actually exercised (see scripts/test-embedder-qwen.sh, which
 # serves Qwen3-Embedding-0.6B at 1024-d). Without this the kb falls back to the

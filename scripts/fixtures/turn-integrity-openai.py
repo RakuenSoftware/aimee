@@ -38,6 +38,8 @@ def response_for(body):
             content = "TURN_INTEGRITY_EMPTY_OBSERVED"
         elif "TI_GIT_PUSH" in wire:
             content = "TURN_INTEGRITY_PUSH_OBSERVED"
+        elif "TI_MCP_TIMEOUT" in wire:
+            content = "TURN_INTEGRITY_UNKNOWN_OUTCOME_OBSERVED"
         return completion(content)
 
     name = None
@@ -58,6 +60,9 @@ def response_for(body):
     elif "TI_GIT_PUSH" in wire:
         name = "git_push"
         args = {}
+    elif "TI_MCP_TIMEOUT" in wire:
+        name = "ti_remote:mutate"
+        args = {"request": "turn-integrity-live-mutation"}
 
     if not name:
         return completion("TURN_INTEGRITY_FIXTURE_DONE")
