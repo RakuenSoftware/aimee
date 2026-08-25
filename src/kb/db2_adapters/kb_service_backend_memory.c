@@ -764,6 +764,55 @@ cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason)
    return resp;
 }
 
+cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (db2_memory_restore(id, actor ? actor : "") != 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "failed to restore memory");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return resp;
+}
+
+cJSON *db2_kb_service_memory_review_list_json(const char *state, int limit)
+{
+   if (limit <= 0 || limit > 64)
+      limit = 64;
+   db2_memory_review_row_t rows[64];
+   int n = db2_memory_review_list(state ? state : "", limit, rows, 64);
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *items = resp ? cJSON_AddArrayToObject(resp, "memories") : NULL;
+   if (!resp || !items || n < 0)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddNumberToObject(o, "id", (double)rows[i].id);
+      cJSON_AddStringToObject(o, "tier", rows[i].tier);
+      cJSON_AddStringToObject(o, "kind", rows[i].kind);
+      cJSON_AddStringToObject(o, "key", rows[i].key);
+      cJSON_AddStringToObject(o, "content", rows[i].content);
+      cJSON_AddNumberToObject(o, "confidence", rows[i].confidence);
+      cJSON_AddStringToObject(o, "lifecycle", rows[i].lifecycle_state);
+      cJSON_AddStringToObject(o, "review_reason", rows[i].review_reason);
+      cJSON_AddStringToObject(o, "scope_type", rows[i].scope_type);
+      cJSON_AddStringToObject(o, "scope_value", rows[i].scope_value);
+      cJSON_AddStringToObject(o, "created_at", rows[i].created_at);
+      cJSON_AddStringToObject(o, "updated_at", rows[i].updated_at);
+      cJSON_AddItemToArray(items, o);
+   }
+   return resp;
+}
+
 cJSON *db2_kb_service_memory_stats_json(void)
 {
    cJSON *resp = cJSON_CreateObject();

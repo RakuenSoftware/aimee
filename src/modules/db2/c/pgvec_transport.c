@@ -603,7 +603,7 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    int has_scope = (workspace && workspace[0]) || (project && project[0]);
    if (scope_ctx.active)
    {
-      int nw = snprintf(where + wpos, sizeof(where) - wpos, "%s", PGVEC_MEMORY_SCOPE_FILTER_SQL);
+      int nw = snprintf(where + wpos, sizeof(where) - wpos, "%s", PGVEC_MEMORY_RECALL_FILTER_SQL);
       if (nw < 0 || (size_t)nw >= sizeof(where) - wpos)
       {
          free(vec_text);

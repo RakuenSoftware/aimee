@@ -553,6 +553,38 @@ int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe
    return n;
 }
 
+int db2_memory_rejection_blocks(const char *key, const char *content)
+{
+   if (!key)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   db2_memory_scope_context_t scope;
+   db2_memory_scope_context_get(&scope);
+   const char *scope_type = scope.project[0]     ? "project"
+                            : scope.workspace[0] ? "workspace"
+                                                 : "global";
+   const char *scope_value = scope.project[0]     ? scope.project
+                             : scope.workspace[0] ? scope.workspace
+                                                  : "_global";
+   char err[MSF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT 1 FROM memory_rejection_tombstones WHERE object_kind='memory' AND active=1"
+       " AND memory_key=?1 AND memory_content=?2 AND scope_type=?3 AND scope_value=?4 LIMIT 1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", key);
+   aimee_pg_bind_text(st, "?2", content ? content : "");
+   aimee_pg_bind_text(st, "?3", scope_type);
+   aimee_pg_bind_text(st, "?4", scope_value);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_ROW ? 1 : step == AIMEE_PG_DONE ? 0 : -1;
+}
+
 int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
                                            const char *epistemic_kind, const char *key,
                                            const char *content, const char *use_cases,
@@ -566,13 +598,24 @@ int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
    void *conn = db2_conn();
    if (!conn)
       return -1;
+   db2_memory_scope_context_t scope;
+   db2_memory_scope_context_get(&scope);
+   const char *scope_type = scope.project[0]     ? "project"
+                            : scope.workspace[0] ? "workspace"
+                                                 : "global";
+   const char *scope_value = scope.project[0]     ? scope.project
+                             : scope.workspace[0] ? scope.workspace
+                                                  : "_global";
+   if (db2_memory_rejection_blocks(key, content) != 0)
+      return -1;
    /* Postgres replaces sqlite's last_insert_rowid() with INSERT ... RETURNING id. */
    static const char *sql =
        "INSERT INTO memories (tier, kind, key, content, use_cases, confidence,"
        " use_count, last_used_at, source_session, created_at,"
        " updated_at, sensitivity, evidence_strength, salience, surprise, observation_count,"
-       " provenance_category, epistemic_kind)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15, ?16)"
+       " provenance_category, epistemic_kind, scope_type, scope_value)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15, ?16, ?17, "
+       "?18)"
        " RETURNING id";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -602,6 +645,8 @@ int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
                       (provenance_category && provenance_category[0]) ? provenance_category
                                                                       : "agent_message");
    aimee_pg_bind_text(st, "?16", epistemic_kind);
+   aimee_pg_bind_text(st, "?17", scope_type);
+   aimee_pg_bind_text(st, "?18", scope_value);
    int64_t new_id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
@@ -995,35 +1040,35 @@ int db2_memory_list_kv_section(db2_memory_section_t section, db2_memory_kv_row_t
    case DB2_MEM_SECTION_ACTIVE_TASKS:
       sql = "SELECT m.key, m.content FROM memories m"
             " WHERE (m.tier = 'L1' OR m.tier = 'L2') AND m.kind = "
-            "'task'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "'task'" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, m.updated_at DESC LIMIT ?1";
       break;
    case DB2_MEM_SECTION_RECENT_CONTEXT:
       sql = "SELECT m.key, m.content FROM memories m"
-            " WHERE m.tier = 'L1' AND m.kind = 'episode'" DB2_MEMORY_SCOPE_FILTER_SQL(
+            " WHERE m.tier = 'L1' AND m.kind = 'episode'" DB2_MEMORY_RECALL_FILTER_SQL(
                 "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.created_at DESC "
                                                                        "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_CONSTRAINTS:
-      sql =
-          "SELECT m.key, m.content FROM memories m"
-          " WHERE (m.tier = 'L2' OR m.tier = 'L3')"
-          " AND (m.kind = 'decision' OR (m.kind = 'policy' AND"
-          " (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)))" DB2_MEMORY_SCOPE_FILTER_SQL(
-              "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC "
-                                                                     "LIMIT ?1";
+      sql = "SELECT m.key, m.content FROM memories m"
+            " WHERE (m.tier = 'L2' OR m.tier = 'L3')"
+            " AND (m.kind = 'decision' OR (m.kind = 'policy' AND"
+            " (m.epistemic_kind<>'policy' OR "
+            "m.governance_promoted<>0)))" DB2_MEMORY_RECALL_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC "
+                                                                       "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_PROCEDURES:
       sql =
           "SELECT m.key, m.content FROM memories m"
           " WHERE (m.tier = 'L1' OR m.tier = 'L2') AND m.kind = "
-          "'procedure'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+          "'procedure'" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
               "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
       break;
    case DB2_MEM_SECTION_FAILURE_WARNINGS:
       sql = "SELECT m.key, m.content FROM memories m"
             " WHERE m.tier = 'L3' AND m.kind = 'episode' AND m.confidence > "
-            "0.3" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "0.3" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, m.created_at DESC LIMIT ?1";
       break;
    default:
@@ -1059,7 +1104,7 @@ int db2_memory_list_episode_cards(db2_memory_episode_card_row_t *rows, int max)
    static const char *sql =
        "SELECT m.content FROM memories m"
        " JOIN memory_units u ON u.memory_id = m.id"
-       " WHERE u.is_episode_card = 1" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " WHERE u.is_episode_card = 1" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, m.id "
                                                                   "DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
@@ -1090,7 +1135,7 @@ int db2_memory_list_global_constraints(db2_memory_kv_row_t *rows, int max)
        "SELECT m.key, m.content FROM memories m"
        " WHERE m.kind IN ('preference', 'policy')"
        " AND (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)"
-       " AND m.tier IN ('L1', 'L2', 'L3', 'L4')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " AND m.tier IN ('L1', 'L2', 'L3', 'L4')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
                                                                   "m.use_count DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
@@ -1258,7 +1303,7 @@ int db2_memory_list_key_facts_with_provenance(db2_memory_key_fact_row_t *rows, i
        "  WHERE p.memory_id = m.id ORDER BY p.created_at DESC LIMIT 1) AS provenance"
        " FROM memories m"
        " WHERE m.tier IN ('L2', 'L3') AND (m.kind = 'fact' OR m.kind = "
-       "'preference')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+       "'preference')" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
            "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -1327,15 +1372,16 @@ int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_
       sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
             " COALESCE(m.last_used_at, ''), m.created_at"
             " FROM memories m WHERE m.tier IN ('L1', 'L2', 'L3', 'L4', "
-            "'L5')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "'L5')" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
       break;
    case DB2_MEM_CAND_FALLBACK:
-      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
-            " COALESCE(m.last_used_at, ''), m.created_at"
-            " FROM memories m WHERE m.tier IN ('L0', 'L1', 'L2', 'L4')" DB2_MEMORY_SCOPE_FILTER_SQL(
-                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
-                                                                       "m.use_count DESC LIMIT ?1";
+      sql =
+          "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
+          " COALESCE(m.last_used_at, ''), m.created_at"
+          " FROM memories m WHERE m.tier IN ('L0', 'L1', 'L2', 'L4')" DB2_MEMORY_RECALL_FILTER_SQL(
+              "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
+                                                                     "m.use_count DESC LIMIT ?1";
       break;
    default:
       return 0;
@@ -1474,19 +1520,20 @@ int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memo
             " AND m.kind = 'fact'"
             " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != 'superseded'"
             " AND (m.key LIKE 'identity:%' OR m.key LIKE 'name:%' OR m.key LIKE 'role:%'"
-            "      OR m.key LIKE 'user:%' OR m.key LIKE 'self:%')" DB2_MEMORY_SCOPE_FILTER_SQL(
+            "      OR m.key LIKE 'user:%' OR m.key LIKE 'self:%')" DB2_MEMORY_RECALL_FILTER_SQL(
                 "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
                                                                        "m.evidence_strength DESC, "
                                                                        "m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_PREFERENCES:
-      sql =
-          "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
-          " WHERE m.tier IN ('L2','L3','L4','L5')"
-          " AND m.kind = 'preference'"
-          " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != "
-          "'superseded'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
-              "m.id") " DESC, m.confidence DESC, m.observation_count DESC, m.id DESC LIMIT ?1";
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
+            " WHERE m.tier IN ('L2','L3','L4','L5')"
+            " AND m.kind = 'preference'"
+            " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != "
+            "'superseded'" DB2_MEMORY_RECALL_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
+                                                                       "m.observation_count DESC, "
+                                                                       "m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_ACTIVE_CONTEXT:
       sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
@@ -1495,7 +1542,7 @@ int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memo
             " AND (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)"
             " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != 'superseded'"
             " AND COALESCE(m.last_used_at, m.updated_at) >= pg_now_text('-7 "
-            "days')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "days')" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, COALESCE(m.last_used_at, m.updated_at) DESC, m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_OPEN_COMMITMENTS:

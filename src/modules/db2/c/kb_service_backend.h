@@ -280,6 +280,8 @@ extern "C"
    cJSON *db2_kb_service_memory_touch_json(int64_t id);
    cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
+   cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor);
+   cJSON *db2_kb_service_memory_review_list_json(const char *state, int limit);
    cJSON *db2_kb_service_memory_stats_json(void);
    cJSON *db2_kb_service_memory_list_conflicts_json(int max);
    cJSON *db2_kb_service_memory_query_health_json(void);
@@ -313,10 +315,11 @@ extern "C"
                                                const char *content, const char *use_cases,
                                                double confidence, const char *session_id,
                                                int authority);
-   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(
-       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
-       const char *content, const char *use_cases, double confidence, const char *session_id,
-       int authority);
+   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
+                                                         const char *epistemic_kind,
+                                                         const char *key, const char *content,
+                                                         const char *use_cases, double confidence,
+                                                         const char *session_id, int authority);
    cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
    /* `authority` is the typed-fact write authority for the §4 retraction this
     * turn may perform; the RPC handler derives it from the request's

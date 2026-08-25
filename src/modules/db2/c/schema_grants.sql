@@ -96,6 +96,14 @@ BEGIN
   -- WORM audit store: runtime may INSERT/SELECT only, never UPDATE/DELETE.
   REVOKE UPDATE, DELETE, TRUNCATE ON kb_audit_event FROM aimee_kb_runtime;
   GRANT INSERT, SELECT ON kb_audit_event TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_runtime;
+
+  -- Rejections are durable state, not disposable queue rows. Runtime may create
+  -- a tombstone and may deactivate it during an explicitly authorized restore,
+  -- but it must never erase the review record outright.
+  REVOKE DELETE, TRUNCATE ON memory_rejection_tombstones FROM aimee_kb_runtime;
+  GRANT SELECT, INSERT, UPDATE ON memory_rejection_tombstones TO aimee_kb_runtime;
 
   -- set_tenant_context is the ONLY runtime-usable tenant-GUC setter; EXECUTE to
   -- the runtime role only, never PUBLIC (N4).

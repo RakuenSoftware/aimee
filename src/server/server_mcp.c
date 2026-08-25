@@ -400,7 +400,9 @@ cJSON *tool_memory_mutate(cJSON *args)
          return text_content("error: store requires 'key' and 'content'");
       memory_t out;
       memset(&out, 0, sizeof(out));
+      mcp_memory_scope_begin(args, NULL);
       int rc = kb_client_memory_insert(tier, kind, key, content, confidence, NULL, &out);
+      mcp_memory_scope_end();
       if (rc != 0)
          return text_content("error: store failed");
       snprintf(buf, sizeof(buf), "stored memory id=%lld key=%s", (long long)out.id, key);
@@ -414,7 +416,10 @@ cJSON *tool_memory_mutate(cJSON *args)
       if (id <= 0 || !content)
          return text_content("error: update requires 'id' and 'content'");
       int64_t new_id = 0;
-      if (kb_client_memory_update_as(id, content, MEMORY_AUTHORITY_MODEL, &new_id) != 0)
+      mcp_memory_scope_begin(args, NULL);
+      int update_rc = kb_client_memory_update_as(id, content, MEMORY_AUTHORITY_MODEL, &new_id);
+      mcp_memory_scope_end();
+      if (update_rc != 0)
          return text_content("error: update failed");
       if (new_id > 0 && new_id != id)
          snprintf(buf, sizeof(buf),
@@ -430,7 +435,10 @@ cJSON *tool_memory_mutate(cJSON *args)
          return text_content("error: supersede requires 'id' and 'content'");
       memory_t out;
       memset(&out, 0, sizeof(out));
-      if (kb_client_memory_supersede(id, content, confidence, NULL, &out) != 0)
+      mcp_memory_scope_begin(args, NULL);
+      int supersede_rc = kb_client_memory_supersede(id, content, confidence, NULL, &out);
+      mcp_memory_scope_end();
+      if (supersede_rc != 0)
          return text_content("error: supersede failed");
       snprintf(buf, sizeof(buf), "superseded id=%lld new id=%lld", (long long)id,
                (long long)out.id);
@@ -443,7 +451,10 @@ cJSON *tool_memory_mutate(cJSON *args)
        * additionally clear CAP_MEMORY_ADMIN — hard-deletes. */
       if (id <= 0)
          return text_content("error: forget requires 'id'");
-      if (kb_client_memory_delete_as(id, MEMORY_AUTHORITY_MODEL) != 0)
+      mcp_memory_scope_begin(args, NULL);
+      int forget_rc = kb_client_memory_delete_as(id, MEMORY_AUTHORITY_MODEL);
+      mcp_memory_scope_end();
+      if (forget_rc != 0)
          return text_content("error: forget failed");
       snprintf(buf, sizeof(buf),
                "forgot memory id=%lld (retired, not destroyed: it no longer "
@@ -454,7 +465,10 @@ cJSON *tool_memory_mutate(cJSON *args)
    {
       if (id <= 0)
          return text_content("error: affirm requires 'id'");
-      if (kb_client_memory_touch(id) != 0)
+      mcp_memory_scope_begin(args, NULL);
+      int affirm_rc = kb_client_memory_touch(id);
+      mcp_memory_scope_end();
+      if (affirm_rc != 0)
          return text_content("error: affirm failed");
       snprintf(buf, sizeof(buf), "affirmed memory id=%lld", (long long)id);
    }
@@ -462,7 +476,10 @@ cJSON *tool_memory_mutate(cJSON *args)
    {
       if (id <= 0)
          return text_content("error: reject requires 'id'");
-      if (kb_client_memory_reject(id, reason) != 0)
+      mcp_memory_scope_begin(args, NULL);
+      int reject_rc = kb_client_memory_reject(id, reason);
+      mcp_memory_scope_end();
+      if (reject_rc != 0)
          return text_content("error: reject failed");
       snprintf(buf, sizeof(buf), "rejected memory id=%lld", (long long)id);
    }

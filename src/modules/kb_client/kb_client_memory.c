@@ -848,6 +848,7 @@ int kb_client_memory_query_health(memory_health_t *out)
 int kb_client_memory_delete_as(int64_t id, memory_authority_t authority)
 {
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
    /* Only ever sent for a user/operator caller. The KB treats an absent field as
     * model authority, so a stale client cannot destroy anything. */
@@ -1249,6 +1250,7 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_
       return -1;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
    /* Only sent when asked. aimee-kb emits as_of/valid_at exactly when it
     * receives a non-empty as_of, so an empty one here would be indistinguishable

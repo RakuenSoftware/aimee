@@ -337,6 +337,14 @@ else
   red   "  FAIL  write→read round-trip"; FAIL=$((FAIL + 1))
 fi
 
+bold "==> Memory governance (row scope + durable human rejection)"
+if SERVER_URL="$SERVER_URL" BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
+   "$REPO/scripts/aimee-memory-governance-e2e.sh"; then
+  green "  PASS  memory governance round-trip"; PASS=$((PASS + 1))
+else
+  red   "  FAIL  memory governance round-trip"; FAIL=$((FAIL + 1))
+fi
+
 # Embedder fidelity: the round-trip above passes on list + KEYWORD retrieval even
 # when no real embedder is wired — the memory embedding silently falls back to the
 # builtin hash (a vestigial 384-d stand-in) whose vectors pgvec then REFUSES on a

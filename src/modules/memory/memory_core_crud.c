@@ -297,6 +297,11 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
    char norm_key[512];
    normalize_key(key, norm_key, sizeof(norm_key));
 
+   /* A human rejection is a durable refusal, including against exact-key
+    * merge paths that never reach the physical INSERT backstop. */
+   if (db2_memory_rejection_blocks(norm_key, content) != 0)
+      return -1;
+
    char ts[32];
    now_utc(ts, sizeof(ts));
 

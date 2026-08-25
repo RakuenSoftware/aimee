@@ -1661,6 +1661,9 @@ const http_route_t g_v1_routes[] = {
      * exposed here. (memory.recall above keeps its bespoke native handler.) */
     {"POST", "/v1/memory/search", NULL, RM_EXACT, "memory.search", 0, rh_dispatch_op},
     {"POST", "/v1/memory/list", NULL, RM_EXACT, "memory.list", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/review", NULL, RM_EXACT, "memory.review_list", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/reject", NULL, RM_EXACT, "memory.reject", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/restore", NULL, RM_EXACT, "memory.restore", 0, rh_dispatch_op},
     {"GET", "/v1/memory/stats", NULL, RM_EXACT, "memory.stats", 0, rh_dispatch_op},
     {"POST", "/v1/memory/get", NULL, RM_EXACT, "memory.get", 0, rh_dispatch_op},
     {"POST", "/v1/memory/delete", NULL, RM_EXACT, "memory.delete", 0, rh_dispatch_op},
@@ -2314,6 +2317,8 @@ uint32_t v1_route_caps_lookup(const char *method, const char *path)
  * `aimee workspace add` does registration (exempt) plus ingest, so the ingest half
  * now needs a `data` grant while registration keeps working with none. */
 static const char *const g_v1_write_ops[] = {"memory.store",
+                                             "memory.reject",
+                                             "memory.restore",
                                              "index.ingest",
                                              "work.add",
                                              "work.claim",

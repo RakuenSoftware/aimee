@@ -451,9 +451,9 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    memory_insert(TIER_L2, KIND_FACT, "identity:workspace-crowdout",
                  "crowdout routing needle belongs to the active workspace", 0.20,
                  "workspace-session", &workspace_mem);
-   /* Preserve compatibility with rows written before memory_scopes became the
-    * canonical tag table: the legacy workspace table alone must rank second. */
-   db2_memory_workspace_tag_insert(workspace_mem.id, "active-workspace");
+   /* An explicit ownership change stamps both the compatibility projection
+    * and the memory row used by authorization. */
+   assert(memory_tag_workspace(workspace_mem.id, "active-workspace") == 0);
 
    /* Both buckets exceed every one-row request below. Their much higher
     * relevance/confidence and later insertion order reproduce the old failure:

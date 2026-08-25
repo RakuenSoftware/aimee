@@ -266,11 +266,15 @@ extern "C"
                                     const char *session_id, const char *ts, const char *sensitivity,
                                     double evidence_strength, double salience, double surprise,
                                     const char *provenance_category);
-   int64_t db2_memory_row_insert_epistemic_ex(
-       const char *tier, const char *kind, const char *epistemic_kind, const char *key,
-       const char *content, const char *use_cases, double confidence, const char *session_id,
-       const char *ts, const char *sensitivity, double evidence_strength, double salience,
-       double surprise, const char *provenance_category);
+   int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
+                                              const char *epistemic_kind, const char *key,
+                                              const char *content, const char *use_cases,
+                                              double confidence, const char *session_id,
+                                              const char *ts, const char *sensitivity,
+                                              double evidence_strength, double salience,
+                                              double surprise, const char *provenance_category);
+   /* Exact negative-memory predicate used before every merge/insert path. */
+   int db2_memory_rejection_blocks(const char *key, const char *content);
    int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap);
    double db2_memory_outcome_adjustment(int64_t memory_id);
    int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
@@ -738,6 +742,28 @@ extern "C"
    /* UPDATE memories SET confidence = GREATEST(confidence - 0.1, 0.0) WHERE id = ?.
     * Returns 0 on success, -1 on failure. */
    int db2_memory_reject(int64_t memory_id, const char *reason);
+
+   typedef struct
+   {
+      int64_t id;
+      char tier[4];
+      char kind[16];
+      char key[512];
+      char content[2048];
+      double confidence;
+      char lifecycle_state[24];
+      char review_reason[256];
+      char scope_type[16];
+      char scope_value[512];
+      char created_at[32];
+      char updated_at[32];
+   } db2_memory_review_row_t;
+
+   /* Human review/history surface. Ordinary recall never uses this function. */
+   int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t *out, int max);
+   /* Explicit human restore: deactivates the value tombstone and returns the
+    * retained row to active in the same transaction. */
+   int db2_memory_restore(int64_t memory_id, const char *actor);
 
    /* SELECT lineage rows for an (object_type, object_id) pair. memory_lineage_t
     * lives in headers/memory.h; callers must include "aimee.h" before this

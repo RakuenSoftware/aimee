@@ -143,6 +143,13 @@ static void shim_set_config_func(sqlite3_context *ctx, int argc, sqlite3_value *
       sqlite3_result_value(ctx, argv[1]);
 }
 
+static void shim_current_setting_func(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+   (void)argc;
+   (void)argv;
+   sqlite3_result_null(ctx);
+}
+
 static void pgvec_register_functions(sqlite3 *db)
 {
    if (!db)
@@ -156,6 +163,9 @@ static void pgvec_register_functions(sqlite3 *db)
                            shim_noop_int_func, NULL, NULL);
    sqlite3_create_function(db, "set_config", 3, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
                            shim_set_config_func, NULL, NULL);
+   sqlite3_create_function(db, "current_setting", 2,
+                           SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS, NULL,
+                           shim_current_setting_func, NULL, NULL);
    /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables. */
    sqlite3_exec(
        db,
@@ -411,12 +421,25 @@ static char *translate_sql(const char *sql_in)
        * other. Longest match first, so ::integer is not read as ::int followed by a
        * stray "eger", and ::boolean not as ::bool. */
       {
-         static const char *const casts[] = {
-             "::double precision", "::timestamptz", "::halfvec", "::timestamp",
-             "::boolean",          "::smallint",    "::integer", "::numeric",
-             "::bigint",           "::vector",      "::float8",  "::jsonb",
-             "::real",             "::bool",        "::json",    "::text",
-             "::int",              "::json",        NULL};
+         static const char *const casts[] = {"::double precision",
+                                             "::timestamptz",
+                                             "::halfvec",
+                                             "::timestamp",
+                                             "::boolean",
+                                             "::smallint",
+                                             "::integer",
+                                             "::numeric",
+                                             "::bigint",
+                                             "::vector",
+                                             "::float8",
+                                             "::jsonb",
+                                             "::real",
+                                             "::bool",
+                                             "::json",
+                                             "::text",
+                                             "::int",
+                                             "::json",
+                                             NULL};
          int stripped = 0;
          for (int ci = 0; casts[ci]; ci++)
          {

@@ -3548,12 +3548,78 @@ paths:
                 tier: { type: string }
                 kind: { type: string }
                 limit: { type: integer }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
       responses:
         "200":
           description: Memory list envelope
           content:
             application/json:
               schema: { type: object }
+  /memory/review:
+    post:
+      summary: List human-reviewable memories, including retained inactive rows
+      description: Scope is explicit or derived from cwd; ordinary recall remains active-only.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+                state: { type: string, enum: [active, pending, rejected, archived, fulfilled, superseded] }
+                limit: { type: integer, minimum: 1, maximum: 256 }
+      responses:
+        "200":
+          description: Review rows with lifecycle, scope, content, reason, and timestamps
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/reject:
+    post:
+      summary: Reject a memory and create a durable exact-value tombstone
+      description: Requires memory-write. Re-extraction and exact-key merge cannot restore the value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                reason: { type: string }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200": { description: Rejection result, content: { application/json: { schema: { type: object } } } }
+        "400": { description: Missing or non-positive id }
+        "404": { description: No visible memory or rejection refused }
+  /memory/restore:
+    post:
+      summary: Explicitly restore a rejected memory and retire its tombstone
+      description: Requires memory-admin so automatic extraction cannot invoke this exception path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200": { description: Restore result, content: { application/json: { schema: { type: object } } } }
+        "400": { description: Missing or non-positive id }
+        "404": { description: No visible rejected memory or restore refused }
   /memory/stats:
     get:
       summary: Memory store statistics
@@ -3895,6 +3961,9 @@ paths:
                 kind: { type: string }
                 key: { type: string }
                 content: { type: string }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
                 tier: { type: string }
       responses:
         "200":
