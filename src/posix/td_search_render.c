@@ -82,8 +82,8 @@ char *td_render_search_hits(const cJSON *hits, const char *query)
       char message[384];
       snprintf(message, sizeof(message), "No knowledge-base results for \"%.300s\".",
                query ? query : "");
-      char *contract = td_render_retrieval_continuation(
-          TD_RETRIEVAL_EMPTY, "knowledge_base", query, message);
+      char *contract =
+          td_render_retrieval_continuation(TD_RETRIEVAL_EMPTY, "knowledge_base", query, message);
       dstr_append_str(&d, message);
       if (contract)
       {
@@ -162,8 +162,8 @@ char *td_search_result_from_response(const cJSON *resp, const char *query)
    if (cJSON_IsArray(hits))
       return td_render_search_hits(hits, query);
 
-   char *contract = td_render_retrieval_continuation(
-       TD_RETRIEVAL_FAILED, "knowledge_base", query, "knowledge search unavailable");
+   char *contract = td_render_retrieval_continuation(TD_RETRIEVAL_FAILED, "knowledge_base", query,
+                                                     "knowledge search unavailable");
    dstr_t d;
    dstr_init(&d);
    dstr_append_str(&d, "error: knowledge search unavailable");

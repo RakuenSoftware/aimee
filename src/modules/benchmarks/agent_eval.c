@@ -45,8 +45,7 @@ static void eval_hardware_profile(char out[AGENT_EVAL_HARDWARE_LEN])
 }
 
 int agent_eval_manifest_build(const char *suite, const eval_task_t *tasks, int task_count,
-                              const char *agent_name, unsigned int seed,
-                              agent_eval_manifest_t *out)
+                              const char *agent_name, unsigned int seed, agent_eval_manifest_t *out)
 {
    if (!out || !tasks || task_count <= 0 || !agent_name || !agent_name[0])
       return -1;
@@ -78,7 +77,8 @@ int agent_eval_manifest_build(const char *suite, const eval_task_t *tasks, int t
    }
    char *dataset_wire = cJSON_PrintUnformatted(dataset);
    cJSON_Delete(dataset);
-   if (!dataset_wire || aimee_sha256_hex(dataset_wire, strlen(dataset_wire), out->dataset_hash) != 0)
+   if (!dataset_wire ||
+       aimee_sha256_hex(dataset_wire, strlen(dataset_wire), out->dataset_hash) != 0)
    {
       free(dataset_wire);
       memset(out, 0, sizeof(*out));
@@ -121,15 +121,15 @@ agent_eval_comparability_t agent_eval_manifest_compare(const agent_eval_manifest
          *reason_out = "missing_manifest_identity";
       return AGENT_EVAL_COMPARABILITY_UNKNOWN;
    }
-#define EVAL_REQUIRE_EQUAL(field, reason)                                                           \
-   do                                                                                                \
-   {                                                                                                 \
-      if (strcmp(left->field, right->field) != 0)                                                    \
-      {                                                                                              \
-         if (reason_out)                                                                             \
-            *reason_out = reason;                                                                    \
-         return AGENT_EVAL_INCOMPARABLE;                                                             \
-      }                                                                                              \
+#define EVAL_REQUIRE_EQUAL(field, reason)                                                          \
+   do                                                                                              \
+   {                                                                                               \
+      if (strcmp(left->field, right->field) != 0)                                                  \
+      {                                                                                            \
+         if (reason_out)                                                                           \
+            *reason_out = reason;                                                                  \
+         return AGENT_EVAL_INCOMPARABLE;                                                           \
+      }                                                                                            \
    } while (0)
    EVAL_REQUIRE_EQUAL(dataset_hash, "dataset_changed");
    EVAL_REQUIRE_EQUAL(target_hash, "target_changed");
@@ -236,9 +236,8 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
 {
    int tool_failures = eval_tool_failures(result, passed);
    agent_eval_manifest_t manifest;
-   int have_manifest =
-       agent_eval_manifest_build(suite, all_tasks, task_count, result->agent_name, seed, &manifest) ==
-       0;
+   int have_manifest = agent_eval_manifest_build(suite, all_tasks, task_count, result->agent_name,
+                                                 seed, &manifest) == 0;
    db1_eval_result_row_t row = {
        .suite = suite,
        .task_name = task->name,

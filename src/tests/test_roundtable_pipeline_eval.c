@@ -209,8 +209,7 @@ static void test_checker_isolation_and_failure_policy(void)
    assert(rtp_checker_decide(RTP_CHECKER_FAIL_CLOSED, RTP_CHECKER_SKIPPED) == RTP_ACT_REVISE);
    assert(rtp_checker_decide(RTP_CHECKER_FAIL_OPEN, RTP_CHECKER_ERROR) == RTP_ACT_PASS);
 
-   rtp_loop_cfg_t cfg = {RTP_DONEBAR_ZERO_BLOCKING, 0, 1, 0.0, 0.0,
-                         RTP_CHECKER_FAIL_CLOSED};
+   rtp_loop_cfg_t cfg = {RTP_DONEBAR_ZERO_BLOCKING, 0, 1, 0.0, 0.0, RTP_CHECKER_FAIL_CLOSED};
    rtp_loop_state_t st = {1, 1, 0.0, 0.0, 0};
    rtp_envelope_t unavailable = base_valid();
    unavailable.present = 0;

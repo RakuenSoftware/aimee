@@ -546,11 +546,11 @@ static void chat_stream_worker_pooled(void *arg)
       presence_emit_turn_done(sid, turn_id); /* turn_done reaches the ring even on cancel */
    if (cancel_entry)
    {
-      ti_turn_state_t final_state = turn_entry_cancelled(cancel_entry) ? TI_TURN_CANCELLED
-                                                                       : TI_TURN_COMPLETED;
+      ti_turn_state_t final_state =
+          turn_entry_cancelled(cancel_entry) ? TI_TURN_CANCELLED : TI_TURN_COMPLETED;
       (void)ti_turn_transition(&cancel_entry->integrity, final_state,
                                final_state == TI_TURN_CANCELLED ? "turn cancelled"
-                                                               : "turn worker returned");
+                                                                : "turn worker returned");
    }
    /* Clear the cancel-registry entry after the worker reaped its child and
     * turn_done was published. cancel_entry is a LOCAL pointer into the static

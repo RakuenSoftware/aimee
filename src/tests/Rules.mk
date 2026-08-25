@@ -5893,6 +5893,7 @@ $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                                        $(OBJDIR)/tests/test_mcp_native_dispatch.o \
                                        $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
+                                       $(OBJDIR)/modules/tools/agent_tools_effect_contract.o \
                                        $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                                        $(OBJDIR)/db1_store_ready.o \
                                        $(OBJDIR)/modules/tools/agent_tools_completion.o \
@@ -8120,6 +8121,7 @@ $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
+                                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                                        $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

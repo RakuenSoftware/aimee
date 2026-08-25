@@ -10,7 +10,6 @@
 #include "tool_args_coerce.h"
 #include "sandbox_learned.h"
 #include "modules/workspace/workspace_provider.h"
-#include <aimee/core/turn_integrity.h>
 #include <aimee/tools/module_api.h>
 
 /* delegation_active_id is provided by server_compute.c at link time;
@@ -20,7 +19,6 @@ const char *delegation_active_id(void)
 {
    return NULL;
 }
-
 static __thread char g_dispatch_role[64];
 static agent_tool_classifier_fn g_tool_classifier;
 
@@ -28,7 +26,6 @@ void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
 {
    g_tool_classifier = classifier;
 }
-
 void agent_tools_set_dispatch_role(const char *role)
 {
    if (role && role[0])
@@ -36,7 +33,6 @@ void agent_tools_set_dispatch_role(const char *role)
    else
       g_dispatch_role[0] = '\0';
 }
-
 const char *agent_tools_dispatch_role(void)
 {
    return g_dispatch_role[0] ? g_dispatch_role : NULL;
@@ -73,14 +69,6 @@ static __thread const char *g_td_verdict = "ok";
 static __thread const char *g_td_reason = "";
 static __thread const char *g_td_mode = "internal";
 static __thread int g_td_explicit = 0; /* 1 once _inner set a definitive verdict */
-static __thread ti_effect_contract_t g_td_effect;
-static __thread int g_td_effect_active;
-static __thread int g_td_effect_authorized;
-
-void agent_tools_set_effect_authorized(int authorized)
-{
-   g_td_effect_authorized = !!authorized;
-}
 
 /* INVARIANT: no handler reachable from dispatch_tool_call_ctx may synchronously
  * re-enter dispatch_tool_call_ctx on the same thread. These carriers are reset at
@@ -96,8 +84,7 @@ static void td_outcome_reset(void)
    g_td_reason = "";
    g_td_mode = "internal";
    g_td_explicit = 0;
-   memset(&g_td_effect, 0, sizeof g_td_effect);
-   g_td_effect_active = 0;
+   agent_tools_effect_reset();
 }
 /* Record a definitive verdict at a return path (refusal, or a known error). */
 static void td_outcome_set(const char *verdict, const char *reason)
@@ -114,217 +101,6 @@ static void td_outcome_set(const char *verdict, const char *reason)
  * stderr beginning "refused:" is the fail-closed sandbox refusal. Only the numeric
  * exit_code, the status string, and a stderr PREFIX are read — no content is
  * stored; the parsed tree is freed. */
-static int is_exec_tool(const char *name)
-{
-   if (!g_tool_classifier)
-      return 0;
-   int classification = 0;
-   return g_tool_classifier(name, &classification) == 0 && classification == AIMEE_TOOL_CLASS_EXEC;
-}
-
-static ti_effect_class_t td_effect_class(const char *name)
-{
-   if (name && (strcmp(name, "web_search") == 0 || strcmp(name, "web_read") == 0 ||
-                strcmp(name, "git_push") == 0 || strcmp(name, "git_pr") == 0 || strchr(name, ':')))
-      return TI_EFFECT_EXTERNAL_COMMUNICATION;
-   int classification = AIMEE_TOOL_CLASS_UNKNOWN;
-   if (g_tool_classifier)
-      (void)g_tool_classifier(name, &classification);
-   switch (classification)
-   {
-   case AIMEE_TOOL_CLASS_READ:
-   case AIMEE_TOOL_CLASS_CONTROL:
-      return TI_EFFECT_READ_ONLY;
-   case AIMEE_TOOL_CLASS_WRITE:
-      return TI_EFFECT_REVERSIBLE;
-   case AIMEE_TOOL_CLASS_EXEC:
-      return TI_EFFECT_CONDITIONALLY_REVERSIBLE;
-   case AIMEE_TOOL_CLASS_REMOTE:
-      return TI_EFFECT_EXTERNAL_COMMUNICATION;
-   default:
-      return TI_EFFECT_UNCLASSIFIED;
-   }
-}
-
-static int td_effect_external_mutation(const char *name)
-{
-   return name &&
-          (strcmp(name, "git_push") == 0 || strcmp(name, "git_pr") == 0 || strchr(name, ':'));
-}
-
-static const char *td_effect_target(const char *name, cJSON *args)
-{
-   static const char *const keys[] = {"path", "repo_path", "url", "ref", "title", "symbol", NULL};
-   for (int i = 0; keys[i]; i++)
-   {
-      cJSON *value = cJSON_GetObjectItemCaseSensitive(args, keys[i]);
-      if (cJSON_IsString(value))
-         return value->valuestring;
-   }
-   return td_effect_external_mutation(name) ? name : "";
-}
-
-static int td_effect_known_reversible(const char *name, cJSON *args)
-{
-   if (!name || !args)
-      return 0;
-   if (strcmp(name, "write_file") == 0)
-      return 1;
-   if (strcmp(name, "edit_file") == 0)
-   {
-      cJSON *dry_run = cJSON_GetObjectItemCaseSensitive(args, "dry_run");
-      return !(cJSON_IsBool(dry_run) && cJSON_IsTrue(dry_run));
-   }
-   if (strcmp(name, "edit_symbol") == 0)
-   {
-      cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
-      return cJSON_IsString(path) && path->valuestring[0];
-   }
-   return 0;
-}
-
-static ti_effect_mode_t td_effect_mode(const char *name, cJSON *args)
-{
-   const char *configured = getenv("AIMEE_EFFECT_CONTRACT_MODE");
-   if (configured && strcmp(configured, "off") == 0)
-      return TI_EFFECT_MODE_OFF;
-   if (configured && strcmp(configured, "shadow") == 0)
-      return TI_EFFECT_MODE_SHADOW;
-   return (td_effect_known_reversible(name, args) || td_effect_external_mutation(name))
-              ? TI_EFFECT_MODE_ENFORCE
-              : TI_EFFECT_MODE_SHADOW;
-}
-
-static void td_effect_propose(const char *name, cJSON *args)
-{
-   char *normalized = cJSON_PrintUnformatted(args);
-   const char *who = session_id();
-   ti_effect_class_t effect_class =
-       td_effect_known_reversible(name, args) ? TI_EFFECT_REVERSIBLE : td_effect_class(name);
-   if (ti_effect_contract_init(&g_td_effect, who, name, td_effect_target(name, args), normalized,
-                               effect_class, td_effect_mode(name, args)) == 0)
-   {
-      g_td_effect_active = 1;
-      if (td_effect_external_mutation(name))
-      {
-         (void)ti_effect_contract_set_authorization(&g_td_effect, 1, g_td_effect_authorized);
-         ti_idempotency_t idempotency =
-             strcmp(name, "git_push") == 0
-                 ? TI_IDEMPOTENT
-                 : (strcmp(name, "git_pr") == 0 ? TI_NON_IDEMPOTENT : TI_IDEMPOTENCY_UNKNOWN);
-         (void)ti_effect_contract_set_idempotency(&g_td_effect, idempotency);
-      }
-      else if (g_td_effect.effect_class == TI_EFFECT_EXTERNAL_COMMUNICATION)
-         (void)ti_effect_contract_set_idempotency(&g_td_effect, TI_IDEMPOTENT);
-      if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && td_effect_known_reversible(name, args))
-         (void)ti_effect_contract_require_postcondition(&g_td_effect);
-   }
-   free(normalized);
-}
-
-static int td_effect_validate_and_execute(const char *name, cJSON *args)
-{
-   if (!g_td_effect_active)
-      return 0;
-   if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && !td_effect_target(name, args)[0])
-      return -1;
-   char *normalized = cJSON_PrintUnformatted(args);
-   ti_effect_class_t effect_class =
-       td_effect_known_reversible(name, args) ? TI_EFFECT_REVERSIBLE : td_effect_class(name);
-   int matched = ti_effect_contract_validate(&g_td_effect, name, td_effect_target(name, args),
-                                             normalized, effect_class);
-   free(normalized);
-   if (matched < 0 || (matched == 0 && g_td_effect.mode == TI_EFFECT_MODE_ENFORCE))
-      return -1;
-   return ti_effect_contract_mark_executing(&g_td_effect);
-}
-
-static int td_effect_verify_file_postcondition(const char *name, cJSON *args,
-                                               const char *dispatch_cwd)
-{
-   if (!g_td_effect_active || g_td_effect.mode != TI_EFFECT_MODE_ENFORCE)
-      return 1;
-   cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
-   if (!cJSON_IsString(path) || !path->valuestring[0])
-      return 0;
-   char absolute[MAX_PATH_LEN];
-   normalize_path(path->valuestring, dispatch_cwd, absolute, sizeof absolute);
-   const workspace_provider_t *provider = workspace_provider_active();
-   char *actual = NULL;
-   size_t actual_len = 0;
-   if (!provider || provider->read_all(provider, absolute, &actual, &actual_len) != 0 || !actual)
-   {
-      free(actual);
-      return 0;
-   }
-
-   int passed = 1;
-   if (strcmp(name, "write_file") == 0)
-   {
-      cJSON *content = cJSON_GetObjectItemCaseSensitive(args, "content");
-      const char *expected = cJSON_IsString(content) ? content->valuestring : "";
-      size_t expected_len = strlen(expected);
-      passed = actual_len == expected_len && memcmp(actual, expected, expected_len) == 0;
-   }
-   else if (strcmp(name, "edit_file") == 0)
-   {
-      cJSON *old = cJSON_GetObjectItemCaseSensitive(args, "old_string");
-      cJSON *replacement = cJSON_GetObjectItemCaseSensitive(args, "new_string");
-      if (cJSON_IsString(old))
-      {
-         const char *new_text = cJSON_IsString(replacement) ? replacement->valuestring : "";
-         if (strcmp(old->valuestring, new_text) == 0)
-            passed = strstr(actual, old->valuestring) != NULL;
-         else
-            passed = strstr(actual, old->valuestring) == NULL &&
-                     (!new_text[0] || strstr(actual, new_text) != NULL);
-      }
-      /* Anchored edits have already checked their snapshot and anchors. The
-       * independent postcondition here is that the target can be read back. */
-   }
-   else if (strcmp(name, "edit_symbol") == 0)
-   {
-      cJSON *text = cJSON_GetObjectItemCaseSensitive(args, "text");
-      cJSON *op = cJSON_GetObjectItemCaseSensitive(args, "op");
-      if (cJSON_IsString(text) && text->valuestring[0] &&
-          !(cJSON_IsString(op) && strcmp(op->valuestring, "delete") == 0))
-         passed = strstr(actual, text->valuestring) != NULL;
-   }
-   free(actual);
-   return passed;
-}
-
-static int td_effect_result_claims_success(const char *result)
-{
-   if (!result || strncmp(result, "error:", 6) == 0)
-      return 0;
-   cJSON *payload = cJSON_Parse(result);
-   if (!payload)
-      return 1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(payload, "status");
-   int succeeded = !cJSON_IsString(status) || strcmp(status->valuestring, "ok") == 0;
-   cJSON_Delete(payload);
-   return succeeded;
-}
-
-static void td_effect_finish(void)
-{
-   if (!g_td_effect_active)
-      return;
-   ti_effect_state_t outcome = TI_EFFECT_FAILED;
-   if (strcmp(g_td_verdict, "ok") == 0)
-      outcome = TI_EFFECT_SUCCEEDED;
-   else if (strcmp(g_td_verdict, "refused") == 0)
-      outcome = TI_EFFECT_REFUSED;
-   else if (strcmp(g_td_verdict, "timeout") == 0 &&
-            g_td_effect.effect_class == TI_EFFECT_EXTERNAL_COMMUNICATION &&
-            g_td_effect.idempotency != TI_IDEMPOTENT)
-      outcome = TI_EFFECT_UNKNOWN_OUTCOME;
-   (void)ti_effect_contract_finish(&g_td_effect, outcome, g_td_reason);
-   g_td_effect_active = 0;
-   g_td_effect_authorized = 0;
-}
-
 static void td_classify_exec_result(const char *result)
 {
    cJSON *r = cJSON_Parse(result);
@@ -340,16 +116,6 @@ static void td_classify_exec_result(const char *result)
    else if (cJSON_IsString(status_j) && strcmp(status_j->valuestring, "failed") == 0)
       td_outcome_set("error", "tool_error");
    cJSON_Delete(r);
-}
-
-/* The MCP transport exposes a stable, content-free timeout classification in
- * err_buf. Preserve it across the namespaced dispatcher boundary: treating it
- * as an ordinary tool error would make a non-idempotent remote mutation look
- * safely retryable even though the request may already have reached the peer. */
-static int td_mcp_failure_is_timeout(const char *error)
-{
-   return error && (strcmp(error, "transport timeout") == 0 ||
-                    strcmp(error, "request timed out") == 0);
 }
 
 /* db1_session_write_path_record from db1/session_paths.h — declared
@@ -2254,7 +2020,9 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
     * exit_code/status, not a prefix); every other tool signals failure with a
     * leading "error:" marker — read only that marker, never the rest of the
     * string, so no tool output can reach the hook. */
-   if (!g_td_explicit && result && is_exec_tool(name ? name : ""))
+   if (!g_td_explicit && result &&
+       agent_tools_effect_classification(name ? name : "", g_tool_classifier) ==
+           AIMEE_TOOL_CLASS_EXEC)
       td_classify_exec_result(result);
    if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
       td_outcome_set("timeout", "timeout");
@@ -2262,8 +2030,7 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
-   td_effect_finish();
-   g_td_effect_authorized = 0;
+   agent_tools_effect_finish(g_td_verdict, g_td_reason);
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
@@ -2528,8 +2295,9 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
 
    /* Contract the effective call only after mechanical policy rewrites have
     * settled its target and arguments, and always before the side effect. */
-   td_effect_propose(name, args);
-   if (td_effect_validate_and_execute(name, args) != 0)
+   int effect_classification = agent_tools_effect_classification(name, g_tool_classifier);
+   agent_tools_effect_propose(name, args, effect_classification);
+   if (agent_tools_effect_validate_and_execute(name, args, effect_classification) != 0)
    {
       cJSON_Delete(args);
       td_outcome_set("refused", "effect_contract");
@@ -2665,7 +2433,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       {
          /* err_buf is the MCP server's own error text and may echo argument
           * values; classify to an enum, never let it near the audit fields. */
-         if (td_mcp_failure_is_timeout(err_buf))
+         if (agent_tools_effect_mcp_failure_is_timeout(err_buf))
             td_outcome_set("timeout", "timeout");
          else
             td_outcome_set("error", "tool_error");
@@ -2699,18 +2467,18 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = safe_strdup(err);
    }
 
-   if (g_td_effect_active && g_td_effect.postcondition == TI_POSTCONDITION_PENDING && result)
+   if (agent_tools_effect_postcondition_pending() && result)
    {
       if (strncmp(result, "error:", 6) == 0)
       {
          /* The wrapper classifies the ordinary tool failure. */
       }
-      else if (!td_effect_result_claims_success(result))
+      else if (!agent_tools_effect_result_claims_success(result))
          td_outcome_set("error", "precondition");
       else
       {
-         int verified = td_effect_verify_file_postcondition(name, args, dispatch_cwd);
-         (void)ti_effect_contract_record_postcondition(&g_td_effect, verified, "readback");
+         int verified = agent_tools_effect_verify_file_postcondition(name, args, dispatch_cwd);
+         agent_tools_effect_record_postcondition(verified, "readback");
          if (!verified)
          {
             free(result);

@@ -2,7 +2,6 @@
 #include "server_state_internal.h"
 #include "aimee.h"
 #include <aimee/ir/aimee_ir_metrics.h>
-#include <aimee/core/turn_integrity.h>
 #include "shadow_mirror.h"
 #include "economizer_module_client.h" /* Go-owned tool-output condense savings */
 #include "token_audit.h"              /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
@@ -683,28 +682,6 @@ int handle_curator_contradictions(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    free(json);
    if (!resp)
       return server_send_error(conn, "knowledge service /v1/contradictions failed", NULL);
-   return send_and_free(conn, resp);
-}
-
-int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   /* Inbound push from aimee-kb: a source doc's derived curator artifacts were
-    * invalidated. The subscriber (this server) has now received the event. */
-   const char *source_kind = jo_str(req, "source_kind", "");
-   const char *source_id = jo_str(req, "source_id", "");
-   int stale = jo_int(req, "artifacts_stale", 0);
-   unsigned long long scoped_epoch = 0;
-   unsigned long long global_epoch = 0;
-   if (stale > 0 && source_kind[0] && source_id[0])
-   {
-      scoped_epoch = ti_knowledge_epoch_advance(source_kind, source_id, "curator invalidated");
-      global_epoch = ti_knowledge_epoch_advance("knowledge", "global", source_kind);
-   }
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "received", stale);
-   cJSON_AddNumberToObject(resp, "scoped_epoch", (double)scoped_epoch);
-   cJSON_AddNumberToObject(resp, "knowledge_epoch", (double)global_epoch);
    return send_and_free(conn, resp);
 }
 
