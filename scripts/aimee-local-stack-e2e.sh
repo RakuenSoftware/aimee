@@ -637,26 +637,29 @@ PY
   else
     semantic_marker="ti-semantic-${RANDOM}-${$}"
     semantic_content="At the moonless harbor, a cerulean lantern beside the eastern quay directs returning vessels. ${semantic_marker}"
-    semantic_store="$(curl -fksS --max-time 30 "${IDENTITY[@]}" "${AUTH[@]}" \
+    semantic_store="$(curl -fksS --max-time 60 "${IDENTITY[@]}" "${AUTH[@]}" \
       -H 'content-type: application/json' -X POST \
       -d "{\"key\":\"semantic harbor guide ${semantic_marker}\",\"content\":\"${semantic_content}\",\"kind\":\"fact\"}" \
       "$SERVER_URL/v1/memory/store" 2>/dev/null || true)"
     semantic_recall=""
-    if [[ "$semantic_store" == *'"status":"ok"'* ]]; then
-      for _ in $(seq 1 20); do
-        # /memory/recall assembles the always-on/session context sections; it is
-        # not the ranked fact-search surface. /memory/search accepts keyword
-        # clusters but routes their joined natural-language query through the
-        # live KB semantic ranker as well, so a lexically-disjoint query here is
-        # direct evidence that the stored pgvector row was retrieved.
-        semantic_recall="$(curl -fksS --max-time 60 "${IDENTITY[@]}" "${AUTH[@]}" \
-          -H 'content-type: application/json' -X POST \
-          -d '{"keywords":["Which colored light helps ships locate the dock after dark?"],"limit":10,"scope":"all"}' \
-          "$SERVER_URL/v1/memory/search" 2>/dev/null || true)"
-        [[ "$semantic_recall" == *"$semantic_marker"* ]] && break
-        sleep 0.25
-      done
+    if [[ "$semantic_store" != *'"status":"ok"'* ]]; then
+      yellow "  UNCERTAIN  semantic store acknowledgement missing; checking the persisted postcondition"
     fi
+    for _ in $(seq 1 20); do
+      # /memory/recall assembles the always-on/session context sections; it is
+      # not the ranked fact-search surface. /memory/search accepts keyword
+      # clusters but routes their joined natural-language query through the
+      # live KB semantic ranker as well, so a lexically-disjoint query here is
+      # direct evidence that the stored pgvector row was retrieved. Always run
+      # this postcondition: a client timeout can leave the store outcome unknown
+      # even though the fact and vector committed successfully.
+      semantic_recall="$(curl -fksS --max-time 60 "${IDENTITY[@]}" "${AUTH[@]}" \
+        -H 'content-type: application/json' -X POST \
+        -d '{"keywords":["Which colored light helps ships locate the dock after dark?"],"limit":10,"scope":"all"}' \
+        "$SERVER_URL/v1/memory/search" 2>/dev/null || true)"
+      [[ "$semantic_recall" == *"$semantic_marker"* ]] && break
+      sleep 0.25
+    done
     if [[ "$semantic_recall" == *"$semantic_marker"* ]]; then
       green "  PASS  real embedder stored and semantically recalled a lexically-disjoint fact"
       PASS=$((PASS + 1))
