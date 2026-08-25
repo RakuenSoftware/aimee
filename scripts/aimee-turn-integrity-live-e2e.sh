@@ -316,16 +316,18 @@ raise SystemExit(1)
 PY
 kill -CONT "$KB_PID"
 kb_stopped=0
+kb_recovered=0
 for _ in $(seq 1 50); do
   if curl -fksS --cert "$CLIENT_CERT" --key "$CLIENT_KEY" \
     -H "Authorization: Bearer $BEARER" -H 'content-type: application/json' -X POST \
     -d '{"query":"turn-integrity-recovery","scope":"all","max_results":1}' \
     "$SERVER_URL/v1/kb/search" | grep -q '"hits"'; then
+    kb_recovered=1
     break
   fi
   sleep 0.2
 done
-run_turn ti-live-kb-recovered TI_SEARCH_EMPTY "$workspace" "$RUN_ROOT/kb-recovered-turn.out"
+(( kb_recovered )) || fail "live server-to-KB retrieval did not recover"
 ok "KB transport failure was typed and bounded; live server→KB retrieval recovered"
 
 echo "turn-integrity-live-e2e: $pass checks passed"

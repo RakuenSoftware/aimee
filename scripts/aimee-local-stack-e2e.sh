@@ -340,6 +340,33 @@ recycle_kb_daemon() {
   done
 }
 
+recycle_probe_stack() {
+  local stop_deadline deadline
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    stop_deadline=$((SECONDS + 10))
+    while kill -0 "$server_pid" 2>/dev/null && (( SECONDS < stop_deadline )); do
+      sleep 0.1
+    done
+    kill -KILL "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+    server_pid=""
+  fi
+  stop_server_modules
+  rm -f "$AIMEE_HOME/server-module-bus.sock"
+  recycle_kb_daemon || return 1
+  start_server_modules
+  "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
+  server_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! curl -fksS --max-time 5 "${IDENTITY[@]}" "${AUTH[@]}" \
+    "$SERVER_URL/v1/health" >/dev/null 2>&1; do
+    kill -0 "$server_pid" 2>/dev/null || return 1
+    (( SECONDS < deadline )) || return 1
+    sleep 1
+  done
+}
+
 cleanup() {
   stop_modules
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
@@ -535,14 +562,14 @@ if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
   # A probe that deliberately interrupts the KB can request a clean lifecycle
   # boundary before unrelated outer checks run. Resuming a stopped process is
   # sufficient to prove transport recovery, but it can leave expensive
-  # background work queued; recycling prevents that load from leaking into the
-  # next contract.
+  # background work queued in both daemons; recycling both prevents that load
+  # from leaking into the next contract.
   if [[ "$MODE" == "full" && -e "$RUN_ROOT/probe-recycle-kb" ]]; then
-    bold "==> Recycling aimee-kb after disruptive external probe"
-    if recycle_kb_daemon; then
-      green "    aimee-kb probe isolation restored"
+    bold "==> Recycling server + kb after disruptive external probe"
+    if recycle_probe_stack; then
+      green "    disruptive probe isolation restored"
     else
-      red "    aimee-kb failed to recover after disruptive external probe"
+      red "    stack failed to recover after disruptive external probe"
       exit 1
     fi
   fi
