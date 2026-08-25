@@ -372,10 +372,10 @@ static void emit_effect(const ti_effect_contract_t *contract, const char *event_
    copy_bounded(event.session_id, sizeof event.session_id, contract->session_id);
    copy_bounded(event.principal, sizeof event.principal, contract->tool);
    snprintf(event.detail, sizeof event.detail,
-            "class=%s state=%s matched=%d target=%s arguments=%s reason=%.24s",
+            "class=%s state=%s matched=%d authorized=%d target=%s arguments=%s reason=%.24s",
             ti_effect_class_name(contract->effect_class), ti_effect_state_name(contract->state),
-            contract->matched, contract->target_digest, contract->arguments_digest,
-            reason_code ? reason_code : "");
+            contract->matched, contract->authorized, contract->target_digest,
+            contract->arguments_digest, reason_code ? reason_code : "");
    switch (contract->state)
    {
    case TI_EFFECT_PROPOSED:
@@ -419,6 +419,7 @@ int ti_effect_contract_init(ti_effect_contract_t *contract, const char *session_
    contract->effect_class = effect_class;
    contract->mode = mode;
    contract->state = TI_EFFECT_PROPOSED;
+   contract->idempotency = TI_IDEMPOTENCY_UNKNOWN;
    contract->matched = 1;
    if (mode != TI_EFFECT_MODE_OFF)
       emit_effect(contract, "effect.proposed", "");
@@ -439,13 +440,33 @@ int ti_effect_contract_validate(ti_effect_contract_t *contract, const char *tool
    contract->matched = strcmp(contract->tool, tool) == 0 &&
                        strcmp(contract->target_digest, target_digest) == 0 &&
                        strcmp(contract->arguments_digest, arguments_digest) == 0 &&
-                       contract->effect_class == effect_class;
+                       contract->effect_class == effect_class &&
+                       (!contract->authorization_required || contract->authorized);
    contract->state = TI_EFFECT_VALIDATED;
    contract->sequence++;
    if (contract->mode != TI_EFFECT_MODE_OFF)
       emit_effect(contract, contract->matched ? "effect.validated" : "effect.mismatch",
                   contract->matched ? "" : "proposal_drift");
    return contract->matched;
+}
+
+int ti_effect_contract_set_authorization(ti_effect_contract_t *contract, int required,
+                                         int authorized)
+{
+   if (!contract || contract->state != TI_EFFECT_PROPOSED)
+      return -1;
+   contract->authorization_required = !!required;
+   contract->authorized = !!authorized;
+   return 0;
+}
+
+int ti_effect_contract_set_idempotency(ti_effect_contract_t *contract, ti_idempotency_t idempotency)
+{
+   if (!contract || contract->state != TI_EFFECT_PROPOSED || idempotency < TI_IDEMPOTENCY_UNKNOWN ||
+       idempotency > TI_NON_IDEMPOTENT)
+      return -1;
+   contract->idempotency = idempotency;
+   return 0;
 }
 
 int ti_effect_contract_mark_executing(ti_effect_contract_t *contract)

@@ -75,6 +75,12 @@ static __thread const char *g_td_mode = "internal";
 static __thread int g_td_explicit = 0; /* 1 once _inner set a definitive verdict */
 static __thread ti_effect_contract_t g_td_effect;
 static __thread int g_td_effect_active;
+static __thread int g_td_effect_authorized;
+
+void agent_tools_set_effect_authorized(int authorized)
+{
+   g_td_effect_authorized = !!authorized;
+}
 
 /* INVARIANT: no handler reachable from dispatch_tool_call_ctx may synchronously
  * re-enter dispatch_tool_call_ctx on the same thread. These carriers are reset at
@@ -118,6 +124,9 @@ static int is_exec_tool(const char *name)
 
 static ti_effect_class_t td_effect_class(const char *name)
 {
+   if (name && (strcmp(name, "web_search") == 0 || strcmp(name, "web_read") == 0 ||
+                strcmp(name, "git_push") == 0 || strcmp(name, "git_pr") == 0 || strchr(name, ':')))
+      return TI_EFFECT_EXTERNAL_COMMUNICATION;
    int classification = AIMEE_TOOL_CLASS_UNKNOWN;
    if (g_tool_classifier)
       (void)g_tool_classifier(name, &classification);
@@ -137,7 +146,13 @@ static ti_effect_class_t td_effect_class(const char *name)
    }
 }
 
-static const char *td_effect_target(cJSON *args)
+static int td_effect_external_mutation(const char *name)
+{
+   return name &&
+          (strcmp(name, "git_push") == 0 || strcmp(name, "git_pr") == 0 || strchr(name, ':'));
+}
+
+static const char *td_effect_target(const char *name, cJSON *args)
 {
    static const char *const keys[] = {"path", "repo_path", "url", "ref", "title", "symbol", NULL};
    for (int i = 0; keys[i]; i++)
@@ -146,7 +161,7 @@ static const char *td_effect_target(cJSON *args)
       if (cJSON_IsString(value))
          return value->valuestring;
    }
-   return "";
+   return td_effect_external_mutation(name) ? name : "";
 }
 
 static int td_effect_known_reversible(const char *name, cJSON *args)
@@ -175,7 +190,9 @@ static ti_effect_mode_t td_effect_mode(const char *name, cJSON *args)
       return TI_EFFECT_MODE_OFF;
    if (configured && strcmp(configured, "shadow") == 0)
       return TI_EFFECT_MODE_SHADOW;
-   return td_effect_known_reversible(name, args) ? TI_EFFECT_MODE_ENFORCE : TI_EFFECT_MODE_SHADOW;
+   return (td_effect_known_reversible(name, args) || td_effect_external_mutation(name))
+              ? TI_EFFECT_MODE_ENFORCE
+              : TI_EFFECT_MODE_SHADOW;
 }
 
 static void td_effect_propose(const char *name, cJSON *args)
@@ -184,11 +201,22 @@ static void td_effect_propose(const char *name, cJSON *args)
    const char *who = session_id();
    ti_effect_class_t effect_class =
        td_effect_known_reversible(name, args) ? TI_EFFECT_REVERSIBLE : td_effect_class(name);
-   if (ti_effect_contract_init(&g_td_effect, who, name, td_effect_target(args), normalized,
+   if (ti_effect_contract_init(&g_td_effect, who, name, td_effect_target(name, args), normalized,
                                effect_class, td_effect_mode(name, args)) == 0)
    {
       g_td_effect_active = 1;
-      if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE)
+      if (td_effect_external_mutation(name))
+      {
+         (void)ti_effect_contract_set_authorization(&g_td_effect, 1, g_td_effect_authorized);
+         ti_idempotency_t idempotency =
+             strcmp(name, "git_push") == 0
+                 ? TI_IDEMPOTENT
+                 : (strcmp(name, "git_pr") == 0 ? TI_NON_IDEMPOTENT : TI_IDEMPOTENCY_UNKNOWN);
+         (void)ti_effect_contract_set_idempotency(&g_td_effect, idempotency);
+      }
+      else if (g_td_effect.effect_class == TI_EFFECT_EXTERNAL_COMMUNICATION)
+         (void)ti_effect_contract_set_idempotency(&g_td_effect, TI_IDEMPOTENT);
+      if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && td_effect_known_reversible(name, args))
          (void)ti_effect_contract_require_postcondition(&g_td_effect);
    }
    free(normalized);
@@ -198,13 +226,13 @@ static int td_effect_validate_and_execute(const char *name, cJSON *args)
 {
    if (!g_td_effect_active)
       return 0;
-   if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && !td_effect_target(args)[0])
+   if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && !td_effect_target(name, args)[0])
       return -1;
    char *normalized = cJSON_PrintUnformatted(args);
    ti_effect_class_t effect_class =
        td_effect_known_reversible(name, args) ? TI_EFFECT_REVERSIBLE : td_effect_class(name);
-   int matched = ti_effect_contract_validate(&g_td_effect, name, td_effect_target(args), normalized,
-                                             effect_class);
+   int matched = ti_effect_contract_validate(&g_td_effect, name, td_effect_target(name, args),
+                                             normalized, effect_class);
    free(normalized);
    if (matched < 0 || (matched == 0 && g_td_effect.mode == TI_EFFECT_MODE_ENFORCE))
       return -1;
@@ -288,8 +316,13 @@ static void td_effect_finish(void)
       outcome = TI_EFFECT_SUCCEEDED;
    else if (strcmp(g_td_verdict, "refused") == 0)
       outcome = TI_EFFECT_REFUSED;
+   else if (strcmp(g_td_verdict, "timeout") == 0 &&
+            g_td_effect.effect_class == TI_EFFECT_EXTERNAL_COMMUNICATION &&
+            g_td_effect.idempotency != TI_IDEMPOTENT)
+      outcome = TI_EFFECT_UNKNOWN_OUTCOME;
    (void)ti_effect_contract_finish(&g_td_effect, outcome, g_td_reason);
    g_td_effect_active = 0;
+   g_td_effect_authorized = 0;
 }
 
 static void td_classify_exec_result(const char *result)
@@ -2192,6 +2225,7 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
    td_effect_finish();
+   g_td_effect_authorized = 0;
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
@@ -2624,7 +2658,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = safe_strdup(err);
    }
 
-   if (g_td_effect_active && g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && result)
+   if (g_td_effect_active && g_td_effect.postcondition == TI_POSTCONDITION_PENDING && result)
    {
       if (strncmp(result, "error:", 6) == 0)
       {

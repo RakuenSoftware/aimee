@@ -16,7 +16,7 @@ struct cJSON;
 #define TI_PRINCIPAL_MAX 128
 #define TI_REVISION_MAX  96
 #define TI_EVENT_MAX     48
-#define TI_DETAIL_MAX    256
+#define TI_DETAIL_MAX    384
 #define TI_DOMAIN_MAX    48
 #define TI_SCOPE_MAX     128
 #define TI_TOOL_MAX      96
@@ -119,6 +119,13 @@ typedef enum
    TI_POSTCONDITION_FAILED
 } ti_postcondition_state_t;
 
+typedef enum
+{
+   TI_IDEMPOTENCY_UNKNOWN = 0,
+   TI_IDEMPOTENT,
+   TI_NON_IDEMPOTENT
+} ti_idempotency_t;
+
 typedef struct
 {
    char contract_id[TI_ID_MAX];
@@ -130,7 +137,10 @@ typedef struct
    ti_effect_mode_t mode;
    ti_effect_state_t state;
    ti_postcondition_state_t postcondition;
+   ti_idempotency_t idempotency;
    int matched;
+   int authorization_required;
+   int authorized;
    uint64_t sequence;
 } ti_effect_contract_t;
 
@@ -191,6 +201,10 @@ int ti_effect_contract_validate(ti_effect_contract_t *contract, const char *tool
                                 const char *target, const char *arguments_json,
                                 ti_effect_class_t effect_class);
 int ti_effect_contract_mark_executing(ti_effect_contract_t *contract);
+int ti_effect_contract_set_authorization(ti_effect_contract_t *contract, int required,
+                                         int authorized);
+int ti_effect_contract_set_idempotency(ti_effect_contract_t *contract,
+                                       ti_idempotency_t idempotency);
 int ti_effect_contract_require_postcondition(ti_effect_contract_t *contract);
 int ti_effect_contract_record_postcondition(ti_effect_contract_t *contract, int passed,
                                             const char *descriptor);

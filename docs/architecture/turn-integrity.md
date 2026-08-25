@@ -64,3 +64,15 @@ symbol edits with an explicit path. A contract mismatch or absent target refuses
 execution. A nominally successful mutation is not reported successful until a
 read-back check passes; failed verification reports an uncertain local state and
 requires inspection before retry. Other writes remain in shadow mode.
+
+External effects are identified independently from ordinary read/write labels.
+Web access is external but read-only; publication tools and unknown remote tools
+are external mutations. Those mutations require a trusted execution-policy
+decision carried out-of-band on the dispatch thread. A model cannot assert its
+own authorization in tool arguments.
+
+Contracts also declare idempotency. A timeout from a non-idempotent or unknown
+external mutation is an `unknown_outcome`, not a clean failure: the operation may
+have reached the remote system, so the dispatcher does not imply that retrying is
+safe. Automatic retry remains prohibited until reconciliation establishes the
+remote state.
