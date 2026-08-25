@@ -1007,7 +1007,7 @@ go-unit-tests:
 		(unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
 		 cd "$$module" && "$(GO)" test ./...); \
 	done
-	@echo "go-unit-tests: db3 providers over the authenticated C bus"
+	@echo "go-unit-tests: postgres routing to a provisioned vector database"
 	@cd .. && bash scripts/test_db3_go_bus.sh
 	@echo "go-unit-tests: cross-language bus conformance"
 	@cd .. && bash scripts/test_bus_conformance.sh

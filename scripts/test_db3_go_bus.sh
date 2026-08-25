@@ -10,19 +10,13 @@ fi
 [ -x "$harness" ] || { echo "FAIL: DB3 Go host harness not built" >&2; exit 1; }
 
 cd "$repo_root/server-go"
-# Both DB3 bus proofs. The first attaches providers as goroutines inside the
-# test; the second starts the SHIPPED provider binary as its own process under a
-# grant naming its executable, applies points through the wire, and searches
-# them back. Only the second exercises a deployment, which is how the provider
-# came to have no runnable process while every test of it passed.
+# The DB3 proof: the postgres module reads a provisioned grant, routes a search
+# over its own bus attachment to the shipped provider binary running as its own
+# process, and gets scored candidates back.
 #
-# CGO_ENABLED is not forced here: the process test builds the multicall itself.
-DB3_GO_HOST="$harness" \
-   go test ./modules/db2 \
-   -run 'TestDB3GoProvidersOperateOverAuthenticatedCBus|TestTheShippedProviderBinaryServesOverARealBus' \
-   -v -timeout 180s || exit 1
-
-# The postgres module's own routing, over the same bus: a provider answers, and
-# PostgreSQL is not touched for a routed search.
+# There used to be two more tests here, against a second DB3 router that lived
+# in modules/db2. That router had no production caller -- postgres owns routing
+# now -- so its tests were exercising a path no deployment takes, which is the
+# shape this work kept finding. They went with it.
 DB3_GO_HOST="$harness" \
    go test ./modules/postgres -run TestThePostgresModuleRoutes -v -timeout 180s

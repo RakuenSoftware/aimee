@@ -1,4 +1,4 @@
-package db2
+package postgres
 
 import (
 	"context"

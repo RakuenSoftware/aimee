@@ -1,4 +1,4 @@
-package db2
+package postgres
 
 import (
 	"context"
@@ -455,25 +455,23 @@ func (store *PGDB3Outbox) RetireProvider(ctx context.Context, principal uint32) 
 	return err
 }
 
-// BusObservers binds the durable ledger to authenticated bus evidence. A
-// failed admission keeps that provider out of search routing; a transient ack
-// write failure is repaired when the leased operation is replayed.
-func (store *PGDB3Outbox) BusObservers(ctx context.Context) DB3BusObservers {
+// AppliedObserver is the handler for a provider's acknowledgements.
+//
+// An Applied notification is the DURABLE completion evidence: a bus publish is
+// only an attempt, and an operation is not done until the provider says it
+// landed. Everything else about delivery is a retry.
+//
+// The capability half of this used to live here too -- a provider was admitted
+// by announcing itself, and refused if it had not caught up. That is gone with
+// discovery: a provider is provisioned by grant, known at boot, and cannot
+// admit or unadmit itself at runtime. What remains is the watermark, which is a
+// fact about replication rather than about who is allowed to serve.
+func (store *PGDB3Outbox) AppliedObserver(ctx context.Context) func(uint32, protocol.Applied) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return DB3BusObservers{
-		Capabilities: func(callCtx context.Context, principal, handle uint32, sequence uint64,
-			capabilities protocol.Capabilities) error {
-			err := store.AdmitProvider(callCtx, principal, handle, sequence, capabilities)
-			if errors.Is(err, ErrDB3ProviderNotCaughtUp) {
-				store.startBackfill(ctx, principal)
-			}
-			return err
-		},
-		Applied: func(principal uint32, applied protocol.Applied) {
-			_ = store.Applied(ctx, principal, applied)
-		},
+	return func(principal uint32, applied protocol.Applied) {
+		_ = store.Applied(ctx, principal, applied)
 	}
 }
 

@@ -15,6 +15,8 @@
     "server-go/modules/postgres/health.go",
     "server-go/modules/postgres/sql.go",
     "server-go/modules/postgres/vectorbus.go",
+    "server-go/modules/postgres/vectoroutbox.go",
+    "server-go/modules/postgres/vectorreplication.go",
     "server-go/modules/postgres/vectorroute.go",
     "server-go/modules/postgres/vectorsearch.go"
   ],
@@ -22,6 +24,7 @@
     "server-go/modules/postgres/checksum_test.go",
     "server-go/modules/postgres/health_test.go",
     "server-go/modules/postgres/vectorbus_e2e_test.go",
+    "server-go/modules/postgres/vectoroutbox_test.go",
     "server-go/modules/postgres/vectorroute_test.go"
   ],
   "public_headers": [
