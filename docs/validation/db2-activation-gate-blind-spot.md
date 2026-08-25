@@ -63,33 +63,72 @@ showing no DB2 include of its own.
 ## What it costs today
 
 Comparing the ledger's consumer list against a scan of every `.c` file outside
-`src/modules/db2`:
+`src/modules/db2`, with comments stripped:
 
-- **326** files outside DB2 call a declared DB2 symbol.
-- **283** are tracked. **43 are not**, reaching **180** distinct declarations.
-- **19** of the untracked are production files, not tests.
+- **19 production files** call a declared DB2 symbol while absent from the
+  consumer list. **17** of them are unguarded, so those calls are live.
+- Between them they reach declarations the ledger attributes to nobody.
 
-One of them reaches a **reviewed wire operation**, which is the case the gate
-exists to prevent:
+| untracked production file | declared DB2 symbols called |
+| --- | --- |
+| `src/kb/kb_mgmt_token_authority_service.c` | 13 |
+| `src/kb/kb_mgmt_status_authority_main.c` | 9 |
+| `src/kb/kb_mgmt_status_provision_main.c` | 6 |
+| `src/modules/benchmarks/agent_eval.c` | 6 |
+| `src/kb/kb_mgmt_jwks_publish_main.c`, `src/kb/kb_vault_operator_runtime.c`, `src/modules/vault/vault_reseal_orchestrator.c`, `src/modules/benchmarks/agent_eval_memory_support.c` | 5 each |
+| 11 more | 1-4 each |
+
+### The gate is not currently wrong
+
+Exactly one untracked production file reaches a **reviewed wire operation**, and
+it does not survive compilation:
 
 ```
-src/modules/kb_client/kb_client_tool_registry.c:36   if (db2_is_initialized())
-src/modules/kb_client/kb_client_tool_registry.c:114  if (db2_is_initialized())
+src/modules/kb_client/kb_client_tool_registry.c:35   #if !defined(AIMEE_DB2_DISABLED)
+src/modules/kb_client/kb_client_tool_registry.c:36       if (db2_is_initialized())
 ```
 
-`db2_is_initialized` is reviewed `wire-operation`, its ledger entry lists 15
-consumers, and `kb_client_tool_registry.c` is not among them. The file reaches
-the declaration through `#include "lifecycle.h"` and `#include "tool_registry.h"`,
-both of which resolve to `src/modules/db2/c/`, and it links into the shipped
-`aimee` binary (`src/Makefile:509`, `:616`).
+`src/Makefile:1645` gives that translation unit an explicit rule compiling it
+with `-DAIMEE_DB2_DISABLED`, so the call is preprocessed away. Verified on the
+built object rather than argued from the source:
 
-So `check_db2_activation` reports this operation clear of direct production
-callers while a shipped binary calls it directly.
+```
+$ nm -u build/obj/modules/kb_client/kb_client_tool_registry.o | wc -l
+13
+$ nm -u build/obj/modules/kb_client/kb_client_tool_registry.o | grep -c db2
+0
+```
 
-A second candidate, `src/modules/benchmarks/agent_eval_memory_support.c`,
-appears in a naive symbol scan but is a **false positive**: both occurrences of
-`db2_embedding_dim()` are inside a comment at lines 1260-1261. It is recorded
-here because the same scan will surface it again.
+**So no reviewed wire operation has a live untracked caller today**, and
+`check_db2_activation` is not currently clearing something it should refuse.
+An earlier revision of this record claimed otherwise; that claim was wrong and
+is corrected here.
+
+A second apparent case, `src/modules/benchmarks/agent_eval_memory_support.c`,
+mentions `db2_embedding_dim()` only inside a comment at lines 1260-1261. It has
+real calls to other DB2 symbols, but none to a reviewed operation.
+
+### Where it does bite
+
+The ledger models neither of the two things that decide whether a call is real:
+an include spelled without `db2`, and a call removed by `AIMEE_DB2_DISABLED`.
+It counts a tracked file's textual uses, and nothing else.
+
+That is survivable while 41 declarations are reviewed and 1166 are not. It stops
+being survivable during the review itself, because the review's evidence is this
+same list. Of the 1166 unreviewed declarations, **443** appear to have no
+outside production consumer at all -- 275 reachable only from tests, 168 from
+nobody -- which invites the inference that they are private by construction.
+That inference is unsound on this data. `db2_agent_outcome_recent_failures` is
+recorded with **zero** consumers and is called at
+`src/modules/benchmarks/agent_eval.c:373`, reached through
+`src/headers/aimee.h`.
+
+So the ordering matters: correcting the consumer list is a prerequisite for the
+declaration review, not a cleanup that can follow it. A symbol classified
+`private-db2` because the ledger showed no callers, when callers exist, is a
+wire operation that will not be built -- and the cutover discovers it as a link
+failure.
 
 ## Why this cannot simply be fixed in place
 
@@ -130,6 +169,13 @@ prevents regression while (2) proceeds.
 ## Not addressed here
 
 Whether the 1166 unreviewed declarations contain further wire operations. That
-review is a separate gate on activation (`declarations_complete`), and its
-input is this same consumer list -- so it should be redone after the list is
-correct, not before.
+review is a separate gate on activation (`declarations_complete`), and its input
+is this same consumer list -- so it must follow the correction rather than
+precede it, for the reason given above.
+
+Also not addressed: whether the 17 live untracked callers should be callers at
+all. Several are operator and management entry points
+(`kb_mgmt_token_authority_service.c` reaches 13 declarations) whose DB2 use may
+be legitimate and simply undeclared, or may be a boundary violation that has
+never been visible enough to argue about. Deciding that is the review this
+record is asking for, not something to settle from a symbol count.
