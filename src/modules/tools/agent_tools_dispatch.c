@@ -342,6 +342,16 @@ static void td_classify_exec_result(const char *result)
    cJSON_Delete(r);
 }
 
+/* The MCP transport exposes a stable, content-free timeout classification in
+ * err_buf. Preserve it across the namespaced dispatcher boundary: treating it
+ * as an ordinary tool error would make a non-idempotent remote mutation look
+ * safely retryable even though the request may already have reached the peer. */
+static int td_mcp_failure_is_timeout(const char *error)
+{
+   return error && (strcmp(error, "transport timeout") == 0 ||
+                    strcmp(error, "request timed out") == 0);
+}
+
 /* db1_session_write_path_record from db1/session_paths.h — declared
  * locally so the dispatch path doesn't pull the full db1 umbrella. */
 int db1_session_write_path_record(const char *session_id, const char *path);
@@ -2655,7 +2665,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       {
          /* err_buf is the MCP server's own error text and may echo argument
           * values; classify to an enum, never let it near the audit fields. */
-         td_outcome_set("error", "tool_error");
+         if (td_mcp_failure_is_timeout(err_buf))
+            td_outcome_set("timeout", "timeout");
+         else
+            td_outcome_set("error", "tool_error");
          char err[384];
          snprintf(err, sizeof(err), "error: %s mcp tool failed: %s", local ? "remote" : "kb-hosted",
                   err_buf[0] ? err_buf : "unknown error");

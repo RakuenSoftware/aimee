@@ -148,6 +148,14 @@ session_refs="$(git --git-dir="$git_bare" for-each-ref --format='%(refname)' ref
 [[ -n "$session_refs" ]] || fail "authorized git_push did not publish the session branch"
 ok "authorized external git_push reached a disposable real remote"
 
+# A real stdio MCP peer receives this non-idempotent external mutation and then
+# withholds its acknowledgement. The production dispatcher must terminate it as
+# unknown_outcome, never as a clean failure that implies retry is safe.
+run_turn ti-live-unknown TI_MCP_TIMEOUT "$workspace" "$RUN_ROOT/mcp-timeout-turn.out"
+grep -q 'TURN_INTEGRITY_UNKNOWN_OUTCOME_OBSERVED' "$RUN_ROOT/mcp-timeout-turn.out" || \
+  fail "model did not observe the external mutation timeout"
+ok "non-idempotent external MCP timeout completed as an uncertain outcome"
+
 # Observe one session through the canonical OpenAI ingress, invalidate knowledge
 # through the public API, then observe the same session again. Supplying a
 # read-only tool keeps the request on the neutral IR path; the second provider
@@ -206,6 +214,7 @@ required = {
     "effect.executing",
     "effect.postcondition",
     "effect.completed",
+    "effect.unknown_outcome",
     "knowledge.invalidated",
 }
 if not required.issubset(actions):
