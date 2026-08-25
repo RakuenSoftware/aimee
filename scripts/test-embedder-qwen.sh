@@ -41,8 +41,25 @@ if [[ -z "$LLAMA_BIN" ]]; then
   # The plain CPU asset is llama-<tag>-bin-ubuntu-x64.tar.gz; the vulkan/rocm/sycl/
   # openvino variants carry an extra token (ubuntu-vulkan-x64, ...) so anchoring on
   # '-bin-ubuntu-x64.tar.gz' selects the CPU build uniquely.
-  url="$(curl -fsSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
-        | grep -oE 'https://[^"]*-bin-ubuntu-x64\.tar\.gz' | head -1)"
+  # GitHub's `latest` release can be a metadata-only tag (v0.3.0 currently)
+  # with no binaries. Read a bounded releases page and select the newest exact
+  # CPU asset, excluding Vulkan/ROCm/SYCL/OpenVINO variants by filename.
+  releases_json="$CACHE/llama-releases.json"
+  curl -fsSL 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10' \
+    -o "$releases_json"
+  url="$(python3 - "$releases_json" <<'PY'
+import json
+import re
+import sys
+
+for release in json.load(open(sys.argv[1], encoding="utf-8")):
+    for asset in release.get("assets", []):
+        if re.fullmatch(r"llama-[^-]+-bin-ubuntu-x64\.tar\.gz", asset.get("name", "")):
+            print(asset["browser_download_url"])
+            raise SystemExit(0)
+raise SystemExit(1)
+PY
+)"
   [[ -n "$url" ]] || { log "could not resolve a llama.cpp CPU release URL"; exit 1; }
   log "url=$url"
   curl -fsSL -o "$CACHE/llama.tar.gz" "$url"
