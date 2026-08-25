@@ -105,6 +105,36 @@ static void test_bandit_sample_disabled(void)
    printf("  bandit_sample_disabled: ok\n");
 }
 
+static void test_bandit_sample_respects_selected_arm(void)
+{
+   open_db();
+   pin_empty_config();
+
+   assert(config_set_bandit_optimize_command("python3 ../scripts/bandit-sidecar.py") == 0);
+   assert(config_set_bandit_exploration_fraction(0.0) == 0);
+   assert(db2_bandit_arm_stats_update("test_policy", "off", 0.0, 1.0, 101.0) == 0);
+   assert(db2_bandit_arm_stats_update("test_policy", "brief", 1.0, 101.0, 1.0) == 0);
+   assert(db2_bandit_arm_stats_update("test_policy", "full", 0.0, 1.0, 101.0) == 0);
+
+   char arm_ids[3][KB_BANDIT_MAX_ARM_ID] = {{0}};
+   snprintf(arm_ids[0], sizeof(arm_ids[0]), "off");
+   snprintf(arm_ids[1], sizeof(arm_ids[1]), "brief");
+   snprintf(arm_ids[2], sizeof(arm_ids[2]), "full");
+   char decision_id[KB_BANDIT_MAX_DECISION] = "";
+   int chosen = kb_bandit_sample("test_policy", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids,
+                                 3, decision_id);
+   assert(chosen == 1);
+   assert(decision_id[0] != '\0');
+
+   /* Do not leave the client-side config snapshot carrying this test's
+    * sidecar into subsequent callers. */
+   assert(config_set_bandit_optimize_command("") == 0);
+   assert(config_set_bandit_exploration_fraction(0.05) == 0);
+   unpin_config();
+   close_db();
+   printf("  bandit_sample_respects_selected_arm: ok\n");
+}
+
 /* ---- 3. bandit_reward_closed ---- */
 static void test_bandit_reward_closed(void)
 {
@@ -341,6 +371,7 @@ int main(void)
    test_bandit_recall_reward();
    test_bandit_enumeration();
    test_bandit_replay_evidence();
+   test_bandit_sample_respects_selected_arm();
 
    printf("All bandit tests passed.\n");
    return 0;
