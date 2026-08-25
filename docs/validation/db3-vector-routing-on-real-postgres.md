@@ -138,17 +138,54 @@ executes an empty file and reports a failure that is entirely self-inflicted.
 **Do not run the two scripts at once.** They share one build tree, and two
 parallel makes in it corrupt each other's objects.
 
+## The provider had no process, and the route has no installer
+
+Two findings that no test could have surfaced, because every test of the split
+runs one half against a fake of the other.
+
+**The provider could not be deployed.** The index, the provider, the router and
+the wire were written and tested, and nothing in `server-go/cmd/aimee-module`
+knew the name, so `provision-plugin-module.py --kind db3-provider` had no
+executable to point a grant at. The provisioner made it worse: for that kind it
+wrote a PLUGIN's grant, naming the ref-derived invoke/declare pair the provider
+never answers and none of the four DB3 wire kinds it does, and printed
+`aimee-module-mcp-<instance>` as the name to symlink. A provider provisioned by
+following its own documentation would attach and then be refused on every
+publish. Both are fixed, and
+`TestTheShippedProviderBinaryServesOverARealBus` now runs the shipped binary as
+its own process under a grant naming its executable, applies points through the
+wire, and searches them back in scored order.
+
+That test immediately found a third defect: the provider never republished its
+capabilities, while every apply advances its index generation. DB2 asks at the
+generation it was told, the provider answers at its real one, and the wire
+requires them to be equal, so the runtime rejected its own provider's reply.
+After the first apply, every routed search failed permanently.
+
+**Nothing installs a route.** `pgvec_db3_route_install` and
+`pgvec_db3_route_select` are called by tests only, and `NewDB3BusRouter` is
+constructed by tests only. So in a running system the C transport's route table
+is empty, `pgvec_db3_candidates` reports "no route", and every search the
+routing work added falls back to pgvector. The two halves are each correct and
+are never connected: no production code observes a provider's capabilities and
+installs the corresponding route into DB2's transport.
+
+This is not fixed here. It is a new component -- something in aimee-kb that
+serves the DB3 route control surface, watches capabilities, and supplies the
+external search callback -- and where it lives, how it fails, and when it
+degrades are design decisions rather than a repair.
+
 ## What is still not proven here
 
-**No test drives the whole path.** Ingest, embed, then a routed search returning
-correct rows from a real external provider over real pgvector data is still
-inferred from parts rather than observed, because each half is tested against a
-fake of the other: `routed_test.go` has a real router and a real provider but a
-stub pgvector fallback, `TestDB3GoProvidersOperateOverAuthenticatedCBus` has a
-real bus and real providers but a fake search function, and `code_verify.sql`
-has real pgvector but is SQL rather than the C that generates it. Closing this
-means standing aimee-kb up with a provisioned provider, the shape
-`docs/validation/aimee-module-on-a-clean-container.md` already uses.
+**No test drives the whole path, and no system can.** The DB3 layer is now
+covered end to end by a real process:
+`TestTheShippedProviderBinaryServesOverARealBus` applies and searches across a
+bus with nothing faked on either side. What remains unproven is the join to
+pgvector data -- ingest, embed, then a routed search returning correct rows --
+and it is unproven because it cannot happen: nothing installs a route, so DB2
+never reaches a provider at runtime no matter what is deployed. A harness
+standing aimee-kb up with a provisioned provider would today demonstrate exactly
+that, and nothing more.
 
 The `unit-test-agent` failure seen on the developer's machine does not reproduce
 in the container, so it is environmental rather than a defect, but its cause is
