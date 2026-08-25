@@ -79,6 +79,23 @@ KINDS = {
     },
 }
 
+# The DB3 wire kinds a vector provider actually speaks.
+#
+# These are FIXED CONSTANTS, not derived from the principal ref like a module's
+# stages are: every provider answers the same SEARCH kind. MUST match
+# src/modules/db2/include/aimee/db2/db3_contract.h and
+# server-go/db3/contract_generated.go.
+#
+# Only ONE provider may SERVE the search. bus_host_serve_kind binds one kind to
+# exactly one serving slot, so a second provider granted it is refused at
+# attach. That is the intended shape -- the C host fixture grants serve to one
+# provider and publish/subscribe to the other -- and it is why the band exists
+# to keep provider IDENTITIES apart rather than their kinds.
+DB3_EVENT_CAPABILITIES = 0x80030001
+DB3_EVENT_APPLY = 0x80030002
+DB3_EVENT_APPLIED = 0x80030003
+DB3_EVENT_SEARCH = 0x80030004
+
 INSTANCE_RE = re.compile(r"^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$")
 GRANT_RE = re.compile(r"^\s*([a-z_]+)\s*=\s*(.*?)\s*$")
 
@@ -183,7 +200,13 @@ def main():
         die(f"instance {args.instance!r} must match [a-z][a-z0-9]*([-_][a-z0-9]+)* -- it becomes a "
             "command group, and the registry accepts only [a-z0-9_]")
 
-    if bool(args.argv) == bool(args.sse_url):
+    # A DB3 provider IS the process. It spawns no child and proxies no endpoint,
+    # so neither --argv nor --sse-url means anything for it: the executable is
+    # --module-bin under the aimee-module-db3-<instance> name. Requiring one of
+    # them made the documented command fail for a reason that had nothing to do
+    # with the provider. Both are still ACCEPTED so an existing command line
+    # keeps working, and both are ignored.
+    if args.kind != "db3-provider" and bool(args.argv) == bool(args.sse_url):
         die("give exactly one of --argv (a local process) or --sse-url (a remote endpoint)")
 
     if args.sse_url:
@@ -195,6 +218,9 @@ def main():
         argv = ["sse:" + args.sse_url]
         if args.bearer_env:
             argv.append(args.bearer_env)
+    elif args.argv is None:
+        # Only reachable for a DB3 provider, which needs no argv at all.
+        argv = []
     else:
         try:
             argv = json.loads(args.argv)
@@ -239,16 +265,30 @@ def main():
     else:
         ref, invoke, declare = allocate(grants, grant_name, args.kind)
 
+    if args.kind == "db3-provider":
+        # A provider serves the DB3 wire, not module-runtime stages. Granting it
+        # the ref-derived invoke/declare pair would authorize two kinds it never
+        # answers and none of the four it does, so it would attach and then be
+        # refused on every publish -- which reads as a provider that is up and
+        # silent.
+        publish = f"{DB3_EVENT_CAPABILITIES},{DB3_EVENT_APPLIED}"
+        subscribe = f"{DB3_EVENT_APPLY}"
+        serve = f"{DB3_EVENT_SEARCH}"
+    else:
+        publish = ""
+        subscribe = ""
+        serve = f"{invoke},{declare}"
+
     grant = "\n".join([
         "version=1",
         "principal_class=1",
         f"principal_ref={ref}",
         "uid=self",
         f"executable={args.module_bin}",
-        "publish=",
-        "subscribe=",
+        f"publish={publish}",
+        f"subscribe={subscribe}",
         "request=",
-        f"serve={invoke},{declare}",
+        f"serve={serve}",
     ]) + "\n"
 
     grant_path = os.path.join(policy_dir, grant_name)
@@ -264,6 +304,18 @@ def main():
 
     # The executable name is what selects the module: aimee-module is a multicall
     # binary dispatching on argv[0].
+    if args.kind == "db3-provider":
+        link = f"aimee-module-db3-{args.instance}"
+        print("")
+        print(f"# start {link} with this environment (it must symlink to {args.module_bin}):")
+        print(f"AIMEE_MODULE_PRINCIPAL_REF={ref}")
+        print("AIMEE_DB3_COLLECTION=<memory|kb|kb_pdf|code|curator_*>")
+        print("AIMEE_DB3_DIMENSION=<the corpus width; a mismatch returns no hits>")
+        print("AIMEE_DB3_METRIC=cosine")
+        print("")
+        print("# only ONE provider may serve the DB3 search; a second is refused at attach.")
+        return 0
+
     link = f"aimee-module-mcp-{args.instance}"
     print("")
     print(f"# start {link} with this environment (it must symlink to {args.module_bin}):")

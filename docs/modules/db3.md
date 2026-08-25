@@ -69,14 +69,39 @@ on top of postgres's block, and a live `aimee-kb` is what found it.
 python3 scripts/provision-plugin-module.py \
     --kind db3-provider \
     --instance qdrant \
-    --argv '["/usr/local/bin/aimee-db3-qdrant"]' \
     --module-bin /usr/local/libexec/aimee-modules/aimee-module \
     --config-dir ~/.config/aimee
 ```
 
-That allocates a ref from the provider band, derives its kinds, and writes
-`db3-qdrant.grant`. The same tool provisions plugin instances (`--kind plugin`,
-the default) from their own band -- one allocator, so the two cannot drift apart.
+That allocates a ref from the provider band and writes `db3-qdrant.grant`. The
+same tool provisions plugin instances (`--kind plugin`, the default) from their
+own band -- one allocator, so the two cannot drift apart.
+
+There is no `--argv`. A provider IS the process: the executable is
+`--module-bin` under the name `aimee-module-db3-qdrant`, which the multicall
+dispatches on. A plugin instance needs an argv because it spawns a third-party
+server; a provider spawns nothing.
+
+Its granted kinds are the DB3 wire's four fixed constants -- serve `SEARCH`,
+publish `CAPABILITIES` and `APPLIED`, subscribe `APPLY` -- not the ref-derived
+invoke/declare pair a module-runtime module serves. Only ONE provider may serve
+the search: one kind has exactly one serving slot, so a second is refused at
+attach. The band therefore keeps provider IDENTITIES apart, not their kinds.
+
+Start it with the principal ref and the collection it serves:
+
+```sh
+AIMEE_MODULE_PRINCIPAL_REF=456 \
+AIMEE_DB3_COLLECTION=memory \
+AIMEE_DB3_DIMENSION=384 \
+AIMEE_DB3_METRIC=cosine \
+    aimee-module-db3-qdrant /run/aimee/module-bus.sock
+```
+
+The dimension must match the corpus. A provider at the wrong width has every
+vector rejected by its index, so the search returns nothing and reads as an
+empty corpus rather than a misconfigured provider, which is why it is required
+rather than defaulted.
 
 A provider and a plugin may share a NAME; they get separate grants and
 non-colliding refs.

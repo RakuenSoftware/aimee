@@ -21,6 +21,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 TOOL = os.path.join(REPO, "scripts", "provision-plugin-module.py")
 
+# MUST match src/modules/db2/include/aimee/db2/db3_contract.h.
+DB3_EVENT_CAPABILITIES = 0x80030001
+DB3_EVENT_APPLY = 0x80030002
+DB3_EVENT_APPLIED = 0x80030003
+DB3_EVENT_SEARCH = 0x80030004
+
 failures = []
 
 
@@ -198,13 +204,28 @@ def main():
                 continue
             f = grant_fields(cfg, name, prefix="db3")
             ref = int(f["principal_ref"])
-            serve = [int(k) for k in f["serve"].split(",")]
+            serve = [int(k) for k in f["serve"].split(",") if k]
+            publish = [int(k) for k in f["publish"].split(",") if k]
+            subscribe = [int(k) for k in f["subscribe"].split(",") if k]
 
             check(456 <= ref < 512,
                   f"{name} ref {ref} is inside the DB3 provider band [456,512)")
             check(ref not in prov_refs, f"{name} got an unused ref ({ref})")
-            check(serve == [4096 + ref * 256 + 1, 4096 + ref * 256 + 2],
-                  f"{name} kinds are derived from its principal_ref")
+
+            # A provider speaks the DB3 WIRE, whose kinds are fixed constants --
+            # not the ref-derived invoke/declare pair a module-runtime module
+            # serves. This assertion used to require the derived pair, which is
+            # what the tool wrote: two kinds the provider never answers, and none
+            # of the four it does. A grant like that attaches and is then refused
+            # on every publish, which reads as a provider that is up and silent.
+            check(serve == [DB3_EVENT_SEARCH],
+                  f"{name} serves the DB3 search kind")
+            check(publish == [DB3_EVENT_CAPABILITIES, DB3_EVENT_APPLIED],
+                  f"{name} publishes capabilities and applied")
+            check(subscribe == [DB3_EVENT_APPLY],
+                  f"{name} subscribes to apply")
+            check(all(k != 4096 + ref * 256 + 1 for k in serve + publish + subscribe),
+                  f"{name} was granted no ref-derived module stage")
             prov_refs.add(ref)
 
         # A provider ref must never land in the plugin band, and vice versa.
