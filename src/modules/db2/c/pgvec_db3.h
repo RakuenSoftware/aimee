@@ -42,6 +42,8 @@ extern "C"
  * embedding row, so the capture trigger has nothing to label it with. */
 #define PGVEC_DB3_COLLECTION_MEMORY             "memory"
 #define PGVEC_DB3_COLLECTION_CODE               "code"
+#define PGVEC_DB3_COLLECTION_KB                 "kb"
+#define PGVEC_DB3_COLLECTION_KB_PDF             "kb_pdf"
 #define PGVEC_DB3_COLLECTION_CURATOR_ENTITY     "curator_entity"
 #define PGVEC_DB3_COLLECTION_CURATOR_NARRATIVE  "curator_narrative"
 #define PGVEC_DB3_COLLECTION_CURATOR_CLAIM_SUBJ "curator_claim_subject"

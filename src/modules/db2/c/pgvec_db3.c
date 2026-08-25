@@ -21,6 +21,8 @@ static pthread_mutex_t g_routes_mu = PTHREAD_MUTEX_INITIALIZER;
 static pgvec_db3_slot_t g_routes[] = {
     {PGVEC_DB3_COLLECTION_MEMORY, {0}, 0},
     {PGVEC_DB3_COLLECTION_CODE, {0}, 0},
+    {PGVEC_DB3_COLLECTION_KB, {0}, 0},
+    {PGVEC_DB3_COLLECTION_KB_PDF, {0}, 0},
     {PGVEC_DB3_COLLECTION_CURATOR_ENTITY, {0}, 0},
     {PGVEC_DB3_COLLECTION_CURATOR_NARRATIVE, {0}, 0},
     {PGVEC_DB3_COLLECTION_CURATOR_CLAIM_SUBJ, {0}, 0},
@@ -114,8 +116,8 @@ int pgvec_db3_route_serving(const char *collection)
 {
    pthread_mutex_lock(&g_routes_mu);
    pgvec_db3_slot_t *slot = slot_for(collection);
-   int serving = slot && slot->installed && slot->route.selected_principal != 0 &&
-                 slot->route.selected_ready;
+   int serving =
+       slot && slot->installed && slot->route.selected_principal != 0 && slot->route.selected_ready;
    pthread_mutex_unlock(&g_routes_mu);
    return serving;
 }
@@ -134,8 +136,8 @@ static int copy_scope(char *out, size_t capacity, const char *value)
    return 0;
 }
 
-int pgvec_db3_candidates(const char *collection, const float *vec, int dim,
-                         const char *record_type, const char *workspace, const char *project,
+int pgvec_db3_candidates(const char *collection, const float *vec, int dim, const char *record_type,
+                         const char *workspace, const char *project,
                          const pgvec_db3_filter_t *filters, int filter_count, int limit,
                          int64_t *ids, double *scores, int max)
 {

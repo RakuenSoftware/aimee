@@ -423,13 +423,21 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
    if (!vec_text)
       return -1;
 
+   /* generation comes from the document being embedded, not from the caller:
+    * point_id IS kb_documents.id, so the authoritative value is one lookup away
+    * and cannot drift from what the search compares against. A missing document
+    * row leaves it NULL, which is an orphaned vector -- the pgvector join
+    * excludes it too. */
    static const char *sql = "INSERT INTO kb_embeddings "
-                            "  (point_id, embedding, project, payload_json) "
+                            "  (point_id, embedding, project, generation, payload_json) "
                             "VALUES "
-                            "  (:point_id, :embedding::vector, :project, :payload) "
+                            "  (:point_id, :embedding::vector, :project, "
+                            "   (SELECT d.generation FROM kb_documents d WHERE d.id = :point_id), "
+                            "   :payload) "
                             "ON CONFLICT (point_id) DO UPDATE SET "
                             "  embedding = EXCLUDED.embedding, "
                             "  project = EXCLUDED.project, "
+                            "  generation = EXCLUDED.generation, "
                             "  payload_json = EXCLUDED.payload_json";
 
    char errbuf[256];
@@ -758,8 +766,36 @@ int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, i
    return pgvec_kb_search_scoped(project, NULL, vec, dim, limit, ids, scores, max);
 }
 
-int pgvec_kb_search_scoped(const char *project, const char *exclude_project, const float *vec,
-                           int dim, int limit, int64_t *ids, double *scores, int max)
+/* Resolve a project's current generation, or 0 when it has none.
+ *
+ * The pgvector code query expresses "current" as a join: projects.lifecycle_state
+ * = 'current' AND ce.generation = p.current_generation. A provider cannot join,
+ * so routing that search means resolving the generation here and sending it as
+ * an exact filter. The two are equivalent because the join has exactly one
+ * matching projects row -- name is unique -- so a resolved generation reproduces
+ * both conditions, and a project that is not current resolves to nothing and the
+ * search must not route at all. */
+static int64_t project_current_generation(void *pg, const char *project)
+{
+   if (!pg || !project || !project[0])
+      return 0;
+   static const char *sql = "SELECT current_generation FROM projects"
+                            " WHERE name = :project AND lifecycle_state = 'current'";
+   char errbuf[256] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return 0;
+   aimee_pg_bind_text(stmt, "project", project);
+   int64_t generation = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+      generation = aimee_pg_column_int64(stmt, 0);
+   aimee_pg_finalize(stmt);
+   return generation > 0 ? generation : 0;
+}
+
+static int pgvec_kb_search_scoped_pgvector(const char *project, const char *exclude_project,
+                                           const float *vec, int dim, int limit, int64_t *ids,
+                                           double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -835,6 +871,39 @@ int pgvec_kb_search_scoped(const char *project, const char *exclude_project, con
    return (rc == AIMEE_PG_ERR) ? -1 : n;
 }
 
+int pgvec_kb_search_scoped(const char *project, const char *exclude_project, const float *vec,
+                           int dim, int limit, int64_t *ids, double *scores, int max)
+{
+   /* Only the named-project form without an exclusion can route.
+    *
+    * An exclusion is negation, and the filter grammar is exact match only. A
+    * project-less search covers every project at its own current generation,
+    * which is a per-row condition no single filter expresses. Both stay on
+    * pgvector rather than route without the condition. */
+   int has_project = project && project[0];
+   int excludes = exclude_project && exclude_project[0];
+   if (has_project && !excludes)
+   {
+      void *pg = db2_conn();
+      int64_t generation = pg ? project_current_generation(pg, project) : 0;
+      /* No current generation means the project is detached: the pgvector query
+       * returns nothing for it, so routing without the condition would return
+       * rows from the generation it was detached at. */
+      if (generation > 0)
+      {
+         char generation_text[24];
+         snprintf(generation_text, sizeof(generation_text), "%lld", (long long)generation);
+         const pgvec_db3_filter_t filters[] = {{"generation", generation_text}};
+         int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_KB, vec, dim, "", "", project,
+                                           filters, 1, limit, ids, scores, max);
+         if (routed >= 0)
+            return routed;
+      }
+   }
+   return pgvec_kb_search_scoped_pgvector(project, exclude_project, vec, dim, limit, ids, scores,
+                                          max);
+}
+
 /* -------------------------------------------------------------------------
  * KB PDF vectors (structured-PDF Phase A1)
  *
@@ -877,13 +946,18 @@ int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *
    if (!vec_text)
       return -1;
 
+   /* As for kb_embeddings: the generation is the document's, looked up rather
+    * than passed in, so it cannot drift from what the search compares against. */
    static const char *sql = "INSERT INTO kb_pdf_embeddings "
-                            "  (point_id, embedding, project, payload_json) "
+                            "  (point_id, embedding, project, generation, payload_json) "
                             "VALUES "
-                            "  (:point_id, :embedding::vector, :project, :payload) "
+                            "  (:point_id, :embedding::vector, :project, "
+                            "   (SELECT d.generation FROM kb_documents d WHERE d.id = :point_id), "
+                            "   :payload) "
                             "ON CONFLICT (point_id) DO UPDATE SET "
                             "  embedding = EXCLUDED.embedding, "
                             "  project = EXCLUDED.project, "
+                            "  generation = EXCLUDED.generation, "
                             "  payload_json = EXCLUDED.payload_json";
 
    char errbuf[256];
@@ -941,8 +1015,8 @@ int pgvec_kbpdf_delete_project(const char *project)
 /* Vector search over PDF chunk embeddings ONLY. There is deliberately no
  * "search both kb_embeddings and kb_pdf_embeddings" helper: keeping the relations
  * disjoint at the transport layer is the structural isolation A1 requires. */
-int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
-                       double *scores, int max)
+static int pgvec_kbpdf_search_pgvector(const char *project, const float *vec, int dim, int limit,
+                                       int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -996,6 +1070,29 @@ int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit
    aimee_pg_finalize(stmt);
    free(vec_text);
    return (rc == AIMEE_PG_ERR) ? -1 : n;
+}
+
+int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
+                       double *scores, int max)
+{
+   /* Same shape as the kb search: a named project resolves to one generation,
+    * and a project-less search is a per-row condition that stays on pgvector. */
+   if (project && project[0])
+   {
+      void *pg = db2_conn();
+      int64_t generation = pg ? project_current_generation(pg, project) : 0;
+      if (generation > 0)
+      {
+         char generation_text[24];
+         snprintf(generation_text, sizeof(generation_text), "%lld", (long long)generation);
+         const pgvec_db3_filter_t filters[] = {{"generation", generation_text}};
+         int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_KB_PDF, vec, dim, "", "", project,
+                                           filters, 1, limit, ids, scores, max);
+         if (routed >= 0)
+            return routed;
+      }
+   }
+   return pgvec_kbpdf_search_pgvector(project, vec, dim, limit, ids, scores, max);
 }
 
 int pgvec_curator_entity_upsert(int64_t point_id, const float *vec, int dim, const char *scope_kind,
@@ -1099,8 +1196,8 @@ int pgvec_curator_entity_delete(int64_t point_id)
 }
 
 static int pgvec_curator_entity_search_pgvector(const char *scope_kind, const char *scope_id,
-                                               const float *vec, int dim, int limit, int64_t *ids,
-                                               double *scores, int max)
+                                                const float *vec, int dim, int limit, int64_t *ids,
+                                                double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1213,7 +1310,6 @@ int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, co
    return pgvec_curator_entity_search_pgvector(scope_kind, scope_id, vec, dim, limit, ids, scores,
                                                max);
 }
-
 
 int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
                                    const char *artifact_id, const char *kind, const char *doc_id,
@@ -1405,7 +1501,6 @@ int pgvec_curator_narrative_search(const char *kind, const char *status, const c
                                                   scores, max);
 }
 
-
 int pgvec_curator_claim_upsert(int64_t point_id, const float *subj_attr_vec, const float *value_vec,
                                int dim, const char *artifact_id, const char *subject,
                                const char *attribute, const char *value, const char *claim_kind,
@@ -1579,7 +1674,6 @@ int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, co
    return pgvec_curator_claim_search_pgvector(which_vec, claim_kind, vec, dim, limit, ids, scores,
                                               max);
 }
-
 
 int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
                                    const float *signature_vec, const float *body_vec, int dim,
@@ -1795,7 +1889,6 @@ int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, 
                                                   max);
 }
 
-
 /* --- Phase 5: code_embeddings operations --- */
 
 int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *project,
@@ -1900,33 +1993,6 @@ int pgvec_code_delete_project(const char *project)
    return (rc == AIMEE_PG_DONE) ? changes : -1;
 }
 
-/* Resolve a project's current generation, or 0 when it has none.
- *
- * The pgvector code query expresses "current" as a join: projects.lifecycle_state
- * = 'current' AND ce.generation = p.current_generation. A provider cannot join,
- * so routing that search means resolving the generation here and sending it as
- * an exact filter. The two are equivalent because the join has exactly one
- * matching projects row -- name is unique -- so a resolved generation reproduces
- * both conditions, and a project that is not current resolves to nothing and the
- * search must not route at all. */
-static int64_t code_current_generation(void *pg, const char *project)
-{
-   if (!pg || !project || !project[0])
-      return 0;
-   static const char *sql = "SELECT current_generation FROM projects"
-                            " WHERE name = :project AND lifecycle_state = 'current'";
-   char errbuf[256] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-      return 0;
-   aimee_pg_bind_text(stmt, "project", project);
-   int64_t generation = 0;
-   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
-      generation = aimee_pg_column_int64(stmt, 0);
-   aimee_pg_finalize(stmt);
-   return generation > 0 ? generation : 0;
-}
-
 static int pgvec_code_search_pgvector(const char *project, const float *vec, int dim, int limit,
                                       int64_t *ids, double *scores, int max)
 {
@@ -1981,6 +2047,34 @@ static int pgvec_code_search_pgvector(const char *project, const float *vec, int
    int64_t elapsed = monotonic_us() - t0;
    record_latency(elapsed);
    return (rc == AIMEE_PG_ERR) ? -1 : n;
+}
+
+int pgvec_code_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
+                      double *scores, int max)
+{
+   /* A named project resolves to exactly one current generation, so the join the
+    * pgvector query uses collapses to an exact filter the wire can carry. A
+    * project-less search spans every project, each with its own current
+    * generation -- that is a per-row condition, not one filter -- so it stays on
+    * pgvector. So does a project with no current generation: it is detached, the
+    * pgvector query returns nothing for it, and routing without the condition
+    * would answer from the generation it was detached at. */
+   if (project && project[0])
+   {
+      void *pg = db2_conn();
+      int64_t generation = pg ? project_current_generation(pg, project) : 0;
+      if (generation > 0)
+      {
+         char generation_text[24];
+         snprintf(generation_text, sizeof(generation_text), "%lld", (long long)generation);
+         const pgvec_db3_filter_t filters[] = {{"generation", generation_text}};
+         int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CODE, vec, dim, "", "", project,
+                                           filters, 1, limit, ids, scores, max);
+         if (routed >= 0)
+            return routed;
+      }
+   }
+   return pgvec_code_search_pgvector(project, vec, dim, limit, ids, scores, max);
 }
 
 /* Like pgvec_code_search, but returns each hit's file_path instead of its

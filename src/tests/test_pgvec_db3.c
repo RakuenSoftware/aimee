@@ -88,14 +88,17 @@ int main(void)
 
    /* Without an installed route the adapter reports "no answer" so the caller
     * runs its own pgvector query. It must never look like an empty result. */
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) == -1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 8) == -1);
 
    search_state_t internal = {0};
-   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, &internal, allow_all, NULL) == 0);
+   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, &internal, allow_all,
+                                  NULL) == 0);
 
    /* With no provider selected, the route serves from the internal pgvector
     * callback and the adapter copies the candidates out. */
-   int n = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8);
+   int n = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                                0, ids, scores, 8);
    assert(n == 2);
    assert(ids[0] == 11 && ids[1] == 22);
    assert(scores[0] > scores[1]);
@@ -108,20 +111,24 @@ int main(void)
    /* Request ids must differ between calls: the wire pairs a reply with its
     * request by this value, so a repeated id could match the wrong reply. */
    uint64_t first_id = internal.last_request_id;
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) == 2);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 8) == 2);
    assert(internal.last_request_id != first_id);
 
    /* An unscoped search cannot be expressed on the wire. Sending one with both
     * components blank would ask a provider to search everything, so it is
     * refused before the route is consulted. */
    int before = internal.calls;
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "", "", NULL, 0, 0, ids, scores, 8) == -1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "", "", NULL, 0, 0,
+                               ids, scores, 8) == -1);
    assert(internal.calls == before);
 
    /* limit bounds top_k below max; max bounds it when limit is absent. */
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 1, ids, scores, 8) == 1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               1, ids, scores, 8) == 1);
    assert(internal.last_top_k == 1);
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 3) == 2);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 3) == 2);
    assert(internal.last_top_k == 3);
 
    /* A scope component too long for the wire fails the search rather than being
@@ -130,15 +137,18 @@ int main(void)
    memset(overlong, 'w', sizeof(overlong) - 1);
    overlong[sizeof(overlong) - 1] = '\0';
    before = internal.calls;
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", overlong, "", NULL, 0, 0, ids, scores, 8) == -1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", overlong, "", NULL,
+                               0, 0, ids, scores, 8) == -1);
    assert(internal.calls == before);
 
    /* An external provider serves portable reads once selected and ready. */
    search_state_t external = {0};
-   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_MEMORY, 456, 1, 0, fake_search, &external) == 0);
+   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_MEMORY, 456, 1, 0, fake_search, &external) ==
+          0);
    assert(pgvec_db3_route_serving(PGVEC_DB3_COLLECTION_MEMORY));
    before = internal.calls;
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "p1", NULL, 0, 0, ids, scores, 8) == 2);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "p1", NULL,
+                               0, 0, ids, scores, 8) == 2);
    assert(external.calls == 1);
    assert(internal.calls == before); /* pgvector was not consulted */
    assert(strcmp(external.last_project, "p1") == 0);
@@ -147,13 +157,16 @@ int main(void)
     * than silently returning pgvector's results. */
    external.fail = 1;
    before = internal.calls;
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) == -1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 8) == -1);
    assert(internal.calls == before);
 
    /* With fallback enabled the same failure falls back to pgvector. */
-   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_MEMORY, 456, 1, 1, fake_search, &external) == 0);
+   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_MEMORY, 456, 1, 1, fake_search, &external) ==
+          0);
    before = internal.calls;
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) == 2);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 8) == 2);
    assert(internal.calls == before + 1);
 
    /* Clearing the provider returns portable reads to pgvector. */
@@ -162,33 +175,42 @@ int main(void)
    assert(!pgvec_db3_route_serving(PGVEC_DB3_COLLECTION_MEMORY));
    before = internal.calls;
    int external_before = external.calls;
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) == 2);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 8) == 2);
    assert(internal.calls == before + 1);
    assert(external.calls == external_before);
 
    /* DB2 re-authorizes every candidate. A provider can narrow what DB2
     * considers, never widen it, so a wholly denied reply yields nothing. */
-   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, &internal, deny_all, NULL) == 0);
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) <= 0);
+   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, &internal, deny_all,
+                                  NULL) == 0);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 8) <= 0);
 
    /* Installing a route replaces its callbacks, so any provider selected
     * against the old ones is dropped. */
-   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_MEMORY, 456, 1, 0, fake_search, &external) == 0);
+   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_MEMORY, 456, 1, 0, fake_search, &external) ==
+          0);
    assert(pgvec_db3_route_serving(PGVEC_DB3_COLLECTION_MEMORY));
-   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, &internal, allow_all, NULL) == 0);
+   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, &internal, allow_all,
+                                  NULL) == 0);
    assert(!pgvec_db3_route_serving(PGVEC_DB3_COLLECTION_MEMORY));
 
    /* Malformed arguments are refused rather than sent. */
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, NULL, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) == -1);
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 0, "memory", "w1", "", NULL, 0, 0, ids, scores, 8) == -1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, NULL, 4, "memory", "w1", "", NULL, 0, 0,
+                               ids, scores, 8) == -1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 0, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 8) == -1);
    /* record_type is optional: it is one filter among others now, and a
     * collection like curator_entity has no such label at all. An absent one
     * means "do not filter on it" rather than a malformed request. */
    assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, NULL, "w1", "", NULL, 0, 0,
                                ids, scores, 8) >= 0);
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0, 0, ids, scores, 0) == -1);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vector, 4, "memory", "w1", "", NULL, 0,
+                               0, ids, scores, 0) == -1);
    assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, NULL, NULL, allow_all, NULL) == -1);
-   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, NULL, NULL, NULL) == -1);
+   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_MEMORY, fake_search, NULL, NULL, NULL) ==
+          -1);
 
    /* Routes are per collection, and selecting a provider for one must not make
     * it serve another. A single process-wide route could serve only one
@@ -198,8 +220,8 @@ int main(void)
    search_state_t kb_external = {0};
    assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_CODE, fake_search, &kb_internal, allow_all,
                                   NULL) == 0);
-   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_CODE, 456, 1, 0, fake_search,
-                                 &kb_external) == 0);
+   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_CODE, 456, 1, 0, fake_search, &kb_external) ==
+          0);
    assert(pgvec_db3_route_serving(PGVEC_DB3_COLLECTION_CODE));
    assert(!pgvec_db3_route_serving(PGVEC_DB3_COLLECTION_MEMORY));
 
@@ -215,10 +237,11 @@ int main(void)
 
    /* A collection this build does not route is refused rather than quietly
     * given a route nothing will ever select a provider for. */
-   assert(pgvec_db3_route_install("nonexistent_collection", fake_search, &internal, allow_all, NULL) == -1);
-   assert(pgvec_db3_candidates("nonexistent_collection", vector, 4, "", "w1", "", NULL, 0, 0, ids, scores, 8) == -1);
+   assert(pgvec_db3_route_install("nonexistent_collection", fake_search, &internal, allow_all,
+                                  NULL) == -1);
+   assert(pgvec_db3_candidates("nonexistent_collection", vector, 4, "", "w1", "", NULL, 0, 0, ids,
+                               scores, 8) == -1);
    assert(pgvec_db3_candidates(NULL, vector, 4, "", "w1", "", NULL, 0, 0, ids, scores, 8) == -1);
-
 
    /* Filters travel with the search, so a condition beyond the scope reaches
     * the provider instead of being dropped. This is what lets a search whose
@@ -227,8 +250,8 @@ int main(void)
                                   NULL) == 0);
    internal.last_filter_count = 0;
    const pgvec_db3_filter_t generation[] = {{"generation", "7"}};
-   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CODE, vector, 4, "", "", "p1", generation, 1,
-                               0, ids, scores, 8) == 2);
+   assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CODE, vector, 4, "", "", "p1", generation, 1, 0,
+                               ids, scores, 8) == 2);
    assert(internal.last_filter_count == 1);
    assert(strcmp(internal.last_filter_key, "generation") == 0);
    assert(strcmp(internal.last_filter_value, "7") == 0);
@@ -256,6 +279,7 @@ int main(void)
    assert(pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CURATOR_ENTITY, vector, 4, "", "", "", scope,
                                AIMEE_DB3_MAX_LABELS + 1, 0, ids, scores, 8) == -1);
 
-   printf("test_pgvec_db3: routing, scope, filters, bounds, collections, and re-authorization passed\n");
+   printf("test_pgvec_db3: routing, scope, filters, bounds, collections, and re-authorization "
+          "passed\n");
    return 0;
 }

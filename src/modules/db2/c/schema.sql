@@ -1349,6 +1349,39 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
         )
     $T$;
 
+    -- kb_embeddings / kb_pdf_embeddings carry the generation of the document
+    -- they embed.
+    --
+    -- The search filters on it -- the pgvector form joins kb_documents and
+    -- compares d.generation to the project's current_generation -- and a join is
+    -- the one thing an external provider cannot do. Mirroring the value onto the
+    -- vector row lets the same condition travel as an exact filter.
+    --
+    -- This is NOT the stale-denormalization trap the memory scope path warns
+    -- about. kb_documents.generation is written once at INSERT from the
+    -- project's then-current generation and never updated in place; a re-scan
+    -- inserts new document rows at the new generation. So the value is the row's
+    -- own identity, not a cached copy of something that moves.
+    --
+    -- Nullable on purpose. A vector whose document row has gone is orphaned, and
+    -- the pgvector query already excludes it because the join finds nothing. A
+    -- NULL generation captures as an empty label, which no generation filter
+    -- matches -- so the routed and unrouted forms agree about orphans too.
+    EXECUTE $T$ ALTER TABLE kb_embeddings
+                ADD COLUMN IF NOT EXISTS generation BIGINT $T$;
+    EXECUTE $T$ ALTER TABLE kb_pdf_embeddings
+                ADD COLUMN IF NOT EXISTS generation BIGINT $T$;
+    EXECUTE $T$ UPDATE kb_embeddings e SET generation = d.generation
+                  FROM kb_documents d
+                 WHERE d.id = e.point_id AND e.generation IS DISTINCT FROM d.generation $T$;
+    EXECUTE $T$ UPDATE kb_pdf_embeddings e SET generation = d.generation
+                  FROM kb_documents d
+                 WHERE d.id = e.point_id AND e.generation IS DISTINCT FROM d.generation $T$;
+    EXECUTE $T$ CREATE INDEX IF NOT EXISTS idx_kb_embeddings_generation
+                  ON kb_embeddings (project, generation) $T$;
+    EXECUTE $T$ CREATE INDEX IF NOT EXISTS idx_kb_pdf_embeddings_generation
+                  ON kb_pdf_embeddings (project, generation) $T$;
+
     -- curator_entity_vectors: pgvector embeddings for deep-curator entity
     -- resolution (resolve_entities pass). Mirrors kb_embeddings with the
     -- additional scope_kind / scope_id / canonical_name columns the curator
@@ -1692,9 +1725,11 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
         ('{"kind":"kind","primary_scope":"primary_scope","project":"project",' ||
         '"record_type":"record_type","workspace":"workspace"}')::JSONB),
       (2,'kb_embeddings','kb','embedding',
-        '{"project":"project","record_type":"=kb"}'),
+        ('{"generation":"generation","project":"project",' ||
+        '"record_type":"=kb"}')::JSONB),
       (3,'kb_pdf_embeddings','kb_pdf','embedding',
-        '{"project":"project","record_type":"=pdf"}'),
+        ('{"generation":"generation","project":"project",' ||
+        '"record_type":"=pdf"}')::JSONB),
       (4,'curator_entity_vectors','curator_entity','embedding',
         '{"scope_id":"scope_id","scope_kind":"scope_kind"}'),
       (5,'curator_narrative_vectors','curator_narrative','embedding',
