@@ -2020,6 +2020,7 @@
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_memory_advanced.c",
+        "src/tests/test_pgvec.c",
         "src/tests/test_rules.c",
         "src/tests/test_schema_subst.c",
         "src/tests/test_tool_prompts.c",
@@ -5053,6 +5054,7 @@
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
+        "src/tests/test_pgvec.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -25067,7 +25069,9 @@
       "symbol": "pgvec_code_node_path"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
@@ -25076,7 +25080,7 @@
       ],
       "signature": "int pgvec_code_search ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "2fcfdcd3e94fcf41a4aa68e54360791b31a990371e09a173d0df3a518a66fc40",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_code_search"
     },
     {
@@ -25485,7 +25489,9 @@
       "symbol": "pgvec_db3_candidates"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_db3.h",
@@ -25494,11 +25500,13 @@
       ],
       "signature": "void pgvec_db3_route_clear ( const char * collection )",
       "signature_sha256": "b0d86774cba4f1de440ef3aa4d43ff4714846d438b5a270e3def2a87a9dcc3cf",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_db3_route_clear"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_db3.h",
@@ -25507,11 +25515,13 @@
       ],
       "signature": "int pgvec_db3_route_install ( const char * collection , aimee_db3_search_fn internal_search , void * internal_context , aimee_db3_candidate_authorize_fn authorize , void * authorize_context )",
       "signature_sha256": "03700fd59a44dee357526fe58f39ed4170c27ab08bc109469a02e270670f4bcf",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_db3_route_install"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_db3.h",
@@ -25520,7 +25530,7 @@
       ],
       "signature": "int pgvec_db3_route_select ( const char * collection , uint32_t principal , int ready , int fallback_enabled , aimee_db3_search_fn external_search , void * external_context )",
       "signature_sha256": "f495ac5186c182ba076bab238ba167eabd90372e7d885c215ca95ec29b668ea7",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_db3_route_select"
     },
     {
@@ -25639,7 +25649,9 @@
       "symbol": "pgvec_kb_search"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
@@ -25648,7 +25660,7 @@
       ],
       "signature": "int pgvec_kb_search_scoped ( const char * project , const char * exclude_project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "ab727fadc53e43f07f3da92be862887e7bf1e25568b5d126bd53588b641334e3",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_kb_search_scoped"
     },
     {
@@ -26080,7 +26092,9 @@
       "symbol": "pgvec_kbpdf_delete_project"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
@@ -26089,7 +26103,7 @@
       ],
       "signature": "int pgvec_kbpdf_search ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "a39f0b98fd33928bc4d472bf8faa6debe6f236a9fb16199ebe9e14eb9d9c3bbe",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_kbpdf_search"
     },
     {
@@ -26820,15 +26834,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a62c13aeb2e99e7f289c43cb70b71d693fe41166a330ac6f6b51fdfebc731f9b",
+  "fingerprint": "7bfcf3b474d29723940d162cd0294a9cd9002fa703667337ac23106ab3c50314",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 709,
     "declarations": 1465,
     "headers": 141,
-    "internal_unconsumed": 174,
-    "private_test_only": 288,
+    "internal_unconsumed": 168,
+    "private_test_only": 294,
     "reviewed": 294
   }
 }

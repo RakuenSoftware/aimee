@@ -1463,6 +1463,9 @@ $(TESTPREFIX)/unit-test-pgvec-neardup: $(OBJDIR)/tests/test_pgvec_neardup.o \
                     $(TEST_CORE_OBJS_PG)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
+# test_pgvec now asserts on the DB3 routing decision, so it includes the
+# boundary header the transport speaks through.
+$(OBJDIR)/tests/test_pgvec.o: C_FLAGS += -Imodules/db2/include
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
                     $(DB2_PGVEC_TRANSPORT_OBJS) $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
                     $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
