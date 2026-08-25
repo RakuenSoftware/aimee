@@ -868,6 +868,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db2-time-support \
                 $(TESTPREFIX)/unit-test-db3-route \
+                $(TESTPREFIX)/unit-test-db3-filters \
                 $(TESTPREFIX)/unit-test-pgvec-db3 \
                 $(TESTPREFIX)/unit-test-bus-db3
 
@@ -3276,6 +3277,15 @@ $(TESTPREFIX)/unit-test-db3-route: $(OBJDIR)/tests/test_db3_route.o \
 
 .PHONY: unit-test-db3-route
 unit-test-db3-route: $(TESTPREFIX)/unit-test-db3-route
+	$<
+
+$(OBJDIR)/tests/test_db3_filters.o: C_FLAGS += -Imodules/db2/include
+$(TESTPREFIX)/unit-test-db3-filters: $(OBJDIR)/tests/test_db3_filters.o \
+                                      $(OBJDIR)/modules/db2/db3_route.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+.PHONY: unit-test-db3-filters
+unit-test-db3-filters: $(TESTPREFIX)/unit-test-db3-filters
 	$<
 
 $(OBJDIR)/tests/test_pgvec_db3.o: C_FLAGS += -Imodules/db2/include -Imodules/db2/c

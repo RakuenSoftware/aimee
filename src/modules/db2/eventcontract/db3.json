@@ -61,6 +61,12 @@
       "magic": 1395868228,
       "header_bytes": 36
     },
+    "search_request_v2": {
+      "magic": 1395868228,
+      "wire_version": 2,
+      "header_bytes": 40,
+      "filter_header_bytes": 4
+    },
     "search_reply": {
       "magic": 1379091012,
       "header_bytes": 28,

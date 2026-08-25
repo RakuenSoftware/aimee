@@ -13,19 +13,20 @@ import (
 )
 
 type wireBaseline struct {
-	ContractSHA256   string `json:"contract_sha256"`
-	ProtocolID       uint32 `json:"protocol_id"`
-	SearchRequestHex string `json:"search_request_hex"`
-	SearchReplyHex   string `json:"search_reply_hex"`
-	ApplyHex         string `json:"apply_hex"`
-	ApplyV2Hex       string `json:"apply_v2_hex"`
-	CapabilitiesHex  string `json:"capabilities_hex"`
-	ApplyChunkHex    string `json:"apply_chunk_hex"`
-	AppliedHex       string `json:"applied_hex"`
-	SearchFailureHex string `json:"search_failure_hex"`
-	RouteRequestHex  string `json:"route_request_hex"`
-	RouteReplyHex    string `json:"route_reply_hex"`
-	Events           []struct {
+	ContractSHA256     string `json:"contract_sha256"`
+	ProtocolID         uint32 `json:"protocol_id"`
+	SearchRequestHex   string `json:"search_request_hex"`
+	SearchRequestV2Hex string `json:"search_request_v2_hex"`
+	SearchReplyHex     string `json:"search_reply_hex"`
+	ApplyHex           string `json:"apply_hex"`
+	ApplyV2Hex         string `json:"apply_v2_hex"`
+	CapabilitiesHex    string `json:"capabilities_hex"`
+	ApplyChunkHex      string `json:"apply_chunk_hex"`
+	AppliedHex         string `json:"applied_hex"`
+	SearchFailureHex   string `json:"search_failure_hex"`
+	RouteRequestHex    string `json:"route_request_hex"`
+	RouteReplyHex      string `json:"route_reply_hex"`
+	Events             []struct {
 		ID        uint32 `json:"id"`
 		Name      string `json:"name"`
 		EventKind uint32 `json:"event_kind"`

@@ -8,6 +8,8 @@
 #define APPLY_MAGIC           AIMEE_DB3_APPLY_MAGIC
 #define WIRE_VERSION          AIMEE_DB3_WIRE_VERSION
 #define SEARCH_REQUEST_HEADER AIMEE_DB3_SEARCH_REQUEST_HEADER
+#define SEARCH_REQUEST_V2_HEADER  AIMEE_DB3_SEARCH_REQUEST_V2_HEADER
+#define SEARCH_REQUEST_V2_VERSION AIMEE_DB3_SEARCH_REQUEST_V2_VERSION
 #define SEARCH_REPLY_HEADER   AIMEE_DB3_SEARCH_REPLY_HEADER
 #define APPLY_HEADER          AIMEE_DB3_APPLY_HEADER
 #define APPLY_V2_HEADER       AIMEE_DB3_APPLY_V2_HEADER
@@ -119,16 +121,23 @@ static int label_value_valid(const char *value)
    return 1;
 }
 
-static int labels_size(const aimee_db3_apply_t *apply, size_t *size)
+/* Measure a label list, enforcing the canonical form: known-good keys and
+ * values, and strictly ascending keys.
+ *
+ * Shared by an apply's labels and a search request's filters rather than
+ * written twice. A divergence between the two would be the worst kind: one side
+ * would accept a frame the other rejects, and the disagreement would only show
+ * up against a peer built from the other source. */
+static int label_list_size(const aimee_db3_exact_label_t *labels, uint32_t count, size_t *size)
 {
-   if (!apply || !size || apply->label_count > AIMEE_DB3_MAX_LABELS)
+   if (!size || count > AIMEE_DB3_MAX_LABELS || (count != 0 && !labels))
       return -1;
    *size = 0;
-   for (uint32_t i = 0; i < apply->label_count; ++i)
+   for (uint32_t i = 0; i < count; ++i)
    {
-      const aimee_db3_exact_label_t *label = &apply->labels[i];
+      const aimee_db3_exact_label_t *label = &labels[i];
       if (!label_key_valid(label->key) || !label_value_valid(label->value) ||
-          (i > 0 && strcmp(apply->labels[i - 1].key, label->key) >= 0))
+          (i > 0 && strcmp(labels[i - 1].key, label->key) >= 0))
          return -1;
       size_t key = text_length(label->key, sizeof(label->key));
       size_t value = text_length(label->value, sizeof(label->value));
@@ -142,6 +151,13 @@ static int labels_size(const aimee_db3_apply_t *apply, size_t *size)
    return 0;
 }
 
+static int labels_size(const aimee_db3_apply_t *apply, size_t *size)
+{
+   if (!apply)
+      return -1;
+   return label_list_size(apply->labels, apply->label_count, size);
+}
+
 int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
 {
    if (!request || request->request_id == 0 || request->required_generation == 0 ||
@@ -152,6 +168,9 @@ int aimee_db3_search_request_validate(const aimee_db3_search_request_t *request)
        (!request->workspace[0] && !request->project[0]) ||
        !text_valid(request->record_type, sizeof(request->record_type), 0) ||
        !vectors_valid(request->vector, request->dimension))
+      return -1;
+   size_t filters_bytes = 0;
+   if (label_list_size(request->filters, request->filter_count, &filters_bytes) != 0)
       return -1;
    return 0;
 }
@@ -221,16 +240,24 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
    size_t workspace_len = text_length(request->workspace, sizeof(request->workspace));
    size_t project_len = text_length(request->project, sizeof(request->project));
    size_t record_len = text_length(request->record_type, sizeof(request->record_type));
-   size_t total = 0;
-   if (checked_total(SEARCH_REQUEST_HEADER, workspace_len, project_len, record_len, sizeof(float),
-                     request->dimension, &total) != 0 ||
-       total > capacity || workspace_len > UINT16_MAX || project_len > UINT16_MAX ||
-       record_len > UINT16_MAX || request->dimension > UINT16_MAX || request->top_k > UINT16_MAX)
+   size_t filters_bytes = 0;
+   if (label_list_size(request->filters, request->filter_count, &filters_bytes) != 0)
       return -1;
-   memset(output, 0, SEARCH_REQUEST_HEADER);
+   /* v1 shape unless filters are present, mirroring the apply encoder, so an
+    * unfiltered request stays byte-identical to what a v1 peer emits. */
+   size_t header = request->filter_count ? SEARCH_REQUEST_V2_HEADER : SEARCH_REQUEST_HEADER;
+   size_t total = 0;
+   if (checked_total(header, workspace_len, project_len, record_len, sizeof(float),
+                     request->dimension, &total) != 0 ||
+       filters_bytes > SIZE_MAX - total || (total += filters_bytes) > capacity ||
+       workspace_len > UINT16_MAX || project_len > UINT16_MAX || record_len > UINT16_MAX ||
+       request->dimension > UINT16_MAX || request->top_k > UINT16_MAX ||
+       filters_bytes > UINT16_MAX)
+      return -1;
+   memset(output, 0, header);
    put_u32(output, SEARCH_REQUEST_MAGIC);
-   put_u16(output + 4, WIRE_VERSION);
-   put_u16(output + 6, SEARCH_REQUEST_HEADER);
+   put_u16(output + 4, request->filter_count ? SEARCH_REQUEST_V2_VERSION : WIRE_VERSION);
+   put_u16(output + 6, (uint16_t)header);
    put_u64(output + 8, request->request_id);
    put_u64(output + 16, request->required_generation);
    put_u16(output + 24, (uint16_t)workspace_len);
@@ -238,7 +265,12 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
    put_u16(output + 28, (uint16_t)record_len);
    put_u16(output + 30, (uint16_t)request->dimension);
    put_u16(output + 32, (uint16_t)request->top_k);
-   size_t offset = SEARCH_REQUEST_HEADER;
+   if (request->filter_count)
+   {
+      put_u16(output + 36, (uint16_t)request->filter_count);
+      put_u16(output + 38, (uint16_t)filters_bytes);
+   }
+   size_t offset = header;
    memcpy(output + offset, request->workspace, workspace_len);
    offset += workspace_len;
    memcpy(output + offset, request->project, project_len);
@@ -252,6 +284,19 @@ int aimee_db3_search_request_encode(const aimee_db3_search_request_t *request, u
       put_u32(output + offset, bits);
       offset += sizeof(bits);
    }
+   for (uint32_t i = 0; i < request->filter_count; ++i)
+   {
+      const aimee_db3_exact_label_t *filter = &request->filters[i];
+      size_t key_len = text_length(filter->key, sizeof(filter->key));
+      size_t value_len = text_length(filter->value, sizeof(filter->value));
+      put_u16(output + offset, (uint16_t)key_len);
+      put_u16(output + offset + 2, (uint16_t)value_len);
+      offset += LABEL_HEADER;
+      memcpy(output + offset, filter->key, key_len);
+      offset += key_len;
+      memcpy(output + offset, filter->value, value_len);
+      offset += value_len;
+   }
    *length = total;
    return 0;
 }
@@ -260,9 +305,31 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
                                     aimee_db3_search_request_t *request)
 {
    if (!input || !request || length < SEARCH_REQUEST_HEADER ||
-       get_u32(input) != SEARCH_REQUEST_MAGIC || get_u16(input + 4) != WIRE_VERSION ||
-       get_u16(input + 6) != SEARCH_REQUEST_HEADER || get_u16(input + 34) != 0)
+       get_u32(input) != SEARCH_REQUEST_MAGIC || get_u16(input + 34) != 0)
       return -1;
+   /* The version selects the header length, and the header length must then
+    * match it exactly. A frame claiming one version while carrying the other's
+    * header is refused rather than read at whichever length it asked for --
+    * that mismatch is how a reader is walked off the end of a frame. */
+   uint16_t version = get_u16(input + 4);
+   size_t header = SEARCH_REQUEST_HEADER;
+   if (version == SEARCH_REQUEST_V2_VERSION)
+      header = SEARCH_REQUEST_V2_HEADER;
+   else if (version != WIRE_VERSION)
+      return -1;
+   if (length < header || get_u16(input + 6) != header)
+      return -1;
+   uint16_t filter_count = 0, filters_bytes = 0;
+   if (version == SEARCH_REQUEST_V2_VERSION)
+   {
+      filter_count = get_u16(input + 36);
+      filters_bytes = get_u16(input + 38);
+      /* A v2 frame carrying no filters would be a second encoding of a v1
+       * request, and two encodings of one value defeat a canonical wire. */
+      if (filter_count == 0 || filter_count > AIMEE_DB3_MAX_LABELS ||
+          filters_bytes > AIMEE_DB3_MAX_LABEL_BYTES)
+         return -1;
+   }
    uint16_t workspace_len = get_u16(input + 24), project_len = get_u16(input + 26);
    uint16_t record_len = get_u16(input + 28), dimension = get_u16(input + 30);
    uint16_t top_k = get_u16(input + 32);
@@ -271,16 +338,16 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
        dimension > AIMEE_DB3_MAX_DIM || top_k == 0 || top_k > AIMEE_DB3_MAX_TOP_K)
       return -1;
    size_t total = 0;
-   if (checked_total(SEARCH_REQUEST_HEADER, workspace_len, project_len, record_len, sizeof(float),
+   if (checked_total(header, workspace_len, project_len, record_len, sizeof(float),
                      dimension, &total) != 0 ||
-       total != length)
+       filters_bytes > SIZE_MAX - total || (total += filters_bytes) != length)
       return -1;
    memset(request, 0, sizeof(*request));
    request->request_id = get_u64(input + 8);
    request->required_generation = get_u64(input + 16);
    request->dimension = dimension;
    request->top_k = top_k;
-   size_t offset = SEARCH_REQUEST_HEADER;
+   size_t offset = header;
    memcpy(request->workspace, input + offset, workspace_len);
    offset += workspace_len;
    memcpy(request->project, input + offset, project_len);
@@ -293,6 +360,31 @@ int aimee_db3_search_request_decode(const uint8_t *input, size_t length,
       memcpy(&request->vector[i], &bits, sizeof(bits));
       offset += sizeof(bits);
    }
+   request->filter_count = filter_count;
+   const size_t filters_end = length;
+   for (uint32_t i = 0; i < filter_count; ++i)
+   {
+      if (offset > filters_end || LABEL_HEADER > filters_end - offset)
+         return -1;
+      size_t key_len = get_u16(input + offset);
+      size_t value_len = get_u16(input + offset + 2);
+      offset += LABEL_HEADER;
+      if (key_len >= AIMEE_DB3_MAX_LABEL_KEY || value_len >= AIMEE_DB3_MAX_LABEL_VALUE ||
+          key_len > filters_end - offset || value_len > filters_end - offset - key_len)
+         return -1;
+      memcpy(request->filters[i].key, input + offset, key_len);
+      offset += key_len;
+      memcpy(request->filters[i].value, input + offset, value_len);
+      offset += value_len;
+   }
+   /* The declared byte count must match what the filters actually consumed, so
+    * a frame cannot claim a length that hides trailing bytes. */
+   if (offset != length)
+      return -1;
+   size_t measured = 0;
+   if (label_list_size(request->filters, request->filter_count, &measured) != 0 ||
+       measured != filters_bytes)
+      return -1;
    return aimee_db3_search_request_validate(request);
 }
 

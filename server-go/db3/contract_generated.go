@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a536a1673ff799ec3b8c289aebbad1cd7b2dedd9a0688730f8a2aa9029c262ab"
+const ContractSHA256 = "4b62bc55f054389289fe2567b248fecfbb3b0fb0684be346e1d715f3fd9eacd9"
 const ProtocolID uint32 = 3
 const WireVersion uint16 = 1
 
@@ -39,6 +39,9 @@ const searchFailureMagic uint32 = 0x45334244
 const routeRequestMagic uint32 = 0x54334244
 const routeReplyMagic uint32 = 0x55334244
 const searchRequestHeader = 36
+const searchRequestV2Version uint16 = 2
+const searchRequestV2Header = 40
+const filterHeader = 4
 const searchReplyHeader = 28
 const candidateBytes = 16
 const applyHeader = 36
@@ -75,6 +78,15 @@ type SearchRequest struct {
 	RecordType         string
 	TopK               uint32
 	Vector             []float32
+	// Filters narrows the search by exact label match, beyond the three
+	// fixed scope fields. It is the v2 extension: a request carrying none
+	// encodes byte-identically to v1, so a v1 peer reads it unchanged.
+	//
+	// Every filter must be honoured. A provider that cannot apply one must
+	// fail the search rather than answer a wider question than was asked --
+	// which is exactly why a search whose meaning depended on a join could
+	// not be expressed before this existed.
+	Filters []ExactLabel
 }
 
 type SearchReply struct {
@@ -175,6 +187,11 @@ func (request SearchRequest) Validate() error {
 		!validText(request.RecordType, MaxRecordTypeBytes, false) || !finite32(request.Vector) {
 		return ErrMalformed
 	}
+	// Filters reuse the label rules, including their sorted-unique key
+	// ordering, so one filter set has exactly one encoding.
+	if _, ok := labelsSize(request.Filters); !ok {
+		return ErrMalformed
+	}
 	return nil
 }
 
@@ -231,11 +248,20 @@ func EncodeSearchRequest(request SearchRequest) ([]byte, error) {
 	if request.Validate() != nil {
 		return nil, ErrMalformed
 	}
-	total := searchRequestHeader + len(request.Workspace) + len(request.Project) + len(request.RecordType) + 4*len(request.Vector)
+	// v1 shape unless filters are present, mirroring EncodeApply: a request
+	// with no filters stays byte-identical to what a v1 peer emits.
+	filtersBytes, _ := labelsSize(request.Filters)
+	header := searchRequestHeader
+	version := WireVersion
+	if len(request.Filters) != 0 {
+		header = searchRequestV2Header
+		version = searchRequestV2Version
+	}
+	total := header + len(request.Workspace) + len(request.Project) + len(request.RecordType) + 4*len(request.Vector) + filtersBytes
 	out := make([]byte, total)
 	binary.LittleEndian.PutUint32(out[0:4], searchRequestMagic)
-	binary.LittleEndian.PutUint16(out[4:6], WireVersion)
-	binary.LittleEndian.PutUint16(out[6:8], searchRequestHeader)
+	binary.LittleEndian.PutUint16(out[4:6], version)
+	binary.LittleEndian.PutUint16(out[6:8], uint16(header))
 	binary.LittleEndian.PutUint64(out[8:16], request.RequestID)
 	binary.LittleEndian.PutUint64(out[16:24], request.RequiredGeneration)
 	binary.LittleEndian.PutUint16(out[24:26], uint16(len(request.Workspace)))
@@ -243,7 +269,11 @@ func EncodeSearchRequest(request SearchRequest) ([]byte, error) {
 	binary.LittleEndian.PutUint16(out[28:30], uint16(len(request.RecordType)))
 	binary.LittleEndian.PutUint16(out[30:32], uint16(len(request.Vector)))
 	binary.LittleEndian.PutUint16(out[32:34], uint16(request.TopK))
-	offset := searchRequestHeader
+	if version == searchRequestV2Version {
+		binary.LittleEndian.PutUint16(out[36:38], uint16(len(request.Filters)))
+		binary.LittleEndian.PutUint16(out[38:40], uint16(filtersBytes))
+	}
+	offset := header
 	offset += copy(out[offset:], request.Workspace)
 	offset += copy(out[offset:], request.Project)
 	offset += copy(out[offset:], request.RecordType)
@@ -251,24 +281,54 @@ func EncodeSearchRequest(request SearchRequest) ([]byte, error) {
 		binary.LittleEndian.PutUint32(out[offset:offset+4], math.Float32bits(value))
 		offset += 4
 	}
+	for _, filter := range request.Filters {
+		binary.LittleEndian.PutUint16(out[offset:offset+2], uint16(len(filter.Key)))
+		binary.LittleEndian.PutUint16(out[offset+2:offset+4], uint16(len(filter.Value)))
+		offset += filterHeader
+		offset += copy(out[offset:], filter.Key)
+		offset += copy(out[offset:], filter.Value)
+	}
 	return out, nil
 }
 
 func DecodeSearchRequest(input []byte) (SearchRequest, error) {
 	if len(input) < searchRequestHeader || binary.LittleEndian.Uint32(input[0:4]) != searchRequestMagic ||
-		binary.LittleEndian.Uint16(input[4:6]) != WireVersion ||
-		binary.LittleEndian.Uint16(input[6:8]) != searchRequestHeader ||
 		binary.LittleEndian.Uint16(input[34:36]) != 0 {
 		return SearchRequest{}, ErrMalformed
 	}
+	// The version selects the header length, and the header length must then
+	// match it exactly. A frame claiming one version while carrying the
+	// other header is refused rather than read at whichever length it asked
+	// for -- that mismatch is how a reader is walked off the end of a frame.
+	version := binary.LittleEndian.Uint16(input[4:6])
+	header := searchRequestHeader
+	if version == searchRequestV2Version {
+		header = searchRequestV2Header
+	} else if version != WireVersion {
+		return SearchRequest{}, ErrMalformed
+	}
+	if len(input) < header || int(binary.LittleEndian.Uint16(input[6:8])) != header {
+		return SearchRequest{}, ErrMalformed
+	}
+	filterCount, filtersBytes := 0, 0
+	if version == searchRequestV2Version {
+		filterCount = int(binary.LittleEndian.Uint16(input[36:38]))
+		filtersBytes = int(binary.LittleEndian.Uint16(input[38:40]))
+		// A v2 frame carrying no filters is refused: it would be a second
+		// encoding of a v1 request, and two encodings of one value defeat a
+		// canonical wire.
+		if filterCount == 0 || filterCount > MaxLabelCount || filtersBytes > MaxLabelsBytes {
+			return SearchRequest{}, ErrMalformed
+		}
+	}
 	w, p, r := int(binary.LittleEndian.Uint16(input[24:26])), int(binary.LittleEndian.Uint16(input[26:28])), int(binary.LittleEndian.Uint16(input[28:30]))
 	dim, topK := int(binary.LittleEndian.Uint16(input[30:32])), uint32(binary.LittleEndian.Uint16(input[32:34]))
-	total := searchRequestHeader + w + p + r + 4*dim
+	total := header + w + p + r + 4*dim + filtersBytes
 	if w >= MaxScopeBytes || p >= MaxScopeBytes || r == 0 || r >= MaxRecordTypeBytes ||
 		dim == 0 || dim > MaxDimension || topK == 0 || topK > MaxTopK || total != len(input) {
 		return SearchRequest{}, ErrMalformed
 	}
-	offset := searchRequestHeader
+	offset := header
 	request := SearchRequest{RequestID: binary.LittleEndian.Uint64(input[8:16]), RequiredGeneration: binary.LittleEndian.Uint64(input[16:24]), TopK: topK}
 	request.Workspace = string(input[offset : offset+w])
 	offset += w
@@ -280,6 +340,29 @@ func DecodeSearchRequest(input []byte) (SearchRequest, error) {
 	for i := range request.Vector {
 		request.Vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(input[offset : offset+4]))
 		offset += 4
+	}
+	if filterCount != 0 {
+		request.Filters = make([]ExactLabel, filterCount)
+		for i := range request.Filters {
+			if offset+filterHeader > len(input) {
+				return SearchRequest{}, ErrMalformed
+			}
+			keyLen := int(binary.LittleEndian.Uint16(input[offset : offset+2]))
+			valueLen := int(binary.LittleEndian.Uint16(input[offset+2 : offset+4]))
+			offset += filterHeader
+			if offset+keyLen+valueLen > len(input) {
+				return SearchRequest{}, ErrMalformed
+			}
+			request.Filters[i].Key = string(input[offset : offset+keyLen])
+			offset += keyLen
+			request.Filters[i].Value = string(input[offset : offset+valueLen])
+			offset += valueLen
+		}
+		// The declared byte count must match what the filters consumed, so a
+		// frame cannot claim a length that hides trailing bytes.
+		if measured, ok := labelsSize(request.Filters); !ok || measured != filtersBytes {
+			return SearchRequest{}, ErrMalformed
+		}
 	}
 	if request.Validate() != nil {
 		return SearchRequest{}, ErrMalformed

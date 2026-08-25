@@ -202,13 +202,19 @@ def validate_catalog(value: object) -> dict[str, object]:
     wire = _keys(
         catalog["wire"],
         {
-            "capabilities", "search_request", "search_reply", "apply", "apply_v2", "apply_chunk",
-            "applied", "search_failure", "route_request", "route_reply",
+            "capabilities", "search_request", "search_request_v2", "search_reply", "apply",
+            "apply_v2", "apply_chunk", "applied", "search_failure", "route_request",
+            "route_reply",
         },
         "wire",
     )
     capabilities = _keys(wire["capabilities"], {"magic", "header_bytes"}, "wire.capabilities")
     request = _keys(wire["search_request"], {"magic", "header_bytes"}, "wire.search_request")
+    request_v2 = _keys(
+        wire["search_request_v2"],
+        {"magic", "wire_version", "header_bytes", "filter_header_bytes"},
+        "wire.search_request_v2",
+    )
     reply = _keys(
         wire["search_reply"], {"magic", "header_bytes", "candidate_bytes"},
         "wire.search_reply",
@@ -236,6 +242,12 @@ def validate_catalog(value: object) -> dict[str, object]:
         fail("capabilities-wire", "capabilities wire differs from DB3 v1")
     if request != {"magic": 0x53334244, "header_bytes": 36}:
         fail("search-request-wire", "search request wire differs from DB3 v1")
+    if request_v2 != {
+        "magic": 0x53334244, "wire_version": 2, "header_bytes": 40,
+        "filter_header_bytes": 4,
+    }:
+        fail("search-request-v2-wire",
+             "search request v2 wire differs from the canonical filter extension")
     if reply != {"magic": 0x52334244, "header_bytes": 28, "candidate_bytes": 16}:
         fail("search-reply-wire", "search reply wire differs from DB3 v1")
     if apply != {"magic": 0x41334244, "header_bytes": 36}:
@@ -359,6 +371,7 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_DB3_SEARCH_REPLY_MAGIC    0x{wire['search_reply']['magic']:08x}u
 #define AIMEE_DB3_APPLY_MAGIC           0x{wire['apply']['magic']:08x}u
 #define AIMEE_DB3_APPLY_V2_VERSION      {wire['apply_v2']['wire_version']}u
+#define AIMEE_DB3_SEARCH_REQUEST_V2_VERSION {wire['search_request_v2']['wire_version']}u
 #define AIMEE_DB3_CAPABILITIES_MAGIC    0x{wire['capabilities']['magic']:08x}u
 #define AIMEE_DB3_APPLY_CHUNK_MAGIC     0x{wire['apply_chunk']['magic']:08x}u
 #define AIMEE_DB3_APPLIED_MAGIC         0x{wire['applied']['magic']:08x}u
@@ -366,6 +379,8 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_DB3_ROUTE_REQUEST_MAGIC   0x{wire['route_request']['magic']:08x}u
 #define AIMEE_DB3_ROUTE_REPLY_MAGIC     0x{wire['route_reply']['magic']:08x}u
 #define AIMEE_DB3_SEARCH_REQUEST_HEADER {wire['search_request']['header_bytes']}u
+#define AIMEE_DB3_SEARCH_REQUEST_V2_HEADER {wire['search_request_v2']['header_bytes']}u
+#define AIMEE_DB3_FILTER_HEADER         {wire['search_request_v2']['filter_header_bytes']}u
 #define AIMEE_DB3_SEARCH_REPLY_HEADER   {wire['search_reply']['header_bytes']}u
 #define AIMEE_DB3_CANDIDATE_BYTES       {wire['search_reply']['candidate_bytes']}u
 #define AIMEE_DB3_APPLY_HEADER          {wire['apply']['header_bytes']}u
@@ -433,6 +448,9 @@ const searchFailureMagic uint32 = 0x{wire['search_failure']['magic']:08x}
 const routeRequestMagic uint32 = 0x{wire['route_request']['magic']:08x}
 const routeReplyMagic uint32 = 0x{wire['route_reply']['magic']:08x}
 const searchRequestHeader = {wire['search_request']['header_bytes']}
+const searchRequestV2Version uint16 = {wire['search_request_v2']['wire_version']}
+const searchRequestV2Header = {wire['search_request_v2']['header_bytes']}
+const filterHeader = {wire['search_request_v2']['filter_header_bytes']}
 const searchReplyHeader = {wire['search_reply']['header_bytes']}
 const candidateBytes = {wire['search_reply']['candidate_bytes']}
 const applyHeader = {wire['apply']['header_bytes']}
@@ -469,6 +487,15 @@ type SearchRequest struct {{
 \tRecordType string
 \tTopK uint32
 \tVector []float32
+\t// Filters narrows the search by exact label match, beyond the three
+\t// fixed scope fields. It is the v2 extension: a request carrying none
+\t// encodes byte-identically to v1, so a v1 peer reads it unchanged.
+\t//
+\t// Every filter must be honoured. A provider that cannot apply one must
+\t// fail the search rather than answer a wider question than was asked --
+\t// which is exactly why a search whose meaning depended on a join could
+\t// not be expressed before this existed.
+\tFilters []ExactLabel
 }}
 
 type SearchReply struct {{
@@ -553,6 +580,9 @@ func (request SearchRequest) Validate() error {{
 \t\t!validText(request.RecordType, MaxRecordTypeBytes, false) || !finite32(request.Vector) {{
 \t\treturn ErrMalformed
 \t}}
+\t// Filters reuse the label rules, including their sorted-unique key
+\t// ordering, so one filter set has exactly one encoding.
+\tif _, ok := labelsSize(request.Filters); !ok {{ return ErrMalformed }}
 \treturn nil
 }}
 
@@ -597,11 +627,17 @@ func (apply Apply) Validate() error {{
 
 func EncodeSearchRequest(request SearchRequest) ([]byte, error) {{
 \tif request.Validate() != nil {{ return nil, ErrMalformed }}
-\ttotal := searchRequestHeader + len(request.Workspace) + len(request.Project) + len(request.RecordType) + 4*len(request.Vector)
+\t// v1 shape unless filters are present, mirroring EncodeApply: a request
+\t// with no filters stays byte-identical to what a v1 peer emits.
+\tfiltersBytes, _ := labelsSize(request.Filters)
+\theader := searchRequestHeader
+\tversion := WireVersion
+\tif len(request.Filters) != 0 {{ header = searchRequestV2Header; version = searchRequestV2Version }}
+\ttotal := header + len(request.Workspace) + len(request.Project) + len(request.RecordType) + 4*len(request.Vector) + filtersBytes
 \tout := make([]byte, total)
 \tbinary.LittleEndian.PutUint32(out[0:4], searchRequestMagic)
-\tbinary.LittleEndian.PutUint16(out[4:6], WireVersion)
-\tbinary.LittleEndian.PutUint16(out[6:8], searchRequestHeader)
+\tbinary.LittleEndian.PutUint16(out[4:6], version)
+\tbinary.LittleEndian.PutUint16(out[6:8], uint16(header))
 \tbinary.LittleEndian.PutUint64(out[8:16], request.RequestID)
 \tbinary.LittleEndian.PutUint64(out[16:24], request.RequiredGeneration)
 \tbinary.LittleEndian.PutUint16(out[24:26], uint16(len(request.Workspace)))
@@ -609,35 +645,87 @@ func EncodeSearchRequest(request SearchRequest) ([]byte, error) {{
 \tbinary.LittleEndian.PutUint16(out[28:30], uint16(len(request.RecordType)))
 \tbinary.LittleEndian.PutUint16(out[30:32], uint16(len(request.Vector)))
 \tbinary.LittleEndian.PutUint16(out[32:34], uint16(request.TopK))
-\toffset := searchRequestHeader
+\tif version == searchRequestV2Version {{
+\t\tbinary.LittleEndian.PutUint16(out[36:38], uint16(len(request.Filters)))
+\t\tbinary.LittleEndian.PutUint16(out[38:40], uint16(filtersBytes))
+\t}}
+\toffset := header
 \toffset += copy(out[offset:], request.Workspace)
 \toffset += copy(out[offset:], request.Project)
 \toffset += copy(out[offset:], request.RecordType)
 \tfor _, value := range request.Vector {{
-\t\tbinary.LittleEndian.PutUint32(out[offset:offset+4], math.Float32bits(value)); offset += 4
+\t\tbinary.LittleEndian.PutUint32(out[offset:offset+4], math.Float32bits(value))
+\t\toffset += 4
+\t}}
+\tfor _, filter := range request.Filters {{
+\t\tbinary.LittleEndian.PutUint16(out[offset:offset+2], uint16(len(filter.Key)))
+\t\tbinary.LittleEndian.PutUint16(out[offset+2:offset+4], uint16(len(filter.Value)))
+\t\toffset += filterHeader
+\t\toffset += copy(out[offset:], filter.Key)
+\t\toffset += copy(out[offset:], filter.Value)
 \t}}
 \treturn out, nil
 }}
 
 func DecodeSearchRequest(input []byte) (SearchRequest, error) {{
 \tif len(input) < searchRequestHeader || binary.LittleEndian.Uint32(input[0:4]) != searchRequestMagic ||
-\t\tbinary.LittleEndian.Uint16(input[4:6]) != WireVersion ||
-\t\tbinary.LittleEndian.Uint16(input[6:8]) != searchRequestHeader ||
 \t\tbinary.LittleEndian.Uint16(input[34:36]) != 0 {{ return SearchRequest{{}}, ErrMalformed }}
+\t// The version selects the header length, and the header length must then
+\t// match it exactly. A frame claiming one version while carrying the
+\t// other header is refused rather than read at whichever length it asked
+\t// for -- that mismatch is how a reader is walked off the end of a frame.
+\tversion := binary.LittleEndian.Uint16(input[4:6])
+\theader := searchRequestHeader
+\tif version == searchRequestV2Version {{
+\t\theader = searchRequestV2Header
+\t}} else if version != WireVersion {{
+\t\treturn SearchRequest{{}}, ErrMalformed
+\t}}
+\tif len(input) < header || int(binary.LittleEndian.Uint16(input[6:8])) != header {{
+\t\treturn SearchRequest{{}}, ErrMalformed
+\t}}
+\tfilterCount, filtersBytes := 0, 0
+\tif version == searchRequestV2Version {{
+\t\tfilterCount = int(binary.LittleEndian.Uint16(input[36:38]))
+\t\tfiltersBytes = int(binary.LittleEndian.Uint16(input[38:40]))
+\t\t// A v2 frame carrying no filters is refused: it would be a second
+\t\t// encoding of a v1 request, and two encodings of one value defeat a
+\t\t// canonical wire.
+\t\tif filterCount == 0 || filterCount > MaxLabelCount || filtersBytes > MaxLabelsBytes {{
+\t\t\treturn SearchRequest{{}}, ErrMalformed
+\t\t}}
+\t}}
 \tw, p, r := int(binary.LittleEndian.Uint16(input[24:26])), int(binary.LittleEndian.Uint16(input[26:28])), int(binary.LittleEndian.Uint16(input[28:30]))
 \tdim, topK := int(binary.LittleEndian.Uint16(input[30:32])), uint32(binary.LittleEndian.Uint16(input[32:34]))
-\ttotal := searchRequestHeader + w + p + r + 4*dim
+\ttotal := header + w + p + r + 4*dim + filtersBytes
 \tif w >= MaxScopeBytes || p >= MaxScopeBytes || r == 0 || r >= MaxRecordTypeBytes ||
 \t\tdim == 0 || dim > MaxDimension || topK == 0 || topK > MaxTopK || total != len(input) {{
 \t\treturn SearchRequest{{}}, ErrMalformed
 \t}}
-\toffset := searchRequestHeader
+\toffset := header
 \trequest := SearchRequest{{RequestID: binary.LittleEndian.Uint64(input[8:16]), RequiredGeneration: binary.LittleEndian.Uint64(input[16:24]), TopK: topK}}
 \trequest.Workspace = string(input[offset:offset+w]); offset += w
 \trequest.Project = string(input[offset:offset+p]); offset += p
 \trequest.RecordType = string(input[offset:offset+r]); offset += r
 \trequest.Vector = make([]float32, dim)
 \tfor i := range request.Vector {{ request.Vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(input[offset:offset+4])); offset += 4 }}
+\tif filterCount != 0 {{
+\t\trequest.Filters = make([]ExactLabel, filterCount)
+\t\tfor i := range request.Filters {{
+\t\t\tif offset+filterHeader > len(input) {{ return SearchRequest{{}}, ErrMalformed }}
+\t\t\tkeyLen := int(binary.LittleEndian.Uint16(input[offset:offset+2]))
+\t\t\tvalueLen := int(binary.LittleEndian.Uint16(input[offset+2:offset+4]))
+\t\t\toffset += filterHeader
+\t\t\tif offset+keyLen+valueLen > len(input) {{ return SearchRequest{{}}, ErrMalformed }}
+\t\t\trequest.Filters[i].Key = string(input[offset:offset+keyLen]); offset += keyLen
+\t\t\trequest.Filters[i].Value = string(input[offset:offset+valueLen]); offset += valueLen
+\t\t}}
+\t\t// The declared byte count must match what the filters consumed, so a
+\t\t// frame cannot claim a length that hides trailing bytes.
+\t\tif measured, ok := labelsSize(request.Filters); !ok || measured != filtersBytes {{
+\t\t\treturn SearchRequest{{}}, ErrMalformed
+\t\t}}
+\t}}
 \tif request.Validate() != nil {{ return SearchRequest{{}}, ErrMalformed }}
 \treturn request, nil
 }}
@@ -787,6 +875,18 @@ def baseline_bytes(catalog: dict[str, object], registry: dict[str, object],
     request = (_u32(0x53334244) + _u16(1) + _u16(36) + _u64(77) + _u64(7) +
                _u16(11) + _u16(9) + _u16(6) + _u16(3) + _u16(2) + _u16(0) +
                b"workspace-a" + b"project-a" + b"memory" + struct.pack("<fff", .3, .2, .1))
+    # The v2 request: identical to v1 up to the reserved field, then the filter
+    # counts and the filter list. Keys are sorted, which the codec requires so a
+    # given filter set has exactly one encoding.
+    request_filters = (
+        _u16(7) + _u16(9) + b"project" + b"project-a" +
+        _u16(11) + _u16(6) + b"record_type" + b"memory"
+    )
+    request_v2 = (_u32(0x53334244) + _u16(2) + _u16(40) + _u64(77) + _u64(7) +
+                  _u16(11) + _u16(9) + _u16(6) + _u16(3) + _u16(2) + _u16(0) +
+                  _u16(2) + _u16(len(request_filters)) +
+                  b"workspace-a" + b"project-a" + b"memory" +
+                  struct.pack("<fff", .3, .2, .1) + request_filters)
     reply = (_u32(0x52334244) + _u16(1) + _u16(28) + _u64(77) + _u64(7) + _u32(2) +
              _u64(41) + struct.pack("<d", .95) + _u64(42) + struct.pack("<d", .75))
     apply = (_u32(0x41334244) + _u16(1) + bytes((1, 0)) + _u64(1001) + _u64(7) + _u64(41) +
@@ -818,6 +918,7 @@ def baseline_bytes(catalog: dict[str, object], registry: dict[str, object],
         "events": events,
         "capabilities_hex": capabilities.hex(),
         "search_request_hex": request.hex(),
+        "search_request_v2_hex": request_v2.hex(),
         "search_reply_hex": reply.hex(),
         "apply_hex": apply.hex(),
         "apply_v2_hex": apply_v2.hex(),

@@ -38,6 +38,12 @@ typedef struct
 
 typedef struct
 {
+   char key[AIMEE_DB3_MAX_LABEL_KEY];
+   char value[AIMEE_DB3_MAX_LABEL_VALUE];
+} aimee_db3_exact_label_t;
+
+typedef struct
+{
    uint64_t request_id;
    uint64_t required_generation;
    char workspace[AIMEE_DB3_MAX_SCOPE];
@@ -46,6 +52,16 @@ typedef struct
    uint32_t dimension;
    uint32_t top_k;
    float vector[AIMEE_DB3_MAX_DIM];
+   /* Exact-match filters beyond the three fixed scope fields (wire v2).
+    *
+    * Keys must be strictly ascending, which makes one filter set have exactly
+    * one encoding. A request with none encodes byte-identically to v1, so a v1
+    * peer reads it unchanged.
+    *
+    * Every filter must be honoured. A provider that cannot apply one must fail
+    * the search rather than answer a wider question than was asked. */
+   uint32_t filter_count;
+   aimee_db3_exact_label_t filters[AIMEE_DB3_MAX_LABELS];
 } aimee_db3_search_request_t;
 
 typedef struct
@@ -55,12 +71,6 @@ typedef struct
    uint32_t count;
    aimee_db3_candidate_t candidates[AIMEE_DB3_MAX_TOP_K];
 } aimee_db3_search_reply_t;
-
-typedef struct
-{
-   char key[AIMEE_DB3_MAX_LABEL_KEY];
-   char value[AIMEE_DB3_MAX_LABEL_VALUE];
-} aimee_db3_exact_label_t;
 
 typedef struct
 {
