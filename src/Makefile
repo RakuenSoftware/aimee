@@ -377,6 +377,17 @@ DB2_HOST_ADAPTER_TEST_OBJS = $(DB2_HOST_ADAPTER_SRCS:kb/db2_adapters/%.c=$(OBJDI
 # make de-duplicating them with DB2_OBJS in composite fixtures.
 DB2_OBJS = $(DB2_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o) $(DB2_HOST_ADAPTER_TEST_OBJS)
 
+# The two DB2 sources that speak to DB3 include the module-owned boundary header
+# <aimee/db2/db3_route.h>, which lives under modules/db2/include rather than the
+# modules/db2/c implementation directory the base flags carry. tests/Rules.mk
+# already grants this to the db3_route object and its tests; the same grant has
+# to reach both namespaces these two are compiled into -- $(OBJDIR)/db2/ for the
+# test fixtures and $(OBJDIR)/kb/modules/db2/c/ for aimee-kb -- or the boundary
+# header is reachable from the tests but not from the binary that ships it.
+DB2_DB3_SRCS = modules/db2/c/pgvec_db3.c modules/db2/c/pgvec_transport.c
+$(DB2_DB3_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o) \
+$(DB2_DB3_SRCS:%.c=$(OBJDIR)/kb/%.o): C_FLAGS += -Imodules/db2/include
+
 # Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
 # (in SERVER_SRCS above, compiled as $(OBJDIR)/modules/vault/*.o) and aimee-kb (linked
 # as KB_VAULT_OBJS below, kb/-prefixed objects). modules/db2/c/vault_pg.c (the kb Postgres store)
@@ -768,7 +779,13 @@ KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
 KB_CORE_SRCS = $(filter-out modules/audit/audit_worm.c,$(CORE_SRCS))
 KB_CORE_OBJS = $(KB_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/cJSON.o
 KB_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/kb/%.o)
-KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o)
+# modules/db2/db3_route.c is the module-owned DB3 boundary itself, so it sits
+# beside modules/db2/ rather than inside the modules/db2/c implementation
+# directory DB2_SRCS is written in terms of. pgvec_db3.c calls into it, so
+# aimee-kb has to link it; appending the object directly keeps DB2_SRCS's
+# modules/db2/c/%.c rewrite (which DB2_OBJS depends on) intact.
+KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/kb/modules/db2/db3_route.o
+$(OBJDIR)/kb/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
 KB_DB2_HOST_ADAPTER_OBJS = $(DB2_HOST_ADAPTER_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_MEMORY_SPLIT_SRCS = modules/memory/memory_core_search_c.c modules/memory/memory_core_search_b.c modules/memory/memory_core_helpers_b.c modules/memory/memory_core_helpers.c modules/memory/memory_core_crud.c modules/memory/memory_core_search.c modules/memory/memory_core_scope_embed.c modules/memory/memory_core_tiers.c
 # ^ KB-real only (#error-guarded); NEVER add to DATA_SRCS/server build.
