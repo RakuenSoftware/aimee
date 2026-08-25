@@ -509,10 +509,15 @@ PY
     semantic_recall=""
     if [[ "$semantic_store" == *'"status":"ok"'* ]]; then
       for _ in $(seq 1 20); do
-        semantic_recall="$(curl -fksS --max-time 30 "${IDENTITY[@]}" "${AUTH[@]}" \
+        # /memory/recall assembles the always-on/session context sections; it is
+        # not the ranked fact-search surface. /memory/search accepts keyword
+        # clusters but routes their joined natural-language query through the
+        # live KB semantic ranker as well, so a lexically-disjoint query here is
+        # direct evidence that the stored pgvector row was retrieved.
+        semantic_recall="$(curl -fksS --max-time 60 "${IDENTITY[@]}" "${AUTH[@]}" \
           -H 'content-type: application/json' -X POST \
-          -d '{"task_hint":"Which colored light helps ships locate the dock after dark?","limit_tokens":1024,"scope":"all"}' \
-          "$SERVER_URL/v1/memory/recall" 2>/dev/null || true)"
+          -d '{"keywords":["Which colored light helps ships locate the dock after dark?"],"limit":10,"scope":"all"}' \
+          "$SERVER_URL/v1/memory/search" 2>/dev/null || true)"
         [[ "$semantic_recall" == *"$semantic_marker"* ]] && break
         sleep 0.25
       done
