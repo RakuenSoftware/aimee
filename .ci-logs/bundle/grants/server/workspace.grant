@@ -1,9 +1,0 @@
-version=1
-principal_class=1
-principal_ref=12
-uid=self
-executable=/usr/local/libexec/aimee-modules/aimee-module-workspace
-publish=
-subscribe=
-request=
-serve=7169,7170,7171

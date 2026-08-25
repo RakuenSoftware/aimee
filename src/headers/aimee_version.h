@@ -4,12 +4,12 @@
 /* Release series, MAJOR.MINOR. The only version component declared in the tree.
  *
  * The PATCH is never written here. It is inferred at release time from the
- * highest v<series>.* tag, so shipping 0.3.1 after 0.3.0 needs no commit to
+ * highest v<series>.* tag, so shipping 0.4.1 after 0.4.0 needs no commit to
  * this file and cannot drift from what was actually tagged. Moving to a new
  * series IS a decision, so it is an explicit edit of this one line and nothing
  * infers it. */
 #ifndef AIMEE_VERSION_SERIES
-#define AIMEE_VERSION_SERIES "0.3"
+#define AIMEE_VERSION_SERIES "0.4"
 #endif
 
 /* Full version -- can be overridden at compile time via -DAIMEE_VERSION='"..."'

@@ -28,13 +28,14 @@ check() { # check <label> <expected> <actual>
     fi
 }
 
-# A stand-in for the shipped manifest: two required modules and one optional one
-# that the image ships ON (sandbox), mirroring the real server.modules.
+# A stand-in for the shipped manifest: three required modules and one optional
+# module that the image ships ON, mirroring the real server.modules.
 shipped="$tmp/shipped.modules"
 {
     printf 'memory\t/usr/local/libexec/aimee-modules/aimee-module-memory\n'
     printf 'routing\t/usr/local/libexec/aimee-modules/aimee-module-routing\n'
     printf 'sandbox\t/usr/local/libexec/aimee-modules/aimee-module-sandbox\n'
+    printf 'roundtable\t/usr/local/libexec/aimee-modules/aimee-module-roundtable\n'
 } > "$shipped"
 chmod 0444 "$shipped"          # read-only, as in the image
 shipped_before=$(cat "$shipped")
@@ -42,36 +43,36 @@ shipped_before=$(cat "$shipped")
 ids() { cut -f1 "$1" | tr '\n' ' ' | sed 's/ $//'; }
 
 # 1. Nothing set: the shipped manifest is used as-is, not copied or rewritten.
-unset AIMEE_MODULE_SANDBOX AIMEE_MODULE_GOVERNANCE AIMEE_RUNTIME_WEB_ENABLED 2>/dev/null || true
+unset AIMEE_MODULE_SANDBOX AIMEE_MODULE_ROUNDTABLE AIMEE_MODULE_GOVERNANCE AIMEE_RUNTIME_WEB_ENABLED 2>/dev/null || true
 out=$(apply_optional_modules server "$shipped" "$tmp")
 check "unset leaves the shipped manifest untouched" "$shipped" "$out"
 
-# 2. "off" drops a module the image shipped on.
-AIMEE_MODULE_SANDBOX=0
-export AIMEE_MODULE_SANDBOX
+# 2. "off" drops an optional module the image shipped on.
+AIMEE_MODULE_ROUNDTABLE=0
+export AIMEE_MODULE_ROUNDTABLE
 out=$(apply_optional_modules server "$shipped" "$tmp")
 [ "$out" != "$shipped" ] || { echo "  FAIL  off did not produce an effective manifest" >&2; fails=$((fails + 1)); }
-check "off removes sandbox" "memory routing" "$(ids "$out")"
-unset AIMEE_MODULE_SANDBOX
+check "off removes roundtable" "memory routing sandbox" "$(ids "$out")"
+unset AIMEE_MODULE_ROUNDTABLE
 
-# 3. Truthy spellings all mean the same thing.
+# 3. False spellings all mean the same thing.
 for word in 0 false off no; do
-    AIMEE_MODULE_SANDBOX="$word"; export AIMEE_MODULE_SANDBOX
+    AIMEE_MODULE_ROUNDTABLE="$word"; export AIMEE_MODULE_ROUNDTABLE
     out=$(apply_optional_modules server "$shipped" "$tmp")
-    check "off spelling '$word'" "memory routing" "$(ids "$out")"
-    unset AIMEE_MODULE_SANDBOX
+    check "off spelling '$word'" "memory routing sandbox" "$(ids "$out")"
+    unset AIMEE_MODULE_ROUNDTABLE
 done
 
-# 4. A required module is never gated, even if someone sets the variable.
-AIMEE_MODULE_MEMORY=0; export AIMEE_MODULE_MEMORY
+# 4. Sandbox is required and never gated, even if a legacy variable is set.
+AIMEE_MODULE_SANDBOX=0; export AIMEE_MODULE_SANDBOX
 out=$(apply_optional_modules server "$shipped" "$tmp")
-check "required memory survives AIMEE_MODULE_MEMORY=0" "memory routing sandbox" "$(ids "$out")"
-unset AIMEE_MODULE_MEMORY
+check "required sandbox ignores AIMEE_MODULE_SANDBOX=0" "memory routing sandbox roundtable" "$(ids "$out")"
+unset AIMEE_MODULE_SANDBOX
 
 # 5. "on" for a module whose binary is absent must not fabricate an entry.
 AIMEE_MODULE_GOVERNANCE=1; export AIMEE_MODULE_GOVERNANCE
 out=$(apply_optional_modules server "$shipped" "$tmp" 2>/dev/null)
-check "on with no binary present does not add governance" "memory routing sandbox" "$(ids "$out")"
+check "on with no binary present does not add governance" "memory routing sandbox roundtable" "$(ids "$out")"
 unset AIMEE_MODULE_GOVERNANCE
 
 # 6. "on" adds the module when the binary exists. Point the lookup at a fake
@@ -81,7 +82,7 @@ unset AIMEE_MODULE_GOVERNANCE
 if [ -x /usr/local/libexec/aimee-modules/aimee-module-governance ]; then
     AIMEE_MODULE_GOVERNANCE=1; export AIMEE_MODULE_GOVERNANCE
     out=$(apply_optional_modules server "$shipped" "$tmp")
-    check "on adds governance when installed" "memory routing sandbox governance" "$(ids "$out")"
+    check "on adds governance when installed" "memory routing sandbox roundtable governance" "$(ids "$out")"
     unset AIMEE_MODULE_GOVERNANCE
 else
     printf '  skip  on-adds-governance (module binary not installed on this host)\n'
@@ -132,13 +133,13 @@ unset AIMEE_MODULE_POSTGRES
 #    shipped. This case defines log() the way a real entrypoint does -- writing to
 #    stdout, the wrong stream on purpose -- and asserts the return value survives.
 log() { printf '[test-entrypoint] %s\n' "$*"; }   # deliberately stdout
-AIMEE_MODULE_SANDBOX=0; export AIMEE_MODULE_SANDBOX
+AIMEE_MODULE_ROUNDTABLE=0; export AIMEE_MODULE_ROUNDTABLE
 out=$(apply_optional_modules server "$shipped" "$tmp")
-unset AIMEE_MODULE_SANDBOX
+unset AIMEE_MODULE_ROUNDTABLE
 if [ -r "$out" ]; then
     printf '  ok    stdout log() does not corrupt the returned manifest path\n'
     check "returned path is the rewritten manifest" "$tmp/server.modules" "$out"
-    check "diagnostic did not leak into the manifest" "memory routing" "$(ids "$out")"
+    check "diagnostic did not leak into the manifest" "memory routing sandbox" "$(ids "$out")"
 else
     printf '  FAIL  stdout log() corrupted the returned manifest path\n     got: %s\n' \
         "$out" >&2

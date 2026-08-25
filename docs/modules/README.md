@@ -59,14 +59,16 @@ replaced by `_`:
 
 ```sh
 AIMEE_MODULE_ROUNDTABLE=1     # turn the review panel on
-AIMEE_MODULE_SANDBOX=0        # turn the shipped sandbox module off
 AIMEE_MODULE_KB_SYNTHESIS=1   # kb-placed module
 ```
 
 Optional modules by placement:
 
-- **server**: `governance`, `roundtable`, `benchmarks`, `sandbox`, `runtime-web`
-- **kb**: `kb-synthesis`, `control-web`, `benchmarks`
+- **server**: `governance`, `roundtable`, `benchmarks`, `runtime-web`, `economizer`
+- **kb**: `kb-synthesis`, `control-web`, `benchmarks`, `postgres`
+
+Required modules are not part of this control surface. In particular, `sandbox`
+is always active and there is no supported `AIMEE_MODULE_SANDBOX` setting.
 
 The setting is read at container start by `deploy/container/optional-modules-lib.sh`,
 which rewrites a copy of the shipped module manifest before

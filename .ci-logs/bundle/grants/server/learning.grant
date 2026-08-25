@@ -1,9 +1,0 @@
-version=1
-principal_class=1
-principal_ref=8
-uid=self
-executable=/usr/local/libexec/aimee-modules/aimee-module-learning
-publish=
-subscribe=
-request=
-serve=6145

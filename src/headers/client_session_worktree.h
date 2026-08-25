@@ -67,6 +67,8 @@ int client_session_worktree_release_at(const char *sid, const char *cwd);
  * route_path writes an absolute path. A NULL/empty input means "the effective
  * cwd", which is useful for shell tools. route_command prefixes the command
  * with the routed cwd and remaps literal absolute source-root references.
+ * A path outside the repository is returned unchanged without provisioning a
+ * worktree; external reads must not depend on repository base resolution.
  *
  * Returns 0 when routed, 1 when isolation is not applicable, -2 when the
  * worktree could not be prepared, and -3 when the input explicitly targets a

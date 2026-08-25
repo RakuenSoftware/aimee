@@ -96,6 +96,7 @@
     "server-go/modules/aimee/families/mgmt_jwks_test.go",
     "server-go/modules/aimee/families/mgmt_nonce_test.go",
     "server-go/modules/aimee/families/migrations_test.go",
+    "server-go/modules/aimee/families/module_assembly_test.go",
     "server-go/modules/aimee/families/pki_test.go",
     "server-go/modules/aimee/families/process_contract_test.go",
     "server-go/modules/aimee/families/roundtable_test.go",

@@ -15,11 +15,10 @@ profiles:
   - default-limits
   - aimee-stack
   # Bind the host Docker socket so aimee-server can drive the daemon for the
-  # DELEGATE SANDBOX: with delegate_sandbox on (below), server-executed delegates
-  # run their build/test/verify tools in a --network none sibling container that
-  # carries the project toolchain, instead of in aimee-server's toolchain-less
-  # runtime image. SECURITY: this grants the plugin control of the host Docker
-  # daemon — remove it (and delegate_sandbox) if you do not want that.
+  # DELEGATE SANDBOX: server-executed delegates always run their
+  # build/test/verify tools in a --network none sibling container that carries
+  # the project toolchain, instead of in aimee-server's toolchain-less runtime
+  # image. SECURITY: this grants the plugin control of the host Docker daemon.
   - docker-socket
 services:
   - name: server
@@ -39,9 +38,8 @@ services:
       # Exercise the kernel path as the server user before every start; a
       # missing mount, hostile hard rlimit, or ineffective core_pattern is fatal.
       AIMEE_CORE_SELFTEST: "1"
-      # ---- Delegate sandbox (needs the docker-socket profile above) -----------
-      # Run server-executed delegates' tools in a --network none Docker sandbox.
-      AIMEE_DELEGATE_SANDBOX: "1"
+      # ---- Delegate sandbox (requires the docker-socket profile above) --------
+      # Server-executed delegates always use a --network none Docker sandbox.
       # Map aimee-server's CONTAINER paths to the DAEMON's HOST paths so the
       # sibling sandbox bind-mounts the real worktree (docker-in-docker). These
       # are the SmoothNAS tier-bound bind sources for this plugin's `home` and
