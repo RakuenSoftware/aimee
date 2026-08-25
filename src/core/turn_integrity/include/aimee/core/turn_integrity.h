@@ -111,6 +111,14 @@ typedef enum
    TI_EFFECT_REFUSED
 } ti_effect_state_t;
 
+typedef enum
+{
+   TI_POSTCONDITION_NONE = 0,
+   TI_POSTCONDITION_PENDING,
+   TI_POSTCONDITION_PASSED,
+   TI_POSTCONDITION_FAILED
+} ti_postcondition_state_t;
+
 typedef struct
 {
    char contract_id[TI_ID_MAX];
@@ -121,6 +129,7 @@ typedef struct
    ti_effect_class_t effect_class;
    ti_effect_mode_t mode;
    ti_effect_state_t state;
+   ti_postcondition_state_t postcondition;
    int matched;
    uint64_t sequence;
 } ti_effect_contract_t;
@@ -182,6 +191,9 @@ int ti_effect_contract_validate(ti_effect_contract_t *contract, const char *tool
                                 const char *target, const char *arguments_json,
                                 ti_effect_class_t effect_class);
 int ti_effect_contract_mark_executing(ti_effect_contract_t *contract);
+int ti_effect_contract_require_postcondition(ti_effect_contract_t *contract);
+int ti_effect_contract_record_postcondition(ti_effect_contract_t *contract, int passed,
+                                            const char *descriptor);
 int ti_effect_contract_finish(ti_effect_contract_t *contract, ti_effect_state_t outcome,
                               const char *reason_code);
 const char *ti_effect_class_name(ti_effect_class_t effect_class);

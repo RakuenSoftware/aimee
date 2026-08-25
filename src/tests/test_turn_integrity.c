@@ -125,6 +125,30 @@ static void test_effect_contract_detects_drift(void)
    assert(ti_effect_contract_finish(&effect, TI_EFFECT_FAILED, "tool_error") == 0);
 }
 
+static void test_effect_postcondition_is_required_for_success(void)
+{
+   ti_effect_contract_t effect;
+   assert(ti_effect_contract_init(&effect, "session-e", "write_file", "src/a.c", "{}",
+                                  TI_EFFECT_REVERSIBLE, TI_EFFECT_MODE_ENFORCE) == 0);
+   assert(ti_effect_contract_require_postcondition(&effect) == 0);
+   assert(ti_effect_contract_validate(&effect, "write_file", "src/a.c", "{}",
+                                      TI_EFFECT_REVERSIBLE) == 1);
+   assert(ti_effect_contract_mark_executing(&effect) == 0);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_SUCCEEDED, "") == -1);
+   assert(ti_effect_contract_record_postcondition(&effect, 1, "exact_readback") == 0);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_SUCCEEDED, "verified") == 0);
+
+   assert(ti_effect_contract_init(&effect, "session-e", "write_file", "src/a.c", "{}",
+                                  TI_EFFECT_REVERSIBLE, TI_EFFECT_MODE_ENFORCE) == 0);
+   assert(ti_effect_contract_require_postcondition(&effect) == 0);
+   assert(ti_effect_contract_validate(&effect, "write_file", "src/a.c", "{}",
+                                      TI_EFFECT_REVERSIBLE) == 1);
+   assert(ti_effect_contract_mark_executing(&effect) == 0);
+   assert(ti_effect_contract_record_postcondition(&effect, 0, "exact_readback") == 0);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_SUCCEEDED, "") == -1);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_FAILED, "postcondition") == 0);
+}
+
 int main(void)
 {
    test_lifecycle_and_json();
@@ -132,6 +156,7 @@ int main(void)
    test_scoped_knowledge_freshness();
    test_effect_contract_shadow_lifecycle();
    test_effect_contract_detects_drift();
+   test_effect_postcondition_is_required_for_success();
    ti_set_event_callback(NULL, NULL);
    puts("all turn_integrity tests passed");
    return 0;

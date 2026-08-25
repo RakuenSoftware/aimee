@@ -223,7 +223,8 @@ typedef struct
    const char *actor;       /* principal (session id / role), captured on the dispatch thread */
    const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
    const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
-                            /* "timeout" | "unknown_tool" | "bad_args" | "policy"          */
+                            /* "timeout" | "unknown_tool" | "bad_args" | "policy" |       */
+                            /* "effect_contract" | "precondition" | "postcondition"        */
    const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
                             /* "outbound:sse" | "served"                    */
 } agent_tool_completion_t;

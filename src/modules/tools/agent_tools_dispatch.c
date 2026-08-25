@@ -139,7 +139,7 @@ static ti_effect_class_t td_effect_class(const char *name)
 
 static const char *td_effect_target(cJSON *args)
 {
-   static const char *const keys[] = {"path", "repo_path", "url", "ref", "title", NULL};
+   static const char *const keys[] = {"path", "repo_path", "url", "ref", "title", "symbol", NULL};
    for (int i = 0; keys[i]; i++)
    {
       cJSON *value = cJSON_GetObjectItemCaseSensitive(args, keys[i]);
@@ -149,25 +149,134 @@ static const char *td_effect_target(cJSON *args)
    return "";
 }
 
+static int td_effect_known_reversible(const char *name, cJSON *args)
+{
+   if (!name || !args)
+      return 0;
+   if (strcmp(name, "write_file") == 0)
+      return 1;
+   if (strcmp(name, "edit_file") == 0)
+   {
+      cJSON *dry_run = cJSON_GetObjectItemCaseSensitive(args, "dry_run");
+      return !(cJSON_IsBool(dry_run) && cJSON_IsTrue(dry_run));
+   }
+   if (strcmp(name, "edit_symbol") == 0)
+   {
+      cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
+      return cJSON_IsString(path) && path->valuestring[0];
+   }
+   return 0;
+}
+
+static ti_effect_mode_t td_effect_mode(const char *name, cJSON *args)
+{
+   const char *configured = getenv("AIMEE_EFFECT_CONTRACT_MODE");
+   if (configured && strcmp(configured, "off") == 0)
+      return TI_EFFECT_MODE_OFF;
+   if (configured && strcmp(configured, "shadow") == 0)
+      return TI_EFFECT_MODE_SHADOW;
+   return td_effect_known_reversible(name, args) ? TI_EFFECT_MODE_ENFORCE : TI_EFFECT_MODE_SHADOW;
+}
+
 static void td_effect_propose(const char *name, cJSON *args)
 {
    char *normalized = cJSON_PrintUnformatted(args);
    const char *who = session_id();
+   ti_effect_class_t effect_class =
+       td_effect_known_reversible(name, args) ? TI_EFFECT_REVERSIBLE : td_effect_class(name);
    if (ti_effect_contract_init(&g_td_effect, who, name, td_effect_target(args), normalized,
-                               td_effect_class(name), TI_EFFECT_MODE_SHADOW) == 0)
+                               effect_class, td_effect_mode(name, args)) == 0)
+   {
       g_td_effect_active = 1;
+      if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE)
+         (void)ti_effect_contract_require_postcondition(&g_td_effect);
+   }
    free(normalized);
 }
 
-static void td_effect_validate_and_execute(const char *name, cJSON *args)
+static int td_effect_validate_and_execute(const char *name, cJSON *args)
 {
    if (!g_td_effect_active)
-      return;
+      return 0;
+   if (g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && !td_effect_target(args)[0])
+      return -1;
    char *normalized = cJSON_PrintUnformatted(args);
-   (void)ti_effect_contract_validate(&g_td_effect, name, td_effect_target(args), normalized,
-                                     td_effect_class(name));
+   ti_effect_class_t effect_class =
+       td_effect_known_reversible(name, args) ? TI_EFFECT_REVERSIBLE : td_effect_class(name);
+   int matched = ti_effect_contract_validate(&g_td_effect, name, td_effect_target(args), normalized,
+                                             effect_class);
    free(normalized);
-   (void)ti_effect_contract_mark_executing(&g_td_effect);
+   if (matched < 0 || (matched == 0 && g_td_effect.mode == TI_EFFECT_MODE_ENFORCE))
+      return -1;
+   return ti_effect_contract_mark_executing(&g_td_effect);
+}
+
+static int td_effect_verify_file_postcondition(const char *name, cJSON *args,
+                                               const char *dispatch_cwd)
+{
+   if (!g_td_effect_active || g_td_effect.mode != TI_EFFECT_MODE_ENFORCE)
+      return 1;
+   cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
+   if (!cJSON_IsString(path) || !path->valuestring[0])
+      return 0;
+   char absolute[MAX_PATH_LEN];
+   normalize_path(path->valuestring, dispatch_cwd, absolute, sizeof absolute);
+   const workspace_provider_t *provider = workspace_provider_active();
+   char *actual = NULL;
+   size_t actual_len = 0;
+   if (!provider || provider->read_all(provider, absolute, &actual, &actual_len) != 0 || !actual)
+   {
+      free(actual);
+      return 0;
+   }
+
+   int passed = 1;
+   if (strcmp(name, "write_file") == 0)
+   {
+      cJSON *content = cJSON_GetObjectItemCaseSensitive(args, "content");
+      const char *expected = cJSON_IsString(content) ? content->valuestring : "";
+      size_t expected_len = strlen(expected);
+      passed = actual_len == expected_len && memcmp(actual, expected, expected_len) == 0;
+   }
+   else if (strcmp(name, "edit_file") == 0)
+   {
+      cJSON *old = cJSON_GetObjectItemCaseSensitive(args, "old_string");
+      cJSON *replacement = cJSON_GetObjectItemCaseSensitive(args, "new_string");
+      if (cJSON_IsString(old))
+      {
+         const char *new_text = cJSON_IsString(replacement) ? replacement->valuestring : "";
+         if (strcmp(old->valuestring, new_text) == 0)
+            passed = strstr(actual, old->valuestring) != NULL;
+         else
+            passed = strstr(actual, old->valuestring) == NULL &&
+                     (!new_text[0] || strstr(actual, new_text) != NULL);
+      }
+      /* Anchored edits have already checked their snapshot and anchors. The
+       * independent postcondition here is that the target can be read back. */
+   }
+   else if (strcmp(name, "edit_symbol") == 0)
+   {
+      cJSON *text = cJSON_GetObjectItemCaseSensitive(args, "text");
+      cJSON *op = cJSON_GetObjectItemCaseSensitive(args, "op");
+      if (cJSON_IsString(text) && text->valuestring[0] &&
+          !(cJSON_IsString(op) && strcmp(op->valuestring, "delete") == 0))
+         passed = strstr(actual, text->valuestring) != NULL;
+   }
+   free(actual);
+   return passed;
+}
+
+static int td_effect_result_claims_success(const char *result)
+{
+   if (!result || strncmp(result, "error:", 6) == 0)
+      return 0;
+   cJSON *payload = cJSON_Parse(result);
+   if (!payload)
+      return 1;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(payload, "status");
+   int succeeded = !cJSON_IsString(status) || strcmp(status->valuestring, "ok") == 0;
+   cJSON_Delete(payload);
+   return succeeded;
 }
 
 static void td_effect_finish(void)
@@ -2163,8 +2272,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
-   td_effect_propose(name, args);
-
    /* The `shell` permission, enforced where the command would run.
     *
     * Deliberately ahead of the toolset check and independent of it: a delegate
@@ -2347,7 +2454,16 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
-   td_effect_validate_and_execute(name, args);
+   /* Contract the effective call only after mechanical policy rewrites have
+    * settled its target and arguments, and always before the side effect. */
+   td_effect_propose(name, args);
+   if (td_effect_validate_and_execute(name, args) != 0)
+   {
+      cJSON_Delete(args);
+      td_outcome_set("refused", "effect_contract");
+      return safe_strdup("error: effect contract refused execution: missing target or proposal "
+                         "drift");
+   }
    char *result = NULL;
 
    if (strcmp(name, "bash") == 0)
@@ -2506,6 +2622,28 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       else
          snprintf(err, sizeof(err), "error: unknown tool '%s'", name);
       result = safe_strdup(err);
+   }
+
+   if (g_td_effect_active && g_td_effect.mode == TI_EFFECT_MODE_ENFORCE && result)
+   {
+      if (strncmp(result, "error:", 6) == 0)
+      {
+         /* The wrapper classifies the ordinary tool failure. */
+      }
+      else if (!td_effect_result_claims_success(result))
+         td_outcome_set("error", "precondition");
+      else
+      {
+         int verified = td_effect_verify_file_postcondition(name, args, dispatch_cwd);
+         (void)ti_effect_contract_record_postcondition(&g_td_effect, verified, "readback");
+         if (!verified)
+         {
+            free(result);
+            result = safe_strdup("error: effect postcondition failed after mutation; inspect the "
+                                 "target before retrying");
+            td_outcome_set("error", "postcondition");
+         }
+      }
    }
 
    cJSON_Delete(args);

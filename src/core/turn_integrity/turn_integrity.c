@@ -459,6 +459,28 @@ int ti_effect_contract_mark_executing(ti_effect_contract_t *contract)
    return 0;
 }
 
+int ti_effect_contract_require_postcondition(ti_effect_contract_t *contract)
+{
+   if (!contract ||
+       (contract->state != TI_EFFECT_PROPOSED && contract->state != TI_EFFECT_VALIDATED))
+      return -1;
+   contract->postcondition = TI_POSTCONDITION_PENDING;
+   return 0;
+}
+
+int ti_effect_contract_record_postcondition(ti_effect_contract_t *contract, int passed,
+                                            const char *descriptor)
+{
+   if (!contract || contract->state != TI_EFFECT_EXECUTING ||
+       contract->postcondition != TI_POSTCONDITION_PENDING)
+      return -1;
+   contract->postcondition = passed ? TI_POSTCONDITION_PASSED : TI_POSTCONDITION_FAILED;
+   contract->sequence++;
+   if (contract->mode != TI_EFFECT_MODE_OFF)
+      emit_effect(contract, "effect.postcondition", descriptor);
+   return 0;
+}
+
 int ti_effect_contract_finish(ti_effect_contract_t *contract, ti_effect_state_t outcome,
                               const char *reason_code)
 {
@@ -467,6 +489,10 @@ int ti_effect_contract_finish(ti_effect_contract_t *contract, ti_effect_state_t 
         contract->state != TI_EFFECT_EXECUTING) ||
        (outcome != TI_EFFECT_SUCCEEDED && outcome != TI_EFFECT_FAILED &&
         outcome != TI_EFFECT_UNKNOWN_OUTCOME && outcome != TI_EFFECT_REFUSED))
+      return -1;
+   if (outcome == TI_EFFECT_SUCCEEDED && contract->postcondition == TI_POSTCONDITION_PENDING)
+      return -1;
+   if (outcome == TI_EFFECT_SUCCEEDED && contract->postcondition == TI_POSTCONDITION_FAILED)
       return -1;
    contract->state = outcome;
    contract->sequence++;
