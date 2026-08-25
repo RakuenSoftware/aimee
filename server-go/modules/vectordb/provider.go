@@ -215,16 +215,24 @@ func (p *Provider) publishCapabilitiesLocked() {
 	// Safe under p.mu: Capabilities takes the INDEX lock, and advanceLocked
 	// above already establishes that order (provider then index).
 	capabilities := p.Capabilities()
+	// Apply holds p.mu, so this is the only sender. A failed send therefore means
+	// the buffer holds a SUPERSEDED generation: drop it and send again, and the
+	// second send cannot fail because nothing else can refill it.
+	//
+	// The drain must not give up when it finds the buffer already empty. If the
+	// reader took the old value between the failed send and the drain, returning
+	// there would leave the router holding the generation we were replacing --
+	// which is the stale-generation failure this whole channel exists to
+	// prevent, reintroduced as a race that shows up only under load.
 	for {
 		select {
 		case p.updates <- capabilities:
 			return
 		default:
-			select {
-			case <-p.updates:
-			default:
-				return
-			}
+		}
+		select {
+		case <-p.updates:
+		default:
 		}
 	}
 }
