@@ -36,6 +36,8 @@
 #                 its environment.                         (optional)
 #   AIMEE_E2E_TURN_INTEGRITY_MCP=1 configures the repository's deterministic
 #                 timeout MCP fixture as a server-owned client. (default 0)
+#   AIMEE_E2E_RESTART_COMPONENTS=1 restart both daemons after all probes and
+#                 prove enrolled/persisted service recovery.       (default 0)
 #
 # Exit code: 0 = all checks passed.
 
@@ -490,6 +492,57 @@ if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
     green "  PASS  external live-stack probe"; PASS=$((PASS + 1))
   else
     red "  FAIL  external live-stack probe"; FAIL=$((FAIL + 1))
+  fi
+fi
+
+if [[ "${AIMEE_E2E_RESTART_COMPONENTS:-0}" == "1" && "$MODE" == "full" ]]; then
+  bold "==> Exploratory daemon restart and persisted recovery"
+  kill "$server_pid"
+  wait "$server_pid" 2>/dev/null || true
+  server_pid=""
+  AIMEE_API_BEARER_TOKEN="$BEARER" \
+    "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
+  server_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! curl -fksS --max-time 5 "${IDENTITY[@]}" "${AUTH[@]}" \
+    "$SERVER_URL/v1/health" >/dev/null 2>&1; do
+    kill -0 "$server_pid" 2>/dev/null || break
+    (( SECONDS < deadline )) || break
+    sleep 1
+  done
+  persisted="$(curl -fksS --max-time 10 "${IDENTITY[@]}" "${AUTH[@]}" \
+    -H 'content-type: application/json' -X POST -d '{"limit":50}' \
+    "$SERVER_URL/v1/memory/list" 2>/dev/null || true)"
+  if [[ "$persisted" == *'aimeeE2E'* ]]; then
+    green "  PASS  aimee-server restart retained mTLS identity and persisted memory"
+    PASS=$((PASS + 1))
+  else
+    red "  FAIL  aimee-server did not recover enrolled persisted state"
+    FAIL=$((FAIL + 1))
+  fi
+
+  kill "$kb_pid"
+  wait "$kb_pid" 2>/dev/null || true
+  kb_pid=""
+  "$REPO/aimee-kb" --http-port=8741 >>"$AIMEE_HOME/kb.log" 2>&1 &
+  kb_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  kb_recovered=""
+  while (( SECONDS < deadline )); do
+    kb_recovered="$(curl -fksS --max-time 10 "${IDENTITY[@]}" "${AUTH[@]}" \
+      -H 'content-type: application/json' -X POST \
+      -d '{"query":"restart recovery","scope":"all","max_results":1}' \
+      "$SERVER_URL/v1/kb/search" 2>/dev/null || true)"
+    [[ "$kb_recovered" == *'"hits"'* ]] && break
+    kill -0 "$kb_pid" 2>/dev/null || break
+    sleep 1
+  done
+  if [[ "$kb_recovered" == *'"hits"'* ]]; then
+    green "  PASS  aimee-kb restart restored the live server→KB search path"
+    PASS=$((PASS + 1))
+  else
+    red "  FAIL  aimee-kb did not restore server→KB search after restart"
+    FAIL=$((FAIL + 1))
   fi
 fi
 
