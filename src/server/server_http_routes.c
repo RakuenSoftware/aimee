@@ -1858,6 +1858,7 @@ static const http_route_t g_v1_routes[] = {
      * (a write) is intentionally not exposed here. */
     {"POST", "/v1/index/find", NULL, RM_EXACT, "index.find", 0, rh_dispatch_op},
     {"POST", "/v1/index/list", NULL, RM_EXACT, "index.list", 0, rh_dispatch_op},
+    {"POST", "/v1/index/verify", NULL, RM_EXACT, "index.verify", 0, rh_dispatch_op},
     {"POST", "/v1/index/structure", NULL, RM_EXACT, "index.structure", 0, rh_dispatch_op},
     {"POST", "/v1/index/find_callers", NULL, RM_EXACT, "index.find_callers", 0, rh_dispatch_op},
     {"POST", "/v1/index/deps", NULL, RM_EXACT, "index.deps", 0, rh_dispatch_op},

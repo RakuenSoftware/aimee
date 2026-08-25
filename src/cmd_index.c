@@ -126,6 +126,60 @@ static void idx_scan(app_ctx_t *ctx, int argc, char **argv)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);
 }
 
+static void idx_verify(app_ctx_t *ctx, int argc, char **argv)
+{
+   const char *project = NULL;
+   const char *root = NULL;
+   int deep = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--deep") == 0)
+         deep = 1;
+      else if (!project)
+         project = argv[i];
+      else if (!root)
+         root = argv[i];
+   }
+   if (!project || !root)
+      fatal("index verify requires <project> <root> [--deep]");
+   int http_status = 0;
+   char *json = kb_client_index_verify_json(project, root, deep, &http_status);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   if (!resp)
+   {
+      free(json);
+      fatal("index verify: knowledge service unavailable");
+   }
+   cJSON *workspace = cJSON_GetObjectItemCaseSensitive(resp, "workspace_state");
+   const char *state = cJSON_IsString(workspace) ? workspace->valuestring : "unavailable";
+   int matched = http_status >= 200 && http_status < 300 && strcmp(state, "matched") == 0;
+   if (ctx->json_output)
+      emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
+   else
+   {
+      cJSON *revision = cJSON_GetObjectItemCaseSensitive(resp, "index_revision");
+      cJSON *verification = cJSON_GetObjectItemCaseSensitive(resp, "verification");
+      cJSON *modified = cJSON_GetObjectItemCaseSensitive(resp, "modified_files");
+      cJSON *missing = cJSON_GetObjectItemCaseSensitive(resp, "missing_files");
+      cJSON *unindexed = cJSON_GetObjectItemCaseSensitive(resp, "unindexed_files");
+      printf("index_state=current revision=%lld workspace_state=%s verification=%s\n",
+             cJSON_IsNumber(revision) ? (long long)revision->valuedouble : 0, state,
+             cJSON_IsString(verification) ? verification->valuestring : "none");
+      printf("modified=%d missing=%d unindexed=%d\n",
+             cJSON_IsNumber(modified) ? modified->valueint : 0,
+             cJSON_IsNumber(missing) ? missing->valueint : 0,
+             cJSON_IsNumber(unindexed) ? unindexed->valueint : 0);
+      cJSON *examples = cJSON_GetObjectItemCaseSensitive(resp, "examples");
+      cJSON *example;
+      cJSON_ArrayForEach(example, examples) if (cJSON_IsString(example))
+          printf("  %s\n", example->valuestring);
+   }
+   cJSON_Delete(resp);
+   free(json);
+   if (!matched)
+      exit(1);
+}
+
 static int idx_lifecycle_emit(app_ctx_t *ctx, const char *operation, const char *project,
                               const char *json, int http_status)
 {
@@ -935,6 +989,7 @@ static void idx_lsp_rename(app_ctx_t *ctx, int argc, char **argv)
 
 static const subcmd_t index_subcmds[] = {
     {"scan", "Scan a project directory for indexing", idx_scan},
+    {"verify", "Read-only manifest or content-hash drift check", idx_verify},
     {"detach", "Hide a project generation without deleting it", idx_detach},
     {"purge", "Dry-run or confirm an audited project purge", idx_purge},
     {"gc", "Retire stale checkout aliases and detached generations", idx_gc},

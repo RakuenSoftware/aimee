@@ -157,6 +157,7 @@ static const struct
     {"economizer", "stats", "economizer.stats", NULL, NULL, 60000},
     {"memory", "benchmark", "memory.benchmark", NULL, NULL, 600000},
     {"index", "scan", "index.scan", NULL, NULL, 300000},
+    {"index", "verify", "index.verify", NULL, NULL, 300000},
     {"index", "overview", "index.list", NULL, "projects", 0},
     {"index", "list", "index.list", NULL, "projects", 0},
     {"index", "find", "index.find", NULL, NULL, 0},
@@ -812,6 +813,21 @@ cJSON *marshal_index_scan(int argc, char **argv)
       cJSON_AddStringToObject(req, "root", opts.positional[1]);
    if (rpc_get(&opts, "force"))
       cJSON_AddTrueToObject(req, "force");
+   return req;
+}
+
+cJSON *marshal_index_verify(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"deep", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+   cJSON *req = marshal_no_args("index.verify");
+   if (opts.pos_count >= 1)
+      cJSON_AddStringToObject(req, "project", opts.positional[0]);
+   if (opts.pos_count >= 2)
+      cJSON_AddStringToObject(req, "root", opts.positional[1]);
+   if (rpc_get(&opts, "deep"))
+      cJSON_AddTrueToObject(req, "deep");
    return req;
 }
 

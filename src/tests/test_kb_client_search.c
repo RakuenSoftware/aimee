@@ -18,6 +18,7 @@ static int g_get_seen = 0;
 static int g_route_case = 0;
 static int g_search_expect_all = 0;
 static char g_push_root[512];
+static char g_scan_id[128];
 static int64_t g_dependency_now_ms = 100000;
 static int g_mtls_enabled;
 static int g_mtls_status;
@@ -567,11 +568,28 @@ static int maintenance_post_handler(const char *url, const char *auth_header, co
       cJSON *project = cJSON_GetObjectItemCaseSensitive(json, "project");
       cJSON *root_path = cJSON_GetObjectItemCaseSensitive(json, "root_path");
       cJSON *force = cJSON_GetObjectItemCaseSensitive(json, "force");
+      cJSON *phase = cJSON_GetObjectItemCaseSensitive(json, "phase");
+      cJSON *scan_id = cJSON_GetObjectItemCaseSensitive(json, "scan_id");
       cJSON *files = cJSON_GetObjectItemCaseSensitive(json, "files");
       assert(cJSON_IsString(project) && strcmp(project->valuestring, "aimee") == 0);
       assert(cJSON_IsString(root_path) && strcmp(root_path->valuestring, "/repo") == 0);
       assert(cJSON_IsBool(force) && cJSON_IsTrue(force));
       assert(files == NULL || (cJSON_IsArray(files) && cJSON_GetArraySize(files) == 0));
+      assert(cJSON_IsString(phase));
+      assert(cJSON_IsString(scan_id) && scan_id->valuestring[0]);
+      if (g_post_seen == 0)
+      {
+         assert(strcmp(phase->valuestring, "begin") == 0);
+         snprintf(g_scan_id, sizeof(g_scan_id), "%s", scan_id->valuestring);
+      }
+      else
+      {
+         assert(g_post_seen == 1);
+         assert(strcmp(phase->valuestring, "seal") == 0);
+         assert(strcmp(scan_id->valuestring, g_scan_id) == 0);
+         cJSON *expected = cJSON_GetObjectItemCaseSensitive(json, "expected_files");
+         assert(cJSON_IsNumber(expected) && expected->valueint == 0);
+      }
       if (response_buf)
          *response_buf = strdup("{\"status\":\"ok\",\"skipped\":false,\"project\":\"aimee\","
                                 "\"files\":2,\"inspected\":3}");
@@ -1241,6 +1259,7 @@ static void test_mtls_raw_post_preserves_content_type_and_status(void)
 static void test_index_scan_uses_v1_api_when_configured(void)
 {
    g_post_seen = 0;
+   g_scan_id[0] = '\0';
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(maintenance_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
@@ -1254,7 +1273,7 @@ static void test_index_scan_uses_v1_api_when_configured(void)
    assert(res.files == 2);
    assert(res.inspected == 3);
 
-   assert(g_post_seen == 1);
+   assert(g_post_seen == 2);
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
    g_route_case = 0;

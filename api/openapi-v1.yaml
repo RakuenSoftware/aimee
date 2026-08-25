@@ -810,12 +810,32 @@ components:
 
     CodeScanRequest:
       type: object
-      required: [project, root_path]
+      required: [project]
       properties:
         project:
           type: string
         root_path:
           type: string
+        phase:
+          type: string
+          enum: [begin, stage, seal, abort, verify]
+          description: Omit for the legacy local or incremental scan shape.
+        scan_id:
+          type: string
+        expected_files:
+          type: integer
+          minimum: 0
+        deep:
+          type: boolean
+          description: For verify, compare content hashes in addition to manifest paths.
+        files:
+          type: array
+          items:
+            type: object
+            required: [rel_path, content]
+            properties:
+              rel_path: { type: string }
+              content: { type: string }
         force:
           type: boolean
           default: false
@@ -835,6 +855,19 @@ components:
           type: integer
         inspected:
           type: integer
+        retracted:
+          type: integer
+        index_state:
+          type: string
+          enum: [current]
+        index_revision:
+          type: integer
+        workspace_state:
+          type: string
+          enum: [matched, modified, missing, unavailable]
+        verification:
+          type: string
+          enum: [manifest, content_hash, none]
 
     CodeBuildRequest:
       type: object

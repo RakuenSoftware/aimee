@@ -1269,6 +1269,7 @@ static const struct
     {"index.find_callers", marshal_index_find_callers},
     {"index.list", marshal_index_list},
     {"index.scan", marshal_index_scan},
+    {"index.verify", marshal_index_verify},
     {"index.structure", marshal_index_structure},
     {"insights.overview", marshal_insights_overview},
     {"job.list", marshal_coord_jobs_list},

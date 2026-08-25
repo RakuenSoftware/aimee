@@ -8,6 +8,8 @@
 /* Shared route helpers (defined in kb_http_code.c), used by the graph-feedback
  * route handlers split into kb_http_code_graphfb.c. */
 int code_scan_write_error(char *out_buf, int out_cap, const char *message);
+int code_scan_handle_phase(cJSON *root, const char *project, const char *root_path, cJSON *files_j,
+                           char *out_buf, int out_cap);
 int code_method_not_allowed(char *out_buf, int out_cap);
 int code_qparam(const char *qs, const char *key, char *out, int outsz);
 int code_request_project(const char *query_string, char *project, size_t project_cap, int allow_all,

@@ -23,15 +23,16 @@ extern "C"
 {
 #endif
 
-   /* Scan a project rooted at `root`, registering it as `name`.
-    * Skips files unchanged since their stored scanned_at unless force=1.
-    * Returns count of files (re)indexed, or -1 on error.
+   /* Scan a project rooted at `root`, registering it as `name`. The complete
+    * collected manifest is sealed atomically; content hashes avoid rebuilding
+    * unchanged file facts and absent indexed paths are retracted.
+    * Returns count of files whose facts changed, or -1 on error.
     *
     * If `inspected_out` is non-NULL, on success it receives the count of
-    * files visited (after path/extension and binary-content filters)
-    * — i.e. the universe the incremental decision ran over. The return
-    * value is always <= *inspected_out; the difference is files
-    * unchanged since their stored scanned_at. */
+    * files visited (after path/extension and binary-content filters).
+    * The return value is always <= *inspected_out; the difference is
+    * content-hash-identical files. `force` is retained for wire compatibility;
+    * correctness never depends on mtime. */
    int canonical_index_scan_project(const char *name, const char *root, int force,
                                     int *inspected_out);
 
@@ -40,6 +41,45 @@ extern "C"
       const char *rel_path;
       const char *content;
    } canonical_index_file_input_t;
+
+   typedef struct
+   {
+      long long revision;
+      int files_indexed;
+      int files_retracted;
+   } canonical_index_seal_result_t;
+
+   /* Complete-manifest protocol. Stage writes are private to scan_id; seal
+    * atomically publishes changed facts, retracts absent paths, and advances
+    * the project's index revision. seal returns -2 for a stale/count-mismatched
+    * session and -1 for storage failure. */
+   int canonical_index_scan_begin(const char *name, const char *root_label, const char *scan_id,
+                                  long long *baseline_revision_out);
+   int canonical_index_scan_stage(const char *scan_id,
+                                  const canonical_index_file_input_t *files, int file_count,
+                                  int *accepted_out);
+   int canonical_index_scan_seal(const char *scan_id, int expected_files,
+                                 canonical_index_seal_result_t *out);
+   int canonical_index_scan_abort(const char *scan_id);
+
+#define CANONICAL_INDEX_VERIFY_EXAMPLES 16
+   typedef struct
+   {
+      long long index_revision;
+      int indexed_files;
+      int workspace_files;
+      int modified_files;
+      int missing_files;
+      int unindexed_files;
+      int unavailable;
+      int example_count;
+      char examples[CANONICAL_INDEX_VERIFY_EXAMPLES][256];
+   } canonical_index_verify_result_t;
+
+   /* Read-only comparison of a current workspace to the published manifest.
+    * deep=0 compares ownership paths; deep=1 also compares content hashes. */
+   int canonical_index_verify_project(const char *name, const char *root, int deep,
+                                      canonical_index_verify_result_t *out);
 
    /* Index files whose content has already been read by the caller.
     * This is the remote/container-safe companion to scan_project: the

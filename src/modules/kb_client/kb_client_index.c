@@ -5,8 +5,10 @@
 #include "cJSON.h"
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Scan timeout is generous because canonical scans of large monorepos can take
  * tens of seconds. The shared v1 helpers choose remote HTTP when configured and
@@ -140,8 +142,9 @@ static int kb_index_find_callers_parse(cJSON *resp, caller_hit_t *out, int max)
    return count;
 }
 
-int kb_client_code_scan_push(const char *name, const char *root, int force, void *files_arr_v,
-                             kb_client_index_scan_result_t *out)
+static int kb_client_code_scan_request(const char *name, const char *root, int force,
+                                       const char *phase, const char *scan_id, int expected_files,
+                                       void *files_arr_v, kb_client_index_scan_result_t *out)
 {
    cJSON *files_arr = (cJSON *)files_arr_v;
 
@@ -168,6 +171,12 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
    }
    cJSON_AddStringToObject(req, "project", name);
    cJSON_AddStringToObject(req, "root_path", root);
+   if (phase && phase[0])
+      cJSON_AddStringToObject(req, "phase", phase);
+   if (scan_id && scan_id[0])
+      cJSON_AddStringToObject(req, "scan_id", scan_id);
+   if (phase && strcmp(phase, "seal") == 0)
+      cJSON_AddNumberToObject(req, "expected_files", expected_files);
    if (force)
       cJSON_AddBoolToObject(req, "force", 1);
    /* Caller-supplied {"rel_path","content"} entries (adopted) let the kb index
@@ -191,26 +200,55 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
    return rc;
 }
 
+int kb_client_code_scan_push(const char *name, const char *root, int force, void *files_arr_v,
+                             kb_client_index_scan_result_t *out)
+{
+   return kb_client_code_scan_request(name, root, force, NULL, NULL, 0, files_arr_v, out);
+}
+
+int kb_client_code_scan_phase(const char *name, const char *root, int force, const char *phase,
+                              const char *scan_id, int expected_files, void *files_arr_v,
+                              kb_client_index_scan_result_t *out)
+{
+   if (!phase || (strcmp(phase, "begin") != 0 && strcmp(phase, "stage") != 0 &&
+                  strcmp(phase, "seal") != 0 && strcmp(phase, "abort") != 0))
+   {
+      if (files_arr_v)
+         cJSON_Delete((cJSON *)files_arr_v);
+      if (out)
+      {
+         memset(out, 0, sizeof(*out));
+         out->skipped = 1;
+         snprintf(out->reason, sizeof(out->reason), "error");
+         snprintf(out->message, sizeof(out->message), "invalid code scan phase");
+      }
+      return -1;
+   }
+   return kb_client_code_scan_request(name, root, force, phase, scan_id, expected_files,
+                                      files_arr_v, out);
+}
+
 #ifdef AIMEE_POSIX
 /* Per-batch content budget for pushed-file scans. Batching keeps client
  * memory to ~one batch regardless of tree size, gives per-batch progress
  * against the scan timeout, and stays under the 1 MB request-body cap of
  * pre-KB_HTTP_BODY_MAX aimee-kb images (which silently truncated bigger
- * bodies into 400 "invalid json"). The kb scan upserts per project+path, so
- * batches accumulate — the same contract the thin client's /v1/index/ingest
- * streamer relies on. */
+ * bodies into 400 "invalid json"). Batches stage into one private scan
+ * session; the seal request publishes the complete manifest atomically. */
 #define KB_CLIENT_SCAN_BATCH_BYTES (600 * 1024)
 
 /* Streaming scan-push state: code_collect_files_cb hands over one file at a
- * time; we accumulate byte-bounded batches and POST each the moment it fills,
+ * time; we accumulate byte-bounded batches and stage each the moment it fills,
  * keeping memory to ~one batch regardless of tree size. */
 typedef struct
 {
    const char *name;
    const char *root;
    int force;
+   char scan_id[97];
    cJSON *batch; /* current open batch, or NULL */
    size_t batch_bytes;
+   int expected_files;
    int batches;   /* batches pushed */
    int failed_rc; /* rc of the first failed batch push; 0 while all succeed */
    kb_client_index_scan_result_t fail_res; /* result of that failed push */
@@ -232,15 +270,16 @@ static void kb_scan_push_flush(kb_scan_push_ctx_t *s)
    }
    kb_client_index_scan_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = kb_client_code_scan_push(s->name, s->root, s->force, s->batch, &res);
+   int batch_count = cJSON_GetArraySize(s->batch);
+   int rc = kb_client_code_scan_request(s->name, s->root, s->force, "stage", s->scan_id, 0,
+                                        s->batch, &res);
    s->batch = NULL;
    s->batch_bytes = 0;
    s->batches++;
    if (rc == 0 && !res.skipped)
    {
       s->agg.projects = 1;
-      s->agg.files += res.files;
-      s->agg.inspected += res.inspected;
+      s->expected_files += batch_count;
    }
    else
    {
@@ -289,28 +328,36 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
    {
       kb_scan_push_ctx_t s;
       memset(&s, 0, sizeof(s));
+      static atomic_ullong sequence = 0;
+      snprintf(s.scan_id, sizeof(s.scan_id), "client-%llu-%llu", (unsigned long long)time(NULL),
+               (unsigned long long)atomic_fetch_add(&sequence, 1) + 1);
       s.name = name;
       s.root = root;
       s.force = force;
+      kb_client_index_scan_result_t phase_res;
+      memset(&phase_res, 0, sizeof(phase_res));
+      int begin_rc =
+          kb_client_code_scan_request(name, root, force, "begin", s.scan_id, 0, NULL, &phase_res);
+      if (begin_rc != 0)
+      {
+         if (out)
+            *out = phase_res;
+         return begin_rc;
+      }
       code_collect_files_cb(root, kb_scan_push_collect_cb, &s);
       kb_scan_push_flush(&s); /* flush the trailing partial batch */
       if (s.failed_rc != 0)
       {
+         (void)kb_client_code_scan_request(name, root, force, "abort", s.scan_id, 0, NULL, NULL);
          if (out)
             *out = s.fail_res;
          return s.failed_rc;
       }
-      if (s.batches > 0)
-      {
-         if (out)
-            *out = s.agg;
-         return 0;
-      }
-      /* No indexable files collected: push an empty files array so the kb
-       * still registers the project + queues curation (prior behavior),
-       * rather than falling back to a root_path scan of a filesystem the kb
+      /* Empty manifests are meaningful: sealing one retracts the previous
+       * ownership set instead of asking a remote service to inspect a path it
        * cannot see. */
-      return kb_client_code_scan_push(name, root, force, cJSON_CreateArray(), out);
+      return kb_client_code_scan_request(name, root, force, "seal", s.scan_id, s.expected_files,
+                                         NULL, out);
    }
 #endif
    return kb_client_code_scan_push(name, root, force, NULL, out);
@@ -323,6 +370,26 @@ int kb_client_index_scan(const char *name, const char *root, int force,
       memset(out, 0, sizeof(*out));
 
    return kb_client_index_scan_v1(name, root, force, out);
+}
+
+char *kb_client_index_verify_json(const char *project, const char *root, int deep, int *http_status)
+{
+   if (http_status)
+      *http_status = 0;
+   if (!project || !project[0] || !root || !root[0])
+      return NULL;
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "project", project);
+   cJSON_AddStringToObject(req, "root_path", root);
+   cJSON_AddStringToObject(req, "phase", "verify");
+   if (deep)
+      cJSON_AddBoolToObject(req, "deep", 1);
+   char *json =
+       kb_client_v1_post_json("/v1/code/scan", req, KB_CLIENT_INDEX_SCAN_TIMEOUT_MS, http_status);
+   cJSON_Delete(req);
+   return json;
 }
 
 char *kb_client_index_project_lifecycle_json(const char *operation, const char *project,
