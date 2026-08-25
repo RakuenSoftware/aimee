@@ -29,6 +29,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_runtime') THEN
     CREATE ROLE aimee_kb_runtime NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_worm_worker') THEN
+    CREATE ROLE aimee_kb_worm_worker LOGIN NOINHERIT NOBYPASSRLS;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status') THEN
     CREATE ROLE aimee_kb_status NOLOGIN NOINHERIT;
   END IF;
@@ -63,6 +66,11 @@ $$;
 -- properties db2_init boot-asserts (B4/N4): a mismatch here or an operator
 -- over-grant is caught at boot, not silently tolerated.
 ALTER ROLE aimee_kb_runtime NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+-- Dedicated online audit consumer. It receives no application-table or chain-
+-- table grants: its only database capability is EXECUTE on the bounded drainer
+-- installed by schema_grants.sql. Credentials are provisioned independently
+-- from the ordinary runtime service.
+ALTER ROLE aimee_kb_worm_worker LOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_status NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_status_login NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_migrate NOBYPASSRLS NOSUPERUSER;
@@ -96,6 +104,26 @@ GRANT aimee_kb_jwks_runtime_definer TO aimee_kb_migrate;
 REVOKE aimee_kb_token_authority_definer FROM aimee_kb_migrate;
 REVOKE aimee_kb_token_authority_store_owner FROM aimee_kb_migrate;
 
+-- The WORM login is a terminal compartment, never a group and never a member
+-- of another role. Repair accidental memberships in either direction so the
+-- runtime cannot SET ROLE into the drainer and the worker cannot inherit an
+-- application or owner capability.
+DO $$
+DECLARE edge RECORD;
+BEGIN
+  FOR edge IN
+    SELECT granted.rolname AS granted_role, member.rolname AS member_role
+      FROM pg_catalog.pg_auth_members am
+      JOIN pg_catalog.pg_roles granted ON granted.oid=am.roleid
+      JOIN pg_catalog.pg_roles member ON member.oid=am.member
+     WHERE granted.rolname='aimee_kb_worm_worker'
+        OR member.rolname='aimee_kb_worm_worker'
+  LOOP
+    EXECUTE format('REVOKE %I FROM %I CASCADE',edge.granted_role,edge.member_role);
+  END LOOP;
+END
+$$;
+
 -- The three token-authority roles are closed compartments, never grouping or
 -- inheriting any other role and never inherited by any role.  Remove every
 -- direct edge in either direction so reapplying provisioning also repairs an
@@ -126,6 +154,10 @@ $$;
 -- Schema usage: runtime may resolve objects but NOT create them.
 GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_runtime;
+-- The WORM worker resolves only its dedicated API schema (created by
+-- schema.sql). Deny public entirely so a future function's default EXECUTE
+-- privilege cannot silently expand the worker's surface.
+REVOKE ALL ON SCHEMA public FROM aimee_kb_worm_worker;
 GRANT USAGE ON SCHEMA public TO aimee_kb_status;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_status;
 GRANT USAGE ON SCHEMA public TO aimee_kb_status_login;

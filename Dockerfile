@@ -46,7 +46,7 @@ ARG AIMEE_VERSION=""
 RUN sh scripts/fetch-treesitter.sh \
     && build_version="$AIMEE_VERSION" \
     && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
-    && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 \
+    && make -C src ../aimee-kb ../aimee-kb-worm -j"$(nproc)" AIMEE_TREESITTER=1 \
          GIT_VERSION="v$build_version"
 
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
@@ -460,6 +460,7 @@ RUN if [ -d /opt/aimee/models ]; then chmod -R a+rX /opt/aimee/models; fi
 # Nothing between the bake and here executes the binary, which is what makes the move
 # safe: the entrypoint script, USER, HEALTHCHECK and ENTRYPOINT all follow.
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
 COPY --from=build /module-runtime/grants/kb/ /opt/aimee/module-grants/kb/

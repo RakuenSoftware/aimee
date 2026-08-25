@@ -12,7 +12,7 @@
 --   (g) aws_account='abc' on a provisioned target -> REJECTED;
 --   (h) the PLAIN org_catalog_upsert with provider='bedrock' -> REJECTED (bypass closed);
 --   (i) a non-bedrock provider via org_catalog_upsert still works (bedrock_* stay NULL);
---   (j) admin-only (a non-admin principal RAISEs 42501) + a WORM kb_audit_event row is
+--   (j) admin-only (a non-admin principal RAISEs 42501) + a WORM kb_audit_outbox row is
 --       appended on a successful bedrock upsert;
 --   (k) the runtime role gets permission denied on a direct SELECT of a bedrock_* column
 --       (the new columns are NOT tenant-readable — same posture P2a proved).
@@ -344,18 +344,18 @@ BEGIN
   END IF;
 END $$;
 
--- (j) A WORM kb_audit_event row is appended atomically on a successful bedrock upsert.
+-- (j) A WORM kb_audit_outbox row is appended atomically on a successful bedrock upsert.
 DO $$
 DECLARE n0 bigint; n1 bigint; last_action text;
 BEGIN
-  SELECT count(*) INTO n0 FROM kb_audit_event;
+  SELECT count(*) INTO n0 FROM kb_audit_outbox;
   PERFORM org_catalog_bedrock_upsert('p6c-audited', 'Audited', 'converse', 'amazon-nova',
     'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
-  SELECT count(*) INTO n1 FROM kb_audit_event;
+  SELECT count(*) INTO n1 FROM kb_audit_outbox;
   IF n1 <> n0 + 1 THEN
     RAISE EXCEPTION 'P6c FAIL: bedrock upsert did not append exactly one audit row (% -> %)', n0, n1;
   END IF;
-  SELECT action INTO last_action FROM kb_audit_event ORDER BY seq DESC LIMIT 1;
+  SELECT action INTO last_action FROM kb_audit_outbox ORDER BY outbox_id DESC LIMIT 1;
   IF last_action <> 'org_catalog_bedrock_upsert' THEN
     RAISE EXCEPTION 'P6c FAIL: newest audit action = % (want org_catalog_bedrock_upsert)', last_action;
   END IF;

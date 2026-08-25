@@ -1,19 +1,16 @@
 # Memory Changeset WORM Seal: Validation Report
 
-Every path that closes a fact-graph changeset now appends a hash-chained audit
-row for it, inside the same transaction as the mutation. Five SQL close paths
-previously closed a changeset leaving nothing in `kb_audit_event`.
+Every path that closes a fact-graph changeset now writes an immutable audit
+intent inside the mutation transaction. A separately credentialed
+`aimee-kb-worm` process turns committed intents into the hash chain. Five SQL
+close paths previously closed a changeset without producing any audit record.
 
 ## What was already true
 
-The C mutation API has always sealed its own closes. `fm_commit_finish()`
-(`src/modules/db2/c/fact_mutation.c:445-465`) calls
-`db2_kb_audit_append_in_txn()` on every close, and the revert and
-ingest-rollback paths route through it (`fact_mutation.c:1791`, `2004`). That
-call is unconditional: it does not consult `config.audit_worm_enabled`, which is
-default-off and gates only the artifacts and guardrails seams. A memory
-mutation through the C API was therefore already tamper-evident, chained, and
-verifiable by `db2_kb_audit_verify_chain()`.
+Before this follow-up, the C mutation API sealed its own closes synchronously.
+`fm_commit_finish()` called `db2_kb_audit_append_in_txn()` on every close, and
+the revert and ingest-rollback paths routed through it. That call was
+unconditional: it did not consult `config.audit_worm_enabled`.
 
 The gap was not the C API. It was the SQL side.
 
@@ -44,14 +41,28 @@ there to fail.
 
 `kb_fact_commit_worm_seal(commit_id, subject)` is a `SECURITY DEFINER` function
 that reads the actor, authority, operation and status from the changeset row and
-appends one WORM record for it. Every audited field comes off the row rather
-than from the caller, which is what makes it safe to grant to runtime: runtime
-can cause a truthful seal for a changeset that exists, and cannot forge a row
-that says anything else. `kb_audit_worm_append` stays ungranted to runtime.
+submits one immutable outbox intent. Every audited field comes off the row
+rather than from the caller, which makes the changeset seal truthful even when
+runtime invokes it.
 
-The row is shaped identically to the one `fm_commit_finish()` writes — same
-action, same `commit_id=<id>` detail — so one verifier reads memory's audit
-trail whichever path produced the mutation.
+The follow-up removes chain construction from every PostgreSQL producer:
+
+- `kb_audit_worm_submit` inserts into append-only `kb_audit_outbox` and emits a
+  transactional notification.
+- `db2_kb_audit_append_in_txn` submits to that function in production; the C
+  process no longer reads the chain head, takes its lock, computes its hash, or
+  inserts `kb_audit_event`.
+- `aimee-kb-worm` is a separate libpq-only process requiring
+  `AIMEE_WORM_DB2_URL`; it refuses to reuse the ordinary runtime credential.
+- `aimee_kb_worm_worker` has no access to the application `public` schema and
+  no table or sequence privileges. Its only capability is the bounded
+  `aimee_kb_worm_api.drain(limit)` definer in an isolated schema.
+- Drain, chain append, witness append, and immutable delivery acknowledgement
+  commit together. A crash leaves either all of them or none of them.
+
+The worker preserves the established canonical row bytes — same action and
+same `commit_id=<id>` detail — so `db2_kb_audit_verify_chain()` continues to
+verify the resulting trail.
 
 ## Verified
 
@@ -69,6 +80,10 @@ trail whichever path produced the mutation.
   the reverting changeset's seal. A unit test pins that.
 - `schema-sync-check`, `db2-contract-check`, `db2-declaration-ledger-check`,
   `db2-activation-check`, `line-check` pass.
+- `make worm-worker-boundary-check` — 7 unit tests plus a structural gate pin
+  the runtime revoke, enqueue-only C production branch, narrow fact seal,
+  separate credential requirement, isolated API schema, and one-object worker
+  link surface.
 
 ## PostgreSQL gate
 
@@ -78,11 +93,12 @@ with pgvector 0.8.0 and pg_trgm 1.6 available. The connection was
 authentication. The harness created isolated databases for the live and
 fault-injection arms and removed both through its exit trap.
 
-The live arm inserts a memory through `evidence_object_mutation`, asserts that
-every closed `memory.%` changeset carries a matching WORM row, checks that the
-row records `worm-seal-tester/user` from the changeset, and re-verifies the hash
-chain. The negative control applies the same schema with the five seal calls
-stripped and requires the matching count to fall to zero.
+The live arm inserts a memory through `evidence_object_mutation`, drains its
+committed intent, asserts that every closed `memory.%` changeset carries a
+matching WORM row, checks that the row records `worm-seal-tester/user` from the
+changeset, and re-verifies the hash chain. The negative control applies the
+same schema with the five seal calls stripped and requires the matching count
+to fall to zero.
 
 Command:
 
@@ -103,12 +119,28 @@ fact mutation PostgreSQL gate: PASSED
 The `0 of 1` negative control demonstrates that the live assertion matches the
 new seal wiring rather than an unrelated audit row.
 
-## Cost
+## Worker isolation and recovery gate
 
-`kb_audit_worm_append` takes the audit chain's advisory transaction lock and
-also appends a witness row, so a changeset close now serializes against every
-other audit appender. The close is one row per changeset, not per changed fact,
-so this is one serialized append per mutation batch. A bulk import that writes
-each row in its own changeset pays it per row; staging a changeset around the
-batch collapses it to one. Worth measuring on an ingest run before enabling
-hardened-tier deployments at volume.
+`scripts/run-worm-worker-pg-test.sh` was also executed on the same PostgreSQL
+17.11 host. It applies the hardened roles and grants, submits as
+`aimee_kb_runtime`, and runs the binary as `aimee_kb_worm_worker`.
+
+The gate proves runtime has no INSERT on the chain, outbox, or delivery ledger
+and cannot execute the internal appender or drainer. It also proves that the
+worker cannot resolve `public` at all—closing PostgreSQL's default-EXECUTE
+function leak—and can resolve only its one-function API schema. It then injects
+a failure after chain insertion but before delivery acknowledgement. The
+complete drain transaction rolls back, the two intents remain pending, restart
+seals them exactly once, and a second restart is a no-op.
+
+```text
+WORM worker PostgreSQL gate: PASSED
+  producer: submit only; chain/outbox/delivery writes denied
+  worker: bounded drain only; crash rollback and retry verified
+  chain: 3 rows + 3 witnesses, idempotent restart, 0 broken links
+```
+
+The request path now pays only for the durable intent insert. Chain hashing,
+witnessing, and their advisory locks are owned by the worker. The operational
+capacity measures are pending-intent count/age and worker throughput, not
+foreground mutation latency.

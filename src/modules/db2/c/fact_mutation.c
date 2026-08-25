@@ -459,10 +459,27 @@ static int fm_commit_finish(void *conn, const fact_actor_t *actor, const char *c
    aimee_pg_finalize(st);
    if (!ok)
       return -1;
+#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+   /* PostgreSQL owns the security boundary: the narrow definer reads the
+    * canonical actor/operation/status from this changeset and writes only a
+    * durable outbox intent. The separately credentialed WORM process constructs
+    * the chain later; this runtime connection never receives chain INSERT. */
+   st = aimee_pg_prepare(conn, "SELECT kb_fact_commit_worm_seal(?1,?2)", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", commit_id);
+   aimee_pg_bind_text(st, "?2", subject ? subject : "");
+   ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+#else
+   /* The SQLite test shim has no stored procedures or worker process. Retain
+    * its local append solely as a deterministic unit-test implementation. */
    char detail[160];
    snprintf(detail, sizeof(detail), "commit_id=%s", commit_id);
    return db2_kb_audit_append_in_txn(conn, actor->role, actor->principal, operation,
                                      subject ? subject : "", "allow", detail);
+#endif
 }
 
 static int fm_change(void *conn, const char *commit_id, int64_t assertion_id, const char *action,

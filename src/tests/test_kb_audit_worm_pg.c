@@ -1,17 +1,14 @@
-/* test_kb_audit_worm_pg.c: PROOF that the SQL WORM appender (schema.sql
- * kb_audit_worm_append) and the C WORM appender (db2/kb_audit_worm.c
- * db2_kb_audit_append) write BYTE-IDENTICAL rows into the SAME kb_audit_event hash
- * chain — so a chain interleaving C and SQL appends still verifies under the C
- * verifier. This is the load-bearing invariant of the P2a atomic-audit design: the
- * SECURITY DEFINER catalog mutations audit via kb_audit_worm_append() inside their own
- * txn, and that row MUST hash exactly as the C store would.
+/* test_kb_audit_worm_pg.c: PROOF that SQL and C producers both submit durable
+ * intents, and the dedicated SQL WORM drainer writes rows that remain byte-
+ * identical to audit_worm_chain's C canonicalization. Producers never construct
+ * or insert the chain themselves.
  *
  * REAL-PG ONLY: plpgsql SECURITY DEFINER functions cannot run on the SQLite shim, so
  * this test needs a live Postgres. It reads AIMEE_TEST_PG_URL and SKIPS CLEANLY (exit 0)
  * when it is unset — mirroring test_vault_pg.c, so `make unit-tests` on a box without
  * Postgres stays green. Validated for real on CT103.
  *
- * The mixed chain built here is:  [C append] -> [SQL append] -> [C append]
+ * The mixed producer queue built here is: [C submit] -> [SQL submit] -> [C submit]
  * and the test asserts (a) db2_kb_audit_verify_chain() == 0 over the whole chain (which
  * only returns 0 if EVERY row, including the SQL one, recomputes to its stored hash under
  * the C canonicalization), and (b) an INDEPENDENT recomputation in C of the SQL row's
@@ -58,7 +55,7 @@ static void reset_chain(void *conn)
                  err, sizeof err);
 }
 
-/* Append one row via the SQL definer kb_audit_worm_append(...). Returns 0 on success. */
+/* Submit one row via the compatibility definer. It enqueues; it does not append. */
 static int sql_append(void *conn, const char *role, const char *principal, const char *action,
                       const char *subject, const char *verdict, const char *detail)
 {
@@ -84,6 +81,18 @@ static int sql_append(void *conn, const char *role, const char *principal, const
       return -1;
    }
    return 0;
+}
+
+static int sql_drain(void *conn)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT kb_audit_worm_drain(1000)", err, sizeof err);
+   if (!st)
+      return -1;
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof err);
+   aimee_pg_finalize(st);
+   return rc == AIMEE_PG_ROW ? 0 : -1;
 }
 
 /* Independently recompute, in C, the row_hash for the row at `seq` from its STORED fields
@@ -140,13 +149,15 @@ static void run(void)
    long before = db2_kb_audit_count();
    assert(before >= 0);
 
-   /* (a) C append, (b) SQL append via kb_audit_worm_append, (c) C append. */
+   /* (a) C submit, (b) SQL submit, (c) C submit; then the worker drains. */
    assert(db2_kb_audit_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
    assert(sql_append(conn, "primary", "u", "p2a.test", "s", "ok", "{}") == 0);
    assert(db2_kb_audit_append("delegate", "mimo", "kb.query", "q1", "ok", "{}") == 0);
+   assert(db2_kb_audit_count() == before); /* producer cannot write the chain */
+   assert(sql_drain(conn) == 0);
 
    assert(db2_kb_audit_count() == before + 3);
-   printf("  PASS: mixed chain built [C, SQL, C] (+3 rows)\n");
+   printf("  PASS: worker drained mixed producer queue [C, SQL, C] (+3 rows)\n");
 
    /* (d) The C verifier accepts the WHOLE chain — only possible if the SQL row's stored
     * row_hash matches what the C canonicalization recomputes for it. */
@@ -154,7 +165,7 @@ static void run(void)
    assert(db2_kb_audit_verify_chain(err, sizeof err) == 0);
    printf("  PASS: db2_kb_audit_verify_chain == 0 over the mixed chain\n");
 
-   /* Direct byte-identity: the middle row (the SQL append) is max-1. */
+   /* Direct byte-identity: the middle submitted row is max-1. */
    long long max_seq = chain_max_seq(conn);
    assert_row_hashes_in_c(conn, max_seq - 1);
 }

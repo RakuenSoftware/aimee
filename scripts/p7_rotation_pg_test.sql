@@ -40,8 +40,10 @@ BEGIN
       <> '\xaabbcc'::bytea THEN
     RAISE EXCEPTION 'P7 FAIL: final signed attestation missing';
   END IF;
+  PERFORM kb_audit_worm_drain(1000);
   SELECT count(*) INTO audits FROM kb_audit_event WHERE action='vault.rotation.activate';
   PERFORM org_vault_rotation_finalize('owner',rid,'\xaabbcc'::bytea);
+  PERFORM kb_audit_worm_drain(1000);
   IF (SELECT count(*) FROM kb_audit_event WHERE action='vault.rotation.activate') <> audits THEN
     RAISE EXCEPTION 'P7 FAIL: idempotent finalize duplicated WORM audit';
   END IF;

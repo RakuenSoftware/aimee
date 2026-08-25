@@ -82,6 +82,7 @@ BEGIN
     WHERE tenant='!kb' AND provider='!audit';
 
   PERFORM public.kb_audit_worm_append('kb','uid:5','vault.key_use','anthropic:default','allow','');
+  PERFORM public.kb_audit_worm_drain(1000);
 
   SELECT count(*) INTO v_after FROM public.kb_vault_witness_log
     WHERE tenant='!kb' AND provider='!audit';
