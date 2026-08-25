@@ -10,26 +10,33 @@ fail() { echo "turn-integrity-live-e2e: FAIL: $*" >&2; exit 1; }
 ok() { echo "  PASS  $*"; pass=$((pass + 1)); }
 
 provider_log="$RUN_ROOT/turn-integrity-provider.jsonl"
-TI_FIXTURE_LOG="$provider_log" python3 "$REPO/scripts/fixtures/turn-integrity-openai.py" \
+provider_port=$((19000 + RANDOM % 1000))
+provider_url="http://127.0.0.1:${provider_port}/v1"
+TI_FIXTURE_LOG="$provider_log" TI_FIXTURE_PORT="$provider_port" \
+  python3 "$REPO/scripts/fixtures/turn-integrity-openai.py" \
   >"$RUN_ROOT/turn-integrity-provider.log" 2>&1 &
 provider_pid=$!
+kb_stopped=0
 cleanup_provider() {
+  if (( kb_stopped )); then
+    kill -CONT "$KB_PID" 2>/dev/null || true
+  fi
   kill "$provider_pid" 2>/dev/null || true
   wait "$provider_pid" 2>/dev/null || true
 }
 trap cleanup_provider EXIT
 
 for _ in $(seq 1 50); do
-  curl -fsS http://127.0.0.1:18991/v1/models >/dev/null 2>&1 && break
+  curl -fsS "$provider_url/models" >/dev/null 2>&1 && break
   kill -0 "$provider_pid" 2>/dev/null || fail "fixture provider exited"
   sleep 0.1
 done
-curl -fsS http://127.0.0.1:18991/v1/models >/dev/null || fail "fixture provider unavailable"
+curl -fsS "$provider_url/models" >/dev/null || fail "fixture provider unavailable"
 ok "deterministic provider is reachable over HTTP"
 
 client_home="$SCRATCH/client"
 AIMEE_HOME="$client_home" "$REPO/aimee" agent local turn-integrity-fixture \
-  http://127.0.0.1:18991/v1 --model turn-integrity-fixture --slots 1 --ctx 32768 \
+  "$provider_url" --model turn-integrity-fixture --slots 1 --ctx 32768 \
   --timeout-ms 5000 --no-probe --no-fallback >/dev/null
 ok "fixture model registered through the live server"
 
@@ -77,18 +84,31 @@ while True:
     chunks.append(data)
 sys.stdout.buffer.write(b"".join(chunks))
 PY
-  grep -q '"event":"done"' "$out" || fail "turn $sid did not finish"
+  grep -q '"event":"done"' "$out" || {
+    sed -n '1,120p' "$out" >&2
+    fail "turn $sid did not finish"
+  }
 }
 
 workspace="$RUN_ROOT/turn-integrity-workspace"
 mkdir -p "$workspace"
-run_turn ti-live-write TI_WRITE_FILE "$workspace" "$RUN_ROOT/write-turn.out"
-[[ "$(<"$workspace/turn-integrity-live.txt")" == "live-contract-ok" ]] || \
+git init -q -b main "$workspace"
+git -C "$workspace" config user.name aimee-e2e
+git -C "$workspace" config user.email aimee-e2e@example.invalid
+printf 'turn integrity live workspace\n' >"$workspace/README.md"
+git -C "$workspace" add README.md
+git -C "$workspace" commit -qm initial
+work_sid=ti-live-work
+run_turn "$work_sid" TI_WRITE_FILE "$workspace" "$RUN_ROOT/write-turn.out"
+session_workspace="$(find "$workspace/.aimee/worktrees" -mindepth 2 -maxdepth 2 \
+  -type d -name main -print -quit 2>/dev/null || true)"
+[[ -n "$session_workspace" ]] || fail "write turn did not create a managed session workspace"
+[[ "$(<"$session_workspace/turn-integrity-live.txt")" == "live-contract-ok" ]] || \
   fail "write_file did not produce the expected bytes"
 ok "model-backed write_file executed with exact readback"
 
-run_turn ti-live-edit TI_EDIT_FILE "$workspace" "$RUN_ROOT/edit-turn.out"
-[[ "$(<"$workspace/turn-integrity-live.txt")" == "live-contract-edited" ]] || \
+run_turn "$work_sid" TI_EDIT_FILE "$workspace" "$RUN_ROOT/edit-turn.out"
+[[ "$(<"$session_workspace/turn-integrity-live.txt")" == "live-contract-edited" ]] || \
   fail "edit_file did not produce the expected bytes"
 ok "model-backed edit_file executed with exact readback"
 
@@ -155,7 +175,8 @@ actions = {row[0] for row in rows}
 details = "\n".join(row[1] or "" for row in rows)
 required = {
     "turn.created",
-    "turn.state",
+    "turn.contextualized",
+    "turn.completed",
     "effect.proposed",
     "effect.validated",
     "effect.executing",
@@ -172,8 +193,10 @@ ok "WORM contains bounded turn/effect/freshness lifecycles without raw arguments
 
 # Freeze the real KB process, bound the failed turn, then resume and prove health.
 kill -STOP "$KB_PID"
+kb_stopped=1
 run_turn ti-live-kb-down TI_SEARCH_EMPTY "$workspace" "$RUN_ROOT/kb-down-turn.out" || true
 kill -CONT "$KB_PID"
+kb_stopped=0
 for _ in $(seq 1 50); do
   curl -fsS http://127.0.0.1:8741/v1/health >/dev/null 2>&1 && break
   sleep 0.1
