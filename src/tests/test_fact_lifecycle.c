@@ -383,6 +383,31 @@ int main(void)
    assert(scalar_int("SELECT COUNT(*) FROM fact_evidence WHERE source_id IN"
                      " ('message:1','document:2')") == 2);
 
+   /* Functional incumbents are found through normalized (subject, relation)
+    * identity. A correction whose subject only differs in case/spacing must
+    * retire the old value rather than leave two current values behind. */
+   fact_assertion_input_t normalized_functional = ai;
+   normalized_functional.source = "surface-subject";
+   normalized_functional.target = "old-value";
+   normalized_functional.evidence = &ev1;
+   assert(db2_fact_mutation_assert(&system_actor, &normalized_functional, &mr) == 0);
+   int64_t normalized_incumbent = mr.assertion_id;
+   normalized_functional.source = "  SURFACE-SUBJECT  ";
+   normalized_functional.target = "new-value";
+   assert(db2_fact_mutation_assert(&system_actor, &normalized_functional, &mr) == 0);
+   char normalized_current_sql[512];
+   snprintf(normalized_current_sql, sizeof(normalized_current_sql),
+            "SELECT COUNT(*) FROM entity_edges WHERE identity_subject_key="
+            "(SELECT identity_subject_key FROM entity_edges WHERE id=%lld)"
+            " AND superseded_at='' AND invalidated_at='' AND suppressed=0",
+            (long long)mr.assertion_id);
+   assert(scalar_int(normalized_current_sql) == 1);
+   char normalized_old_sql[256];
+   snprintf(normalized_old_sql, sizeof(normalized_old_sql),
+            "SELECT COUNT(*) FROM entity_edges WHERE id=%lld AND lifecycle_state='superseded'",
+            (long long)normalized_incumbent);
+   assert(scalar_int(normalized_old_sql) == 1);
+
    ai.target = "globex";
    ai.evidence = &ev1;
    assert(db2_fact_mutation_assert(&model_actor, &ai, &mr) == 0);
@@ -455,8 +480,12 @@ int main(void)
 
    /* An async delivery retry carries the same immutable evidence mention. It
     * must be a true no-op after rollback, rather than treating the replay as a
-    * new correction that resurrects the invalidated assertion. */
+    * new correction that resurrects the invalidated assertion. The retry uses
+    * compatibility-width letters, case and surrounding whitespace so this also
+    * proves normalized identity cannot route around the tombstone. */
    int commits_before_replay = scalar_int("SELECT COUNT(*) FROM fact_graph_commits");
+   ai.source = "  ROLLBACK-SUBJECT  ";
+   ai.target = "ＡＣＭＥ";
    assert(db2_fact_mutation_assert(&system_actor, &ai, &mr) == 0);
    assert(mr.assertion_id > 0 && mr.changed == 0 && mr.evidence_added == 0);
    assert(mr.commit_id[0] == '\0');

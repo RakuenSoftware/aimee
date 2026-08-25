@@ -358,7 +358,10 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    json = cJSON_Parse(result);
    assert(json != NULL);
    ec = cJSON_GetObjectItem(json, "exit_code");
-   assert(ec && ec->valueint == -1);
+   /* The lexical preflight reports -1; kernels with the filesystem sandbox
+    * available may instead launch the command and have the kernel deny it with
+    * a conventional nonzero exit. Both are valid enforcement points. */
+   assert(ec && ec->valueint != 0);
    cJSON_Delete(json);
    free(result);
    assert(access(outside, F_OK) != 0);

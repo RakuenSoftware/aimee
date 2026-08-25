@@ -108,6 +108,7 @@ is a dependency-design concern, not an exception to canonical include ownership.
 - `ir`: supplies canonical turn, response, tool-call, usage, and streaming structures.
 - `module-runtime`: supplies required lifecycle and extension contracts for delegation.
 - `routing`: selects eligible agents/providers/tiers and explains exclusions.
+- `sandbox`: supplies mandatory learned-toolchain and package-egress policy for every delegate.
 - `tools`: supplies the authorized capability catalog invoked by delegate turns.
 - `vault`: supplies scoped credentials without transferring ownership to delegate state.
 - `workspace`: supplies bounded filesystem/execution authority and lifecycle.

@@ -52,26 +52,24 @@ command a delegate ran; `delegates`, whose `delegate_sandbox_image.c` calls
 ## Providers and readiness
 
 The module runs as a separately supervised Go process attached to the local bus, hosted
-by the `aimee-module` multicall binary. It is **optional**, so it is not part of the
-required set that holds the listener out of rotation: a deployment without it starts
-normally and simply never learns a toolchain.
+by the `aimee-module` multicall binary. It is **required** because every delegate
+depends on its learned-toolchain and package-egress policy. A missing or unattached
+module is a startup/readiness failure and keeps the listener out of rotation.
 
-Attachment is the readiness signal. When the module is not attached, `observe` is
-skipped and `load` yields an empty set, which degrades image builds to the un-augmented
-base image rather than failing them. Proxy policy fails closed: no classification or
-address approval means no outbound connection.
+Attachment is the readiness signal. Individual learning calls remain best-effort, but
+proxy policy fails closed: no classification or address approval means no outbound
+connection.
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `true`; the module is operator-controlled at runtime.
+- `runtime_toggle.supported`: `false`; sandbox is part of the required runtime.
 
-The descriptor sets `enabled_by_default: true`, so a shipped image runs it unless the
-operator says otherwise. `AIMEE_MODULE_SANDBOX=0` turns it off and `=1` turns it on,
-read at container start by `deploy/container/optional-modules-lib.sh`, which rewrites a
-copy of the shipped manifest rather than editing the baked one.
+There is no sandbox on/off setting and no supported `AIMEE_MODULE_SANDBOX` environment
+variable. Every deployment starts it from the required module manifest.
 
 Capture is additionally gated in core by `delegate.sandbox.learn_packages`. With the
-module running but the gate off, nothing is recorded.
+gate off, nothing is recorded; this changes learning only and does not disable sandbox
+isolation or package-egress policy.
 
 ## Surfaces
 
@@ -127,8 +125,9 @@ project's set. The next time that project builds a sandbox image, `load` returns
 `["jq","ripgrep"]` sorted, the builder bakes them in, and the delegate finds them present
 in a `--network none` sandbox.
 
-The second journey is an operator turning learning off with `AIMEE_MODULE_SANDBOX=0`
-after deciding a project's toolchain should be pinned by hand instead.
+The second journey is an operator setting `delegate.sandbox.learn_packages: false`
+after deciding a project's toolchain should be pinned by hand instead. Sandbox
+isolation and package-egress policy remain active.
 
 ## Tests and failure behavior
 
@@ -141,9 +140,10 @@ rejects non-Unix clients and hands the Go helper the exact request bytes and inh
 Unix fd. The bus conformance suite exercises the other shipped C-host/Go-module stages.
 
 Learning is best-effort and must never fail a delegate turn. A missing, oversized
-(> 1 MiB), or unparseable store reads as empty rather than as an error, and an
-unattached module means the capture is skipped, not that the turn fails. A malformed
-request is answered with an invalid-request status rather than a partial write.
+(> 1 MiB), or unparseable store reads as empty rather than as an error. An unattached
+required module prevents readiness; if attachment is lost during a call, learning
+fails empty while proxy policy remains fail-closed. A malformed request is answered
+with an invalid-request status rather than a partial write.
 
 ## Operational diagnostics
 
@@ -172,6 +172,7 @@ A new stage means a new ordinal-derived kind, a handler in
 `server-go/modules/sandbox/module.go`, and a descriptor update; the `ownership-complete`
 latch fails CI if a module-local source or header is added without being declared.
 
-Removal is clean because the module is optional and its data is derived: turning
-`AIMEE_MODULE_SANDBOX=0` leaves image builds on the un-augmented base image, and deleting
-`sandbox-learned.json` leaves no residue. Nothing else reads the store.
+The module cannot be disabled or removed independently: delegates have a required
+dependency on it. Removing it requires an architecture and descriptor change. Its
+derived `sandbox-learned.json` store may still be deleted safely to reset learned
+package state.

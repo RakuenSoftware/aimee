@@ -83,6 +83,7 @@ KB_MTLS_ENV = {
 REQUIRED_DOCKERIGNORE_ENTRIES = {
     ".git",
     ".aimee",
+    ".env",
     "build",
     "src/build",
     "frontend/node_modules",

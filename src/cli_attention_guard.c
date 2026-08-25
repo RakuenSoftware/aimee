@@ -1643,12 +1643,17 @@ int handle_attention_guard(void)
       }
    }
 
+   const int require_session_worktree = attn_config_require_session_worktree();
+
    /* Provisioning happens at SessionStart; this idempotent per-tool route is the
     * enforcement backstop for clients that resume oddly or skip a lifecycle
     * event. Successful routing is silent and applies to reads as well as writes,
-    * so a session never reads one checkout and edits another. */
+    * so a session never reads one checkout and edits another. The explicit
+    * operator opt-out disables both routing and the guard below. */
    cJSON *updated_input = NULL;
-   int route_rc = attn_route_tool_input(sid, payload_cwd, tool, ti, &updated_input);
+   int route_rc = require_session_worktree
+                      ? attn_route_tool_input(sid, payload_cwd, tool, ti, &updated_input)
+                      : 1;
    if (route_rc == -2 || route_rc == -3)
    {
       fprintf(stderr, "aimee: internal session workspace isolation failed; tool call blocked\n");
@@ -1666,7 +1671,7 @@ int handle_attention_guard(void)
     * closed on a mutating op outside an aimee-managed worktree, so a client that
     * bypassed `aimee launch` cannot mutate the primary checkout/default branch.
     * A SessionStart hook supplies context only and is never treated as cwd state. */
-   if ((op == ATTN_OP_SOFT || op == ATTN_OP_HARD) && attn_config_require_session_worktree())
+   if ((op == ATTN_OP_SOFT || op == ATTN_OP_HARD) && require_session_worktree)
    {
       char routed_cwd[8192];
       const char *cwd = payload_cwd;

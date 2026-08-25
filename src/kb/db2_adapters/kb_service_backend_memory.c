@@ -687,6 +687,16 @@ cJSON *db2_kb_service_memory_query_health_json(void)
    cJSON_AddNumberToObject(h, "total_promotions", health.total_promotions);
    cJSON_AddNumberToObject(h, "total_demotions", health.total_demotions);
    cJSON_AddNumberToObject(h, "total_expirations", health.total_expirations);
+   cJSON *lag = cJSON_AddObjectToObject(h, "write_to_readable_lag");
+   cJSON_AddNumberToObject(lag, "samples", (double)health.write_to_readable_samples);
+   if (health.write_to_readable_samples > 0)
+   {
+      cJSON_AddNumberToObject(lag, "p50_secs", health.write_to_readable_p50_secs);
+      cJSON_AddNumberToObject(lag, "p95_secs", health.write_to_readable_p95_secs);
+      cJSON_AddNumberToObject(lag, "p99_secs", health.write_to_readable_p99_secs);
+   }
+   else
+      cJSON_AddStringToObject(lag, "state", "unmeasured");
    return resp;
 }
 
@@ -939,12 +949,13 @@ cJSON *db2_kb_service_memory_alerts_json(const char *since)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens, int session_start)
+cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
+                                         const struct memory_activation *activation)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   cJSON *bundle = memory_recall(task_hint, limit_tokens, session_start);
+   cJSON *bundle = memory_recall_activated(task_hint, limit_tokens, session_start, activation);
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddItemToObject(resp, "recall", bundle ? bundle : cJSON_CreateObject());
    return resp;

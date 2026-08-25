@@ -40,7 +40,7 @@
 # anywhere — just a deployment that quietly never reduces a prompt.
 optional_modules_for_placement() {
     case "$1" in
-        server) echo "governance roundtable benchmarks sandbox runtime-web economizer" ;;
+        server) echo "governance roundtable benchmarks runtime-web economizer" ;;
         kb)     echo "kb-synthesis control-web benchmarks postgres" ;;
         *)      echo "" ;;
     esac

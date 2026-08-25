@@ -1,9 +1,0 @@
-version=1
-principal_class=1
-principal_ref=20
-uid=self
-executable=/usr/local/bin/aimee-wfe
-publish=
-subscribe=
-request=
-serve=9217,9218,9219,9220

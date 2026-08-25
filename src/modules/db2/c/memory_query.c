@@ -579,7 +579,8 @@ int db2_memory_filter_archived_ids(const int64_t *ids, int n, int64_t *out, int 
                       i == 0 ? "?%d" : ",?%d", i + 1);
    char sql[4400];
    snprintf(sql, sizeof(sql),
-            "SELECT id FROM memories WHERE id IN (%s) AND lifecycle_state = 'archived'",
+            "SELECT id FROM memories WHERE id IN (%s)"
+            " AND (lifecycle_state IN ('archived','superseded') OR activation_suppressed<>0)",
             placeholders);
 
    char err[MQ_ERRBUF] = "";
@@ -2025,6 +2026,8 @@ int db2_memory_episode_cards_query(const char *source_session, char **out, int m
    static const char *sql = "SELECT m.content FROM memories m"
                             "  JOIN memory_units u ON u.memory_id = m.id"
                             " WHERE u.is_episode_card = 1 AND m.source_session = ?1"
+                            " AND m.lifecycle_state NOT IN ('archived','superseded')"
+                            " AND m.activation_suppressed=0"
                             " ORDER BY m.id DESC LIMIT ?2";
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));

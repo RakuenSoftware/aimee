@@ -370,6 +370,28 @@ static void test_ensure_requires_a_session_id_and_a_repo(void)
    printf("  ensure: no session id / no repo -> not applicable: ok\n");
 }
 
+static void test_external_path_does_not_provision_a_worktree(void)
+{
+   char repo[512], external[512], routed[1024];
+   make_repo("external-route", "main", repo, sizeof repo);
+   snprintf(external, sizeof external, "%s/client-owned-memory/fact.md", g_tmp_root);
+
+   /* If routing tried to provision, this deliberately nonexistent base would
+    * make it fail. An external target is not repository state, so it must pass
+    * through without consulting the base at all. */
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "refs/heads/definitely-missing", 1);
+   assert(client_session_worktree_route_path("external-route-session", repo, external, routed,
+                                             sizeof routed) == 1);
+   assert(strcmp(routed, external) == 0);
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+
+   char key[80], wt[1024];
+   client_session_worktree_key("external-route-session", key, sizeof key);
+   snprintf(wt, sizeof wt, "%s/.aimee/worktrees/%s/main", repo, key);
+   assert(access(wt, F_OK) != 0);
+   printf("  route: external path needs no repository worktree base: ok\n");
+}
+
 static void test_routes_reads_writes_shell_and_patch_per_session(void)
 {
    char upstream[512], clone[512];
@@ -726,6 +748,7 @@ int main(void)
    test_explicit_feature_base_incorporates_latest_default();
    test_concurrent_session_starts_get_distinct_worktrees();
    test_ensure_requires_a_session_id_and_a_repo();
+   test_external_path_does_not_provision_a_worktree();
    test_routes_reads_writes_shell_and_patch_per_session();
    test_release_recycles_only_clean_session_worktrees();
    test_ensure_reclaims_pre_rekey_worktree();

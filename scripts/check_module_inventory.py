@@ -42,10 +42,10 @@ RESERVED_BANDS = (
     ("plugin_principal_ref_band", "plugin instances"),
     ("db3_provider_principal_ref_band", "DB3 vector providers"),
 )
-REQUIRED_COUNT = 19
-# PostgreSQL is appended while its C-to-Go migration is staged so existing
-# optional-module principal references remain stable.
-OPTIONAL_COUNT = 11
+REQUIRED_COUNT = 20
+# Principal references stay stable when a module changes activation class;
+# PostgreSQL is also appended while its C-to-Go migration is staged.
+OPTIONAL_COUNT = 10
 PINNED_REQUIRED = {"git"}
 
 

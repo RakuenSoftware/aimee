@@ -28,7 +28,21 @@ typedef struct
    double score;           /* computed relevance score */
    int estimated_tokens;   /* estimated token cost (strlen/4 + 1) */
    double score_per_token; /* score / max(1, estimated_tokens) */
+   /* Origin identity for envelope diversity (the session this row came from).
+    * Empty means "no known origin", and such rows are each treated as their own
+    * origin rather than pooled into one bucket. */
+   char source_session[128];
+   int activation_sticky_turns;
+   int activation_cooldown_turns;
+   int activation_delay_turns;
+   int activation_suppressed;
 } context_candidate_t;
+
+/* Total per-origin cap after the breadth pass. Pass one admits one item from
+ * each origin; pass two admits a second high-scoring item where budget remains.
+ * That reserve split preserves local depth without allowing one source to fill
+ * the envelope. */
+#define CONTEXT_ORIGIN_RESERVE_CAP 2
 
 /* From memory_logic.c — used by memory_health.c's maintenance cycle. */
 int memory_demote_from_failures(void);

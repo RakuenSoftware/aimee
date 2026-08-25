@@ -1,9 +1,0 @@
-version=1
-principal_class=1
-principal_ref=21
-uid=self
-executable=/usr/local/libexec/aimee-modules/aimee-module-roundtable
-publish=
-subscribe=
-request=
-serve=9473,9474,9475

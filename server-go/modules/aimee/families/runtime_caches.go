@@ -309,7 +309,87 @@ const (
 
 	contextSnapshotHasMemorySQL = `SELECT EXISTS (
 	                                   SELECT 1 FROM context_snapshots WHERE memory_id = $1)`
+
+	contextSnapshotInsertTurnSQL = `INSERT INTO context_activation_events
+	                                    (session_id, memory_id, relevance_score, turn_index)
+	                                VALUES ($1, $2, $3, $4)`
+
+	contextActivationAdvanceSQL = `INSERT INTO context_activation_turns (session_id, current_turn)
+	                               VALUES ($1, 1)
+	                               ON CONFLICT (session_id) DO UPDATE
+	                                  SET current_turn = context_activation_turns.current_turn + 1
+	                               RETURNING current_turn`
+
+	// The activation state of one conversation: for each unit ever injected in
+	// this session, the most recent turn it fired on. One query per turn rather
+	// than one per candidate -- the gate in front of retrieval has to be much
+	// cheaper than the retrieval it guards, and a per-candidate round trip is
+	// not. Highest turn first so a truncated read keeps the rows that matter:
+	// the recent ones are the only ones sticky and cooldown can still act on.
+	contextSnapshotActivationSQL = `SELECT memory_id, MAX(turn_index) AS last_turn
+	                                  FROM context_activation_events
+	                                 WHERE session_id = $1
+	                                 GROUP BY memory_id
+	                                 ORDER BY last_turn DESC, memory_id
+	                                 LIMIT $2`
 )
+
+func contextSnapshotInsertTurn(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	memoryID, ok := store.Atoi64(f[1])
+	if f[0] == "" || !ok || memoryID <= 0 {
+		return store.StatusInvalid, nil, nil
+	}
+	score, ok := store.Atof(f[2])
+	if !ok {
+		return store.StatusInvalid, nil, nil
+	}
+	turn, ok := store.Atoi64(f[3])
+	if !ok || turn <= 0 {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, err := q.Exec(ctx, contextSnapshotInsertTurnSQL, f[0], memoryID, score, turn); err != nil {
+		return store.StatusFailed, nil, err
+	}
+	return store.StatusOK, nil, nil
+}
+
+// contextSnapshotActivation answers one conversation's activation state as
+// "<memory_id> <last_turn>" cells, which the caller reads into its gate.
+func contextSnapshotActivation(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if f[0] == "" {
+		return store.StatusInvalid, nil, nil
+	}
+	max, ok := boundedMax(f[1])
+	if !ok {
+		return store.StatusInvalid, nil, nil
+	}
+	var currentTurn int64
+	if err := q.QueryRow(ctx, contextActivationAdvanceSQL, f[0]).Scan(&currentTurn); err != nil {
+		return store.StatusFailed, nil, err
+	}
+	// Reserve one response cell for the out-of-band turn marker. The caller's
+	// max is a bound on the whole reply, not only the state query.
+	rows, err := q.Query(ctx, contextSnapshotActivationSQL, f[0], max-1)
+	if err != nil {
+		return store.StatusFailed, nil, err
+	}
+	defer rows.Close()
+	// Memory id zero is an out-of-band marker carrying the persisted turn. Real
+	// memory ids are strictly positive, so this cannot collide with state.
+	out := make([]string, 0, 17)
+	out = append(out, "0 "+store.I64toa(currentTurn))
+	for rows.Next() {
+		var memoryID, lastTurn int64
+		if err := rows.Scan(&memoryID, &lastTurn); err != nil {
+			return store.StatusFailed, nil, err
+		}
+		out = append(out, store.I64toa(memoryID)+" "+store.I64toa(lastTurn))
+	}
+	if err := rows.Err(); err != nil {
+		return store.StatusFailed, nil, err
+	}
+	return store.StatusOK, out, nil
+}
 
 func contextSnapshotInsert(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	memoryID, ok := store.Atoi64(f[1])

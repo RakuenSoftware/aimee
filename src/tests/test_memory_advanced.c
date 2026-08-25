@@ -16,6 +16,7 @@
 #include "modules/db2/c/memory_scope_query.h"
 #include "modules/memory/memory_ontology.h"
 #include "modules/memory/memory_platform.h"
+#include "modules/memory/memory_activation.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -69,6 +70,58 @@ static void test_memory_rejection_governance(void)
       assert(found[0].id == rejected.id);
       db2_memory_scope_context_clear();
    }
+}
+
+static int64_t insert_raw_fact(const char *key, const char *content)
+{
+   char err[128] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO memories(tier,kind,key,content,confidence,confidence_ceiling,source_session)"
+       " VALUES('L2','fact',?1,?2,0.8,0.8,'lineage-test') RETURNING id",
+       err, sizeof(err));
+   assert(st != NULL);
+   aimee_pg_bind_text(st, "?1", key);
+   aimee_pg_bind_text(st, "?2", content);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   int64_t id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   assert(id > 0);
+   return id;
+}
+
+static int64_t insert_raw_l0(const char *session_id, const char *key, const char *content)
+{
+   char err[128] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO memories(tier,kind,key,content,confidence,confidence_ceiling,source_session)"
+       " VALUES('L0','episode',?1,?2,0.8,0.8,?3) RETURNING id",
+       err, sizeof(err));
+   assert(st != NULL);
+   aimee_pg_bind_text(st, "?1", key);
+   aimee_pg_bind_text(st, "?2", content);
+   aimee_pg_bind_text(st, "?3", session_id);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   int64_t id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   assert(id > 0);
+   return id;
+}
+
+static int count_session_tier(const char *session_id, const char *tier)
+{
+   char err[128] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT COUNT(*) FROM memories WHERE source_session=?1 AND tier=?2", err,
+       sizeof(err));
+   assert(st != NULL);
+   aimee_pg_bind_text(st, "?1", session_id);
+   aimee_pg_bind_text(st, "?2", tier);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   int count = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return count;
 }
 
 /* The file-static legacy_config_record this suite used to share is gone. It existed because
@@ -244,6 +297,163 @@ int main(void)
       /* is_contradiction checks for always/never, should/shouldn't patterns */
       /* If contradiction detection works, conflict > 0; if not, skip gracefully */
       (void)conflict;
+
+      /* The contradiction is deliberately beyond the historical 64-row
+       * buffer. Detection must drain the cursored scan, not silently certify
+       * only its first page. */
+      char err[128] = "";
+      aimee_pg_stmt_t *deep_insert = aimee_pg_prepare(
+          db2_conn(),
+          "INSERT INTO memories(tier,kind,key,content,confidence,confidence_ceiling,source_session)"
+          " VALUES('L1','fact','deep-conflict-scan',?1,0.7,0.8,'deep-scan')",
+          err, sizeof(err));
+      assert(deep_insert != NULL);
+      for (int i = 0; i < 70; i++)
+      {
+         char content[128];
+         snprintf(content, sizeof(content), "harmless revision %d uses a distinct placeholder", i);
+         if (i == 69)
+            snprintf(content, sizeof(content), "we always deploy with docker containers");
+         assert(aimee_pg_reset(deep_insert) == 0);
+         aimee_pg_bind_text(deep_insert, "?1", content);
+         assert(aimee_pg_step(deep_insert, err, sizeof(err)) == AIMEE_PG_DONE);
+      }
+      aimee_pg_finalize(deep_insert);
+      assert(memory_detect_conflict("deep-conflict-scan",
+                                    "we never deploy with docker containers") > 0);
+   }
+
+   /* --- derived lineage suppression is recursive and bounded --- */
+   {
+      memory_t base = {0}, left = {0}, right = {0};
+      base.id = insert_raw_fact("lineage-base", "lineage base evidence");
+      left.id = insert_raw_fact("lineage-left", "lineage left derivation");
+      right.id = insert_raw_fact("lineage-right", "lineage right derivation");
+      char ref[64];
+      snprintf(ref, sizeof(ref), "memory:%lld", (long long)base.id);
+      assert(memory_lineage_insert("memory", left.id, "memory", ref, 0.8) > 0);
+      assert(memory_lineage_insert("memory", right.id, "memory", ref, 0.8) > 0);
+      int64_t shared_dag[] = {left.id, right.id};
+      assert(memory_derived_sources_allowed(shared_dag, 2) == 1);
+      assert(memory_transition_lifecycle(base.id, MEMORY_LIFECYCLE_STATE_ARCHIVED,
+                                         "lineage refusal fixture") == 0);
+      assert(memory_derived_sources_allowed(shared_dag, 2) == 0);
+
+      memory_t cycle_a = {0}, cycle_b = {0};
+      cycle_a.id = insert_raw_fact("lineage-cycle-a", "cycle alpha");
+      cycle_b.id = insert_raw_fact("lineage-cycle-b", "cycle beta");
+      snprintf(ref, sizeof(ref), "memory:%lld", (long long)cycle_b.id);
+      assert(memory_lineage_insert("memory", cycle_a.id, "memory", ref, 0.8) > 0);
+      snprintf(ref, sizeof(ref), "memory:%lld", (long long)cycle_a.id);
+      assert(memory_lineage_insert("memory", cycle_b.id, "memory", ref, 0.8) > 0);
+      assert(memory_derived_sources_allowed(&cycle_a.id, 1) == 0);
+
+      memory_t chain[18];
+      memset(chain, 0, sizeof(chain));
+      for (int i = 0; i < 18; i++)
+      {
+         char key[64], content[64];
+         snprintf(key, sizeof(key), "lineage-depth-%02d", i);
+         snprintf(content, sizeof(content), "depth node token %02d", i);
+         chain[i].id = insert_raw_fact(key, content);
+         if (i > 0)
+         {
+            snprintf(ref, sizeof(ref), "memory:%lld", (long long)chain[i - 1].id);
+            assert(memory_lineage_insert("memory", chain[i].id, "memory", ref, 0.8) > 0);
+         }
+      }
+      assert(memory_derived_sources_allowed(&chain[17].id, 1) == 0);
+
+      memory_t wide = {0}, wide_source = {0};
+      wide.id = insert_raw_fact("lineage-wide", "wide lineage root");
+      wide_source.id = insert_raw_fact("lineage-wide-source", "wide source");
+      snprintf(ref, sizeof(ref), "memory:%lld", (long long)wide_source.id);
+      for (int i = 0; i < 65; i++)
+         assert(memory_lineage_insert("memory", wide.id, "memory", ref, 0.8) > 0);
+      assert(memory_derived_sources_allowed(&wide.id, 1) == 0);
+   }
+
+   /* --- provenance confidence ceilings survive later merges --- */
+   {
+      memory_t model = {0}, inferred = {0};
+      assert(memory_insert(TIER_L2, KIND_FACT, "ceiling-model", "model supplied claim", 1.0,
+                           "ceiling", &model) == 0);
+      assert(model.confidence <= 0.800001);
+      assert(db2_memory_merge_update_ex(model.id, model.content, "", 1.0, 2, 2, 0.8, 0.5, 0.5,
+                                        "2026-08-25T00:00:00Z") == 0);
+      assert(memory_get(model.id, &model) == 0);
+      assert(model.confidence <= 0.800001);
+
+      assert(memory_insert(TIER_L5, KIND_FACT, "ceiling-inference", "synthesized inference", 1.0,
+                           "ceiling", &inferred) == 0);
+      assert(inferred.confidence <= MEMORY_L5_SYNTHESIS_CONFIDENCE + 0.000001);
+
+      memory_health_t health;
+      assert(memory_query_health(&health) == 0);
+      if (health.write_to_readable_samples == 0)
+      {
+         assert(health.write_to_readable_p50_secs < 0.0);
+         assert(health.write_to_readable_p95_secs < 0.0);
+         assert(health.write_to_readable_p99_secs < 0.0);
+      }
+   }
+
+   /* --- cross-session synthesis keeps scope in selection and identity --- */
+   {
+      memory_t project_a = {0}, project_b = {0}, unresolved = {0};
+      project_a.id = insert_raw_fact("scope-isolated-pattern", "scope isolated evidence");
+      project_b.id = insert_raw_fact("scope-isolated-pattern", "scope isolated evidence");
+      unresolved.id = insert_raw_fact("scope-unresolved-pattern", "unresolved evidence");
+      db2_memory_scope_tag_insert(project_a.id, "project", "project-a");
+      db2_memory_scope_tag_insert(project_b.id, "project", "project-b");
+      for (int i = 0; i < 3; i++)
+      {
+         char session[32];
+         snprintf(session, sizeof(session), "scope-a-%d", i);
+         add_provenance(project_a.id, session, "observe", "scope test");
+         snprintf(session, sizeof(session), "scope-b-%d", i);
+         add_provenance(project_b.id, session, "observe", "scope test");
+         snprintf(session, sizeof(session), "scope-u-%d", i);
+         add_provenance(unresolved.id, session, "observe", "scope test");
+      }
+      assert(memory_synthesize_l5_patterns() >= 2);
+
+      const char *projects[] = {"project-a", "project-b"};
+      int64_t derived_ids[2] = {0};
+      for (int i = 0; i < 2; i++)
+      {
+         char err[128] = "";
+         aimee_pg_stmt_t *q = aimee_pg_prepare(
+             db2_conn(),
+             "SELECT m.id,m.confidence FROM memories m JOIN memory_scopes s ON s.memory_id=m.id"
+             " WHERE m.tier='L5' AND s.scope_type='project' AND s.scope_value=?1"
+             " AND m.content LIKE '%scope isolated evidence%'",
+             err, sizeof(err));
+         assert(q != NULL);
+         aimee_pg_bind_text(q, "?1", projects[i]);
+         assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW);
+         derived_ids[i] = aimee_pg_column_int64(q, 0);
+         assert(aimee_pg_column_double(q, 1) <= MEMORY_L5_SYNTHESIS_CONFIDENCE + 0.000001);
+         assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_DONE);
+         aimee_pg_finalize(q);
+
+         db2_memory_scope_tag_row_t scopes[4];
+         int scope_count = db2_memory_scopes_list(derived_ids[i], scopes, 4);
+         assert(scope_count == 1);
+         assert(strcmp(scopes[0].type, "project") == 0);
+         assert(strcmp(scopes[0].value, projects[i]) == 0);
+      }
+      assert(derived_ids[0] != derived_ids[1]);
+
+      char err[128] = "";
+      aimee_pg_stmt_t *q = aimee_pg_prepare(db2_conn(),
+                                            "SELECT COUNT(*) FROM memories WHERE tier='L5'"
+                                            " AND content LIKE '%unresolved evidence%'",
+                                            err, sizeof(err));
+      assert(q != NULL);
+      assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int(q, 0) == 0);
+      aimee_pg_finalize(q);
    }
 
    /* --- memory_list_conflicts --- */
@@ -598,6 +808,8 @@ int main(void)
                "memory:\n  cognify:\n    enabled: true\n    command: \"cat > /dev/null; cat %s\"\n",
                path);
       write_test_config(yaml);
+      assert(config_memory_cognify_enabled() == 1);
+      assert(strstr(config_memory_cognify_command(), path) != NULL);
 
       memory_cognify_result_t result;
       int rc = memory_cognify_unit(src.id, "user prefers terse replies", &result);
@@ -1648,6 +1860,16 @@ int main(void)
       /* Preferences: KIND_PREFERENCE at L2+. */
       assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:indent", "user prefers 3-space", 0.9,
                            "s1", &m) == 0);
+      int64_t pref_control_id = m.id;
+      assert(memory_activation_policy_set(pref_control_id, 2, 0, 0, 0) == 0);
+      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:cooldown", "cooldown sentinel", 0.99,
+                           "s1", &m) == 0);
+      int64_t pref_cooldown_id = m.id;
+      assert(memory_activation_policy_set(pref_cooldown_id, 2, 1, 0, 0) == 0);
+      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:delayed", "delay sentinel", 0.98, "s1",
+                           &m) == 0);
+      int64_t pref_delayed_id = m.id;
+      assert(memory_activation_policy_set(pref_delayed_id, 0, 0, 2, 0) == 0);
 
       /* Active context: recent, in-window L1/L2 facts. */
       assert(memory_insert(TIER_L2, KIND_FACT, "active:one", "touched today", 0.8, "s1", &m) == 0);
@@ -1685,6 +1907,42 @@ int main(void)
       assert(cJSON_IsArray(commitments));
       assert(cJSON_IsArray(reminders));
       assert(cJSON_IsArray(directives));
+
+      /* The production recall selector consumes a snapshot loaded by the
+       * user-local server. Cooldown and delay must be applied before the
+       * section cap, allowing the next eligible row to backfill the section. */
+      memory_activation_t activation = {0};
+      activation.loaded = 1;
+      activation.current_turn = 2;
+      activation.count = 2;
+      activation.rows[0].memory_id = pref_cooldown_id;
+      activation.rows[0].last_turn = 1;
+      activation.rows[1].memory_id = pref_control_id;
+      activation.rows[1].last_turn = 1;
+      cJSON *activated = memory_recall_activated("routine edit", 0, 0, &activation);
+      assert(activated != NULL);
+      cJSON *activated_prefs = cJSON_GetObjectItemCaseSensitive(activated, "preferences");
+      int saw_control = 0, saw_cooldown = 0, saw_delayed = 0;
+      int saw_sticky_reason = 0;
+      cJSON *activated_it = NULL;
+      cJSON_ArrayForEach(activated_it, activated_prefs)
+      {
+         int64_t id = (int64_t)cJSON_GetNumberValue(
+             cJSON_GetObjectItemCaseSensitive(activated_it, "memory_id"));
+         saw_control |= id == pref_control_id;
+         saw_cooldown |= id == pref_cooldown_id;
+         saw_delayed |= id == pref_delayed_id;
+         const char *why =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(activated_it, "why"));
+         saw_sticky_reason |= id == pref_control_id && why && strcmp(why, "sticky activation") == 0;
+      }
+      assert(saw_control);
+      assert(saw_sticky_reason);
+      assert(!saw_cooldown);
+      assert(!saw_delayed);
+      cJSON *held = cJSON_GetObjectItemCaseSensitive(activated, "activation_held");
+      assert(cJSON_IsNumber(held) && held->valuedouble >= 2.0);
+      cJSON_Delete(activated);
 
       /* Telemetry fields for operator inspection. */
       cJSON *approx = cJSON_GetObjectItemCaseSensitive(bundle, "approx_tokens");
@@ -1991,6 +2249,22 @@ int main(void)
          memory_directive_t cd;
          assert(memory_directive_get(cid, &cd) == 0);
          assert(strcmp(cd.state, MEMORY_DIRECTIVE_STATE_RESOLVED) == 0);
+
+         /* Re-extraction of the same order-insensitive pair consults the
+          * durable disposition and cannot recreate an unresolved conflict. */
+         assert(memory_record_conflict(mb.id, ma.id) == 0);
+         char err[128] = "";
+         aimee_pg_stmt_t *q = aimee_pg_prepare(
+             db2_conn(),
+             "SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0"
+             " AND ((memory_a=?1 AND memory_b=?2) OR (memory_a=?2 AND memory_b=?1))",
+             err, sizeof(err));
+         assert(q != NULL);
+         aimee_pg_bind_int64(q, "?1", ma.id);
+         aimee_pg_bind_int64(q, "?2", mb.id);
+         assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW);
+         assert(aimee_pg_column_int(q, 0) == 0);
+         aimee_pg_finalize(q);
       }
 
       /* Recall integration: a matching open directive surfaces in the
@@ -2218,6 +2492,66 @@ int main(void)
       assert(db2_memory_valid_at(sup_src.id, spaced_after) == 0);
 
       printf("  bitemporal_rows: ok\n");
+   }
+
+   /* --- session folding is bounded, recursively gated, and fully traced --- */
+   {
+      const char *success_session = "fold-complete";
+      int64_t source_ids[3];
+      source_ids[0] = insert_raw_l0(success_session, "fold-source-a", "alpha checkpoint");
+      source_ids[1] = insert_raw_l0(success_session, "fold-source-b", "beta checkpoint");
+      source_ids[2] = insert_raw_l0(success_session, "fold-source-c", "gamma checkpoint");
+      char summary[256] = "not-cleared";
+      assert(memory_fold_session(success_session, summary, sizeof(summary)) == 3);
+      assert(summary[0] != '\0');
+      assert(count_session_tier(success_session, TIER_L0) == 0);
+      assert(count_session_tier(success_session, TIER_L1) == 1);
+
+      char err[128] = "";
+      aimee_pg_stmt_t *q =
+          aimee_pg_prepare(db2_conn(), "SELECT id FROM memories WHERE key='session:fold-complete'",
+                           err, sizeof(err));
+      assert(q != NULL);
+      assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW);
+      int64_t episode_id = aimee_pg_column_int64(q, 0);
+      aimee_pg_finalize(q);
+      memory_lineage_t lineage[4];
+      assert(memory_lineage_get("memory", episode_id, lineage, 4) == 3);
+      for (int i = 0; i < 3; i++)
+      {
+         char expected[48];
+         snprintf(expected, sizeof(expected), "memory:%lld", (long long)source_ids[i]);
+         int found = 0;
+         for (int j = 0; j < 3; j++)
+            if (strcmp(lineage[j].source_kind, "memory") == 0 &&
+                strcmp(lineage[j].source_ref, expected) == 0)
+               found = 1;
+         assert(found);
+      }
+
+      const char *refused_session = "fold-refused";
+      int64_t refused = insert_raw_l0(refused_session, "fold-refused-source", "retired source");
+      assert(memory_transition_lifecycle(refused, MEMORY_LIFECYCLE_STATE_ARCHIVED,
+                                         "fold refusal fixture") == 0);
+      snprintf(summary, sizeof(summary), "not-cleared");
+      assert(memory_fold_session(refused_session, summary, sizeof(summary)) == -1);
+      assert(summary[0] == '\0');
+      assert(count_session_tier(refused_session, TIER_L0) == 1);
+      assert(count_session_tier(refused_session, TIER_L1) == 0);
+
+      const char *bounded_session = "fold-over-cap";
+      for (int i = 0; i < 65; i++)
+      {
+         char key[64], content[64];
+         snprintf(key, sizeof(key), "fold-bounded-%02d", i);
+         snprintf(content, sizeof(content), "bounded checkpoint %02d", i);
+         (void)insert_raw_l0(bounded_session, key, content);
+      }
+      snprintf(summary, sizeof(summary), "not-cleared");
+      assert(memory_fold_session(bounded_session, summary, sizeof(summary)) == -1);
+      assert(summary[0] == '\0');
+      assert(count_session_tier(bounded_session, TIER_L0) == 65);
+      assert(count_session_tier(bounded_session, TIER_L1) == 0);
    }
 
    /* ONE WAY TO WRITE A TIMESTAMP.

@@ -34,7 +34,8 @@
  * pending, fulfilled, and superseded rows never enter an answer candidate set. */
 #define DB2_MEMORY_RECALL_FILTER_SQL(memory_id_sql)                                                \
    " AND EXISTS (SELECT 1 FROM memories aml WHERE aml.id = " memory_id_sql                         \
-   " AND aml.lifecycle_state='active')" DB2_MEMORY_SCOPE_FILTER_SQL(memory_id_sql)
+   " AND aml.lifecycle_state='active' AND "                                                        \
+   "aml.activation_suppressed=0)" DB2_MEMORY_SCOPE_FILTER_SQL(memory_id_sql)
 
 typedef struct
 {

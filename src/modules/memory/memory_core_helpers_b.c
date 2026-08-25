@@ -1110,18 +1110,11 @@ void memory_refresh_units_graph(int64_t memory_id, const char *key, const char *
 
    db2_memory_unit_edges_delete_for_memory(memory_id);
 
-   /* Drop the per-unit pgvector points before deleting the rows. */
-   {
-      int64_t prior_unit_ids[256];
-      int prior_n = db2_memory_unit_list_ids(
-          memory_id, prior_unit_ids, (int)(sizeof(prior_unit_ids) / sizeof(prior_unit_ids[0])));
-      for (int i = 0; i < prior_n; i++)
-      {
-         int64_t pt = PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET + prior_unit_ids[i];
-         pgvec_memory_vector_delete_point(pt);
-         db2_vector_index_op_remove(pt);
-      }
-   }
+   /* Drop the per-unit pgvector points before deleting the rows. Derived in SQL
+    * rather than enumerated: a fixed buffer here bounded reclamation at its own
+    * size and silently orphaned every unit past it. */
+   (void)pgvec_memory_vector_delete_points_for_memory(memory_id, 0);
+   db2_vector_index_ops_remove_for_memory(memory_id, PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, 0);
    db2_memory_units_delete_for_memory(memory_id);
 
    int64_t summary_units[8];

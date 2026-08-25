@@ -45,7 +45,7 @@ The tree declares `AIMEE_VERSION_SERIES` in `src/headers/aimee_version.h`, and t
 version component written down:
 
 ```c
-#define AIMEE_VERSION_SERIES "0.3"
+#define AIMEE_VERSION_SERIES "0.4"
 ```
 
 The patch comes from the highest `v<series>.*` tag at release time. So `0.3.1` after `0.3.0` needs no
@@ -77,9 +77,9 @@ If a tag survives a failed run, delete it by hand before the next release or tha
 ## A tag is not a release
 
 The repository can carry tags that were never released. `v0.2.196` is marked prerelease for exactly
-that reason: it exists, it has artifacts, and it is not a release anyone announced. The series has no
-`v0.3.*` tag yet, so the next approved release is `v0.3.0`, and it is what
-`api/releases/latest` will report once it ships.
+that reason: it exists, it has artifacts, and it is not a release anyone announced. The repository
+now carries `v0.3.0`; with `AIMEE_VERSION_SERIES` set to `0.4`, the next approved release is
+`v0.4.0`, and it is what `api/releases/latest` will report once it ships.
 
 Do not read the tag list to decide what shipped. Read the releases, and check whether the one you are
 looking at is marked prerelease.

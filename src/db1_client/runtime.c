@@ -1112,6 +1112,58 @@ int db1_context_snapshot_list_sessions_for_memory(int64_t memory_id, char (*out)
    return wire_rows;
 }
 
+int db1_context_snapshot_insert_turn(const char *session_id, int64_t memory_id,
+                                     double relevance_score, int64_t turn_index)
+{
+   if (!session_id || !session_id[0] || memory_id <= 0 || turn_index <= 0)
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%lld", (long long)memory_id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%.17g", (double)relevance_score);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%lld", (long long)turn_index);
+   const char *fields[] = {session_id, arg1, arg2, arg3};
+   int wire_status = call_stage(AIMEE_DB1_OP_CONTEXT_SNAPSHOT_INSERT_TURN, fields, 4, NULL, NULL, 0, NULL);
+   return wire_status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
+}
+
+int db1_context_snapshot_activation(const char *session_id,
+                                    char (*out)[DB1_CONTEXT_ACTIVATION_ROW_LEN], int max)
+{
+   if (!session_id || !session_id[0] || !out || max <= 0)
+      return -1;
+   if (max > 512)
+      max = 512;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {session_id, arg1};
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
+   {
+      free(wire_values);
+      free(wire_caps);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int wire_row = 0; wire_row < max; ++wire_row)
+   {
+      wire_values[wire_row * 1u + 0u] = out[wire_row];
+      wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row];
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_CONTEXT_SNAPSHOT_ACTIVATION, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
+   {
+      return -1;
+   }
+   return (int)(wire_filled / 1u);
+}
+
 int db1_context_snapshot_has_memory(int64_t memory_id)
 {
    char arg0[32];

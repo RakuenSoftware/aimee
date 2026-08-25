@@ -21,6 +21,10 @@ extern "C"
 
 #define DB1_CONTEXT_SNAPSHOT_SESSION_LEN 128
 
+/* One activation row, rendered as "<memory_id> <last_turn>". Two int64 decimals
+ * plus a separator; 48 leaves room without inviting a wider payload. */
+#define DB1_CONTEXT_ACTIVATION_ROW_LEN 48
+
    /* --- Context cache --- */
 
    /* Read a cached assembly by hash. Returns 0 on hit, -1 on miss or expired. */
@@ -44,6 +48,21 @@ extern "C"
                                                      char (*out)[DB1_CONTEXT_SNAPSHOT_SESSION_LEN],
                                                      int max);
    int db1_context_snapshot_has_memory(int64_t memory_id);
+
+   /* Record an injection against the turn it happened on. The turn-less form
+    * above stays for callers that only need "this was sampled"; anything that
+    * has to answer "how many turns ago" writes through this one. */
+   int db1_context_snapshot_insert_turn(const char *session_id, int64_t memory_id,
+                                        double relevance_score, int64_t turn_index);
+
+   /* One conversation's activation state: for each unit ever injected in this
+    * session, the most recent turn it fired on, highest turn first.
+    *
+    * Read once per turn, not once per candidate -- a gate placed in front of
+    * retrieval has to cost far less than the retrieval it guards, and a round
+    * trip per candidate would not. Returns rows written, or -1. */
+   int db1_context_snapshot_activation(const char *session_id,
+                                       char (*out)[DB1_CONTEXT_ACTIVATION_ROW_LEN], int max);
 
    /* --- Agent result cache ---
     *

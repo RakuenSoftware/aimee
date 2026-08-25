@@ -600,7 +600,10 @@ static void test_external_memory_enforcement(void)
    assert(handle_attention_guard() == 2);
 
    /* (3) Reading the store stays allowed (worktree isolation off so only the
-    *     memory guard is in play). */
+    *     memory guard is in play). The invalid base makes this deterministic:
+    *     an accidental routing attempt cannot succeed because of local Git
+    *     configuration. */
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "refs/heads/definitely-missing", 1);
    write_config("require_session_worktree: false\n");
    g_stdin_json = READ_MEMORY_HOOK;
    assert(handle_attention_guard() == 0);
@@ -612,6 +615,7 @@ static void test_external_memory_enforcement(void)
    assert(handle_attention_guard() == 0);
    g_stdin_json = BASH_MEMORY_HOOK;
    assert(handle_attention_guard() == 0);
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
 
    /* (5) No env-var bypass. */
    write_config("require_session_worktree: false\n");

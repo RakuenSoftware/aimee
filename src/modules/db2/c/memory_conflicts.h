@@ -14,9 +14,8 @@ extern "C"
 {
 #endif
 
-   /* INSERT a new (mem_a, mem_b) row into memory_conflicts with
-    * `detected_at` stamped to now and resolved=0. Returns 0 on success,
-    * -1 on failure. */
+   /* Ensure an unresolved (mem_a, mem_b) row exists, order-insensitively, with
+    * `detected_at` stamped to now. Replays are successful no-ops. */
    int db2_memory_conflict_record(int64_t mem_a, int64_t mem_b);
 
    /* INSERT a row into contradiction_log with the given resolution and
@@ -35,6 +34,13 @@ extern "C"
    /* Mark a conflict as resolved with the given resolution string.
     * Returns rows changed (1 = success), 0 = no row, -1 on SQL error. */
    int db2_memory_conflict_resolve(int64_t conflict_id, const char *resolution);
+
+   /* 1 when this (mem_a, mem_b) pair already carries a resolved row, in either
+    * order; 0 otherwise or on error. Consulted before re-recording so an
+    * adjudicated contradiction is not raised again by the next extraction pass.
+    * Fails open (returns 0): an unreadable store re-raises rather than silently
+    * swallowing a real contradiction. */
+   int db2_memory_conflict_pair_resolved(int64_t mem_a, int64_t mem_b);
 
 #ifdef __cplusplus
 }
