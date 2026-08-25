@@ -38,6 +38,7 @@ argument/schema helpers, and MCP native dispatch remain owned elsewhere and cons
 - `execution-policy`: authorizes each proposed capability and effect before dispatch.
 - `ir`: supplies canonical tool definitions, calls, results, and streaming events.
 - `module-runtime`: supplies required lifecycle plus optional tool-provider registration contracts.
+- `sandbox`: records learned packages and enforces package-egress policy for delegated tools.
 - `vault`: supplies scoped secret references or bounded values required by a tool implementation.
 - `workspace`: supplies the selected resource provider and filesystem/process context.
 

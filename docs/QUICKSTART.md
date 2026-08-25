@@ -477,6 +477,7 @@ sudo install -d -o root -g root -m 0755 server-management
 sudo install -o root -g root -m 0644 /path/from/authority/jwks-trust-bundle.json \
   server-management/jwks-trust-bundle.json
 
+cp -n .env.example .env
 cat >>.env <<'EOF'
 AIMEE_SERVER_ID=YOUR_ENROLLED_SERVER_ID
 AIMEE_SERVER_TEAM_ID=YOUR_NUMERIC_TEAM_ID

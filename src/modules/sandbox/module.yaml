@@ -6,9 +6,8 @@
     "config",
     "module-runtime"
   ],
-  "enabled_by_default": true,
   "runtime_toggle": {
-    "supported": true
+    "supported": false
   },
   "ownership_complete": true,
   "sources": [
