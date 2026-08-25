@@ -180,6 +180,49 @@ func decodeVectorSearch(body []byte) (string, db3.SearchRequest, error) {
 	return collection, request, nil
 }
 
+// The reply is this hop's shape too, for the reason the request is: a caller
+// asked postgres for rows and gets back ids and scores. Whether a vector
+// database produced them is not in the answer, because it is not the caller's
+// question -- and an answer that carried the store's identity would invite a
+// caller to start depending on it.
+func encodeVectorReply(reply db3.SearchReply) ([]byte, error) {
+	if len(reply.Candidates) > maxTopK {
+		return nil, ErrVectorStage
+	}
+	body := make([]byte, 0, 18+len(reply.Candidates)*16)
+	body = binary.LittleEndian.AppendUint64(body, reply.RequestID)
+	body = binary.LittleEndian.AppendUint64(body, reply.Generation)
+	body = binary.LittleEndian.AppendUint16(body, uint16(len(reply.Candidates)))
+	for _, candidate := range reply.Candidates {
+		body = binary.LittleEndian.AppendUint64(body, uint64(candidate.PointID))
+		body = binary.LittleEndian.AppendUint64(body, math.Float64bits(candidate.Score))
+	}
+	return body, nil
+}
+
+func decodeVectorReply(body []byte) (db3.SearchReply, error) {
+	if len(body) < 18 {
+		return db3.SearchReply{}, ErrVectorStage
+	}
+	reply := db3.SearchReply{
+		RequestID:  binary.LittleEndian.Uint64(body),
+		Generation: binary.LittleEndian.Uint64(body[8:]),
+	}
+	count := int(binary.LittleEndian.Uint16(body[16:]))
+	rest := body[18:]
+	if count > maxTopK || len(rest) != count*16 {
+		return db3.SearchReply{}, ErrVectorStage
+	}
+	reply.Candidates = make([]db3.Candidate, count)
+	for index := range reply.Candidates {
+		reply.Candidates[index] = db3.Candidate{
+			PointID: int64(binary.LittleEndian.Uint64(rest[index*16:])),
+			Score:   math.Float64frombits(binary.LittleEndian.Uint64(rest[index*16+8:])),
+		}
+	}
+	return reply, nil
+}
+
 // VectorSearchHandler answers vector searches for the deployment as provisioned.
 //
 // Built once, at boot, from the grant. The routers are fixed for the life of
@@ -239,7 +282,7 @@ func (h *VectorSearchHandler) Handle(invocation bus.ModuleInvocation, frame []by
 	if err != nil {
 		return nil, bus.ModuleStatusInternal
 	}
-	encoded, err := db3.EncodeSearchReply(reply)
+	encoded, err := encodeVectorReply(reply)
 	if err != nil {
 		return nil, bus.ModuleStatusInternal
 	}

@@ -86,7 +86,7 @@ func TestAHandedOffSearchReachesTheProviderAndComesBackOnTheWire(t *testing.T) {
 	if searcher.asked != 1 || searcher.lastFor != 456 {
 		t.Fatalf("the provider was asked %d times as principal %d", searcher.asked, searcher.lastFor)
 	}
-	reply, err := db3.DecodeSearchReply(response)
+	reply, err := decodeVectorReply(response)
 	if err != nil {
 		t.Fatal(err)
 	}
