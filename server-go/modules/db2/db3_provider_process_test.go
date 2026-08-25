@@ -186,24 +186,14 @@ func providerProcessRoundTrip(t *testing.T, backendEnv []string) {
 		t.Fatal(err)
 	}
 
-	// The provider process must publish capabilities and be routed to. This is
-	// the step that fails if the grant, the band, the name, or the environment
-	// is wrong -- each of which was wrong at some point in this work.
-	deadline = time.Now().Add(10 * time.Second)
-	for {
-		outcome := router.Search(ctx, protocol.SearchRequest{
-			RequestID: 1, RequiredGeneration: 1, Workspace: "workspace-a",
-			Project: "project-a", RecordType: "memory", TopK: 3,
-			Vector: []float32{1, 0, 0},
-		})
-		if outcome.Route == DB3External {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the provider process never became the route (last outcome %+v)", outcome)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	// Seed FIRST, then expect the provider to be routed to.
+	//
+	// A provider that has applied nothing is not ready -- it holds no rows and
+	// has no generation to answer at -- so waiting for readiness before sending
+	// it anything waits forever. The applies below are what make it ready, and
+	// they are idempotent by operation id, so the loop that follows re-sends
+	// them until they land: a publish is not queued for a subscriber that has
+	// not arrived, and one sent too early is simply lost.
 
 	// Apply real points through the wire, then search them back. The labels are
 	// the ones scopeFilters derives from the request's scope, so a point that
@@ -222,13 +212,15 @@ func providerProcessRoundTrip(t *testing.T, backendEnv []string) {
 		{42, []float32{0.9, 0.1, 0}},
 		{43, []float32{0, 0, 1}},
 	}
-	for i, point := range points {
-		if err := busRouter.PublishApply(ctx, protocol.Apply{
-			OperationID: uint64(i + 1), Generation: 1, PointID: point.id,
-			Kind: protocol.ApplyUpsert, Collection: "memory",
-			Vector: point.vector, Labels: labels,
-		}); err != nil {
-			t.Fatalf("publishing apply for point %d: %v", point.id, err)
+	seed := func() {
+		for i, point := range points {
+			if err := busRouter.PublishApply(ctx, protocol.Apply{
+				OperationID: uint64(i + 1), Generation: 1, PointID: point.id,
+				Kind: protocol.ApplyUpsert, Collection: "memory",
+				Vector: point.vector, Labels: labels,
+			}); err != nil {
+				t.Fatalf("publishing apply for point %d: %v", point.id, err)
+			}
 		}
 	}
 
@@ -238,34 +230,27 @@ func providerProcessRoundTrip(t *testing.T, backendEnv []string) {
 	// reached -- which is the whole reason the provider republishes its
 	// capabilities. Reading it here rather than assuming it is what makes this
 	// test notice if that republication ever stops.
-	// The applies are asynchronous, and against a remote store each one is a
-	// network round trip, so the provider's generation is still moving while
-	// this runs. The generation is therefore re-read on EVERY attempt rather
-	// than once: a single read races the applies and then searches at a version
-	// the provider has already left, which the router answers as unavailable.
-	// Re-reading is also what DB2 does -- it searches at the generation it has
-	// most recently been told about.
+	// The generation is PostgreSQL's: it stamps every apply and searches at the
+	// same value, and the provider carries back whatever it was told. Applies
+	// are re-sent each attempt because one published before the provider is
+	// subscribed is lost, and re-sending is free -- the provider recognises an
+	// operation id it has already applied.
 	deadline = time.Now().Add(30 * time.Second)
 	var outcome DB3SearchOutcome
-	var generation uint64
 	for {
-		route := router.Route(protocol.RouteRequest{RequestID: 3, Action: protocol.RouteQuery})
-		if route.SelectedPrincipal == 456 && route.ProviderGeneration > 1 {
-			generation = route.ProviderGeneration
-			outcome = router.Search(ctx, protocol.SearchRequest{
-				RequestID: 2, RequiredGeneration: generation, Workspace: "workspace-a",
-				Project: "project-a", RecordType: "memory", TopK: 2,
-				Vector: []float32{1, 0, 0},
-			})
-			if outcome.Route == DB3External && len(outcome.Reply.Candidates) == 2 {
-				break
-			}
+		seed()
+		outcome = router.Search(ctx, protocol.SearchRequest{
+			RequestID: 2, RequiredGeneration: 1, Workspace: "workspace-a",
+			Project: "project-a", RecordType: "memory", TopK: 2,
+			Vector: []float32{1, 0, 0},
+		})
+		if outcome.Route == DB3External && len(outcome.Reply.Candidates) == 2 {
+			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the provider never returned the applied points (last generation %d, outcome %+v)",
-				generation, outcome)
+			t.Fatalf("the provider never returned the applied points (outcome %+v)", outcome)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Nearest first, and the orthogonal point excluded by TopK. Getting the
