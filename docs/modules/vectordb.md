@@ -55,9 +55,16 @@ A provider is dynamically provisioned rather than compiled in, so it does not
 pick its own identity. Its principal ref is allocated from
 `db3_provider_principal_ref_band` in
 `tests/baselines/modules/canonical-inventory.yaml` by
-`scripts/provision-plugin-module.py --kind db3-provider`. That is why this
-module has an id in the inventory but no `principal_refs` entry: an entry there
-would pin a ref that provisioning is supposed to hand out.
+`scripts/provision-plugin-module.py --kind db3-provider`.
+
+That is why `vectordb` has no `src/modules/vectordb/module.yaml` and no entry in
+the canonical inventory, unlike every compiled-in module. Adding one would
+require `src/modules/process-contracts.json` to carry a component with a
+declared ref and the event kinds carved from it, and a running provider serves
+none of those kinds: it attaches on the ref provisioning gave it. The contract
+would describe a process that does not exist.
+`scripts/check-module-descriptor-sources.py` records this as a stated exemption
+rather than a silent gap, and enforces the tree the moment a descriptor appears.
 
 Readiness is the capability exchange. `DB3Router.ObserveCapabilities` refuses an
 out-of-band principal outright, and DB2 shapes its outbox fan-out to the batch

@@ -45,14 +45,7 @@ RESERVED_BANDS = (
 REQUIRED_COUNT = 19
 # PostgreSQL is appended while its C-to-Go migration is staged so existing
 # optional-module principal references remain stable.
-#
-# vectordb follows it with no principal_refs entry of its own. It is a DB3
-# vector provider, and a provider is dynamically provisioned -- its ref comes
-# from db3_provider_principal_ref_band at provision time, not from this file.
-# It is listed here anyway because a module id is what a descriptor is validated
-# against, and without one server-go/modules/vectordb has no id, no dependency
-# edges, and nothing for check-module-descriptor-sources to claim its files by.
-OPTIONAL_COUNT = 12
+OPTIONAL_COUNT = 11
 PINNED_REQUIRED = {"git"}
 
 
