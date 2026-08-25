@@ -135,7 +135,7 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		return nil, bus.ModuleStatusCancelled
 	}
 
-	plan := WorktreePlan{Isolated: req.WritesAllowed, ReadOnlyMount: !req.WritesAllowed}
+	plan := WorktreePlan{Isolated: true, ReadOnlyMount: !req.WritesAllowed}
 	sandboxReq := SandboxRequestFor(plan, req.RepoRoot, req.Worktree, req.GitDir,
 		req.IsGitCheckout, req.ParentSocketHost, req.ParentSocketTarget, req.EgressProxy)
 	sandboxReq.RunAsUser = req.RunAsUser

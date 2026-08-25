@@ -23,7 +23,8 @@ func readReq() SandboxRequest {
 	return SandboxRequest{
 		WritesAllowed:      false,
 		RepoRoot:           "/srv/repo",
-		Worktree:           "/srv/repo",
+		Worktree:           "/srv/repo/.aimee/worktrees/r1/main",
+		GitDir:             "/srv/repo/.git/worktrees/r1",
 		IsGitCheckout:      true,
 		ParentSocketHost:   "/run/aimee/aimee-http.sock",
 		ParentSocketTarget: "/run/aimee/aimee-http.sock",
@@ -39,9 +40,9 @@ func findMount(spec SandboxSpec, target string) (SandboxMount, bool) {
 	return SandboxMount{}, false
 }
 
-// A write delegate gets the tree readable and only its own worktree writable,
-// so an edit outside its ownership fails at the filesystem rather than being
-// caught later by review.
+// A write delegate gets only its own worktree. The common Git directory is
+// readable for object lookup, but the parent checkout's working files are not
+// exposed at all.
 func TestSandboxWriteDelegateMountLayering(t *testing.T) {
 	spec, err := BuildSandboxSpec(writeReq())
 	if err != nil {
@@ -51,9 +52,12 @@ func TestSandboxWriteDelegateMountLayering(t *testing.T) {
 		t.Error("a write role produced a read-only sandbox")
 	}
 
-	repo, ok := findMount(spec, "/srv/repo")
-	if !ok || !repo.ReadOnly {
-		t.Errorf("repo mount = %+v, want present and read-only", repo)
+	if _, ok := findMount(spec, "/srv/repo"); ok {
+		t.Error("parent checkout was exposed to the delegate")
+	}
+	common, ok := findMount(spec, "/srv/repo/.git")
+	if !ok || !common.ReadOnly || common.Kind != SandboxGitMetadata {
+		t.Errorf("common git mount = %+v, want present, metadata-only, and read-only", common)
 	}
 	worktree, ok := findMount(spec, "/srv/repo/.aimee/worktrees/w1/main")
 	if !ok || worktree.ReadOnly {
@@ -66,8 +70,8 @@ func TestSandboxWriteDelegateMountLayering(t *testing.T) {
 	}
 }
 
-// The supervisor's live branch. The mount mode is the enforcement -- a delegate
-// that is merely asked not to write can still write.
+// A read delegate gets its own checkout and the minimum Git metadata it needs;
+// it never receives the supervisor's live working files.
 func TestSandboxReadOnlyDelegateCannotGetAWritableWorkspace(t *testing.T) {
 	spec, err := BuildSandboxSpec(readReq())
 	if err != nil {
@@ -81,7 +85,7 @@ func TestSandboxReadOnlyDelegateCannotGetAWritableWorkspace(t *testing.T) {
 			t.Errorf("writable workspace mount for a read-only role: %+v", m)
 		}
 	}
-	// Exactly one workspace mount: the parent's worktree, not a fresh one.
+	// Exactly one workspace mount: the delegate's dedicated worktree.
 	workspaceMounts := 0
 	for _, m := range spec.Mounts {
 		if m.Kind == SandboxWorkspace {
@@ -90,6 +94,10 @@ func TestSandboxReadOnlyDelegateCannotGetAWritableWorkspace(t *testing.T) {
 	}
 	if workspaceMounts != 1 {
 		t.Errorf("read-only delegate got %d workspace mounts, want 1", workspaceMounts)
+	}
+	common, ok := findMount(spec, "/srv/repo/.git")
+	if !ok || !common.ReadOnly || common.Kind != SandboxGitMetadata {
+		t.Errorf("read-only common git mount = %+v, want read-only metadata", common)
 	}
 }
 
@@ -256,9 +264,9 @@ func TestPlainCheckoutGetsOneWritableMount(t *testing.T) {
 	}
 }
 
-// A LINKED worktree still gets the layering: the repo read-only underneath, the
-// worktree writable over it, so a write outside the worktree fails.
-func TestLinkedWorktreeKeepsTheReadOnlyRepoBeneath(t *testing.T) {
+// A linked worktree gets common Git metadata without exposing the parent
+// checkout's working files.
+func TestLinkedWorktreeKeepsParentCheckoutHidden(t *testing.T) {
 	spec, err := BuildSandboxSpec(SandboxRequest{
 		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo/.aimee/worktrees/d1",
 		GitDir: "/repo/.git/worktrees/d1", IsGitCheckout: true,
@@ -267,17 +275,23 @@ func TestLinkedWorktreeKeepsTheReadOnlyRepoBeneath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	var repoRO, worktreeRW bool
+	var repoVisible, commonRO, worktreeRW bool
 	for _, m := range spec.Mounts {
-		if m.Target == "/repo" && m.ReadOnly {
-			repoRO = true
+		if m.Target == "/repo" {
+			repoVisible = true
+		}
+		if m.Target == "/repo/.git" && m.ReadOnly && m.Kind == SandboxGitMetadata {
+			commonRO = true
 		}
 		if m.Target == "/repo/.aimee/worktrees/d1" && !m.ReadOnly {
 			worktreeRW = true
 		}
 	}
-	if !repoRO {
-		t.Error("the repo is not mounted read-only beneath the worktree")
+	if repoVisible {
+		t.Error("the parent checkout's working files are visible")
+	}
+	if !commonRO {
+		t.Error("the common Git metadata is not mounted read-only")
 	}
 	if !worktreeRW {
 		t.Error("the worktree is not writable")

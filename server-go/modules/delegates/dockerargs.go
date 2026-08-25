@@ -2,6 +2,7 @@ package delegates
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -117,6 +118,37 @@ func DockerCreateArgs(req DockerCreateRequest) ([]string, error) {
 	if !baseImageValid(req.Image) {
 		return nil, fmt.Errorf("invalid image reference: %q", req.Image)
 	}
+	workDir := ""
+	if req.WorkDir != "" {
+		var ok bool
+		workDir, ok = cleanAbs(req.WorkDir)
+		if !ok {
+			return nil, fmt.Errorf("container workdir must be an absolute mounted worktree, got %q", req.WorkDir)
+		}
+	}
+	workDirMounted := false
+	for _, m := range req.Spec.Mounts {
+		if m.Kind != SandboxWorkspace {
+			continue
+		}
+		target := path.Clean(m.Target)
+		if workDir != "" && target == workDir {
+			workDirMounted = true
+		}
+		if workDir == "" && (req.Spec.ReadOnly || !m.ReadOnly) {
+			if workDirMounted {
+				return nil, fmt.Errorf("container has multiple candidate worktree mounts")
+			}
+			workDir = target
+			workDirMounted = true
+		}
+	}
+	if workDir == "" {
+		return nil, fmt.Errorf("container has no worktree mount to use as its working directory")
+	}
+	if !workDirMounted {
+		return nil, fmt.Errorf("container workdir %q is not a workspace mount target", workDir)
+	}
 
 	args := []string{"create", "--name", req.ContainerName}
 
@@ -135,9 +167,7 @@ func DockerCreateArgs(req DockerCreateRequest) ([]string, error) {
 		args = append(args, "-e", e.Name+"="+e.Value)
 	}
 
-	if req.WorkDir != "" {
-		args = append(args, "-w", req.WorkDir)
-	}
+	args = append(args, "-w", workDir)
 
 	args = append(args, req.Image)
 	args = append(args, req.Command...)

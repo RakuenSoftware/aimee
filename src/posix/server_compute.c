@@ -821,9 +821,19 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * share one checkout and clobber each other. No-op when cwd is not a git repo
     * or is already a managed worktree (session_isolation_target guards both). */
    char session_wt[MAX_PATH_LEN];
-   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0] &&
-       session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
-                                1 /*create_if_missing*/))
+   int isolation_rc = 0;
+   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0])
+      isolation_rc = session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
+                                              1 /*create_if_missing*/);
+   if (isolation_rc < 0)
+   {
+      workspace_turn_unbind_active();
+      free(system_prompt);
+      compute_error(cctx, "could not initialize isolated session workspace");
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (isolation_rc == 1)
       use_cwd = session_wt;
    if (aimee_path_is_absolute(use_cwd) && !strstr(use_cwd, "/.."))
       run_cmd_set_cwd(use_cwd);
@@ -1010,9 +1020,19 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
     * created on demand — so concurrent sessions on the same project never share a
     * checkout. No-op when cwd is not a git repo / already a managed worktree. */
    char session_wt[MAX_PATH_LEN];
-   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0] &&
-       session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
-                                1 /*create_if_missing*/))
+   int isolation_rc = 0;
+   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0])
+      isolation_rc = session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
+                                              1 /*create_if_missing*/);
+   if (isolation_rc < 0)
+   {
+      workspace_turn_unbind_active();
+      free(system_prompt);
+      compute_error(cctx, "could not initialize isolated session workspace");
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (isolation_rc == 1)
       use_cwd = session_wt;
 
    stream_event(cctx, "turn_start", NULL, NULL);

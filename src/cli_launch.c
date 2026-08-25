@@ -150,6 +150,13 @@ static int launch_route_conversation_gateway(const char *session_id)
 
 int client_launch_exec(int argc, char **argv)
 {
+   int route_gateway = 0;
+   if (argc > 0 && strcmp(argv[0], "--gateway") == 0)
+   {
+      route_gateway = 1;
+      argc--;
+      argv++;
+   }
    if (argc > 0 && strcmp(argv[0], "--") == 0)
    {
       argc--;
@@ -157,7 +164,7 @@ int client_launch_exec(int argc, char **argv)
    }
    if (argc <= 0 || !argv || !argv[0] || !argv[0][0])
    {
-      fprintf(stderr, "usage: aimee launch -- <client> [args...]\n");
+      fprintf(stderr, "usage: aimee launch [--gateway] -- <client> [args...]\n");
       return 2;
    }
 
@@ -169,7 +176,10 @@ int client_launch_exec(int argc, char **argv)
       return 1;
    }
 
-   if (launch_route_conversation_gateway(sid) < 0)
+   /* Workspace ownership is universal; provider routing is optional. A local
+    * client may use OAuth, its own API key, or any non-Aimee endpoint and still
+    * needs the same pre-exec isolation boundary. */
+   if (route_gateway && launch_route_conversation_gateway(sid) < 0)
       return 1;
 
    char worktree[4096];

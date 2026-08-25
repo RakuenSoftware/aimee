@@ -62,22 +62,20 @@ func TestWorktreePlanStageWriteRoleIsIsolated(t *testing.T) {
 	}
 }
 
-// A read-only role mounts the parent's worktree, so there is nothing to create
-// and no name to give it.
-func TestWorktreePlanStageReadRoleCreatesNothing(t *testing.T) {
+func TestWorktreePlanStageReadRoleGetsDedicatedReadOnlyTree(t *testing.T) {
 	response, status := callWorktreePlan(t, false, "delegate-7")
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status = %v, want OK", status)
 	}
 	isolated, readOnly, name := decodeWorktreePlan(t, response)
-	if isolated {
-		t.Error("a read-only role should not get its own worktree")
+	if !isolated {
+		t.Error("a read-only role should get its own worktree")
 	}
 	if !readOnly {
 		t.Error("a read-only role's mount must be read-only")
 	}
-	if name != "" {
-		t.Errorf("work name = %q, want empty", name)
+	if name != "delegate-7" {
+		t.Errorf("work name = %q, want delegate id", name)
 	}
 }
 
@@ -109,10 +107,9 @@ func TestWorktreePlanStageRefusesUnusableNames(t *testing.T) {
 	}
 }
 
-// A read-only role needs no name, so an unusable one must not refuse the plan.
-func TestWorktreePlanStageIgnoresTheNameWhenNothingIsCreated(t *testing.T) {
-	if _, status := callWorktreePlan(t, false, "../escape"); status != bus.ModuleStatusOK {
-		t.Errorf("status = %v, want OK", status)
+func TestWorktreePlanStageReadOnlyRejectsUnsafeName(t *testing.T) {
+	if _, status := callWorktreePlan(t, false, "../escape"); status != bus.ModuleStatusInvalidRequest {
+		t.Errorf("status = %v, want InvalidRequest", status)
 	}
 }
 

@@ -251,36 +251,33 @@ static void test_launch_owns_session_worktree_and_cwd_before_exec(void)
    g_worktree_result = 0;
    char *argv[] = {(char *)"--", (char *)"example-client", (char *)"--flag", NULL};
    assert(client_launch_exec(3, argv) == 127); /* exec stub deliberately fails */
-   assert(g_env_count == 6);
+   assert(g_env_count == 1);
    assert(strcmp(g_env[0].name, "AIMEE_SESSION_ID") == 0);
    assert(strlen(g_env[0].value) == 32);
    assert(strcmp(g_env[0].value, g_worktree_sid) == 0);
-   assert(strcmp(g_env[1].name, "AIMEE_CONVERSATION_GATEWAY") == 0);
-   assert(strcmp(g_env[1].value, "https://gateway.example:8910/v1") == 0);
-   assert(strcmp(g_env[2].name, "OPENAI_BASE_URL") == 0);
-   assert(strcmp(g_env[2].value, g_env[1].value) == 0);
-   assert(strcmp(g_env[3].name, "OPENAI_API_KEY") == 0);
-   assert(strncmp(g_env[3].value, "test-token.aimee-session.", 25) == 0);
-   assert(strstr(g_env[3].value, g_env[0].value) != NULL);
-   assert(strcmp(g_env[4].name, "ANTHROPIC_BASE_URL") == 0);
-   assert(strcmp(g_env[4].value, "https://gateway.example:8910") == 0);
-   assert(strcmp(g_env[5].name, "ANTHROPIC_AUTH_TOKEN") == 0);
-   assert(strcmp(g_env[5].value, g_env[3].value) == 0);
    assert(strcmp(g_chdir_path, "/aimee-test-fixture/owned-worktree") == 0);
    assert(strcmp(g_exec_file, "example-client") == 0);
    assert(g_chdir_order > 0 && g_chdir_order < g_exec_order);
    g_worktree_result = -1;
 }
 
-static void test_launch_refuses_to_bypass_conversation_ingress(void)
+static void test_launch_gateway_is_explicit_and_fail_closed(void)
 {
+   g_worktree_result = 0;
+   g_env_count = 0;
+   char *gateway[] = {(char *)"--gateway", (char *)"--", (char *)"example-client", NULL};
+   assert(client_launch_exec(3, gateway) == 127);
+   assert(g_env_count == 6);
+   assert(strcmp(g_env[1].name, "AIMEE_CONVERSATION_GATEWAY") == 0);
+   assert(strcmp(g_env[1].value, "https://gateway.example:8910/v1") == 0);
+
    g_remote_active = 0;
    g_env_count = 0;
    g_exec_file[0] = '\0';
-   char *argv[] = {(char *)"example-client", NULL};
-   assert(client_launch_exec(1, argv) == 1);
+   assert(client_launch_exec(3, gateway) == 1);
    assert(g_exec_file[0] == '\0');
    g_remote_active = 1;
+   g_worktree_result = -1;
 }
 
 int main(void)
@@ -303,7 +300,7 @@ int main(void)
    test_parse_autonomous_codex();
    test_launch_requires_a_client_command();
    test_launch_owns_session_worktree_and_cwd_before_exec();
-   test_launch_refuses_to_bypass_conversation_ingress();
+   test_launch_gateway_is_explicit_and_fail_closed();
    printf("cli_launch: all tests passed\n");
    return 0;
 }

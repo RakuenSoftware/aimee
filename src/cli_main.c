@@ -836,8 +836,9 @@ static int cli_hook_client_supports_updated_input(void)
 {
    const char *client = getenv("AIMEE_HOOK_CLIENT");
    if (client)
-      return strcmp(client, "claude") == 0;
-   return getenv("CLAUDE_SESSION_ID") != NULL;
+      return strcmp(client, "claude") == 0 || strcmp(client, "codex") == 0;
+   return getenv("CLAUDE_SESSION_ID") != NULL || getenv("CODEX_THREAD_ID") != NULL ||
+          getenv("CODEX_HOME") != NULL;
 }
 
 static void emit_pretool_deny_json(const char *reason)
@@ -854,6 +855,22 @@ static void emit_pretool_deny_json(const char *reason)
    {
       fputs(s, stdout);
       fputc('\n', stdout);
+      free(s);
+   }
+   cJSON_Delete(out);
+}
+
+static void emit_pretool_updated_json(const cJSON *updated)
+{
+   cJSON *out = cJSON_CreateObject();
+   cJSON *hook_out = cJSON_AddObjectToObject(out, "hookSpecificOutput");
+   cJSON_AddStringToObject(hook_out, "hookEventName", "PreToolUse");
+   cJSON_AddStringToObject(hook_out, "permissionDecision", "allow");
+   cJSON_AddItemToObject(hook_out, "updatedInput", cJSON_Duplicate(updated, 1));
+   char *s = cJSON_PrintUnformatted(out);
+   if (s)
+   {
+      puts(s);
       free(s);
    }
    cJSON_Delete(out);
@@ -977,49 +994,6 @@ static int cli_delegate_probe(void)
    return avail;
 }
 
-/* Worktree isolation (client-side, server-independent — mirrors the sub-agent
- * guard above). aimee isolates its OWN work in worktrees, but the primary
- * session's harness Edit/Write never reach aimee's gateway, so the shared main
- * clone was editable directly — how concurrent sessions entangle uncommitted
- * work on one branch. Enforce it here so it holds even when aimee-server is
- * down. A main clone's .git is a directory; a worktree's is a file. Returns the
- * process exit code, or -1 when not applicable (caller proceeds). */
-static int client_failopen_worktree_deny(const char *phase, const char *tool_name,
-                                         const char *file_path, const char *payload_cwd)
-{
-   if (!phase || strcmp(phase, "pre") != 0 || !tool_name)
-      return -1;
-   if (!(strcmp(tool_name, "Write") == 0 || strcmp(tool_name, "Edit") == 0 ||
-         strcmp(tool_name, "MultiEdit") == 0 || strcmp(tool_name, "NotebookEdit") == 0))
-      return -1;
-   /* Prefer the session cwd from the hook payload (authoritative); fall back to
-    * this process's cwd (the hook usually inherits the session's dir). */
-   char cwd[MAX_PATH_LEN];
-   if (payload_cwd && payload_cwd[0])
-      snprintf(cwd, sizeof(cwd), "%s", payload_cwd);
-   else if (!getcwd(cwd, sizeof(cwd)))
-      return -1;
-   /* Key on the file being edited (resolved against cwd), not just the cwd — an
-    * absolute Edit into the main clone from a worktree session must still be caught. */
-   if (!aimee_edit_target_in_main_clone(file_path, cwd) || aimee_main_clone_edits_allowed(cwd))
-      return -1;
-   char reason[1024];
-   snprintf(reason, sizeof(reason),
-            "BLOCKED: %s edits the SHARED MAIN CLONE (%s), not a git worktree — concurrent "
-            "sessions entangle uncommitted work this way. Isolate the task in its own worktree:\n"
-            "  git -C %s worktree add ../<name>-<task> -b <branch> origin/testing\n"
-            "then work there. (Branch-owner override: AIMEE_ALLOW_MAIN_CHECKOUT=1 or "
-            "touch %s/.git/aimee-allow-main-edits.)",
-            tool_name, cwd, cwd, cwd);
-   if (cli_hook_client_uses_pretool_json())
-   {
-      emit_pretool_deny_json(reason);
-      return 0;
-   }
-   fprintf(stderr, "aimee: %s\n", reason);
-   return 2;
-}
-
 /* Handle hooks specially -- use dedicated server methods for lower latency */
 static int handle_hooks(int argc, char **argv, int json_output)
 {
@@ -1083,32 +1057,53 @@ static int handle_hooks(int argc, char **argv, int json_output)
       return discovery_deny;
    }
 
-   /* Worktree isolation — pure filesystem check, before we even try the server,
-    * so it holds regardless of aimee-server reachability. */
+   /* Worktree routing must happen on the client: a remote Aimee server cannot
+    * see or create a worktree in this machine's repository. */
    const char *hook_cwd = NULL;
-   const char *hook_file_path = NULL;
+   cJSON *hook_input = NULL;
    if (json)
    {
       cJSON *cj = cJSON_GetObjectItemCaseSensitive(json, "cwd");
       if (cJSON_IsString(cj))
          hook_cwd = cj->valuestring;
-      cJSON *ti = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-      if (cJSON_IsObject(ti))
-      {
-         cJSON *fp = cJSON_GetObjectItemCaseSensitive(ti, "file_path");
-         if (!cJSON_IsString(fp))
-            fp = cJSON_GetObjectItemCaseSensitive(ti, "notebook_path");
-         if (cJSON_IsString(fp))
-            hook_file_path = fp->valuestring;
-      }
+      hook_input = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
    }
-   int wt_deny = client_failopen_worktree_deny(phase, tool_name, hook_file_path, hook_cwd);
-   if (wt_deny >= 0)
+   char route_cwd[MAX_PATH_LEN];
+   if (!hook_cwd || !hook_cwd[0])
    {
-      free(stdin_data);
-      cJSON_Delete(json);
-      free(tool_input_heap);
-      return wt_deny;
+      if (getcwd(route_cwd, sizeof route_cwd))
+         hook_cwd = route_cwd;
+      else
+         hook_cwd = "";
+   }
+   cJSON *local_updated = NULL;
+   if (strcmp(phase, "pre") == 0)
+   {
+      int route = attn_route_tool_input(sid, hook_cwd, tool_name, hook_input, &local_updated);
+      if (route == -2 || route == -3)
+      {
+         const char *reason = "Internal session workspace isolation failed; tool call blocked.";
+         if (cli_hook_client_uses_pretool_json())
+            emit_pretool_deny_json(reason);
+         else
+            fprintf(stderr, "aimee: %s\n", reason);
+         free(stdin_data);
+         cJSON_Delete(json);
+         free(tool_input_heap);
+         return cli_hook_client_uses_pretool_json() ? 0 : 2;
+      }
+      if (local_updated)
+      {
+         free(tool_input_heap);
+         tool_input_heap = cJSON_PrintUnformatted(local_updated);
+         if (tool_input_heap)
+            tool_input = tool_input_heap;
+         else
+         {
+            cJSON_Delete(local_updated);
+            local_updated = NULL;
+         }
+      }
    }
 
    /* Exclusive transport: with a remote configured, the whole pre_tool_check
@@ -1120,10 +1115,16 @@ static int handle_hooks(int argc, char **argv, int json_output)
    if (!use_remote && !sock)
    {
       int deny = client_failopen_subagent_deny(phase, tool_name);
-      if (deny < 0)
+      /* A successful local rewrite is the complete worktree decision. Do not
+       * turn an otherwise invisible routing success into hook-warning noise
+       * just because the optional server-side policy plane is offline. */
+      if (deny < 0 && !local_updated)
          fprintf(stderr, "aimee: hooks %s: server unavailable — tool call allowed\n", phase);
+      if (deny < 0 && local_updated && cli_hook_client_supports_updated_input())
+         emit_pretool_updated_json(local_updated);
       free(stdin_data);
       cJSON_Delete(json);
+      cJSON_Delete(local_updated);
       free(tool_input_heap);
       return deny < 0 ? 0 : deny;
    }
@@ -1188,6 +1189,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
       if (deny >= 0)
       {
          cJSON_Delete(json);
+         cJSON_Delete(local_updated);
          free(tool_input_heap);
          return deny;
       }
@@ -1213,6 +1215,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
             emit_pretool_rewrite_unsupported_json(exit_code, msg_str);
             cJSON_Delete(resp);
             cJSON_Delete(json);
+            cJSON_Delete(local_updated);
             free(tool_input_heap);
             return 0;
          }
@@ -1249,6 +1252,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
             cJSON_Delete(out);
             cJSON_Delete(resp);
             cJSON_Delete(json);
+            cJSON_Delete(local_updated);
             free(tool_input_heap);
             return 0;
          }
@@ -1260,6 +1264,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
          emit_pretool_deny_json(msg_str);
          cJSON_Delete(resp);
          cJSON_Delete(json);
+         cJSON_Delete(local_updated);
          free(tool_input_heap);
          return 0;
       }
@@ -1285,7 +1290,11 @@ static int handle_hooks(int argc, char **argv, int json_output)
       cJSON_Delete(resp);
    }
 
+   if (exit_code == 0 && local_updated && cli_hook_client_supports_updated_input())
+      emit_pretool_updated_json(local_updated);
+
    cJSON_Delete(json);
+   cJSON_Delete(local_updated);
    free(tool_input_heap);
    return exit_code;
 }
@@ -1900,6 +1909,16 @@ int main(int argc, char **argv)
    /* Fall back to <aimee_home>/remote.conf when no flag/env override. */
    cli_remote_load_persisted();
 
+   /* Installer/update seam: materialize detected client adapters without
+    * starting a server, probing delegates, or dispatching a user command. */
+   const char *integrations_only = getenv("AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY");
+   if (integrations_only && integrations_only[0] && strcmp(integrations_only, "0") != 0 &&
+       strcmp(integrations_only, "false") != 0)
+   {
+      ensure_client_integrations();
+      return 0;
+   }
+
    /* Keep local client registrations pointed at the thin client binary the
     * user actually invoked, even when the command itself forwards to a
     * long-lived server process. */
@@ -1915,10 +1934,13 @@ int main(int argc, char **argv)
       const char *c = argv[cmd_start];
       int hook_callback = strcmp(c, "attention-guard") == 0 || strcmp(c, "subagent-guard") == 0 ||
                           strcmp(c, "hooks") == 0 || strcmp(c, "user-prompt-submit") == 0 ||
-                          strcmp(c, "pre-compact") == 0;
+                          strcmp(c, "pre-compact") == 0 || strcmp(c, "session-start") == 0;
+      hook_callback = hook_callback || strcmp(c, "session-end") == 0;
       if (!hook_callback)
+      {
          client_integrations_set_delegate_probe(cli_delegate_probe);
-      ensure_client_integrations();
+         ensure_client_integrations();
+      }
    }
 
    if (cmd_start >= argc)
@@ -2129,6 +2151,8 @@ int main(int argc, char **argv)
    /* SessionStart hook (settings.json wires it as `aimee session-start`). */
    if (strcmp(cmd, "session-start") == 0)
       return handle_session_start(json_output);
+   if (strcmp(cmd, "session-end") == 0)
+      return handle_session_end(json_output);
 
    /* Client-neutral process boundary: allocate and bind the session before any
     * host (Codex, Claude, OpenCode, or another executable) starts. */
