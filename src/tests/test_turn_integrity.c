@@ -90,11 +90,48 @@ static void test_scoped_knowledge_freshness(void)
    assert(ti_knowledge_epoch_advance("", "x", NULL) == 0);
 }
 
+static void test_effect_contract_shadow_lifecycle(void)
+{
+   event_count = 0;
+   ti_effect_contract_t effect;
+   assert(ti_effect_contract_init(&effect, "session-e", "write_file", "src/a.c",
+                                  "{\"path\":\"src/a.c\",\"content\":\"secret\"}",
+                                  TI_EFFECT_REVERSIBLE, TI_EFFECT_MODE_SHADOW) == 0);
+   assert(strcmp(effect.tool, "write_file") == 0);
+   assert(strstr(effect.arguments_digest, "secret") == NULL);
+   assert(event_count == 1 && strcmp(events[0].event, "effect.proposed") == 0);
+   assert(strstr(events[0].detail, "secret") == NULL);
+
+   assert(ti_effect_contract_validate(&effect, "write_file", "src/a.c",
+                                      "{\"path\":\"src/a.c\",\"content\":\"secret\"}",
+                                      TI_EFFECT_REVERSIBLE) == 1);
+   assert(ti_effect_contract_mark_executing(&effect) == 0);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_SUCCEEDED, "postcondition") == 0);
+   assert(effect.state == TI_EFFECT_SUCCEEDED);
+   assert(event_count == 4);
+}
+
+static void test_effect_contract_detects_drift(void)
+{
+   event_count = 0;
+   ti_effect_contract_t effect;
+   assert(ti_effect_contract_init(&effect, "session-e", "edit_file", "src/a.c", "{\"v\":1}",
+                                  TI_EFFECT_REVERSIBLE, TI_EFFECT_MODE_SHADOW) == 0);
+   assert(ti_effect_contract_validate(&effect, "edit_file", "src/b.c", "{\"v\":1}",
+                                      TI_EFFECT_REVERSIBLE) == 0);
+   assert(effect.matched == 0);
+   assert(strcmp(events[1].event, "effect.mismatch") == 0);
+   assert(ti_effect_contract_mark_executing(&effect) == 0);
+   assert(ti_effect_contract_finish(&effect, TI_EFFECT_FAILED, "tool_error") == 0);
+}
+
 int main(void)
 {
    test_lifecycle_and_json();
    test_read_only_and_terminal_paths();
    test_scoped_knowledge_freshness();
+   test_effect_contract_shadow_lifecycle();
+   test_effect_contract_detects_drift();
    ti_set_event_callback(NULL, NULL);
    puts("all turn_integrity tests passed");
    return 0;

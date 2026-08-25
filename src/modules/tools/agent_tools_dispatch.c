@@ -10,6 +10,7 @@
 #include "tool_args_coerce.h"
 #include "sandbox_learned.h"
 #include "modules/workspace/workspace_provider.h"
+#include <aimee/core/turn_integrity.h>
 #include <aimee/tools/module_api.h>
 
 /* delegation_active_id is provided by server_compute.c at link time;
@@ -72,6 +73,8 @@ static __thread const char *g_td_verdict = "ok";
 static __thread const char *g_td_reason = "";
 static __thread const char *g_td_mode = "internal";
 static __thread int g_td_explicit = 0; /* 1 once _inner set a definitive verdict */
+static __thread ti_effect_contract_t g_td_effect;
+static __thread int g_td_effect_active;
 
 /* INVARIANT: no handler reachable from dispatch_tool_call_ctx may synchronously
  * re-enter dispatch_tool_call_ctx on the same thread. These carriers are reset at
@@ -87,6 +90,8 @@ static void td_outcome_reset(void)
    g_td_reason = "";
    g_td_mode = "internal";
    g_td_explicit = 0;
+   memset(&g_td_effect, 0, sizeof g_td_effect);
+   g_td_effect_active = 0;
 }
 /* Record a definitive verdict at a return path (refusal, or a known error). */
 static void td_outcome_set(const char *verdict, const char *reason)
@@ -109,6 +114,73 @@ static int is_exec_tool(const char *name)
       return 0;
    int classification = 0;
    return g_tool_classifier(name, &classification) == 0 && classification == AIMEE_TOOL_CLASS_EXEC;
+}
+
+static ti_effect_class_t td_effect_class(const char *name)
+{
+   int classification = AIMEE_TOOL_CLASS_UNKNOWN;
+   if (g_tool_classifier)
+      (void)g_tool_classifier(name, &classification);
+   switch (classification)
+   {
+   case AIMEE_TOOL_CLASS_READ:
+   case AIMEE_TOOL_CLASS_CONTROL:
+      return TI_EFFECT_READ_ONLY;
+   case AIMEE_TOOL_CLASS_WRITE:
+      return TI_EFFECT_REVERSIBLE;
+   case AIMEE_TOOL_CLASS_EXEC:
+      return TI_EFFECT_CONDITIONALLY_REVERSIBLE;
+   case AIMEE_TOOL_CLASS_REMOTE:
+      return TI_EFFECT_EXTERNAL_COMMUNICATION;
+   default:
+      return TI_EFFECT_UNCLASSIFIED;
+   }
+}
+
+static const char *td_effect_target(cJSON *args)
+{
+   static const char *const keys[] = {"path", "repo_path", "url", "ref", "title", NULL};
+   for (int i = 0; keys[i]; i++)
+   {
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(args, keys[i]);
+      if (cJSON_IsString(value))
+         return value->valuestring;
+   }
+   return "";
+}
+
+static void td_effect_propose(const char *name, cJSON *args)
+{
+   char *normalized = cJSON_PrintUnformatted(args);
+   const char *who = session_id();
+   if (ti_effect_contract_init(&g_td_effect, who, name, td_effect_target(args), normalized,
+                               td_effect_class(name), TI_EFFECT_MODE_SHADOW) == 0)
+      g_td_effect_active = 1;
+   free(normalized);
+}
+
+static void td_effect_validate_and_execute(const char *name, cJSON *args)
+{
+   if (!g_td_effect_active)
+      return;
+   char *normalized = cJSON_PrintUnformatted(args);
+   (void)ti_effect_contract_validate(&g_td_effect, name, td_effect_target(args), normalized,
+                                     td_effect_class(name));
+   free(normalized);
+   (void)ti_effect_contract_mark_executing(&g_td_effect);
+}
+
+static void td_effect_finish(void)
+{
+   if (!g_td_effect_active)
+      return;
+   ti_effect_state_t outcome = TI_EFFECT_FAILED;
+   if (strcmp(g_td_verdict, "ok") == 0)
+      outcome = TI_EFFECT_SUCCEEDED;
+   else if (strcmp(g_td_verdict, "refused") == 0)
+      outcome = TI_EFFECT_REFUSED;
+   (void)ti_effect_contract_finish(&g_td_effect, outcome, g_td_reason);
+   g_td_effect_active = 0;
 }
 
 static void td_classify_exec_result(const char *result)
@@ -2010,6 +2082,7 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
+   td_effect_finish();
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
@@ -2089,6 +2162,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          }
       }
    }
+
+   td_effect_propose(name, args);
 
    /* The `shell` permission, enforced where the command would run.
     *
@@ -2272,6 +2347,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
+   td_effect_validate_and_execute(name, args);
    char *result = NULL;
 
    if (strcmp(name, "bash") == 0)

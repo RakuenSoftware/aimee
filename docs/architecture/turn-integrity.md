@@ -44,3 +44,15 @@ re-retrieve affected facts rather than silently relying on an earlier answer.
 The in-process epoch table is a bounded cache, not the source of truth. The
 durable curator feed remains authoritative across daemon restarts. An unseen
 session or scope is reported as `unknown`, never incorrectly asserted current.
+
+## Effect contracts
+
+Every tool dispatch can be represented as a mechanical effect proposal: tool
+identity, effect class, target digest, normalized-arguments digest, mode, and
+lifecycle state. Target and argument content are hashed at the boundary and are
+never retained by the contract or emitted in events.
+
+Shadow mode observes `proposed`, `validated` or `mismatch`, `executing`, and a
+terminal outcome without changing authorization. It provides a safe measurement
+period for contract coverage and drift before enforcement is enabled. Existing
+role, execution-policy, workflow, and guardrail decisions remain authoritative.

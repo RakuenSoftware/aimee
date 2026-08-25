@@ -19,6 +19,8 @@ struct cJSON;
 #define TI_DETAIL_MAX    256
 #define TI_DOMAIN_MAX    48
 #define TI_SCOPE_MAX     128
+#define TI_TOOL_MAX      96
+#define TI_DIGEST_MAX    65
 
 typedef enum
 {
@@ -81,6 +83,48 @@ typedef struct
    uint64_t epoch;
 } ti_knowledge_basis_t;
 
+typedef enum
+{
+   TI_EFFECT_READ_ONLY = 0,
+   TI_EFFECT_REVERSIBLE,
+   TI_EFFECT_CONDITIONALLY_REVERSIBLE,
+   TI_EFFECT_IRREVERSIBLE,
+   TI_EFFECT_EXTERNAL_COMMUNICATION,
+   TI_EFFECT_UNCLASSIFIED
+} ti_effect_class_t;
+
+typedef enum
+{
+   TI_EFFECT_MODE_OFF = 0,
+   TI_EFFECT_MODE_SHADOW,
+   TI_EFFECT_MODE_ENFORCE
+} ti_effect_mode_t;
+
+typedef enum
+{
+   TI_EFFECT_PROPOSED = 0,
+   TI_EFFECT_VALIDATED,
+   TI_EFFECT_EXECUTING,
+   TI_EFFECT_SUCCEEDED,
+   TI_EFFECT_FAILED,
+   TI_EFFECT_UNKNOWN_OUTCOME,
+   TI_EFFECT_REFUSED
+} ti_effect_state_t;
+
+typedef struct
+{
+   char contract_id[TI_ID_MAX];
+   char session_id[TI_ID_MAX];
+   char tool[TI_TOOL_MAX];
+   char target_digest[TI_DIGEST_MAX];
+   char arguments_digest[TI_DIGEST_MAX];
+   ti_effect_class_t effect_class;
+   ti_effect_mode_t mode;
+   ti_effect_state_t state;
+   int matched;
+   uint64_t sequence;
+} ti_effect_contract_t;
+
 /* Installation must complete before worker threads start. NULL disables the
  * callback. Events contain bounded identity/enum metadata, never prompt, tool
  * argument, result, or model-response content. */
@@ -123,5 +167,24 @@ ti_freshness_t ti_session_knowledge_observe(const char *session_id, uint64_t cur
 /* Clears only the knowledge/session registries. Intended for process teardown
  * tests; production lifetime is the daemon lifetime. */
 void ti_knowledge_reset_for_test(void);
+
+/* Bind an effect proposal to the mechanical tool, target identity and effective
+ * normalized arguments. Raw target/argument content is hashed and never retained
+ * or emitted. Shadow mode records drift without authorizing or blocking it. */
+int ti_effect_contract_init(ti_effect_contract_t *contract, const char *session_id,
+                            const char *tool, const char *target, const char *arguments_json,
+                            ti_effect_class_t effect_class, ti_effect_mode_t mode);
+
+/* Compare the execution about to happen with the proposal. Returns 1 for an
+ * exact match, 0 for drift, and -1 for an invalid contract. The caller decides
+ * whether a mismatch blocks according to the declared mode and policy. */
+int ti_effect_contract_validate(ti_effect_contract_t *contract, const char *tool,
+                                const char *target, const char *arguments_json,
+                                ti_effect_class_t effect_class);
+int ti_effect_contract_mark_executing(ti_effect_contract_t *contract);
+int ti_effect_contract_finish(ti_effect_contract_t *contract, ti_effect_state_t outcome,
+                              const char *reason_code);
+const char *ti_effect_class_name(ti_effect_class_t effect_class);
+const char *ti_effect_state_name(ti_effect_state_t state);
 
 #endif /* AIMEE_CORE_TURN_INTEGRITY_H */

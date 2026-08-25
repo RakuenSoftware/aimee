@@ -1,10 +1,12 @@
 #include <aimee/core/turn_integrity.h>
 
 #include "cJSON.h"
+#include "aimee_sha256.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdatomic.h>
 
 static ti_event_callback_t g_event_callback;
 static void *g_event_userdata;
@@ -30,6 +32,7 @@ typedef struct
 static ti_knowledge_slot_t g_knowledge[TI_KNOWLEDGE_SLOTS];
 static ti_session_slot_t g_sessions[TI_SESSION_SLOTS];
 static pthread_mutex_t g_knowledge_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic uint64_t g_effect_sequence = 1;
 
 static void copy_bounded(char *dst, size_t cap, const char *src)
 {
@@ -307,4 +310,167 @@ void ti_knowledge_reset_for_test(void)
    memset(g_knowledge, 0, sizeof g_knowledge);
    memset(g_sessions, 0, sizeof g_sessions);
    pthread_mutex_unlock(&g_knowledge_lock);
+}
+
+const char *ti_effect_class_name(ti_effect_class_t effect_class)
+{
+   switch (effect_class)
+   {
+   case TI_EFFECT_READ_ONLY:
+      return "read_only";
+   case TI_EFFECT_REVERSIBLE:
+      return "reversible";
+   case TI_EFFECT_CONDITIONALLY_REVERSIBLE:
+      return "conditionally_reversible";
+   case TI_EFFECT_IRREVERSIBLE:
+      return "irreversible";
+   case TI_EFFECT_EXTERNAL_COMMUNICATION:
+      return "external_communication";
+   default:
+      return "unclassified";
+   }
+}
+
+const char *ti_effect_state_name(ti_effect_state_t state)
+{
+   switch (state)
+   {
+   case TI_EFFECT_PROPOSED:
+      return "proposed";
+   case TI_EFFECT_VALIDATED:
+      return "validated";
+   case TI_EFFECT_EXECUTING:
+      return "executing";
+   case TI_EFFECT_SUCCEEDED:
+      return "succeeded";
+   case TI_EFFECT_FAILED:
+      return "failed";
+   case TI_EFFECT_UNKNOWN_OUTCOME:
+      return "unknown_outcome";
+   case TI_EFFECT_REFUSED:
+      return "refused";
+   default:
+      return "invalid";
+   }
+}
+
+static int effect_digest(const char *value, char out[TI_DIGEST_MAX])
+{
+   const char *safe = value ? value : "";
+   return aimee_sha256_hex(safe, strlen(safe), out);
+}
+
+static void emit_effect(const ti_effect_contract_t *contract, const char *event_name,
+                        const char *reason_code)
+{
+   if (!contract || !g_event_callback)
+      return;
+   ti_event_t event;
+   memset(&event, 0, sizeof event);
+   copy_bounded(event.event, sizeof event.event, event_name);
+   copy_bounded(event.turn_id, sizeof event.turn_id, contract->contract_id);
+   copy_bounded(event.session_id, sizeof event.session_id, contract->session_id);
+   copy_bounded(event.principal, sizeof event.principal, contract->tool);
+   snprintf(event.detail, sizeof event.detail,
+            "class=%s state=%s matched=%d target=%s arguments=%s reason=%.24s",
+            ti_effect_class_name(contract->effect_class), ti_effect_state_name(contract->state),
+            contract->matched, contract->target_digest, contract->arguments_digest,
+            reason_code ? reason_code : "");
+   switch (contract->state)
+   {
+   case TI_EFFECT_PROPOSED:
+      event.state = TI_TURN_CONTRACTED;
+      break;
+   case TI_EFFECT_VALIDATED:
+      event.state = TI_TURN_AUTHORIZED;
+      break;
+   case TI_EFFECT_EXECUTING:
+      event.state = TI_TURN_EXECUTING;
+      break;
+   case TI_EFFECT_SUCCEEDED:
+      event.state = TI_TURN_COMPLETED;
+      break;
+   case TI_EFFECT_REFUSED:
+      event.state = TI_TURN_BLOCKED;
+      break;
+   default:
+      event.state = TI_TURN_FAILED;
+      break;
+   }
+   event.sequence = contract->sequence;
+   g_event_callback(&event, g_event_userdata);
+}
+
+int ti_effect_contract_init(ti_effect_contract_t *contract, const char *session_id,
+                            const char *tool, const char *target, const char *arguments_json,
+                            ti_effect_class_t effect_class, ti_effect_mode_t mode)
+{
+   if (!contract || !tool || !tool[0] || mode < TI_EFFECT_MODE_OFF || mode > TI_EFFECT_MODE_ENFORCE)
+      return -1;
+   memset(contract, 0, sizeof *contract);
+   contract->sequence = atomic_fetch_add(&g_effect_sequence, 1);
+   snprintf(contract->contract_id, sizeof contract->contract_id, "effect-%llu",
+            (unsigned long long)contract->sequence);
+   copy_bounded(contract->session_id, sizeof contract->session_id, session_id);
+   copy_bounded(contract->tool, sizeof contract->tool, tool);
+   if (effect_digest(target, contract->target_digest) != 0 ||
+       effect_digest(arguments_json, contract->arguments_digest) != 0)
+      return -1;
+   contract->effect_class = effect_class;
+   contract->mode = mode;
+   contract->state = TI_EFFECT_PROPOSED;
+   contract->matched = 1;
+   if (mode != TI_EFFECT_MODE_OFF)
+      emit_effect(contract, "effect.proposed", "");
+   return 0;
+}
+
+int ti_effect_contract_validate(ti_effect_contract_t *contract, const char *tool,
+                                const char *target, const char *arguments_json,
+                                ti_effect_class_t effect_class)
+{
+   if (!contract || contract->state != TI_EFFECT_PROPOSED || !tool)
+      return -1;
+   char target_digest[TI_DIGEST_MAX];
+   char arguments_digest[TI_DIGEST_MAX];
+   if (effect_digest(target, target_digest) != 0 ||
+       effect_digest(arguments_json, arguments_digest) != 0)
+      return -1;
+   contract->matched = strcmp(contract->tool, tool) == 0 &&
+                       strcmp(contract->target_digest, target_digest) == 0 &&
+                       strcmp(contract->arguments_digest, arguments_digest) == 0 &&
+                       contract->effect_class == effect_class;
+   contract->state = TI_EFFECT_VALIDATED;
+   contract->sequence++;
+   if (contract->mode != TI_EFFECT_MODE_OFF)
+      emit_effect(contract, contract->matched ? "effect.validated" : "effect.mismatch",
+                  contract->matched ? "" : "proposal_drift");
+   return contract->matched;
+}
+
+int ti_effect_contract_mark_executing(ti_effect_contract_t *contract)
+{
+   if (!contract || contract->state != TI_EFFECT_VALIDATED)
+      return -1;
+   contract->state = TI_EFFECT_EXECUTING;
+   contract->sequence++;
+   if (contract->mode != TI_EFFECT_MODE_OFF)
+      emit_effect(contract, "effect.executing", "");
+   return 0;
+}
+
+int ti_effect_contract_finish(ti_effect_contract_t *contract, ti_effect_state_t outcome,
+                              const char *reason_code)
+{
+   if (!contract ||
+       (contract->state != TI_EFFECT_PROPOSED && contract->state != TI_EFFECT_VALIDATED &&
+        contract->state != TI_EFFECT_EXECUTING) ||
+       (outcome != TI_EFFECT_SUCCEEDED && outcome != TI_EFFECT_FAILED &&
+        outcome != TI_EFFECT_UNKNOWN_OUTCOME && outcome != TI_EFFECT_REFUSED))
+      return -1;
+   contract->state = outcome;
+   contract->sequence++;
+   if (contract->mode != TI_EFFECT_MODE_OFF)
+      emit_effect(contract, "effect.completed", reason_code);
+   return 0;
 }
