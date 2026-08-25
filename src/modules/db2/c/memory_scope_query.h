@@ -27,7 +27,7 @@
    " OR (ams.scope_type='workspace' AND ams.scope_value='_shared'))) THEN 1 ELSE 0 END"
 
 #define DB2_MEMORY_SCOPE_FILTER_SQL(memory_id_sql)                                                 \
-   " AND (?102 = 1 OR (" DB2_MEMORY_SCOPE_RANK_SQL(memory_id_sql) ") > 0)"
+   " AND (?101 = 0 OR ?102 = 1 OR (" DB2_MEMORY_SCOPE_RANK_SQL(memory_id_sql) ") > 0)"
 
 /* Normal recall is deliberately stricter than scope-only history/review
  * queries.  Lifecycle visibility is not feature-gated: rejected, archived,
@@ -54,6 +54,7 @@ void db2_memory_scope_context_restore(const db2_memory_scope_context_t *context)
 void db2_memory_scope_context_clear(void);
 void db2_memory_scope_context_get(db2_memory_scope_context_t *out);
 int db2_memory_scope_context_rank(int64_t memory_id);
+int db2_memory_scope_context_allows(int64_t memory_id);
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *st);
 
 #endif

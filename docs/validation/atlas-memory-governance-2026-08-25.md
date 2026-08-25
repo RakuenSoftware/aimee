@@ -19,8 +19,10 @@ badges as documentation-only claims.
   the tombstone, preserving the negative decision as review history.
 - Memory ownership is stored on each `memories` row. PostgreSQL RLS policies cover
   both memories and their rejection tombstones; the runtime role cannot delete or
-  truncate tombstones. Legacy `memory_scopes` and `memory_workspaces` rows are
-  migrated deterministically (project first, then workspace, then global).
+  truncate tombstones. Review, direct reads and row mutations also apply the same
+  scope predicate in the application, including on owner connections that can
+  bypass RLS. Legacy `memory_scopes` and `memory_workspaces` rows are migrated
+  deterministically (project first, then workspace, then global).
 - Recall requires `lifecycle_state='active'` independently of the two legacy
   archival feature flags. Archived, pending, rejected, fulfilled and superseded
   rows remain available to history/review APIs but cannot enter prompt context.

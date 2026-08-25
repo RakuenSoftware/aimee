@@ -37,10 +37,19 @@ static void test_memory_rejection_governance(void)
       assert(memory_insert(TIER_L2, KIND_FACT, "refusal:deploy",
                            "never deploy directly to production", 0.9, "review-session",
                            &rejected) == 0);
+
+      /* Application-side filtering remains authoritative even for an owner or
+       * superuser connection that PostgreSQL permits to bypass RLS. */
+      db2_memory_scope_context_set("", "other-project", 0);
+      assert(db2_memory_get(rejected.id, &replay) == -1);
+      db2_memory_review_row_t review[8];
+      assert(db2_memory_review_list("", 8, review, 8) == 0);
+      assert(db2_memory_reject(rejected.id, "cross-project rejection") == -1);
+
+      db2_memory_scope_context_set("", "governance-project", 0);
       assert(db2_memory_reject(rejected.id, "operator says this extraction is wrong") == 0);
       assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 0);
 
-      db2_memory_review_row_t review[8];
       int review_count = db2_memory_review_list("rejected", 8, review, 8);
       assert(review_count == 1);
       assert(review[0].id == rejected.id);
@@ -52,6 +61,9 @@ static void test_memory_rejection_governance(void)
                            "never deploy directly to production", 0.9, "second-extraction",
                            &replay) == -1);
 
+      db2_memory_scope_context_set("", "other-project", 0);
+      assert(db2_memory_restore(rejected.id, "test:other-operator") == -1);
+      db2_memory_scope_context_set("", "governance-project", 0);
       assert(db2_memory_restore(rejected.id, "test:operator") == 0);
       assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 1);
       assert(found[0].id == rejected.id);

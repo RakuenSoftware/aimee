@@ -95,7 +95,7 @@ int db2_memory_scope_context_rank(int64_t memory_id)
       return 0;
    char err[MSQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT scope_type,scope_value FROM memories WHERE id=?1 AND lifecycle_state='active'",
+       conn, "SELECT scope_type,scope_value FROM memories WHERE id=?1",
        err, sizeof(err));
    if (!st)
       return 0;
@@ -124,6 +124,15 @@ int db2_memory_scope_context_rank(int64_t memory_id)
    }
    aimee_pg_finalize(st);
    return rank;
+}
+
+int db2_memory_scope_context_allows(int64_t memory_id)
+{
+   if (memory_id <= 0)
+      return 0;
+   if (!s_memory_scope_context.active || s_memory_scope_context.include_all)
+      return 1;
+   return db2_memory_scope_context_rank(memory_id) > 0;
 }
 
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *st)
@@ -253,6 +262,10 @@ void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, cons
 {
    if (memory_id <= 0 || !scope_type || !scope_type[0] || !scope_value || !scope_value[0])
       return;
+   /* A scope tag changes ownership.  Keep the application-side authorization
+    * check even when the development connection is an RLS-bypassing owner. */
+   if (!db2_memory_scope_context_allows(memory_id))
+      return;
    void *conn = db2_conn();
    if (!conn)
       return;
@@ -286,6 +299,8 @@ void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, cons
 void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace)
 {
    if (memory_id <= 0 || !workspace || !workspace[0])
+      return;
+   if (!db2_memory_scope_context_allows(memory_id))
       return;
    void *conn = db2_conn();
    if (!conn)

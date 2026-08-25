@@ -16996,7 +16996,8 @@
         "src/modules/memory/memory_core_helpers_b.c",
         "src/modules/memory/memory_core_search_c.c",
         "src/modules/memory/memory_core_tiers.c",
-        "src/tests/test_kb_http_routes.c"
+        "src/tests/test_kb_http_routes.c",
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -18997,13 +18998,26 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 57
+          "line": 58
         }
       ],
       "signature": "void db2_memory_scope_bind_current ( aimee_pg_stmt_t * st )",
       "signature_sha256": "093697bbecdca2cd69a7fcbead866e9612a1ecd44ea3080c981c8436c258f84d",
       "status": "internal-unconsumed",
       "symbol": "db2_memory_scope_bind_current"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/memory_scope_query.h",
+          "line": 57
+        }
+      ],
+      "signature": "int db2_memory_scope_context_allows ( int64_t memory_id )",
+      "signature_sha256": "dff76433588a980c8b2dbf23b45861db5e1212f0804bafdf84c67af36796d26b",
+      "status": "internal-unconsumed",
+      "symbol": "db2_memory_scope_context_allows"
     },
     {
       "consumers": [
@@ -26878,14 +26892,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7e7ffcc111bad37e36dcca0c865b173c484a7cfb5efa509de034947c254ebcad",
+  "fingerprint": "35cee8efcf93c729983eae3eb0fb9b42a59438d037ca4252bb17d32271c142df",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 716,
-    "declarations": 1467,
+    "declarations": 1468,
     "headers": 140,
-    "internal_unconsumed": 169,
+    "internal_unconsumed": 170,
     "private_test_only": 288,
     "reviewed": 294
   }

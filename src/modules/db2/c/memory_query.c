@@ -1609,11 +1609,13 @@ int db2_memory_delete_row(int64_t memory_id)
       return 0;
 
    char err[MQ_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "DELETE FROM memories WHERE id = ?1", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "DELETE FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id"),
+       err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", memory_id);
+   db2_memory_scope_bind_current(st);
    int changes = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       changes = aimee_pg_stmt_changes(st);
@@ -1632,12 +1634,14 @@ int db2_memory_get(int64_t memory_id, memory_t *out)
    static const char *sql = "SELECT id, tier, kind, key, content, confidence, use_count,"
                             "       last_used_at, created_at, updated_at, source_session, salience,"
                             "       provenance_category, use_cases"
-                            "  FROM memories WHERE id = ?1";
+                            "  FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL(
+                                "memories.id");
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", memory_id);
+   db2_memory_scope_bind_current(st);
 
    int rc = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -1661,12 +1665,13 @@ int db2_memory_touch(int64_t memory_id)
     * helpers so persisted stamps compare lexically and consistently. */
    static const char *sql = "UPDATE memories SET use_count = use_count + 1,"
                             " last_used_at = pg_now_text()"
-                            " WHERE id = ?1";
+                            " WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id");
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", memory_id);
+   db2_memory_scope_bind_current(st);
    int changes = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       changes = aimee_pg_stmt_changes(st);
@@ -1746,13 +1751,14 @@ int db2_memory_update_content(int64_t memory_id, const char *content)
    if (!conn)
       return 0;
    static const char *sql = "UPDATE memories SET content = ?2, updated_at = pg_now_text()"
-                            " WHERE id = ?1";
+                            " WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id");
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", memory_id);
    aimee_pg_bind_text(st, "?2", content);
+   db2_memory_scope_bind_current(st);
    int changes = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       changes = aimee_pg_stmt_changes(st);
@@ -1762,7 +1768,7 @@ int db2_memory_update_content(int64_t memory_id, const char *content)
 
 int db2_memory_reject(int64_t memory_id, const char *reason)
 {
-   if (memory_id <= 0)
+   if (memory_id <= 0 || !db2_memory_scope_context_allows(memory_id))
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -1816,7 +1822,7 @@ int db2_memory_reject(int64_t memory_id, const char *reason)
 
 int db2_memory_restore(int64_t memory_id, const char *actor)
 {
-   if (memory_id <= 0 || !actor || !actor[0])
+   if (memory_id <= 0 || !actor || !actor[0] || !db2_memory_scope_context_allows(memory_id))
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -1879,7 +1885,8 @@ int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t
    static const char *sql =
        "SELECT id,tier,kind,key,content,confidence,lifecycle_state,archive_reason,"
        " scope_type,scope_value,created_at,updated_at FROM memories"
-       " WHERE (?1='' OR lifecycle_state=?2) ORDER BY updated_at DESC,id DESC LIMIT ?3";
+       " WHERE (?1='' OR lifecycle_state=?2)" DB2_MEMORY_SCOPE_FILTER_SQL(
+           "memories.id") " ORDER BY updated_at DESC,id DESC LIMIT ?3";
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -1887,6 +1894,7 @@ int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t
    aimee_pg_bind_text(st, "?1", state ? state : "");
    aimee_pg_bind_text(st, "?2", state ? state : "");
    aimee_pg_bind_int(st, "?3", limit);
+   db2_memory_scope_bind_current(st);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
