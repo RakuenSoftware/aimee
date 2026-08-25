@@ -41,6 +41,44 @@ ascending keys. That closed shape is what a provider can answer without a join,
 and it is why a search whose condition DB2 cannot flatten into filters stays on
 pgvector rather than routing with the condition dropped.
 
+## One module, many stores
+
+Which vector database sits behind the DB3 contract is a deployment choice, so
+the store is an interface (`vectordb.Backend`) and the provider does not know
+which one it has. Adding Milvus means another package beside `qdrant/` and
+nothing else.
+
+A provider per store was the alternative, and a forked provider is how two of
+them come to disagree about scope filtering. That is the one part which must
+never differ, because it is all that keeps one workspace's vectors out of
+another's answers. `Backend` is narrow for the same reason: authorize,
+rehydrate, and return-payload are absent by construction rather than by
+convention, so no backend can offer them.
+
+Two backends ship:
+
+- **memory**, the in-process index. It needs no external service, which makes it
+  right for a smoke test and wrong for anything else: it loses everything on
+  restart.
+- **qdrant**, over Qdrant's REST API. Selected with `AIMEE_DB3_BACKEND=qdrant`
+  and `AIMEE_DB3_QDRANT_URL`.
+
+Qdrant differs from the contract in three places, and each would have been
+silent:
+
+- it has no tombstone, only points and their absence. DB2's tombstone keeps the
+  identity while making the point unreachable, so a delete would preserve half
+  of it and let the id be reused. It is stored as a payload flag every search
+  excludes, under a prefixed key so a projected label cannot resurrect a point.
+- it returns a DISTANCE for Euclid and a similarity for the other metrics.
+  Passing the distance through would invert every ranking while still returning
+  plausible ids. It is negated, as the in-process index already does.
+- it reports no version of its own. The contract requires one, so the backend
+  counts its own generation, and only on a write that actually landed.
+
+`scripts/validation/db3/run-qdrant-e2e.sh` checks all three against a real
+Qdrant, because a fake will confirm whatever the client believes about them.
+
 ## Dependencies and consumers
 
 - `config` supplies the index dimension, metric, and collection.

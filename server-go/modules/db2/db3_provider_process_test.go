@@ -4,6 +4,7 @@ package db2
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,7 +61,39 @@ func buildProviderBinary(t *testing.T) string {
 	return provider
 }
 
+// TestTheShippedProviderBinaryServesOverARealBus runs the round trip against
+// each backend the provider can be deployed with.
+//
+// The memory backend always runs. The qdrant one runs when a live Qdrant is
+// named, and it is the case that matters most: it is the only test in the tree
+// where a search leaves the process, crosses the bus, is answered out of a real
+// vector database, and comes back. Everything else about the split is one half
+// talking to a fake of the other.
 func TestTheShippedProviderBinaryServesOverARealBus(t *testing.T) {
+	backends := []struct {
+		name string
+		env  []string
+	}{{name: "memory", env: []string{"AIMEE_DB3_BACKEND=memory"}}}
+	if url := os.Getenv("AIMEE_TEST_QDRANT_URL"); url != "" {
+		backends = append(backends, struct {
+			name string
+			env  []string
+		}{name: "qdrant", env: []string{
+			"AIMEE_DB3_BACKEND=qdrant",
+			"AIMEE_DB3_QDRANT_URL=" + url,
+			// A per-run prefix so a rerun never inherits the previous run's
+			// points and two runs can share one Qdrant.
+			fmt.Sprintf("AIMEE_DB3_QDRANT_PREFIX=busrt%d", time.Now().UnixNano()),
+		}})
+	}
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			providerProcessRoundTrip(t, backend.env)
+		})
+	}
+}
+
+func providerProcessRoundTrip(t *testing.T, backendEnv []string) {
 	harness := os.Getenv("DB3_GO_HOST")
 	if harness == "" {
 		t.Skip("DB3_GO_HOST is unset; run scripts/test_db3_go_bus.sh")
@@ -112,12 +145,12 @@ func TestTheShippedProviderBinaryServesOverARealBus(t *testing.T) {
 	// width rejects every vector and answers nothing, which is why it is a
 	// required setting rather than a defaulted one.
 	command := exec.Command(provider, socket)
-	command.Env = append(os.Environ(),
+	command.Env = append(append(os.Environ(),
 		"AIMEE_MODULE_PRINCIPAL_REF=456",
 		"AIMEE_DB3_COLLECTION=memory",
 		"AIMEE_DB3_DIMENSION=3",
 		"AIMEE_DB3_METRIC=cosine",
-	)
+	), backendEnv...)
 	providerLog, err := os.Create(filepath.Join(directory, "provider.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -204,38 +237,34 @@ func TestTheShippedProviderBinaryServesOverARealBus(t *testing.T) {
 	// reached -- which is the whole reason the provider republishes its
 	// capabilities. Reading it here rather than assuming it is what makes this
 	// test notice if that republication ever stops.
-	deadline = time.Now().Add(10 * time.Second)
+	// The applies are asynchronous, and against a remote store each one is a
+	// network round trip, so the provider's generation is still moving while
+	// this runs. The generation is therefore re-read on EVERY attempt rather
+	// than once: a single read races the applies and then searches at a version
+	// the provider has already left, which the router answers as unavailable.
+	// Re-reading is also what DB2 does -- it searches at the generation it has
+	// most recently been told about.
+	deadline = time.Now().Add(30 * time.Second)
+	var outcome DB3SearchOutcome
 	var generation uint64
 	for {
 		route := router.Route(protocol.RouteRequest{RequestID: 3, Action: protocol.RouteQuery})
 		if route.SelectedPrincipal == 456 && route.ProviderGeneration > 1 {
 			generation = route.ProviderGeneration
-			break
+			outcome = router.Search(ctx, protocol.SearchRequest{
+				RequestID: 2, RequiredGeneration: generation, Workspace: "workspace-a",
+				Project: "project-a", RecordType: "memory", TopK: 2,
+				Vector: []float32{1, 0, 0},
+			})
+			if outcome.Route == DB3External && len(outcome.Reply.Candidates) == 2 {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the provider never reported a generation past its applies (route %+v)", route)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	// The apply is asynchronous, so the search is retried until the index has
-	// them rather than slept on.
-	deadline = time.Now().Add(10 * time.Second)
-	var outcome DB3SearchOutcome
-	for {
-		outcome = router.Search(ctx, protocol.SearchRequest{
-			RequestID: 2, RequiredGeneration: generation, Workspace: "workspace-a",
-			Project: "project-a", RecordType: "memory", TopK: 2,
-			Vector: []float32{1, 0, 0},
-		})
-		if outcome.Route == DB3External && len(outcome.Reply.Candidates) == 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the provider never returned the applied points at generation %d (outcome %+v)",
+			t.Fatalf("the provider never returned the applied points (last generation %d, outcome %+v)",
 				generation, outcome)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Nearest first, and the orthogonal point excluded by TopK. Getting the

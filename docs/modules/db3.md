@@ -108,6 +108,25 @@ non-colliding refs.
 
 Grants load once, at daemon start: provision before starting, or restart after.
 
+## Who routes, and when
+
+Routing is the postgres module's job, and it is conditional.
+
+A DB3 provider is optional. With none installed the provider registry is empty,
+every vector operation runs against PostgreSQL, and nothing about the deployment
+changes. Installing one accelerates the portable subset; it never becomes a
+dependency. If the provider is absent, unready, behind DB2's generation, or
+failing, PostgreSQL answers -- and a fallback is reported distinctly from never
+having routed, so a broken provider cannot be mistaken for a quiet corpus.
+
+Not every vector operation can leave, and that is not a limitation to work
+around. A provider takes a vector, a top-k and exact-match filters and returns
+opaque ids and scores. Anything that needs a join, a payload, an ordering
+PostgreSQL computes, or authority over what the caller may see is an operation
+DB2 must answer itself. The test for "can this be routed" is the wire's own
+validation, so portability keeps a single definition rather than a second
+opinion that can drift from it.
+
 ## Public contracts
 
 The wire contract is generated -- `src/modules/db2/include/aimee/db2/db3_contract.h`,
