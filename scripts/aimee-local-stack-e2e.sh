@@ -242,17 +242,57 @@ arm_module() { # executable socket policy log pid-variable [environment...]
   printf -v "$pid_var" '%s' "$!"
 }
 
-stop_modules() {
+stop_server_modules() {
   local pid
   for pid in "$server_db1_pid" "$server_config_pid" "$server_postgres_pid" \
-             "$kb_config_pid" "$kb_postgres_pid" "${feature_module_pids[@]}"; do
+             "${feature_module_pids[@]}"; do
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
   server_db1_pid=""; server_config_pid=""; server_postgres_pid=""
-  kb_config_pid=""; kb_postgres_pid=""
   feature_module_pids=()
+}
+
+stop_kb_modules() {
+  local pid
+  for pid in "$kb_config_pid" "$kb_postgres_pid"; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  kb_config_pid=""; kb_postgres_pid=""
+}
+
+stop_modules() {
+  stop_server_modules
+  stop_kb_modules
+}
+
+start_kb_modules() {
+  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-config-module.log" kb_config_pid
+  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-postgres-module.log" kb_postgres_pid \
+    "AIMEE_DB2_URL=$AIMEE_DB2_URL"
+}
+
+start_server_modules() {
+  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+    "$AIMEE_HOME/server-postgres-module.log" server_postgres_pid \
+    "AIMEE_STORE_URL=$AIMEE_STORE_URL"
+  arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+    "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
+    "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
+  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+    "$AIMEE_HOME/server-config-module.log" server_config_pid
+  for module_id in "${feature_module_ids[@]}"; do
+    feature_pid=""
+    arm_module "$MODULE_BIN_DIR/aimee-module-$module_id" \
+      "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+      "$AIMEE_HOME/server-$module_id-module.log" feature_pid
+    feature_module_pids+=("$feature_pid")
+  done
 }
 
 cleanup() {
@@ -306,11 +346,7 @@ if [[ "$MODE" == "full" ]]; then
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
-  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
-    "$AIMEE_HOME/kb-config-module.log" kb_config_pid
-  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
-    "$AIMEE_HOME/kb-postgres-module.log" kb_postgres_pid \
-    "AIMEE_DB2_URL=$AIMEE_DB2_URL"
+  start_kb_modules
   # Capture kb output so the embedder-fidelity gate below can see whether pgvec
   # accepted the memory vectors or refused them on a dim mismatch.
   "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
@@ -350,21 +386,7 @@ else
 fi
 
 bold "==> Starting aimee-server"
-arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
-  "$AIMEE_HOME/server-postgres-module.log" server_postgres_pid \
-  "AIMEE_STORE_URL=$AIMEE_STORE_URL"
-arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
-  "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
-  "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
-arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
-  "$AIMEE_HOME/server-config-module.log" server_config_pid
-for module_id in "${feature_module_ids[@]}"; do
-  feature_pid=""
-  arm_module "$MODULE_BIN_DIR/aimee-module-$module_id" \
-    "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
-    "$AIMEE_HOME/server-$module_id-module.log" feature_pid
-  feature_module_pids+=("$feature_pid")
-done
+start_server_modules
 AIMEE_API_BEARER_TOKEN="$BEARER" \
   "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
@@ -549,6 +571,14 @@ if [[ "${AIMEE_E2E_RESTART_COMPONENTS:-0}" == "1" && "$MODE" == "full" ]]; then
   kill "$server_pid"
   wait "$server_pid" 2>/dev/null || true
   server_pid=""
+  # Process modules are supervised siblings. They exit when their owner's bus
+  # disappears, so a daemon-only restart must re-arm them just as a service
+  # manager would. Remove only the now-stale socket after its owner is reaped;
+  # otherwise an arm process can race into the dead inode and exit before the
+  # replacement server binds.
+  stop_server_modules
+  rm -f "$AIMEE_HOME/server-module-bus.sock"
+  start_server_modules
   # The bootstrap bearer is a first-process transport secret. After deploy/apply
   # seals the installation, replaying an enrolled client's bearer through that
   # channel is invalid configuration and must be rejected. A real restart uses
@@ -576,6 +606,9 @@ if [[ "${AIMEE_E2E_RESTART_COMPONENTS:-0}" == "1" && "$MODE" == "full" ]]; then
   kill "$kb_pid"
   wait "$kb_pid" 2>/dev/null || true
   kb_pid=""
+  stop_kb_modules
+  rm -f "$AIMEE_HOME/kb-module-bus.sock"
+  start_kb_modules
   "$REPO/aimee-kb" --http-port=8741 >>"$AIMEE_HOME/kb.log" 2>&1 &
   kb_pid=$!
   deadline=$((SECONDS + WAIT_SECONDS))
