@@ -55,15 +55,16 @@ STAGE_DECLARE = 2
 # in that file so no future module is assigned into it. The band is wider than the
 # real ceiling -- BUS_HOST_MAX_KINDS is 256 kinds per host, shared with every other
 # module -- so the band is never what binds.
-# A DB3 vector provider is provisioned exactly like a plugin instance -- an
-# operator installs Qdrant or Milvus, it attaches to a bus, and DB3Router keys it
-# by principal ref. The only differences are which band the ref comes from and
-# what the grant is called, so this script covers both rather than being copied.
-# A second copy is how the two allocators would drift, which is the defect this
-# whole derivation exists to remove.
+# The band MUST match tests/baselines/modules/canonical-inventory.yaml, which
+# enforces that no module ref falls inside it.
 #
-# The bands MUST match tests/baselines/modules/canonical-inventory.yaml, which
-# enforces that no module ref falls inside either and that they do not overlap.
+# There was a second band here, [456,512), for external vector database
+# providers. It went with them: the searches worth answering outside PostgreSQL
+# came to one curator lookup, because memory visibility is a rank over EXISTS
+# subqueries, kb reads its generation from a joined table, and code search is
+# one leg of a fusion whose other legs are relational. The band stays RESERVED
+# in the inventory rather than reused, so a ref from a grant written before the
+# removal can never collide with a plugin allocated after it.
 KINDS = {
     "plugin": {
         "first": 200,
@@ -71,30 +72,7 @@ KINDS = {
         "prefix": "mcp",
         "what": "plugin instances",
     },
-    "db3-provider": {
-        "first": 456,
-        "limit": 512,
-        "prefix": "db3",
-        "what": "DB3 vector providers",
-    },
 }
-
-# The DB3 wire kinds a vector provider actually speaks.
-#
-# These are FIXED CONSTANTS, not derived from the principal ref like a module's
-# stages are: every provider answers the same SEARCH kind. MUST match
-# src/modules/db2/include/aimee/db2/db3_contract.h and
-# server-go/db3/contract_generated.go.
-#
-# Only ONE provider may SERVE the search. bus_host_serve_kind binds one kind to
-# exactly one serving slot, so a second provider granted it is refused at
-# attach. That is the intended shape -- the C host fixture grants serve to one
-# provider and publish/subscribe to the other -- and it is why the band exists
-# to keep provider IDENTITIES apart rather than their kinds.
-DB3_EVENT_CAPABILITIES = 0x80030001
-DB3_EVENT_APPLY = 0x80030002
-DB3_EVENT_APPLIED = 0x80030003
-DB3_EVENT_SEARCH = 0x80030004
 
 INSTANCE_RE = re.compile(r"^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$")
 GRANT_RE = re.compile(r"^\s*([a-z_]+)\s*=\s*(.*?)\s*$")
@@ -189,8 +167,7 @@ def main():
     ap.add_argument("--cwd", default="", help="working directory for the plugin")
     ap.add_argument("--daemon", default="server", help="daemon hosting it (default: server)")
     ap.add_argument("--kind", default="plugin", choices=sorted(KINDS),
-                    help="what is being provisioned: an MCP/pluggy plugin instance, "
-                         "or a DB3 vector provider (default: plugin)")
+                    help="what is being provisioned (default: plugin)")
     ap.add_argument("--config-dir", default=os.path.expanduser("~/.config/aimee"),
                     help="aimee config directory")
     ap.add_argument("--dry-run", action="store_true", help="print, write nothing")
@@ -200,13 +177,7 @@ def main():
         die(f"instance {args.instance!r} must match [a-z][a-z0-9]*([-_][a-z0-9]+)* -- it becomes a "
             "command group, and the registry accepts only [a-z0-9_]")
 
-    # A DB3 provider IS the process. It spawns no child and proxies no endpoint,
-    # so neither --argv nor --sse-url means anything for it: the executable is
-    # --module-bin under the aimee-module-db3-<instance> name. Requiring one of
-    # them made the documented command fail for a reason that had nothing to do
-    # with the provider. Both are still ACCEPTED so an existing command line
-    # keeps working, and both are ignored.
-    if args.kind != "db3-provider" and bool(args.argv) == bool(args.sse_url):
+    if bool(args.argv) == bool(args.sse_url):
         die("give exactly one of --argv (a local process) or --sse-url (a remote endpoint)")
 
     if args.sse_url:
@@ -218,9 +189,6 @@ def main():
         argv = ["sse:" + args.sse_url]
         if args.bearer_env:
             argv.append(args.bearer_env)
-    elif args.argv is None:
-        # Only reachable for a DB3 provider, which needs no argv at all.
-        argv = []
     else:
         try:
             argv = json.loads(args.argv)
@@ -265,19 +233,9 @@ def main():
     else:
         ref, invoke, declare = allocate(grants, grant_name, args.kind)
 
-    if args.kind == "db3-provider":
-        # A provider serves the DB3 wire, not module-runtime stages. Granting it
-        # the ref-derived invoke/declare pair would authorize two kinds it never
-        # answers and none of the four it does, so it would attach and then be
-        # refused on every publish -- which reads as a provider that is up and
-        # silent.
-        publish = f"{DB3_EVENT_CAPABILITIES},{DB3_EVENT_APPLIED}"
-        subscribe = f"{DB3_EVENT_APPLY}"
-        serve = f"{DB3_EVENT_SEARCH}"
-    else:
-        publish = ""
-        subscribe = ""
-        serve = f"{invoke},{declare}"
+    publish = ""
+    subscribe = ""
+    serve = f"{invoke},{declare}"
 
     grant = "\n".join([
         "version=1",
@@ -304,18 +262,6 @@ def main():
 
     # The executable name is what selects the module: aimee-module is a multicall
     # binary dispatching on argv[0].
-    if args.kind == "db3-provider":
-        link = f"aimee-module-db3-{args.instance}"
-        print("")
-        print(f"# start {link} with this environment (it must symlink to {args.module_bin}):")
-        print(f"AIMEE_MODULE_PRINCIPAL_REF={ref}")
-        print("AIMEE_DB3_COLLECTION=<memory|kb|kb_pdf|code|curator_*>")
-        print("AIMEE_DB3_DIMENSION=<the corpus width; a mismatch returns no hits>")
-        print("AIMEE_DB3_METRIC=cosine")
-        print("")
-        print("# only ONE provider may serve the DB3 search; a second is refused at attach.")
-        return 0
-
     link = f"aimee-module-mcp-{args.instance}"
     print("")
     print(f"# start {link} with this environment (it must symlink to {args.module_bin}):")

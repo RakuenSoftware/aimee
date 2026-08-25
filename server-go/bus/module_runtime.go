@@ -86,29 +86,6 @@ type ModuleProcessConfig struct {
 	PrincipalRef   uint32
 	Stages         []ModuleStage
 	Handler        ModuleHandler
-
-	// Attached runs once, after this process has attached and before it serves
-	// a single request. It receives THIS process's own client -- the one the
-	// loop below polls -- so a module that must also CALL something can do it
-	// on the attachment it already has.
-	//
-	// It is not a second attachment and not a separate identity. Whatever it
-	// builds emits as this module, under this module's grant, and is subject to
-	// exactly the publish and request rules the host loaded for it. A module
-	// that needs no outbound traffic leaves this nil.
-	//
-	// It must not block: the serving loop starts when it returns.
-	Attached func(ctx context.Context, client *Client)
-
-	// Absorb receives events this loop polled that are not requests for a stage
-	// -- replies to what Attached sent, and notifications.
-	//
-	// It exists because there is exactly ONE reader on a client. Whoever calls
-	// out cannot poll for its own reply without racing this loop for events and
-	// silently eating the other's, so the loop reads everything and hands over
-	// what is not its own work. Nil means such events are dropped, which is
-	// right for a module that never calls out.
-	Absorb func(Event)
 }
 
 type cancelFlag struct{ set atomic.Bool }
@@ -219,9 +196,6 @@ func RunModuleProcess(ctx context.Context, config ModuleProcessConfig) error {
 		return fmt.Errorf("%w: %s attach: %v", ErrModuleRuntime, config.ModuleName, err)
 	}
 	defer client.Detach()
-	if config.Attached != nil {
-		config.Attached(ctx, client)
-	}
 	return runModuleClient(ctx, config, stages, client)
 }
 
@@ -398,13 +372,6 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 			continue
 		}
 		if event.Frame.HdrFlags&FRequest == 0 {
-			// Not work for a stage: a reply to something this module sent, or a
-			// notification. Handed over rather than dropped, because the module
-			// that sent the request cannot poll for its own answer -- this loop
-			// is the single reader.
-			if config.Absorb != nil {
-				config.Absorb(event)
-			}
 			continue
 		}
 

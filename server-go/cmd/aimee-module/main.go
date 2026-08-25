@@ -497,7 +497,6 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		config.Stages = []bus.ModuleStage{
 			{EventKind: postgres.EventHealth, StageID: postgres.StageHealth},
 			{EventKind: postgres.EventSQL, StageID: postgres.StageSQL},
-			{EventKind: postgres.EventVectorSearch, StageID: postgres.StageVectorSearch},
 		}
 		// BOTH STAGES, ALWAYS. The SQL handler opens its pool on first use and
 		// answers with the reason when it cannot, so a missing DSN produces an
@@ -505,81 +504,11 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// Trimming the list here instead would make this process disagree with
 		// process-contracts.json exactly when the database is unreachable.
 		sqlHandler := postgres.NewSQLHandler()
-		// Every collection answered in-database until the grant says otherwise.
-		// Replaced below when a provider is provisioned, which happens before
-		// the loop serves its first request.
-		vectorSearch, localErr := postgres.NewVectorSearchHandler(postgres.VectorProvider{}, nil)
-		if localErr != nil {
-			log.Printf("postgres: %v", localErr)
-			return bus.ModuleProcessConfig{}, false
-		}
 		config.Handler = func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
-			switch invocation.StageID {
-			case postgres.StageSQL:
+			if invocation.StageID == postgres.StageSQL {
 				return sqlHandler(invocation, frame)
-			case postgres.StageVectorSearch:
-				return vectorSearch.Handle(invocation, frame)
 			}
 			return postgres.Handle(invocation, frame)
-		}
-		// Is a vector database installed?
-		//
-		// Asked ONCE, here, by reading the grant directory the bus host read.
-		// Either an operator provisioned a provider or nobody did; grants load
-		// at boot and cannot appear while this process runs, so the answer is
-		// fixed for its lifetime. A vector database that came and went would
-		// mean the same query answered from different stores minutes apart with
-		// no way for a caller to know which.
-		//
-		// With none provisioned, every vector operation is served in-database by
-		// pgvector or pgvectorscale -- the ordinary deployment, and not a
-		// degraded one.
-		provider, err := postgres.ProvisionedVectorProvider(postgres.PolicyDir())
-		if err != nil {
-			// A misconfiguration, not an absence. Reported rather than resolved
-			// by picking one, because the operator installed something that is
-			// not being used and needs to know.
-			log.Printf("postgres: %v", err)
-		} else if provider.Principal != 0 {
-			log.Printf("postgres: vector provider %q (principal %d) serves collection %q; "+
-				"every other collection is answered in-database",
-				provider.Instance, provider.Principal, provider.Collection)
-			// The wire, on THIS process's attachment. Built when the loop hands
-			// over its client and torn down with it -- there is no second
-			// client and no separate identity; searches and applies leave as
-			// this module, under the grant the host already loaded.
-			var attachment *postgres.VectorBus
-			config.Attached = func(ctx context.Context, client *bus.Client) {
-				attachment, err = postgres.AttachVectorBus(client, provider)
-				if err != nil {
-					// Serving continues. Every vector operation is answered
-					// in-database, which is the same answer from the same rows
-					// -- slower, never wrong. Refusing to start instead would
-					// take the whole store down over a provider that is an
-					// optimization.
-					log.Printf("postgres: vector provider %q is provisioned but "+
-						"unreachable, serving in-database: %v", provider.Instance, err)
-					attachment = nil
-					return
-				}
-				// The write half. Without it the provider is searched and never
-				// written to, so it answers correctly and emptily forever --
-				// which reads as a corpus with no matches rather than one
-				// nobody filled.
-				// The searches this provider can take. Built here because the
-				// transport only exists once the loop hands over its client,
-				// and installed before the loop serves anything.
-				routed, buildErr := postgres.NewVectorSearchHandler(provider, attachment.Searcher())
-				if buildErr != nil {
-					log.Printf("postgres: vector searches stay in-database: %v", buildErr)
-				} else {
-					vectorSearch = routed
-				}
-				postgres.StartVectorReplication(ctx, attachment, postgres.ReplicationLeaseOwner())
-			}
-			// Replies to those searches come back through the loop's single
-			// reader, because nothing else may poll this client.
-			config.Absorb = func(event bus.Event) { attachment.Absorb(event) }
 		}
 	// "aimee" is what a deployment installs this as: the id in
 	// process-contracts.json and the executable every generated grant pins.
@@ -828,14 +757,6 @@ func principalRefFromEnv() (uint32, error) {
 func run(ctx context.Context, args []string) error {
 	if len(args) != 2 {
 		return errUsage
-	}
-	// A DB3 vector provider is dispatched before the module table, because it is
-	// not a module-runtime module: it serves the DB3 wire over a plain client
-	// rather than stages through a handler, so it never reaches
-	// bus.RunModuleProcess below.
-	if instance, isProvider := strings.CutPrefix(
-		strings.TrimPrefix(filepath.Base(args[0]), "aimee-module-"), db3ProviderPrefix); isProvider {
-		return runDB3Provider(ctx, instance, args[1])
 	}
 	config, ok := moduleConfigRuntime(ctx, args[0], args[1])
 	if !ok {

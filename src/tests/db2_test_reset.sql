@@ -29,10 +29,9 @@ END $$ LANGUAGE plpgsql;
 -- a typical test dirties a handful and resets in single-digit ms.
 --
 -- session_replication_role = replica suppresses user triggers for the duration.
--- The schema installs db3_reject_vector_truncate on the eight vector tables to
--- stop a production operator truncating an index out from under its rebuild;
--- that guard is correct and stays, but a test fixture resetting its own scratch
--- database is exactly the case it is not aimed at.
+-- A fixture resetting its own scratch database is not what any of this tree's
+-- table triggers are aimed at, and letting them fire here would make a reset
+-- cost more than the test it precedes.
 CREATE OR REPLACE FUNCTION aimee_test_reset() RETURNS void AS $$
 DECLARE
    r        record;

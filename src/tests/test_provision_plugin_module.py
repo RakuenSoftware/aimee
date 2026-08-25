@@ -21,12 +21,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 TOOL = os.path.join(REPO, "scripts", "provision-plugin-module.py")
 
-# MUST match src/modules/db2/include/aimee/db2/db3_contract.h.
-DB3_EVENT_CAPABILITIES = 0x80030001
-DB3_EVENT_APPLY = 0x80030002
-DB3_EVENT_APPLIED = 0x80030003
-DB3_EVENT_SEARCH = 0x80030004
-
 failures = []
 
 
@@ -185,63 +179,6 @@ def main():
     if failures:
         print(f"\n{len(failures)} failure(s)")
         return 1
-    # --- DB3 vector providers ---------------------------------------------
-    #
-    # A provider is provisioned by the same tool, from a DIFFERENT ref band. The
-    # bands must not overlap, or the two allocators collide exactly the way the
-    # retired 11264 plugin range collided with postgres.
-    with tempfile.TemporaryDirectory() as cfg:
-        module_bin = os.path.join(cfg, "aimee-module")
-        open(module_bin, "w").close()
-        os.chmod(module_bin, 0o755)
-
-        prov_refs = set()
-        for name in ("qdrant", "milvus"):
-            r = provision(cfg, name, module_bin, extra=("--kind", "db3-provider"))
-            check(r.returncode == 0, f"provisioned db3 provider {name}")
-            if r.returncode != 0:
-                print(r.stderr)
-                continue
-            f = grant_fields(cfg, name, prefix="db3")
-            ref = int(f["principal_ref"])
-            serve = [int(k) for k in f["serve"].split(",") if k]
-            publish = [int(k) for k in f["publish"].split(",") if k]
-            subscribe = [int(k) for k in f["subscribe"].split(",") if k]
-
-            check(456 <= ref < 512,
-                  f"{name} ref {ref} is inside the DB3 provider band [456,512)")
-            check(ref not in prov_refs, f"{name} got an unused ref ({ref})")
-
-            # A provider speaks the DB3 WIRE, whose kinds are fixed constants --
-            # not the ref-derived invoke/declare pair a module-runtime module
-            # serves. This assertion used to require the derived pair, which is
-            # what the tool wrote: two kinds the provider never answers, and none
-            # of the four it does. A grant like that attaches and is then refused
-            # on every publish, which reads as a provider that is up and silent.
-            check(serve == [DB3_EVENT_SEARCH],
-                  f"{name} serves the DB3 search kind")
-            check(publish == [DB3_EVENT_CAPABILITIES, DB3_EVENT_APPLIED],
-                  f"{name} publishes capabilities and applied")
-            check(subscribe == [DB3_EVENT_APPLY],
-                  f"{name} subscribes to apply")
-            check(all(k != 4096 + ref * 256 + 1 for k in serve + publish + subscribe),
-                  f"{name} was granted no ref-derived module stage")
-            prov_refs.add(ref)
-
-        # A provider ref must never land in the plugin band, and vice versa.
-        check(all(r >= 456 for r in prov_refs),
-              "no DB3 provider ref fell into the plugin band [200,456)")
-
-        # The two kinds write DIFFERENT grant files, so a plugin and a provider
-        # of the same name cannot overwrite one another.
-        r = provision(cfg, "qdrant", module_bin)
-        check(r.returncode == 0, "a PLUGIN may share a name with a provider")
-        plugin_ref = int(grant_fields(cfg, "qdrant")["principal_ref"])
-        check(200 <= plugin_ref < 456,
-              f"the same-named plugin got a plugin-band ref ({plugin_ref})")
-        check(plugin_ref not in prov_refs,
-              "the plugin and the provider did not collide on a ref")
-
     print("all provisioning tests passed")
     return 0
 

@@ -90,10 +90,6 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "contract",
         "Caller-side mirror of the db2 module's serving wire.",
     ),
-    "server-go/db3": (
-        "contract",
-        "Caller-side mirror of the db3 module's serving wire.",
-    ),
     "server-go/delegate": (
         "contract",
         "Shared caller-side contract for delegate execution, so a peer can call "

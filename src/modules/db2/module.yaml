@@ -127,7 +127,6 @@
     "src/modules/db2/c/org_vault_key_use.c",
     "src/modules/db2/c/org_vault_rewrap.c",
     "src/modules/db2/c/org_vault_rotation.c",
-    "src/modules/db2/c/pgvec_db3.c",
     "src/modules/db2/c/pgvec_kb_service.c",
     "src/modules/db2/c/pgvec_transport.c",
     "src/modules/db2/c/pgvec_verify.c",
@@ -153,7 +152,6 @@
     "src/modules/db2/c/workflow_patterns.c",
     "src/modules/db2/c/write_tier_grant.c",
     "src/modules/db2/client/generated.c",
-    "src/modules/db2/db3_route.c",
     "src/modules/db2/module_adapter.c",
     "src/modules/db2/module_init.c",
     "src/modules/db2/support/cert_serial_primitives.c",
@@ -181,14 +179,11 @@
   ],
   "public_headers": [
     "src/modules/db2/include/aimee/db2/client.h",
-    "src/modules/db2/include/aimee/db2/db3_contract.h",
-    "src/modules/db2/include/aimee/db2/db3_route.h",
     "src/modules/db2/include/aimee/db2/host_contracts.h",
     "src/modules/db2/include/aimee/db2/module_api.h"
   ],
   "contracts": [
     "src/modules/db2/eventcontract/declaration-review.json",
-    "src/modules/db2/eventcontract/db3.json",
     "src/modules/db2/eventcontract/link-closure-v1.json",
     "src/modules/db2/eventcontract/operations.json",
     "src/modules/db2/eventcontract/vector-portability.json"
@@ -309,7 +304,6 @@
     "src/modules/db2/c/org_vault_rotation.h",
     "src/modules/db2/c/pgvec_kb_service.h",
     "src/modules/db2/c/pgvec_scope_query.h",
-    "src/modules/db2/c/pgvec_db3.h",
     "src/modules/db2/c/pgvec_transport.h",
     "src/modules/db2/c/project.h",
     "src/modules/db2/c/prospective_memories.h",
@@ -360,7 +354,6 @@
   "tests": [
     "src/tests/test_bus_db2_module.c",
     "src/tests/test_bus_db2_process.c",
-    "src/tests/test_bus_db3.c",
     "src/tests/test_db2_cert_serial_support.c",
     "src/tests/test_db2_cjson_support.c",
     "src/tests/test_db2_cochange_support.c",
@@ -384,8 +377,7 @@
     "src/tests/test_db2_runtime_config_support.c",
     "src/tests/test_db2_sketch_support.c",
     "src/tests/test_db2_text_support.c",
-    "src/tests/test_db2_time_support.c",
-    "src/tests/test_db3_route.c"
+    "src/tests/test_db2_time_support.c"
   ],
   "docs": [
     "docs/modules/db2.md"

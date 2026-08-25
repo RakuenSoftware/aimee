@@ -89,7 +89,6 @@ INFRASTRUCTURE = {
     # program another script drives rather than a test that runs itself. The
     # script that drives it is named, so "who runs this" has an answer that can
     # be checked instead of assumed.
-    "db3-go-host": "the C bus host; scripts/test_db3_go_bus.sh drives it",
     "bus-conformance-host": "the C half; test_bus_conformance.sh, run by make go-unit-tests",
     "bus-bench": "a measurement; scripts/check_bus_perf_gate.sh drives it",
     "db2-test-template": "builds the Postgres test template; unit-tests-pg drives it",
@@ -147,10 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     # And it matched only names beginning "unit-test-", which was the SAME blind
     # spot one layer out. A test binary is a test binary whatever it is called,
     # and the ones that are not unit-test-* are disproportionately the expensive
-    # kind: db3-go-host is the C bus host for the DB3 provider proof, and it went
-    # unrun -- and broken -- for as long as it existed, because this check could
-    # not see the name. That is the third time the same shape has cost something
-    # here, so the pattern now takes any target under TESTPREFIX.
+    # kind. One such harness, the C bus host for an external vector database
+    # proof, went unrun -- and broken -- for as long as it existed, because this
+    # check could not see the name. That is the third time the same shape has
+    # cost something here, so the pattern now takes any target under TESTPREFIX.
     prefixed = set(re.findall(r"^\$\(TESTPREFIX\)/([a-z0-9][a-z0-9-]*)\s*:", joined, re.M))
     bare = set(re.findall(r"^(unit-test-[a-z0-9-]+)\s*:", joined, re.M))
     defined = prefixed | bare
