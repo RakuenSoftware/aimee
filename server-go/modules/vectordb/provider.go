@@ -24,6 +24,15 @@ const maxBatch = 256
 // scores and nothing else.
 type Provider struct {
 	index *Index
+	// collection is the namespace this provider serves.
+	//
+	// The DB3 search request has no collection field — only a record_type,
+	// which the projection catalog defines as a LABEL within a collection, not
+	// the collection itself. So a provider serves one collection, named here,
+	// and treats record_type as one more exact filter. Reading record_type as
+	// the collection would search a namespace the caller never asked for and
+	// return confident results from the wrong corpus.
+	collection string
 
 	mu sync.Mutex
 	// applied remembers which operation ids have landed, so a replayed apply
@@ -38,9 +47,9 @@ type Provider struct {
 	contiguous uint64
 }
 
-// NewProvider builds a provider over an index.
-func NewProvider(index *Index) *Provider {
-	return &Provider{index: index, applied: map[uint64]bool{}}
+// NewProvider builds a provider serving one collection out of an index.
+func NewProvider(index *Index, collection string) *Provider {
+	return &Provider{index: index, collection: collection, applied: map[uint64]bool{}}
 }
 
 // Capabilities describes what this provider will serve.
@@ -101,7 +110,7 @@ func (p *Provider) Search(ctx context.Context, request db3.SearchRequest) (db3.S
 	// even after refusing to return their content.
 	filters := scopeFilters(request)
 
-	candidates := p.index.Search(request.RecordType, request.Vector, int(request.TopK), filters)
+	candidates := p.index.Search(p.collection, request.Vector, int(request.TopK), filters)
 	return db3.SearchReply{
 		RequestID:  request.RequestID,
 		Generation: generation,
@@ -111,12 +120,17 @@ func (p *Provider) Search(ctx context.Context, request db3.SearchRequest) (db3.S
 
 // scopeFilters turns the request's scope into label filters.
 func scopeFilters(request db3.SearchRequest) []db3.ExactLabel {
-	filters := make([]db3.ExactLabel, 0, 2)
+	filters := make([]db3.ExactLabel, 0, 3)
 	if request.Workspace != "" {
 		filters = append(filters, db3.ExactLabel{Key: "workspace", Value: request.Workspace})
 	}
 	if request.Project != "" {
 		filters = append(filters, db3.ExactLabel{Key: "project", Value: request.Project})
+	}
+	// record_type is a label the projection catalog stores beside the vector,
+	// so it narrows within the collection rather than choosing one.
+	if request.RecordType != "" {
+		filters = append(filters, db3.ExactLabel{Key: "record_type", Value: request.RecordType})
 	}
 	return filters
 }

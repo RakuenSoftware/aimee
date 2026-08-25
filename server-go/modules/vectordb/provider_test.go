@@ -18,7 +18,7 @@ func labels(pairs ...string) []db3.ExactLabel {
 func seeded(t *testing.T) (*Provider, *Index) {
 	t.Helper()
 	index := NewIndex(Cosine, 3)
-	provider := NewProvider(index)
+	provider := NewProvider(index, "memory")
 	ctx := context.Background()
 
 	points := []struct {
@@ -26,10 +26,10 @@ func seeded(t *testing.T) (*Provider, *Index) {
 		vector []float32
 		labs   []db3.ExactLabel
 	}{
-		{1, []float32{1, 0, 0}, labels("workspace", "w1", "project", "p1")},
-		{2, []float32{0.9, 0.1, 0}, labels("workspace", "w1", "project", "p1")},
-		{3, []float32{0, 1, 0}, labels("workspace", "w1", "project", "p1")},
-		{4, []float32{1, 0, 0}, labels("workspace", "w2", "project", "p9")},
+		{1, []float32{1, 0, 0}, labels("workspace", "w1", "project", "p1", "record_type", "memory")},
+		{2, []float32{0.9, 0.1, 0}, labels("workspace", "w1", "project", "p1", "record_type", "memory")},
+		{3, []float32{0, 1, 0}, labels("workspace", "w1", "project", "p1", "record_type", "memory")},
+		{4, []float32{1, 0, 0}, labels("workspace", "w2", "project", "p9", "record_type", "memory")},
 	}
 	for index, point := range points {
 		outcome := provider.Apply(ctx, db3.Apply{
@@ -96,7 +96,7 @@ func TestSearchNeverCrossesScope(t *testing.T) {
 // as a wildcard is how an index leaks across workspaces.
 func TestSearchTreatsMissingLabelAsNoMatch(t *testing.T) {
 	index := NewIndex(Cosine, 3)
-	provider := NewProvider(index)
+	provider := NewProvider(index, "memory")
 	if err := index.Upsert("memory", 7, []float32{1, 0, 0}, nil); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestApplyIsIdempotentOnRedelivery(t *testing.T) {
 		OperationID: 2, Generation: 1, PointID: 2,
 		Kind: db3.ApplyUpsert, Collection: "memory",
 		Vector: []float32{0.9, 0.1, 0},
-		Labels: labels("workspace", "w1", "project", "p1"),
+		Labels: labels("workspace", "w1", "project", "p1", "record_type", "memory"),
 	}
 	outcome := provider.Apply(ctx, apply)
 	if outcome.Result != db3.AppliedOK {
@@ -236,7 +236,7 @@ func TestApplyIsIdempotentOnRedelivery(t *testing.T) {
 // not, and the outbox would never redeliver it.
 func TestWatermarkStopsAtAGap(t *testing.T) {
 	index := NewIndex(Cosine, 3)
-	provider := NewProvider(index)
+	provider := NewProvider(index, "memory")
 	ctx := context.Background()
 
 	apply := func(id uint64, pointID int64) db3.ProviderApplyOutcome {
@@ -321,7 +321,7 @@ func TestCapabilitiesReportTheIndexMetric(t *testing.T) {
 		L2:     db3.MetricL2,
 		Dot:    db3.MetricDot,
 	} {
-		provider := NewProvider(NewIndex(metric, 3))
+		provider := NewProvider(NewIndex(metric, 3), "memory")
 		if got := provider.Capabilities().Metrics; got != want {
 			t.Errorf("metric %d advertised %v, want %v", metric, got, want)
 		}

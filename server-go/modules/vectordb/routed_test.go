@@ -19,7 +19,7 @@ const providerPrincipal = db3.ProviderRefFirst
 func buildProvider(t *testing.T) *vectordb.Provider {
 	t.Helper()
 	index := vectordb.NewIndex(vectordb.Cosine, 3)
-	provider := vectordb.NewProvider(index)
+	provider := vectordb.NewProvider(index, "memory")
 
 	seeds := []struct {
 		id     int64
@@ -40,6 +40,7 @@ func buildProvider(t *testing.T) *vectordb.Provider {
 			Labels: []db3.ExactLabel{
 				{Key: "workspace", Value: "w1"},
 				{Key: "project", Value: "p1"},
+				{Key: "record_type", Value: "memory"},
 			},
 		})
 		if outcome.Result != db3.AppliedOK {
