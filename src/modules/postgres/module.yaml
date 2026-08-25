@@ -15,7 +15,8 @@
     "server-go/modules/postgres/health.go",
     "server-go/modules/postgres/sql.go",
     "server-go/modules/postgres/vectorbus.go",
-    "server-go/modules/postgres/vectorroute.go"
+    "server-go/modules/postgres/vectorroute.go",
+    "server-go/modules/postgres/vectorsearch.go"
   ],
   "go_tests": [
     "server-go/modules/postgres/checksum_test.go",

@@ -510,6 +510,28 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			}
 			return postgres.Handle(invocation, frame)
 		}
+		// DB3 rides this module's own attachment.
+		//
+		// An external vector database is OPTIONAL: with none installed the
+		// registry stays empty and every vector operation is served in-database
+		// by pgvector or pgvectorscale, which is what a deployment has before it
+		// has anything else. The sidecar attaches regardless, because whether a
+		// provider exists is discovered from the bus rather than configured
+		// here -- and a module that only listened when told to would never hear
+		// the first announcement.
+		//
+		// The collection is named because a provider serves exactly one and the
+		// wire carries no collection field, so the in-database side has to be
+		// told the same thing the provider was configured with.
+		collection := strings.TrimSpace(os.Getenv("AIMEE_DB3_COLLECTION"))
+		if collection == "" {
+			collection = "memory"
+		}
+		if sidecar, err := postgres.NewVectorSidecarForCollection(collection); err == nil {
+			config.Sidecar = sidecar
+		} else {
+			log.Printf("postgres: vector routing unavailable: %v", err)
+		}
 	// "aimee" is what a deployment installs this as: the id in
 	// process-contracts.json and the executable every generated grant pins.
 	//

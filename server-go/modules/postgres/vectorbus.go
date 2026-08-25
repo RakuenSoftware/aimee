@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -47,14 +48,18 @@ func (s busSearcher) Search(ctx context.Context, principal uint32,
 	return reply, nil
 }
 
-// VectorBus keeps a module's provider registry current and carries its searches.
+// VectorBus keeps this module's provider registry current and carries its
+// searches, on the module's OWN bus attachment.
 //
-// It owns the client it is given: it reads every event, so the client must not
-// be shared with another reader. The bus delivers each event once, and two
-// readers would each see half of them.
+// It is a bus.ModuleSidecar. The module loop owns the only reader and drops
+// every event that is not a request to one of its stages -- which is exactly
+// the search replies and capability publishes this needs -- so those events are
+// handed here instead of discarded. Sending was never the difficulty; a second
+// attachment for receiving is not available, because a principal attaches once.
 type VectorBus struct {
-	caller   *db3.SearchCaller
-	registry *db3.ProviderRegistry
+	caller    *db3.SearchCaller
+	publisher *db3.ApplyPublisher
+	registry  *db3.ProviderRegistry
 }
 
 // AttachVectorBus connects this module to the DB3 wire.
@@ -63,8 +68,7 @@ type VectorBus struct {
 // provider on it, never calls this, and vector operations stay in-database on
 // pgvector or pgvectorscale exactly as they always have. Nothing here may make
 // the absence of a provider an error.
-func AttachVectorBus(ctx context.Context, client *bus.Client,
-	registry *db3.ProviderRegistry) (*VectorBus, error) {
+func AttachVectorBus(client *bus.Client, registry *db3.ProviderRegistry) (*VectorBus, error) {
 	if client == nil {
 		return nil, ErrVectorBusConfig
 	}
@@ -77,7 +81,7 @@ func AttachVectorBus(ctx context.Context, client *bus.Client,
 	// the module DISCOVER a provider: anything else means being told a
 	// generation by something that guessed it, and the wire refuses a search at
 	// a generation the provider is not actually at.
-	caller, err := db3.NewSearchCallerWithObserver(ctx, client,
+	caller, err := db3.NewSearchCallerWithObserver(client,
 		func(principal, handle uint32, sequence uint64, capabilities db3.Capabilities) {
 			registry.Observe(principal, handle, sequence, capabilities)
 		})
@@ -85,6 +89,14 @@ func AttachVectorBus(ctx context.Context, client *bus.Client,
 		return nil, err
 	}
 	attachment.caller = caller
+	// The write half. A provider that is searched but never written to answers
+	// correctly and emptily forever, which reads as a corpus with no matches
+	// rather than one nobody filled.
+	publisher, err := db3.NewApplyPublisher(client)
+	if err != nil {
+		return nil, err
+	}
+	attachment.publisher = publisher
 	return attachment, nil
 }
 
@@ -96,9 +108,27 @@ func (v *VectorBus) Searcher() ProviderSearcher { return busSearcher{caller: v.c
 
 // Close releases the attachment.
 func (v *VectorBus) Close() {
-	if v != nil && v.caller != nil {
+	if v == nil {
+		return
+	}
+	if v.caller != nil {
 		v.caller.Close()
 	}
+	if v.publisher != nil {
+		v.publisher.Close()
+	}
+}
+
+// PublishApply ships one committed operation to every admitted provider.
+//
+// The postgres module owns this because it owns the canonical rows: an
+// operation is published only after it has committed here, so a provider can
+// never hold a row PostgreSQL does not.
+func (v *VectorBus) PublishApply(ctx context.Context, apply db3.Apply) error {
+	if v == nil || v.publisher == nil {
+		return ErrVectorBusConfig
+	}
+	return v.publisher.PublishApply(ctx, apply)
 }
 
 // NewBusVectorRouter builds a router wired to a bus, with PostgreSQL behind it.
@@ -106,7 +136,7 @@ func (v *VectorBus) Close() {
 // This is the constructor a deployment uses. With no client it still builds a
 // working router -- one that answers every search in-database -- because an
 // external vector database is optional and its absence is the ordinary case.
-func NewBusVectorRouter(ctx context.Context, client *bus.Client,
+func NewBusVectorRouter(client *bus.Client,
 	fallback PostgreSQLSearch) (*VectorRouter, *VectorBus, error) {
 	if fallback == nil {
 		return nil, nil, ErrNoVectorFallback
@@ -115,7 +145,7 @@ func NewBusVectorRouter(ctx context.Context, client *bus.Client,
 		router, err := NewVectorRouter(nil, nil, fallback)
 		return router, nil, err
 	}
-	attachment, err := AttachVectorBus(ctx, client, nil)
+	attachment, err := AttachVectorBus(client, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -178,4 +208,110 @@ func (r *VectorRouter) fallbackOnly(ctx context.Context,
 	request db3.SearchRequest) (db3.SearchReply, RouteKind, error) {
 	reply, err := r.fallback(ctx, request)
 	return reply, RouteFellBack, err
+}
+
+// --- bus.ModuleSidecar ---------------------------------------------------
+//
+// The module loop calls these. They are the whole reason this module can speak
+// DB3 without a second attachment.
+
+// VectorSidecar carries DB3 on a module's own attachment.
+//
+// Built before the client exists, because the module runtime hands the client
+// to the sidecar rather than the other way round: the process declares what it
+// will carry, then the loop attaches once and passes it in.
+type VectorSidecar struct {
+	registry *db3.ProviderRegistry
+	fallback PostgreSQLSearch
+
+	mu     sync.Mutex
+	bus    *VectorBus
+	router *VectorRouter
+}
+
+// NewVectorSidecar declares that this module will carry DB3.
+//
+// The fallback is required and the provider is not: with no vector database
+// installed the sidecar still attaches, the registry stays empty, and every
+// search runs in-database. That is the ordinary deployment.
+func NewVectorSidecar(fallback PostgreSQLSearch) (*VectorSidecar, error) {
+	if fallback == nil {
+		return nil, ErrNoVectorFallback
+	}
+	return &VectorSidecar{registry: db3.NewProviderRegistry(), fallback: fallback}, nil
+}
+
+// NewVectorSidecarForCollection is the constructor a module process uses: it
+// binds the in-database search to the same collection a provider would serve,
+// so the two answer from the same relation.
+func NewVectorSidecarForCollection(collection string) (*VectorSidecar, error) {
+	search, err := NewPGVectorSearch(collection)
+	if err != nil {
+		return nil, err
+	}
+	return NewVectorSidecar(search)
+}
+
+func (s *VectorSidecar) Attached(client *bus.Client) {
+	attachment, err := AttachVectorBus(client, s.registry)
+	if err != nil {
+		// Without the DB3 half this module still serves every vector operation
+		// in-database, so a failure here degrades to the default rather than
+		// taking the module down.
+		return
+	}
+	router, err := NewVectorRouter(s.registry, attachment.Searcher(), s.fallback)
+	if err != nil {
+		attachment.Close()
+		return
+	}
+	s.mu.Lock()
+	s.bus, s.router = attachment, router
+	s.mu.Unlock()
+}
+
+func (s *VectorSidecar) Absorb(event bus.Event) {
+	s.mu.Lock()
+	attachment := s.bus
+	s.mu.Unlock()
+	if attachment != nil {
+		attachment.Absorb(event)
+	}
+}
+
+func (s *VectorSidecar) Detached() {
+	s.mu.Lock()
+	attachment := s.bus
+	s.bus, s.router = nil, nil
+	s.mu.Unlock()
+	if attachment != nil {
+		attachment.Close()
+	}
+}
+
+// PublishApply ships a committed operation to every admitted provider, or
+// reports that this module has no DB3 attachment.
+func (s *VectorSidecar) PublishApply(ctx context.Context, apply db3.Apply) error {
+	s.mu.Lock()
+	attachment := s.bus
+	s.mu.Unlock()
+	if attachment == nil {
+		return ErrVectorBusConfig
+	}
+	return attachment.PublishApply(ctx, apply)
+}
+
+// Router is the router to route vector searches through, or nil before the
+// module has attached.
+func (s *VectorSidecar) Router() *VectorRouter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.router
+}
+
+// Absorb hands one event to the DB3 caller.
+func (v *VectorBus) Absorb(event bus.Event) {
+	if v != nil && v.caller != nil {
+		v.caller.Absorb(event)
+	}
 }

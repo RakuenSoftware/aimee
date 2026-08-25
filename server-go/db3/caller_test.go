@@ -24,7 +24,6 @@ type scriptedWire struct {
 }
 
 func (w *scriptedWire) InlineBudget() uint32 { return w.budget }
-func (w *scriptedWire) HeartbeatNow()        {}
 
 func (w *scriptedWire) RequestFragment(_ uint32, _ uint64, payload []byte, more bool) error {
 	w.mu.Lock()
@@ -48,15 +47,16 @@ func (w *scriptedWire) Cancel(_ uint32, correlation uint64) error {
 	return nil
 }
 
-func (w *scriptedWire) Poll() (bus.Event, bool, error) {
+// next takes the oldest scripted event, standing in for the owner's Poll.
+func (w *scriptedWire) next() (bus.Event, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(w.events) == 0 {
-		return bus.Event{}, false, nil
+		return bus.Event{}, false
 	}
 	event := w.events[0]
 	w.events = w.events[1:]
-	return event, true, nil
+	return event, true
 }
 
 func (w *scriptedWire) push(events ...bus.Event) {
@@ -95,18 +95,39 @@ func callerRequest() SearchRequest {
 	}
 }
 
+// startCaller builds a caller and pumps the scripted wire into it.
+//
+// The caller does not read the bus -- whoever owns the attachment does -- so a
+// test has to play that part, which is the same thing the module loop does in
+// production.
 func startCaller(t *testing.T, wire *scriptedWire) *SearchCaller {
 	t.Helper()
 	if wire.budget == 0 {
 		wire.budget = 4096
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	caller, err := newSearchCaller(ctx, wire)
+	caller, err := newSearchCaller(wire)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(caller.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			event, ok := wire.next()
+			if !ok {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			caller.Absorb(event)
+		}
+	}()
+	t.Cleanup(func() { cancel(); <-done; caller.Close() })
 	return caller
 }
 

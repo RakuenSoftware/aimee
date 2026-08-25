@@ -48,11 +48,13 @@ type SearchCaller struct {
 
 // callerWireClient is the part of bus.Client this needs, so the caller is
 // testable without standing a bus up.
+//
+// No Poll. The caller does not read the bus: whoever owns the attachment does,
+// and feeds this what it sees. A module has ONE attachment and therefore one
+// reader, and a caller that polled alongside it would take half the events.
 type callerWireClient interface {
-	Poll() (bus.Event, bool, error)
 	RequestFragment(kind uint32, correlation uint64, payload []byte, more bool) error
 	Cancel(kind uint32, correlation uint64) error
-	HeartbeatNow()
 	InlineBudget() uint32
 }
 
@@ -81,22 +83,21 @@ var ErrCallerConfig = errors.New("db3: invalid search caller")
 // actually wrong.
 const maxCallerPending = 512
 
-// NewSearchCaller starts a caller on an attached client.
+// NewSearchCaller builds a caller on an already-attached client.
 //
-// It owns a goroutine reading the client until ctx ends, so a client shared
-// with another reader must not be passed here: the bus delivers each event once
-// and two readers would each see half of them.
-func NewSearchCaller(ctx context.Context, client *bus.Client) (*SearchCaller, error) {
-	return NewSearchCallerWithObserver(ctx, client, nil)
+// It starts no goroutine and reads nothing. Whoever owns the attachment polls
+// and hands events to Absorb -- one attachment, one reader.
+func NewSearchCaller(client *bus.Client) (*SearchCaller, error) {
+	return NewSearchCallerWithObserver(client, nil)
 }
 
 // NewSearchCallerWithObserver also reports every provider announcement it sees.
-func NewSearchCallerWithObserver(ctx context.Context, client *bus.Client,
+func NewSearchCallerWithObserver(client *bus.Client,
 	observe CapabilityObserver) (*SearchCaller, error) {
 	if client == nil {
 		return nil, ErrCallerConfig
 	}
-	caller, err := newSearchCaller(ctx, client)
+	caller, err := newSearchCaller(client)
 	if err != nil {
 		return nil, err
 	}
@@ -104,18 +105,16 @@ func NewSearchCallerWithObserver(ctx context.Context, client *bus.Client,
 	return caller, nil
 }
 
-func newSearchCaller(ctx context.Context, client callerWireClient) (*SearchCaller, error) {
-	if ctx == nil || client == nil || client.InlineBudget() == 0 {
+func newSearchCaller(client callerWireClient) (*SearchCaller, error) {
+	if client == nil || client.InlineBudget() == 0 {
 		return nil, ErrCallerConfig
 	}
-	caller := &SearchCaller{
+	return &SearchCaller{
 		client:   client,
 		pollWait: time.Millisecond,
 		pending:  map[uint64]*pendingSearch{},
 		closed:   make(chan struct{}),
-	}
-	go caller.run(ctx)
-	return caller, nil
+	}, nil
 }
 
 // Close stops the caller and fails every outstanding search.
@@ -138,37 +137,11 @@ func (c *SearchCaller) Close() {
 	})
 }
 
-func (c *SearchCaller) run(ctx context.Context) {
-	defer c.Close()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.closed:
-			return
-		default:
-		}
-		c.client.HeartbeatNow()
-		event, ok, err := c.client.Poll()
-		if err != nil {
-			return
-		}
-		if !ok {
-			select {
-			case <-ctx.Done():
-				return
-			case <-c.closed:
-				return
-			case <-time.After(c.pollWait):
-			}
-			continue
-		}
-		c.absorb(event)
-	}
-}
-
-// absorb assembles one reply fragment and completes the search when it ends.
-func (c *SearchCaller) absorb(event bus.Event) {
+// Absorb takes one event from whoever owns the attachment.
+//
+// Everything not addressed to this caller is ignored, so the owner may offer it
+// every event it does not serve itself rather than having to classify first.
+func (c *SearchCaller) Absorb(event bus.Event) {
 	if event.Frame.EventKind == EventCapabilities {
 		c.absorbCapabilities(event)
 		return

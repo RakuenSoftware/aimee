@@ -145,7 +145,7 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 	// A fallback that records whether PostgreSQL was asked. That is the whole
 	// question: a routed search must not touch it, and every other case must.
 	postgresCalls := 0
-	router, attachment, err := NewBusVectorRouter(ctx, client,
+	router, attachment, err := NewBusVectorRouter(client,
 		func(_ context.Context, request db3.SearchRequest) (db3.SearchReply, error) {
 			postgresCalls++
 			return db3.SearchReply{
@@ -156,6 +156,33 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer attachment.Close()
+
+	// The caller no longer polls: whoever owns the attachment does. In the
+	// module process that is the module loop; here the test owns the client, so
+	// the test pumps it. This is the single-reader rule made visible -- there is
+	// exactly one Poll on a client, and everything else is fed from it.
+	pumpDone := make(chan struct{})
+	go func() {
+		defer close(pumpDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			client.HeartbeatNow()
+			event, ok, err := client.Poll()
+			if err != nil {
+				return
+			}
+			if !ok {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			attachment.Absorb(event)
+		}
+	}()
+	defer func() { cancel(); <-pumpDone }()
 
 	// Before any provider is observed, the module answers from PostgreSQL. This
 	// is the ordinary deployment, and it must work with a bus present.
