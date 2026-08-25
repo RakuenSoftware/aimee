@@ -21,6 +21,7 @@
 #   MODE          full | hybrid                 (default full; or pass --mode)
 #   AIMEE_DB2_URL Postgres URL for the kb        (full mode; default
 #                 postgresql://aimee@localhost/aimee_shared via local peer auth)
+#   AIMEE_STORE_URL PostgreSQL URL for server DB1 (optional; isolated per run)
 #   KB_URL        external kb base URL           (hybrid mode; default
 #                 http://localhost:8741)
 #   EMBEDDER_URL  embedder endpoint        (full mode; optional)
@@ -82,6 +83,17 @@ make -C src ../aimee ../aimee-server ../aimee-kb \
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
 BUNDLE="$RUN_ROOT/module-bundle"
+# Give the DB1 store the same per-run PostgreSQL isolation as the integration
+# harness.  Without this, a second live run inherits the immutable first-user
+# claim and cannot exercise enrollment honestly.
+if [[ -n "${AIMEE_STORE_URL:-}" && "$AIMEE_STORE_URL" != *"search_path="* ]]; then
+  LIVE_STORE_SCHEMA="local_stack_${$}_${RANDOM}"
+  case "$AIMEE_STORE_URL" in
+    *\?*) AIMEE_STORE_URL="${AIMEE_STORE_URL}&search_path=${LIVE_STORE_SCHEMA}" ;;
+    *)    AIMEE_STORE_URL="${AIMEE_STORE_URL}?search_path=${LIVE_STORE_SCHEMA}" ;;
+  esac
+  export AIMEE_STORE_URL
+fi
 cleanup_run_root() { rm -rf "$RUN_ROOT"; }
 trap cleanup_run_root EXIT INT TERM
 python3 scripts/export_c_repositories.py \
