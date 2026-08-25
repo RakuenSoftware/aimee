@@ -38,6 +38,8 @@
 #                 timeout MCP fixture as a server-owned client. (default 0)
 #   AIMEE_E2E_RESTART_COMPONENTS=1 restart both daemons after all probes and
 #                 prove enrolled/persisted service recovery.       (default 0)
+#   AIMEE_E2E_KEEP_RUN_ROOT=1 retain the scratch tree after cleanup for failed
+#                 live-run diagnosis; the printed path is operator-removable.
 #
 # Exit code: 0 = all checks passed.
 
@@ -92,7 +94,13 @@ make -C src ../aimee ../aimee-server ../aimee-kb \
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
 BUNDLE="$RUN_ROOT/module-bundle"
-cleanup_run_root() { rm -rf "$RUN_ROOT"; }
+cleanup_run_root() {
+  if [[ "${AIMEE_E2E_KEEP_RUN_ROOT:-0}" == "1" ]]; then
+    yellow "retaining E2E scratch tree for inspection: $RUN_ROOT"
+  else
+    rm -rf "$RUN_ROOT"
+  fi
+}
 trap cleanup_run_root EXIT INT TERM
 python3 scripts/export_c_repositories.py \
   --runtime-bundle "$BUNDLE" >/dev/null
@@ -245,7 +253,7 @@ cleanup() {
   stop_modules
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
   [[ -n "$kb_pid" ]] && kill "$kb_pid" 2>/dev/null || true
-  rm -rf "$RUN_ROOT"
+  cleanup_run_root
 }
 trap cleanup EXIT
 
@@ -259,6 +267,28 @@ if [[ "$MODE" == "full" ]]; then
   # through the Postgres module on the SERVER bus; an unset store URL leaves
   # that declared edge present but unusable and the mTLS ramp correctly refuses.
   export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$AIMEE_DB2_URL}"
+  # This is an environment harness, so provision the extensions its fresh
+  # database needs before migrations run. A server should not require runtime
+  # CREATE EXTENSION authority, and silently running without pgvector would make
+  # keyword-only retrieval look like semantic coverage.
+  extension_error=""
+  if command -v psql >/dev/null 2>&1; then
+    if ! psql "$AIMEE_DB2_URL" -v ON_ERROR_STOP=1 \
+      -c 'CREATE EXTENSION IF NOT EXISTS vector' \
+      -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' \
+      >/dev/null 2>"$RUN_ROOT/extension-provision.err"; then
+      extension_error="$(<"$RUN_ROOT/extension-provision.err")"
+    fi
+  else
+    extension_error="psql is unavailable"
+  fi
+  if [[ -n "$extension_error" ]]; then
+    if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
+      red "    required PostgreSQL vector extensions could not be provisioned: $extension_error"
+      exit 1
+    fi
+    yellow "    DEGRADED  PostgreSQL vector extensions were not provisioned: $extension_error"
+  fi
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
