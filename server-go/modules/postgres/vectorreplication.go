@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 
 	"github.com/JBailes/aimee/server-go/db3"
 )
@@ -76,4 +78,33 @@ func (v *VectorBus) AppliedObserver(ctx context.Context,
 		return func(uint32, db3.Applied) {}
 	}
 	return store.AppliedObserver(ctx)
+}
+
+// ReplicationLeaseOwner names this process in the outbox ledger.
+//
+// The outbox hands out claims by lease, so the name must be UNIQUE PER PROCESS:
+// two replicators sharing one name would each renew the other's claims, and a
+// crash would leave rows that look continuously claimed by a live owner and are
+// never redelivered. Host and pid together give that without configuration.
+//
+// Reduced to printable ASCII within the column's 64 bytes, because a hostname
+// is whatever the operator set it to and the ledger refuses anything else.
+func ReplicationLeaseOwner() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	sanitized := make([]byte, 0, len(host))
+	for index := range len(host) {
+		character := host[index]
+		if character < 0x21 || character > 0x7e {
+			character = '-'
+		}
+		sanitized = append(sanitized, character)
+	}
+	owner := "postgres@" + string(sanitized) + "/" + strconv.Itoa(os.Getpid())
+	if len(owner) > 64 {
+		owner = owner[:64]
+	}
+	return owner
 }

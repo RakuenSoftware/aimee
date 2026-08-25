@@ -531,6 +531,33 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		} else if provider.Principal != 0 {
 			log.Printf("postgres: vector provider %q (principal %d) is provisioned",
 				provider.Instance, provider.Principal)
+			// The wire, on THIS process's attachment. Built when the loop hands
+			// over its client and torn down with it -- there is no second
+			// client and no separate identity; searches and applies leave as
+			// this module, under the grant the host already loaded.
+			var attachment *postgres.VectorBus
+			config.Attached = func(ctx context.Context, client *bus.Client) {
+				attachment, err = postgres.AttachVectorBus(client, provider)
+				if err != nil {
+					// Serving continues. Every vector operation is answered
+					// in-database, which is the same answer from the same rows
+					// -- slower, never wrong. Refusing to start instead would
+					// take the whole store down over a provider that is an
+					// optimization.
+					log.Printf("postgres: vector provider %q is provisioned but "+
+						"unreachable, serving in-database: %v", provider.Instance, err)
+					attachment = nil
+					return
+				}
+				// The write half. Without it the provider is searched and never
+				// written to, so it answers correctly and emptily forever --
+				// which reads as a corpus with no matches rather than one
+				// nobody filled.
+				postgres.StartVectorReplication(ctx, attachment, postgres.ReplicationLeaseOwner())
+			}
+			// Replies to those searches come back through the loop's single
+			// reader, because nothing else may poll this client.
+			config.Absorb = func(event bus.Event) { attachment.Absorb(event) }
 		}
 	// "aimee" is what a deployment installs this as: the id in
 	// process-contracts.json and the executable every generated grant pins.
