@@ -28,6 +28,8 @@
 #   SERVER_TLS_PORT server TLS /v1 port           (default SERVER_PORT + 3)
 #   BEARER        server first-boot bearer        (default random per run)
 #   WAIT_SECONDS  health wait budget             (default 90)
+#   AIMEE_E2E_HOLD_SECONDS keep a green scratch stack alive for exploratory
+#                 probes before cleanup           (default 0)
 #
 # Exit code: 0 = all checks passed.
 
@@ -375,3 +377,8 @@ echo
 bold "==> Summary (${MODE}): ${PASS} passed, ${FAIL} failed"
 [[ "$FAIL" == 0 ]] || exit 1
 green "local ${MODE} stack is up and serving."
+if [[ "${AIMEE_E2E_HOLD_SECONDS:-0}" =~ ^[0-9]+$ ]] &&
+   (( AIMEE_E2E_HOLD_SECONDS > 0 )); then
+  yellow "holding green scratch stack for ${AIMEE_E2E_HOLD_SECONDS}s (exploratory probes)"
+  sleep "$AIMEE_E2E_HOLD_SECONDS"
+fi
