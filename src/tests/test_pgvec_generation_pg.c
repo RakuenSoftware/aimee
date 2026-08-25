@@ -42,13 +42,19 @@
 #include "modules/db2/c/db2_internal.h"
 #include "modules/db2/c/db_postgres.h"
 #include "modules/db2/c/pgvec_transport.h"
+#include "modules/db2/c/db_schema.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define DIM 4
+/* The vector column's width is fixed when the schema is APPLIED --
+ * `vector(__EMBED_DIM__)` is substituted then -- so a test cannot pick its own.
+ * A four-float vector against a database applied at the default width is
+ * rejected by the column, which is what the first run of this test hit. Read
+ * the applied width instead and build vectors to match. */
+static int g_dim;
 
 static void exec_or_die(const char *sql)
 {
@@ -101,14 +107,20 @@ static void seed_document(int64_t id, const char *project, long long generation)
 static void check(const char *table, int (*upsert)(int64_t, const float *, int, const char *),
                   const char *label)
 {
-   float vec[DIM] = {1.0f, 0.0f, 0.0f, 0.0f};
+   float *vec = calloc((size_t)g_dim, sizeof(float));
+   if (!vec)
+   {
+      fprintf(stderr, "%s: out of memory for a %d-wide vector\n", label, g_dim);
+      exit(1);
+   }
+   vec[0] = 1.0f;
    int64_t generation = 0;
    int is_null = 0;
 
    /* 1 + 2: the document's generation is what lands, through a statement that
     * binds :point_id twice. */
    seed_document(9001, "genproj", 3);
-   if (upsert(9001, vec, DIM, "{\"project\":\"genproj\"}") != 0)
+   if (upsert(9001, vec, g_dim, "{\"project\":\"genproj\"}") != 0)
    {
       fprintf(stderr, "%s: upsert of a documented point failed\n", label);
       exit(1);
@@ -128,7 +140,7 @@ static void check(const char *table, int (*upsert)(int64_t, const float *, int, 
 
    /* 3: a re-scan moves the document forward; ON CONFLICT must carry it. */
    seed_document(9001, "genproj", 4);
-   if (upsert(9001, vec, DIM, "{\"project\":\"genproj\"}") != 0)
+   if (upsert(9001, vec, g_dim, "{\"project\":\"genproj\"}") != 0)
    {
       fprintf(stderr, "%s: re-upsert failed\n", label);
       exit(1);
@@ -143,7 +155,7 @@ static void check(const char *table, int (*upsert)(int64_t, const float *, int, 
 
    /* 4: an orphan takes NULL rather than a default, so no generation filter
     * matches it and the routed form excludes it exactly as the join does. */
-   if (upsert(9002, vec, DIM, "{\"project\":\"genproj\"}") != 0)
+   if (upsert(9002, vec, g_dim, "{\"project\":\"genproj\"}") != 0)
    {
       fprintf(stderr, "%s: upsert of an undocumented point failed\n", label);
       exit(1);
@@ -160,6 +172,7 @@ static void check(const char *table, int (*upsert)(int64_t, const float *, int, 
       exit(1);
    }
    printf("%s: ok, a point with no document row takes a NULL generation\n", label);
+   free(vec);
 }
 
 int main(void)
@@ -175,9 +188,17 @@ int main(void)
       fprintf(stderr, "pgvec_generation_pg: db2_init failed for %s\n", url);
       return 1;
    }
-   /* The upsert guards the vector length against the declared dimension, so the
-    * declaration has to match the tiny vectors used here. */
-   db2_set_embedding_dim(DIM);
+   /* The upsert guards the vector length against the DECLARED dimension, and the
+    * column enforces the APPLIED one. They have to be the same number, and the
+    * applied one is the fact on disk, so take it from there. */
+   g_dim = db2_embedding_dim_get(db2_conn());
+   if (g_dim <= 0)
+   {
+      fprintf(stderr, "pgvec_generation_pg: no schema_embedding_dim recorded\n");
+      return 1;
+   }
+   db2_set_embedding_dim(g_dim);
+   printf("pgvec_generation_pg: schema applied at %d dimensions\n", g_dim);
 
    exec_or_die("DELETE FROM kb_embeddings WHERE point_id IN (9001, 9002)");
    exec_or_die("DELETE FROM kb_pdf_embeddings WHERE point_id IN (9001, 9002)");
