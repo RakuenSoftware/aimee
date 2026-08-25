@@ -19,6 +19,25 @@ dependencies.
 - Mechanical policy remains authoritative. Observability is not an
   authorization boundary.
 
+## Retrieval outcomes and continuations
+
+Retrieval surfaces distinguish `found`, `empty`, `degraded`, and `failed`.
+Healthy empty results and degraded local evidence may include a structured,
+prefilled alternative action. The offer is inert data: it carries the required
+capability, a one-action advisory budget, `policy_recheck=true`, and
+`authorized=false`. Following it always creates an ordinary tool call that must
+pass the current toolset, capability, execution-policy, and effect-contract
+checks. Failed or unauthorized retrievals do not suggest an external action.
+
+## Checker isolation
+
+Automated reviewers return a typed verdict only: approved, rejected, skipped,
+or error. Their prompt, rationale, and model transcript are not control inputs to
+the pipeline. Approval and rejection have fixed meanings; skipped/error results
+are mapped by an explicit failure mode. The authoring pipeline uses `degrade`,
+which escalates to a human after bounded infrastructure retries instead of
+silently treating an unavailable checker as assent.
+
 ## Context authority
 
 Canonical request blocks carry metadata independently from their wire content:

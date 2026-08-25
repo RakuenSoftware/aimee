@@ -1552,10 +1552,38 @@ static char *td_search_memory(cJSON *args, const char *name, const char *dispatc
    {
       memory_t facts[20];
       int count = kb_client_memory_find_facts(q->valuestring, 20, facts, 20);
+      kb_client_result_status_t status = kb_client_last_result_status();
       char buf[8192];
       int pos = 0;
       if (count <= 0)
-         pos += snprintf(buf, sizeof(buf), "No facts found for '%s'", q->valuestring);
+      {
+         td_retrieval_outcome_t outcome = TD_RETRIEVAL_FAILED;
+         const char *message = "memory retrieval failed";
+         if (status == KB_CLIENT_RESULT_EMPTY)
+         {
+            outcome = TD_RETRIEVAL_EMPTY;
+            message = "no local memory facts matched";
+         }
+         else if (status == KB_CLIENT_RESULT_ABSTAINED || status == KB_CLIENT_RESULT_STALE)
+         {
+            outcome = TD_RETRIEVAL_DEGRADED;
+            message = status == KB_CLIENT_RESULT_STALE ? "memory evidence is stale"
+                                                       : "memory retrieval abstained";
+         }
+         else if (status == KB_CLIENT_RESULT_UNAUTHORIZED)
+            message = "memory retrieval unauthorized";
+         else if (status == KB_CLIENT_RESULT_UNAVAILABLE)
+            message = "memory service unavailable";
+         char *contract =
+             td_render_retrieval_continuation(outcome, "memory", q->valuestring, message);
+         if (outcome == TD_RETRIEVAL_FAILED)
+            pos += snprintf(buf, sizeof(buf), "error: %s", message);
+         else
+            pos += snprintf(buf, sizeof(buf), "%s", message);
+         if (contract && pos < (int)sizeof(buf) - 2)
+            pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\n%s", contract);
+         free(contract);
+      }
       else
       {
          pos += snprintf(buf, sizeof(buf), "Found %d fact(s):\n\n", count);

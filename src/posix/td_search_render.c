@@ -6,6 +6,71 @@
 #include <stdlib.h>
 #include <string.h>
 
+const char *td_retrieval_outcome_name(td_retrieval_outcome_t outcome)
+{
+   switch (outcome)
+   {
+   case TD_RETRIEVAL_FOUND:
+      return "found";
+   case TD_RETRIEVAL_EMPTY:
+      return "empty";
+   case TD_RETRIEVAL_DEGRADED:
+      return "degraded";
+   default:
+      return "failed";
+   }
+}
+
+char *td_render_retrieval_continuation(td_retrieval_outcome_t outcome, const char *source,
+                                       const char *query, const char *message)
+{
+   cJSON *root = cJSON_CreateObject();
+   cJSON *offers = NULL;
+   if (!root)
+      return NULL;
+   cJSON_AddStringToObject(root, "status", td_retrieval_outcome_name(outcome));
+   cJSON_AddStringToObject(root, "source", source ? source : "knowledge_base");
+   cJSON_AddStringToObject(root, "message", message ? message : "");
+   offers = cJSON_AddArrayToObject(root, "continuations");
+
+   /* An external search is a useful alternative for an empty or degraded local
+    * corpus.  It remains inert data: dispatch must re-enter the ordinary tool,
+    * capability, execution-policy, and effect-authorization path. */
+   if (offers && (outcome == TD_RETRIEVAL_EMPTY || outcome == TD_RETRIEVAL_DEGRADED) && query &&
+       query[0])
+   {
+      cJSON *offer = cJSON_CreateObject();
+      cJSON *args = cJSON_CreateObject();
+      if (offer && args)
+      {
+         cJSON_AddStringToObject(offer, "action", "web_search");
+         cJSON_AddStringToObject(args, "query", query);
+         cJSON_AddItemToObject(offer, "arguments", args);
+         args = NULL;
+         cJSON_AddStringToObject(offer, "required_capability", "external_read");
+         cJSON_AddNumberToObject(offer, "remaining_budget", 1);
+         cJSON_AddBoolToObject(offer, "policy_recheck", 1);
+         cJSON_AddBoolToObject(offer, "authorized", 0);
+         cJSON_AddItemToArray(offers, offer);
+         offer = NULL;
+      }
+      cJSON_Delete(args);
+      cJSON_Delete(offer);
+   }
+
+   char *wire = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!wire)
+      return NULL;
+   dstr_t d;
+   dstr_init(&d);
+   dstr_append_str(&d, "<aimee_retrieval_outcome>");
+   dstr_append_str(&d, wire);
+   dstr_append_str(&d, "</aimee_retrieval_outcome>");
+   free(wire);
+   return dstr_steal(&d);
+}
+
 char *td_render_search_hits(const cJSON *hits, const char *query)
 {
    dstr_t d;
@@ -14,7 +79,18 @@ char *td_render_search_hits(const cJSON *hits, const char *query)
    int n = cJSON_IsArray(hits) ? cJSON_GetArraySize(hits) : 0;
    if (n <= 0)
    {
-      dstr_appendf(&d, "No knowledge-base results for \"%s\".", query ? query : "");
+      char message[384];
+      snprintf(message, sizeof(message), "No knowledge-base results for \"%.300s\".",
+               query ? query : "");
+      char *contract = td_render_retrieval_continuation(
+          TD_RETRIEVAL_EMPTY, "knowledge_base", query, message);
+      dstr_append_str(&d, message);
+      if (contract)
+      {
+         dstr_append_str(&d, "\n");
+         dstr_append_str(&d, contract);
+         free(contract);
+      }
       return dstr_steal(&d);
    }
 
@@ -86,10 +162,16 @@ char *td_search_result_from_response(const cJSON *resp, const char *query)
    if (cJSON_IsArray(hits))
       return td_render_search_hits(hits, query);
 
-   const char *err = "error: knowledge search unavailable";
-   size_t n = strlen(err) + 1;
-   char *out = malloc(n);
-   if (out)
-      memcpy(out, err, n);
-   return out;
+   char *contract = td_render_retrieval_continuation(
+       TD_RETRIEVAL_FAILED, "knowledge_base", query, "knowledge search unavailable");
+   dstr_t d;
+   dstr_init(&d);
+   dstr_append_str(&d, "error: knowledge search unavailable");
+   if (contract)
+   {
+      dstr_append_str(&d, "\n");
+      dstr_append_str(&d, contract);
+      free(contract);
+   }
+   return dstr_steal(&d);
 }
