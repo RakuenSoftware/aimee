@@ -65,5 +65,10 @@ DB3_GO_HOST="$harness" AIMEE_TEST_QDRANT_URL="$QDRANT_URL" \
    go test ./modules/db2 -count=1 -v -run TestTheShippedProviderBinary
 [ $? -eq 0 ] || failed=1
 
+echo "=== the postgres module routing over the bus, backed by Qdrant ==="
+DB3_GO_HOST="$harness" AIMEE_TEST_QDRANT_URL="$QDRANT_URL" \
+   go test ./modules/postgres -count=1 -v -run TestThePostgresModuleRoutes
+[ $? -eq 0 ] || failed=1
+
 echo "QDRANT-E2E-FAILED=$failed"
 exit $failed

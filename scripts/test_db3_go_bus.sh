@@ -20,4 +20,9 @@ cd "$repo_root/server-go"
 DB3_GO_HOST="$harness" \
    go test ./modules/db2 \
    -run 'TestDB3GoProvidersOperateOverAuthenticatedCBus|TestTheShippedProviderBinaryServesOverARealBus' \
-   -v -timeout 180s
+   -v -timeout 180s || exit 1
+
+# The postgres module's own routing, over the same bus: a provider answers, and
+# PostgreSQL is not touched for a routed search.
+DB3_GO_HOST="$harness" \
+   go test ./modules/postgres -run TestThePostgresModuleRoutes -v -timeout 180s
