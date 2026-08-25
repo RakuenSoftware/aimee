@@ -419,7 +419,13 @@ fi
 # NOT exercised — announce it loudly, and hard-fail under AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1.
 bold "==> Embedder fidelity (semantic vector path)"
 mm="$(grep -aoE 'memory embedding dim mismatch: got [0-9]+, expected [0-9]+' "$AIMEE_HOME/kb.log" 2>/dev/null | tail -1 || true)"
-if [[ -n "$mm" ]]; then
+if [[ -z "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
+  yellow "  DEGRADED  no external embedder configured — builtin hash path only."
+  if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
+    red "  FAIL  real embedder required but AIMEE_E2E_EMBEDDER_URL is unset"
+    FAIL=$((FAIL + 1))
+  fi
+elif [[ -n "$mm" ]]; then
   yellow "  DEGRADED  ${mm}; vectors refused — semantic search NOT exercised (list/keyword only)."
   yellow "            Wire a real embedder: point EMBEDDER_URL / SYNTHESIS_ENDPOINT at a"
   yellow "            Qwen3-Embedding endpoint whose dim matches the corpus (1024 CPU / 2560 GPU)."
@@ -428,8 +434,51 @@ if [[ -n "$mm" ]]; then
     FAIL=$((FAIL + 1))
   fi
 else
-  green "  PASS  memory vectors accepted (no dim mismatch) — real semantic path exercised"
-  PASS=$((PASS + 1))
+  embed_health="$(curl -fsS --max-time 5 "${AIMEE_E2E_EMBEDDER_URL%/}/health" 2>/dev/null || true)"
+  if ! python3 - "$embed_health" <<'PY'
+import json
+import sys
+
+try:
+    health = json.loads(sys.argv[1])
+except (json.JSONDecodeError, IndexError):
+    raise SystemExit(1)
+raise SystemExit(
+    0 if health.get("status") == "ok"
+    and isinstance(health.get("dim"), int) and health["dim"] > 0
+    and isinstance(health.get("serving_id"), str) and health["serving_id"]
+    else 1
+)
+PY
+  then
+    red "  FAIL  configured embedder has no healthy dimension-bound serving identity"
+    FAIL=$((FAIL + 1))
+  else
+    semantic_marker="ti-semantic-${RANDOM}-${$}"
+    semantic_content="At the moonless harbor, a cerulean lantern beside the eastern quay directs returning vessels. ${semantic_marker}"
+    semantic_store="$(curl -fksS --max-time 30 "${IDENTITY[@]}" "${AUTH[@]}" \
+      -H 'content-type: application/json' -X POST \
+      -d "{\"key\":\"semantic harbor guide ${semantic_marker}\",\"content\":\"${semantic_content}\",\"kind\":\"fact\"}" \
+      "$SERVER_URL/v1/memory/store" 2>/dev/null || true)"
+    semantic_recall=""
+    if [[ "$semantic_store" == *'"status":"ok"'* ]]; then
+      for _ in $(seq 1 20); do
+        semantic_recall="$(curl -fksS --max-time 30 "${IDENTITY[@]}" "${AUTH[@]}" \
+          -H 'content-type: application/json' -X POST \
+          -d '{"task_hint":"Which colored light helps ships locate the dock after dark?","limit_tokens":1024,"scope":"all"}' \
+          "$SERVER_URL/v1/memory/recall" 2>/dev/null || true)"
+        [[ "$semantic_recall" == *"$semantic_marker"* ]] && break
+        sleep 0.25
+      done
+    fi
+    if [[ "$semantic_recall" == *"$semantic_marker"* ]]; then
+      green "  PASS  real embedder stored and semantically recalled a lexically-disjoint fact"
+      PASS=$((PASS + 1))
+    else
+      red "  FAIL  real embedder did not semantically recall the stored fact"
+      FAIL=$((FAIL + 1))
+    fi
+  fi
 fi
 
 if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
