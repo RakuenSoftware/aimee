@@ -148,7 +148,7 @@ The code search is the worked example. Its pgvector form is a join:
 A provider cannot join. But `projects.name` is unique, so the join selects
 exactly one row, and resolving that row's `current_generation` up front turns
 both conditions into a single `generation = N` filter. A project that is not
-current resolves to nothing — and then the search must stay on pgvector rather
+current resolves to nothing -- and then the search must stay on pgvector rather
 than route without the condition, because routing it would return rows from the
 generation the project was detached at.
 

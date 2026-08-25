@@ -32,7 +32,8 @@
     "sandbox",
     "economizer",
     "postgres",
-    "db2"
+    "db2",
+    "vectordb"
   ],
   "principal_refs": {
     "module-runtime": 1,
