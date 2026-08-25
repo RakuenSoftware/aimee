@@ -122,7 +122,7 @@ int db2_memory_negation_fts_search(const char *neg_tokens, int limit, memory_t *
        " m.provenance_category"
        " FROM memories m"
        " WHERE m.memory_negation_fts_tsv @@ websearch_to_tsquery('simple', "
-       "?1)" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+       "?1)" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
            "m.id") " DESC,"
                    "          ts_rank(m.memory_negation_fts_tsv, "
                    "websearch_to_tsquery('simple', ?1)) "
@@ -164,7 +164,7 @@ int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int 
        " WHERE (LOWER(m.key) LIKE '%' || LOWER(?1) || '%'"
        "    OR LOWER(m.content) LIKE '%' || LOWER(?2) || '%'"
        "    OR LOWER(COALESCE(m.use_cases, '')) LIKE '%' || LOWER(?3) || "
-       "'%')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+       "'%')" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
            "m.id") " DESC, CASE"
                    "            WHEN LOWER(m.key) = LOWER(?4) THEN 0"
                    "            WHEN LOWER(m.content) = LOWER(?5) THEN 1"
@@ -218,7 +218,7 @@ int db2_memory_collect_alias_matches(const char *alias, int limit, memory_t *out
        " JOIN memories m ON m.id = a.memory_id"
        " WHERE (a.alias = ?1"
        "    OR a.alias LIKE ?2 || '%'"
-       "    OR a.alias LIKE '%' || ?3 || '%')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "    OR a.alias LIKE '%' || ?3 || '%')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, CASE"
                                                                   "            WHEN a.alias = ?4 "
                                                                   "THEN 0"
@@ -272,7 +272,7 @@ int db2_memory_collect_entity_matches(const char *term, int limit, memory_t *out
        " JOIN memories m ON m.id = e.memory_id"
        " WHERE (e.entity = ?1"
        "    OR e.entity LIKE ?2 || '%'"
-       "    OR e.entity LIKE '%' || ?3 || '%')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "    OR e.entity LIKE '%' || ?3 || '%')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, CASE"
                                                                   "            WHEN e.entity = ?4 "
                                                                   "THEN 0"
@@ -322,7 +322,7 @@ int db2_memory_collect_temporal_matches(const char *term, int limit, memory_t *o
        " FROM memory_temporal_refs t"
        " JOIN memories m ON m.id = t.memory_id"
        " WHERE (t.ref_key = ?1"
-       "    OR t.ref_key LIKE ?2 || '%')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "    OR t.ref_key LIKE ?2 || '%')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, CASE WHEN t.ref_key = ?3 "
                                                                   "THEN 0 ELSE 1 END,"
                                                                   "          t.weight DESC, "
@@ -364,7 +364,7 @@ int db2_memory_collect_summary_matches(const char *term, int limit, memory_t *ou
        "m.provenance_category"
        " FROM memory_summaries s"
        " JOIN memories m ON m.id = s.memory_id"
-       " WHERE LOWER(s.summary) LIKE '%' || LOWER(?1) || '%'" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " WHERE LOWER(s.summary) LIKE '%' || LOWER(?1) || '%'" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, CASE WHEN "
                                                                   "LOWER(s.summary) LIKE LOWER(?2) "
                                                                   "|| '%' THEN 0 ELSE 1 END,"
@@ -405,7 +405,7 @@ int db2_memory_collect_event_frame_matches(const char *term, int limit, memory_t
        " FROM memory_event_frames e"
        " JOIN memories m ON m.id = e.memory_id"
        " WHERE (e.actor = ?1 OR e.action = ?2 OR e.object LIKE '%' || ?3 || '%'"
-       "    OR e.location = ?4 OR e.event_time = ?5)" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "    OR e.location = ?4 OR e.event_time = ?5)" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
                                                                   "m.use_count DESC LIMIT ?6";
 
@@ -527,7 +527,7 @@ int db2_memory_episodes_search(const char *query, int limit, memory_episode_t *o
        " WHERE (?1 = '' OR LOWER(e.episode_key) LIKE '%' || LOWER(?2) || '%'"
        "    OR LOWER(e.episode_text) LIKE '%' || LOWER(?3) || '%'"
        "    OR LOWER(e.source_session) LIKE '%' || LOWER(?4) || "
-       "'%')" DB2_MEMORY_SCOPE_FILTER_SQL("e.memory_id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+       "'%')" DB2_MEMORY_RECALL_FILTER_SQL("e.memory_id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
            "e.memory_id") " DESC, CASE WHEN LOWER(e.episode_key) = LOWER(?5) THEN 0 ELSE 1 END,"
                           "          CASE WHEN e.reference_time <> '' THEN 0 ELSE 1 END,"
                           "          e.created_at DESC LIMIT ?6";
@@ -679,7 +679,7 @@ int db2_memory_search_by_pattern(const char *pattern, db2_memory_search_match_t 
    static const char *sql =
        "SELECT m.id, m.key, m.content FROM memories m"
        " WHERE (m.tier = 'L1' OR m.tier = 'L2')"
-       "   AND (m.key LIKE ?1 OR m.content LIKE ?2)" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "   AND (m.key LIKE ?1 OR m.content LIKE ?2)" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC LIMIT ?3";
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -1271,7 +1271,7 @@ int db2_memory_list_session_scope_priority(memory_t *out, int max)
 
    static const char *sql =
        "SELECT m.id, m.key, m.content, m.kind FROM memories m"
-       " WHERE m.tier IN ('L1', 'L2', 'L3')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " WHERE m.tier IN ('L1', 'L2', 'L3')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC,"
                                                                   "   CASE m.kind WHEN 'workflow' "
                                                                   "THEN 0 WHEN 'decision' THEN 1 "
@@ -1301,7 +1301,7 @@ int db2_memory_list_session_scope_priority_like(const char *pattern, memory_t *o
    static const char *sql =
        "SELECT m.id, m.key, m.content, m.kind FROM memories m"
        " WHERE m.tier IN ('L1', 'L2', 'L3')"
-       "   AND (m.key LIKE ?1 OR m.content LIKE ?2)" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "   AND (m.key LIKE ?1 OR m.content LIKE ?2)" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC,"
                                                                   "   CASE m.kind WHEN 'workflow' "
                                                                   "THEN 0 WHEN 'decision' THEN 1 "
@@ -1332,7 +1332,7 @@ int db2_memory_top_l2_facts(memory_t *out, int max)
 
    static const char *sql =
        "SELECT id, key, content FROM memories"
-       " WHERE tier = 'L2' AND kind = 'fact'" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " WHERE tier = 'L2' AND kind = 'fact'" DB2_MEMORY_RECALL_FILTER_SQL(
            "memories.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("memories.id") " DESC, use_count "
                                                                                 "DESC, confidence "
                                                                                 "DESC LIMIT ?1";
@@ -1393,7 +1393,7 @@ int db2_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *o
        " WHERE m.tier IN ('L2', 'L3', 'L5')"
        "   AND m.kind IN ('fact', 'pattern')"
        "   AND (LOWER(m.content) LIKE '%' || LOWER(?1) || '%'"
-       "        OR LOWER(m.key) LIKE '%' || LOWER(?2) || '%')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       "        OR LOWER(m.key) LIKE '%' || LOWER(?2) || '%')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
                                                                   "m.use_count DESC LIMIT ?3";
    char err[MQ_ERRBUF] = "";
@@ -1464,7 +1464,7 @@ int db2_memory_list(const char *tier, const char *kind, int hide_archived, int l
       kind_idx = next_idx++;
    }
    int wrote = snprintf(query + pos, sizeof(query) - (size_t)pos, "%s",
-                        DB2_MEMORY_SCOPE_FILTER_SQL("memories.id"));
+                        DB2_MEMORY_RECALL_FILTER_SQL("memories.id"));
    if (wrote < 0 || wrote >= (int)(sizeof(query) - (size_t)pos))
       return 0;
    pos += wrote;
@@ -1610,11 +1610,13 @@ int db2_memory_delete_row(int64_t memory_id)
       return 0;
 
    char err[MQ_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "DELETE FROM memories WHERE id = ?1", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "DELETE FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id"), err,
+       sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", memory_id);
+   db2_memory_scope_bind_current(st);
    int changes = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       changes = aimee_pg_stmt_changes(st);
@@ -1630,15 +1632,17 @@ int db2_memory_get(int64_t memory_id, memory_t *out)
    if (!conn)
       return -1;
 
-   static const char *sql = "SELECT id, tier, kind, key, content, confidence, use_count,"
-                            "       last_used_at, created_at, updated_at, source_session, salience,"
-                            "       provenance_category, use_cases"
-                            "  FROM memories WHERE id = ?1";
+   static const char *sql =
+       "SELECT id, tier, kind, key, content, confidence, use_count,"
+       "       last_used_at, created_at, updated_at, source_session, salience,"
+       "       provenance_category, use_cases"
+       "  FROM memories WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id");
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", memory_id);
+   db2_memory_scope_bind_current(st);
 
    int rc = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -1662,12 +1666,13 @@ int db2_memory_touch(int64_t memory_id)
     * helpers so persisted stamps compare lexically and consistently. */
    static const char *sql = "UPDATE memories SET use_count = use_count + 1,"
                             " last_used_at = pg_now_text()"
-                            " WHERE id = ?1";
+                            " WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id");
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", memory_id);
+   db2_memory_scope_bind_current(st);
    int changes = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       changes = aimee_pg_stmt_changes(st);
@@ -1747,13 +1752,14 @@ int db2_memory_update_content(int64_t memory_id, const char *content)
    if (!conn)
       return 0;
    static const char *sql = "UPDATE memories SET content = ?2, updated_at = pg_now_text()"
-                            " WHERE id = ?1";
+                            " WHERE id = ?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id");
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", memory_id);
    aimee_pg_bind_text(st, "?2", content);
+   db2_memory_scope_bind_current(st);
    int changes = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
       changes = aimee_pg_stmt_changes(st);
@@ -1763,26 +1769,153 @@ int db2_memory_update_content(int64_t memory_id, const char *content)
 
 int db2_memory_reject(int64_t memory_id, const char *reason)
 {
-   (void)reason;
-   if (memory_id <= 0)
+   if (memory_id <= 0 || !db2_memory_scope_context_allows(memory_id))
       return -1;
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "UPDATE memories"
-                            " SET confidence = GREATEST(confidence - 0.1, 0.0),"
-                            "     updated_at = pg_now_text()"
-                            " WHERE id = ?1";
+   char err[MQ_ERRBUF] = "";
+   if (aimee_pg_in_transaction(conn) || aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "INSERT INTO memory_rejection_tombstones(object_kind,memory_key,memory_content,"
+       " scope_type,scope_value,authority_rank,reason,rejected_by)"
+       " SELECT 'memory',key,content,scope_type,scope_value,30,?2,"
+       " COALESCE(NULLIF(current_setting('aimee.principal',true),''),'authenticated-user')"
+       " FROM memories WHERE id=?1 ON CONFLICT DO NOTHING",
+       err, sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   aimee_pg_bind_text(st, "?2", reason && reason[0] ? reason : "explicit memory rejection");
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   if (!ok)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   st = aimee_pg_prepare(
+       conn,
+       "UPDATE memories SET lifecycle_state='rejected',confidence=0,archive_reason=?2,"
+       " updated_at=pg_now_text() WHERE id=?1 AND lifecycle_state<>'rejected'",
+       err, sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   aimee_pg_bind_text(st, "?2", reason && reason[0] ? reason : "explicit memory rejection");
+   ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE && aimee_pg_stmt_changes(st) == 1;
+   aimee_pg_finalize(st);
+   if (!ok || aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   return 0;
+}
+
+int db2_memory_restore(int64_t memory_id, const char *actor)
+{
+   if (memory_id <= 0 || !actor || !actor[0] || !db2_memory_scope_context_allows(memory_id))
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[MQ_ERRBUF] = "";
+   if (aimee_pg_in_transaction(conn) || aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "UPDATE memory_rejection_tombstones AS t SET active=0,restored_at=pg_now_text(),"
+       " restored_by=?2 WHERE t.object_kind='memory' AND t.active=1 AND EXISTS"
+       " (SELECT 1 FROM memories m WHERE m.id=?1 AND m.key=t.memory_key"
+       "  AND m.content=t.memory_content AND m.scope_type=t.scope_type"
+       "  AND m.scope_value=t.scope_value)",
+       err, sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   aimee_pg_bind_text(st, "?2", actor);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   if (!ok)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   st = aimee_pg_prepare(conn,
+                         "UPDATE memories SET lifecycle_state='active',archive_reason='',"
+                         " confidence=GREATEST(confidence,0.4),updated_at=pg_now_text()"
+                         " WHERE id=?1 AND lifecycle_state='rejected'",
+                         err, sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE && aimee_pg_stmt_changes(st) == 1;
+   aimee_pg_finalize(st);
+   if (!ok || aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   return 0;
+}
+
+int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t *out, int max)
+{
+   if (!out || max <= 0)
+      return 0;
+   if (limit <= 0 || limit > max)
+      limit = max;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "SELECT id,tier,kind,key,content,confidence,lifecycle_state,archive_reason,"
+       " scope_type,scope_value,created_at,updated_at FROM memories"
+       " WHERE (?1='' OR lifecycle_state=?2)" DB2_MEMORY_SCOPE_FILTER_SQL(
+           "memories.id") " ORDER BY updated_at DESC,id DESC LIMIT ?3";
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
-   aimee_pg_bind_int64(st, "?1", memory_id);
-   int changes = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
-      changes = aimee_pg_stmt_changes(st);
+   aimee_pg_bind_text(st, "?1", state ? state : "");
+   aimee_pg_bind_text(st, "?2", state ? state : "");
+   aimee_pg_bind_int(st, "?3", limit);
+   db2_memory_scope_bind_current(st);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      db2_memory_review_row_t *r = &out[n++];
+      memset(r, 0, sizeof(*r));
+      r->id = aimee_pg_column_int64(st, 0);
+      db2_copy_text(r->tier, sizeof(r->tier), aimee_pg_column_text(st, 1));
+      db2_copy_text(r->kind, sizeof(r->kind), aimee_pg_column_text(st, 2));
+      db2_copy_text(r->key, sizeof(r->key), aimee_pg_column_text(st, 3));
+      db2_copy_text(r->content, sizeof(r->content), aimee_pg_column_text(st, 4));
+      r->confidence = aimee_pg_column_double(st, 5);
+      db2_copy_text(r->lifecycle_state, sizeof(r->lifecycle_state), aimee_pg_column_text(st, 6));
+      db2_copy_text(r->review_reason, sizeof(r->review_reason), aimee_pg_column_text(st, 7));
+      db2_copy_text(r->scope_type, sizeof(r->scope_type), aimee_pg_column_text(st, 8));
+      db2_copy_text(r->scope_value, sizeof(r->scope_value), aimee_pg_column_text(st, 9));
+      db2_copy_text(r->created_at, sizeof(r->created_at), aimee_pg_column_text(st, 10));
+      db2_copy_text(r->updated_at, sizeof(r->updated_at), aimee_pg_column_text(st, 11));
+   }
    aimee_pg_finalize(st);
-   return changes > 0 ? 0 : -1;
+   return n;
 }
 
 int db2_memory_dedupe_by_key(int dry_run)

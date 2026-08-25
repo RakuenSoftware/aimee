@@ -13,6 +13,7 @@
 #include "support/test_time.h"
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
+#include "modules/db2/c/memory_scope_query.h"
 #include "modules/memory/memory_ontology.h"
 #include "modules/memory/memory_platform.h"
 #include "modules/memory/memory_activation.h"
@@ -24,6 +25,51 @@ static void reset_db(void)
 {
    db2_test_shim_close();
    db2_test_shim_open();
+}
+
+static void test_memory_rejection_governance(void)
+{
+   reset_db();
+   /* Episodic refusal survives re-extraction and remains human reviewable.
+    * Recall never depends on the old lifecycle feature flags. */
+   {
+      memory_t rejected, replay, found[8];
+      db2_memory_scope_context_set("", "governance-project", 0);
+      assert(memory_insert(TIER_L2, KIND_FACT, "refusal:deploy",
+                           "never deploy directly to production", 0.9, "review-session",
+                           &rejected) == 0);
+
+      /* Application-side filtering remains authoritative even for an owner or
+       * superuser connection that PostgreSQL permits to bypass RLS. */
+      db2_memory_scope_context_set("", "other-project", 0);
+      assert(db2_memory_get(rejected.id, &replay) == -1);
+      db2_memory_review_row_t review[8];
+      assert(db2_memory_review_list("", 8, review, 8) == 0);
+      assert(db2_memory_reject(rejected.id, "cross-project rejection") == -1);
+
+      db2_memory_scope_context_set("", "governance-project", 0);
+      assert(db2_memory_reject(rejected.id, "operator says this extraction is wrong") == 0);
+      assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 0);
+
+      int review_count = db2_memory_review_list("rejected", 8, review, 8);
+      assert(review_count == 1);
+      assert(review[0].id == rejected.id);
+      assert(strcmp(review[0].scope_type, "project") == 0);
+      assert(strcmp(review[0].scope_value, "governance-project") == 0);
+      assert(strstr(review[0].review_reason, "operator") != NULL);
+      assert(db2_memory_rejection_blocks(review[0].key, review[0].content) == 1);
+      assert(memory_insert(TIER_L2, KIND_FACT, "refusal:deploy",
+                           "never deploy directly to production", 0.9, "second-extraction",
+                           &replay) == -1);
+
+      db2_memory_scope_context_set("", "other-project", 0);
+      assert(db2_memory_restore(rejected.id, "test:other-operator") == -1);
+      db2_memory_scope_context_set("", "governance-project", 0);
+      assert(db2_memory_restore(rejected.id, "test:operator") == 0);
+      assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 1);
+      assert(found[0].id == rejected.id);
+      db2_memory_scope_context_clear();
+   }
 }
 
 static int64_t insert_raw_fact(const char *key, const char *content)
@@ -1606,6 +1652,12 @@ int main(void)
          memory_t got;
          assert(memory_get(m.id, &got) == 0);
          assert(strcmp(got.key, "sm:active") == 0);
+
+         /* Recall must hide archived rows even with the archival feature flags
+          * at their default-off values. History/get remains available above. */
+         memory_t recall_rows[4];
+         assert(memory_list(NULL, NULL, 4, recall_rows, 4) == 0);
+         assert(memory_find_facts("review next week", 4, recall_rows, 4) == 0);
       }
 
       /* Sweep: rows whose ttl_at is in the past transition to archived
@@ -2570,6 +2622,7 @@ int main(void)
       printf("  timestamp_writers_agree: ok\n");
    }
 
+   test_memory_rejection_governance();
    db2_test_shim_close();
    platform_memory_background_embed_set_suppressed(background_embed_was_suppressed);
    db1_shutdown();

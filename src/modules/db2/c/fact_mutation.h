@@ -76,13 +76,17 @@ extern "C"
 #define FACT_KIND_POLICY       "policy"
 #define FACT_KIND_HYPOTHESIS   "hypothesis"
 /* Read compatibility for data produced before P6. New writes use episode. */
-#define FACT_KIND_OBSERVATION  "observation"
+#define FACT_KIND_OBSERVATION "observation"
 
 #define FACT_LIFECYCLE_CANDIDATE   "candidate"
 #define FACT_LIFECYCLE_PERSISTENT  "persistent"
 #define FACT_LIFECYCLE_PROMOTED    "promoted"
 #define FACT_LIFECYCLE_SUPERSEDED  "superseded"
 #define FACT_LIFECYCLE_INVALIDATED "invalidated"
+
+/* The value was explicitly rejected and may only return through a human
+ * restore/undo decision, never through ordinary assertion or extraction. */
+#define FACT_MUTATION_TOMBSTONED (-3)
 
    typedef struct
    {

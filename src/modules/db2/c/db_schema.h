@@ -11,7 +11,7 @@
  * stale / un-migrated schema. BUMP this whenever schema.sql adds or changes objects
  * that a runtime kb depends on, so a runtime kb started against an old schema fails
  * closed rather than running degraded. */
-#define AIMEE_DB2_SCHEMA_VERSION 3
+#define AIMEE_DB2_SCHEMA_VERSION 4
 
 struct sqlite3;
 

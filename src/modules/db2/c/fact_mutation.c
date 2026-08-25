@@ -75,6 +75,68 @@ static int fm_actor_ok(const fact_actor_t *actor)
           actor->rank <= FACT_ACTOR_OPERATOR;
 }
 
+static int fm_tombstone_blocks(void *conn, const char *source, const char *relation,
+                               const char *target)
+{
+   char err[FM_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT 1 FROM memory_rejection_tombstones WHERE object_kind='fact' AND active=1"
+       " AND source=?1 AND relation=?2 AND target=?3 LIMIT 1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", source);
+   aimee_pg_bind_text(st, "?2", relation);
+   aimee_pg_bind_text(st, "?3", target);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_ROW ? 1 : step == AIMEE_PG_DONE ? 0 : -1;
+}
+
+static int fm_tombstone_add_assertion(void *conn, int64_t assertion_id, const fact_actor_t *actor,
+                                      const char *reason)
+{
+   char err[FM_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "INSERT INTO memory_rejection_tombstones(object_kind,source,relation,target,"
+       " authority_rank,reason,rejected_by)"
+       " SELECT 'fact',source,relation,target,?2,?3,?4 FROM entity_edges WHERE id=?1"
+       " ON CONFLICT DO NOTHING",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", assertion_id);
+   aimee_pg_bind_int(st, "?2", (int)actor->rank);
+   aimee_pg_bind_text(st, "?3", reason ? reason : "explicit rejection");
+   aimee_pg_bind_text(st, "?4", actor->principal);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+}
+
+static int fm_tombstone_restore_assertion(void *conn, int64_t assertion_id,
+                                          const fact_actor_t *actor)
+{
+   char err[FM_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE memory_rejection_tombstones AS t SET "
+                        "active=0,restored_at=pg_now_text(),restored_by=?2"
+                        " WHERE t.object_kind='fact' AND t.active=1 AND EXISTS"
+                        " (SELECT 1 FROM entity_edges e WHERE e.id=?1 AND e.source=t.source"
+                        "  AND e.relation=t.relation AND e.target=t.target)",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", assertion_id);
+   aimee_pg_bind_text(st, "?2", actor->principal);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+}
+
 int db2_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out)
 {
    if (!out || rank == FACT_ACTOR_OPERATOR ||
@@ -666,6 +728,13 @@ int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_inp
    if (fm_backfill_identity(conn) != 0)
       return fm_end(conn, 0);
 
+   int tombstoned = fm_tombstone_blocks(conn, in->source, in->relation, in->target);
+   if (tombstoned != 0)
+   {
+      (void)fm_end(conn, 0);
+      return tombstoned > 0 ? FACT_MUTATION_TOMBSTONED : -1;
+   }
+
    char now[32];
    fm_now(now);
    const char *desired =
@@ -1111,6 +1180,8 @@ int db2_fact_mutation_invalidate(const fact_actor_t *actor, const char *source,
       if (!ok || fm_change(conn, commit_id, rows[i].id, "invalidate", &rows[i], &after,
                            "reversible correction") != 0)
          return fm_end(conn, 0);
+      if (fm_tombstone_add_assertion(conn, rows[i].id, actor, "explicit fact invalidation") != 0)
+         return fm_end(conn, 0);
       changed++;
       last_id = rows[i].id;
    }
@@ -1287,6 +1358,21 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
       if (!reverses)
          return fm_end(conn, 0);
    }
+   if (action == FACT_REVIEW_APPROVE)
+   {
+      char target[2048] = "", qerr[FM_ERRBUF] = "";
+      aimee_pg_stmt_t *tq = aimee_pg_prepare(
+          conn, "SELECT target FROM entity_edges WHERE id=?1 AND edge_class='semantic'", qerr,
+          sizeof(qerr));
+      if (!tq)
+         return fm_end(conn, 0);
+      aimee_pg_bind_int64(tq, "?1", assertion_id);
+      if (aimee_pg_step(tq, qerr, sizeof(qerr)) == AIMEE_PG_ROW)
+         fm_copy(target, sizeof(target), aimee_pg_column_text(tq, 0));
+      aimee_pg_finalize(tq);
+      if (!target[0] || fm_tombstone_blocks(conn, review_source, review_relation, target) != 0)
+         return fm_end(conn, 0);
+   }
    char commit_id[FACT_COMMIT_ID_MAX];
    if (fm_commit_open(conn, actor, "fact.review", 1, commit_id) != 0)
       return fm_end(conn, 0);
@@ -1342,6 +1428,11 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
       after.invalidated_at[0] = '\0';
    after.authority_rank = action == FACT_REVIEW_UNDO ? undo_authority_rank : FACT_ACTOR_OPERATOR;
    after.version++;
+   /* The DB trigger rejects any transition back to a recallable lifecycle while
+    * the tombstone is active.  Deactivate it first in this same transaction;
+    * rollback restores it if any later review write fails. */
+   if (action == FACT_REVIEW_UNDO && fm_tombstone_restore_assertion(conn, assertion_id, actor) != 0)
+      return fm_end(conn, 0);
    char err[FM_ERRBUF] = "";
    aimee_pg_stmt_t *u = aimee_pg_prepare(
        conn,
@@ -1360,6 +1451,9 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
    aimee_pg_finalize(u);
    if (!ok || fm_change(conn, commit_id, assertion_id, action_text, &before, &after,
                         "operator review") != 0)
+      return fm_end(conn, 0);
+   if (action == FACT_REVIEW_REJECT &&
+       fm_tombstone_add_assertion(conn, assertion_id, actor, "operator review rejection") != 0)
       return fm_end(conn, 0);
    if (action == FACT_REVIEW_UNDO)
    {

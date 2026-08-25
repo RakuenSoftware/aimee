@@ -222,13 +222,13 @@ static void test_scope_hints(void)
 
 static void test_memory_scope_sql_uses_canonical_owner_scope(void)
 {
-   const char *filter = PGVEC_MEMORY_SCOPE_FILTER_SQL;
+   const char *filter = PGVEC_MEMORY_RECALL_FILTER_SQL;
    const char *rank = PGVEC_MEMORY_SCOPE_RANK_SQL;
-   assert(strstr(filter, "memory_scopes") != NULL);
-   assert(strstr(filter, "memory_workspaces") != NULL);
-   assert(strstr(filter, "memory_units") != NULL);
+   assert(strstr(filter, "memories") != NULL);
+   assert(strstr(filter, "lifecycle_state='active'") != NULL);
+   assert(strstr(filter, "scope_type") != NULL);
    assert(strstr(filter, "e.point_id - 1000000000000") != NULL);
-   assert(strstr(rank, "memory_workspaces") != NULL);
+   assert(strstr(rank, "scope_value") != NULL);
    printf("pgvec: canonical memory owner scope SQL OK\n");
 }
 

@@ -425,6 +425,32 @@ int main(void)
    snprintf(undo_commit, sizeof(undo_commit), "%s", mr.commit_id);
    assert(db2_fact_current_count("jane") == 1); /* undo restored incumbent */
 
+   /* Human rejection is durable negative memory.  A later extraction with
+    * different evidence must not resurrect the exact value; only an explicit
+    * operator undo removes the tombstone. */
+   ai.source = "refusal-survives";
+   ai.target = "acme";
+   ai.evidence = &ev1;
+   assert(db2_fact_mutation_assert(&system_actor, &ai, &mr) == 0);
+   int64_t rejected_assertion_id = mr.assertion_id;
+   assert(db2_fact_mutation_review(&operator_actor, rejected_assertion_id, FACT_REVIEW_REJECT,
+                                   &mr) == 0);
+   fact_evidence_input_t reextract_ev = ev1;
+   reextract_ev.source_id = "document:reextracted";
+   reextract_ev.evidence_hash = "hash-reextracted";
+   ai.evidence = &reextract_ev;
+   assert(db2_fact_mutation_assert(&system_actor, &ai, &mr) == FACT_MUTATION_TOMBSTONED);
+   assert(scalar_int("SELECT COUNT(*) FROM memory_rejection_tombstones"
+                     " WHERE object_kind='fact' AND source='refusal-survives'"
+                     " AND relation='works_for' AND target='acme' AND active=1") == 1);
+   assert(db2_fact_mutation_review(&operator_actor, rejected_assertion_id, FACT_REVIEW_UNDO, &mr) ==
+          0);
+   assert(db2_fact_mutation_assert(&system_actor, &ai, &mr) == 0);
+
+   ai.source = "jane";
+   ai.target = "globex";
+   ai.evidence = &ev1;
+
    /* Rolling the latest transition creates a revert commit.  That neutralizing
     * commit must not itself become a descendant that makes walking the prior
     * decision backward impossible. */
