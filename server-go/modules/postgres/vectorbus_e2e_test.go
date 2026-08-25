@@ -135,9 +135,11 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// The postgres module attaches as itself. Principal 28 is postgres; the
-	// harness grants it the DB3 kinds a caller needs.
-	client := attachClient(t, socket, 29)
+	// The postgres module attaches as ITSELF. Principal 28 is postgres, and it
+	// is the only principal the harness grants the caller role -- because it is
+	// the only one a deployment gives a real grant to speak to a vector store.
+	// Every other DB operation reaches the store by going to postgres first.
+	client := attachClient(t, socket, 28)
 	defer client.Detach()
 
 	// A fallback that records whether PostgreSQL was asked. That is the whole

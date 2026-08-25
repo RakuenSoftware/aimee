@@ -9,10 +9,16 @@ import (
 
 // Vector routing: send to DB3 what a provider can answer, keep the rest here.
 //
-// A DB3 provider is OPTIONAL, and that is the property this file exists to
-// preserve. With none installed the registry is empty, every operation runs
-// against PostgreSQL, and nothing about the deployment changes. Installing one
-// is an accelerator for the portable subset, never a dependency: if the
+// THE DEFAULT IS IN-DATABASE. Vector operations are served by PostgreSQL --
+// pgvector, with pgvectorscale's DiskANN where the extension is present and the
+// corpus is large enough to want it. That is the whole product for a deployment
+// that installs nothing else, and it is not a fallback in the sense of a
+// degraded mode: it is the ordinary path.
+//
+// An external vector database is something a user may OPTIONALLY install for
+// PostgreSQL's use. With none installed the registry is empty, every operation
+// runs in-database, and nothing about the deployment changes. Installing one
+// accelerates the portable subset; it never becomes a dependency. If the
 // provider is absent, unready, slow, or wrong, the answer still comes from
 // PostgreSQL.
 //
@@ -26,7 +32,8 @@ import (
 type RouteKind uint8
 
 const (
-	// RoutePostgreSQL means the operation ran here.
+	// RoutePostgreSQL means the operation ran in-database, on pgvector or
+	// pgvectorscale. This is the default and the ordinary case.
 	RoutePostgreSQL RouteKind = iota
 	// RouteProvider means a DB3 provider answered it.
 	RouteProvider
@@ -64,7 +71,9 @@ type ProviderSearcher interface {
 	Search(ctx context.Context, principal uint32, request db3.SearchRequest) (db3.SearchReply, error)
 }
 
-// PostgreSQLSearch is the pgvector path. It is never optional.
+// PostgreSQLSearch is the in-database path: pgvector, or pgvectorscale's
+// DiskANN where it is installed and chosen. It is never optional, because it is
+// what a deployment has before it has anything else.
 type PostgreSQLSearch func(ctx context.Context, request db3.SearchRequest) (db3.SearchReply, error)
 
 // VectorRouter decides where a vector search runs.
@@ -101,10 +110,10 @@ func RoutableSearch(request db3.SearchRequest) bool {
 
 // Search answers a vector search, routing it when it can and can be answered.
 //
-// The generation is not negotiable. DB2 asks at the generation it requires, and
-// a provider that has not reached it would answer from an older corpus. So a
-// provider behind the request is not used -- PostgreSQL is, which is always
-// current because it is the canonical store.
+// The generation is not negotiable. The caller asks at the generation it
+// requires, and a provider that has not reached it would answer from an older
+// corpus. So a provider behind the request is not used -- the in-database path
+// is, and it is always current because PostgreSQL is the canonical store.
 func (r *VectorRouter) Search(ctx context.Context,
 	request db3.SearchRequest) (db3.SearchReply, RouteKind, error) {
 	if r == nil || r.fallback == nil {
@@ -150,10 +159,10 @@ func (r *VectorRouter) selectProvider(request db3.SearchRequest) (uint32, uint64
 	if !ok {
 		return 0, 0, false
 	}
-	// A provider behind the required generation has not caught up with DB2's
-	// writes. Ahead is equally refused: the wire requires the reply to carry
-	// exactly the requested generation, so a provider ahead of it cannot answer
-	// this request at all.
+	// A provider behind the required generation has not caught up with the
+	// canonical store's writes. Ahead is equally refused: the wire requires the
+	// reply to carry exactly the requested generation, so a provider ahead of it
+	// cannot answer this request at all.
 	if generation != request.RequiredGeneration {
 		return 0, 0, false
 	}

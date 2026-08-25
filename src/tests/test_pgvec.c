@@ -22,8 +22,6 @@
 #include "../modules/db2/c/memory_vectors.h"
 #include "../modules/db2/c/kb_vectors.h"
 #include "../modules/db2/c/vector_verify.h"
-#include "../modules/db2/c/pgvec_db3.h"
-#include "../modules/db2/c/db_postgres.h"
 
 static void test_collection_names(void)
 {
@@ -267,41 +265,49 @@ static void test_public_api_symbols(void)
    printf("pgvec: all public API symbols resolve OK\n");
 }
 
-static void test_corpus_index_type_hnsw_default(void)
+/* pgvectorscale is the DEFAULT index, and these cases exist because the tree
+ * used to say otherwise in two places at once: this policy returned HNSW for an
+ * unset setting and gated "auto" behind a million-row threshold, while
+ * schema.sql created DiskANN whenever the extension was present. Two policies,
+ * opposite defaults, and no production caller of this one to make the
+ * disagreement visible. */
+static void test_corpus_index_type_defaults_to_diskann(void)
 {
-   /* auto + no vectorscale + below threshold → hnsw */
-   const char *t = pgvec_corpus_index_type("auto", 0, 0, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* explicit hnsw → always hnsw regardless of scale or extension */
-   t = pgvec_corpus_index_type("hnsw", 999999999, 1, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* NULL/empty configured → hnsw */
-   t = pgvec_corpus_index_type(NULL, 0, 1, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type default hnsw OK\n");
+   /* Unset, "auto" and "diskann" all mean the same thing: use the access method
+    * this system indexes with, whenever it is installed. */
+   const char *t = pgvec_corpus_index_type(NULL, 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+   t = pgvec_corpus_index_type("", 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+   t = pgvec_corpus_index_type("auto", 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+   t = pgvec_corpus_index_type("diskann", 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+
+   /* A corpus of ZERO rows still gets DiskANN. The old threshold would have sent
+    * it to HNSW, which is exactly backwards for a small corpus of wide vectors:
+    * HNSW caps at 2000 dimensions and DiskANN does not, so the threshold sent
+    * the one case that cannot use HNSW straight to it. */
+   t = pgvec_corpus_index_type("auto", 0, 1, 1000000);
+   assert(strcmp(t, "diskann") == 0);
+   printf("pgvec: corpus_index_type defaults to diskann OK\n");
 }
 
-static void test_corpus_index_type_diskann(void)
+static void test_corpus_index_type_falls_back_without_the_extension(void)
 {
-   /* diskann forced + vectorscale present → diskann */
-   const char *t = pgvec_corpus_index_type("diskann", 0, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* diskann forced + vectorscale absent → hnsw fallback */
-   t = pgvec_corpus_index_type("diskann", 0, 0, 1000000);
+   /* Without pgvectorscale there is only one answer available. */
+   const char *t = pgvec_corpus_index_type(NULL, 0, 0, 0);
    assert(strcmp(t, "hnsw") == 0);
-   /* auto + above threshold + vectorscale present → diskann */
-   t = pgvec_corpus_index_type("auto", 2000000, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* auto + at threshold + vectorscale present → diskann */
-   t = pgvec_corpus_index_type("auto", 1000000, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* auto + above threshold + vectorscale absent → hnsw */
-   t = pgvec_corpus_index_type("auto", 2000000, 0, 1000000);
+   t = pgvec_corpus_index_type("auto", 2000000, 0, 0);
    assert(strcmp(t, "hnsw") == 0);
-   /* auto + below threshold + vectorscale present → hnsw */
-   t = pgvec_corpus_index_type("auto", 999999, 1, 1000000);
+   t = pgvec_corpus_index_type("diskann", 0, 0, 0);
    assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type diskann selection OK\n");
+
+   /* An operator who names HNSW gets it even where DiskANN is available: a
+    * setting that was silently overridden would be a lie. */
+   t = pgvec_corpus_index_type("hnsw", 999999999, 1, 0);
+   assert(strcmp(t, "hnsw") == 0);
+   printf("pgvec: corpus_index_type falls back without vectorscale OK\n");
 }
 
 static void test_corpus_ensure_index_graceful(void)
@@ -316,144 +322,6 @@ static void test_corpus_ensure_index_graceful(void)
    rc = pgvec_ensure_corpus_index(NULL, "hnsw", 0);
    assert(rc == -1);
    printf("pgvec: corpus ensure_index graceful OK\n");
-}
-
-/* --- The routing decision the search wrappers make -----------------------
- *
- * pgvec_code_search, pgvec_kb_search and pgvec_kbpdf_search each answer the
- * same question before they do anything: can this search be expressed as
- * filters a provider could serve, or must it stay on pgvector? The answer turns
- * on resolving the project's current generation, because the pgvector form
- * expresses "current" as a JOIN and a provider cannot join.
- *
- * That decision had no test at all, which is how pgvec_code_search came to be
- * declared in the header with no definition behind it: nothing called the
- * symbol, so nothing missed it. These cases call the wrappers and assert on
- * what the provider was asked, so the next time the wrapper is renamed or the
- * condition is dropped, something says so.
- *
- * The generation lookup is ordinary SQL over `projects`, which the sqlite shim
- * executes, so the decision is reachable here even though the pgvector query
- * behind it is not. */
-
-typedef struct
-{
-   int calls;
-   char last_project[AIMEE_DB3_MAX_SCOPE];
-   uint32_t last_filter_count;
-   char last_filter_key[AIMEE_DB3_MAX_LABEL_KEY];
-   char last_filter_value[AIMEE_DB3_MAX_LABEL_VALUE];
-} route_probe_t;
-
-static int probe_search(void *context, const aimee_db3_search_request_t *request,
-                        aimee_db3_search_reply_t *reply)
-{
-   route_probe_t *probe = context;
-   probe->calls++;
-   snprintf(probe->last_project, sizeof(probe->last_project), "%s", request->project);
-   probe->last_filter_count = request->filter_count;
-   probe->last_filter_key[0] = probe->last_filter_value[0] = '\0';
-   if (request->filter_count > 0)
-   {
-      snprintf(probe->last_filter_key, sizeof(probe->last_filter_key), "%s",
-               request->filters[0].key);
-      snprintf(probe->last_filter_value, sizeof(probe->last_filter_value), "%s",
-               request->filters[0].value);
-   }
-   reply->request_id = request->request_id;
-   reply->generation = request->required_generation;
-   reply->count = 1;
-   reply->candidates[0].point_id = 77;
-   reply->candidates[0].score = 0.5;
-   return 0;
-}
-
-static int probe_allow(void *context, const char *workspace, const char *project, int64_t point_id)
-{
-   (void)context;
-   (void)workspace;
-   (void)project;
-   (void)point_id;
-   return 1;
-}
-
-static void seed_project(const char *name, const char *lifecycle, long long generation)
-{
-   char sql[512];
-   char errbuf[256];
-   snprintf(sql, sizeof(sql),
-            "INSERT INTO projects (name, root, scanned_at, lifecycle_state, current_generation) "
-            "VALUES ('%s', '/tmp/%s', '2026-01-01', '%s', %lld)",
-            name, name, lifecycle, generation);
-   (void)aimee_pg_exec(db2_conn(), sql, errbuf, sizeof(errbuf));
-}
-
-static void test_search_routing_decision(void)
-{
-   float vec[4] = {1.0f, 0.0f, 0.0f, 0.0f};
-   int64_t ids[8];
-   double scores[8];
-
-   seed_project("routed", "current", 7);
-   seed_project("gone", "detached", 5);
-
-   route_probe_t code = {0};
-   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_CODE, probe_search, &code, probe_allow,
-                                  &code) == 0);
-   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_CODE, 456, 1, 0, probe_search, &code) == 0);
-
-   /* A current project routes, and carries its resolved generation as an exact
-    * filter -- the whole point of the join-to-filter reduction. */
-   int n = pgvec_code_search("routed", vec, 4, 5, ids, scores, 8);
-   assert(n == 1 && ids[0] == 77);
-   assert(code.calls == 1);
-   assert(strcmp(code.last_project, "routed") == 0);
-   assert(code.last_filter_count == 1);
-   assert(strcmp(code.last_filter_key, "generation") == 0);
-   assert(strcmp(code.last_filter_value, "7") == 0);
-
-   /* A detached project resolves to nothing. Routing it without the lifecycle
-    * condition would answer from the generation it was detached at, so the
-    * search must stay on pgvector -- which under the shim means it fails rather
-    * than reaching the provider. */
-   int before = code.calls;
-   (void)pgvec_code_search("gone", vec, 4, 5, ids, scores, 8);
-   assert(code.calls == before);
-
-   /* A project-less search spans every project, each with its own current
-    * generation. That is a per-row condition, not one filter, so it does not
-    * route either. */
-   (void)pgvec_code_search("", vec, 4, 5, ids, scores, 8);
-   assert(code.calls == before);
-   pgvec_db3_route_clear(PGVEC_DB3_COLLECTION_CODE);
-
-   /* kb and kb_pdf resolve the same value through the same helper. */
-   route_probe_t kb = {0};
-   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_KB, probe_search, &kb, probe_allow, &kb) ==
-          0);
-   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_KB, 456, 1, 0, probe_search, &kb) == 0);
-   n = pgvec_kb_search("routed", vec, 4, 5, ids, scores, 8);
-   assert(n == 1 && ids[0] == 77);
-   assert(kb.calls == 1 && strcmp(kb.last_filter_key, "generation") == 0);
-   assert(strcmp(kb.last_filter_value, "7") == 0);
-
-   /* An excluded project cannot be sent as an equality filter, so a scoped
-    * search with one stays on pgvector even though the project is current. */
-   before = kb.calls;
-   (void)pgvec_kb_search_scoped("routed", "other", vec, 4, 5, ids, scores, 8);
-   assert(kb.calls == before);
-   pgvec_db3_route_clear(PGVEC_DB3_COLLECTION_KB);
-
-   route_probe_t pdf = {0};
-   assert(pgvec_db3_route_install(PGVEC_DB3_COLLECTION_KB_PDF, probe_search, &pdf, probe_allow,
-                                  &pdf) == 0);
-   assert(pgvec_db3_route_select(PGVEC_DB3_COLLECTION_KB_PDF, 456, 1, 0, probe_search, &pdf) == 0);
-   n = pgvec_kbpdf_search("routed", vec, 4, 5, ids, scores, 8);
-   assert(n == 1 && ids[0] == 77);
-   assert(pdf.calls == 1 && strcmp(pdf.last_filter_value, "7") == 0);
-   pgvec_db3_route_clear(PGVEC_DB3_COLLECTION_KB_PDF);
-
-   printf("pgvec: search routing decision OK\n");
 }
 
 int main(void)
@@ -472,10 +340,9 @@ int main(void)
    test_memory_scope_sql_uses_canonical_owner_scope();
    test_latency_snapshot();
    test_public_api_symbols();
-   test_corpus_index_type_hnsw_default();
-   test_corpus_index_type_diskann();
+   test_corpus_index_type_defaults_to_diskann();
+   test_corpus_index_type_falls_back_without_the_extension();
    test_corpus_ensure_index_graceful();
-   test_search_routing_decision();
 
    db2_test_shim_close();
    printf("pgvec: all tests passed\n");

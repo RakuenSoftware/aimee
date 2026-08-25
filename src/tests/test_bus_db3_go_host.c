@@ -24,7 +24,13 @@
  * AGREE with what the Go test attaches as; if they ever stop agreeing, the bus
  * refuses the attach and the test says which principal it was, rather than
  * failing later on a route that never deploys. */
-#define DB2_REF        29u
+/* The caller is POSTGRES, not DB2.
+ *
+ * Only one principal holds a real grant to speak to a vector database, and it
+ * is the postgres module: every other DB operation reaches the vector store by
+ * going to postgres first. Granting the caller role to DB2 here would let a
+ * fixture prove a path that no deployment is allowed to take. 28 is postgres. */
+#define CALLER_REF     28u
 #define PROVIDER_A_REF 456u
 #define PROVIDER_B_REF 457u
 /* The control principal only REQUESTS routes; it is not a provider, so it is not
@@ -56,26 +62,26 @@ int main(int argc, char **argv)
    signal(SIGTERM, stop_now);
    signal(SIGINT, stop_now);
 
-   const uint32_t db2_publish[] = {AIMEE_DB3_EVENT_APPLY};
-   const uint32_t db2_subscribe[] = {AIMEE_DB3_EVENT_CAPABILITIES, AIMEE_DB3_EVENT_APPLIED};
-   const uint32_t db2_request[] = {AIMEE_DB3_EVENT_SEARCH};
-   const uint32_t db2_serve[] = {AIMEE_DB3_EVENT_ROUTE};
+   const uint32_t caller_publish[] = {AIMEE_DB3_EVENT_APPLY};
+   const uint32_t caller_subscribe[] = {AIMEE_DB3_EVENT_CAPABILITIES, AIMEE_DB3_EVENT_APPLIED};
+   const uint32_t caller_request[] = {AIMEE_DB3_EVENT_SEARCH};
+   const uint32_t caller_serve[] = {AIMEE_DB3_EVENT_ROUTE};
    const uint32_t provider_publish[] = {AIMEE_DB3_EVENT_CAPABILITIES, AIMEE_DB3_EVENT_APPLIED};
    const uint32_t provider_subscribe[] = {AIMEE_DB3_EVENT_APPLY};
    const uint32_t provider_serve[] = {AIMEE_DB3_EVENT_SEARCH};
    const uint32_t control_request[] = {AIMEE_DB3_EVENT_ROUTE};
    bus_runtime_grant_t grants[] = {
        {.principal_class = 1,
-        .principal_ref = DB2_REF,
+        .principal_ref = CALLER_REF,
         .uid = BUS_RUNTIME_SELF_UID,
         .executable = argv[2],
-        .publish = db2_publish,
+        .publish = caller_publish,
         .publish_count = 1,
-        .subscribe = db2_subscribe,
+        .subscribe = caller_subscribe,
         .subscribe_count = 2,
-        .request = db2_request,
+        .request = caller_request,
         .request_count = 1,
-        .serve = db2_serve,
+        .serve = caller_serve,
         .serve_count = 1},
        {.principal_class = 1,
         .principal_ref = PROVIDER_A_REF,

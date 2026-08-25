@@ -32,8 +32,11 @@ int pgvec_vectorscale_available(void);
 
 /* Resolve corpus index type from config policy.
  * configured: "auto"|"hnsw"|"diskann".  Returns "hnsw" or "diskann".
- * "diskann" is only returned when vectorscale_available=1 AND (configured="diskann" OR
- * configured="auto" with corpus_rows >= diskann_threshold). */
+ * pgvectorscale's StreamingDiskANN is the DEFAULT: unset, "auto" and "diskann"
+ * all return "diskann" when vectorscale_available=1. HNSW is returned only when
+ * the extension is absent, or when an operator asked for it by name.
+ * corpus_rows and diskann_threshold are accepted and ignored; see the definition
+ * for why a size threshold is the wrong shape for this decision. */
 const char *pgvec_corpus_index_type(const char *configured, int64_t corpus_rows,
                                     int vectorscale_available, int64_t diskann_threshold);
 

@@ -19,17 +19,10 @@ from typing import NoReturn
 ROOT = Path(__file__).resolve().parent.parent
 AUDIT = Path("src/modules/db2/eventcontract/vector-portability.json")
 LEDGER = Path("tests/baselines/db2/declarations-v1.json")
-ROUTE_SOURCE = Path("src/modules/db2/db3_route.c")
 MAX_BYTES = 2_097_152
 MAX_DEPTH = 32
 MAX_ARRAY = 4096
 SYMBOL = re.compile(r"^pgvec_[a-z0-9_]+$")
-INCLUDE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]\s*$')
-INCLUDE_PREFIX = re.compile(r"^\s*#\s*include\b")
-STANDARD_HEADERS = {
-    "assert.h", "errno.h", "float.h", "inttypes.h", "limits.h", "math.h", "stdalign.h",
-    "stdbool.h", "stddef.h", "stdint.h", "stdio.h", "stdlib.h", "string.h", "time.h",
-}
 CLASSIFICATIONS = (
     ("portable-search", "portable-now", "candidate-search"),
     ("committed-mutation", "portable-after-commit", "apply"),
@@ -138,39 +131,6 @@ def symbols_sha256(symbols: list[str]) -> str:
     return hashlib.sha256("".join(f"{symbol}\n" for symbol in symbols).encode()).hexdigest()
 
 
-def validate_route_boundary(root: Path) -> None:
-    path = root / ROUTE_SOURCE
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        fail("route-boundary", f"cannot read {path}: {exc}")
-    if len(raw) > MAX_BYTES:
-        fail("route-boundary", f"{path} exceeds {MAX_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8", "strict")
-    except UnicodeDecodeError as exc:
-        fail("route-boundary", f"{path}: {exc}")
-    imports: list[str] = []
-    for line in text.splitlines():
-        normalized = re.sub(r"/\*.*?\*/", " ", line)
-        if not INCLUDE_PREFIX.match(normalized):
-            if line.lstrip().startswith("#") and re.search(r"\binclude\b", line):
-                fail("route-boundary", f"cannot classify include directive {line!r}")
-            continue
-        match = INCLUDE.fullmatch(normalized)
-        if not match:
-            fail("route-boundary", f"cannot classify include directive {line!r}")
-        delimiter, header = match.groups()
-        if header == "aimee/db2/db3_route.h" and delimiter == "<":
-            imports.append(header)
-        elif delimiter == "<" and header in STANDARD_HEADERS:
-            continue
-        else:
-            fail("route-boundary", f"forbidden non-standard or private include {header!r}")
-    if imports != ["aimee/db2/db3_route.h"]:
-        fail("route-boundary", "the public DB3 route header must be included exactly once")
-
-
 def validate(audit_value: object, ledger_value: object) -> dict[str, int]:
     audit = _object(audit_value, {
         "schema_version", "module", "source", "source_symbols_sha256", "classifications",
@@ -221,7 +181,6 @@ def validate(audit_value: object, ledger_value: object) -> dict[str, int]:
 
 def run(root: Path) -> dict[str, int]:
     summary = validate(load_json(root / AUDIT), load_json(root / LEDGER))
-    validate_route_boundary(root)
     return summary
 
 

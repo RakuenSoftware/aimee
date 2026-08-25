@@ -357,7 +357,7 @@ DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 DB2_PG_SRCS = modules/db2/c/db_postgres.c
 DB2_PG_OBJS = $(DB2_PG_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o)
 DB2_SRCS = modules/db2/c/db2_init.c modules/db2/c/db2_reembed.c modules/db2/c/db2_pool.c modules/db2/c/agent_hints.c modules/db2/c/agent_outcomes.c modules/db2/c/canonical_index.c modules/db2/c/anti_patterns.c modules/db2/c/workflow_patterns.c modules/db2/c/evidence_vectors.c modules/db2/c/learning_synth_ops.c modules/db2/c/collab_rules.c modules/db2/c/curiosity.c modules/db2/c/decision_log.c modules/db2/c/kb_audit_worm.c modules/db2/c/enrollments.c modules/db2/c/db2_tenant.c modules/db2/c/db2_hardening.c modules/db2/c/team.c modules/db2/c/project.c modules/db2/c/membership.c modules/db2/c/admin_grant.c modules/db2/c/write_tier_grant.c modules/db2/c/oidc_jwks.c modules/db2/c/entity_edges.c modules/db2/c/rel_types_store.c modules/db2/c/entity_registry.c modules/db2/c/fact_lifecycle.c modules/db2/c/fact_mutation.c modules/db2/c/evidence_lifecycle.c modules/db2/c/ontology_evolution.c modules/db2/c/fact_ingest.c modules/db2/c/fact_recall.c modules/db2/c/entity_nodes.c modules/db2/c/code_projection.c modules/db2/c/lessons.c modules/db2/c/shadow_delta.c modules/db2/c/entity_profiles.c modules/db2/c/epistemic_directives.c modules/db2/c/failed_queries.c modules/db2/c/feedback.c modules/db2/c/notes.c modules/db2/c/prospective_memories.c modules/db2/c/rules.c modules/db2/c/stopwords.c modules/db2/c/tasks.c modules/db2/c/tool_registry.c modules/db2/c/trace_mining.c modules/db2/c/kind_lifecycle.c modules/db2/c/kb_payload.c modules/db2/c/kb_runtime_state.c modules/db2/c/kb_service_backend.c modules/db2/c/kb_service_backend_ingest.c modules/db2/c/memory_briefing.c modules/db2/c/memory_conflicts.c modules/db2/c/memory_export.c modules/db2/c/memory_health.c modules/db2/c/memory_lifecycle.c modules/db2/c/memory_payload.c modules/db2/c/memory_promotion.c modules/db2/c/memory_query.c modules/db2/c/memory_query_bookkeeping.c modules/db2/c/memory_entity_graph.c modules/db2/c/memory_row_mapper_pg.c modules/db2/c/memory_score_fields.c modules/db2/c/memory_scope_query.c modules/db2/c/memory_relations.c modules/db2/c/memory_scenes.c modules/db2/c/vector_index_ops.c modules/db2/c/code_index_ops.c modules/db2/c/learning.c modules/db2/c/code_index.c modules/db2/c/code_project_lifecycle.c modules/db2/c/css_graph.c modules/db2/c/css_migration.c modules/db2/c/css_render.c modules/db2/c/css_insights.c modules/db2/c/typed_facts.c modules/db2/c/db_schema.c modules/db2/c/memory_lint.c modules/db2/c/sketch.c modules/db2/c/artifacts.c modules/db2/c/corpus_structural.c modules/db2/c/corpus_jobs.c modules/db2/c/mining.c modules/db2/c/calibration.c modules/db2/c/demotion.c modules/db2/c/fidelity.c modules/db2/c/feature_rows.c modules/db2/c/report_enrichments.c modules/db2/c/bandit.c modules/db2/c/kb_maintenance.c modules/db2/c/kb_docs.c modules/db2/c/kb_releases.c modules/db2/c/code_audit.c \
-           modules/db2/c/pgvec_transport.c modules/db2/c/pgvec_db3.c modules/db2/c/memory_vectors.c modules/db2/c/kb_vectors.c modules/db2/c/vector_status.c modules/db2/c/pgvec_verify.c modules/db2/c/pgvec_kb_service.c \
+           modules/db2/c/pgvec_transport.c modules/db2/c/memory_vectors.c modules/db2/c/kb_vectors.c modules/db2/c/vector_status.c modules/db2/c/pgvec_verify.c modules/db2/c/pgvec_kb_service.c \
            modules/db2/c/curator_terms.c modules/db2/c/curator_gaps.c \
            modules/db2/c/cross_repo_resolver.c modules/db2/c/cross_repo_classify.c modules/db2/c/cross_repo_stats.c \
            modules/db2/c/cross_repo_deps.c modules/db2/c/cross_repo_review.c modules/db2/c/cross_repo_identity.c \
@@ -377,16 +377,6 @@ DB2_HOST_ADAPTER_TEST_OBJS = $(DB2_HOST_ADAPTER_SRCS:kb/db2_adapters/%.c=$(OBJDI
 # make de-duplicating them with DB2_OBJS in composite fixtures.
 DB2_OBJS = $(DB2_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o) $(DB2_HOST_ADAPTER_TEST_OBJS)
 
-# The two DB2 sources that speak to DB3 include the module-owned boundary header
-# <aimee/db2/db3_route.h>, which lives under modules/db2/include rather than the
-# modules/db2/c implementation directory the base flags carry. tests/Rules.mk
-# already grants this to the db3_route object and its tests; the same grant has
-# to reach both namespaces these two are compiled into -- $(OBJDIR)/db2/ for the
-# test fixtures and $(OBJDIR)/kb/modules/db2/c/ for aimee-kb -- or the boundary
-# header is reachable from the tests but not from the binary that ships it.
-DB2_DB3_SRCS = modules/db2/c/pgvec_db3.c modules/db2/c/pgvec_transport.c
-$(DB2_DB3_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o) \
-$(DB2_DB3_SRCS:%.c=$(OBJDIR)/kb/%.o): C_FLAGS += -Imodules/db2/include
 
 # Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
 # (in SERVER_SRCS above, compiled as $(OBJDIR)/modules/vault/*.o) and aimee-kb (linked
@@ -779,13 +769,7 @@ KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
 KB_CORE_SRCS = $(filter-out modules/audit/audit_worm.c,$(CORE_SRCS))
 KB_CORE_OBJS = $(KB_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/cJSON.o
 KB_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/kb/%.o)
-# modules/db2/db3_route.c is the module-owned DB3 boundary itself, so it sits
-# beside modules/db2/ rather than inside the modules/db2/c implementation
-# directory DB2_SRCS is written in terms of. pgvec_db3.c calls into it, so
-# aimee-kb has to link it; appending the object directly keeps DB2_SRCS's
-# modules/db2/c/%.c rewrite (which DB2_OBJS depends on) intact.
-KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/kb/modules/db2/db3_route.o
-$(OBJDIR)/kb/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
+KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_DB2_HOST_ADAPTER_OBJS = $(DB2_HOST_ADAPTER_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_MEMORY_SPLIT_SRCS = modules/memory/memory_core_search_c.c modules/memory/memory_core_search_b.c modules/memory/memory_core_helpers_b.c modules/memory/memory_core_helpers.c modules/memory/memory_core_crud.c modules/memory/memory_core_search.c modules/memory/memory_core_scope_embed.c modules/memory/memory_core_tiers.c
 # ^ KB-real only (#error-guarded); NEVER add to DATA_SRCS/server build.

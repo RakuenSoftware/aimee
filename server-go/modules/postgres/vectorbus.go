@@ -60,9 +60,9 @@ type VectorBus struct {
 // AttachVectorBus connects this module to the DB3 wire.
 //
 // It is OPTIONAL in the strongest sense: a deployment with no bus, or no
-// provider on it, never calls this, and vector operations run on PostgreSQL
-// exactly as they always have. Nothing here may make the absence of a provider
-// an error.
+// provider on it, never calls this, and vector operations stay in-database on
+// pgvector or pgvectorscale exactly as they always have. Nothing here may make
+// the absence of a provider an error.
 func AttachVectorBus(ctx context.Context, client *bus.Client,
 	registry *db3.ProviderRegistry) (*VectorBus, error) {
 	if client == nil {
@@ -104,8 +104,8 @@ func (v *VectorBus) Close() {
 // NewBusVectorRouter builds a router wired to a bus, with PostgreSQL behind it.
 //
 // This is the constructor a deployment uses. With no client it still builds a
-// working router -- one that answers every search from PostgreSQL -- because a
-// DB3 provider is optional and its absence is the ordinary case.
+// working router -- one that answers every search in-database -- because an
+// external vector database is optional and its absence is the ordinary case.
 func NewBusVectorRouter(ctx context.Context, client *bus.Client,
 	fallback PostgreSQLSearch) (*VectorRouter, *VectorBus, error) {
 	if fallback == nil {

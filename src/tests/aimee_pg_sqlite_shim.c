@@ -411,12 +411,25 @@ static char *translate_sql(const char *sql_in)
        * other. Longest match first, so ::integer is not read as ::int followed by a
        * stray "eger", and ::boolean not as ::bool. */
       {
-         static const char *const casts[] = {
-             "::double precision", "::timestamptz", "::halfvec", "::timestamp",
-             "::boolean",          "::smallint",    "::integer", "::numeric",
-             "::bigint",           "::vector",      "::float8",  "::jsonb",
-             "::real",             "::bool",        "::json",    "::text",
-             "::int",              "::json",        NULL};
+         static const char *const casts[] = {"::double precision",
+                                             "::timestamptz",
+                                             "::halfvec",
+                                             "::timestamp",
+                                             "::boolean",
+                                             "::smallint",
+                                             "::integer",
+                                             "::numeric",
+                                             "::bigint",
+                                             "::vector",
+                                             "::float8",
+                                             "::jsonb",
+                                             "::real",
+                                             "::bool",
+                                             "::json",
+                                             "::text",
+                                             "::int",
+                                             "::json",
+                                             NULL};
          int stripped = 0;
          for (int ci = 0; casts[ci]; ci++)
          {
@@ -685,10 +698,11 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    /* The schema-apply path runs the full postgres schema text through
     * here. Tests are expected to apply db2_apply_schema_sqlite_shim to
     * their handle BEFORE registering it; ignore the postgres schema text. */
-   if (sql && (strstr(sql, "CREATE OR REPLACE FUNCTION") != NULL ||
-               strstr(sql, "AT TIME ZONE 'UTC'") != NULL ||
-               strstr(sql, "GENERATED ALWAYS AS") != NULL || strstr(sql, "to_tsvector") != NULL ||
-               strstr(sql, "USING hnsw") != NULL || strstr(sql, "DROP INDEX") != NULL))
+   if (sql &&
+       (strstr(sql, "CREATE OR REPLACE FUNCTION") != NULL ||
+        strstr(sql, "AT TIME ZONE 'UTC'") != NULL || strstr(sql, "GENERATED ALWAYS AS") != NULL ||
+        strstr(sql, "to_tsvector") != NULL || strstr(sql, "USING hnsw") != NULL ||
+        strstr(sql, "USING diskann") != NULL || strstr(sql, "DROP INDEX") != NULL))
       return 0;
    char *sql_t = translate_sql(sql);
    if (!sql_t)

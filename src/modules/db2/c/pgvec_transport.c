@@ -1,5 +1,4 @@
 #include "pgvec_transport.h"
-#include "pgvec_db3.h"
 #include "memory_scope_query.h"
 #include "pgvec_scope_query.h"
 
@@ -177,22 +176,41 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
          LOG_WARN("pgvec", "truncate %s failed: %s", table, errbuf);
          return -1;
       }
-      /* index name is idx_<table>_hnsw */
+      /* BOTH index names, because which one exists depends on whether
+       * pgvectorscale was present when it was built. Dropping only the HNSW
+       * name left a stale DiskANN index behind on a re-create, and the
+       * IF NOT EXISTS below then found it and did nothing -- so a re-create
+       * silently kept the old index. */
       snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_hnsw", table);
       if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
          LOG_WARN("pgvec", "drop index idx_%s_hnsw failed: %s", table, errbuf);
+      snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_diskann", table);
+      if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
+         LOG_WARN("pgvec", "drop index idx_%s_diskann failed: %s", table, errbuf);
    }
 
+   /* pgvectorscale's StreamingDiskANN is the index this system uses; HNSW is
+    * what a database without the extension gets.
+    *
+    * This path used to create HNSW unconditionally, never probing for the
+    * extension -- while schema.sql, which builds the very same indexes at apply
+    * time, chose DiskANN whenever it was installed. So the memory, kb and code
+    * tables got DiskANN from the schema and HNSW from here, and which one a
+    * deployment ended up with depended on whichever ran last. It also meant a
+    * corpus wider than 2000 dimensions, which HNSW cannot index at all, had its
+    * index quietly created by the one path that could not hold it. */
+   const char *index_type = pgvec_vectorscale_available() ? "diskann" : "hnsw";
    char sql[256];
    snprintf(sql, sizeof(sql),
-            "CREATE INDEX IF NOT EXISTS idx_%s_hnsw "
-            "ON %s USING hnsw (embedding vector_cosine_ops)",
-            table, table);
+            "CREATE INDEX IF NOT EXISTS idx_%s_%s "
+            "ON %s USING %s (embedding vector_cosine_ops)",
+            table, index_type, table, index_type);
    if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
    {
-      LOG_WARN("pgvec", "create hnsw index on %s failed: %s", table, errbuf);
+      LOG_WARN("pgvec", "create %s index on %s failed: %s", index_type, table, errbuf);
       return -1;
    }
+   LOG_INFO("pgvec", "vector index type=%s table=%s", index_type, table);
    return 0;
 }
 
@@ -215,17 +233,36 @@ int pgvec_vectorscale_available(void)
    return found;
 }
 
+/* pgvectorscale's StreamingDiskANN is the DEFAULT, and HNSW is the fallback for
+ * a database that does not have the extension.
+ *
+ * This function used to say the opposite: an unset setting meant HNSW, and
+ * "auto" reached DiskANN only above db2_vector_corpus_diskann_threshold, whose
+ * shipped default is a million rows. schema.sql has always disagreed with it --
+ * it creates `USING diskann` whenever the extension is present and only falls
+ * back to HNSW when CREATE EXTENSION vectorscale fails. So the tree carried two
+ * index policies that contradicted each other, and the contradiction went
+ * unnoticed because this one has no production caller: only tests reach it.
+ *
+ * corpus_rows and diskann_threshold remain in the signature and are deliberately
+ * unused. A corpus size threshold is the wrong shape for this decision: DiskANN
+ * is not a large-corpus optimisation to grow into, it is the access method this
+ * system indexes with, and it also lifts pgvector's 2000-dimension cap on HNSW
+ * -- so a small corpus with wide vectors is exactly the case a threshold would
+ * have sent to the index that cannot hold it. */
 const char *pgvec_corpus_index_type(const char *configured, int64_t corpus_rows,
                                     int vectorscale_available, int64_t diskann_threshold)
 {
-   if (!configured || !configured[0] || strcmp(configured, "hnsw") == 0)
+   (void)corpus_rows;
+   (void)diskann_threshold;
+   /* An explicit "hnsw" is honoured: an operator who asks for it has a reason,
+    * and overriding that would make the setting a lie. */
+   if (configured && strcmp(configured, "hnsw") == 0)
       return "hnsw";
-   if (strcmp(configured, "diskann") == 0)
-      return vectorscale_available ? "diskann" : "hnsw";
-   /* auto: pick diskann only when extension present and corpus exceeds threshold */
-   if (vectorscale_available && corpus_rows >= diskann_threshold)
-      return "diskann";
-   return "hnsw";
+   /* Everything else -- unset, "auto", "diskann" -- wants DiskANN, and gets it
+    * whenever the extension is there. Without the extension there is only one
+    * answer available, and pgvec_ensure_corpus_index warns when it takes it. */
+   return vectorscale_available ? "diskann" : "hnsw";
 }
 
 int pgvec_ensure_corpus_index(const char *table, const char *index_type, int recreate)
@@ -236,12 +273,13 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
    if (!pg)
       return -1;
 
-   const char *use_type = index_type;
-   if (use_type && strcmp(use_type, "diskann") == 0 && !pgvec_vectorscale_available())
-   {
+   /* Resolve through the policy rather than trusting the argument, so a caller
+    * that passes nothing gets the DEFAULT (DiskANN) instead of silently
+    * creating an HNSW index. Passing NULL used to mean HNSW here, which is the
+    * same inversion pgvec_corpus_index_type carried. */
+   const char *use_type = pgvec_corpus_index_type(index_type, 0, pgvec_vectorscale_available(), 0);
+   if (index_type && strcmp(index_type, "diskann") == 0 && strcmp(use_type, "hnsw") == 0)
       LOG_WARN("pgvec", "pgvectorscale unavailable; corpus table %s falls back to HNSW", table);
-      use_type = "hnsw";
-   }
 
    char errbuf[256];
    if (recreate)
@@ -254,7 +292,7 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
    }
 
    char sql[512];
-   if (use_type && strcmp(use_type, "diskann") == 0)
+   if (strcmp(use_type, "diskann") == 0)
       snprintf(sql, sizeof(sql),
                "CREATE INDEX IF NOT EXISTS idx_%s_diskann "
                "ON %s USING diskann (embedding vector_cosine_ops)",
@@ -267,11 +305,10 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
 
    if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
    {
-      LOG_WARN("pgvec", "create %s index on corpus table %s failed: %s",
-               use_type ? use_type : "hnsw", table, errbuf);
+      LOG_WARN("pgvec", "create %s index on corpus table %s failed: %s", use_type, table, errbuf);
       return -1;
    }
-   LOG_INFO("pgvec", "corpus index type=%s table=%s", use_type ? use_type : "hnsw", table);
+   LOG_INFO("pgvec", "corpus index type=%s table=%s", use_type, table);
    return 0;
 }
 
@@ -585,10 +622,9 @@ int pgvec_scroll(const char *table, int64_t offset, int64_t *ids_out, int max,
  * Named separately from pgvec_memory_search because it is also the callback the
  * DB3 route falls back to: the route needs a function it can call, and that
  * function must not itself consult the route. */
-static int pgvec_memory_search_pgvector(const float *vec, int dim, const char *record_type,
-                                        const char *const *kinds, int n_kinds,
-                                        const char *workspace, const char *project, int limit,
-                                        int64_t *ids, double *scores, int max)
+int pgvec_memory_search(const float *vec, int dim, const char *record_type,
+                        const char *const *kinds, int n_kinds, const char *workspace,
+                        const char *project, int limit, int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !record_type || !ids || !scores || max <= 0)
       return -1;
@@ -721,81 +757,14 @@ static int pgvec_memory_search_pgvector(const float *vec, int dim, const char *r
    return (rc == AIMEE_PG_ERR) ? -1 : n;
 }
 
-int pgvec_memory_search(const float *vec, int dim, const char *record_type,
-                        const char *const *kinds, int n_kinds, const char *workspace,
-                        const char *project, int limit, int64_t *ids, double *scores, int max)
-{
-   /* Three things make a search unroutable, and all three share one cause: the
-    * DB3 search request carries only workspace, project and record_type, so a
-    * search whose meaning depends on anything else would come back answering a
-    * different question while looking correct.
-    *
-    *   - A kind filter. The request has no field for one, so a routed filtered
-    *     search returns unfiltered candidates.
-    *   - An unscoped search. The wire requires a scope and inventing one would
-    *     change what was asked.
-    *   - An ACTIVE REQUEST SCOPE. This is the subtle one. With a scope context
-    *     set, the query below does not filter on the denormalized workspace and
-    *     project columns at all — it computes a visibility rank from
-    *     memory_scopes and memory_workspaces, including the legacy case of rows
-    *     tagged in neither. No provider can express that: it is a join against
-    *     canonical relational rows, not a label match. Routing here would
-    *     return memories the request is not entitled to see, and drop shared
-    *     and global ones it is. */
-   db2_memory_scope_context_t routing_scope;
-   db2_memory_scope_context_get(&routing_scope);
-   int routable = !routing_scope.active && !(kinds && n_kinds > 0) &&
-                  ((workspace && workspace[0]) || (project && project[0]));
-   if (routable)
-   {
-      int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_MEMORY, vec, dim, record_type,
-                                        workspace, project, NULL, 0, limit, ids, scores, max);
-      /* A negative answer means the route declined or produced nothing usable
-       * — including the ordinary case of no route installed at all — so the
-       * query runs here instead. Zero is a real empty result and is returned. */
-      if (routed >= 0)
-         return routed;
-   }
-   return pgvec_memory_search_pgvector(vec, dim, record_type, kinds, n_kinds, workspace, project,
-                                       limit, ids, scores, max);
-}
-
 int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
                     double *scores, int max)
 {
    return pgvec_kb_search_scoped(project, NULL, vec, dim, limit, ids, scores, max);
 }
 
-/* Resolve a project's current generation, or 0 when it has none.
- *
- * The pgvector code query expresses "current" as a join: projects.lifecycle_state
- * = 'current' AND ce.generation = p.current_generation. A provider cannot join,
- * so routing that search means resolving the generation here and sending it as
- * an exact filter. The two are equivalent because the join has exactly one
- * matching projects row -- name is unique -- so a resolved generation reproduces
- * both conditions, and a project that is not current resolves to nothing and the
- * search must not route at all. */
-static int64_t project_current_generation(void *pg, const char *project)
-{
-   if (!pg || !project || !project[0])
-      return 0;
-   static const char *sql = "SELECT current_generation FROM projects"
-                            " WHERE name = :project AND lifecycle_state = 'current'";
-   char errbuf[256] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-      return 0;
-   aimee_pg_bind_text(stmt, "project", project);
-   int64_t generation = 0;
-   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
-      generation = aimee_pg_column_int64(stmt, 0);
-   aimee_pg_finalize(stmt);
-   return generation > 0 ? generation : 0;
-}
-
-static int pgvec_kb_search_scoped_pgvector(const char *project, const char *exclude_project,
-                                           const float *vec, int dim, int limit, int64_t *ids,
-                                           double *scores, int max)
+int pgvec_kb_search_scoped(const char *project, const char *exclude_project, const float *vec,
+                           int dim, int limit, int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -869,39 +838,6 @@ static int pgvec_kb_search_scoped_pgvector(const char *project, const char *excl
    int64_t elapsed = monotonic_us() - t0;
    record_latency(elapsed);
    return (rc == AIMEE_PG_ERR) ? -1 : n;
-}
-
-int pgvec_kb_search_scoped(const char *project, const char *exclude_project, const float *vec,
-                           int dim, int limit, int64_t *ids, double *scores, int max)
-{
-   /* Only the named-project form without an exclusion can route.
-    *
-    * An exclusion is negation, and the filter grammar is exact match only. A
-    * project-less search covers every project at its own current generation,
-    * which is a per-row condition no single filter expresses. Both stay on
-    * pgvector rather than route without the condition. */
-   int has_project = project && project[0];
-   int excludes = exclude_project && exclude_project[0];
-   if (has_project && !excludes)
-   {
-      void *pg = db2_conn();
-      int64_t generation = pg ? project_current_generation(pg, project) : 0;
-      /* No current generation means the project is detached: the pgvector query
-       * returns nothing for it, so routing without the condition would return
-       * rows from the generation it was detached at. */
-      if (generation > 0)
-      {
-         char generation_text[24];
-         snprintf(generation_text, sizeof(generation_text), "%lld", (long long)generation);
-         const pgvec_db3_filter_t filters[] = {{"generation", generation_text}};
-         int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_KB, vec, dim, "", "", project,
-                                           filters, 1, limit, ids, scores, max);
-         if (routed >= 0)
-            return routed;
-      }
-   }
-   return pgvec_kb_search_scoped_pgvector(project, exclude_project, vec, dim, limit, ids, scores,
-                                          max);
 }
 
 /* -------------------------------------------------------------------------
@@ -1015,8 +951,8 @@ int pgvec_kbpdf_delete_project(const char *project)
 /* Vector search over PDF chunk embeddings ONLY. There is deliberately no
  * "search both kb_embeddings and kb_pdf_embeddings" helper: keeping the relations
  * disjoint at the transport layer is the structural isolation A1 requires. */
-static int pgvec_kbpdf_search_pgvector(const char *project, const float *vec, int dim, int limit,
-                                       int64_t *ids, double *scores, int max)
+int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
+                       double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1070,29 +1006,6 @@ static int pgvec_kbpdf_search_pgvector(const char *project, const float *vec, in
    aimee_pg_finalize(stmt);
    free(vec_text);
    return (rc == AIMEE_PG_ERR) ? -1 : n;
-}
-
-int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
-                       double *scores, int max)
-{
-   /* Same shape as the kb search: a named project resolves to one generation,
-    * and a project-less search is a per-row condition that stays on pgvector. */
-   if (project && project[0])
-   {
-      void *pg = db2_conn();
-      int64_t generation = pg ? project_current_generation(pg, project) : 0;
-      if (generation > 0)
-      {
-         char generation_text[24];
-         snprintf(generation_text, sizeof(generation_text), "%lld", (long long)generation);
-         const pgvec_db3_filter_t filters[] = {{"generation", generation_text}};
-         int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_KB_PDF, vec, dim, "", "", project,
-                                           filters, 1, limit, ids, scores, max);
-         if (routed >= 0)
-            return routed;
-      }
-   }
-   return pgvec_kbpdf_search_pgvector(project, vec, dim, limit, ids, scores, max);
 }
 
 int pgvec_curator_entity_upsert(int64_t point_id, const float *vec, int dim, const char *scope_kind,
@@ -1195,9 +1108,8 @@ int pgvec_curator_entity_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-static int pgvec_curator_entity_search_pgvector(const char *scope_kind, const char *scope_id,
-                                                const float *vec, int dim, int limit, int64_t *ids,
-                                                double *scores, int max)
+int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, const float *vec,
+                                int dim, int limit, int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1281,36 +1193,6 @@ static int pgvec_curator_entity_search_pgvector(const char *scope_kind, const ch
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
 }
 
-int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, const float *vec,
-                                int dim, int limit, int64_t *ids, double *scores, int max)
-{
-   /* The curator entity search is a single-table exact filter on scope_kind and
-    * scope_id, and the projection captures both as labels -- so the whole
-    * condition is expressible and the search can route.
-    *
-    * With neither set the query is unscoped by design ("WHERE TRUE"), which the
-    * wire refuses and should: asking a provider to search everything is not the
-    * same question. */
-   int have_kind = scope_kind && scope_kind[0];
-   int have_id = scope_id && scope_id[0];
-   if (have_kind || have_id)
-   {
-      /* Keys ascending: scope_id before scope_kind. */
-      pgvec_db3_filter_t filters[2];
-      int count = 0;
-      if (have_id)
-         filters[count++] = (pgvec_db3_filter_t){"scope_id", scope_id};
-      if (have_kind)
-         filters[count++] = (pgvec_db3_filter_t){"scope_kind", scope_kind};
-      int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CURATOR_ENTITY, vec, dim, "", "", "",
-                                        filters, count, limit, ids, scores, max);
-      if (routed >= 0)
-         return routed;
-   }
-   return pgvec_curator_entity_search_pgvector(scope_kind, scope_id, vec, dim, limit, ids, scores,
-                                               max);
-}
-
 int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
                                    const char *artifact_id, const char *kind, const char *doc_id,
                                    const char *status, const char *priority,
@@ -1379,9 +1261,9 @@ int pgvec_curator_narrative_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-static int pgvec_curator_narrative_search_pgvector(const char *kind, const char *status,
-                                                   const char *priority, const float *vec, int dim,
-                                                   int limit, int64_t *ids, double *scores, int max)
+int pgvec_curator_narrative_search(const char *kind, const char *status, const char *priority,
+                                   const float *vec, int dim, int limit, int64_t *ids,
+                                   double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1474,33 +1356,6 @@ static int pgvec_curator_narrative_search_pgvector(const char *kind, const char 
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
 }
 
-int pgvec_curator_narrative_search(const char *kind, const char *status, const char *priority,
-                                   const float *vec, int dim, int limit, int64_t *ids,
-                                   double *scores, int max)
-{
-   /* Single-table exact filters on labels the projection captures, so the whole
-    * condition travels. With none set the query is unscoped by design and the
-    * wire refuses it, which is the right answer. */
-   pgvec_db3_filter_t filters[3];
-   int count = 0;
-   /* Keys ascending: kind, priority, status. */
-   if (kind && kind[0])
-      filters[count++] = (pgvec_db3_filter_t){"kind", kind};
-   if (priority && priority[0])
-      filters[count++] = (pgvec_db3_filter_t){"priority", priority};
-   if (status && status[0])
-      filters[count++] = (pgvec_db3_filter_t){"status", status};
-   if (count > 0)
-   {
-      int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CURATOR_NARRATIVE, vec, dim, "", "",
-                                        "", filters, count, limit, ids, scores, max);
-      if (routed >= 0)
-         return routed;
-   }
-   return pgvec_curator_narrative_search_pgvector(kind, status, priority, vec, dim, limit, ids,
-                                                  scores, max);
-}
-
 int pgvec_curator_claim_upsert(int64_t point_id, const float *subj_attr_vec, const float *value_vec,
                                int dim, const char *artifact_id, const char *subject,
                                const char *attribute, const char *value, const char *claim_kind,
@@ -1579,9 +1434,8 @@ int pgvec_curator_claim_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-static int pgvec_curator_claim_search_pgvector(const char *which_vec, const char *claim_kind,
-                                               const float *vec, int dim, int limit, int64_t *ids,
-                                               double *scores, int max)
+int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, const float *vec,
+                               int dim, int limit, int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1650,29 +1504,6 @@ static int pgvec_curator_claim_search_pgvector(const char *which_vec, const char
    int64_t elapsed = monotonic_us() - t0;
    record_latency(elapsed);
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
-}
-
-int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, const float *vec,
-                               int dim, int limit, int64_t *ids, double *scores, int max)
-{
-   /* claim_kind is a captured label. which_vec selects between two vector
-    * columns on the same row, and the projection gives each its own collection,
-    * so it chooses the route rather than becoming a filter. */
-   const char *collection = NULL;
-   if (which_vec && strcmp(which_vec, "value") == 0)
-      collection = PGVEC_DB3_COLLECTION_CURATOR_CLAIM_VAL;
-   else if (which_vec && strcmp(which_vec, "subj_attr") == 0)
-      collection = PGVEC_DB3_COLLECTION_CURATOR_CLAIM_SUBJ;
-   if (collection && claim_kind && claim_kind[0])
-   {
-      const pgvec_db3_filter_t filters[] = {{"claim_kind", claim_kind}};
-      int routed = pgvec_db3_candidates(collection, vec, dim, "", "", "", filters, 1, limit, ids,
-                                        scores, max);
-      if (routed >= 0)
-         return routed;
-   }
-   return pgvec_curator_claim_search_pgvector(which_vec, claim_kind, vec, dim, limit, ids, scores,
-                                              max);
 }
 
 int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
@@ -1790,9 +1621,8 @@ int pgvec_curator_code_unit_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-static int pgvec_curator_code_unit_search_pgvector(const char *which_vec, const char *def_kind,
-                                                   const float *vec, int dim, int limit,
-                                                   int64_t *ids, double *scores, int max)
+int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, const float *vec,
+                                   int dim, int limit, int64_t *ids, double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -1863,30 +1693,6 @@ static int pgvec_curator_code_unit_search_pgvector(const char *which_vec, const 
    int64_t elapsed = monotonic_us() - t0;
    record_latency(elapsed);
    return (rc == AIMEE_PG_ERR) ? -1 : rows;
-}
-
-int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, const float *vec,
-                                   int dim, int limit, int64_t *ids, double *scores, int max)
-{
-   /* As for claims: def_kind is a captured label, and which_vec picks among the
-    * row's three vector columns, each of which is its own collection. */
-   const char *collection = NULL;
-   if (which_vec && strcmp(which_vec, "intent") == 0)
-      collection = PGVEC_DB3_COLLECTION_CURATOR_CODE_INT;
-   else if (which_vec && strcmp(which_vec, "signature") == 0)
-      collection = PGVEC_DB3_COLLECTION_CURATOR_CODE_SIG;
-   else if (which_vec && strcmp(which_vec, "body") == 0)
-      collection = PGVEC_DB3_COLLECTION_CURATOR_CODE_BODY;
-   if (collection && def_kind && def_kind[0])
-   {
-      const pgvec_db3_filter_t filters[] = {{"def_kind", def_kind}};
-      int routed = pgvec_db3_candidates(collection, vec, dim, "", "", "", filters, 1, limit, ids,
-                                        scores, max);
-      if (routed >= 0)
-         return routed;
-   }
-   return pgvec_curator_code_unit_search_pgvector(which_vec, def_kind, vec, dim, limit, ids, scores,
-                                                  max);
 }
 
 /* --- Phase 5: code_embeddings operations --- */
@@ -1993,8 +1799,8 @@ int pgvec_code_delete_project(const char *project)
    return (rc == AIMEE_PG_DONE) ? changes : -1;
 }
 
-static int pgvec_code_search_pgvector(const char *project, const float *vec, int dim, int limit,
-                                      int64_t *ids, double *scores, int max)
+int pgvec_code_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
+                      double *scores, int max)
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
@@ -2047,34 +1853,6 @@ static int pgvec_code_search_pgvector(const char *project, const float *vec, int
    int64_t elapsed = monotonic_us() - t0;
    record_latency(elapsed);
    return (rc == AIMEE_PG_ERR) ? -1 : n;
-}
-
-int pgvec_code_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
-                      double *scores, int max)
-{
-   /* A named project resolves to exactly one current generation, so the join the
-    * pgvector query uses collapses to an exact filter the wire can carry. A
-    * project-less search spans every project, each with its own current
-    * generation -- that is a per-row condition, not one filter -- so it stays on
-    * pgvector. So does a project with no current generation: it is detached, the
-    * pgvector query returns nothing for it, and routing without the condition
-    * would answer from the generation it was detached at. */
-   if (project && project[0])
-   {
-      void *pg = db2_conn();
-      int64_t generation = pg ? project_current_generation(pg, project) : 0;
-      if (generation > 0)
-      {
-         char generation_text[24];
-         snprintf(generation_text, sizeof(generation_text), "%lld", (long long)generation);
-         const pgvec_db3_filter_t filters[] = {{"generation", generation_text}};
-         int routed = pgvec_db3_candidates(PGVEC_DB3_COLLECTION_CODE, vec, dim, "", "", project,
-                                           filters, 1, limit, ids, scores, max);
-         if (routed >= 0)
-            return routed;
-      }
-   }
-   return pgvec_code_search_pgvector(project, vec, dim, limit, ids, scores, max);
 }
 
 /* Like pgvec_code_search, but returns each hit's file_path instead of its

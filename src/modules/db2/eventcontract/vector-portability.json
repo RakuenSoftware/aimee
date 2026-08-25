@@ -2,7 +2,7 @@
   "schema_version": 1,
   "module": "db3",
   "source": "tests/baselines/db2/declarations-v1.json",
-  "source_symbols_sha256": "7616862bb7b9c60e846436af884673b507ef0b8a9551312009134bfa92bade7d",
+  "source_symbols_sha256": "8933df59106a753dd9d1ce4ab8e0ffebf863b32fc792f83e165419699cf5c034",
   "classifications": [
     {
       "id": "portable-search",
@@ -98,11 +98,6 @@
         "pgvec_code_exists_by_hash",
         "pgvec_code_node_path",
         "pgvec_curator_entity_lookup",
-        "pgvec_db3_candidates",
-        "pgvec_db3_route_clear",
-        "pgvec_db3_route_install",
-        "pgvec_db3_route_select",
-        "pgvec_db3_route_serving",
         "pgvec_kb_service_code_exists_by_hash",
         "pgvec_kb_service_reconcile_orphans",
         "pgvec_memory_vector_scope_hint_clear",

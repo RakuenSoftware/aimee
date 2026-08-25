@@ -133,7 +133,7 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	db2Client := attachDB3Client(t, socket, 29)
+	db2Client := attachDB3Client(t, socket, 28)
 	providerAClient := attachDB3Client(t, socket, providerAPrincipal)
 	providerBClient := attachDB3Client(t, socket, providerBPrincipal)
 	controlClient := attachDB3Client(t, socket, controlPrincipal)

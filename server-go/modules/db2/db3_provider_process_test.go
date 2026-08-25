@@ -169,7 +169,8 @@ func providerProcessRoundTrip(t *testing.T, backendEnv []string) {
 		}
 	}()
 
-	db2Client := attachDB3Client(t, socket, 29)
+	// Attaching as postgres (28), the only principal granted the caller role.
+	db2Client := attachDB3Client(t, socket, 28)
 	defer db2Client.Detach()
 
 	ctx, cancel := context.WithCancel(context.Background())
