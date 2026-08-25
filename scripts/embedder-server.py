@@ -49,9 +49,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ---- the embedder registry ----
 # The same file the kb and the setup wizard read. Every per-model fact that changes the
 # vectors lives there — pooling, width, context, prefixes — keyed by model identity, so a
-# swap cannot silently inherit the previous model's settings. That failure has happened
-# twice here: pooling defaulted to `last` (right for Qwen3, wrong for nomic) and prefixes
-# were absent entirely.
+# swap cannot silently inherit the previous model's settings. Pooling defaults and
+# missing prefixes have both changed vector spaces silently in earlier deployments.
 EMBEDDERS_FILE = os.environ.get("EMBEDDERS_FILE", "/opt/aimee/embedders.json")
 EMBEDDERS_EXTRA = os.environ.get("EMBEDDERS_EXTRA", "")
 INPUT_TYPES = ("query", "document")
