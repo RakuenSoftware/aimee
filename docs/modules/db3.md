@@ -119,38 +119,52 @@ into `db3_outbox` inside the writing transaction, and enqueue is a no-op while
 no provider is `backfilling` or `active`, so nothing accumulates when nothing is
 attached.
 
-The search side is much narrower than the portability classification implies,
-and one cause explains every exclusion: **`SearchRequest` carries only
-`workspace`, `project` and `record_type`.** It has no closed filter list. Any
-search whose meaning depends on something else cannot be expressed, and routing
-it would answer a different question while looking correct.
+On the search side, what decides whether a search can route is whether every
+condition it applies can be expressed on the wire. `SearchRequest` carries
+`workspace`, `project`, `record_type`, and a closed list of exact-match filters
+(wire v2). A condition outside that grammar cannot travel, and a search routed
+without it would answer a wider question while looking correct.
 
-What that rules out, from reading the implementations rather than the
-classification:
+| Search | Status | Why |
+| --- | --- | --- |
+| `pgvec_memory_search`, no active request scope | routes | scope and record type are the fixed fields |
+| `pgvec_memory_search`, active request scope | pgvector | computes a visibility rank from `memory_scopes` and `memory_workspaces`, including rows tagged in neither. A join against canonical rows, not a label match |
+| `pgvec_code_search`, named project | routes | `ce.generation = p.current_generation` becomes one exact filter once DB2 resolves the project's current generation |
+| `pgvec_code_search`, no project | pgvector | every project at its own current generation is a per-row condition no single filter expresses |
+| the four curator searches | route | single-table exact filters on labels the projections already capture |
+| `pgvec_kb_search_scoped`, `pgvec_kbpdf_search` | pgvector | filter on `kb_documents.generation`, which is not a column on the embedding row, so the capture trigger has nothing to label it with |
 
-| Search | Why it cannot route |
-| --- | --- |
-| `pgvec_kb_search_scoped`, `pgvec_kbpdf_search` | join `kb_documents` and `projects`, filtering `lifecycle_state='current'` and `d.generation=p.current_generation`. Neither is a label in the projection, so a provider would return candidates from retired project generations. |
-| `pgvec_code_search` | same shape: `projects.lifecycle_state` plus `ce.generation = p.current_generation`. |
-| the four curator searches | scope by `scope_kind`/`scope_id`, for which the request has no field. Routing would drop the scope and widen the search. |
-| `pgvec_memory_search` **with an active request scope** | does not filter on the denormalized workspace/project columns at all. It computes a visibility rank from `memory_scopes` and `memory_workspaces`, including rows tagged in neither. That is a join against canonical rows, not a label match; routing it would return memories the request is not entitled to see and drop shared and global ones it is. |
+Two shapes remain inexpressible for any collection, and both are grammar limits
+rather than missing wiring: a kind filter (set membership) and a project
+exclusion (negation). The filter grammar is exact match only.
 
-`pgvec_memory_search` therefore routes only for direct callers with no active
-scope context, an explicit workspace or project, and no kind filter. That is the
-one case whose whole meaning fits the three fields the wire carries.
+### Resolving a join into a filter
 
-Routes are keyed by collection. A DB3 route selects one provider and a provider
-serves one collection — `record_type` cannot select one, because the projection
-catalog stores it as a *label* beside the vector (`memory_embeddings` maps it as
-one of five; `kb_embeddings` pins it to the constant `kb`). A single
-process-wide route could therefore serve exactly one collection, and a kb search
-sent through a memory provider's route would return memory candidates that
-looked like kb answers.
+The code search is the worked example. Its pgvector form is a join:
 
-Widening this needs a wire change, not more call sites: give `SearchRequest` the
-closed filter expression the boundary section above already contemplates, and
-add the corresponding labels to `db3_projection.label_sources`. Until then the
-adapter refuses what it cannot express rather than approximating it.
+    JOIN projects p ON p.name = ce.project
+    WHERE p.lifecycle_state = 'current' AND ce.generation = p.current_generation
+
+A provider cannot join. But `projects.name` is unique, so the join selects
+exactly one row, and resolving that row's `current_generation` up front turns
+both conditions into a single `generation = N` filter. A project that is not
+current resolves to nothing — and then the search must stay on pgvector rather
+than route without the condition, because routing it would return rows from the
+generation the project was detached at.
+
+That is the general shape: a join can become a filter when it is functionally
+determined and DB2 can resolve it before asking. It cannot when the condition
+varies per row, which is why an unscoped code search and a scoped memory search
+both stay behind.
+
+### Routes are per collection
+
+A DB3 route selects one provider and a provider serves one collection.
+`record_type` cannot select one: the projection catalog stores it as a *label*
+beside the vector (`memory_embeddings` maps it as one of five; `kb_embeddings`
+pins it to the constant `kb`). A single process-wide route could therefore serve
+exactly one collection, and a kb search sent through a memory provider's route
+would return memory candidates that looked like kb answers.
 
 ## Dependencies and consumers
 
