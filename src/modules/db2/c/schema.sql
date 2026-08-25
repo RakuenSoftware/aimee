@@ -8116,6 +8116,56 @@ END; $$;
 -- kb_audit_worm_append is deliberately NOT granted to runtime (only the owner-run
 -- definers above call it) so runtime cannot forge audit rows.
 REVOKE ALL ON FUNCTION kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+
+-- kb_fact_commit_worm_seal: one WORM audit row per closed fact-graph changeset,
+-- appended INSIDE the mutating transaction, so a memory write whose audit row
+-- cannot be written does not commit either.
+--
+-- The C mutation API already seals its own closes: fm_commit_finish()
+-- (db2/c/fact_mutation.c) calls db2_kb_audit_append_in_txn() on every close,
+-- including the revert and ingest-rollback paths, and does so unconditionally --
+-- it does not consult config.audit_worm_enabled. The SQL-side closes had no
+-- equivalent: the evidence trigger, changeset revert, document lifecycle,
+-- operator review and ontology migration each opened a changeset, applied it,
+-- and closed it leaving nothing in the audit chain. They run as the runtime
+-- role, which is deliberately not granted EXECUTE on kb_audit_worm_append, so a
+-- direct call was not open to them. This definer is that missing seam.
+--
+-- Every audited field is READ FROM the changeset row rather than taken from the
+-- caller. That is what makes it safe to grant to runtime: runtime can cause a
+-- truthful seal for a changeset that exists, and cannot forge a row that says
+-- anything else. p_subject only names which object the changeset was about; it
+-- never reaches the actor, operation, or authority fields.
+--
+-- The row carries the same fields as the one fm_commit_finish writes -- same
+-- action, same 'commit_id=<id>' detail -- so one verifier reads memory's audit
+-- trail whichever path produced the mutation.
+--
+-- Cost note: kb_audit_worm_append takes the chain's advisory xact lock, so a
+-- changeset close now serializes against every other audit appender. The close
+-- is already one row per changeset, not per changed fact, so this adds one
+-- serialized append per mutation batch rather than per row.
+CREATE OR REPLACE FUNCTION kb_fact_commit_worm_seal(p_commit_id TEXT, p_subject TEXT DEFAULT '')
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE c fact_graph_commits%ROWTYPE; v_subject TEXT;
+BEGIN
+  IF p_commit_id IS NULL OR p_commit_id = '' THEN
+    RAISE EXCEPTION 'kb_fact_commit_worm_seal: empty changeset id' USING ERRCODE = '22023';
+  END IF;
+  SELECT * INTO c FROM fact_graph_commits WHERE commit_id = p_commit_id;
+  IF c.commit_id IS NULL THEN
+    RAISE EXCEPTION 'kb_fact_commit_worm_seal: no changeset %', p_commit_id
+      USING ERRCODE = '22023';
+  END IF;
+  v_subject := COALESCE(NULLIF(p_subject, ''), NULLIF(c.origin_ref, ''), c.commit_id);
+  PERFORM kb_audit_worm_append(c.actor_role, c.actor_principal, c.operation, v_subject,
+    CASE WHEN c.status IN ('applied', 'partial') THEN 'allow' ELSE c.status END,
+    'commit_id=' || c.commit_id);
+END $$;
+
+-- Granted to runtime out of band in schema_grants.sql: the SQL close paths above
+-- run as runtime and every one of them has to be able to seal.
+REVOKE ALL ON FUNCTION kb_fact_commit_worm_seal(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_entitled() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
@@ -15863,6 +15913,10 @@ BEGIN
   IF owns_changeset THEN
     UPDATE fact_graph_commits SET status='applied',closed_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
      WHERE commit_id=cid;
+    -- Only the branch that OWNS the changeset seals it. When a caller staged the
+    -- changeset, that caller closes it and seals it there, so a staged batch is
+    -- one audit row for the batch rather than one per changed row.
+    PERFORM kb_fact_commit_worm_seal(cid, TG_ARGV[0]||':'||oid);
   END IF;
   RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
 END $$;
@@ -16166,6 +16220,9 @@ BEGIN
  UPDATE fact_graph_commits SET status=CASE WHEN jsonb_array_length(skipped)>0 THEN 'partial'
       ELSE 'reverted' END,rolled_back_at=now_text,rolled_back_by=actor WHERE commit_id=p_id;
  UPDATE fact_graph_commits SET status='applied',closed_at=now_text WHERE commit_id=cid;
+ -- Subject names the changeset being reverted, matching what the C revert path
+ -- passes to fm_commit_finish().
+ PERFORM kb_fact_commit_worm_seal(cid, p_id);
  PERFORM set_config('aimee.changeset_id','',true);
  RETURN jsonb_build_object('ok',true,'changeset_id',cid,'reverts_changeset',p_id,
    'applied_items',applied_n,'partial',jsonb_array_length(skipped)>0,'skipped_items',skipped);
@@ -16359,6 +16416,7 @@ BEGIN
     WHERE preview_token=p_preview_token;
   UPDATE fact_graph_commits SET status='applied',closed_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
     WHERE commit_id=cid;
+  PERFORM kb_fact_commit_worm_seal(cid, 'document:'||p_doc_id::TEXT);
   PERFORM set_config('aimee.changeset_id','',true);
   RETURN jsonb_build_object('ok',true,'changeset_id',cid,'receipt_id',receipt,
     'facts_only',p.facts_only,'facts_surviving',p.facts_surviving,'derived_items',p.derived_items,
@@ -16799,6 +16857,7 @@ BEGIN
       'restore-envelope','operator review decision');
    UPDATE fact_graph_commits SET status='applied',closed_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
     WHERE commit_id=cid;
+   PERFORM kb_fact_commit_worm_seal(cid, p_item_id);
    PERFORM set_config('aimee.changeset_id','',true);
  END IF;
  INSERT INTO knowledge_review_decisions(decision_id,item_id,source_queue,decision,
@@ -17114,6 +17173,7 @@ BEGIN
   WHERE preview_token=p_preview_token;
  UPDATE fact_graph_commits SET status='applied',closed_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
   WHERE commit_id=cid;
+ PERFORM kb_fact_commit_worm_seal(cid, p_package);
  PERFORM set_config('aimee.changeset_id','',true);
  RETURN jsonb_build_object('ok',true,'changeset_id',cid,'package_id',p_package,
   'migrated',migrated_n,'retired',retired_n,'quarantined',quarantined_n,

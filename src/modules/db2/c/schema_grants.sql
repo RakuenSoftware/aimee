@@ -97,6 +97,18 @@ BEGIN
   REVOKE UPDATE, DELETE, TRUNCATE ON kb_audit_event FROM aimee_kb_runtime;
   GRANT INSERT, SELECT ON kb_audit_event TO aimee_kb_runtime;
 
+  -- Every fact-graph changeset close carries a WORM row in its own transaction.
+  -- The C mutation API seals its own closes (fm_commit_finish); the SQL close
+  -- paths -- the evidence trigger, changeset revert, document lifecycle, operator
+  -- review and ontology migration -- run as THIS role, which is deliberately not
+  -- granted EXECUTE on kb_audit_worm_append. kb_fact_commit_worm_seal is the
+  -- narrow definer they may call: it reads the actor, authority, operation and
+  -- status from the changeset row rather than from its caller, so runtime can
+  -- cause a truthful seal for a changeset that exists and still cannot forge an
+  -- audit row that says anything else.
+  REVOKE ALL ON FUNCTION kb_fact_commit_worm_seal(TEXT,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_fact_commit_worm_seal(TEXT,TEXT) TO aimee_kb_runtime;
+
   -- set_tenant_context is the ONLY runtime-usable tenant-GUC setter; EXECUTE to
   -- the runtime role only, never PUBLIC (N4).
   REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
