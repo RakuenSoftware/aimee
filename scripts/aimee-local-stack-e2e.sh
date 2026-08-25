@@ -130,7 +130,10 @@ export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
 DB1_MODULE="$REPO/src/build/obj/aimee-module-aimee"
-[ -x "$DB1_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
+# Integration and prior E2E runs can leave a named copy behind. Refresh it after
+# every build: the module grant is bound to the current executable identity, so
+# reusing an older copy is correctly denied and prevents the TLS ramp starting.
+cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
 PG_MODULE="$REPO/src/build/obj/aimee-module-postgres"
 [ -x "$PG_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
 CONFIG_MODULE="$REPO/src/build/obj/aimee-module-config"
