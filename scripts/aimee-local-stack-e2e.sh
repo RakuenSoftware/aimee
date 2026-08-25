@@ -544,8 +544,11 @@ if [[ "${AIMEE_E2E_RESTART_COMPONENTS:-0}" == "1" && "$MODE" == "full" ]]; then
   kill "$server_pid"
   wait "$server_pid" 2>/dev/null || true
   server_pid=""
-  AIMEE_API_BEARER_TOKEN="$BEARER" \
-    "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
+  # The bootstrap bearer is a first-process transport secret. After deploy/apply
+  # seals the installation, replaying an enrolled client's bearer through that
+  # channel is invalid configuration and must be rejected. A real restart uses
+  # only the persisted Vault/config state.
+  "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
   server_pid=$!
   deadline=$((SECONDS + WAIT_SECONDS))
   while ! curl -fksS --max-time 5 "${IDENTITY[@]}" "${AUTH[@]}" \
