@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -120,6 +121,11 @@ type VectorBus struct {
 	caller    *db3.SearchCaller
 	publisher *db3.ApplyPublisher
 	provider  VectorProvider
+
+	// appliedMu guards the observer because replication installs it from the
+	// goroutine that starts it while the module loop is already absorbing.
+	appliedMu sync.RWMutex
+	applied   func(uint32, db3.Applied)
 }
 
 // AttachVectorBus prepares the DB3 wire for a provisioned provider.
@@ -152,11 +158,62 @@ func (v *VectorBus) Provider() VectorProvider {
 	return v.provider
 }
 
-// Absorb hands one event to the DB3 caller.
+// ObserveApplied installs the sink for a provider's acknowledgements.
+//
+// Set by replication, which owns the ledger those acknowledgements settle. Until
+// it is set, an Applied is dropped -- correct, because an operation the ledger
+// never hears about is redelivered, and Apply is idempotent by operation id.
+func (v *VectorBus) ObserveApplied(observer func(uint32, db3.Applied)) {
+	if v == nil {
+		return
+	}
+	v.appliedMu.Lock()
+	v.applied = observer
+	v.appliedMu.Unlock()
+}
+
+// Absorb hands one polled event to whichever half of the wire it belongs to.
 func (v *VectorBus) Absorb(event bus.Event) {
-	if v != nil && v.caller != nil {
+	if v == nil {
+		return
+	}
+	if event.Frame.EventKind == db3.EventApplied {
+		v.absorbApplied(event)
+		return
+	}
+	if v.caller != nil {
 		v.caller.Absorb(event)
 	}
+}
+
+// absorbApplied settles one acknowledgement against the outbox ledger.
+//
+// An Applied is the ONLY thing that deletes an outbox row -- publishing is an
+// attempt, not evidence -- so this is the path that keeps the ledger from
+// growing without bound and replaying every operation forever on lease expiry.
+//
+// Which makes the principal check load-bearing rather than defensive. Exactly
+// one provider is granted; an Applied from any other principal is somebody else
+// claiming an operation landed in a store this deployment does not read, and
+// acting on it would delete the row that was the only record it had not.
+func (v *VectorBus) absorbApplied(event bus.Event) {
+	if event.Frame.PrincipalRef != v.provider.Principal {
+		return
+	}
+	v.appliedMu.RLock()
+	observer := v.applied
+	v.appliedMu.RUnlock()
+	if observer == nil {
+		return
+	}
+	applied, err := db3.DecodeApplied(event.Payload)
+	if err != nil || applied.Validate() != nil {
+		// A malformed acknowledgement is not one. Dropping it leaves the
+		// operation claimed until its lease expires and then redelivered, which
+		// is the safe direction: Apply is idempotent by operation id.
+		return
+	}
+	observer(event.Frame.PrincipalRef, applied)
 }
 
 // PublishApply ships one committed operation to the provisioned provider.

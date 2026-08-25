@@ -24,6 +24,7 @@
     "server-go/modules/postgres/checksum_test.go",
     "server-go/modules/postgres/health_test.go",
     "server-go/modules/postgres/vectorbus_e2e_test.go",
+    "server-go/modules/postgres/vectorbus_test.go",
     "server-go/modules/postgres/vectoroutbox_test.go",
     "server-go/modules/postgres/vectorroute_test.go"
   ],

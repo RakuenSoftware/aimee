@@ -44,6 +44,11 @@ func RunVectorReplication(ctx context.Context, attachment *VectorBus, leaseOwner
 	if err != nil {
 		return err
 	}
+	// Installed BEFORE the first publish. An operation published while nothing
+	// was listening would be acknowledged into a dropped event and then sit
+	// claimed until its lease expired, so the first pass would replay entirely.
+	attachment.ObserveApplied(attachment.AppliedObserver(ctx, store))
+	defer attachment.ObserveApplied(nil)
 	return RunDB3Outbox(ctx, store, attachment)
 }
 
