@@ -75,6 +75,7 @@ INFRASTRUCTURE = {
         "the emitter half; unit-test-bus-guardrail-durability runs it and verifies in SQL",
     "unit-test-bus-db2-process": "needs Postgres and the packaged DB2 executable",
     "unit-test-content-scope-pg": "needs Postgres",
+    "unit-test-pgvec-generation-pg": "needs Postgres and pgvector",
     "unit-test-kb-audit-worm-pg": "needs Postgres",
     "unit-test-vault-pg": "needs Postgres",
     "unit-test-witness-canary-pg": "needs Postgres",

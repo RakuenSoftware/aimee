@@ -5403,6 +5403,17 @@ $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: \
 # AIMEE_TEST_PG_URL it actually connects to Postgres; without it the test SKIPs (exit 0).
 # Modeled on the negation-eval binary (full KB minus kb_main + a test main), which is
 # the established pattern for a real-libpq test target.
+# The kb/kb_pdf embedding write path, against real Postgres. It links the same
+# KB closure as the other *-pg fixtures because the upsert reaches db2_conn()
+# through the ordinary DB2 runtime rather than a shim.
+$(OBJDIR)/tests/test_pgvec_generation_pg.o: C_FLAGS += -Imodules/db2/include
+$(TESTPREFIX)/unit-test-pgvec-generation-pg: $(OBJDIR)/tests/test_pgvec_generation_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
 $(TESTPREFIX)/unit-test-vault-pg: $(OBJDIR)/tests/test_vault_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
@@ -8199,6 +8210,7 @@ $(TESTPREFIX)/unit-test-http-content-encoding: \
 TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-kb-audit-worm-pg \
   $(TESTPREFIX)/unit-test-content-scope-pg \
+  $(TESTPREFIX)/unit-test-pgvec-generation-pg \
   $(TESTPREFIX)/unit-test-kb-bedrock-live \
   $(TESTPREFIX)/unit-test-kb-p2b-egress-live \
   $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
