@@ -110,6 +110,9 @@ static void load_loop_cfg(const rtp_run_t *run, rtp_loop_cfg_t *out)
                                     : 2;
    out->max_phase_cost_usd = config_roundtable_pipeline_max_cost_usd();
    out->max_total_cost_usd = config_roundtable_pipeline_max_total_cost_usd();
+   /* Reviews are an integrity boundary.  An unavailable or unusable checker
+    * degrades to a human decision; it is never silently interpreted as assent. */
+   out->checker_failure_mode = RTP_CHECKER_DEGRADE;
 }
 
 static double phase_cost(const rtp_run_t *run, const char *phase)
