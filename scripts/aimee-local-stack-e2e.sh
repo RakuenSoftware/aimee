@@ -29,6 +29,7 @@
 #   SERVER_TLS_PORT server TLS /v1 port           (default SERVER_PORT + 3)
 #   BEARER        server first-boot bearer        (default random per run)
 #   WAIT_SECONDS  health wait budget             (default 90)
+#   AIMEE_E2E_SKIP_BUILD=1 reuse already-built binaries (exploratory reruns)
 #
 # Exit code: 0 = all checks passed.
 
@@ -76,10 +77,14 @@ check() {
 }
 
 # --- build ----------------------------------------------------------------
-bold "==> Building aimee client + server + kb + required modules"
-make -C src ../aimee ../aimee-server ../aimee-kb \
-  build/obj/aimee-module build/obj/aimee-module-config \
-  build/obj/aimee-module >/dev/null
+if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != 1 ]]; then
+  bold "==> Building aimee client + server + kb + required modules"
+  make -C src ../aimee ../aimee-server ../aimee-kb \
+    build/obj/aimee-module build/obj/aimee-module-config \
+    build/obj/aimee-module >/dev/null
+else
+  bold "==> Reusing already-built binaries for exploratory rerun"
+fi
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
 BUNDLE="$RUN_ROOT/module-bundle"
