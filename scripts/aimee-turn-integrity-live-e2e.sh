@@ -214,10 +214,12 @@ required = {
     "effect.executing",
     "effect.postcondition",
     "effect.completed",
-    "effect.unknown_outcome",
     "knowledge.invalidated",
 }
 if not required.issubset(actions):
+    raise SystemExit(1)
+if not any(action == "effect.completed" and "state=unknown_outcome" in (detail or "")
+           for action, detail in rows):
     raise SystemExit(1)
 if "live-contract-ok" in details or "turn-integrity-live.txt" in details:
     raise SystemExit(1)
