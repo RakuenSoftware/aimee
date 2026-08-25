@@ -524,16 +524,14 @@ static void print_index_verify(cJSON *resp)
 {
    const char *workspace = json_str(resp, "workspace_state");
    printf("index_state=%s revision=%lld workspace_state=%s verification=%s\n",
-          json_str(resp, "index_state"),
-          (long long)json_int(resp, "index_revision", 0),
+          json_str(resp, "index_state"), (long long)json_int(resp, "index_revision", 0),
           workspace[0] ? workspace : "unavailable", json_str(resp, "verification"));
    printf("modified=%d missing=%d unindexed=%d\n", json_int(resp, "modified_files", 0),
           json_int(resp, "missing_files", 0), json_int(resp, "unindexed_files", 0));
    cJSON *examples = cJSON_GetObjectItemCaseSensitive(resp, "examples");
    cJSON *example;
-   cJSON_ArrayForEach(example, examples)
-      if (cJSON_IsString(example))
-         printf("  %s\n", example->valuestring);
+   cJSON_ArrayForEach(example, examples) if (cJSON_IsString(example))
+       printf("  %s\n", example->valuestring);
 }
 
 static void print_index_list(cJSON *resp)

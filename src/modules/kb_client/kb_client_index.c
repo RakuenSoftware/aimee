@@ -336,8 +336,8 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
       s.force = force;
       kb_client_index_scan_result_t phase_res;
       memset(&phase_res, 0, sizeof(phase_res));
-      int begin_rc = kb_client_code_scan_request(name, root, force, "begin", s.scan_id, 0, NULL,
-                                                  &phase_res);
+      int begin_rc =
+          kb_client_code_scan_request(name, root, force, "begin", s.scan_id, 0, NULL, &phase_res);
       if (begin_rc != 0)
       {
          if (out)
@@ -356,8 +356,8 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
       /* Empty manifests are meaningful: sealing one retracts the previous
        * ownership set instead of asking a remote service to inspect a path it
        * cannot see. */
-      return kb_client_code_scan_request(name, root, force, "seal", s.scan_id,
-                                         s.expected_files, NULL, out);
+      return kb_client_code_scan_request(name, root, force, "seal", s.scan_id, s.expected_files,
+                                         NULL, out);
    }
 #endif
    return kb_client_code_scan_push(name, root, force, NULL, out);
@@ -372,8 +372,7 @@ int kb_client_index_scan(const char *name, const char *root, int force,
    return kb_client_index_scan_v1(name, root, force, out);
 }
 
-char *kb_client_index_verify_json(const char *project, const char *root, int deep,
-                                  int *http_status)
+char *kb_client_index_verify_json(const char *project, const char *root, int deep, int *http_status)
 {
    if (http_status)
       *http_status = 0;
@@ -387,8 +386,8 @@ char *kb_client_index_verify_json(const char *project, const char *root, int dee
    cJSON_AddStringToObject(req, "phase", "verify");
    if (deep)
       cJSON_AddBoolToObject(req, "deep", 1);
-   char *json = kb_client_v1_post_json("/v1/code/scan", req, KB_CLIENT_INDEX_SCAN_TIMEOUT_MS,
-                                       http_status);
+   char *json =
+       kb_client_v1_post_json("/v1/code/scan", req, KB_CLIENT_INDEX_SCAN_TIMEOUT_MS, http_status);
    cJSON_Delete(req);
    return json;
 }

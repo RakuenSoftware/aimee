@@ -1251,9 +1251,9 @@ int canonical_index_scan_stage(const char *scan_id, const canonical_index_file_i
    if (!conn)
       return -1;
    char err[CI_ERRBUF] = "";
-   aimee_pg_stmt_t *open = aimee_pg_prepare(
-       conn, "SELECT 1 FROM code_scan_sessions WHERE scan_id=?1 AND state='open'", err,
-       sizeof(err));
+   aimee_pg_stmt_t *open =
+       aimee_pg_prepare(conn, "SELECT 1 FROM code_scan_sessions WHERE scan_id=?1 AND state='open'",
+                        err, sizeof(err));
    if (!open)
       return -1;
    aimee_pg_bind_text(open, "?1", scan_id);
@@ -1262,20 +1262,19 @@ int canonical_index_scan_stage(const char *scan_id, const canonical_index_file_i
    if (!exists)
       return -1;
 
-   aimee_pg_stmt_t *put = aimee_pg_prepare(
-       conn,
-       "INSERT INTO code_scan_manifest_files(scan_id,path,content,content_hash) "
-       "VALUES(?1,?2,?3,?4) ON CONFLICT(scan_id,path) DO UPDATE SET "
-       "content=EXCLUDED.content,content_hash=EXCLUDED.content_hash",
-       err, sizeof(err));
+   aimee_pg_stmt_t *put =
+       aimee_pg_prepare(conn,
+                        "INSERT INTO code_scan_manifest_files(scan_id,path,content,content_hash) "
+                        "VALUES(?1,?2,?3,?4) ON CONFLICT(scan_id,path) DO UPDATE SET "
+                        "content=EXCLUDED.content,content_hash=EXCLUDED.content_hash",
+                        err, sizeof(err));
    if (!put)
       return -1;
    int accepted = 0;
    for (int i = 0; i < file_count; i++)
    {
       const char *path = files[i].rel_path;
-      if (!path || !path[0] || path[0] == '/' || ci_path_ingest_excluded(path) ||
-          !files[i].content)
+      if (!path || !path[0] || path[0] == '/' || ci_path_ingest_excluded(path) || !files[i].content)
          continue;
       char *content = strdup(files[i].content);
       if (!content)
@@ -1346,23 +1345,23 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
    aimee_pg_finalize(project_q);
    if (!project[0])
       return -2;
-   if (aimee_pg_exec(conn, aimee_pg_is_shim() ? "BEGIN" : "BEGIN ISOLATION LEVEL SERIALIZABLE",
-                     err, sizeof(err)) != 0)
+   if (aimee_pg_exec(conn, aimee_pg_is_shim() ? "BEGIN" : "BEGIN ISOLATION LEVEL SERIALIZABLE", err,
+                     sizeof(err)) != 0)
       return -1;
    /* Purge and scan publication share the project advisory lock. Take it
     * before row locks on both paths to avoid lock-order inversions. */
    if (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project))
       goto storage_fail;
 
-   const char *session_sql = aimee_pg_is_shim()
-                                 ? "SELECT s.project_id,s.generation,s.baseline_revision,s.state,"
-                                   "p.name,p.current_generation,ps.revision FROM code_scan_sessions s "
-                                   "JOIN projects p ON p.id=s.project_id JOIN code_index_project_state ps "
-                                   "ON ps.project_id=p.id WHERE s.scan_id=?1"
-                                 : "SELECT s.project_id,s.generation,s.baseline_revision,s.state,"
-                                   "p.name,p.current_generation,ps.revision FROM code_scan_sessions s "
-                                   "JOIN projects p ON p.id=s.project_id JOIN code_index_project_state ps "
-                                   "ON ps.project_id=p.id WHERE s.scan_id=?1 FOR UPDATE OF s,ps";
+   const char *session_sql =
+       aimee_pg_is_shim() ? "SELECT s.project_id,s.generation,s.baseline_revision,s.state,"
+                            "p.name,p.current_generation,ps.revision FROM code_scan_sessions s "
+                            "JOIN projects p ON p.id=s.project_id JOIN code_index_project_state ps "
+                            "ON ps.project_id=p.id WHERE s.scan_id=?1"
+                          : "SELECT s.project_id,s.generation,s.baseline_revision,s.state,"
+                            "p.name,p.current_generation,ps.revision FROM code_scan_sessions s "
+                            "JOIN projects p ON p.id=s.project_id JOIN code_index_project_state ps "
+                            "ON ps.project_id=p.id WHERE s.scan_id=?1 FOR UPDATE OF s,ps";
    aimee_pg_stmt_t *session = aimee_pg_prepare(conn, session_sql, err, sizeof(err));
    if (!session)
       goto storage_fail;
@@ -1431,8 +1430,8 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
       }
       aimee_pg_finalize(old);
       int64_t file_id = ci_upsert_file(conn, project_id, path, ts);
-      if (file_id < 0 ||
-          (changed && ci_replace_file_data_txn(conn, file_id, ci_get_extension(path), content) != 0))
+      if (file_id < 0 || (changed && ci_replace_file_data_txn(conn, file_id, ci_get_extension(path),
+                                                              content) != 0))
       {
          free(path);
          free(content);

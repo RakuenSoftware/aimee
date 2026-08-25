@@ -388,19 +388,17 @@ int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force")) ? 1 : 0;
    /* Detach the client-pushed array so the kb-client relay adopts (frees) it
     * without a double-free when req is released. */
-   cJSON *files = cJSON_IsArray(files_item)
-                      ? cJSON_DetachItemFromObjectCaseSensitive(req, "files")
-                      : NULL;
+   cJSON *files =
+       cJSON_IsArray(files_item) ? cJSON_DetachItemFromObjectCaseSensitive(req, "files") : NULL;
 
    kb_client_index_scan_result_t res;
    memset(&res, 0, sizeof(res));
-   int kb_rc = phase && phase[0]
-                   ? kb_client_code_scan_phase(name, root, force, phase, scan_id,
-                                               cJSON_IsNumber(expected_item)
-                                                   ? (int)expected_item->valuedouble
-                                                   : 0,
-                                               files, &res)
-                   : kb_client_code_scan_push(name, root, force, files, &res);
+   int kb_rc =
+       phase && phase[0]
+           ? kb_client_code_scan_phase(
+                 name, root, force, phase, scan_id,
+                 cJSON_IsNumber(expected_item) ? (int)expected_item->valuedouble : 0, files, &res)
+           : kb_client_code_scan_push(name, root, force, files, &res);
    cJSON *resp = (cJSON *)kb_client_index_scan_format_response(kb_rc, &res);
    return send_and_free(conn, resp);
 }

@@ -171,9 +171,8 @@ static void idx_verify(app_ctx_t *ctx, int argc, char **argv)
              cJSON_IsNumber(unindexed) ? unindexed->valueint : 0);
       cJSON *examples = cJSON_GetObjectItemCaseSensitive(resp, "examples");
       cJSON *example;
-      cJSON_ArrayForEach(example, examples)
-         if (cJSON_IsString(example))
-            printf("  %s\n", example->valuestring);
+      cJSON_ArrayForEach(example, examples) if (cJSON_IsString(example))
+          printf("  %s\n", example->valuestring);
    }
    cJSON_Delete(resp);
    free(json);

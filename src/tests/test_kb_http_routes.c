@@ -5156,21 +5156,18 @@ static void test_code_scan_phases_and_verify_states(void)
 {
    char buf[1024];
    g_db_initialized = 1;
-   const char *begin =
-       "{\"project\":\"proj-alpha\",\"root_path\":\"remote\",\"phase\":\"begin\","
-       "\"scan_id\":\"scan-1\"}";
-   int s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, begin,
-                            (int)strlen(begin), buf, sizeof(buf));
+   const char *begin = "{\"project\":\"proj-alpha\",\"root_path\":\"remote\",\"phase\":\"begin\","
+                       "\"scan_id\":\"scan-1\"}";
+   int s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, begin, (int)strlen(begin),
+                            buf, sizeof(buf));
    assert(s == 200 && strstr(buf, "\"phase\":\"begin\"") != NULL);
-   const char *stage =
-       "{\"project\":\"proj-alpha\",\"phase\":\"stage\",\"scan_id\":\"scan-1\","
-       "\"files\":[{\"rel_path\":\"a.c\",\"content\":\"int a;\"}]}";
-   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, stage, (int)strlen(stage),
-                        buf, sizeof(buf));
+   const char *stage = "{\"project\":\"proj-alpha\",\"phase\":\"stage\",\"scan_id\":\"scan-1\","
+                       "\"files\":[{\"rel_path\":\"a.c\",\"content\":\"int a;\"}]}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, stage, (int)strlen(stage), buf,
+                        sizeof(buf));
    assert(s == 200 && strstr(buf, "\"accepted\":1") != NULL);
-   const char *seal =
-       "{\"project\":\"proj-alpha\",\"phase\":\"seal\",\"scan_id\":\"scan-1\","
-       "\"expected_files\":1}";
+   const char *seal = "{\"project\":\"proj-alpha\",\"phase\":\"seal\",\"scan_id\":\"scan-1\","
+                      "\"expected_files\":1}";
    s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, seal, (int)strlen(seal), buf,
                         sizeof(buf));
    assert(s == 200);
@@ -5178,11 +5175,10 @@ static void test_code_scan_phases_and_verify_states(void)
    assert(strstr(buf, "\"workspace_state\":\"matched\"") != NULL);
    assert(strstr(buf, "\"verification\":\"content_hash\"") != NULL);
 
-   const char *verify =
-       "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp\",\"phase\":\"verify\","
-       "\"deep\":true}";
-   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, verify,
-                        (int)strlen(verify), buf, sizeof(buf));
+   const char *verify = "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp\",\"phase\":\"verify\","
+                        "\"deep\":true}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, verify, (int)strlen(verify), buf,
+                        sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"workspace_state\":\"matched\"") != NULL);
    assert(strstr(buf, "\"verification\":\"content_hash\"") != NULL);
