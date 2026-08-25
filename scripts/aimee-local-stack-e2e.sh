@@ -273,7 +273,15 @@ if [[ "$MODE" == "full" ]]; then
   # keyword-only retrieval look like semantic coverage.
   extension_error=""
   if command -v psql >/dev/null 2>&1; then
-    if ! psql "$AIMEE_DB2_URL" -v ON_ERROR_STOP=1 \
+    pg_extension_cmd=(psql)
+    if [[ "$(id -u)" == "0" && "$AIMEE_DB2_URL" =~ ^postgres(ql)?:///[^/?]+$ ]] && \
+       command -v runuser >/dev/null 2>&1; then
+      # A local peer-auth E2E database is normally owned by a non-superuser.
+      # Use the cluster administrator only for CREATE EXTENSION; daemons and
+      # every schema migration continue under AIMEE_DB2_URL's runtime role.
+      pg_extension_cmd=(runuser -u postgres -- psql)
+    fi
+    if ! "${pg_extension_cmd[@]}" "$AIMEE_DB2_URL" -v ON_ERROR_STOP=1 \
       -c 'CREATE EXTENSION IF NOT EXISTS vector' \
       -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' \
       >/dev/null 2>"$RUN_ROOT/extension-provision.err"; then
