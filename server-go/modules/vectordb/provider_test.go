@@ -126,13 +126,13 @@ func TestSearchReturnsOnlyIdentifiersAndScores(t *testing.T) {
 	_ = candidate.Score
 }
 
-// A caller naming a generation newer than the index's has already seen writes
-// this index may not have. Answering would hand back a ranking that silently
-// omits them.
+// A caller naming a generation newer than the provider has applied has already
+// seen writes this provider has not. Answering would hand back a ranking that
+// silently omits them.
 func TestSearchRefusesGenerationItCannotSatisfy(t *testing.T) {
-	provider, index := seeded(t)
+	provider, _ := seeded(t)
 	request := searchRequest(3)
-	request.RequiredGeneration = index.Generation() + 1
+	request.RequiredGeneration = provider.Capabilities().Generation + 1
 
 	_, failure := provider.Search(context.Background(), request)
 	if failure != db3.SearchFailureRetryable {
@@ -141,9 +141,9 @@ func TestSearchRefusesGenerationItCannotSatisfy(t *testing.T) {
 }
 
 func TestSearchAcceptsGenerationItHasReached(t *testing.T) {
-	provider, index := seeded(t)
+	provider, _ := seeded(t)
 	request := searchRequest(3)
-	request.RequiredGeneration = index.Generation()
+	request.RequiredGeneration = provider.Capabilities().Generation
 
 	reply, failure := provider.Search(context.Background(), request)
 	if failure != 0 {

@@ -217,62 +217,6 @@ func TestTombstoneWritesAPayloadFlagRatherThanDeleting(t *testing.T) {
 	}
 }
 
-func TestEveryMutationAdvancesTheGeneration(t *testing.T) {
-	// DB2 searches AT a generation and the reply must carry exactly it back, so
-	// a generation that did not move on a write would make a search after the
-	// write indistinguishable from one before it.
-	fake := newFake(t)
-	backend := newBackend(t, fake, vectordb.Cosine)
-	ctx := context.Background()
-
-	before, _ := backend.Generation(ctx)
-	if err := backend.Upsert(ctx, "memory", 1, []float32{1, 0, 0}, nil); err != nil {
-		t.Fatal(err)
-	}
-	afterUpsert, _ := backend.Generation(ctx)
-	if afterUpsert <= before {
-		t.Fatalf("upsert left the generation at %d", afterUpsert)
-	}
-	if err := backend.Tombstone(ctx, "memory", 1); err != nil {
-		t.Fatal(err)
-	}
-	afterTombstone, _ := backend.Generation(ctx)
-	if afterTombstone <= afterUpsert {
-		t.Fatalf("tombstone left the generation at %d", afterTombstone)
-	}
-	if err := backend.Delete(ctx, "memory", 1); err != nil {
-		t.Fatal(err)
-	}
-	afterDelete, _ := backend.Generation(ctx)
-	if afterDelete <= afterTombstone {
-		t.Fatalf("delete left the generation at %d", afterDelete)
-	}
-}
-
-func TestAFailedWriteDoesNotAdvanceTheGeneration(t *testing.T) {
-	// A generation that moved on a failure would tell DB2 the store had changed
-	// when it had not, and DB2 would search at a version the store never reached.
-	fake := newFake(t)
-	backend := newBackend(t, fake, vectordb.Cosine)
-	ctx := context.Background()
-	if err := backend.Upsert(ctx, "memory", 1, []float32{1, 0, 0}, nil); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := backend.Generation(ctx)
-
-	<-fake.mu
-	fake.status["/collections/memory/points"] = http.StatusInternalServerError
-	fake.mu <- struct{}{}
-
-	if err := backend.Upsert(ctx, "memory", 2, []float32{0, 1, 0}, nil); err == nil {
-		t.Fatal("a failing store reported a successful upsert")
-	}
-	after, _ := backend.Generation(ctx)
-	if after != before {
-		t.Errorf("a failed upsert moved the generation from %d to %d", before, after)
-	}
-}
-
 func TestWrongWidthIsRefusedRatherThanSent(t *testing.T) {
 	fake := newFake(t)
 	backend := newBackend(t, fake, vectordb.Cosine)
@@ -306,4 +250,24 @@ func TestCollectionPrefixNamespacesOneQdrantAcrossDeployments(t *testing.T) {
 		t.Fatal(err)
 	}
 	find(t, fake, http.MethodPut, "/collections/tenant1_memory/points")
+}
+
+func TestAFailedWriteIsReported(t *testing.T) {
+	// The store's own version is no longer this backend's concern -- PostgreSQL
+	// stamps the generation and the provider carries it -- but a write that did
+	// not land must still say so, or the outbox would mark it applied.
+	fake := newFake(t)
+	backend := newBackend(t, fake, vectordb.Cosine)
+	ctx := context.Background()
+	if err := backend.Upsert(ctx, "memory", 1, []float32{1, 0, 0}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	<-fake.mu
+	fake.status["/collections/memory/points"] = http.StatusInternalServerError
+	fake.mu <- struct{}{}
+
+	if err := backend.Upsert(ctx, "memory", 2, []float32{0, 1, 0}, nil); err == nil {
+		t.Fatal("a failing store reported a successful upsert")
+	}
 }

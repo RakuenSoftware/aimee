@@ -104,28 +104,6 @@ func TestUpsertRefusesWrongDimension(t *testing.T) {
 
 // Generation advances on every mutation, which is what lets a caller tell a
 // stale index from a current one.
-func TestGenerationAdvancesOnEveryMutation(t *testing.T) {
-	index := NewIndex(Cosine, 2)
-	start := index.Generation()
-
-	mustUpsert(t, index, 1, []float32{1, 0})
-	afterUpsert := index.Generation()
-	if afterUpsert <= start {
-		t.Fatal("an upsert must advance the generation")
-	}
-	index.Delete("c", 1)
-	afterDelete := index.Generation()
-	if afterDelete <= afterUpsert {
-		t.Fatal("a delete must advance the generation")
-	}
-	index.Tombstone("c", 2)
-	if index.Generation() <= afterDelete {
-		t.Fatal("a tombstone must advance the generation")
-	}
-}
-
-// A tombstone records that a point existed and is gone, which is what lets a
-// later replay tell "never seen" from "deleted". A delete simply drops it.
 func TestTombstoneIsRememberedWhereDeleteIsNot(t *testing.T) {
 	index := NewIndex(Cosine, 2)
 	mustUpsert(t, index, 1, []float32{1, 0})

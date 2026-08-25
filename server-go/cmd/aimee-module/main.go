@@ -510,27 +510,27 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			}
 			return postgres.Handle(invocation, frame)
 		}
-		// DB3 rides this module's own attachment.
+		// Is a vector database installed?
 		//
-		// An external vector database is OPTIONAL: with none installed the
-		// registry stays empty and every vector operation is served in-database
-		// by pgvector or pgvectorscale, which is what a deployment has before it
-		// has anything else. The sidecar attaches regardless, because whether a
-		// provider exists is discovered from the bus rather than configured
-		// here -- and a module that only listened when told to would never hear
-		// the first announcement.
+		// Asked ONCE, here, by reading the grant directory the bus host read.
+		// Either an operator provisioned a provider or nobody did; grants load
+		// at boot and cannot appear while this process runs, so the answer is
+		// fixed for its lifetime. A vector database that came and went would
+		// mean the same query answered from different stores minutes apart with
+		// no way for a caller to know which.
 		//
-		// The collection is named because a provider serves exactly one and the
-		// wire carries no collection field, so the in-database side has to be
-		// told the same thing the provider was configured with.
-		collection := strings.TrimSpace(os.Getenv("AIMEE_DB3_COLLECTION"))
-		if collection == "" {
-			collection = "memory"
-		}
-		if sidecar, err := postgres.NewVectorSidecarForCollection(collection); err == nil {
-			config.Sidecar = sidecar
-		} else {
-			log.Printf("postgres: vector routing unavailable: %v", err)
+		// With none provisioned, every vector operation is served in-database by
+		// pgvector or pgvectorscale -- the ordinary deployment, and not a
+		// degraded one.
+		provider, err := postgres.ProvisionedVectorProvider(postgres.PolicyDir())
+		if err != nil {
+			// A misconfiguration, not an absence. Reported rather than resolved
+			// by picking one, because the operator installed something that is
+			// not being used and needs to know.
+			log.Printf("postgres: %v", err)
+		} else if provider.Principal != 0 {
+			log.Printf("postgres: vector provider %q (principal %d) is provisioned",
+				provider.Instance, provider.Principal)
 		}
 	// "aimee" is what a deployment installs this as: the id in
 	// process-contracts.json and the executable every generated grant pins.

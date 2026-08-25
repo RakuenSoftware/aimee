@@ -54,11 +54,10 @@ type point struct {
 // which is what makes this usable as the reference the contract is checked
 // against.
 type Index struct {
-	mu         sync.RWMutex
-	metric     Metric
-	dimension  int
-	points     map[collectionKey]*point
-	generation uint64
+	mu        sync.RWMutex
+	metric    Metric
+	dimension int
+	points    map[collectionKey]*point
 	// watermark is the highest contiguously applied operation id. It is what
 	// DB2 reads to know how far behind this provider is.
 	watermark uint64
@@ -72,23 +71,10 @@ type collectionKey struct {
 // NewIndex builds an empty index over one metric and dimension.
 func NewIndex(metric Metric, dimension int) *Index {
 	return &Index{
-		metric:     metric,
-		dimension:  dimension,
-		points:     map[collectionKey]*point{},
-		generation: 1,
+		metric:    metric,
+		dimension: dimension,
+		points:    map[collectionKey]*point{},
 	}
-}
-
-// Generation reports the index's current generation.
-//
-// It advances on every mutation. A search carrying a RequiredGeneration newer
-// than this one is refused rather than answered from a stale index, because a
-// caller that asked for a generation is telling the provider it has already
-// seen writes this index may not have.
-func (i *Index) Generation() uint64 {
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-	return i.generation
 }
 
 // Watermark reports the highest applied operation id.
@@ -113,7 +99,6 @@ func (i *Index) Upsert(collection string, pointID int64, vector []float32, label
 		labelMap[label.Key] = label.Value
 	}
 	i.points[collectionKey{collection, pointID}] = &point{vector: stored, labels: labelMap}
-	i.generation++
 	return nil
 }
 
@@ -122,7 +107,6 @@ func (i *Index) Delete(collection string, pointID int64) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	delete(i.points, collectionKey{collection, pointID})
-	i.generation++
 }
 
 // Tombstone marks a point gone while remembering that it existed.
@@ -136,7 +120,6 @@ func (i *Index) Tombstone(collection string, pointID int64) {
 	} else {
 		i.points[key] = &point{tombstoned: true}
 	}
-	i.generation++
 }
 
 // Len reports how many live points the index holds.

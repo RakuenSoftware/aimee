@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/db3"
@@ -37,18 +39,12 @@ func (f *fakeSearcher) Search(_ context.Context, principal uint32,
 	return reply, nil
 }
 
-func readyProvider(generation uint64) db3.Capabilities {
-	return db3.Capabilities{
-		Generation: generation, Operations: db3.OperationSearch | db3.OperationApply,
-		Metrics: db3.MetricCosine, Filters: db3.FilterExact,
-		MaxDimension: db3.MaxDimension, MaxBatch: 8, MaxTopK: db3.MaxTopK, Ready: true,
-	}
-}
-
-func newRouter(t *testing.T, searcher ProviderSearcher) (*VectorRouter, *int) {
+// newRouter builds a router as a deployment would: a provisioned principal, or
+// zero for the ordinary case of no vector database.
+func newRouter(t *testing.T, principal uint32, searcher ProviderSearcher) (*VectorRouter, *int) {
 	t.Helper()
 	fallbacks := 0
-	router, err := NewVectorRouter(db3.NewProviderRegistry(), searcher,
+	router, err := NewVectorRouter(principal, searcher,
 		func(_ context.Context, request db3.SearchRequest) (db3.SearchReply, error) {
 			fallbacks++
 			return db3.SearchReply{
@@ -62,10 +58,10 @@ func newRouter(t *testing.T, searcher ProviderSearcher) (*VectorRouter, *int) {
 	return router, &fallbacks
 }
 
-func TestWithNoProviderInstalledEverythingRunsOnPostgreSQL(t *testing.T) {
-	// The default deployment. A DB3 provider is optional, and its absence is
-	// not a degraded mode -- it is the mode.
-	router, fallbacks := newRouter(t, nil)
+func TestWithNoVectorDatabaseProvisionedEverythingRunsInDatabase(t *testing.T) {
+	// The default deployment. Nothing was provisioned, so nothing is routed --
+	// not as a degraded mode, but as the ordinary one.
+	router, fallbacks := newRouter(t, 0, nil)
 	reply, route, err := router.Search(context.Background(), routableRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -76,17 +72,14 @@ func TestWithNoProviderInstalledEverythingRunsOnPostgreSQL(t *testing.T) {
 	if *fallbacks != 1 || len(reply.Candidates) != 1 {
 		t.Errorf("PostgreSQL did not answer (%d calls, %d candidates)", *fallbacks, len(reply.Candidates))
 	}
-	if router.Registry().Len() != 0 {
-		t.Error("a registry with no provider is not empty")
+	if router.Provider() != 0 {
+		t.Errorf("Provider() = %d with nothing provisioned", router.Provider())
 	}
 }
 
-func TestAReadyProviderAtTheRequiredGenerationAnswers(t *testing.T) {
+func TestAProvisionedProviderAnswers(t *testing.T) {
 	searcher := &fakeSearcher{}
-	router, fallbacks := newRouter(t, searcher)
-	if !router.Registry().Observe(db3.ProviderRefFirst, 1, 1, readyProvider(7)) {
-		t.Fatal("the registry refused a valid provider")
-	}
+	router, fallbacks := newRouter(t, db3.ProviderRefFirst, searcher)
 	_, route, err := router.Search(context.Background(), routableRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -102,45 +95,32 @@ func TestAReadyProviderAtTheRequiredGenerationAnswers(t *testing.T) {
 	}
 }
 
-func TestAProviderAtTheWrongGenerationIsNotUsed(t *testing.T) {
-	// Behind means it has not caught up with DB2's writes. Ahead cannot answer
-	// at all: the wire requires the reply to carry exactly the requested
-	// generation. Either way PostgreSQL answers, and it is always current.
-	for _, generation := range []uint64{6, 8} {
-		searcher := &fakeSearcher{}
-		router, fallbacks := newRouter(t, searcher)
-		router.Registry().Observe(db3.ProviderRefFirst, 1, 1, readyProvider(generation))
-		_, route, err := router.Search(context.Background(), routableRequest())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if route != RoutePostgreSQL || searcher.calls != 0 || *fallbacks != 1 {
-			t.Errorf("generation %d: route=%v provider-calls=%d fallbacks=%d",
-				generation, route, searcher.calls, *fallbacks)
-		}
-	}
-}
-
-func TestAnUnreadyProviderIsNotUsed(t *testing.T) {
-	// Attached but still filling its index. It would answer correctly and
-	// emptily, which is worse than not being used at all.
+func TestTheRoutingDecisionDoesNotChangeUnderACaller(t *testing.T) {
+	// A vector database cannot come and go. Whatever was provisioned at boot is
+	// what answers, every time, for the life of the process -- otherwise the
+	// same query answers from different stores minutes apart with no way for a
+	// caller to know which.
 	searcher := &fakeSearcher{}
-	router, fallbacks := newRouter(t, searcher)
-	unready := readyProvider(7)
-	unready.Ready = false
-	router.Registry().Observe(db3.ProviderRefFirst, 1, 1, unready)
-	_, route, _ := router.Search(context.Background(), routableRequest())
-	if route != RoutePostgreSQL || searcher.calls != 0 || *fallbacks != 1 {
-		t.Errorf("an unready provider was used (route=%v calls=%d)", route, searcher.calls)
+	router, _ := newRouter(t, db3.ProviderRefFirst, searcher)
+	for i := 0; i < 16; i++ {
+		_, route, err := router.Search(context.Background(), routableRequest())
+		if err != nil || route != RouteProvider {
+			t.Fatalf("attempt %d: route=%v err=%v", i, route, err)
+		}
+	}
+	if router.Provider() != db3.ProviderRefFirst {
+		t.Errorf("Provider() moved to %d", router.Provider())
 	}
 }
 
-func TestAFailingProviderFallsBackRatherThanReturningNothing(t *testing.T) {
+func TestAFailingProviderFallsBackButStaysTheRoute(t *testing.T) {
 	// An empty result is indistinguishable from a corpus with no matches, so a
-	// broken provider would become a silent loss of recall.
+	// broken provider must not become one. It also must not stop being the
+	// route: quietly demoting it hides the deployment problem an operator needs
+	// to see, and makes the store an answer comes from depend on when it was
+	// asked.
 	searcher := &fakeSearcher{err: errors.New("provider is down")}
-	router, fallbacks := newRouter(t, searcher)
-	router.Registry().Observe(db3.ProviderRefFirst, 1, 1, readyProvider(7))
+	router, fallbacks := newRouter(t, db3.ProviderRefFirst, searcher)
 	reply, route, err := router.Search(context.Background(), routableRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +129,10 @@ func TestAFailingProviderFallsBackRatherThanReturningNothing(t *testing.T) {
 		t.Fatalf("route = %v, want fell-back", route)
 	}
 	if *fallbacks != 1 || len(reply.Candidates) != 1 {
-		t.Errorf("PostgreSQL did not answer after the provider failed")
+		t.Error("PostgreSQL did not answer after the provider failed")
+	}
+	if router.Provider() != db3.ProviderRefFirst {
+		t.Error("a failing provider was demoted; the deployment silently changed")
 	}
 }
 
@@ -157,8 +140,7 @@ func TestAMalformedProviderReplyFallsBack(t *testing.T) {
 	// A reply the wire refuses is not an answer. Accepting it would let a
 	// provider return candidates for a different request.
 	searcher := &fakeSearcher{reply: db3.SearchReply{RequestID: 999, Generation: 7}}
-	router, fallbacks := newRouter(t, searcher)
-	router.Registry().Observe(db3.ProviderRefFirst, 1, 1, readyProvider(7))
+	router, fallbacks := newRouter(t, db3.ProviderRefFirst, searcher)
 	_, route, err := router.Search(context.Background(), routableRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -169,14 +151,13 @@ func TestAMalformedProviderReplyFallsBack(t *testing.T) {
 }
 
 func TestFellBackIsDistinctFromNeverRouted(t *testing.T) {
-	// "No provider installed" and "the provider is failing" look identical in
-	// the results and could not be more different operationally.
+	// "No vector database installed" and "the one installed is failing" look
+	// identical in the results and could not be more different operationally.
 	searcher := &fakeSearcher{err: errors.New("down")}
-	failing, _ := newRouter(t, searcher)
-	failing.Registry().Observe(db3.ProviderRefFirst, 1, 1, readyProvider(7))
+	failing, _ := newRouter(t, db3.ProviderRefFirst, searcher)
 	_, failedRoute, _ := failing.Search(context.Background(), routableRequest())
 
-	absent, _ := newRouter(t, nil)
+	absent, _ := newRouter(t, 0, nil)
 	_, absentRoute, _ := absent.Search(context.Background(), routableRequest())
 
 	if failedRoute == absentRoute {
@@ -184,12 +165,11 @@ func TestFellBackIsDistinctFromNeverRouted(t *testing.T) {
 	}
 }
 
-func TestAnOperationTheWireCannotCarryStaysOnPostgreSQL(t *testing.T) {
+func TestAnOperationTheWireCannotCarryStaysInDatabase(t *testing.T) {
 	// Not every vector operation can leave. A request the contract refuses is
 	// not a failure; it is an operation that runs where it always did.
 	searcher := &fakeSearcher{}
-	router, fallbacks := newRouter(t, searcher)
-	router.Registry().Observe(db3.ProviderRefFirst, 1, 1, readyProvider(7))
+	router, fallbacks := newRouter(t, db3.ProviderRefFirst, searcher)
 
 	unroutable := routableRequest()
 	unroutable.TopK = 0
@@ -206,12 +186,10 @@ func TestACancelledContextDoesNotSpendPostgreSQL(t *testing.T) {
 	// The caller has gone. Running the query anyway would spend the database on
 	// an answer nobody is waiting for.
 	searcher := &fakeSearcher{err: errors.New("down")}
-	router, fallbacks := newRouter(t, searcher)
-	router.Registry().Observe(db3.ProviderRefFirst, 1, 1, readyProvider(7))
+	router, fallbacks := newRouter(t, db3.ProviderRefFirst, searcher)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := router.Search(ctx, routableRequest())
-	if err == nil {
+	if _, _, err := router.Search(ctx, routableRequest()); err == nil {
 		t.Fatal("a cancelled search reported success")
 	}
 	if *fallbacks != 0 {
@@ -219,10 +197,92 @@ func TestACancelledContextDoesNotSpendPostgreSQL(t *testing.T) {
 	}
 }
 
-func TestARouterWithoutAPostgreSQLPathIsRefused(t *testing.T) {
-	// PostgreSQL is never optional; DB3 always is. A router built the other way
-	// round would make an optional component load-bearing.
-	if _, err := NewVectorRouter(db3.NewProviderRegistry(), &fakeSearcher{}, nil); err == nil {
-		t.Fatal("a router was built with no PostgreSQL fallback")
+func TestARouterWithoutAnInDatabasePathIsRefused(t *testing.T) {
+	// PostgreSQL is never optional; a vector database always is. A router built
+	// the other way round would make an optional component load-bearing.
+	if _, err := NewVectorRouter(db3.ProviderRefFirst, &fakeSearcher{}, nil); err == nil {
+		t.Fatal("a router was built with no in-database fallback")
+	}
+}
+
+// --- what the deployment provisioned -------------------------------------
+
+func writeGrant(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNoGrantMeansNoVectorDatabase(t *testing.T) {
+	// The ordinary deployment, and never an error.
+	provider, err := ProvisionedVectorProvider(t.TempDir())
+	if err != nil || provider.Principal != 0 {
+		t.Fatalf("empty policy dir gave (%+v, %v)", provider, err)
+	}
+	// A directory that does not exist is the same answer: nothing was
+	// provisioned. A deployment without a policy directory has installed no
+	// modules at all.
+	provider, err = ProvisionedVectorProvider(filepath.Join(t.TempDir(), "absent"))
+	if err != nil || provider.Principal != 0 {
+		t.Fatalf("missing policy dir gave (%+v, %v)", provider, err)
+	}
+	if provider, err := ProvisionedVectorProvider(""); err != nil || provider.Principal != 0 {
+		t.Fatalf("unset policy dir gave (%+v, %v)", provider, err)
+	}
+}
+
+func TestAProvisionedGrantIsFound(t *testing.T) {
+	dir := t.TempDir()
+	writeGrant(t, dir, "db3-qdrant.grant",
+		"version=1\nprincipal_class=1\nprincipal_ref=456\nuid=self\n"+
+			"executable=/usr/local/libexec/aimee-modules/aimee-module\n")
+	provider, err := ProvisionedVectorProvider(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Principal != 456 || provider.Instance != "qdrant" {
+		t.Fatalf("provider = %+v, want principal 456 instance qdrant", provider)
+	}
+}
+
+func TestGrantsOutsideTheProviderBandAreIgnored(t *testing.T) {
+	// The band is what keeps a provider from deriving a canonical module's
+	// event kinds. A grant naming a ref outside it was hand-edited or written
+	// by a provisioner predating the band, and neither is something to route
+	// vector traffic through.
+	dir := t.TempDir()
+	writeGrant(t, dir, "db3-rogue.grant",
+		"version=1\nprincipal_ref=28\nexecutable=/usr/local/bin/x\n")
+	provider, err := ProvisionedVectorProvider(dir)
+	if err != nil || provider.Principal != 0 {
+		t.Fatalf("an out-of-band grant was accepted: (%+v, %v)", provider, err)
+	}
+}
+
+func TestNonProviderGrantsAreNotMistakenForOne(t *testing.T) {
+	dir := t.TempDir()
+	writeGrant(t, dir, "mcp-github.grant", "version=1\nprincipal_ref=200\n")
+	writeGrant(t, dir, "notes.txt", "principal_ref=456\n")
+	provider, err := ProvisionedVectorProvider(dir)
+	if err != nil || provider.Principal != 0 {
+		t.Fatalf("a non-provider file was read as a provider grant: (%+v, %v)", provider, err)
+	}
+}
+
+func TestTwoProvisionedProvidersAreRefusedRatherThanChosenBetween(t *testing.T) {
+	// Only one may serve the search kind -- the bus binds a kind to exactly one
+	// slot -- so a second grant is a misconfiguration. Picking one silently
+	// would leave the operator with a provider that is installed, granted, and
+	// never used.
+	dir := t.TempDir()
+	writeGrant(t, dir, "db3-qdrant.grant", "version=1\nprincipal_ref=456\n")
+	writeGrant(t, dir, "db3-milvus.grant", "version=1\nprincipal_ref=457\n")
+	provider, err := ProvisionedVectorProvider(dir)
+	if err == nil {
+		t.Fatalf("two provisioned providers were accepted: %+v", provider)
+	}
+	if provider.Principal != 0 {
+		t.Error("a provider was selected despite the misconfiguration")
 	}
 }

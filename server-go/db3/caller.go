@@ -23,22 +23,10 @@ import (
 // It does NOT decide whether to route, which provider to ask, or what to do
 // when a provider fails. Those are the caller's policy. This is the wire.
 
-// CapabilityObserver is told what a provider has announced.
-//
-// The caller's read loop sees every event on the client, capability publishes
-// included, so this is where a module LEARNS that a provider exists and what
-// generation it has reached. Handing that to the caller rather than expecting
-// each module to run its own subscription is the difference between a module
-// that discovers providers and one that has to be told about them -- and being
-// told means somebody inventing a generation, which the wire then refuses.
-type CapabilityObserver func(principal, handle uint32, sequence uint64, capabilities Capabilities)
-
 type SearchCaller struct {
 	client   callerWireClient
 	next     atomic.Uint64
 	pollWait time.Duration
-	observe  CapabilityObserver
-	sequence atomic.Uint64
 
 	mu      sync.Mutex
 	pending map[uint64]*pendingSearch
@@ -88,21 +76,10 @@ const maxCallerPending = 512
 // It starts no goroutine and reads nothing. Whoever owns the attachment polls
 // and hands events to Absorb -- one attachment, one reader.
 func NewSearchCaller(client *bus.Client) (*SearchCaller, error) {
-	return NewSearchCallerWithObserver(client, nil)
-}
-
-// NewSearchCallerWithObserver also reports every provider announcement it sees.
-func NewSearchCallerWithObserver(client *bus.Client,
-	observe CapabilityObserver) (*SearchCaller, error) {
 	if client == nil {
 		return nil, ErrCallerConfig
 	}
-	caller, err := newSearchCaller(client)
-	if err != nil {
-		return nil, err
-	}
-	caller.observe = observe
-	return caller, nil
+	return newSearchCaller(client)
 }
 
 func newSearchCaller(client callerWireClient) (*SearchCaller, error) {
@@ -142,10 +119,6 @@ func (c *SearchCaller) Close() {
 // Everything not addressed to this caller is ignored, so the owner may offer it
 // every event it does not serve itself rather than having to classify first.
 func (c *SearchCaller) Absorb(event bus.Event) {
-	if event.Frame.EventKind == EventCapabilities {
-		c.absorbCapabilities(event)
-		return
-	}
 	if event.Frame.EventKind != EventSearch || event.Frame.HdrFlags&bus.FReply == 0 {
 		return
 	}
@@ -287,27 +260,4 @@ func (c *SearchCaller) send(ctx context.Context, id uint64, payload []byte) erro
 		offset += part
 	}
 	return nil
-}
-
-// absorbCapabilities reports one provider announcement.
-//
-// The sequence is assigned HERE, from arrival order, because the wire carries
-// no sequence of its own. Arrival order on one client is exactly the ordering a
-// registry needs: it only has to know which announcement is newer, and there is
-// one reader.
-func (c *SearchCaller) absorbCapabilities(event bus.Event) {
-	if c.observe == nil {
-		return
-	}
-	// Capabilities are published whole; a fragmented one is malformed rather
-	// than large, and acting on half of it would take a provider's readiness
-	// from a truncated message.
-	if event.Frame.HdrFlags&bus.FMore != 0 {
-		return
-	}
-	capabilities, err := DecodeCapabilities(event.Payload)
-	if err != nil {
-		return
-	}
-	c.observe(event.Frame.PrincipalRef, event.Frame.SrcHandle, c.sequence.Add(1), capabilities)
 }

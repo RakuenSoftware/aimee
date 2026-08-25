@@ -14,13 +14,11 @@
 package qdrant
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/modules/vectordb"
@@ -66,16 +64,6 @@ type Config struct {
 type Backend struct {
 	config Config
 	client *http.Client
-	// generation counts this backend's own mutations.
-	//
-	// Qdrant reports no version of its own, and the DB3 contract requires one:
-	// DB2 searches AT a generation and the reply must carry exactly it back. So
-	// the provider counts. It starts at one per process, which means a restart
-	// renumbers -- DB2 learns the new value from the capabilities the provider
-	// publishes on attach, and converges. What must never happen is a
-	// generation that does not advance on a write, because then a search after
-	// a write would look identical to one before it.
-	generation atomic.Uint64
 	// ensured remembers collections already created, so the create call is made
 	// once rather than before every write.
 	ensured sync.Map
@@ -97,16 +85,12 @@ func New(config Config) (*Backend, error) {
 	if backend.client == nil {
 		backend.client = &http.Client{Timeout: config.Timeout}
 	}
-	backend.generation.Store(1)
 	return backend, nil
 }
 
 func (b *Backend) Dimension() int          { return b.config.Dimension }
 func (b *Backend) Metric() vectordb.Metric { return b.config.Metric }
 func (b *Backend) Close() error            { return nil }
-func (b *Backend) Generation(context.Context) (uint64, error) {
-	return b.generation.Load(), nil
-}
 
 // distanceName is Qdrant's name for the metric this backend scores by.
 func (b *Backend) distanceName() string {

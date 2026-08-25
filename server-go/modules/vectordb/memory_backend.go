@@ -27,10 +27,6 @@ func NewMemoryBackend(index *Index) *MemoryBackend {
 // Index exposes the underlying store, for tests that seed it directly.
 func (b *MemoryBackend) Index() *Index { return b.index }
 
-func (b *MemoryBackend) Generation(context.Context) (uint64, error) {
-	return b.index.Generation(), nil
-}
-
 func (b *MemoryBackend) Dimension() int { return b.index.dimension }
 
 func (b *MemoryBackend) Metric() Metric { return b.index.metric }

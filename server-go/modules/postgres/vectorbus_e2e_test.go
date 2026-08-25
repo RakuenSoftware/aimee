@@ -142,10 +142,32 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 	client := attachClient(t, socket, 28)
 	defer client.Detach()
 
+	// The deployment, as an operator provisions it: a grant naming the provider
+	// this test started. The module reads it once and that is the answer for
+	// the rest of its life.
+	policyDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(policyDir, "db3-pgroute.grant"),
+		[]byte("version=1\nprincipal_class=1\nprincipal_ref=456\nuid=self\n"+
+			"executable="+provider+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provisioned, err := ProvisionedVectorProvider(policyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provisioned.Principal != 456 {
+		t.Fatalf("the grant was not read: %+v", provisioned)
+	}
+
 	// A fallback that records whether PostgreSQL was asked. That is the whole
 	// question: a routed search must not touch it, and every other case must.
 	postgresCalls := 0
-	router, attachment, err := NewBusVectorRouter(client,
+	attachment, err := AttachVectorBus(client, provisioned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer attachment.Close()
+	router, err := NewVectorRouter(provisioned.Principal, attachment.Searcher(),
 		func(_ context.Context, request db3.SearchRequest) (db3.SearchReply, error) {
 			postgresCalls++
 			return db3.SearchReply{
@@ -155,7 +177,6 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer attachment.Close()
 
 	// The caller no longer polls: whoever owns the attachment does. In the
 	// module process that is the module loop; here the test owns the client, so
@@ -184,50 +205,45 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 	}()
 	defer func() { cancel(); <-pumpDone }()
 
-	// Before any provider is observed, the module answers from PostgreSQL. This
-	// is the ordinary deployment, and it must work with a bus present.
 	request := db3.SearchRequest{
 		RequestID: 1, RequiredGeneration: 1, Workspace: "workspace-a",
 		Project: "project-a", RecordType: "memory", TopK: 2, Vector: []float32{1, 0, 0},
 	}
-	if _, route, err := router.Search(ctx, request); err != nil || route != RoutePostgreSQL {
-		t.Fatalf("with no provider observed: route=%v err=%v", route, err)
-	}
-	if postgresCalls != 1 {
-		t.Fatalf("PostgreSQL was asked %d times, want 1", postgresCalls)
-	}
 
-	// Give the provider something to find. Its capabilities are NOT supplied by
-	// this test: the module observes them off the bus, which is the point --
-	// a fabricated generation is one the provider is not at, and the wire
-	// refuses a search at a generation the provider is not at.
-	seedProviderThroughTheBus(t, ctx, client)
-
-	deadline = time.Now().Add(20 * time.Second)
+	// The grant said a provider is installed, so the router routes from the
+	// first call. It does not wait to observe anything: the deployment is a
+	// fact, not something to be discovered.
+	//
+	// The generation is PostgreSQL's. It stamps every apply with it and searches
+	// at the same value, and the provider carries back whatever it was told --
+	// which is what makes the two agree without either discovering the other.
+	//
+	// Applies are re-published each attempt because a publish is not queued for
+	// a subscriber that has not arrived yet: one sent before the provider is
+	// serving is simply lost. Re-sending is safe -- the provider recognises an
+	// operation id it has already applied and acknowledges it without repeating
+	// the work -- so this converges rather than needing the two starts ordered.
+	deadline = time.Now().Add(30 * time.Second)
 	var routed db3.SearchReply
 	for {
-		principal, generation, ok := attachment.Registry().Selected()
-		if ok && principal == 456 {
-			request.RequiredGeneration = generation
-			reply, route, err := router.Search(ctx, request)
-			if err == nil && route == RouteProvider && len(reply.Candidates) == 2 {
-				routed = reply
-				break
-			}
+		seedProviderThroughTheBus(t, ctx, client)
+		reply, route, err := router.Search(ctx, request)
+		if err == nil && route == RouteProvider && len(reply.Candidates) == 2 {
+			routed = reply
+			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the module never routed to the provider (postgres calls %d)", postgresCalls)
+			t.Fatalf("the provider never returned the applied points "+
+				"(postgres calls %d, route %v, err %v)", postgresCalls, route, err)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if routed.Candidates[0].PointID != 41 || routed.Candidates[1].PointID != 42 {
 		t.Fatalf("routed candidates = %+v, want 41 then 42", routed.Candidates)
 	}
 
-	// Now that it IS routing, one more search must not touch PostgreSQL at all.
-	// Counting across the loop above would have counted the attempts that
-	// legitimately fell back while the provider was still catching up.
+	// A routed search must not touch PostgreSQL at all.
 	before := postgresCalls
 	reply, route, err := router.Search(ctx, request)
 	if err != nil || route != RouteProvider {
@@ -240,15 +256,10 @@ func TestThePostgresModuleRoutesToAProviderOverTheBus(t *testing.T) {
 		t.Errorf("PostgreSQL was queried %d times for a routed search", postgresCalls-before)
 	}
 
-	// With the provider forgotten, the very next search is PostgreSQL's again.
-	// Removing DB3 must be as uneventful as never installing it.
-	attachment.ForgetProvider(456, 1)
-	before = postgresCalls
-	if _, route, err := router.Search(ctx, request); err != nil || route != RoutePostgreSQL {
-		t.Fatalf("after the provider left: route=%v err=%v", route, err)
-	}
-	if postgresCalls != before+1 {
-		t.Error("PostgreSQL did not answer after the provider was removed")
+	// And the decision does not drift. The provider provisioned at boot is the
+	// one that answers, every time, for the life of this process.
+	if router.Provider() != 456 {
+		t.Errorf("the routing decision moved to %d", router.Provider())
 	}
 }
 

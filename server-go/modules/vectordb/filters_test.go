@@ -98,13 +98,19 @@ func TestProviderAdvertisesExactFiltering(t *testing.T) {
 func TestFilteredRequestSurvivesTheWire(t *testing.T) {
 	index := NewIndex(Cosine, 3)
 	provider := NewProvider(index, "kb")
-	if err := index.Upsert("kb", 1, []float32{1, 0, 0},
-		labels("generation", "7", "project", "p1")); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-	if err := index.Upsert("kb", 2, []float32{1, 0, 0},
-		labels("generation", "6", "project", "p1")); err != nil {
-		t.Fatalf("upsert: %v", err)
+	// Seeded through APPLY, not by writing the index directly: that is how a
+	// provider receives data in production, and it is also what tells the
+	// provider which generation PostgreSQL stamped. A provider seeded behind its
+	// own back has no generation and refuses every search.
+	for id, generation := range map[int64]string{1: "7", 2: "6"} {
+		outcome := provider.Apply(context.Background(), db3.Apply{
+			OperationID: uint64(id), Generation: 1, PointID: id,
+			Kind: db3.ApplyUpsert, Collection: "kb", Vector: []float32{1, 0, 0},
+			Labels: labels("generation", generation, "project", "p1"),
+		})
+		if outcome.Result != db3.AppliedOK {
+			t.Fatalf("seed apply %d = %v", id, outcome.Result)
+		}
 	}
 
 	sent := db3.SearchRequest{

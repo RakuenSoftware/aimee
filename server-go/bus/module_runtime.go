@@ -86,31 +86,6 @@ type ModuleProcessConfig struct {
 	PrincipalRef   uint32
 	Stages         []ModuleStage
 	Handler        ModuleHandler
-
-	// Sidecar carries a second protocol on this module's own attachment.
-	//
-	// SENDING on the module's client was never the problem: Publish and
-	// RequestFragment work from anywhere that holds it. RECEIVING is, because
-	// this loop owns the only Poll() and drops everything that is not a request
-	// to one of its stages -- which is precisely the replies a request is
-	// waiting for. So the events it drops are offered here instead of thrown
-	// away.
-	//
-	// A second client is not the alternative. A principal attaches once: another
-	// attachment on the same ref is a duplicate principal, and the bus delivers
-	// each event once, so two readers would each see half of them.
-	Sidecar ModuleSidecar
-}
-
-// ModuleSidecar is a second protocol carried on a module's own attachment.
-type ModuleSidecar interface {
-	// Attached is called once, with the client, before the loop starts.
-	Attached(client *Client)
-	// Absorb is offered every event this loop does not serve itself.
-	Absorb(event Event)
-	// Detached is called when the loop ends, so the sidecar can fail whatever
-	// it has outstanding rather than leave callers waiting on a dead bus.
-	Detached()
 }
 
 type cancelFlag struct{ set atomic.Bool }
@@ -221,10 +196,6 @@ func RunModuleProcess(ctx context.Context, config ModuleProcessConfig) error {
 		return fmt.Errorf("%w: %s attach: %v", ErrModuleRuntime, config.ModuleName, err)
 	}
 	defer client.Detach()
-	if config.Sidecar != nil {
-		config.Sidecar.Attached(client)
-		defer config.Sidecar.Detached()
-	}
 	return runModuleClient(ctx, config, stages, client)
 }
 
@@ -401,12 +372,6 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 			continue
 		}
 		if event.Frame.HdrFlags&FRequest == 0 {
-			// Not a request to one of our stages: a reply we are waiting for, or
-			// a publish we subscribed to. Either way it belongs to the sidecar,
-			// and dropping it here is what leaves a request unanswered forever.
-			if config.Sidecar != nil {
-				config.Sidecar.Absorb(event)
-			}
 			continue
 		}
 

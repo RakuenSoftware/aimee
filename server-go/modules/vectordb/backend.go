@@ -25,13 +25,16 @@ import (
 // under its own lock but not searches, and a remote backend will have several
 // in flight.
 type Backend interface {
-	// Generation reports the store's current version.
+	// NO GENERATION. A backend stores vectors; it does not decide what version
+	// they are.
 	//
-	// DB2 searches AT a generation and the wire requires the reply to carry
-	// exactly that generation back, so this is not bookkeeping: it is the value
-	// the whole routed path agrees on. It MUST advance on every mutation, and a
-	// backend whose store cannot report one must count its own.
-	Generation(ctx context.Context) (uint64, error)
+	// The generation belongs to the replication stream: PostgreSQL owns the
+	// canonical rows, stamps each committed operation with its generation, and
+	// the provider reports back the highest one it has applied. A backend that
+	// counted its own -- as this interface once asked it to -- drifts from
+	// PostgreSQL on the first write, and the wire refuses every reply because it
+	// requires the reply's generation to equal the request's exactly. The
+	// symptom is a provider that is installed, routed to, and answers nothing.
 
 	// Dimension is the vector width the store was built for. A mismatch is
 	// rejected rather than padded: a search at the wrong width returns

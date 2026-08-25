@@ -111,11 +111,7 @@ func (b *Backend) Upsert(ctx context.Context, collection string, pointID int64,
 		map[string]any{"points": []map[string]any{{
 			"id": pointID, "vector": vector, "payload": payload,
 		}}}, nil)
-	if err != nil {
-		return err
-	}
-	b.generation.Add(1)
-	return nil
+	return err
 }
 
 // Delete removes a point entirely.
@@ -126,11 +122,7 @@ func (b *Backend) Delete(ctx context.Context, collection string, pointID int64) 
 	err := b.do(ctx, http.MethodPost,
 		"/collections/"+b.collectionName(collection)+"/points/delete?wait=true",
 		map[string]any{"points": []int64{pointID}}, nil)
-	if err != nil {
-		return err
-	}
-	b.generation.Add(1)
-	return nil
+	return err
 }
 
 // Tombstone makes a point unreachable while keeping its identity.
@@ -147,11 +139,7 @@ func (b *Backend) Tombstone(ctx context.Context, collection string, pointID int6
 			"payload": map[string]any{tombstonePayloadKey: true},
 			"points":  []int64{pointID},
 		}, nil)
-	if err != nil {
-		return err
-	}
-	b.generation.Add(1)
-	return nil
+	return err
 }
 
 type searchResponse struct {

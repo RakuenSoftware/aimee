@@ -48,6 +48,21 @@ if ! curl -sf -o /dev/null "$QDRANT_URL/healthz"; then
 fi
 echo "--- Qdrant: $(curl -s "$QDRANT_URL" | head -c 120) ---"
 
+# Drop collections earlier runs left behind.
+#
+# Every run namespaces its collections so it cannot inherit stale points, which
+# is right and unbounded. Qdrant keeps file descriptors per collection, so a
+# container that has run this often enough begins failing every write with
+# "Too many open files" -- a store-side exhaustion that looks exactly like a
+# broken client, and cost real time to tell apart once.
+dropped=0
+for collection in $(curl -s "$QDRANT_URL/collections" \
+      | grep -oE '(aimeetest|busrt|pgroute)[0-9]+_[a-z_]+'); do
+   curl -s -X DELETE "$QDRANT_URL/collections/$collection" >/dev/null
+   dropped=$((dropped + 1))
+done
+[ "$dropped" -gt 0 ] && echo "dropped $dropped collection(s) from earlier runs"
+
 # The C host harness is what gives the provider a real bus with a real grant.
 make -C "$TREE/src" --no-print-directory db3-go-host >/dev/null 2>&1
 harness="$TREE/src/build/obj/tests/db3-go-host"

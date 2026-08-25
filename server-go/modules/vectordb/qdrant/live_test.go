@@ -38,6 +38,12 @@ func liveBackend(t *testing.T, metric vectordb.Metric, collection string) (*Back
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Dropped after the run. Each run uses a fresh prefix so it cannot inherit
+	// the previous one's points, which is right for isolation and accumulates
+	// collections without bound. Qdrant holds file descriptors per collection,
+	// and a container that has run this suite enough times starts failing every
+	// write with "Too many open files" -- which presents as a broken client and
+	// is not one.
 	t.Cleanup(func() {
 		_ = backend.do(context.Background(), "DELETE",
 			"/collections/"+backend.collectionName(collection), nil, nil)

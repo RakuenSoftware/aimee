@@ -45,6 +45,9 @@ type Provider struct {
 	applied map[uint64]bool
 	// contiguous is the highest operation id below which nothing is missing.
 	contiguous uint64
+	// lastGeneration is the newest generation PostgreSQL has stamped on an
+	// operation this provider applied.
+	lastGeneration uint64
 
 	// updates carries a fresh Capabilities every time an apply moves the
 	// index's generation.
@@ -86,15 +89,27 @@ func NewProviderWithBackend(backend Backend, collection string) *Provider {
 // — but the field is set from the index rather than hard-coded, because a real
 // provider's readiness is a fact about its backing store and not a constant.
 func (p *Provider) Capabilities() db3.Capabilities {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.capabilitiesLocked()
+}
+
+func (p *Provider) capabilitiesLocked() db3.Capabilities {
 	return db3.Capabilities{
-		Generation:   p.generation(),
+		Generation:   p.lastGeneration,
 		Operations:   db3.OperationSearch | db3.OperationApply,
 		Metrics:      p.metricSet(),
 		Filters:      db3.FilterExact,
 		MaxDimension: uint32(p.backend.Dimension()),
 		MaxBatch:     maxBatch,
 		MaxTopK:      db3.MaxTopK,
-		Ready:        true,
+		// Ready means "I can answer", and a provider that has applied nothing
+		// cannot: it holds no rows and has no generation to answer at. Saying
+		// otherwise is not merely optimistic, it is malformed on the wire --
+		// Capabilities.Validate refuses Ready with a zero generation, precisely
+		// so a store that has received nothing cannot advertise itself as able
+		// to serve.
+		Ready: p.lastGeneration > 0,
 	}
 }
 
@@ -215,6 +230,9 @@ func (p *Provider) Apply(ctx context.Context, apply db3.Apply) db3.ProviderApply
 	}
 
 	p.applied[apply.OperationID] = true
+	if apply.Generation > p.lastGeneration {
+		p.lastGeneration = apply.Generation
+	}
 	watermark := p.advanceLocked()
 	p.publishCapabilitiesLocked()
 	return db3.ProviderApplyOutcome{
@@ -234,9 +252,7 @@ func (p *Provider) publishCapabilitiesLocked() {
 	if p.updates == nil {
 		return
 	}
-	// Safe under p.mu: Capabilities takes the INDEX lock, and advanceLocked
-	// above already establishes that order (provider then index).
-	capabilities := p.Capabilities()
+	capabilities := p.capabilitiesLocked()
 	// Apply holds p.mu, so this is the only sender. A failed send therefore means
 	// the buffer holds a SUPERSEDED generation: drop it and send again, and the
 	// second send cannot fail because nothing else can refill it.
@@ -295,17 +311,18 @@ func (p *Provider) Run(ctx context.Context, client *bus.Client) error {
 	})
 }
 
-// generation reads the backend's version, treating an error as "no generation".
+// generation is the highest generation PostgreSQL has told this provider about.
 //
-// Zero is not a valid generation on the wire, so a store that cannot report one
-// makes the provider advertise itself as having none -- which the router reads
-// as not ready, and no search is sent. That is the safe direction: answering at
-// a guessed generation would have DB2 accept results from a store whose version
-// it does not actually know.
+// Not the backend's, and not a counter of its own: the canonical store owns the
+// version and stamps every committed operation with it. The wire then requires
+// a reply to carry back exactly the generation the request asked for, so a
+// provider that invented its own would be refused on every search after its
+// first write -- installed, routed to, and answering nothing.
+//
+// Zero until the first apply arrives, which reads as "not ready" and is true: a
+// provider that has received nothing has nothing to answer from.
 func (p *Provider) generation() uint64 {
-	generation, err := p.backend.Generation(context.Background())
-	if err != nil {
-		return 0
-	}
-	return generation
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastGeneration
 }
