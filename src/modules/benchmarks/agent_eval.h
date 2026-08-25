@@ -39,6 +39,46 @@ typedef struct
    unsigned int seed;
 } agent_eval_run_options_t;
 
+#define AGENT_EVAL_MANIFEST_HASH_LEN 65
+#define AGENT_EVAL_HARNESS_LEN       32
+#define AGENT_EVAL_HARDWARE_LEN      128
+
+typedef struct
+{
+   char dataset_hash[AGENT_EVAL_MANIFEST_HASH_LEN];
+   char target_hash[AGENT_EVAL_MANIFEST_HASH_LEN];
+   char harness_version[AGENT_EVAL_HARNESS_LEN];
+   char hardware_profile[AGENT_EVAL_HARDWARE_LEN];
+   int seed;
+} agent_eval_manifest_t;
+
+typedef enum
+{
+   AGENT_EVAL_COMPARE_QUALITY = 0,
+   AGENT_EVAL_COMPARE_LATENCY
+} agent_eval_comparison_kind_t;
+
+typedef enum
+{
+   AGENT_EVAL_COMPARABLE = 0,
+   AGENT_EVAL_INCOMPARABLE,
+   AGENT_EVAL_COMPARABILITY_UNKNOWN
+} agent_eval_comparability_t;
+
+/* Build immutable identity for a run. Dataset identity is derived from the
+ * canonical task content, not a mutable pathname. Target identity binds the
+ * exact Aimee build and selected agent. */
+int agent_eval_manifest_build(const char *suite, const eval_task_t *tasks, int task_count,
+                              const char *agent_name, unsigned int seed,
+                              agent_eval_manifest_t *out);
+
+/* Refuse accidental apples-to-oranges comparisons. Latency additionally
+ * requires an identical hardware profile; quality comparisons do not. */
+agent_eval_comparability_t agent_eval_manifest_compare(const agent_eval_manifest_t *left,
+                                                       const agent_eval_manifest_t *right,
+                                                       agent_eval_comparison_kind_t kind,
+                                                       const char **reason_out);
+
 int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
                                 const agent_eval_run_options_t *options, eval_result_t *results,
                                 int max_results);

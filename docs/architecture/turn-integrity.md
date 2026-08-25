@@ -38,6 +38,21 @@ are mapped by an explicit failure mode. The authoring pipeline uses `degrade`,
 which escalates to a human after bounded infrastructure retries instead of
 silently treating an unavailable checker as assent.
 
+## Benchmark identity
+
+Every stored agent-evaluation row carries an immutable manifest identity:
+
+- a SHA-256 of the suite name and canonical task content;
+- a SHA-256 binding the exact Aimee build and selected agent;
+- the harness contract version and random seed; and
+- a bounded hardware profile (or an operator-pinned profile).
+
+Comparison is a gate, not a label. Quality results require matching dataset,
+target, harness, and seed. Latency additionally requires matching hardware.
+Missing identity produces `unknown`; a mismatch produces `incomparable`, with a
+stable reason code, instead of manufacturing a regression or improvement from
+different experiments.
+
 ## Context authority
 
 Canonical request blocks carry metadata independently from their wire content:
