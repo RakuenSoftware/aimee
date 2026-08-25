@@ -148,15 +148,26 @@ session_refs="$(git --git-dir="$git_bare" for-each-ref --format='%(refname)' ref
 [[ -n "$session_refs" ]] || fail "authorized git_push did not publish the session branch"
 ok "authorized external git_push reached a disposable real remote"
 
-# Observe one session, invalidate knowledge through the public API, then observe
-# the same session again. The second provider request must carry the stale marker.
+# Observe one session through the canonical OpenAI ingress, invalidate knowledge
+# through the public API, then observe the same session again. Supplying a
+# read-only tool keeps the request on the neutral IR path; the second provider
+# request must carry the typed stale marker.
 fresh_sid=ti-live-freshness
-run_turn "$fresh_sid" TI_FRESHNESS_BEFORE "$workspace" "$RUN_ROOT/fresh-before.out"
+run_ir_turn() {
+  local prompt="$1" out="$2"
+  curl -fksS --cert "$CLIENT_CERT" --key "$CLIENT_KEY" \
+    -H "Authorization: Bearer $BEARER" -H "aimee-session-id: $fresh_sid" \
+    -H 'content-type: application/json' -X POST \
+    -d "{\"model\":\"turn-integrity-fixture\",\"messages\":[{\"role\":\"user\",\"content\":\"$prompt\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"description\":\"read a file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}}}]}" \
+    "$SERVER_URL/v1/chat/completions" >"$out"
+  grep -q 'TURN_INTEGRITY_FIXTURE_DONE' "$out" || fail "canonical IR turn failed"
+}
+run_ir_turn TI_FRESHNESS_BEFORE "$RUN_ROOT/fresh-before.out"
 curl -fksS --cert "$CLIENT_CERT" --key "$CLIENT_KEY" \
   -H "Authorization: Bearer $BEARER" -H 'content-type: application/json' -X POST \
   -d '{"source_kind":"repository","source_id":"turn-integrity-e2e"}' \
   "$SERVER_URL/v1/curator/invalidated" >/dev/null
-run_turn "$fresh_sid" TI_FRESHNESS_AFTER "$workspace" "$RUN_ROOT/fresh-after.out"
+run_ir_turn TI_FRESHNESS_AFTER "$RUN_ROOT/fresh-after.out"
 grep -q 'aimee-freshness' "$provider_log" || \
   fail "knowledge invalidation did not add the freshness marker"
 ok "live invalidation produced a stale-knowledge instruction on the next turn"
