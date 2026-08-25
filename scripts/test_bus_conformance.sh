@@ -52,13 +52,31 @@ go_multicall="$repo_root/src/build/obj/tests/aimee-module-go"
 # Derive the list from the contract rather than restating it. A hardcoded list
 # drifts silently: a module hosted by another program is no longer a spawned
 # multicall binary, and a newly migrated one would never be exercised here.
+# `config` is a Go module process like the others and is NOT in this multicall:
+# it ships as its own program from RakuenSoftware/aimee-module-config, built
+# here as $(OBJDIR)/aimee-module-config. Spawning the multicall under that name
+# gets "unknown Go module executable", which reads as a missing module rather
+# than a module that lives somewhere else. Named rather than derived, because
+# the contract says what a component IS and not which repository builds it.
 module_ids=$(python3 -I -c '
 import json, sys
+# `config` ships as its own program from RakuenSoftware/aimee-module-config, so
+# the multicall does not answer to its name.
+#
+# `aimee` needs a STORE, which it reaches by attaching as a second principal
+# (ref 69) to a bus that must already be serving it. It refuses to start
+# without one -- deliberately, because declaring its stages with no store would
+# have the daemon route every call here to fail one at a time. This harness
+# grants exactly two principals and stands up no store, so it cannot host it;
+# the aimee module is covered by docs/validation/aimee-module-on-a-clean-container.md,
+# which brings a real stack up.
+EXTERNAL = {"config", "aimee"}
 contract = json.load(open("src/modules/process-contracts.json"))
 print(" ".join(
     component["id"]
     for component in contract["components"]
     if component.get("runtime") == "go" and not component.get("hosted_by")
+    and component["id"] not in EXTERNAL
 ))')
 for module_id in $module_ids; do
    executable="$repo_root/src/build/obj/tests/aimee-module-$module_id"

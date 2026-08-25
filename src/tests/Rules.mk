@@ -3076,7 +3076,11 @@ $(TESTPREFIX)/unit-test-bus-runtime: $(OBJDIR)/tests/test_bus_runtime.o \
 unit-test-bus-runtime: $(TESTPREFIX)/unit-test-bus-runtime
 	$<
 
-$(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include
+# The conformance run drives every component in process-contracts.json, so this
+# test names their event kinds -- including execution-policy's, whose include
+# root is granted per-object rather than in the base flags.
+$(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include \
+                                                  -Imodules/execution-policy/include
 $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
                                         $(OBJDIR)/core/event_bus/module_client.o \
                                         $(OBJDIR)/core/event_bus/module_runtime.o \

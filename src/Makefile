@@ -1009,6 +1009,8 @@ go-unit-tests:
 	done
 	@echo "go-unit-tests: db3 providers over the authenticated C bus"
 	@cd .. && bash scripts/test_db3_go_bus.sh
+	@echo "go-unit-tests: cross-language bus conformance"
+	@cd .. && bash scripts/test_bus_conformance.sh
 	@echo "go-unit-tests: ok"
 
 # The complete shipping build must finish before lint inspects its artifacts.
