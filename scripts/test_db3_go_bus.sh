@@ -10,5 +10,14 @@ fi
 [ -x "$harness" ] || { echo "FAIL: DB3 Go host harness not built" >&2; exit 1; }
 
 cd "$repo_root/server-go"
-DB3_GO_HOST="$harness" CGO_ENABLED=0 \
-   go test ./modules/db2 -run TestDB3GoProvidersOperateOverAuthenticatedCBus -v -timeout 60s
+# Both DB3 bus proofs. The first attaches providers as goroutines inside the
+# test; the second starts the SHIPPED provider binary as its own process under a
+# grant naming its executable, applies points through the wire, and searches
+# them back. Only the second exercises a deployment, which is how the provider
+# came to have no runnable process while every test of it passed.
+#
+# CGO_ENABLED is not forced here: the process test builds the multicall itself.
+DB3_GO_HOST="$harness" \
+   go test ./modules/db2 \
+   -run 'TestDB3GoProvidersOperateOverAuthenticatedCBus|TestTheShippedProviderBinaryServesOverARealBus' \
+   -v -timeout 180s

@@ -45,11 +45,30 @@ type Provider struct {
 	applied map[uint64]bool
 	// contiguous is the highest operation id below which nothing is missing.
 	contiguous uint64
+
+	// updates carries a fresh Capabilities every time an apply moves the
+	// index's generation.
+	//
+	// It is not an optimisation. DB2 sends the generation it REQUIRES, and the
+	// wire requires the reply to carry exactly that generation back
+	// (ValidateSearchReply). Every apply bumps the index generation, so a
+	// provider that never republished would answer at a generation DB2 has not
+	// been told about, its reply would be rejected as malformed, and the
+	// provider runtime would report SearchFailureInternal. That is not a
+	// degraded search: after the FIRST apply, every routed search fails, for
+	// good, and the provider looks broken rather than stale.
+	//
+	// Buffered at one and coalescing: only the newest generation matters, and a
+	// provider must never block an apply waiting for a reader.
+	updates chan db3.Capabilities
 }
 
 // NewProvider builds a provider serving one collection out of an index.
 func NewProvider(index *Index, collection string) *Provider {
-	return &Provider{index: index, collection: collection, applied: map[uint64]bool{}}
+	return &Provider{
+		index: index, collection: collection, applied: map[uint64]bool{},
+		updates: make(chan db3.Capabilities, 1),
+	}
 }
 
 // Capabilities describes what this provider will serve.
@@ -175,10 +194,38 @@ func (p *Provider) Apply(ctx context.Context, apply db3.Apply) db3.ProviderApply
 
 	p.applied[apply.OperationID] = true
 	watermark := p.advanceLocked()
+	p.publishCapabilitiesLocked()
 	return db3.ProviderApplyOutcome{
 		Result:    db3.AppliedOK,
 		Watermark: watermark,
 		Lag:       p.lagLocked(apply.OperationID, watermark),
+	}
+}
+
+// publishCapabilitiesLocked offers the router the generation this provider is
+// now at, replacing any older pending one.
+//
+// Coalescing rather than queueing: a router that is behind wants the CURRENT
+// generation, never a backlog of superseded ones. Never blocking: an apply that
+// waited on a reader would stall DB2's outbox behind the provider.
+func (p *Provider) publishCapabilitiesLocked() {
+	if p.updates == nil {
+		return
+	}
+	// Safe under p.mu: Capabilities takes the INDEX lock, and advanceLocked
+	// above already establishes that order (provider then index).
+	capabilities := p.Capabilities()
+	for {
+		select {
+		case p.updates <- capabilities:
+			return
+		default:
+			select {
+			case <-p.updates:
+			default:
+				return
+			}
+		}
 	}
 }
 
@@ -211,8 +258,9 @@ func (p *Provider) lagLocked(operationID, watermark uint64) uint32 {
 // Run serves this provider on an attached bus client until ctx ends.
 func (p *Provider) Run(ctx context.Context, client *bus.Client) error {
 	return db3.RunProvider(ctx, client, db3.ProviderConfig{
-		Capabilities: p.Capabilities(),
-		Search:       p.Search,
-		Apply:        p.Apply,
+		Capabilities:      p.Capabilities(),
+		CapabilityUpdates: p.updates,
+		Search:            p.Search,
+		Apply:             p.Apply,
 	})
 }

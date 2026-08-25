@@ -41,11 +41,18 @@ static void stop_now(int signal_number)
 
 int main(int argc, char **argv)
 {
-   if (argc != 3)
+   if (argc != 3 && argc != 4)
    {
-      fprintf(stderr, "usage: %s SOCKET GO_TEST_EXECUTABLE\n", argv[0]);
+      fprintf(stderr, "usage: %s SOCKET GO_TEST_EXECUTABLE [PROVIDER_EXECUTABLE]\n", argv[0]);
       return 2;
    }
+   /* With a provider executable, provider A is a SEPARATE PROCESS rather than a
+    * goroutine inside the Go test. The grant checks the peer's /proc/<pid>/exe
+    * against this exact string, so the shipped provider binary can only attach
+    * when the grant names it -- which is the whole point of running it this way:
+    * every other test of the split runs the provider in-process, where no grant
+    * is ever checked and no deployment is ever exercised. */
+   const char *provider_a_executable = argc == 4 ? argv[3] : argv[2];
    signal(SIGTERM, stop_now);
    signal(SIGINT, stop_now);
 
@@ -73,7 +80,7 @@ int main(int argc, char **argv)
        {.principal_class = 1,
         .principal_ref = PROVIDER_A_REF,
         .uid = BUS_RUNTIME_SELF_UID,
-        .executable = argv[2],
+        .executable = provider_a_executable,
         .publish = provider_publish,
         .publish_count = 2,
         .subscribe = provider_subscribe,

@@ -327,3 +327,69 @@ func TestCapabilitiesReportTheIndexMetric(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyRepublishesTheGenerationTheRouterMustAskFor(t *testing.T) {
+	// DB2 sends the generation it REQUIRES and the wire requires the reply to
+	// carry exactly that generation back. Every apply moves the index forward,
+	// so a provider that did not republish would answer at a generation DB2 was
+	// never told about; the reply would be rejected as malformed and reported as
+	// an internal provider failure. After the FIRST apply, every routed search
+	// would fail for good -- and the provider would look broken rather than one
+	// message behind.
+	index := NewIndex(Cosine, 3)
+	provider := NewProvider(index, "memory")
+	before := provider.Capabilities().Generation
+
+	outcome := provider.Apply(context.Background(), db3.Apply{
+		OperationID: 1, Generation: 1, PointID: 7, Kind: db3.ApplyUpsert,
+		Collection: "memory", Vector: []float32{1, 0, 0},
+	})
+	if outcome.Result != db3.AppliedOK {
+		t.Fatalf("apply result = %v, want AppliedOK", outcome.Result)
+	}
+
+	select {
+	case update := <-provider.updates:
+		if update.Generation <= before {
+			t.Fatalf("republished generation %d did not advance past %d",
+				update.Generation, before)
+		}
+		if update.Generation != provider.Capabilities().Generation {
+			t.Fatalf("republished generation %d is not the provider's current %d",
+				update.Generation, provider.Capabilities().Generation)
+		}
+	default:
+		t.Fatal("an apply advanced the generation and published no capability update")
+	}
+}
+
+func TestCapabilityUpdatesCoalesceAndNeverBlockAnApply(t *testing.T) {
+	// The channel holds one. A provider that blocked waiting for a reader would
+	// stall DB2's outbox behind itself, and a router that is behind wants the
+	// CURRENT generation rather than a backlog of superseded ones.
+	index := NewIndex(Cosine, 3)
+	provider := NewProvider(index, "memory")
+	for i := 1; i <= 5; i++ {
+		outcome := provider.Apply(context.Background(), db3.Apply{
+			OperationID: uint64(i), Generation: 1, PointID: int64(i), Kind: db3.ApplyUpsert,
+			Collection: "memory", Vector: []float32{1, 0, 0},
+		})
+		if outcome.Result != db3.AppliedOK {
+			t.Fatalf("apply %d result = %v, want AppliedOK", i, outcome.Result)
+		}
+	}
+	select {
+	case update := <-provider.updates:
+		if update.Generation != provider.Capabilities().Generation {
+			t.Fatalf("coalesced update carried generation %d, want the newest %d",
+				update.Generation, provider.Capabilities().Generation)
+		}
+	default:
+		t.Fatal("five applies published no capability update")
+	}
+	select {
+	case extra := <-provider.updates:
+		t.Fatalf("updates did not coalesce; a second is queued (%+v)", extra)
+	default:
+	}
+}
