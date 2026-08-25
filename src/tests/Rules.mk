@@ -8225,6 +8225,14 @@ TEST_KB_RUNTIME_TARGETS = \
 $(filter-out $(TEST_KB_RUNTIME_TARGETS),$(TEST_TARGETS)): \
   $(OBJDIR)/modules/vault/runtime_secret.o
 
+# These fixtures link L_KB, which carries $(CORE_CONNECTION_LIB), but they are
+# NOT in TEST_TARGETS -- they need a live Postgres or a live service, so they are
+# built and driven separately. The order-only edge above that guarantees the
+# archive exists therefore never reached them, and on a cold tree each one fails
+# at the link with "cannot find build/obj/libaimee-core-connection.a" rather than
+# anything about the test. Give them the same edge, for the same reason.
+$(TEST_KB_RUNTIME_TARGETS): | $(CORE_CONNECTION_LIB)
+
 # ---------------------------------------------------------------- benchmark probes
 # Compaction retention probe: measures how much load-bearing detail survives a
 # compaction boundary under each summary derivation. Deliberately NOT in
