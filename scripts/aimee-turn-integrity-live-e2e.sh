@@ -49,15 +49,15 @@ set_primary() {
 }
 
 run_turn() {
-  local sid="$1" prompt="$2" cwd="$3" out="$4"
+  local sid="$1" prompt="$2" cwd="$3" out="$4" socket_timeout="${5:-45}"
   set_primary "$sid"
-  python3 - "$sid" "$prompt" "$cwd" <<'PY' >"$out"
+  python3 - "$sid" "$prompt" "$cwd" "$socket_timeout" <<'PY' >"$out"
 import json
 import os
 import socket
 import sys
 
-sid, prompt, cwd = sys.argv[1:]
+sid, prompt, cwd, socket_timeout = sys.argv[1:]
 body = json.dumps({
     "method": "chat.send_stream",
     "message": prompt,
@@ -73,7 +73,7 @@ request = (
     f"Content-Length: {len(body.encode())}\r\n\r\n{body}"
 ).encode()
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-sock.settimeout(45)
+sock.settimeout(float(socket_timeout))
 sock.connect(os.path.join(os.environ["SCRATCH"], "aimee-http.sock"))
 sock.sendall(request)
 chunks = []
@@ -215,17 +215,43 @@ if "live-contract-ok" in details or "turn-integrity-live.txt" in details:
 PY
 ok "WORM contains bounded turn/effect/freshness lifecycles without raw arguments"
 
-# Freeze the real KB process, bound the failed turn, then resume and prove health.
+# Freeze the real KB process, require a bounded typed failure with no external
+# continuation, then resume and prove the server-to-KB path recovers.
 kill -STOP "$KB_PID"
 kb_stopped=1
-run_turn ti-live-kb-down TI_SEARCH_EMPTY "$workspace" "$RUN_ROOT/kb-down-turn.out" || true
+run_turn ti-live-kb-down TI_SEARCH_KB_DOWN "$workspace" "$RUN_ROOT/kb-down-turn.out" 90
+python3 - "$provider_log" <<'PY' || fail "KB transport failure was not typed or offered an external continuation"
+import json
+import sys
+
+for line in open(sys.argv[1], encoding="utf-8"):
+    request = json.loads(line)
+    body = request.get("body", {})
+    wire = json.dumps(body, separators=(",", ":"))
+    if "TI_SEARCH_KB_DOWN" not in wire:
+        continue
+    tool_wire = json.dumps(
+        [m for m in body.get("messages", []) if m.get("role") == "tool"],
+        separators=(",", ":"),
+    )
+    if 'status\\\":\\\"failed' in tool_wire and 'continuations\\\":[]' in tool_wire:
+        if "web_search" in tool_wire or 'action\\\":' in tool_wire:
+            raise SystemExit(1)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
 kill -CONT "$KB_PID"
 kb_stopped=0
 for _ in $(seq 1 50); do
-  curl -fsS http://127.0.0.1:8741/v1/health >/dev/null 2>&1 && break
-  sleep 0.1
+  if curl -fksS --cert "$CLIENT_CERT" --key "$CLIENT_KEY" \
+    -H "Authorization: Bearer $BEARER" -H 'content-type: application/json' -X POST \
+    -d '{"query":"turn-integrity-recovery","scope":"all","max_results":1}' \
+    "$SERVER_URL/v1/kb/search" | grep -q '"hits"'; then
+    break
+  fi
+  sleep 0.2
 done
-curl -fsS http://127.0.0.1:8741/v1/health >/dev/null || fail "KB did not recover after resume"
-ok "KB transport failure was bounded and the live KB recovered"
+run_turn ti-live-kb-recovered TI_SEARCH_EMPTY "$workspace" "$RUN_ROOT/kb-recovered-turn.out"
+ok "KB transport failure was typed and bounded; live server→KB retrieval recovered"
 
 echo "turn-integrity-live-e2e: $pass checks passed"
