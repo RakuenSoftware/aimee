@@ -4,7 +4,7 @@
 WHY A STUB. EMBED is the one memory-module stage this branch never ran: no
 embedder was configured, `aimee status` reported "BLOCKED: no embedder
 configured -- memory and KB search cannot embed", and the llama-server serving
-Qwen answers 501 for /v1/embeddings. Standing up a real embedding model on that
+The chat provider answers 501 for /v1/embeddings. Standing up a real embedding model on that
 box is a deployment exercise unrelated to what is under test.
 
 WHAT IS REAL AND WHAT IS NOT. The PATH is real: the kb resolves the configured

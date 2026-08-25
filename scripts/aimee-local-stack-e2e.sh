@@ -152,11 +152,11 @@ mcp_clients:
       - ${REPO}/scripts/fixtures/turn-integrity-mcp.py
 YAML
 fi
-# Optional: point memory embedding at a REAL small embedder so the semantic
-# vector path is actually exercised (see scripts/test-embedder-qwen.sh, which
-# serves Qwen3-Embedding-0.6B at 1024-d). Without this the kb falls back to the
-# builtin hash and the embedder-fidelity gate below reports DEGRADED. An http(s)
-# URL is used directly (aimee POSTs raw text to {url}/embed).
+# Optional: point memory embedding at a real deployment-supported embedder so
+# the semantic vector path is actually exercised. Without this the kb falls
+# back to the builtin hash and the embedder-fidelity gate below reports
+# DEGRADED. The endpoint's health identity and dimension are authoritative; the
+# harness does not select or guess a model. An http(s) URL is used directly.
 if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${EMBEDDER_DIMS:-unset})"
   # `embedding_command` is the request-side hint, while EMBEDDER_URL is the
@@ -594,8 +594,8 @@ fi
 # Embedder fidelity: the round-trip above passes on list + KEYWORD retrieval even
 # when no real embedder is wired — the memory embedding silently falls back to the
 # builtin hash (a vestigial 384-d stand-in) whose vectors pgvec then REFUSES on a
-# dim mismatch against a corpus built by the real embedder (Qwen3-Embedding: 1024-d
-# CPU / 2560-d GPU). That makes the semantic/vector path a no-op while the run still
+# dim mismatch against a corpus built by the real embedder. That makes the
+# semantic/vector path a no-op while the run still
 # reports green. Surface it: if kb refused the memory vector, the semantic path was
 # NOT exercised — announce it loudly, and hard-fail under AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1.
 bold "==> Embedder fidelity (semantic vector path)"
@@ -608,8 +608,8 @@ if [[ -z "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   fi
 elif [[ -n "$mm" ]]; then
   yellow "  DEGRADED  ${mm}; vectors refused — semantic search NOT exercised (list/keyword only)."
-  yellow "            Wire a real embedder: point EMBEDDER_URL / SYNTHESIS_ENDPOINT at a"
-  yellow "            Qwen3-Embedding endpoint whose dim matches the corpus (1024 CPU / 2560 GPU)."
+  yellow "            Wire a real embedder: point EMBEDDER_URL at the selected deployment"
+  yellow "            embedder and ensure its declared dimension matches the corpus."
   if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
     red "  FAIL  real embedder required (AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1) but the run degraded to the builtin embedder"
     FAIL=$((FAIL + 1))

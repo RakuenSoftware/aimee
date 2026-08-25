@@ -15,7 +15,7 @@ averaged over all questions — the same metrics the gate uses.
 
 Usage:
   python3 embedder_gate.py --dataset locomo10.json --endpoint http://localhost:8899/v1/embeddings \
-      --name qwen3-0.6b --output results_qwen3.json [--max-conversations N] [--query-prefix STR]
+      --name candidate --output results_candidate.json [--max-conversations N] [--query-prefix STR]
 """
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ def main() -> None:
     ap.add_argument("--query-prefix", default="", help="instruction prefix for queries (some models)")
     ap.add_argument("--doc-prefix", default="", help="instruction prefix for documents (some models)")
     ap.add_argument("--query-prefix-file", help="read the query prefix from a file (preserves "
-                    "embedded newlines, e.g. Qwen3's 'Instruct: ...\\nQuery: ')")
+                    "embedded newlines, e.g. an instruction plus query prefix")
     ap.add_argument("--no-normalize", action="store_true",
                     help="do not L2-normalize (endpoint already returns unit vectors)")
     args = ap.parse_args()

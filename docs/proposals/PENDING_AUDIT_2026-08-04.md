@@ -77,7 +77,6 @@ records which other rejection PRs require their own Go-context rewrite.
 | `delegate-sandbox-image-customization.md` | No complete per-project image resolution/build/cache policy. |
 | `dynamic-tool-egress-registration-identity.md` | Registration identity and capability binding remain open. |
 | `frontend-development-module.md` | Browser executor, containment, and visual-QA slices are absent. |
-| `gemma4-unified-embed-rerank-synth-base.md` | Design-only model/evaluation change. |
 | `governance-agent-identity-and-artifact-trust.md` | Per-agent principals, delegation chain, fleet registry, and artifact gates remain open. |
 | `governance-attestable-enforcement.md` | WORM is still default-off; policy revisions, capture completeness, external anchor, and `audit attest` are absent. Bus sinks alone do not satisfy these deltas. |
 | `governance-policy-surface-and-posture.md` | Profiles, complete ingress integrity gating, approval verdict, and containment defaults remain open. |

@@ -195,8 +195,7 @@ def _env_int(name, default, fallback=None):
 
 PORT = _env_int("EMBEDDER_PORT", 8080)
 # CPU serving tuning. A single short embed does not scale past ~8 intra-op
-# threads — on a 32-core host pplx-embed-0.6b is 269ms at 32 threads but 189ms at
-# 8 (per-call thread overhead dominates the tiny workload). Cap to a sane default;
+# threads because per-call overhead dominates small workloads. Cap to a sane default;
 # an explicit EMBEDDER_THREADS wins. Set OMP before torch is imported.
 def _usable_cpus():
     """CPUs this process may actually run on.
@@ -226,19 +225,17 @@ _runtime = "unloaded"
 os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
 # Optional int8 dynamic quantization. Pure torch (no optimum/onnx) rather than the
 # q4 ONNX path.
-# EMBEDDER_QUANTIZE=int8 runs ~3.3x faster on CPU (58ms vs 190ms/embed @ 8 threads)
-# but the embedding drifts (~0.90 cosine vs fp32): dynamic quant is per-tensor and
-# uncalibrated. INTENDED PAIRING: serve int8 only when the 4b deep tier is enabled
-# (it re-embeds for quality, backstopping the drift); serve fp32 when the 0.6b is
-# the sole tier. The deep-tier deployment sets this to int8; the default is fp32.
+# Dynamic int8 quantization can run faster on CPU but changes the vector space:
+# it is allowed only for a deployment that explicitly selects and re-embeds for
+# that serving identity. The default remains fp32.
 EMBEDDER_QUANTIZE = os.environ.get("EMBEDDER_QUANTIZE", "fp32").strip().lower()
 
 # CI/test stub: serve deterministic fixed-dimension vectors without downloading
 # or loading any model. e2e-docker uses this so CI exercises the real
-# kb -> embedder -> pgvector wiring (at the deployment's real dim, e.g. 2560 or
-# 1024 — never the retired 384) without a multi-GB cold model fetch. Off in prod.
+# kb -> embedder -> pgvector wiring at the selected deployment dimension without
+# a cold model fetch. Off in production.
 EMBEDDER_STUB = os.environ.get("EMBEDDER_STUB", "").strip() not in ("", "0", "false", "no")
-STUB_DIM = int(os.environ.get("EMBEDDER_STUB_DIM", os.environ.get("EMBEDDER_DIMS", "2560")) or "2560")
+STUB_DIM = int(os.environ.get("EMBEDDER_STUB_DIM", os.environ.get("EMBEDDER_DIMS", "384")) or "384")
 
 _model = None
 _dim = 0
@@ -262,8 +259,8 @@ def load_model():
     import torch
 
     torch.set_num_threads(EMBEDDER_THREADS)
-    # trust_remote_code: the Qwen3-based embedders (pplx-embed, gte-Qwen2) ship
-    # custom modelling code on the Hub.
+    # trust_remote_code: some registered third-party embedders ship custom
+    # modelling code on the Hub.
     # revision pinned from the registry: the weights are baked at build time, and a
     # floating ref would let an image rebuild change the vector space silently.
     # ONNX FIRST. onnxruntime is the CPU path this embedder was characterised on;
