@@ -57,6 +57,17 @@ var ErrNoVectorFallback = errors.New("postgres: vector routing needs a PostgreSQ
 // testable without a bus, and so the transport can be supplied by whatever
 // already owns a connection. A nil searcher is a deployment with no DB3 at all,
 // which is the default.
+//
+// NOTHING SUPPLIES ONE YET. The bus transport that would carry a search to a
+// provider lives in modules/db2, and the module boundary forbids importing it;
+// making it shared means lifting the fragment and correlation machinery into
+// the db3 package, which has not been done. So today every caller of this
+// router passes nil and every search runs on PostgreSQL -- correct, and the
+// same answer as before, but the routed half is policy without a wire.
+//
+// This is written down because the rest of this work was found by noticing
+// exactly this shape: a component that is complete, tested, and connected to
+// nothing reads as a working feature until someone checks.
 type ProviderSearcher interface {
 	Search(ctx context.Context, principal uint32, request db3.SearchRequest) (db3.SearchReply, error)
 }
