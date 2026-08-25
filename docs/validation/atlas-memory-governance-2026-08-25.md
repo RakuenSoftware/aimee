@@ -51,10 +51,10 @@ The permanent regression coverage includes:
 Validation ran on fresh Debian 13 containers on `root@192.168.1.252`:
 
 - CT 9081 (`aimee-memory-clean`): PostgreSQL 17 + pgvector, clean Git topology,
-  hardened schema/RLS gate, complete C unit suite, integration suite, and live
-  full-stack exploration.
+  hardened schema/RLS gate and the complete C unit suite.
 - CT 9082 (`aimee-memory-migration`): PostgreSQL 17 + pgvector, upgrade from the
-  pre-change `origin/testing` schema, frontend tests/builds, and Go unit suites.
+  pre-change `origin/testing` schema, complete integration suite, live full-stack
+  exploration, frontend tests/builds, and Go unit suites.
 
 The migration fixture applied the new schema twice over legacy rows. The observed
 row scopes were `project:project-a`, `workspace:workspace-a`,
