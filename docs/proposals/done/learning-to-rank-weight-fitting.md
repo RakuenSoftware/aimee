@@ -1,18 +1,18 @@
-# Proposal: Learning-to-rank weight fitting — close the loop on the KB-hybrid ranker
+# Proposal: Learning-to-rank weight fitting: close the loop on the KB-hybrid ranker
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** done — Phases 1–4 implemented as **option A** (the fitter sidecar
+- **State:** done. Phases 1–4 implemented as **option A** (the fitter sidecar
   `scripts/rank-fit.py` + training-view/`export-view` + benchmark-gated commit +
   scheduled refit), shipped default-off behind `intelligence.ranking.fit.enabled`.
   **Honest limit (not papered over):** on the shipped substrate the §1 training-view
-  join is empty — ranker features are keyed to `feature_rows.subject_kind='kb_document'`
+  join is empty, ranker features are keyed to `feature_rows.subject_kind='kb_document'`
   (the kb_hybrid code-search path) while retrieval outcomes are attributed to `memory`
   row ids, and `feature_rows` carries no `retrieval_event_id`/query-grouping key. So the
   loop is **bench-only** (fixture-fitted + fixture-gated) until the kb_hybrid
-  outcome-wiring prerequisite lands (deliberately out of scope — it is a schema
+  outcome-wiring prerequisite lands (deliberately out of scope; it is a schema
   migration + retrieval hot-path change, its own proposal). That gap is not silent:
   `aimee kb ranker export-view` emits a structured diagnostic naming the
   subject-space mismatch and the missing grouping key. This matches the proposal's
@@ -55,7 +55,7 @@ w_sketch_distinct=0}` (`src/kb/kb_ranker.c:32`); `kb_ranker_model_load` even
 *re-hardcodes* those same defaults before reading the artifact
 (`src/kb/kb_ranker.c:188`). `kb_ranker_model_write` accepts a `weights_json` blob
 from a caller that does not exist. The two sketch weights ship pinned at `0.0`, so
-the frequency/distinct-source features are computed, stored — and never used.
+the frequency/distinct-source features are computed, stored, and never used.
 
 This is the *Calibrate* half of the statistical decision substrate, exactly
 analogous to *Bayesian Calibration of Promotion Thresholds* (which replaced static
@@ -65,17 +65,17 @@ static `ranker_model` weights with **fitted** `ranker_model` artifacts.
 ## Goal
 
 A promotion-gated fitting loop that turns accumulated `feature_rows` +
-`retrieval_outcome` into a `ranker_model` artifact — measurably better than the
+`retrieval_outcome` into a `ranker_model` artifact, measurably better than the
 `{0.6, 0.4}` default on the benchmark suite, or it does not promote.
 
 1. A **fitter sidecar** that reads the joined feature/outcome view and emits a
    `weights_json` for `kb_ranker_model_write`.
 2. **Promotion discipline:** the fitted model enters `proposed`, is benchmark-gated,
-   and only a passing model is `committed` — the same gate every other artifact
+   and only a passing model is `committed`, the same gate every other artifact
    crosses. Default weights remain the fallback when no committed model beats them.
 3. **Honest rollout:** ship fitting behind a flag, prove lift on the benchmark
    suite before the loaded model is allowed to displace the default. If it does not
-   beat `{0.6, 0.4}`, it stays bench-only — the precedent set by *Dynamic Alpha
+   beat `{0.6, 0.4}`, it stays bench-only, the precedent set by *Dynamic Alpha
    Fusion* (shipped, `rrf` never flipped to default).
 
 ## §0 What already exists (so we don't rebuild it)
@@ -119,7 +119,7 @@ contract.
 - **fit:** start with **pointwise logistic / ridge** on the five `v1` features
   (matches `model_kind='linear'`; interpretable; no new inference code needed).
   Pairwise (LambdaMART-style) is a later objective behind the same
-  `objective` field — the artifact schema already carries `"objective":"pointwise"`.
+  `objective` field. The artifact schema already carries `"objective":"pointwise"`.
 - **output:** `{weights:{"dense.cos":…, "lex.cos":…, "temp.recency":…,
   "sketch.frequency_kind_scope":…, "sketch.distinct_sources_hll":…},
   fit_metrics:{…}}` — feature-keyed exactly as `kb_ranker_model_load` parses.
@@ -142,7 +142,7 @@ service) that:
 4. runs the benchmark suite's recall track against the proposed model,
 5. **commits only on lift** over the current committed model (or the `{0.6,0.4}`
    default when none is committed), recording the delta as a `benchmark_trace`
-   artifact — the same evidence trail *Contextual Bandits* uses for replay.
+   artifact. The same evidence trail *Contextual Bandits* uses for replay.
 
 Refit is keyed on `feature_set_version` and re-triggered on a feature-set bump,
 mirroring the prompt/model-version-keyed refit in *Bayesian Calibration*.
@@ -167,7 +167,7 @@ mirroring the prompt/model-version-keyed refit in *Bayesian Calibration*.
 - No new inference engine. `score_candidate` stays a linear dot product;
   non-linear models would be a separate `model_kind` and are not proposed.
 - No default flip by fiat. If fitting does not beat `{0.6, 0.4}` on the suite, the
-  ranker keeps the default and this ships bench-only — that is an acceptable
+  ranker keeps the default and this ships bench-only. That is an acceptable
   outcome, not a failure to paper over.
 
 ## Risks / honest limits
@@ -195,7 +195,7 @@ mirroring the prompt/model-version-keyed refit in *Bayesian Calibration*.
 
 ## Open questions for the roundtable
 
-- Pointwise-first vs. pairwise-first — is position bias severe enough at our scale
+- Pointwise-first vs. pairwise-first, is position bias severe enough at our scale
   to justify the harder objective in phase 2 rather than phase 4?
 - Should the two sketch weights (pinned `0.0` today) be unlocked only once a fitted
   model exists, or is a hand-set nonzero prior worth trying independently as a

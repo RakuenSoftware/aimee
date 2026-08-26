@@ -1,4 +1,4 @@
-# Core modularization slice 57: latch memory ownership — Class B complete
+# Core modularization slice 57: latch memory ownership: Class B complete
 
 ## Scope
 
@@ -36,8 +36,8 @@ claim identical build-product membership across Make and CMake, where thirteen s
 ## Where the programme now stands
 
 Eighteen of the twenty-six module descriptors carry `ownership_complete`. The eight that do not are
-exactly the Class A set — `benchmarks`, `control-web`, `execution-policy`, `kb-synthesis`,
-`response-composition`, `routing`, `runtime-web`, `tools` — whose module roots hold nothing but
+exactly the Class A set, `benchmarks`, `control-web`, `execution-policy`, `kb-synthesis`,
+`response-composition`, `routing`, `runtime-web`, `tools`, whose module roots hold nothing but
 `module.yaml`. They are blocked by the `ownership-empty-domain` guard added in slice 39, which refuses
 a latch on an empty root because set equality would hold vacuously. Their remaining work is migrating
 real implementation under `src/modules/<id>/`, not declaration work, and it is tracked in
@@ -52,7 +52,7 @@ promotions (`learning.h`, `config_fields.h`) that ownership slices were forbidde
 ## Regression controls
 
 The descriptor mutation suite removes `memory_core.c` and requires `rule=ownership-complete` on
-`/sources`, and removes `memory_core_internal.h` — one of the five unpaired headers — and requires the
+`/sources`, and removes `memory_core_internal.h` (one of the five unpaired headers) and requires the
 same rule on `/private_headers`. It plants `src/modules/memory/undeclared.c` and `undeclared.h` and
 requires the rule on `/sources` and `/private_headers`. It removes `docs/modules/memory.md` from the
 descriptor's `docs` field and requires the rule on `/docs`. The graph-derived latched-descriptor

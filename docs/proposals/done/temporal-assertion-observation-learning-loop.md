@@ -1,6 +1,6 @@
 # Proposal: temporal assertion recall, evidence-backed observations, and a closed learning loop
 
-- **State:** done — implemented, validated, and promoted default-on after benchmark review
+- **State:** done. Implemented, validated, and promoted default-on after benchmark review
 - **Date:** 2026-08-24
 - **Charter roles:** Extract / Recall / Rank-Fuse / Observe / Learn / Gate-Promote /
   Evaluate / Constrain-Verify
@@ -579,40 +579,40 @@ The committed corpus includes at minimum:
 
 ## §8 Delivery slices
 
-### P0 — Contracts and goldens
+### P0: Contracts and goldens
 
 - Freeze the dual-axis temporal semantics and result schema.
 - Add temporal, contradiction, access, and evidence-attribution goldens.
 - Extend benchmark result schemas with sufficiency/minimality fields.
 - No production behavior change.
 
-### P1 — Exact evidence attribution
+### P1: Exact evidence attribution
 
 - Add episode-index/source-span fields to extraction responses.
 - Validate bounds, hashes, stance, actor, and batch identity.
 - Remove whole-source fallback for model-extracted claims.
 - Add idempotency, rollback, and erasure tests.
 
-### P2 — Semantic assertion retrieval in shadow
+### P2: Semantic assertion retrieval in shadow
 
 - Add the distinct semantic channel and dual-axis filter.
 - Emit explain traces and shadow deltas against current recall.
 - Keep prompt injection unchanged until quality and safety gates pass.
 
-### P3 — Observation substrate in shadow
+### P3: Observation substrate in shadow
 
 - Materialize deterministic, evidence-linked observation candidates.
 - Refactor recurrence output to emit observations before learning proposals.
 - Add refresh, contradiction, scope-inheritance, and retirement behavior.
 - No observation enters normal context yet.
 
-### P4 — Reviewed learning and typed context
+### P4: Reviewed learning and typed context
 
 - Route eligible observations through the existing proposal/review pipeline.
 - Record retrieval/exposure/application outcome attribution.
 - Add bounded observation and approved-procedure context channels behind flags.
 
-### P5 — Promotion and cleanup
+### P5: Promotion and cleanup
 
 - Run the full sufficiency, temporal, safety, learning, latency, and token gates.
 - Promote channels independently; retain instant rollback.

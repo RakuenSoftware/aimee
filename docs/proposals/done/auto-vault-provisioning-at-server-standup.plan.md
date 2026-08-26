@@ -1,4 +1,4 @@
-# Implementation plan — Automatic delegate-vault provisioning at standup
+# Implementation plan: Automatic delegate-vault provisioning at standup
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
@@ -8,7 +8,7 @@ Plan for [auto-vault-provisioning-at-server-standup.md](auto-vault-provisioning-
 Grounded in `origin/testing` (server v0.2.85 line). Default-safe, no new always-on
 behavior beyond an idempotent boot pass that no-ops when no secret source is set.
 
-## Key existing primitives (already on testing — reuse, don't rebuild)
+## Key existing primitives (already on testing: reuse, don't rebuild)
 
 | Primitive | Where | Use |
 |-----------|-------|-----|
@@ -25,7 +25,7 @@ authenticate with no further change.
 
 ## Work packets
 
-### WP-A — Boot-time vault bootstrap pass (core)
+### WP-A: Boot-time vault bootstrap pass (core)
 - Add `static int server_run_vault_bootstrap(void)` to `src/server/server.c`,
   invoked from the same boot vicinity as `server_run_kb_bootstrap()` (after the
   vault subsystem/master key are available, **before** the compute pool serves
@@ -41,14 +41,14 @@ authenticate with no further change.
     and `AIMEE_DELEGATE_SECRETS_OVERWRITE` is unset → skip (non-destructive).
   - Else `vault_service_set_server(agent, VAULT_API_KEY_CRED, secret)`; on
     non-`VAULT_OK`, `LOG_ERROR` and continue (one bad cred must not wedge boot).
-- No-op (return early) when neither source is set — zero behavior change for
+- No-op (return early) when neither source is set, zero behavior change for
   existing deploys.
 - **Secret hygiene:** after ingestion, `unsetenv` each `AIMEE_DELEGATE_KEY_*`;
   `OPENSSL_cleanse` the in-memory secret buffers and the parsed JSON strings;
   never write a secret into `$AIMEE_HOME` or any log. The secrets file stays
   operator-owned/read-only (we only read it).
 
-### WP-B — Audit + observability
+### WP-B: Audit + observability
 - Emit one `aimee_log(LOG_INFO, "vault.bootstrap", …)` per provisioned agent with
   **counts/fingerprints only** (reuse the `vault_cred_fingerprint()` style already
   in `server_vault.c:168`), never the secret. Summarize: `provisioned=N skipped=M
@@ -56,7 +56,7 @@ authenticate with no further change.
 - `aimee status` / kb-style health unaffected; optional: surface
   `vault_server_creds=N` in a status field (stretch, not required).
 
-### WP-C — Container + compose wiring
+### WP-C: Container + compose wiring
 - `deploy/container/combined-entrypoint.sh` and `server-entrypoint.sh`: pass through
   `AIMEE_DELEGATE_SECRETS_FILE` / `AIMEE_DELEGATE_KEY_*` to the dropped-priv
   `aimee-server` exec (they already forward env; just document + don't strip).
@@ -66,10 +66,10 @@ authenticate with no further change.
 - SmoothNAS plugin config (`deploy/smoothnas/…`): document the secrets-file/env
   field so a `.254`-style deploy provisions on standup.
 
-### WP-D — (Optional, follow-on) remote provisioning over native TLS
-- Once [native-tls-thin-client-backends.md](../pending/native-tls-thin-client-backends.md)
+### WP-D: (Optional, follow-on) remote provisioning over native TLS
+- Once [native-tls-thin-client-backends.md](native-tls-thin-client-backends.md)
   lands, `ATTEST_TLS_BEARER` already authorizes server-principal writes over a
-  confidential bearer channel — so an operator could `aimee vault set --server`
+  confidential bearer channel, so an operator could `aimee vault set --server`
   remotely over `https://` instead of mounting a file. Note as complementary; not
   required for WP-A..C and not in this plan's critical path.
 
@@ -100,6 +100,6 @@ authenticate with no further change.
   key is loadable (so `vault_server_kek` succeeds) and before delegates serve.
   `vault_service_set_server` is fail-closed (no KEK → `VAULT_ERR_CRYPTO`, never
   plaintext), so a too-early call degrades to "not provisioned", not a leak.
-- This is the **gating dependency** for live roundtables — landing WP-A..C and
+- This is the **gating dependency** for live roundtables, landing WP-A..C and
   re-provisioning `.254` unblocks the roundtable flow for every other proposal,
-  including [native-tls-thin-client-backends.md](../pending/native-tls-thin-client-backends.md).
+  including [native-tls-thin-client-backends.md](native-tls-thin-client-backends.md).

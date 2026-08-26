@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 after the descriptor/source-ownership and event-bus
+- **State:** DONE. Archived 2026-08-04 after the descriptor/source-ownership and event-bus
   portions landed. The separately buildable process boundary and compatibility closeout remain in
   [`core-process-separation-residual.md`](../pending/core-process-separation-residual.md).
 

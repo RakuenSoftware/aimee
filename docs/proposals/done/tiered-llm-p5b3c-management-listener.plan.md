@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implementation and adversarial branch review converged; production CT260→CT262 gate passed.
+- **State:** DONE. Implementation and adversarial branch review converged; production CT260→CT262 gate passed.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.plan.md`, P5-B.
 - **Depends on:** P5-B3a health exchange and P5-B3b production wiring.
 - **Followed by:** P5-C operator/OIDC propagation, then P5-D closeout.
@@ -89,7 +89,7 @@ SIGHUP never replaces or frees the management context.
 at context build time. On a later start, all three hashes must match before reuse; mismatch returns
 `SERVER_HTTP_START_MGMT_FATAL`, never swaps the context, and never rebinds a listener. Bind/port
 are separately revalidated but are not part of the TLS-context tuple.
-The same single captured PEM buffers—not reopened pathnames—build the candidate certificate chain,
+The same single captured PEM buffers, not reopened pathnames. Build the candidate certificate chain,
 private key, and CA store, closing the hash/load TOCTOU window; the buffers are cleansed after the
 private candidate is built.
 

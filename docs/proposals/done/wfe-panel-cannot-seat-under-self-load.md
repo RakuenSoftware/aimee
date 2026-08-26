@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — saturation-aware routing archived 2026-08-04; capacity/deadline residual
+- **State:** DONE. Saturation-aware routing archived 2026-08-04; capacity/deadline residual
   completed in Go 2026-08-14.
 
 > **Completion notice.** Candidate occupancy influences group routing and route-selected admission
@@ -59,13 +59,13 @@ job 14812  review  cancelled  MiniMax-M3   cancelled: WFE turn cancelled
 With two slices at `rt_gate` at once, the engine asks for up to 8 concurrent
 agents. `claude` saturates at 3 and its seats fail instantly; slow seats are
 killed at 600s. Fewer than `min_successful: 2` seats return, so the panel is
-declared unreachable. **The engine starves itself** — no external load is
+declared unreachable. **The engine starves itself**. No external load is
 required.
 
 **This is load-dependent, not deterministic.** Slice 1 passed `rt_gate` on its
 fourth attempt at 23:21:05, and slice 2 passed on its first at 23:10:19. The
 defect makes seating unreliable under the engine's own concurrency; it does not
-make it impossible. Any claim that the gate "cannot" be passed is too strong —
+make it impossible. Any claim that the gate "cannot" be passed is too strong,
 what is established is that it fails a substantial fraction of the time, with a
 failure mode that costs a full 10-minute deadline and a 30-minute backoff each
 time.
@@ -78,7 +78,7 @@ capacity") raised `CONFIG_DEFAULT_BACKGROUND_THREADS` 2 → 14 "matching the
 standard 10 Codex + 4 MiniMax roundtable capacity", and `840132c8` ("decouple
 roundtable admission from compute workers") then **deliberately reverted it to
 2** because admission no longer runs through compute workers. Both are ancestors
-of the deployed release — verified, not assumed:
+of the deployed release, verified, not assumed:
 
 ```
 $ git merge-base --is-ancestor 9fd1b2c0 origin/testing && echo YES    # YES
@@ -101,8 +101,8 @@ That commit pair does, however, record the intended roundtable capacity:
 yet `$random` can seat them.
 
 Note also that `local-gemma4` targets `aimee-synth`, i.e. the `aimee-llm`
-gateway. Whenever that container is down — as it is now, deliberately, for
-replacement-LLM testing — every seat that draws `local-gemma4` fails. Taking
+gateway. Whenever that container is down, as it is now, deliberately, for
+replacement-LLM testing, every seat that draws `local-gemma4` fails. Taking
 `aimee-llm` down therefore silently degrades the roundtable panel. That coupling
 is not obvious from either side.
 
@@ -130,8 +130,8 @@ at admission (`agent_runtime.c:259`) with `AGENT_RC_AT_LIMIT`.
 
 The health path cannot compensate, and deliberately so: `agent_fallback.c:61`
 records that the "at concurrency limit" message is classified **non-retryable so
-at-limit never records health**. That is correct in itself — saturation is not a
-provider fault and must not poison health — but it means a saturated agent is
+at-limit never records health**. That is correct in itself, saturation is not a
+provider fault and must not poison health, but it means a saturated agent is
 never marked `HEALTH_DOWN` either. It therefore stays selectable indefinitely.
 
 So routing and admission disagree: routing believes the agent is available;
@@ -141,8 +141,8 @@ One step in that chain is **not verified**, and the claim is limited accordingly
 `agent_runtime.c:255` sets `AGENT_ADMIT_NONBLOCKING` only when
 `tl_admission_fail_fast` is set; otherwise admission *blocks* and waits for a
 slot. Which caller sets that flag for a panel seat was not traced. What is
-observed is that panel seats **did** take the fail-fast path — jobs 14813 and
-14821 failed instantly rather than waiting — so the flag is evidently set
+observed is that panel seats **did** take the fail-fast path, jobs 14813 and
+14821 failed instantly rather than waiting, so the flag is evidently set
 somewhere on this path, but the responsible caller has not been identified.
 
 Limited to what that supports: on the observed fail-fast path, a seat drawing a
@@ -161,8 +161,8 @@ Assumed, NOT established:
 ## Options
 
 1. **Give `claude` an explicit `max_parallel`** matching its real provider
-   limit. Smallest change. Unsafe until the third assumption above is settled —
-   raising it past a real rate limit trades one failure for another.
+   limit. Smallest change. Unsafe until the third assumption above is settled,
+raising it past a real rate limit trades one failure for another.
 2. **Restrict `$random` to the intended capacity pool** (`codex`, `MiniMax-M3`),
    excluding `claude` and `local-gemma4`. Matches the documented design intent.
    Cost: a smaller pool, and it hard-codes a roster that was meant to be dynamic.
@@ -199,15 +199,15 @@ provider's real rate limit, which is the fact that makes option 1 unsafe today.
 It also preserves the `agent_fallback.c` invariant: the fix is in *selection*,
 not in health classification, so saturation still never counts as a fault.
 
-Option 3 remains worth doing for the residual race — an agent can saturate
-between selection and admission — so a seat that loses that race should fall
+Option 3 remains worth doing for the residual race. An agent can saturate
+between selection and admission, so a seat that loses that race should fall
 back or wait rather than fail. Option 6 makes that race rare; option 3 makes it
 harmless.
 
 Option 4 should be taken regardless. It is a correctness bug independent of
 load: with `aimee-llm` deliberately stopped, any seat drawn against
 `local-gemma4` is a guaranteed failure. (This may already be covered by the
-existing health filter — `AGENT_ROUTE_HEALTH_DOWN` — if the catalog marks the
+existing health filter (`AGENT_ROUTE_HEALTH_DOWN`) if the catalog marks the
 dead gateway down; that was not verified, and should be before implementing
 anything separate.)
 
@@ -222,7 +222,7 @@ Deterministic:
 - **Saturated pool:** with agent A at its limit and agent B free, seat selection
   returns B, not A. No seat fails with `concurrency_limit`.
 - **Empty eligible pool:** with *every* eligible agent saturated, selection
-  returns a distinct, named "no agent with free capacity" condition — not a bare
+  returns a distinct, named "no agent with free capacity" condition, not a bare
   "no agent" error, and not a seat that fails at admission.
 - **Concurrent-admission race:** when N seats select simultaneously against a
   pool with fewer than N free slots, each seat either obtains a slot or reports

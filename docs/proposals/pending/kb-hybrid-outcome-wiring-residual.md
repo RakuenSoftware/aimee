@@ -1,6 +1,6 @@
 # KB hybrid outcome wiring: residual work
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`kb-hybrid-outcome-wiring.md`](../done/kb-hybrid-outcome-wiring.md)
 

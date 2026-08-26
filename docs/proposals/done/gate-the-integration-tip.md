@@ -4,8 +4,8 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived after the single slice shipped.
-- **Historical state:** approved — single slice.
+- **State:** DONE. Archived after the single slice shipped.
+- **Historical state:** approved. Single slice.
 
 ## Problem
 
@@ -31,8 +31,8 @@ total_count = 2
   build (aimee-kb, Dockerfile)             success
 ```
 
-Two image builds. None of the 17 gate jobs — `unit-tests`, `build-integrity`,
-`e2e-docker` T1/T2/T3, `lint`, the Windows/macOS legs — has ever run against
+Two image builds. None of the 17 gate jobs, `unit-tests`, `build-integrity`,
+`e2e-docker` T1/T2/T3, `lint`, the Windows/macOS legs, has ever run against
 this commit. The same is true of every previous tip.
 
 ## Why this is not merely theoretical
@@ -40,7 +40,7 @@ this commit. The same is true of every previous tip.
 Each of the 14 commits in this release (#1994–#2010) was gated in isolation,
 against the tip as it stood when that PR was opened. Nothing re-checks the
 combination. The failure mode this misses is the semantic conflict: two PRs that
-each pass alone and break in combination — one renames a helper while another
+each pass alone and break in combination. One renames a helper while another
 adds a caller, one changes a default while another adds a test asserting the old
 one. Textual conflicts are caught by git; semantic ones are caught only by
 running the gate on the merged result, which never happens.
@@ -49,8 +49,8 @@ GitHub's merge-queue and "require branches to be up to date before merging"
 settings exist precisely to close this gap. Neither is in use here: PRs merge
 against whatever base they were opened on.
 
-Note that this is the same class of hole as the slice sub-PR gap described in
-[ci-on-slice-subprs.md](../done/ci-on-slice-subprs.md) — work merging through a gate
+This is the same class of hole as the slice sub-PR gap described in
+[ci-on-slice-subprs.md](../done/ci-on-slice-subprs.md), work merging through a gate
 that did not actually run. They are independent instances and can be fixed
 independently, but a fix for one does not address the other.
 
@@ -66,7 +66,7 @@ bench-check:
 ```
 
 Confirmed empirically: the manually dispatched run `30223112295` on `e161dd34`
-reported **success**, but with those two jobs `skipped` — 15 of 17 jobs actually
+reported **success**, but with those two jobs `skipped`, 15 of 17 jobs actually
 ran. A `push`-triggered run would skip them for the same reason.
 
 The two are not equivalent in importance:
@@ -76,7 +76,7 @@ The two are not equivalent in importance:
   done its job on the way in.
 - **`bench-check` is a genuine gap.** It is skipped on a tip gate, so
   performance regressions arising from the *combination* of merged PRs are not
-  checked at integration level — which is exactly the class of problem this
+  checked at integration level, which is exactly the class of problem this
   proposal exists to catch.
 
 The approved option accepts that integration-level performance is ungated. A push
@@ -102,7 +102,7 @@ certified, rather than from the historical job count above.
    to add, catches combination breakage within a day. Cost: not tied to a merge,
    so attribution to a specific PR is weaker and detection is delayed.
 5. **Leave as-is**, and rely on the release-time full run being dispatched by
-   hand — which is what was done for this release, and only because the gap was
+   hand, which is what was done for this release, and only because the gap was
    noticed.
 
 ## Established vs. assumed
@@ -131,7 +131,7 @@ costs no billed minutes (see the cost analysis in
 [ci-on-slice-subprs.md](../done/ci-on-slice-subprs.md)), and it is a two-line change to
 an existing trigger block.
 
-Option 1 reports rather than prevents — a broken tip is found minutes after the
+Option 1 reports rather than prevents. A broken tip is found minutes after the
 merge, not before it. That is a genuine weakness, and options 2 and 3 are
 strictly stronger. But they change how every PR merges, which is a workflow
 decision with human cost, whereas option 1 is additive and reversible. The

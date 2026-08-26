@@ -1,9 +1,9 @@
-# Proposal: P7 — one operator review surface over every pending knowledge decision
+# Proposal: P7: one operator review surface over every pending knowledge decision
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 7 of 9.
 - **Author:** JBailes
@@ -25,7 +25,7 @@ Worse, the decisions that *are* available are under-informed. Approving a
 proposed change today does not show what evidence stands behind it, what the
 current value is, whose authority each side carries, what depends on it, or what
 would leave recall if the change were applied. So the decision is either made
-blind or not made at all — and the queues grow.
+blind or not made at all, and the queues grow.
 
 The second problem is what "promotion" means. Today, several paths promote
 content on the basis of repeated model agreement crossing a threshold. Repeated
@@ -42,13 +42,13 @@ new detection mechanism and no new queue.
 |---|---|---|
 | `memory_conflicts` (a, b, resolved, resolution) | `src/modules/db2/c/schema.sql` | Evidence, authority comparison, blast radius |
 | `contradiction_log` | `src/modules/db2/c/schema.sql` | Same |
-| `curiosity_items` (gap, importance, novelty, routing score) | `src/modules/db2/c/schema.sql` | A decision vocabulary — it is a question queue with no answer surface |
+| `curiosity_items` (gap, importance, novelty, routing score) | `src/modules/db2/c/schema.sql` | A decision vocabulary: it is a question queue with no answer surface |
 | `epistemic_directives` (open questions with cause and evidence) | `src/modules/db2/c/schema.sql` | Resolution is a memory id, with no operator action path |
 | `learning_proposals` (sink, state, action_json, corroboration_count) | `src/modules/db2/c/schema.sql` | The closest to a review item; `corroboration_count` is exactly the repeated-agreement promotion this proposal argues against |
 | `entity_name_conflicts` (open/resolved/failed) | `src/modules/db2/c/entity_registry.c` | Operator adjudication path |
 | `ontology_evaluations` (pending → approved/mapped/rejected) | `src/modules/db2/c/ontology_evolution.c` | Decided by the model; no operator review step |
 | `docs.review_needed`, `review_reason` | `src/modules/db2/c/kb_docs.c` | Renders as a list, with no consequence preview |
-| `memory_promotion_approvals` (memory_id, target_tier, approver, note) | `src/modules/db2/c/schema.sql` | The right shape for a governance record — used by one path only |
+| `memory_promotion_approvals` (memory_id, target_tier, approver, note) | `src/modules/db2/c/schema.sql` | The right shape for a governance record: used by one path only |
 | `frontend/src/console/pages/TypedFacts.tsx` | frontend | An operator console exists to host this |
 
 ## Decision
@@ -89,13 +89,13 @@ empty evidence list and an uncomputed evidence list must never look alike.
 accept   correct   retire   restore   promote   invalidate_source   purge   request_evidence
 ```
 
-- `accept` — apply the proposed change as a P2 changeset.
-- `correct` — apply a different value the operator supplies, at operator authority.
-- `retire` / `restore` — lifecycle transitions, both reversible.
-- `promote` — an explicit governance decision, below.
-- `invalidate_source` / `purge` — P3 document operations, with P3's mandatory
+- `accept`: apply the proposed change as a P2 changeset.
+- `correct`: apply a different value the operator supplies, at operator authority.
+- `retire` / `restore`, lifecycle transitions, both reversible.
+- `promote`: an explicit governance decision, below.
+- `invalidate_source` / `purge`. P3 document operations, with P3's mandatory
   preview and, for purge, its preview token.
-- `request_evidence` — defer, and record *what* would settle it. The queue item
+- `request_evidence`: defer, and record *what* would settle it. The queue item
   stays open with a stated evidential requirement instead of being silently
   re-queued forever.
 
@@ -117,12 +117,12 @@ Concretely:
 1. No path promotes content to a higher authority class on a corroboration count.
    Counts may *raise priority in this queue*; they may not change authority.
 2. `promote` records the deciding principal, the evidence set as it stood, and
-   the resulting authority — extending the `memory_promotion_approvals` shape to
+   the resulting authority, extending the `memory_promotion_approvals` shape to
    every promotable object kind.
 3. Promotion of a `mental_model` into an assertion is possible only here, and
    only with the derivation and its inputs shown (P4).
-4. Existing count-based promotion paths — including the Class-B durability sweep
-   and `learning_proposals` corroboration — are audited in S1 and either
+4. Existing count-based promotion paths, including the Class-B durability sweep
+   and `learning_proposals` corroboration, are audited in S1 and either
    reclassified as *priority* signals or explicitly retained with a written
    justification in the PR. Silence about them is not an acceptable outcome.
 
@@ -131,7 +131,7 @@ Concretely:
 One list, one detail view, one decision bar, ordered by a priority that combines
 blast radius, authority conflict, and age. The queues keep their own storage and
 their own producers; P7 is a projection with a decision API. If a queue's rows
-stop being produced, its items simply stop appearing — the surface has no
+stop being produced, its items simply stop appearing. The surface has no
 independent state to go stale.
 
 ## Non-goals

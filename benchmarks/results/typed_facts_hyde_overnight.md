@@ -1,4 +1,4 @@
-# typed_facts + HyDE — overnight before/after (2026-06-20)
+# typed_facts + HyDE: overnight before/after (2026-06-20)
 
 Run autonomously against .254 (aimee-combined, app v0.2.128, fence-fixed :latest).
 Goal: before/after numbers to decide whether to ship `typed_facts` and `HyDE`
@@ -10,17 +10,17 @@ default-on.
   (extraction coverage 87%). When a fact is in context the model answers it;
   without typed_facts the model has nothing and says "unknown". Recommend
   **default-on**, after fixing the auto-inject wiring bug below.
-- **HyDE: not measurable as shipped — it was silently broken on .254** (the
+- **HyDE: not measurable as shipped. It was silently broken on .254** (the
   rewrite command's script was missing from the image, so the rewrite no-op'd
   and HyDE had *zero* effect in production). Fixed the script tonight; verified
   the rewrite now produces correct hypothetical answers. But once active it adds
-  a per-query LLM rewrite (+rerank) call that makes semantic recall very slow
+  a per-query LLM rewrite (+rerank) call that makes semantic recall slow
   (>120s in probes). Recommend **keep opt-in** until recall lift is measured via
   the native direct eval and the latency cost is addressed.
 
 ---
 
-## typed_facts — answer accuracy (real before/after)
+## typed_facts: answer accuracy (real before/after)
 
 Method: ingest 15 natural-language "memories" stating one durable fact each
 (mix of first-person + third-party, varied relations: job, location, prefs,
@@ -28,7 +28,7 @@ relationships, possessions, study). Let typed_facts extract (LLM extractor via
 mistral). For each question: bare turn (OFF) vs same turn with the **recalled
 typed-fact block injected** (ON, exactly what ingress would inject). Answers
 scored by deterministic substring match against gold. Preinject forced off so
-OFF is truly bare and ON isolates the injected block.
+OFF is bare and ON isolates the injected block.
 
 | metric | value |
 |---|---|
@@ -38,16 +38,16 @@ OFF is truly bare and ON isolates the injected block.
 | ON accuracy | **12/15 = 80%** |
 
 - The 2 coverage misses ("I live in Portland, Oregon" → city; "training for a
-  marathon" → event) were **not extracted** by the LLM extractor — the ceiling
+  marathon" → event) were **not extracted** by the LLM extractor, the ceiling
   for ON was 13/15, and it hit 12. The one remaining miss (Caroline's job) *had*
   the fact in context but the model emitted verbose reasoning that got truncated
-  before stating the answer — a formatting artifact, not a recall failure.
+  before stating the answer, a formatting artifact, not a recall failure.
 - OFF is uniformly 0%: with no memory layer the model cannot answer any "what is
-  my X / what does <person> do" question. This is the gap typed_facts closes.
+  my X / what does <person> do" question; this is the gap typed_facts closes.
 
 Conclusion: typed_facts converts unanswerable personal-fact questions into
 correct answers. The dominant residual error is **extraction coverage**, not
-recall or injection — i.e. tuning the extractor prompt/floor, not plumbing.
+recall or injection, i.e. tuning the extractor prompt/floor, not plumbing.
 
 ### Blocker found: auto-inject does not fire in live turns
 
@@ -68,7 +68,7 @@ registered.
 
 ---
 
-## HyDE — retrieval recall
+## HyDE: retrieval recall
 
 **HyDE was non-functional on .254.** `memory_rewrite.command` points at
 `/opt/aimee/scripts/llm-rewrite.py`, which is **absent from the image's
@@ -88,12 +88,12 @@ out: {"hyde_answer":"The user prefers camping at the beach over mountains. They
 
 So the mechanism is correct. Two consequences for the decision:
 
-1. **No real "after" existed to measure** on .254 — HyDE never ran. The relevant
+1. **No real "after" existed to measure** on .254. HyDE never ran. The relevant
    "before" is the published direct-eval baseline (commit 366fac9):
    **Recall@5 ≈ 0.21, Recall@10 ≈ 0.32, MRR ≈ 0.18** (HyDE effectively off).
 2. **Latency cost is now visible**: with HyDE active, `memory.find_facts_scoped`
    (the semantic route where the rewrite fires) exceeded 120s per query in
-   probes — every semantic recall now incurs an extra LLM rewrite call (and the
+   probes. Every semantic recall now incurs an extra LLM rewrite call (and the
    path also reranks). This is a material per-query cost that argues against
    blanket default-on.
 

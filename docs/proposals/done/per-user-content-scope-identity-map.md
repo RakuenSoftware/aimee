@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — all six bounded slices delivered and archived 2026-08-15.
+- **State:** DONE. All six bounded slices delivered and archived 2026-08-15.
 - **Owner:** KB content scope.
 
 > **Archived after delivery.** The identity map, caller-context propagation, project-bound

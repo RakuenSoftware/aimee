@@ -1,11 +1,11 @@
 # Proposal: how a module process gets cJSON
 
-- **State:** DECIDED — the second option is implemented. A descriptor may name
+- **State:** DECIDED. The second option is implemented. A descriptor may name
   vendored sources under `src/vendor/` that it compiles but does not own.
 
 Nine of DB1's remaining sources use cJSON, and none of them can be served until
-the DB1 module process can link it. This is not a wire question — the frame
-carries documents already — it is a question about how a self-contained module
+the DB1 module process can link it. This is not a wire question. The frame
+carries documents already. It is a question about how a self-contained module
 consumes vendored third-party code, and the answer sets a precedent for every
 module after this one.
 
@@ -17,7 +17,7 @@ binary:
     undefined reference to `cJSON_CreateObject'
     undefined reference to `cJSON_AddStringToObject'
 
-The module already *compiles* every cJSON-using source — they are all in its
+The module already *compiles* every cJSON-using source. They are all in its
 descriptor. It links today only because `--gc-sections` drops them: nothing
 reachable from `main` calls one. Declaring an operation makes it reachable, and
 the link fails.
@@ -47,7 +47,7 @@ nothing else. That is the rule that lets `aimee-module-db1` build standalone,
 and it is why `db1_time.c` exists to supply `now_utc` rather than the module
 linking `util.c`. The same rule is what excludes `src/vendor/cJSON.c`.
 
-For a small helper, supplying your own is right — `now_utc` is six lines and
+For a small helper, supplying your own is right, `now_utc` is six lines and
 having db1 own its copy costs nothing. cJSON is 77KB of upstream code, and the
 calculus changes: a copy is a thing to patch when upstream issues a CVE, and
 patching N copies is a process nobody runs N times correctly.
@@ -60,11 +60,11 @@ vendored copy, so the precedent exists and the change is mechanical: add
 it is reviewable, and it unblocks all nine immediately.
 
 The cost is a third copy of the same library. Today that means a cJSON CVE is
-patched in `src/vendor/`, in DB2's copy, and in DB1's — and the only thing
+patched in `src/vendor/`, in DB2's copy, and in DB1's, and the only thing
 keeping those in step is that somebody remembers.
 
 **Let a descriptor name vendored sources it does not own.** A `c_build`
-field — `vendor_sources`, restricted to paths under `src/vendor/` — compiled
+field (`vendor_sources`, restricted to paths under `src/vendor/`) compiled
 into the module and exempt from the ownership rule, because "owned by a module"
 and "vendored third-party code compiled into a module" are genuinely different
 claims and the ownership checker currently has no way to say the second.
@@ -76,14 +76,14 @@ of cJSON, and every module after this one gets the same door.
 ## Decision (implemented)
 
 The second, implemented as `c_build.vendor_sources`. DB1 compiles
-`src/vendor/cJSON.c` — the same copy the daemon uses — and owns none of it.
+`src/vendor/cJSON.c` (the same copy the daemon uses) and owns none of it.
 DB2's copy should fold into this rather than remain a second precedent; that is
 left as follow-up because moving DB2's build is a change to DB2, not to this. The first is faster today and I did not take it, because a
 third copy of a vendored library is the kind of decision that is cheap to make
 once and expensive to unmake, and because "DB2 did it" is a weak argument for
 repeating something whose cost only shows up during an incident.
 
-That said, this is a repo-wide call about third-party code and it belongs to
+The choice is a repo-wide call about third-party code and it belongs to
 whoever maintains the vendoring policy, not to the migration that happened to
 hit it first. It is written down rather than decided so the nine sources are
 blocked visibly instead of quietly skipped.

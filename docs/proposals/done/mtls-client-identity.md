@@ -17,7 +17,7 @@
 Over the network, every aimee client authenticates with a **single shared
 bearer token**. The bearer is anonymous and all-or-nothing: the server cannot
 tell two TCP/TLS clients apart, and `aimee.api.remote_writes` gates the *whole*
-listener, not per client. The current native-TLS path makes this explicit —
+listener, not per client. The current native-TLS path makes this explicit,
 `ATTEST_TLS_BEARER` collapses every TLS+bearer connection to the **server**
 principal (`server_tls.c`: "plain server TLS — the bearer is the authority").
 
@@ -39,14 +39,14 @@ network path is the one place identity degrades to a shared secret.
 Give each networked client an **individual, attested identity** via mutual TLS
 with a **self-generated** (private) CA: a verified client certificate becomes a
 distinct principal that the *existing* capability / per-principal-vault / audit
-machinery keys off — so attribution, per-client scoping, per-client vaults, and
+machinery keys off, so attribution, per-client scoping, per-client vaults, and
 **revoke-one-without-rotating-everyone** all follow. No external/public PKI:
 aimee owns both ends and trusts only its own CA.
 
 ## Why this fits aimee's existing model
 
 The server already resolves a connection to an attested principal in **one
-place** — `server_http_identity_capture()` calls
+place**, `server_http_identity_capture()` calls
 `vault_principal_resolve(is_tcp, is_tls, peer_uid, webuser, webuser_token_ok, …)`
 and writes `conn->attested_transport` + `conn->vault_principal`. Everything
 downstream (capabilities `vault_capability_*`, `remote_writes` gating,
@@ -57,7 +57,7 @@ extension of an existing listener, not a new one.
 
 ## Design
 
-### WP-A — Server: request + verify client certs
+### WP-A: Server: request + verify client certs
 - Extend `server_tls_init` (`server_tls.c`) to, when mTLS is enabled, set
   `SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, cb)`
   and `SSL_CTX_load_verify_locations(ctx, <config>/tls/client-ca.crt, NULL)` so
@@ -70,7 +70,7 @@ extension of an existing listener, not a new one.
   `server_tls_peer_identity(SSL *, char *out, size_t)` → the leaf cert's CN (or a
   designated SAN), plus its serial for revocation.
 
-### WP-B — Identity wiring (the small, high-leverage change)
+### WP-B: Identity wiring (the small, high-leverage change)
 - New transport `ATTEST_MTLS_CLIENT` in `vault_principal.h`, mapping to a
   `cert:<CN>` principal (a namespace distinct from `uid:`/`webuser:`/server).
 - In `server_http_identity_capture()`, when `is_tls` and a verified peer cert is
@@ -82,7 +82,7 @@ extension of an existing listener, not a new one.
   principal unchanged. Per-client `remote_writes`/capability grants become
   expressible because the principal is now per client.
 
-### WP-C — Self-generated PKI lifecycle
+### WP-C: Self-generated PKI lifecycle
 - **CA**: an aimee-owned CA created on demand; its private key is **sealed in the
   existing server vault** (reuse `vault_crypto` / the server-master-key wrap) so
   it is never plaintext at rest. Issuance is operator-gated.
@@ -96,7 +96,7 @@ extension of an existing listener, not a new one.
   first-hand-off trust problem by leaning on the existing shared bearer for
   enrollment only. After enrollment the client uses its cert, not the bearer.
 
-### WP-D — Client: present a client certificate
+### WP-D: Client: present a client certificate
 The thin client loads its identity (`<aimee_home>/tls/client.{crt,key}`) and
 presents it via each `aimee_tls.h` backend:
 - OpenSSL (Linux): `SSL_CTX_use_certificate_chain_file` +
@@ -122,7 +122,7 @@ No lens found a design blocker; these are the must-address specifics before
 implementation.
 
 ### Identity integrity (security-critical)
-- **CN/SAN sanitization — prevent principal spoofing.** The `cert:<CN>` principal
+- **CN/SAN sanitization, prevent principal spoofing.** The `cert:<CN>` principal
   MUST be isolated from `uid:`/`webuser:`/server namespaces and rejected if the CN
   contains anything outside a strict charset (e.g. `[A-Za-z0-9._-]`, bounded
   length). A CN like `uid:0`, one embedding `:`/newlines/path-traversal, or one
@@ -135,7 +135,7 @@ implementation.
 
 ### Mode + downgrade
 - **`optional` mode is a documented downgrade.** With `optional`, a leaked bearer
-  can omit a client cert and revert to the shared server principal — losing
+  can omit a client cert and revert to the shared server principal, losing
   attribution/revocation. Document this explicitly; recommend `required` for
   production. In `optional`, if a client **does** present a (valid) cert, the
   cert identity MUST win over bearer-only (no silently ignoring a presented cert).
@@ -145,7 +145,7 @@ implementation.
   one of: operator approval, or **one-time, short-lived enrollment tokens** (not the
   long-lived shared bearer), so a bearer leak during rollout can't mint rogue client
   identities. Rate-limit + audit every enrollment. (Also define an out-of-band path
-  for clients that can't present the bearer, e.g. CI runners — operator-issued cert.)
+  for clients that can't present the bearer, e.g. CI runners, operator-issued cert.)
 - **Revocation: atomic + available, still fail-closed.** The denylist read in the
   verify callback must be consistent (transactional/locked update; atomic read).
   Balance fail-closed against a DoS: a *transient* DB1 read error should fall back to
@@ -156,7 +156,7 @@ implementation.
 
 ### Lifecycle (CA + certs)
 - **CA rotation procedure** (issue under a new CA, dual-trust both CAs during
-  migration, reissue clients, retire the old CA) — must not break existing clients.
+  migration, reissue clients, retire the old CA), must not break existing clients.
 - **Cert expiry + renewal.** Short-lived client certs need `aimee cert renew` (or
   auto-renew before expiry); document the NTP/clock-skew expectation, and make the
   validity window wide enough that normal drift can't cause a fleet-wide outage.
@@ -167,13 +167,13 @@ implementation.
 - **Key protection + backend formats.** The client key file is created `0600`
   (refuse world-readable); optional passphrase. Document the per-backend cert source:
   OpenSSL PEM cert+key files, Schannel cert from a PFX/the user store, Secure
-  Transport `SecIdentityRef` from a PKCS#12 — with a unified config knob and clear
+  Transport `SecIdentityRef` from a PKCS#12, with a unified config knob and clear
   load-failure errors.
 
 ## Out of scope
 - **Replacing the bearer.** mTLS + bearer coexist; `optional` mode keeps bearer-only
   clients working. The UDS path (peercred) is unchanged.
-- **SSE/streaming over TLS** — already unsupported (`server_tls.h` phase 1c: an
+- **SSE/streaming over TLS**: already unsupported (`server_tls.h` phase 1c: an
   offloaded SSE worker can't share the `SSL`). Interactive `chat`/event streams over
   mTLS inherit that limitation until phase 1c lands; the data/RPC plane works now.
 - External/public CAs, ACME, hardware-backed keys (HSM/TPM), cert transparency.
@@ -215,7 +215,7 @@ implementation.
    principal is refused at issuance and yields an empty principal at resolution.
 7. **`optional` mode**: a client that presents a valid cert is identified by it (cert
    identity wins over bearer); a leaked-bearer client with no cert gets only the
-   downgraded server principal — and this downgrade is documented.
+   downgraded server principal, and this downgrade is documented.
 8. **Enrollment** with a one-time/short-lived token (or operator approval) issues a
    cert; the long-lived shared bearer alone does not, beyond the documented bootstrap
    window; every issue/revoke/renew is audited (no key material in the log).

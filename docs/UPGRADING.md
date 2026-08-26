@@ -1,6 +1,6 @@
 # Upgrading from v0.2.192
 
-There is no route back. 0.3.0 rewrites storage, credentials, and remote identity, and a 0.2 server
+There is no route back. 0.4.0 rewrites storage, credentials, and remote identity, and a 0.2 server
 will not read what it leaves behind. Your backup is the rollback plan; there is no downgrade
 command. Take the backup before step one, not after the first thing goes wrong.
 
@@ -45,7 +45,7 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
 
 ## This upgrade is one-way, by design
 
-0.3.0 does not preserve backwards compatibility, and that includes the image itself: once a server
+0.4.0 does not preserve backwards compatibility, and that includes the image itself: once a server
 volume has been booted by this release, an older image will not start on it again. It crash-loops
 with:
 

@@ -1,4 +1,4 @@
-# Pending proposal audit — 2026-07-26
+# Pending proposal audit: 2026-07-26
 
 This is the exhaustive reconciliation of the 79 Markdown files that were in
 `docs/proposals/pending/` at `testing` commit
@@ -132,8 +132,8 @@ comments that cited the archived originals. These are reference-only edits; no r
 ## Review record
 
 The intent classification was reviewed by the `documentation` roundtable in run
-`roundtable-de0fb8de6c6e17307226169d` (3/3 seats, converged). Its blocking ruling—update stale but
-still-live proposals in place rather than moving them—and its evidence-ledger requirement are encoded
+`roundtable-de0fb8de6c6e17307226169d` (3/3 seats, converged). Its blocking ruling. Update stale but
+still-live proposals in place rather than moving them, and its evidence-ledger requirement are encoded
 above. Frozen review `roundtable-c103f6e71d7aa11c9109614d` correctly requested reciprocal archive
 links and checker exit evidence, which are now present; its apparent missing-file blockers were caused
 by a review packet built from `git diff --stat`, which omits untracked move destinations and residuals.

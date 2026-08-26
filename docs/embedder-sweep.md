@@ -4,7 +4,12 @@ The sweep compares embedding models on LoCoMo and LongMemEval direct-retrieval t
 read text on stdin and write a JSON float array on stdout, so the harness is hardware- and
 provider-neutral.
 
-## Run it
+**The harness does not run today.** The Aimee direct entry points it calls were removed, and
+`benchmarks/embedder-sweep.sh` says so in its own header. The Go replacement is specified in
+[dataset benchmark direct track](proposals/pending/dataset-benchmark-direct-track.md). What follows
+describes the shape the sweep had and the shape its replacement should keep.
+
+## How it was run
 
 ```bash
 cp benchmarks/embedder-candidates.txt.example benchmarks/embedder-candidates.txt
@@ -31,14 +36,22 @@ Keep names short and filesystem-safe. Results land in
 
 ## What it measures
 
-For each candidate the harness:
-
-1. sets `AIMEE_EMBEDDING_COMMAND`;
-2. runs the LoCoMo and LongMemEval direct-retrieval adapters;
-3. validates each result with `benchmarks/verify_scores.py`.
+For each candidate the harness runs the LoCoMo and LongMemEval direct-retrieval adapters, then
+validates each result with `benchmarks/verify_scores.py`.
 
 No answer-generation model runs. The result covers retrieval quality and latency: Recall@K, MRR,
 ingest time, and query time.
+
+The embedder is the `embedding_command` config key:
+
+```bash
+aimee config set embedding_command "python3 scripts/embed.py --model all-mpnet-base-v2"
+```
+
+The shipped script exports `AIMEE_EMBEDDING_COMMAND` per candidate instead, and nothing in the tree
+reads that variable. Had the entry points survived, every candidate row would have measured the one
+configured embedder and reported it under a different name each time. A replacement must set the
+config key per candidate and restore it afterwards.
 
 ## Selection bar
 

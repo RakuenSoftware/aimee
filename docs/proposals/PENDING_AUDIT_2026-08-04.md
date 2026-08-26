@@ -1,4 +1,4 @@
-# Pending proposal audit — 2026-08-04
+# Pending proposal audit: 2026-08-04
 
 This is the exhaustive reconciliation of the 69 Markdown proposals in
 `docs/proposals/pending/` at `testing` commit `5b203df06`. It reuses the evidence from the

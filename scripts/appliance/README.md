@@ -90,5 +90,5 @@ What the adversarial pass confirmed rather than found: `--days -100` clamps to
 1, `--days abc` parses to 0 and clamps to 1, `--json` in a positional slot is
 parsed as the flag it is, unicode and embedded quotes and newlines survive the
 wire intact, and the session cascade resolves --session over $AIMEE_SESSION_ID
-over the literal "default" -- that last one checked with the variable actually
+over the literal "default". That last one checked with the variable actually
 SET, which is the only way the precedence is observable at all.

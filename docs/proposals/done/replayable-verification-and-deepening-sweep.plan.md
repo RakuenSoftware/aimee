@@ -1,4 +1,4 @@
-# Implementation plan — replayable-evidence verification (Part A)
+# Implementation plan: replayable-evidence verification (Part A)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
@@ -10,21 +10,21 @@ exercise its evidence vocabulary on real runs, then plan Part B separately).
 Grounded in `origin/testing`. Default-safe: the replay/verify pass is gated and,
 when off, the roundtable behaves exactly as today.
 
-**Implementation note (grounded during build):** the server is `AIMEE_DB2_DISABLED`
-— it reaches the code index over the kb socket via `kb_client` (`kb_client_index_find`
+**Implementation note (grounded during build):** the server is `AIMEE_DB2_DISABLED`,
+it reaches the code index over the kb socket via `kb_client` (`kb_client_index_find`
 / `_find_callers` / `_code_search`), not direct db2, and `search_graph` is the memory
 graph (wrong for code). So the replay engine takes its index access through a
 **settable backend seam** (`evidence_replay_set_backend`): the engine references no
 index/db2/kb symbol (links into every binary), and the server installs a
 kb_client-backed backend in `handle_delegate_roundtable`. No backend ⇒ DEGRADE. The
-verifier is **pure-code** (replay + rubric), no second "verifier model" call — the
+verifier is **pure-code** (replay + rubric), no second "verifier model" call. The
 verdict is mechanical, so a model would only add a jailbreak surface. PR grouping
 landed as PR1 = A1+A2; **PR2 = A3+A4+A5 together** (the verifier is inert/regressive
 without the panelist brief emitting evidence, so they ship as one coherent unit).
 
 **Plan-gate:** roundtabled (engineer + security lenses → both APPROVE-WITH-CHANGES).
-The four security blockers — verifier tolerance (B1), `area_root` provenance (B2),
-model-prose-out-of-artifact (B3), 2000-line-cap factoring (B4) — and the concerns
+The four security blockers, verifier tolerance (B1), `area_root` provenance (B2),
+model-prose-out-of-artifact (B3), 2000-line-cap factoring (B4), and the concerns
 (verifier-role, post-replay dedup, idkey normalization, vacuous-query, fixed
 rejected array, upward tier table, ast-grep validation, independent gate, audit
 sink) are folded into the work packets below.
@@ -33,25 +33,25 @@ sink) are folded into the work packets below.
 
 | Primitive | Where | Use |
 |-----------|-------|-----|
-| `delegate_roundtable_run()` | `src/server/delegate_ensemble.c:1494` | Orchestrator — the verify pass slots in **after** item capture, **before** `assemble_review_artifact`. |
-| `capture_round_review_items()` / `capture_review_items_from_text()` | `delegate_ensemble.c:944` / `:880` | Produce `roundtable_review_item_t[]` from panelist JSON — the input to the verify pass. |
+| `delegate_roundtable_run()` | `src/server/delegate_ensemble.c:1494` | Orchestrator: the verify pass slots in **after** item capture, **before** `assemble_review_artifact`. |
+| `capture_round_review_items()` / `capture_review_items_from_text()` | `delegate_ensemble.c:944` / `:880` | Produce `roundtable_review_item_t[]` from panelist JSON: the input to the verify pass. |
 | `review_items_same()` / `review_item_add_source()` | `delegate_ensemble.c:843` / `:850` | Existing dedup; extend to key on the deterministic `identity_key` from the reduced record. |
 | `assemble_review_artifact()` | `delegate_ensemble.c:1446` | Final artifact; add the **rejected appendix**. |
-| `panel_persona_prompt()` | `delegate_ensemble.c:1154` | Where the panelist brief is built — add the "emit a structured evidence query" instruction. |
+| `panel_persona_prompt()` | `delegate_ensemble.c:1154` | Where the panelist brief is built: add the "emit a structured evidence query" instruction. |
 | `roundtable_review_item_t` | `src/headers/delegate_ensemble.h:71` | Fixed-width item; gains a bounded evidence sub-struct (WP-A1). |
 | Read-only code-intel surfaces | `find_symbol`, `lsp_references`, `ast_grep_search`, `search_graph` | The **only** execution path for replay (security model). |
 | `run_aggregator()` / `parse_model_json_lenient()` | `delegate_ensemble.c:490` / `:78` | Pattern for a delegate sub-call + lenient JSON parse; the verifier reuses this shape. |
 
 **File-size constraint:** `delegate_ensemble.c` is **1917/2000 lines**. The replay
 engine and verifier go in **new files**, not appended here:
-- `src/server/evidence_replay.{c,h}` — the non-model structured-query → reduced-record engine.
-- `src/server/roundtable_verify.{c,h}` — the verifier pass (rubric + verdict).
+- `src/server/evidence_replay.{c,h}`: the non-model structured-query → reduced-record engine.
+- `src/server/roundtable_verify.{c,h}`: the verifier pass (rubric + verdict).
 
 ## Design refinement settled by grounding
 
 The proposal hedged the evidence field between "inline" and "4 KiB side buffer".
 Because we **locked replay to structured-query-only**, the evidence is *bounded*,
-not a free-form command — so it is a **fixed inline sub-struct**, no heap, no
+not a free-form command, so it is a **fixed inline sub-struct**, no heap, no
 lifetime management in `delegate_roundtable_result_free`:
 
 ```c
@@ -66,7 +66,7 @@ typedef struct {
 } review_evidence_t;
 ```
 Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
-`roundtable_result_t` — well within the 32 MB compute-pool worker stack.
+`roundtable_result_t`, well within the 32 MB compute-pool worker stack.
 
 ## Implementation grounding (verified against the code)
 
@@ -87,7 +87,7 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
   Reduced-record paths are still validated as project-relative for the idkey.
 - **Degrade vs reject (critical robustness rule).** Distinguish
   `REPLAY_INDEX_UNAVAILABLE` (project unknown / 0 indexed files) → **degrade: keep
-  the item, mark `unverified:index-unavailable`, do NOT reject** — from
+  the item, mark `unverified:index-unavailable`, do NOT reject**, from
   `REPLAY_CONTRADICTED` (index present, claim doesn't reproduce) → reject. Without
   this, enabling the gate on an unindexed server would drop every review item.
 - **sha256 for idkey** → OpenSSL `EVP_sha256` (already used across the tree:
@@ -102,22 +102,21 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
 
 ## Work packets
 
-### WP-A1 — Evidence sub-struct + struct plumbing
+### WP-A1: Evidence sub-struct + struct plumbing
 - Add `review_evidence_t evidence;` to `roundtable_review_item_t`
   (`delegate_ensemble.h`); update the `_Static_assert`/array-dim comments.
-- Audit every site that `memcpy`/`memcmp`/serializes the struct —
-  `git grep -n 'roundtable_review_item_t' src` — explicitly including
+- Audit every site that `memcpy`/`memcmp`/serializes the struct (`git grep -n 'roundtable_review_item_t' src`) explicitly including
   **`src/server/server_compute.c`** (the other `delegate_roundtable_run` caller)
   for any wire/JSON (de)serialization, plus `review_items_same`, dedup, capture,
   and artifact. Bump each to carry the evidence sub-struct.
-- No behavior change yet — field is populated in WP-A3, ignored when the gate is off.
+- No behavior change yet, field is populated in WP-A3, ignored when the gate is off.
 
-### WP-A2 — Structured-query replay engine (`evidence_replay.{c,h}`) — security core
+### WP-A2: Structured-query replay engine (`evidence_replay.{c,h}`), security core
 - `int evidence_replay(const review_evidence_t *ev, reduced_record_t *out)`.
 - **`area_root` is authoritative, not a parameter (B2).** It is the server's
   project root resolved **once at config load** and held immutable for the run;
   `evidence_replay` reads it from that single source. There is no caller-supplied
-  root to spoof — a path that resolves outside it is rejected at the engine, not
+  root to spoof, a path that resolves outside it is rejected at the engine, not
   trusted to the glob.
 - Dispatch `ev->kind` to the matching read-only surface **only**; never a shell,
   never arbitrary argv, never `make`/`curl`. Unknown/`EV_NONE`/malformed → return
@@ -126,7 +125,7 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
   trim, or `expected_count <= 0` for a count claim → `UNVERIFIABLE` with a
   distinct `reason=vacuous` (so a jailbroken panelist can't smuggle a no-op query).
 - Constrain `glob` to resolve under `area_root` (reject `..`, absolute escapes,
-  **and symlinks/hardlinks leaving the root** — resolve, then re-check) before any
+  **and symlinks/hardlinks leaving the root**. Resolve, then re-check) before any
   surface call.
 - **`EV_PATTERN` validation (C5):** reject unbalanced/over-nested ast-grep
   patterns and **time-box** every surface call; a pathological pattern returns
@@ -134,23 +133,23 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
 - Reduce output to `reduced_record_t { int count; char idkey[65]; }`.
   **idkey normalization (C4):** `idkey = sha256_hex( join("\n",
   sort_ascending( "<file>:<line>" )) )[:64]`, where `file` = path **relative to
-  `area_root`, normalized, symlinks resolved**, `line` = decimal — so equivalent
+  `area_root`, normalized, symlinks resolved**, `line` = decimal, so equivalent
   evidence in different path forms collides correctly.
 - The full surface output is written to an **append-only audit sink with a
-  per-item size cap (C1)** — a fixed path that **no prompt-construction code path
+  per-item size cap (C1)**. A fixed path that **no prompt-construction code path
   ever reads back**; never returned to a model.
 - **Dispatch model (C11):** per-item replay is **serial within the verify pass**
   for v1 (bounded, deterministic, simplest to reason about); a bounded-parallel
   variant is a later optimization, not v1.
 - Pure/deterministic and unit-testable with a fake surface backend (no network).
 
-### WP-A3 — Verifier pass (`roundtable_verify.{c,h}`)
+### WP-A3: Verifier pass (`roundtable_verify.{c,h}`)
 - `int roundtable_verify_items(agent_config_t*, const legacy_config_record*, roundtable_result_t*, ...)`:
-  for each captured item — call `evidence_replay`; `UNVERIFIABLE` → move the item
+  for each captured item. Call `evidence_replay`; `UNVERIFIABLE` → move the item
   to the **rejected list**.
 - **Tolerance contract (B1):** severity is always derived from the **reproduced
-  `actual`, never the panelist's claim**. A Part-A factual trigger is **binary** —
-  the cited symbol/line either reproduces or it doesn't (no fuzzy band). Where a
+  `actual`, never the panelist's claim**. A Part-A factual trigger is **binary**.
+The cited symbol/line either reproduces or it doesn't (no fuzzy band). Where a
   claim carries a count (relevant to Part B, not this slice), the verifier
   **re-grounds to `actual`** and logs `claimed→actual` drift in the audit sink;
   the tier follows `actual`, so inflating the claim buys nothing.
@@ -163,26 +162,25 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
   (replacing the model-derived key in `review_items_same`). Rejected items don't
   participate.
 - For survivors, run **one fresh delegate call** (reuse the `run_aggregator`
-  shape) by a **dedicated `verifier` persona — NOT one of the panel models (C2)** —
-  that receives **only** the claims + reduced records (never raw output, never the
+  shape) by a **dedicated `verifier` persona (NOT one of the panel models (C2)**) that receives **only** the claims + reduced records (never raw output, never the
   proposers' reasoning). Its role is recorded in the audit sink.
 - **Verdict schema carries NO model prose (B3):** the verifier returns
   `{ severity, idkey[], line_range[] }` only. The human-facing rationale is
-  **code-templated from the reduced record**, never from model text — so a
+  **code-templated from the reduced record**, never from model text, so a
   jailbroken verifier can neither escalate the enum (capped by WP-A4) nor smuggle
   a scary narrative into the artifact. (The panelist's own finding summary, captured
   pre-verification, still rides through as the finding text.)
-- Apply the rubric mechanically in code (WP-A4) over the verdict — the model
+- Apply the rubric mechanically in code (WP-A4) over the verdict. The model
   proposes, the code decides.
 - Wire into `delegate_roundtable_run` between capture and `assemble_review_artifact`.
 
-### WP-A4 — Part-A rubric + verdict logic
+### WP-A4: Part-A rubric + verdict logic
 - Encode the severity rubric as a pure function `severity_t apply_rubric(claimed,
   reduced, factual, verdict)`: `blocker` requires a reproduced factual trigger;
   `factual==0` items **cap at `concern`**; `nit` is the floor. Verifier may
   **downgrade** (claim exceeds reproduced support) **and promote** (a reproduced
-  fact meets a higher tier) — but **never escalate on interpretation alone**.
-- **Explicit upward tier table (C9)** — which reproduced trigger earns which tier,
+  fact meets a higher tier), but **never escalate on interpretation alone**.
+- **Explicit upward tier table (C9)**: which reproduced trigger earns which tier,
   so promotion isn't left to the model: reproduced UB / memory-safety / auth-bypass
   / data-loss → `blocker`; reproduced correctness defect without UB → `concern`;
   reproduced style/preference → `nit`. The trigger class comes from the structured
@@ -191,12 +189,12 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
   interpretive-only-capped case, the off-by-one-in-a-test-fixture (stays `concern`,
   doesn't clamp-promote) case, and the claimed-100/actual-93 re-grounding case.
 
-### WP-A5 — Panelist brief + config gate + artifact
+### WP-A5: Panelist brief + config gate + artifact
 - `panel_persona_prompt` (review mode): instruct panelists to emit a
   `review_evidence_t`-shaped query for every item and to mark factual vs
   interpretive. An item with no query is treated as interpretive (caps at concern)
   and is not replayed.
-- **Config gate (C6):** `roundtable_replay_verify_enabled` — a bool in
+- **Config gate (C6):** `roundtable_replay_verify_enabled`. A bool in
   config_fields/config_sections read **independently** of any panel-mode/caller
   intent flag, validated at the public entry point; both the replay flag and
   review mode must hold. mtime-reloaded, matching existing ensemble config. Off →
@@ -204,15 +202,15 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
   mode is a config default, not derived from caller-controlled state.
 - **Keep `delegate_ensemble.c` under the 2000-line cap (B4):** the rejected
   appendix + the `verified=N rejected=M capped=K` counts are rendered by a helper
-  **in `roundtable_verify.c`** — `char *roundtable_render_rejected(const
+  **in `roundtable_verify.c`**, `char *roundtable_render_rejected(const
   roundtable_result_t *)`. `assemble_review_artifact` gains only a single
   `str_append(artifact, rejected_md)` + free. Net add to `delegate_ensemble.c` is
-  the verify-call wiring + the brief text — budgeted to land it ≤ ~1980 with
+  the verify-call wiring + the brief text, budgeted to land it ≤ ~1980 with
   margin; if it doesn't, the brief text moves to `roundtable_verify.c` too.
 
-### WP-A6 — Tests
+### WP-A6: Tests
 - `test_evidence_replay`: each `ev_kind_t` against a fake surface; `..`-escape
-  **and symlink-leaving-root** rejection; `area_root` is authoritative — a benign
+  **and symlink-leaving-root** rejection; `area_root` is authoritative. A benign
   glob is still rejected if the resolved path leaves the stored root (B2);
   vacuous-query → `UNVERIFIABLE reason=vacuous` (C7); pathological `EV_PATTERN`
   returns `UNVERIFIABLE` within the deadline (C5); **idkey determinism across
@@ -221,7 +219,7 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
   (B1); reproduced trigger promotes a nit to blocker; interpretive-only capped at
   concern; off-by-one-in-test-fixture stays concern (C9); rejected `rejected[]`
   array populated; **verdict-jailbreak**: a model verdict cannot escalate the enum
-  past the rubric **and** its prose never reaches the artifact — byte-grep the
+  past the rubric **and** its prose never reaches the artifact, byte-grep the
   model payload, byte-grep the artifact, assert no overlap beyond the idkey ref
   (B3); dedup runs over survivors only (C3).
 - **Audit-sink isolation (C1):** assert the audit path appears in **no**
@@ -247,7 +245,7 @@ Added to `roundtable_review_item_t`: `~460 B` × 128 items ≈ `+60 KB` to
   still lands as a `concern`, it is not lost) and surfaced via the
   `rejected/capped` counts so a bad panel is visible, not silent.
 
-## Out of this plan (Part B — separate follow-up plan)
+## Out of this plan (Part B: separate follow-up plan)
 The deepening sweep, scope/areas, `typed_facts.architecture_settled`, worktree +
 committer, cost caps, and work-item filing are **not** in Part A. They get their
 own plan once Part A's evidence vocabulary is exercised on real roundtables.

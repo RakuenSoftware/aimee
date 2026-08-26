@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 as partially implemented. Source ownership and the memory,
+- **State:** DONE. Archived 2026-08-04 as partially implemented. Source ownership and the memory,
   learning, skills, response-composition, and synthesis boundaries now exist; cross-process bus
   isolation and remaining production-quality contracts continue in
   [`memory-learning-cross-process-boundaries-residual.md`](../pending/memory-learning-cross-process-boundaries-residual.md).
@@ -19,7 +19,7 @@
 > this proposal owns are unchanged, but the suite amendment
 > ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md))
 > changes how `memory` runs: it is a **separate program on the shared-memory event bus**, not an
-> in-process C module, and it is the dependency **hub/sink** (suite invariant 14) — nearly every
+> in-process C module, and it is the dependency **hub/sink** (suite invariant 14), nearly every
 > module depends on it while it depends on no feature module, and its public surface is a narrow event
 > contract (ingest/recall/index/embed/rerank). Code intelligence remains owned by `memory`. Its
 > round trip crosses the bus within the committed performance budget rather than as an in-process

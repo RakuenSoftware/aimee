@@ -1,6 +1,6 @@
 # Agent-facing code-intelligence E1 validation
 
-- **Slice:** E1 — truthful capability catalog
+- **Slice:** E1. Truthful capability catalog
 - **Based on:** E0 merge `352b4682205800ed41714ce7bdd53b4f081f81db` and local-first
   amendment merge `e9626cda560b7e9b1bbf96e48c05c94b62a72c8a`
 - **Untreated control:**

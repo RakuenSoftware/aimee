@@ -16,7 +16,7 @@ with its own postgres. A real `aimee-server` needs neither and runs on the host.
 
 The split matters for more than convenience. **Only the kb leg attaches the real
 `postgres` module**, and that is the configuration that exposed the defect below.
-A scratch host running no other modules cannot see it — which is exactly why the
+A scratch host running no other modules cannot see it, which is exactly why the
 earlier single-daemon validation passed while the bug was present.
 
 ## What this run found
@@ -30,7 +30,7 @@ its principal ref as **`4096 + ref*256 + stage`**. A ref therefore reserves a
 whole 256-kind block, whether or not it uses every stage.
 
 Plugin instances did not follow that rule. They drew from a *separate* range
-starting at 11264, chosen — per the comment in `mcp.go` — as "the next free
+starting at 11264, chosen (per the comment in `mcp.go`) as "the next free
 256-aligned block after the highest currently allocated kind (11010, block 43)".
 That reasoning inspected the highest kind actually *in use* rather than the
 blocks the rule *reserves*. And `4096 + 28*256 = 11264` is precisely postgres's
@@ -43,7 +43,7 @@ block. The range squatted:
 | db1 | 30 | 11776–12031 | yes (serves 11777–11784) |
 
 Reproduced live: with the real postgres module attached to a real `aimee-kb`,
-the plugin instance was **refused at attach** —
+the plugin instance was **refused at attach**,
 `mcp-coll attach: bus: attach denied`. `bus_host_serve_kind()` binds one kind to
 exactly one serving slot, so whichever attaches second loses. Postgres attached
 first here; **in the other order the plugin would have denied postgres**, taking
@@ -52,7 +52,7 @@ first here; **in the other order the plugin would have denied postgres**, taking
 The provisioner had partially hidden this: `taken()` reads the `serve=` lines of
 other grants in the same policy dir, so it *avoided* kinds it could see. It
 cannot see a module that is not deployed yet, is granted in a different
-directory, or is enabled later — and the failure then appears at attach time, far
+directory, or is enabled later, and the failure then appears at attach time, far
 from the provisioning that caused it.
 
 **Fix.** The principal ref is now the single allocation authority, and kinds are
@@ -62,14 +62,14 @@ they share a ref, which the provisioner already prevents. Concretely:
 - `EventPair(base)` → `EventKinds(ref)` in `server-go/modules/mcp`.
 - `AIMEE_MODULE_EVENT_BASE` is retired. An instance still carrying one that
   disagrees with the derivation is **refused with a message telling the operator
-  to re-provision** — silently ignoring it would leave a grant naming postgres's
+  to re-provision**, silently ignoring it would leave a grant naming postgres's
   kinds.
 - The provisioner rewrites an old grant's `serve=` list from the derivation.
 - Refs 200–455 are reserved for plugin instances in
   `tests/baselines/modules/canonical-inventory.yaml`, and
   `scripts/check_module_inventory.py` now **fails** if any module is assigned a
   ref inside that band (it also now checks ref uniqueness and that a retired ref
-  is not still assigned — none of which was validated before).
+  is not still assigned, none of which was validated before).
 
 Post-fix, ref 200 derives kinds 55297/55298, clear of every canonical block, and
 a plugin instance and the postgres module coexist on one kb bus with
@@ -77,12 +77,12 @@ a plugin instance and the postgres module coexist on one kb bus with
 
 ### 2. `install: kb` is not a plugin-module concept
 
-An earlier version of this document listed "`install: kb` — plugin modules hosted
-by `aimee-kb`" as untested. That was wrong twice over. `install: server|kb` is a
+An earlier version of this document listed "`install: kb`, plugin modules hosted
+by `aimee-kb`" as untested; that was wrong twice over; `install: server|kb` is a
 field of the **existing `aimee.yaml` `mcp_clients`** path, not of plugin modules;
 `aimee-kb` boots its share via `mcp_client_registry_boot(CONFIG_MCP_INSTALL_KB)`.
 
-And plugin modules hosted by kb are not untested — they are **not implemented**.
+And plugin modules hosted by kb are **not implemented**, which is a different thing from untested.
 Every caller of `aimee_module_commands_*` is in `src/server/`, and `aimee-kb` has
 no `/v1/commands`, no CLI manifest and no MCP tools route. A plugin module can
 attach to kb's bus (it did, above) but nothing collects or exposes its commands.
@@ -111,7 +111,7 @@ Plugin modules are aimee-server-hosted by design; the kb leg exercises kb as the
 
 ## Assertions
 
-### Server leg — `scripts/plugin-full-e2e-server-remote.sh`, on the host
+### Server leg: `scripts/plugin-full-e2e-server-remote.sh`, on the host
 
 | Assertion | Result |
 |---|---|
@@ -132,7 +132,7 @@ Plugin modules are aimee-server-hosted by design; the kb leg exercises kb as the
 | Instances do **not** re-attach on their own | recorded (known gap) |
 | Processes left from the run | 0 |
 
-### KB leg — `scripts/plugin-full-e2e-kb-remote.sh`, in a container
+### KB leg: `scripts/plugin-full-e2e-kb-remote.sh`, in a container
 
 Run in a scratch LXC against PostgreSQL 17 + pgvector with a real db2 schema,
 built from the debian-13 template by `scripts/plugin-e2e-ctprep.sh` and destroyed
@@ -168,7 +168,7 @@ afterwards. The whole leg reports **FULL E2E PASSED** with 0 leftover processes.
 | Processes left from the run | 0 |
 
 **On the container.** The first kb run used LXC 101 (`aimee-full-e2e-101`), which
-another actor on the host stopped and destroyed partway through — `vzstop` then
+another actor on the host stopped and destroyed partway through, `vzstop` then
 `vzdestroy` by `root@pam` in the Proxmox task log, while the run was in progress.
 The leg was re-run start to finish on a freshly created scratch container, so
 every kb assertion above comes from one complete green run, not a salvaged one.
@@ -178,7 +178,7 @@ it.
 **One unexplained intermittent.** Across six runs of the concurrency step, five
 returned 40/40 and one returned **36/40**. The bad run happened while a container
 was being provisioned (apt install) on the same host, so heavy load is the
-obvious suspect — but that is a guess: the diagnostic that dumps what a failed
+obvious suspect, but that is a guess: the diagnostic that dumps what a failed
 dispatch actually returned was added afterwards and has not reproduced it in
 three subsequent runs. It is recorded here as open rather than dismissed as
 flake.
@@ -201,9 +201,9 @@ transport there. The same is true of pluggy: its host is an MCP server behind a
 Go module, reached over the bus like any other.
 
 The MCP profile is `full` for these runs on purpose. Plugin tools are registered
-`MCPDiscoverable` by design — `mcp_tool_profile.c` records that the prominent
+`MCPDiscoverable` by design, `mcp_tool_profile.c` records that the prominent
 list is a per-session tax on every client, and ~15 plugin modules would grow it
-without bound — so the default `core` profile correctly filters them out and they
+without bound, so the default `core` profile correctly filters them out and they
 are reached via `find_tools`/`describe_tool`/`call_tool`. The full profile is
 what proves the group tool is actually built and appended.
 
@@ -223,9 +223,9 @@ previous run that had been aborted mid-flight, not a regression.
 
 ## What this does and does not settle for the retirement
 
-**Settled:** the plugin path works end to end on a real daemon — provisioning,
+**Settled:** the plugin path works end to end on a real daemon, provisioning,
 admission, registration, dispatch, withdrawal, the operator surface, both
-transports — it coexists with the `aimee.yaml` path on the same server, and it no
+transports, it coexists with the `aimee.yaml` path on the same server, and it no
 longer collides with core module kinds.
 
 **Not settled:**

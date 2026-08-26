@@ -1,8 +1,8 @@
-# Tier-A gold set — labeling rules
+# Tier-A gold set: labeling rules
 
 The task under test is the **`memory_facts` drain**: the highest-volume Tier-A
 call in the KB. One remembered note in, subject-relation-object triples out.
-The contract is `MF_SYSTEM_PROMPT_TMPL` in `src/kb/kb_memory_facts.c:52` — the
+The contract is `MF_SYSTEM_PROMPT_TMPL` in `src/kb/kb_memory_facts.c:52`, the
 gold labels below follow that prompt exactly, not a paraphrase of it.
 
 ## Contract the labels encode
@@ -32,8 +32,8 @@ multi-fact, implicit, negation, ambiguous".
 | `third_person` | third-person simple | baseline competence |
 | `multi_fact` | several facts in one note | recall under multiplicity, no early stop |
 | `implicit` | fact requires light inference | recall on non-literal statements |
-| `negation` | retraction/correction/denial | precision — must not assert the negated fact |
-| `transient` | feelings, plans, one-off events | **precision — gold is the empty list** |
+| `negation` | retraction/correction/denial | precision: must not assert the negated fact |
+| `transient` | feelings, plans, one-off events | **precision: gold is the empty list** |
 | `ambiguous` | underspecified referent or value | calibration; partial credit allowed |
 | `novel_pred` | no seed predicate fits | the §7.2 own-predicate path |
 | `infra` | host/IP/network facts | `device_has_ip`, `has_hostname` |
@@ -53,8 +53,8 @@ A predicted triple matches a gold triple when subject, relation, and object all
 match after normalization (casefold, strip punctuation and leading articles,
 collapse whitespace). Two scores are reported:
 
-- **strict** — object must match exactly after normalization.
-- **lenient** — object matches on token-set F1 ≥ 0.6, absorbing "Rakuen Software"
+- **strict**: object must match exactly after normalization.
+- **lenient**: object matches on token-set F1 ≥ 0.6, absorbing "Rakuen Software"
   vs "Rakuen Software Ltd". Relation and subject remain exact under both.
 
 `confidence` is not scored. Notes with empty gold contribute to precision only
@@ -65,7 +65,7 @@ denominator.
 
 Notes are hand-authored for this benchmark, seeded by the shapes visible in the
 prompt and ontology. They are **not** sampled from the live `memory_facts`
-corpus — I have no access to production memories from this session. That is the
+corpus. I have no access to production memories from this session. That is the
 main external-validity limit: the category mix here is my construction, so it
 measures relative model capability on a faithful task, not absolute drain
 quality. A follow-up pass over real notes is the obvious upgrade, and §4.3 of the
@@ -78,7 +78,7 @@ authored any label.
 
 A triple is correct only if **both endpoints name the labelled entity**; only the
 predicate may vary (`works_for` vs `member_of`, `born_in` vs `grew_up_in`).
-Surface variation — `Dr.` vs `Dr`, case, underscores, hyphens — is absorbed by
+Surface variation (`Dr.` vs `Dr`, case, underscores, hyphens) is absorbed by
 normalisation and is not a difference.
 
 This means coreference is NOT forgiven. If a note calls one device both "the
@@ -89,10 +89,10 @@ marked wrong. That is a real limitation and it lands on `mf04`:
 > Auckland rack."
 
 Gold uses **build host** as the subject throughout, with `forge` as the hostname
-value. The justification is consistency with the two sibling notes — `in03`
+value. The justification is consistency with the two sibling notes, `in03`
 ("The KB server has hostname aimee-kb") and `in04` ("forge is the hostname we use
 for the build machine") both use the descriptive entity as subject and the
-hostname as the value — and with the sentence's own grammatical subject.
+hostname as the value, and with the sentence's own grammatical subject.
 
 It is not a typing rule. `device_has_ip` is `{NODE_DEVICE} -> {NODE_IP}` and
 `forge` is a device, so `forge | device_has_ip | ...` is well-formed. Models that

@@ -11,7 +11,7 @@ rerankers, and the query-latency budget. Supporting detail in
 ## Executive summary
 
 1. **The reranker may not be earning its place.** Against a dense-ordered top-20
-   — what production actually feeds it — reranking *costs* 0.07-0.09 NDCG. The
+(what production actually feeds it) reranking *costs* 0.07-0.09 NDCG. The
    reranker's ceiling sits below what a modern embedder already achieves.
 2. **The embedder choice is worth less than it appeared.** a25m and nomic differ
    by 0.016-0.021 NDCG. The reranking question is an order of magnitude larger.
@@ -27,7 +27,7 @@ rerankers, and the query-latency budget. Supporting detail in
 
 ## 1. Embedders
 
-Each model with its own card prefix and native pooling — every model at its best.
+Each model with its own card prefix and native pooling, every model at its best.
 
 | model | NDCG@10 | R@10 | dim | code | prose | cited | GPU vec/s |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -87,17 +87,17 @@ every candidate embedder is multilingual. It must be replaced or removed.
 | **gte-multilingual-reranker-base** (ONNX) | **0.7178** | see below | 306M |
 | BAAI/bge-reranker-v2-m3 | 0.6174 | 0.120 | 568M |
 | ettin-reranker-68m (disqualified) | 0.2969 | 0.054 | 68M |
-| no rerank | 0.2279 | 0 | — |
+| no rerank | 0.2279 | 0 | n/a |
 
 GTE is the best reranker measured and is **1.9x smaller** than the runner-up.
 Both replacements are `seq-cls`, so they convert to GGUF whole and delete the
 `head.npz` + `publish-rerank-artifacts.yml` machinery Ettin requires.
 
-> **The GTE torch path is broken** — it returns constant scores (it reproduced
+> **The GTE torch path is broken**. It returns constant scores (it reproduced
 > the no-rerank baseline to sixteen decimal places). Only the **ONNX** export is
 > usable. This bug silently corrupted two experiments before it was caught.
 
-### Usefulness, measured on dense-ordered candidates — the production question
+### Usefulness, measured on dense-ordered candidates: the production question
 
 | embedder | dense only | + rerank 20x128 | + rerank 10x256 |
 |---|---:|---:|---:|
@@ -108,7 +108,7 @@ Both replacements are `seq-cls`, so they convert to GGUF whole and delete the
 reranker's best score at these truncations (~0.594) is below dense retrieval's
 0.612, so its reorderings are on average backwards.
 
-The two tables are not in conflict — they answer different questions. Capability
+The two tables are not in conflict, they answer different questions. Capability
 (can it sort a random list?) is not usefulness (can it beat the embedder?). Only
 the second is the production question, and it had never been run.
 
@@ -129,11 +129,11 @@ handed**:
 
 | reranker | capability (unsorted) | dense ranking | can it help? |
 |---|---:|---:|---|
-| bge-reranker-v2-m3 | 0.6174 | 0.6116 | parity — **no** |
-| **gte-multilingual-reranker-base** | **0.7178** | 0.6116 | **+0.106 — possibly** |
+| bge-reranker-v2-m3 | 0.6174 | 0.6116 | parity: **no** |
+| **gte-multilingual-reranker-base** | **0.7178** | 0.6116 | **+0.106: possibly** |
 
 bge-v2-m3 is at parity with dense retrieval, so it can only shuffle. GTE scores
-0.106 higher — and it was then tested in-pipeline.
+0.106 higher, and it was then tested in-pipeline.
 
 ### Resolved: GTE improves the pipeline, but only at full document length
 
@@ -144,7 +144,7 @@ bge-v2-m3 is at parity with dense retrieval, so it can only shuffle. GTE scores
 | a25m | 0.5934 | 0.4976 (**-0.096**) | **0.6136 (+0.020)** |
 | nomic + prefix | 0.6092 | 0.5024 (**-0.107**) | **0.6172 (+0.008)** |
 
-**Reranking helps — at 512 tokens only.** At 128 tokens it is catastrophic. The
+**Reranking helps, at 512 tokens only.** At 128 tokens it is catastrophic. The
 helpful configuration costs **4.1s on CPU** (outside budget) and ~0.09s on GPU.
 
 **Correction to the design rule stated earlier in this campaign.** The rule
@@ -153,7 +153,7 @@ helpful configuration costs **4.1s on CPU** (outside budget) and ~0.09s on GPU.
 *dense-ordered* list truncation costs 0.10 and destroys the entire benefit.
 Beating an already-good ranking requires full document context; sorting a random
 list does not. The rule holds for reranker *capability* and is wrong for
-reranker *usefulness* — which is the production case.
+reranker *usefulness*, which is the production case.
 
 ### A good reranker compresses the embedder gap
 
@@ -183,10 +183,10 @@ while **quality depends overwhelmingly on candidate count**:
 Cutting 512->128 tokens costs 0.023 NDCG. Cutting 20->10 candidates costs
 **0.24**. Five candidates (0.208) scores *below not reranking at all* (0.228).
 
-> **Design rule: never trim the candidate list to save time — truncate documents.**
+> **Design rule: never trim the candidate list to save time, truncate documents.**
 
 **CPU-viable recommendation if a reranker is kept:** gte-multilingual, ONNX int8,
-**20 candidates x 128 tokens — 0.6116 NDCG at 0.731s**, inside the 1s budget.
+**20 candidates x 128 tokens, 0.6116 NDCG at 0.731s**, inside the 1s budget.
 
 ---
 
@@ -202,8 +202,8 @@ Cutting 512->128 tokens costs 0.023 NDCG. Cutting 20->10 candidates costs
 | Index time | 0.0106 s/doc |
 | Storage | **743 GB per million docs** |
 
-Its cost profile matches the constraint exactly — heavy at index time, trivial
-per query — and **if bge-m3 were also the embedder the query encode is shared**,
+Its cost profile matches the constraint exactly, heavy at index time, trivial
+per query, and **if bge-m3 were also the embedder the query encode is shared**,
 leaving 27 ms of MaxSim as the true marginal cost. It would also supply the
 learned-sparse leg the architecture already anticipates, from one model.
 
@@ -220,7 +220,7 @@ than a purpose-built ColBERT:
 | colbert-xm (int8) | 256 | 128 | 32 KB | **33 GB** |
 | *(dense embedding, for scale)* | 1 | 768 | 1.5 KB | 1.5 GB |
 
-**bge-m3 multi-vector is not viable** — 743 GB per million, and it was already
+**bge-m3 multi-vector is not viable**, 743 GB per million, and it was already
 the slowest embedder measured (316 tok/s CPU). It loses on both axes.
 
 **colbert-xm is 11x smaller (22x at int8).** 33 GB per million is an ordinary
@@ -229,7 +229,7 @@ particular model was. An earlier version of this page framed 743 GB as the cost
 of the architecture, which was misleading.
 
 `antoinelouis/colbert-xm` (MIT, XLM-R, multilingual) is the **only** licence-clean
-multilingual ColBERT — answerai-colbert-small is English-only, and jina-colbert-v2
+multilingual ColBERT, answerai-colbert-small is English-only, and jina-colbert-v2
 and Reason-ModernColBERT are CC-BY-NC.
 
 **Open question against it:** its `doc_maxlen` is fixed at **256 tokens**, and we
@@ -242,11 +242,11 @@ committing to this path.
 
 ## 4. Paths forward
 
-**A. Ships today — a25m, no reranker.** 0.5903-0.5934 dense. No prefix work, no
+**A. Ships today, a25m, no reranker.** 0.5903-0.5934 dense. No prefix work, no
 reranker machinery, 2,155 tok/s on CPU, 384-dim vectors. Deletes the Ettin
 release pipeline outright. *Blocked on nothing.*
 
-**B. a25m + GTE reranking on the GPU tier only.** 0.6136 — beats plain nomic
+**B. a25m + GTE reranking on the GPU tier only.** 0.6136, beats plain nomic
 dense (0.6116) using the *cheaper* embedder. GTE ONNX at 20x512, ~0.09s on GPU.
 CPU tier runs dense-only, because no rerank config is both affordable and
 beneficial there (20x512 is 4.1s; 20x128 loses 0.10). *Blocked on GPU ONNX
@@ -258,12 +258,12 @@ present. *Blocked on building prefix plumbing and a full re-embed.*
 
 **D. Late interaction.** Best retrieval quality measured (0.946 Recall@10) and
 architecturally the cleanest fit for a sub-1s budget. *Blocked on a storage
-story — 743 GB/million is not shippable as configured.*
+story, 743 GB/million is not shippable as configured.*
 
 **Recommendation: A now, B next, D as the research track.** (C) is hard to
 justify: it costs prefix plumbing and a full re-embed to buy 0.0036 over (B).
 
-The reranker is worth keeping — but only on GPU, only at full document length,
+The reranker is worth keeping, but only on GPU, only at full document length,
 and only with GTE. On CPU the evidence says do not rerank at all.
 
 ---
@@ -271,7 +271,7 @@ and only with GTE. On CPU the evidence says do not rerank at all.
 ## 5. Method note
 
 Six substantive claims made during this campaign were wrong and corrected by
-measurement — the harness discrepancy (it was a prefix flag), CPU rerank
+measurement. The harness discrepancy (it was a prefix flag), CPU rerank
 feasibility (10x pessimistic), the late-interaction speedup (3x optimistic),
 latency linearity, late-interaction storage (5.7x optimistic), and the value of
 uniform embedding dimensions.
@@ -282,13 +282,13 @@ a score by 0.025, an `-ngl 0` that auto-fit overrides, a reranker that returns
 constant scores, a `-np 4` that quarters the context window. Each produced a
 plausible number rather than an error.
 
-Every figure in this report therefore carries its provenance — model, precision,
-device, truncation, sample size, and harness — because on this evidence a number
+Every figure in this report therefore carries its provenance, model, precision,
+device, truncation, sample size, and harness, because on this evidence a number
 without provenance is not trustworthy.
 
 ---
 
-# Addendum: hybrid retrieval (BM25 + RRF) — the largest effect measured
+# Addendum: hybrid retrieval (BM25 + RRF): the largest effect measured
 
 Added 2026-07-30 after the reranker work concluded. Raw artifacts:
 `benchmarks/results/reranker-2026-07-29/hybrid-*.json`, `fusion-frontier-*.json`.
@@ -305,10 +305,10 @@ signal, fused by Reciprocal Rank Fusion with the dense leg.
 | BM25 alone | 0.6213 | 0.8470 |
 | a25m + BM25 (RRF) | 0.6206 | 0.8642 |
 | **nomic + BM25 (RRF60)** | **0.6337** | 0.8668 |
-| **nomic + BM25 (RRF10)** | — | **0.9034** |
+| **nomic + BM25 (RRF10)** | n/a | **0.9034** |
 
 **BM25 alone beats every dense embedder measured.** Fusion beats everything, and
-the embedder choice composes with it rather than competing — nomic+hybrid
+the embedder choice composes with it rather than competing, nomic+hybrid
 (0.6337) exceeds a25m+hybrid (0.6206) by roughly the same margin as their dense
 scores differ.
 
@@ -320,7 +320,7 @@ scores differ.
 | **dense ∪ BM25 top-50** | **0.9739 / 0.9735** |
 
 Dense retrieval missed the target entirely for **11–13%** of queries. **No
-reranker can recover those** — which is precisely why 20 reranking
+reranker can recover those**, which is precisely why 20 reranking
 configurations produced at best +0.0032. Reranking reorders a fixed pool;
 lexical fusion changes what is in the pool.
 
@@ -344,7 +344,7 @@ the first result rather than reading a whole context.
 - **`rrf10` dominates `rrf60` on every metric.** The textbook `k=60` is simply
   wrong for this corpus. Free quality from a constant.
 - **`tiered` has zero top-1 regression by construction** and still gains +0.074
-  R@10 — unconditionally safe where the consumer set is unknown.
+  R@10, unconditionally safe where the consumer set is unknown.
 - `rrf10` buys a further +0.029 R@10 for −0.011 R@1.
 
 Note `tiered` is safe but **not optimal**: dense wins rank 1 only on average
@@ -356,7 +356,7 @@ where BM25's top hit was correct.
 - **The queries may be lexically derived from their documents.** Suite queries
   read as document summaries with key terms appended, which flatters BM25.
   Treat **BM25's absolute win as suspect** and the **+10 points of pool recall as
-  robust** — decorrelated retrieval finding different documents is far less
+  reproducible**, decorrelated retrieval finding different documents is far less
   sensitive to phrasing.
 - **Labels are silver, one positive per query** out of 26,473 documents. R@1 of
   0.3875 is *not* "correct 38% of the time"; retrieving a different but genuinely
@@ -371,6 +371,6 @@ where BM25's top hit was correct.
 
 Hybrid fusion delivered roughly **35x the best reranker result** using
 infrastructure that already exists (the FTS leg) and a constant nobody tuned.
-Combined with [learning-to-rank](../proposals/pending/learning-to-rank-from-interactions.md),
+Combined with [learning-to-rank](../proposals/done/learning-to-rank-from-interactions.md),
 which would learn that combination from real interactions instead of guessing it,
 this is where the remaining retrieval quality lives.

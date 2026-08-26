@@ -7,7 +7,7 @@
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,
 > superseded by the current implementation, or fully represented by completed child slices.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Depends on:** P5-B foundation and P7 signed-HWM KMS custody.
 
 ## Boundary

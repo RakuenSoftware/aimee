@@ -7,7 +7,7 @@
 > **Archived complete (2026-07-26).** The scoped implementation and safety gates are
 > present on `testing` with dedicated tests.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Review status:** CONVERGED (`converged=true`, zero issues)
 - **Version:** `aimee-economizer-safety-v2`
 - **Date:** 2026-07-22

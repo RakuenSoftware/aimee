@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — root-caused and fixed 2026-08-08; all four acceptance criteria met.
+- **State:** DONE. Root-caused and fixed 2026-08-08; all four acceptance criteria met.
 
 > **Delivered.** Shipped across six merged PRs. The headline defect turned out to
 > have two independent causes, only one of which this proposal had identified:
@@ -36,7 +36,7 @@ Measured on the validation appliance with a server-side checkout at
 
   Same worktree id, different root: the *ephemeral* workspace prefix with the
   session-worktree suffix appended. That path does not exist, so the guardrail
-  refuses it — correctly. Even `pwd` and `echo hello` fail this way.
+  refuses it, correctly. Even `pwd` and `echo hello` fail this way.
 
 The ephemeral workspace is created at `src/server/server_compute.c:1473`, which
 calls `run_cmd_set_cwd(ephemeral_ws)`; `run_cmd()` then prefixes every shell line
@@ -57,7 +57,7 @@ did not.
 
 A delegate with no shell is not merely limited, it is unable to verify itself, and
 it does not know that. Asked to add one comment line to a 2157-line Go file, a
-`code` delegate **truncated the file to 5 lines** — 2152 deletions — and could not
+`code` delegate **truncated the file to 5 lines** (2152 deletions) and could not
 compile, test, or `gofmt` to notice. Writes are permitted; verification is not.
 
 That combination should not be reachable. Either a delegate can check its own work
@@ -67,7 +67,7 @@ or it should not be able to write.
 
 1. **One root per delegate turn.** The shell and the file tools must resolve the
    same session worktree. Whichever root the file tools bind, `run_cmd_set_cwd()`
-   receives that same root — not the ephemeral workspace with the worktree suffix
+   receives that same root, not the ephemeral workspace with the worktree suffix
    pasted on.
 
 2. **Refuse the incoherent combination.** When a delegate is write-capable but its
@@ -112,11 +112,11 @@ The proposal's measurement was accurate and its remedy was correct, but it named
 one cause where there were two, and it did not notice that the shell was also
 being refused for a reason that had nothing to do with roots.
 
-**Cause 1 — an unimplemented verdict (not in this proposal).** `pre_tool_check`
+**Cause 1. An unimplemented verdict (not in this proposal).** `pre_tool_check`
 answers 0=allow, 1=allow-with-path-rewrite, 2=block, 3=allow-with-command-rewrite.
 `agent_tools_dispatch.c` implemented 0, 1 and 2, and treated **3 as a refusal**.
 Every shell command a guardrail wanted to *rewrite* came back as
-`guardrail blocked: …`, echoing the composed command — which is why the evidence
+`guardrail blocked: …`, echoing the composed command, which is why the evidence
 below reads as a path problem. It was, but the block on top of it was not.
 Fixed in #2429, and again at a second call site in `server_compute_async.c`
 (#2431), which had the same `rc != 0 && rc != 1` test.
@@ -124,11 +124,11 @@ Fixed in #2429, and again at a second call site in `server_compute_async.c`
 That is worth stating plainly: **the verbatim path in the Problem section is
 real, and the error message quoting it was produced by an unrelated bug.** Three
 causal claims made while chasing it were wrong and were retracted rather than
-quietly dropped (`server.c:713`; "silent no-op"; "cwd is empty") — each was an
+quietly dropped (`server.c:713`; "silent no-op"; "cwd is empty"). Each was an
 inference from partial output, and each was corrected only after grepping the
 appliance log for other occurrences of the same path.
 
-**Cause 2 — the root divergence (this proposal).** Confirmed exactly as
+**Cause 2, the root divergence (this proposal).** Confirmed exactly as
 described, and fixed in #2441.
 
 ### The fix
@@ -149,22 +149,22 @@ two halves cannot come apart because there is only one value.
 decision, but a delegate with coherent roots and no tree is still a delegate
 that cannot work. Closing that took two changes the proposal did not anticipate:
 
-- **#2436** — `workspace mirror-sync` ships its patch in 128 KB chunks. The
+- **#2436**: `workspace mirror-sync` ships its patch in 128 KB chunks. The
   binding cap was never the 4 MB transport limit but a **256 KB per-method**
   limit; chunking means no limit has to move, because the size of one request
   stops being a function of the size of the tree.
-- **#2440** — a `detached` workspace can record a remote and head. The
+- **#2440**: a `detached` workspace can record a remote and head. The
   reconstruction path read them, but nothing could set them: `workspace add`
   stored them only for `mirror` and `mirror-sync` refused anything else, so that
   fallback was unreachable. This avoids making anyone trade live file serving
-  for working delegates — a detached workspace stays detached.
+  for working delegates. A detached workspace stays detached.
 
 ### Acceptance criteria
 
 | # | Criterion | Where |
 |---|---|---|
-| 1 | Shell and file tools resolve the same worktree | #2441 — root resolved once, above every consumer |
-| 2 | Write-capable delegate with an unusable shell is refused before it can write | #2441 — refusal names the workspace and both ways out |
+| 1 | Shell and file tools resolve the same worktree | #2441: root resolved once, above every consumer |
+| 2 | Write-capable delegate with an unusable shell is refused before it can write | #2441: refusal names the workspace and both ways out |
 | 3 | A test asserts file-tool root == shell root for one turn | `test_bg_detached_mirror_delegate_roots_agree`, `test_delegate_shell_and_file_roots_agree` |
 | 4 | The turn diagnostic names the bound root and its kind | `## Working root` block + an INFO line naming the root, its kind, and any divergence |
 
@@ -177,7 +177,7 @@ shell root [.../workspaces/56d321a8/work]
 
 Both roots are sampled *during* the run; `delegate_worker` clears them on the way
 out. Writing it first was what caught that the read-only detached case had never
-actually run a delegate — the stub agent advertised only the `code` role, so a
+actually run a delegate, the stub agent advertised only the `code` role, so a
 `validate` delegate was rejected as unroutable before reaching any of the
 behaviour under test.
 
@@ -195,7 +195,7 @@ behaviour under test.
 
 | PR | |
 |---|---|
-| #2429 | guardrail verdict 3 in the tool dispatcher — the root cause |
+| #2429 | guardrail verdict 3 in the tool dispatcher: the root cause |
 | #2431 | the same verdict at a second call site |
 | #2432 | oversized-body diagnostic said "cannot reach endpoint" for a plain refusal |
 | #2436 | chunked `workspace mirror-sync` |
@@ -207,7 +207,7 @@ behaviour under test.
 **Read-only delegates may still diverge.** A read-only delegate on an unsynced
 detached workspace runs its shell in an ephemeral scratch dir while its file
 tools point at the client workspace. Working in the wrong place is useless there
-rather than destructive, so it is allowed — but it is now *declared*: the
+rather than destructive, so it is allowed, but it is now *declared*: the
 delegate is told both roots and that it cannot verify anything. Making that case
 coherent means provisioning a tree for it, which is the operator decision this
 proposal set out of scope.

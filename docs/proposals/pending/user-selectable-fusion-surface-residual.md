@@ -1,6 +1,6 @@
 # User-selectable fusion: surface and policy residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`user-selectable-fusion-mode.md`](../done/user-selectable-fusion-mode.md)
 

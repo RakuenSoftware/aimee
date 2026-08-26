@@ -73,6 +73,12 @@ Curation joins duplicates, records contradictions, and lets stale evidence decay
 lexical, dense, graph, and recency signals, then may synthesize. A low-evidence query can
 abstain instead of inventing an answer.
 
+Recall reads the assertion store directly and returns current values. Assertions carry world time
+and belief time separately, so asking what a value was last March is a different query from asking
+what the KB believed last March, and the historical axis is opt-in. A failure or recovery seen in
+two independent sessions becomes an observation, which can raise a procedural proposal into the
+review queue. Nothing promotes itself.
+
 Working memory is session scratch:
 
 ```bash

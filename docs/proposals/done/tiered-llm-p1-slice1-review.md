@@ -1,10 +1,10 @@
-# P1 Slice 1 — review request (tenancy schema + Postgres hardening)
+# P1 Slice 1: review request (tenancy schema + Postgres hardening)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived review artifact for the completed slice.
+- **State:** DONE. Archived review artifact for the completed slice.
 
 Branch `worktree-claude+tiered-llm-p1-tenancy`, 6 commits, ~2329 lines. This is the
 first slice of the converged P1 plan. Requesting roundtable approval to proceed to
@@ -28,38 +28,38 @@ slice 2 (identity resolution). The full diff is attached as context.
   EXECUTE to runtime only.
 - **Verified on real PG17 + pgvector** (not the shim): the full 1825-line
   `schema.sql` applies with the tenancy block integrated, and the mandatory
-  isolation gate passes — fail-closed with no context, per-principal isolation,
+  isolation gate passes, fail-closed with no context, per-principal isolation,
   non-member team reject, GUC-spoof denied, runtime `NOBYPASSRLS`.
 
 **C tenancy core.**
-- `kb_identity` — verifier-only authenticated `kb_principal_t` handle + canonical
+- `kb_identity`: verifier-only authenticated `kb_principal_t` handle + canonical
   immutable `identity_key` (`oidc:/cert:/owner`) + cert-serial normalization (I5).
-- `db2_tenant` — `db2_tenant_scope_begin/_commit/_rollback`: the sole runtime path
+- `db2_tenant`: `db2_tenant_scope_begin/_commit/_rollback`: the sole runtime path
   that sets tenant GUCs, via `set_tenant_context` inside a txn, fail-closed `RESET`
   on every path (I4); `db2_tenant_require_pg()` shim hard-fail (B1).
 - 5 typed CRUD modules (team/project/membership/admin_grant/oidc_jwks), each
   guarded.
-- `db2_hardening` — hardened-tier `db2_init` boot asserts: verify-full DSN (I1) +
+- `db2_hardening`: hardened-tier `db2_init` boot asserts: verify-full DSN (I1) +
   runtime-role privilege floor (B4), gated by `AIMEE_KB_HARDENED` so the existing
   plaintext dev/CI lanes are unchanged.
 
 **Tests / gates (all green).**
 - `unit-test-kb-identity`, `unit-test-db2-hardening`, `unit-test-kb-tenancy-shim-guard`
-  (all 18 tenant entries hard-fail on the shim — B1/N1) via `make unit-tests`.
+  (all 18 tenant entries hard-fail on the shim; B1/N1) via `make unit-tests`.
 - `run-p1-rls-gate.sh` wired into `ci.yml` as a **mandatory, non-skipping** step on
-  the pgvector sidecar (the cross-team-deny AC — only provable on real Postgres).
+  the pgvector sidecar (the cross-team-deny AC, only provable on real Postgres).
 - `check-p1-tenant-guard.py` (N1) in `make lint`: build fails if a new tenant entry
   omits the guard (verified falsifiable).
 
 ## Round-4 guard mapping (N1–N6)
 
-- **N1** ✓ shim-guard unit test over all entries + build-time coverage check.
-- **N4 (B4)** ✓ `db2_init` boot-asserts runtime role lacks BYPASSRLS/super/CREATE;
+- **N1** shim-guard unit test over all entries + build-time coverage check.
+- **N4 (B4)** `db2_init` boot-asserts runtime role lacks BYPASSRLS/super/CREATE;
   `set_tenant_context` EXECUTE to runtime only (not PUBLIC).
-- **N2** — `kb_principal_t` is verifier-only (no raw-string path); `set_tenant_context`
+- **N2**: `kb_principal_t` is verifier-only (no raw-string path); `set_tenant_context`
   validates membership internally. (Call-site enforcement lands with slice 2's
   `kb_identity_resolve`.)
-- **N3 (B3 backup key), N5 (B5 ingress header-deny)** — see re-scoping below.
+- **N3 (B3 backup key), N5 (B5 ingress header-deny)**: see re-scoping below.
 
 ## Proposed re-scoping (flagging for the panel)
 

@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 *Filed as a precondition record for
 [surface-neutral-retrieval-substrate.md](surface-neutral-retrieval-substrate.md)
@@ -53,14 +53,14 @@ and refuse to follow redirects.
 
 ## Why this is not simply "share the validator"
 
-The obvious fix — call `web_egress_addr_blocked` before `agent_http_get` — is
+The obvious fix (call `web_egress_addr_blocked` before `agent_http_get`) is
 wrong in two distinct ways.
 
 **These are two policies, not one.** A model-supplied page URL is an untrusted
 destination and should be denied private/reserved addresses. A SearXNG endpoint
 is operator-configured and may legitimately be `127.0.0.1`, a private LAN
 address, or a cluster service address. Applying the page-reader deny-list to the
-configured backend would break legitimate self-hosted deployments — which is the
+configured backend would break legitimate self-hosted deployments, which is the
 documented reason the SearXNG backend exists.
 
 **Validation without pinning leaves a TOCTOU gap.** Validating a resolved
@@ -80,7 +80,7 @@ control.
 
 ## Direction
 
-1. Introduce two named policies rather than one predicate — roughly
+1. Introduce two named policies rather than one predicate, roughly
    `EGRESS_UNTRUSTED_DESTINATION` (deny private/reserved; pin; no redirects) and
    `EGRESS_CONFIGURED_SERVICE` (private addresses permitted only when the
    operator has explicitly authorized that endpoint in configuration).

@@ -1,6 +1,6 @@
 # Route descriptor single source: residual work
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`route-descriptor-single-source-of-truth.md`](../done/route-descriptor-single-source-of-truth.md)
 

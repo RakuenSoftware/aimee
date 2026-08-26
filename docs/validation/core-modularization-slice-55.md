@@ -28,8 +28,8 @@ twenty-four-of-thirty membership is an intentional thin-client boundary. That au
 here; this slice adds only the completeness assertion on the already-reviewed declarations.
 
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
-DB1's `wfe_store.c` and `wfe_binding.c` — which share this module's `wfe_` name prefix but are DB1
-sources — or the server-side workflow route handlers have been moved in, and it does not claim
+DB1's `wfe_store.c` and `wfe_binding.c`, which share this module's `wfe_` name prefix but are DB1
+sources, or the server-side workflow route handlers have been moved in, and it does not claim
 identical build-product membership across Make and CMake, where six sources are Make-only.
 
 ## The `wfe_` prefix stays a live hazard after latching
@@ -77,7 +77,6 @@ src/build/obj/tests/unit-test-wfe-router
 tests and the twenty-four-source thin-client subset are covered by the required pull-request CMake
 jobs.
 
-With `workflows` latched, seventeen modules carry `ownership_complete`. One Class B module remains —
-`memory`, the largest — and the eight Class A modules remain blocked by the empty-domain guard and
+With `workflows` latched, seventeen modules carry `ownership_complete`. One Class B module remains (`memory`, the largest) and the eight Class A modules remain blocked by the empty-domain guard and
 tracked in `docs/validation/core-modularization-class-a-migration.md`. Technical-writer review,
 exact-final-diff roundtable approval, and every required pull-request check are required before merge.

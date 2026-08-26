@@ -1,6 +1,6 @@
 # P6 residual: native InvokeModel families and pricing
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`tiered-llm-p6-bedrock-and-breadth.md`](../done/tiered-llm-p6-bedrock-and-breadth.md)
 

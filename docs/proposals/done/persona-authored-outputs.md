@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. The remaining work is restored as a
@@ -33,9 +33,9 @@ hardwire *who* instead of *what capabilities the job requires*.
 And even with all of that fixed, persona-styled commit messages would stay
 best-effort as long as an agent can run raw `git commit` from a shell: the
 message only reliably passes through a persona if every commit and PR
-passes through one gate. aimee already has that gate — the guarded git
+passes through one gate. aimee already has that gate, the guarded git
 tools (`git_commit`, `git_push`, `git_pr`) that strip AI attribution,
-block protected branches, and skip sensitive files — but nothing requires
+block protected branches, and skip sensitive files, but nothing requires
 agents to use it.
 
 One model change fixes all of this. Roles become permissions. Delegates
@@ -49,7 +49,7 @@ config and workflow YAML, not prompt surgery.
 
 ## What
 
-### Part A — roles are permissions
+### Part A: roles are permissions
 
 1. A role is a permission set drawn from `read`, `write`, `execute`. The
    source of truth is a built-in permission table in code, one row per
@@ -66,7 +66,7 @@ config and workflow YAML, not prompt surgery.
    name-keyed by design; they are cost policy, not capability.
 3. Delegates are defined by roles, not personas. A delegate's granted set
    is the union of its roles' grants. A persona's frontmatter gains
-   `requires:` — the permissions it needs (reviewer built-ins `[read]`,
+   `requires:`. The permissions it needs (reviewer built-ins `[read]`,
    engineer `[read, write, execute]`). A delegate is a valid target for a
    persona iff its grants cover the persona's requirements, on both the CLI
    and workflow dispatch paths; a workflow-named delegate that fails
@@ -78,13 +78,13 @@ config and workflow YAML, not prompt surgery.
 4. Callers cannot name a persona. `--persona` on `aimee delegate` and the
    `persona` property on the MCP `delegate` tool are deprecated: accepted
    and ignored with a warning for one release, then removed. A delegate
-   runs as the dispatching context's persona — the workflow node's
+   runs as the dispatching context's persona, the workflow node's
    `persona:` param, else the session persona, else `default_persona`, else
    `engineer`. Context selects the persona; delegates never target one.
 5. Stance is generated, not written. The composer receives the granted
    permission set and emits the stance block itself: without `write`,
    "report findings, do not edit"; with `write`, authoring framing. The
-   built-in persona prose is re-authored stance-neutral — the stance
+   built-in persona prose is re-authored stance-neutral. The stance
    sentences, the read-only delegation blocks, and every literal
    `--persona` example are removed from the prompt bodies. Seeded persona
    files are versioned and re-seeded so stale review-framed copies do not
@@ -92,7 +92,7 @@ config and workflow YAML, not prompt surgery.
    content hashes so pristine legacy files are distinguishable from
    user-edited ones, which are preserved.
 
-### Part B — persona-authored outputs
+### Part B: persona-authored outputs
 
 6. `pr.open` writes real PR text. The executor dispatches one
    read-granted delegate as the node's `persona:` param (default
@@ -109,7 +109,7 @@ config and workflow YAML, not prompt surgery.
    `persona: technical-writer` on its document node.
 8. aimee's git tooling is enforced for agents, at both layers agents run
    in. A new config key, `require_aimee_git` (default on, operator
-   opt-out only — the `require_aimee_memory` pattern), refuses raw git
+   opt-out only. The `require_aimee_memory` pattern), refuses raw git
    write commands and raw `gh pr` invocations from agent shells and
    directs them to the guarded tools: the attention-guard covers
    hook-driven interactive sessions, and the server-side agent policy
@@ -118,7 +118,7 @@ config and workflow YAML, not prompt surgery.
    list. Every agent-authored commit and PR then flows through one gate.
    aimee-server's own internal commits and forge calls are not agent
    shells and stay as they are; and the refusal is a redirect, not a
-   sandbox — a determined bypass is out of scope, the ban on unattended
+   sandbox. A determined bypass is out of scope, the ban on unattended
    AI attribution remains the hard outer guard.
 9. Commit messages are persona-authored at that gate. The commit gate
    becomes one shared implementation behind the MCP `git_commit` handler
@@ -131,7 +131,7 @@ config and workflow YAML, not prompt surgery.
    already arrived (committing workflow dispatches carry one through a
    commit-message draft channel in the delegate handoff, and their
    prompts carry the persona's voice guidance as a
-   "## Commit message style" block) — one authoring pass per commit,
+   "## Commit message style" block). One authoring pass per commit,
    never two. On dispatch failure, no backend, or a message that strips
    to empty, the draft commits as supplied; a human operator's own
    commit message is never rewritten.
@@ -140,8 +140,7 @@ config and workflow YAML, not prompt surgery.
     sections parsed from persona files and the seeded output. A persona
     without a voice makes `commit_style_persona` a logged no-op.
 11. Persona names and grants are validated. `aimee workflow validate`
-    rejects an unknown `persona:` on producing and `pr.open` nodes —
-    today a typo silently falls back to `engineer` — and template loading
+    rejects an unknown `persona:` on producing and `pr.open` nodes (today a typo silently falls back to `engineer`) and template loading
     rejects unknown permission tokens.
 12. Docs and help follow the interface: `docs/personas.md`,
     `docs/DELEGATES.md`, `docs/WORKFLOW_ACTIONS.md`, the CLI help text,
@@ -149,8 +148,8 @@ config and workflow YAML, not prompt surgery.
     the permission model and the git-tooling requirement.
 
 Out of scope: a general action→persona binding table, and any permission
-beyond `read`/`write`/`execute`. Mechanics — caller enumerations, file
-lists, signatures, migration, and the test seam — are in
+beyond `read`/`write`/`execute`. Mechanics, caller enumerations, file
+lists, signatures, migration, and the test seam, are in
 [persona-authored-outputs.plan.md](persona-authored-outputs.plan.md).
 
 ## Acceptance
@@ -176,11 +175,11 @@ lists, signatures, migration, and the test seam — are in
 - A `build` run opens its PR with a delegate-authored title and non-empty
   body, and no extra commit lands on the branch from the PR-text dispatch.
   With the dispatch failing, returning garbage, or the forge rejecting the
-  text, the PR still opens with the work-item title and empty body —
-  observed via the block-test forge recorder, not parked.
+  text, the PR still opens with the work-item title and empty body,
+observed via the block-test forge recorder, not parked.
 - With `require_aimee_git` on (the default), a raw `git commit` or `gh pr`
   from an agent shell is refused with a message directing to the guarded
-  tools — on both the interactive-session (hook) layer and the in-process
+  tools, on both the interactive-session (hook) layer and the in-process
   delegate (agent policy) layer; with it off, the command passes. Read
   verbs pass untouched. The guard is operator config only, with no
   env-var bypass.
@@ -189,7 +188,7 @@ lists, signatures, migration, and the test seam — are in
   in the caller's worktree, and the harness commit no longer carries the
   hardcoded message.
 - With `commit_style_persona` set (and by default), an agent commit
-  without a styled draft gets the gate-authored message — asserted on the
+  without a styled draft gets the gate-authored message, asserted on the
   resulting commit, not the prompt; a handoff-drafted commit is used as
   supplied (no second authoring pass); on gate-dispatch failure or a
   message that strips to empty the draft is used; a human operator's

@@ -1,6 +1,6 @@
 # Per-user content scope: a project you cannot see returns nothing
 
-- **State:** PENDING — restored 2026-08-16 after rejection #2678 applied the wrong Go-only
+- **State:** PENDING. Restored 2026-08-16 after rejection #2678 applied the wrong Go-only
   lifecycle rule; the already-landed SQL controls remain operator-gated compatibility enforcement,
   and the unresolved authorization owner is rewritten below as Go work.
 - **Scope:** KB tenancy and read visibility across database content, code index, workspace, and
@@ -61,8 +61,8 @@ project, action, resource, or expired operation denies. A missing, malformed, un
 ambiguous decision denies.
 
 Only Go `execution-policy` decides whether the actor may see the content. Consumers and adapters
-may narrow an allow—for example, path containment can still reject an otherwise authorized
-workspace request—but no downstream component may turn a Go denial into an allow.
+may narrow an allow, for example, path containment can still reject an otherwise authorized
+workspace request, but no downstream component may turn a Go denial into an allow.
 
 This typed decision is a new architecture choice needed to prevent the Go rewrite from creating
 parallel policy owners. It was approved as part of the corrective intent; its concrete event kind,

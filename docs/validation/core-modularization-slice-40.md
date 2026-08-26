@@ -10,7 +10,7 @@ follow-up latch slice does not bless declarations written in the same change. It
 metadata, the test-registration baseline, documentation, and cleanup accounting only; no production
 code, public symbol, build membership, configuration, storage, or runtime behavior changes.
 
-`governance` is the smallest module in this class — one source and one private header — and it is the
+`governance` is the smallest module in this class (one source and one private header) and it is the
 first module in the whole series to carry a private header. The nine already-latched modules have
 none, so the validator's private-header handling has never been exercised against a real declared
 module. Doing governance first confirms it before the larger declarations depend on it.
@@ -19,17 +19,17 @@ module. Doing governance first confirms it before the larger declarations depend
 
 The descriptor now declares what lives under `src/modules/governance/`:
 
-- `src/modules/governance/gw_stage_governance.c` — the response-governance stage. It wraps
+- `src/modules/governance/gw_stage_governance.c`: the response-governance stage. It wraps
   `gateway_policy_police_parsed_response` in a togglable response-pipeline stage, collapsing the four
   inline police call sites into one path that config can disable. It exports two functions:
   `gw_response_governance_enabled` (the `AIMEE_STAGE_GOVERNANCE` env fallback, default-on) and
   `gw_response_run_governance` (runs the stage over a parsed response when enabled).
-- `src/modules/governance/gw_stage_governance.h` — the private header for those two exports. It is not
+- `src/modules/governance/gw_stage_governance.h`: the private header for those two exports. It is not
   under `include/aimee/governance/`; consumers include it as `gw_stage_governance.h` via the
   `-Imodules/governance` search path, which is what makes it a private header rather than a public one.
-- `src/tests/test_response_governance_stage.c` — the direct test, covering the env-toggle parsing, the
+- `src/tests/test_response_governance_stage.c`: the direct test, covering the env-toggle parsing, the
   enabled drop count, the disabled no-op, and the NULL-parsed guard.
-- `docs/modules/governance.md` — the canonical document.
+- `docs/modules/governance.md`: the canonical document.
 
 This is narrower than the governance plane the canonical document describes. The OIDC, organizational
 identity, policy-distribution, and console surfaces named there are distributed across
@@ -72,7 +72,7 @@ them as a second implementation.
 ## Why declare without latching
 
 The latch asserts that the descriptor exhaustively covers the module root. That assertion is true here
-today — the module root holds exactly the one source and one header now declared — so the latch would
+today (the module root holds exactly the one source and one header now declared) so the latch would
 pass. The roundtable's point is not that the assertion is false; it is that declaring the files and
 asserting completeness are two distinct claims, and collapsing them into one change means the
 completeness audit reviews declarations it just authored. Keeping them separate means the follow-up
@@ -89,8 +89,8 @@ slice leaves `governance` flagged as migration debt, correctly, while pinning wh
 The declaration is covered by the existing descriptor validation: every declared path must exist and
 resolve within the module, and the regenerated test-registration baseline pins the governance test's
 per-suite registration. The empty-domain guard added in slice 39 does not apply, because the module
-root is not empty. The latch-specific mutation coverage — source removal, planted files, cleared latch
-— is deferred to the latch slice, where `ownership_complete` is set and those mutations become
+root is not empty. The latch-specific mutation coverage (source removal, planted files, cleared latch)
+is deferred to the latch slice, where `ownership_complete` is set and those mutations become
 meaningful.
 
 ## Verification

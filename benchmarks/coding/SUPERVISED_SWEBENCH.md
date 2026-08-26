@@ -16,10 +16,10 @@ What this benchmark *does* show, rigorously: given the same code region, delegat
 diff to a cheap fleet and having the primary only **select the best of N** costs the
 primary far fewer of its own tokens than solving each task itself, and the fleet runs
 concurrently. What it does **not** show is that aimee's coordination beats an agentic
-supervisor — that requires the agentic version below.
+supervisor. That requires the agentic version below.
 
-> **Follow-up (the real Reddit-parity claim):** a tool-using agentic version — workers
-> explore/edit/test the repo, the primary supervises across turns — is tracked
+> **Follow-up (the real Reddit-parity claim):** a tool-using agentic version, workers
+> explore/edit/test the repo, the primary supervises across turns, is tracked
 > separately. Only that version should be posted as an apples-to-apples Reddit comparison.
 
 ## Arms
@@ -41,7 +41,7 @@ separately; they are **not** counted against the primary reduction.
 - **Wall-clock brackets the whole arm** (dispatch → grade); dispatch and polling are
   thread-parallel, so the number is fleet concurrency, not driver serialism.
 - **Two resolution denominators.** `resolved/submitted` (skill, given a patch was
-  produced) and `resolved/instances` (end-to-end, incl. worker failures — the honest
+  produced) and `resolved/instances` (end-to-end, incl. worker failures, the honest
   public number). Worker failures cannot silently flatter the reduction.
 - **Candidate-set health.** Instances with `< ceil(N/2)` candidates are flagged; a flaky
   fleet returning fewer candidates shrinks the selection prompt and would otherwise inflate
@@ -89,7 +89,7 @@ is required. Scale to more GPUs for more concurrent large-context workers.
 ## Reference results
 
 Run the pipeline against your own fleet and record `run.json` here with the model names and
-run date filled in — do **not** post hand-copied numbers. On the reddit10 set with a strong
+run date filled in, do **not** post hand-copied numbers. On the reddit10 set with a strong
 primary this repo has observed primary-token reductions in the **~80%** range with the fleet
 running concurrently and best-of-N recovering resolution toward the solo primary; fill this
 table from a real `run.json`:
@@ -109,7 +109,7 @@ python3 -m unittest benchmarks.tests.test_bench_swebench_supervised
 
 ---
 
-# Agentic variant (issue #987) — the true, tool-using, Reddit-parity claim
+# Agentic variant (issue #987): the true, tool-using, Reddit-parity claim
 
 The single-shot benchmark above delegates one diff and reviews it; it is **explicitly barred**
 from being posted as a Reddit head-to-head. The *agentic* variant makes both arms tool-using
@@ -122,7 +122,7 @@ live parts (server transport, per-worker container, official grading) as marked 
 
 | module | slice | role |
 |---|---|---|
-| `swebench_transport_verify.py` | S0 | 5 FAKE-mode token-attribution assertions (theoretical EMPTY-polarity model — **superseded live** by the delegate transport; kept as the CI gate) |
+| `swebench_transport_verify.py` | S0 | 5 FAKE-mode token-attribution assertions (theoretical EMPTY-polarity model: **superseded live** by the delegate transport; kept as the CI gate) |
 | `swebench_live_attribution.py` | S0-live | the **corrected** deployment model + `run_live_matrix` (L1–L4 over the real `delegation_spawns`/`token_audit`, job-id partitioned) |
 | `swebench_live_transport.py` | S0–S5 | the live `aimee delegate` transport: argv build (tools ⇒ worktree), dispatch/poll (injectable runner), job-id token split, supervisor-tool-row assertion |
 | `swebench_agentic_harness.py` | S1 | per-worker workspace provision at `base_commit`, per-worker OS-resource allocator, canonical secret-redacted patch (`git add -A` → `diff --cached`), loop bounds, **`run_agentic_loop`** (live) |
@@ -138,12 +138,12 @@ The public line ("beats Reddit's −75.5% at no wall-clock penalty") is emitted 
 `swebench_claim_gate.evaluate_claim_gate(b1, b2, independent_review=…)` **only if ALL** hold,
 under the official grader, on **both** Benchmark 1 (Reddit-10) **and** Benchmark 2 (held-out):
 
-1. **Token** — BCa-95 CI lower-bound of the primary-token reduction `> 0`, anchored on **N=1**.
-2. **Wall** — **p95** A→C wall-clock ratio CI upper-bound `≤ 1.0` (vs aimee's own arm-A time,
+1. **Token**: BCa-95 CI lower-bound of the primary-token reduction `> 0`, anchored on **N=1**.
+2. **Wall**: **p95** A→C wall-clock ratio CI upper-bound `≤ 1.0` (vs aimee's own arm-A time,
    not Reddit's cross-harness minutes).
-3. **Resolution floor** — `resolved_C/total ≥ max(0.7 × resolved_A/total, 0.25)`.
+3. **Resolution floor**: `resolved_C/total ≥ max(0.7 × resolved_A/total, 0.25)`.
 4. **K ≥ 10** repeats on Benchmark 1.
-5. **Not escalation-dominated** — the arm-C headline set's escalation-excluded fraction `≤ 0.40`.
+5. **Not escalation-dominated**: the arm-C headline set's escalation-excluded fraction `≤ 0.40`.
 6. **Independent reviewer** sign-off (not the harness/worker author).
 
 The report is **published regardless** of the outcome; only the claim *line* is gated. When
@@ -169,7 +169,7 @@ python3 -m unittest \
 
 The live paths are **wired** on the `aimee delegate` transport (`swebench_live_transport.py`),
 which supersedes the theoretical `/v1/runs` + EMPTY-delegation-polarity model. This is not a
-choice — a live 2026-07-05 run (`swebench_live_attribution.py`) established that the real fleet
+choice. A live 2026-07-05 run (`swebench_live_attribution.py`) established that the real fleet
 emits almost no EMPTY-delegation rows, so the harness runs **both** the primary and the workers as
 `aimee delegate` jobs and distinguishes them by **which delegation_id (job_id) it dispatched**:
 

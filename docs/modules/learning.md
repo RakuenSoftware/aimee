@@ -59,10 +59,11 @@ used, and must distinguish a temporarily idle provider from removal of required 
 
 ## Surfaces
 
-User and operator surfaces include `aimee learning list|status|accept|reject|metrics`, KB/server learning
-routes, proposal review, and dashboard metrics derived from `learning_metrics_commit_ratio` and
-`learning_metrics_per_sink_caps`. Internal signal ingestion is also a surface because rules, turns, and
-delegates rely on its result states and evidence references.
+`aimee learning` exposes `approaches`, `attribution`, `fate`, and `resolve`. Proposal review runs
+through the KB/server learning routes and the browser queue; dashboard metrics derive from
+`learning_metrics_commit_ratio` and `learning_metrics_per_sink_caps`. Internal signal ingestion is
+also a surface because rules, turns, and delegates rely on its result states and evidence
+references.
 
 ## Data and migrations
 
@@ -101,8 +102,8 @@ action.
 
 ## Operational diagnostics
 
-The `aimee learning metrics` surface reports commit ratios, per-sink cap utilization, and router/detector
-latency from `learning_router_metrics`. Operators should correlate those counters with proposal states,
+`learning_router_metrics` reports commit ratios, per-sink cap utilization, and router/detector
+latency to the dashboard. Operators should correlate those counters with proposal states,
 KB drain logs, provider readiness, and evidence references to distinguish no useful signal from a broken
 ingestion or synthesis path.
 

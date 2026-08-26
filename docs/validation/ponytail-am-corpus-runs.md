@@ -1,4 +1,4 @@
-# am_ corpus runs — record for the article
+# am_ corpus runs: record for the article
 
 Every run recorded here so code, tests and cost can be compared across arms
 later. One row per cell; the harness retains the patch, the changed files, a
@@ -24,7 +24,7 @@ grade time, the non-test diff kept as the reference patch.
 
 ## Runs
 
-### R1 — non-aimee baselines, n=1 (2026-08-05)
+### R1: non-aimee baselines, n=1 (2026-08-05)
 
 13 of 14 tasks x {baseline, ponytail-instructions, ponytail-addon}. Lanes kept
 per task so a task's arms never straddle boxes (per-box cost variation is real).
@@ -45,25 +45,25 @@ simply smaller than the task's build. Any build-graded task needs this raised.
 With that task included the non-aimee baseline is 14/14 tasks:
 **baseline 8/14, ponytail-instructions 9/14, ponytail-addon 10/14.**
 
-### R2 — aimee arm, n=1 (2026-08-05)
+### R2: aimee arm, n=1 (2026-08-05)
 
 Aimee build under test: branch `agent/roundtable-review-bus`, commit
 `318e977383`, image `aimee-server:rt17`, recorded client sha256
 `b8478e75c55f9d92296723914d6f6968c517641098aff050238c163770cb7873`.
-Run on CT403 only — the sole box with configured delegates.
+Run on CT403 only, the sole box with configured delegates.
 
 Prior aimee cells (an older build) were archived to
 `/opt/bench/results/archive-aimee-20260805/` and are NOT part of this result.
 
 Results: pending.
 
-**Blocker hit on the first attempt — aimee-kb wedged.** Cell 1 failed its
+**Blocker hit on the first attempt, aimee-kb wedged.** Cell 1 failed its
 readiness gate with `aimee kb build` returning
 `knowledge service /v1/code/build did not respond`. The KB's own log showed only
 health checks plus a growing pool warning:
 
     db2.pool: member 0 leased 964195ms (> 300000ms ceiling)
-              by kb/http/kb_tls_serve.c:463 — missed lease_end?
+              by kb/http/kb_tls_serve.c:463, missed lease_end?
 
 Two members were stuck (0 at ~964s, 1 at ~327s) with the counters climbing
 monotonically, so leases taken on the mTLS serve path were never returned. The
@@ -81,7 +81,7 @@ reproduced on relaunch, and the mechanism is now known.
 **Root cause: a client timeout far shorter than the operation it invokes.**
 
 `kb_client_code_post_json()` posts `/v1/code/build` with
-`KB_CLIENT_REPAIR_TIMEOUT_MS`, which is `10 * 60 * 1000` — ten minutes
+`KB_CLIENT_REPAIR_TIMEOUT_MS`, which is `10 * 60 * 1000`, ten minutes
 (`modules/kb_client/kb_client.c:783`). A full corpus embed of one am_ task
 takes about 3.5 hours: measured here at 320 vectors/min, sustained, against a
 ~3000-file checkout. So:
@@ -90,11 +90,11 @@ takes about 3.5 hours: measured here at 320 vectors/min, sustained, against a
 2. the client gives up at 10 minutes and reports
    `knowledge service /v1/code/build did not respond`, failing the cell;
 3. the SERVER keeps building, still holding the db2 connection it leased at
-   `kb_tls_serve.c:463` — which is the >300s lease that keeps climbing;
+   `kb_tls_serve.c:463`, which is the >300s lease that keeps climbing;
 4. the next cell orphans another one, until the service stops answering.
 
 So the pool warning is a symptom, not the defect, and the begin/end pair is
-correct — the request simply outlives the caller with no server-side
+correct, the request simply outlives the caller with no server-side
 cancellation on client disconnect. Fixing it properly means one of: making the
 build asynchronous (submit + poll), cancelling server-side work when the client
 disconnects, or sizing the client timeout to the operation. A synchronous
@@ -107,7 +107,7 @@ true`, 2977 files indexed, ~382s/cell). That measures aimee with its code index
 and NO embeddings or semantic recall. Any claim from R2 must say so; the
 harness records the mode per cell precisely so the two are never conflated.
 
-## R2 blockers — aimee defects found while trying to run the arm
+## R2 blockers: aimee defects found while trying to run the arm
 
 None of these are the tasks failing. They are aimee failing to become ready.
 
@@ -120,18 +120,18 @@ server keeps building and keeps its db2 connection. Each cell orphans another.
 **2. The wedge that follows.** Orphaned builds hold leases taken at
 `kb/http/kb_tls_serve.c:463` well past the 300s ceiling, counters climbing
 monotonically, until the service stops answering `/v1/code/build` entirely.
-`lease_begin`/`lease_end` are correctly paired -- the request outlives its
+`lease_begin`/`lease_end` are correctly paired. The request outlives its
 caller and nothing cancels server-side work on client disconnect.
 
 **3. A scan can index nothing and only warn.** `aimee index scan` on a runner
 cell returned `Scan complete: 1 project(s), 0 file(s) re-indexed` with
 
-    warning: nothing was indexed — knowledge service saw no files at that path
-    — it may not be able to read it (aimee-kb runs in its own container and
+    warning: nothing was indexed (knowledge service saw no files at that path)
+it may not be able to read it (aimee-kb runs in its own container and
     does not share the server's filesystem)
 
 The warning is good, but its stated cause is wrong here: the KB container CAN
-read the path (verified by `docker exec` -- 50 entries, same as the workspace
+read the path (verified by `docker exec`, 50 entries, same as the workspace
 that indexed fine). So the real cause is unreported, and readiness then fails
 three assertions downstream with no reference to the warning that explains them.
 
@@ -142,7 +142,7 @@ configured))` while, seconds earlier and later, `aimee --json status` reports
 A green status that does not reflect the path the next command takes is worse
 than no status.
 
-**5. WITHDRAWN — this was my error, not a defect.** I claimed re-scanning an
+**5. WITHDRAWN. This was my error, not a defect.** I claimed re-scanning an
 existing project with `--force` indexes zero files. It does not: scanning the
 existing project `manualprobe` with `--force` re-indexed 2978 files. The
 zero-file scans I saw were the knowledge service being unavailable at that
@@ -152,7 +152,7 @@ rather than deleted because it was published as a finding.
 
 **5a. The real pattern: a heavy scan is followed by unavailability.** A 2978-file
 scan succeeds; the next scan of the same tree, seconds later, fails with
-`knowledge service unavailable` — with `aimee status` reporting `kb: ok`, the
+`knowledge service unavailable`, with `aimee status` reporting `kb: ok`, the
 container healthy, and the KB itself still answering `/v1/health` 200 every 10s
 throughout. So the KB is alive and the server's breaker is closed, yet the scan
 path cannot reach it. This is what actually blocks the arm: readiness scans one
@@ -170,7 +170,7 @@ even on that good index.
 
 ## R2 status: STOPPED, zero cells produced
 
-The aimee arm never produced a single cell. Not one task failed -- readiness
+The aimee arm never produced a single cell. Not one task failed, readiness
 never passed. Where it ended, honestly:
 
 **CT403's scan path is now wedged for every tree, and restart no longer clears
@@ -202,7 +202,7 @@ restart. Every health signal aimee exposes says fine; the operation fails.
   starve the pool, so the lease warnings do not explain it either.
 
 **Environment state:** CT403 is degraded. The non-aimee results are on 401/402/403
-under `/opt/bench/results/cells` and are unaffected -- they were produced before
+under `/opt/bench/results/cells` and are unaffected. They were produced before
 any of this and do not depend on the KB.
 
 ## Harness environment for the am_ corpus
@@ -239,11 +239,11 @@ Collected by `.synctmp/stage/collect.sh` into `cellmetrics.jsonl`.
 ## Caveats to carry into the article
 
 - n=1 everywhere. No confidence intervals; single-task flips are inside noise.
-- The aimee arm is not a like-for-like prompt comparison — it has machinery the
+- The aimee arm is not a like-for-like prompt comparison. It has machinery the
   others do not. Gated on the same hidden tests regardless.
 - Cost is provider-side: `estimated_credits` is a pure function of the codex
   token counts (uncached input, cached input, output) at the rates pinned in
   provenance. It does not depend on which box ran the cell, so cost comparisons
   are lane-matched by construction even when a task's arms ran on different
-  containers. `wall_seconds` is the exception — that is local machine time and
+  containers. `wall_seconds` is the exception. That is local machine time and
   should not be compared across boxes.

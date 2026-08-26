@@ -1,6 +1,6 @@
 # Proposal: Correction completeness and bounded reachability in a durable memory substrate
 
-- **State:** DONE — §3.1 through §3.10 implemented and validated 2026-08-25.
+- **State:** DONE. §3.1 through §3.10 implemented and validated 2026-08-25.
 - **Date:** 2026-08-25.
 - **Charter roles:** Constrain-Verify / Gate-Promote / Enforce.
 - **Thesis:** A memory substrate that already carries bi-temporal validity, an explicit
@@ -12,7 +12,7 @@
 ## 1. Problem
 
 Eleven defects share one root. In each, a mechanism *designed* to be complete is complete only
-over a prefix, a literal, or a single lane — and nothing asserts otherwise. Failure in this
+over a prefix, a literal, or a single lane, and nothing asserts otherwise. Failure in this
 class always looks like success: the query returns, the delete reports rows changed, the
 synthesized record carries high confidence.
 
@@ -25,8 +25,8 @@ remainder as live rows in the vector table. That table is keyed on a synthetic p
 identifier and carries no foreign key back to the record, so the cascade that reclaims child
 rows never reaches it. Orphans retain their payload and stay in the ANN index.
 
-A sweep for the shape — a fixed stack buffer passed as the bound to a list helper that fills
-to capacity and returns — finds three correctness-relevant sites: two reclamation paths with
+A sweep for the shape, a fixed stack buffer passed as the bound to a list helper that fills
+to capacity and returns, finds three correctness-relevant sites: two reclamation paths with
 different buffer sizes, and one safety check (§1.9). The remaining matches are legitimately
 bounded batches (search, ranking, maintenance) where truncation is intended.
 
@@ -35,8 +35,8 @@ bounded batches (search, ranking, maintenance) where truncation is intended.
 The substrate has suppression, invalidation, quarantine, erasure, scope filtering and
 lifecycle-filtered views. Nothing asserts that any of it survives contact with the *read
 path*; the closest existing assertion counts rows at the mutation layer. This matters more
-here than in a single-lane system because recall is plural — lexical, dense, graph expansion,
-episode cards, derived profile views, envelope assembly — and a value suppressed in one lane
+here than in a single-lane system because recall is plural, lexical, dense, graph expansion,
+episode cards, derived profile views, envelope assembly, and a value suppressed in one lane
 can re-enter through another.
 
 The test discipline matters as much as the tests. A harness that reimplements its caller
@@ -49,8 +49,8 @@ Rejection semantics are otherwise sound: the exact-match lookup deliberately doe
 by lifecycle, so a re-assertion finds the dead row, and revival is gated on actor authority
 rank. A lower-authority writer cannot revive what a higher-authority actor invalidated. The
 hole is the key. Identity is the raw triple, and no normalization occurs anywhere in the
-mutation seam — no case folding, no Unicode canonicalization, no whitespace collapse, no alias
-resolution — despite canonical entity infrastructure existing elsewhere. Two spellings of one
+mutation seam, no case folding, no Unicode canonicalization, no whitespace collapse, no alias
+resolution, despite canonical entity infrastructure existing elsewhere. Two spellings of one
 fact are two facts. The realistic trigger is not an adversary; it is the extractor emitting
 the same claim with different surface form on the next pass.
 
@@ -69,7 +69,7 @@ as the strongest available signal. That is popularity presented as truth, and it
 higher-confidence record ranks higher, is injected more, is restated more, recurs in more
 sessions.
 
-The substrate is otherwise careful here — confidence classes are provenance-keyed and set by
+The substrate is otherwise careful here, confidence classes are provenance-keyed and set by
 authority, durable promotion is gated on independent *evidence* count rather than retrieval
 count, and the reachability score decays on its own clock and is clamped. This one path is the
 exception that undoes the discipline of the rest. There is also no provenance ceiling: nothing
@@ -82,7 +82,7 @@ The same synthesis query selects candidates across the whole store with no works
 user or tenant predicate, grouping on a distinct-session count. A claim appearing in three
 sessions of three unrelated projects is promoted into the top tier and becomes globally
 reachable. Scope is enforced on the read path but omitted from this background job and from
-the derived rows it writes — the precise failure mode where scope is treated as a retrieval
+the derived rows it writes. The precise failure mode where scope is treated as a retrieval
 filter rather than part of identity. Combined with §1.5, cross-context recurrence is laundered
 into high-confidence global canon.
 
@@ -105,7 +105,7 @@ the one item from elsewhere that would have changed the answer.
 ### 1.9 Contradiction resolution never reaches the write path
 
 Contradictions are detected, logged, linked, given an epistemic directive and exposed through a
-resolve verb — a real disposition, not merely a flag. But detection reads only current content
+resolve verb, a real disposition, not merely a flag. But detection reads only current content
 for contradiction shape; it never consults whether *this pair* was already resolved. A
 resolution invisible to the write path is undone by the next extraction pass, so the same
 contradiction reappears, the queue refills, and the detector's precision becomes unmeasurable.
@@ -122,8 +122,8 @@ phrasing drifts. There is no per-unit state anywhere in the read path.
 
 Capture is synchronous; embedding, enrichment and graph projection are queued. The queue table
 records enough to derive the interval between a record becoming durable and becoming
-retrievable, but nothing surfaces it. This is the property a user notices first — "it forgot
-what I just said" — and the one property no comparable reviewed system measures at all.
+retrievable, but nothing surfaces it. This is the property a user notices first, "it forgot
+what I just said": and the one property no comparable reviewed system measures at all.
 
 ## 2. Existing machinery to reuse
 
@@ -139,8 +139,8 @@ what I just said" — and the one property no comparable reviewed system measure
 | Relation normalization | existing relation-name normalizer | Extend the discipline to subject and object |
 | Lineage | lineage insert/get written on derived records | Consult before derived writes |
 | Confidence classes | provenance-keyed, set by authority | Stop letting frequency set confidence |
-| Durable promotion | gated on independent evidence count | None — corroboration, not reinforcement |
-| Reachability score | separate column, decayed, clamped | None — already the right shape |
+| Durable promotion | gated on independent evidence count | None: corroboration, not reinforcement |
+| Reachability score | separate column, decayed, clamped | None: already the right shape |
 | Scope filters | scope tables and typed filters | Apply them in background/derived jobs too |
 | Conflict disposition | record / log / list / resolve verbs | Consult resolutions before re-raising |
 | Read stage | query presence + token floor + global toggle | Cheap, fail-open, logged relevance gate |
@@ -161,8 +161,8 @@ All three sites found by the sweep are repaired. A larger buffer is not a fix, a
 one is not the only one.
 
 The invariant: reclamation must never depend on a compile-time bound over a runtime-sized set.
-Where a batch bound is genuinely wanted — a maintenance sweep that should not hold a long
-transaction — the bound is legitimate but must be **logged when it truncates**, so a partial
+Where a batch bound is genuinely wanted. A maintenance sweep that should not hold a long
+transaction. The bound is legitimate but must be **logged when it truncates**, so a partial
 pass is never mistaken for a complete one.
 
 ### 3.2 Normalized rejection key
@@ -180,8 +180,8 @@ Two failure modes observed elsewhere are designed against explicitly:
 - **Normalization must be codepoint-preserving.** An implementation that keeps only ASCII
   alphanumerics reduces non-Latin values to the empty string, and every such fact then shares
   one key. It folds case and width; it does not filter character classes.
-- **No minimum length below which normalization is skipped.** Short values — dates, versions,
-  identifiers, region names — are exactly the values corrected most often.
+- **No minimum length below which normalization is skipped.** Short values, dates, versions,
+  identifiers, region names, are exactly the values corrected most often.
 
 The exact-value lookup matches the normalized key. The functional-relation incumbent scan
 matches it too; otherwise a rephrased incumbent escapes supersession and two spellings of one
@@ -189,7 +189,7 @@ functional fact coexist as current. The literal remains stored and displayed unc
 normalization decides *identity*, never presentation.
 
 Per the gateway's check order, normalization is step one and the tombstone check precedes the
-create/corroborate/supersede decision — not after it.
+create/corroborate/supersede decision, not after it.
 
 ### 3.3 Derived-write lineage suppression
 
@@ -205,7 +205,7 @@ being mandatory on derived writes.
 ### 3.4 Frequency must not set confidence; provenance sets a ceiling
 
 Cross-session synthesis stops deriving confidence from occurrence count. Recurrence is retained
-as what it is — a reachability and salience signal — and recorded as such. Confidence on a
+as what it is (a reachability and salience signal) and recorded as such. Confidence on a
 synthesized record is the conservative class the substrate already uses for unproven inference,
 and rises only through paths that gate on independent evidence or explicit approval.
 
@@ -213,7 +213,7 @@ A provenance ceiling caps how high a record may climb by where it came from, so 
 cannot become permanent canon regardless of how often it recurs.
 
 Stated as an invariant: **exposure does not validate, and time does not validate.** Four
-dimensions stay in four fields on four clocks — retrieval strength (reachability), epistemic
+dimensions stay in four fields on four clocks, retrieval strength (reachability), epistemic
 confidence (evidence), validity expiry (staleness), retention policy (authorization to delete).
 No one number may serve two. Telemetry is not truth: that a record is frequently retrieved
 proves it is discoverable, not that it is correct.
@@ -223,21 +223,21 @@ proves it is discoverable, not that it is correct.
 Every background job that selects candidates, and every derived record it writes, carries the
 same scope predicate the read path enforces. Recurrence is counted **within** a scope, never
 across unrelated ones. An unresolved scope is an error, not a permissive default meaning
-"all data" — the defaulting form is how private context leaks into shared state.
+"all data". The defaulting form is how private context leaks into shared state.
 
 ### 3.6 Turn-level recall gate
 
 A cheap deterministic decision runs before the expensive read, under three invariants:
 
-- **Much cheaper than what it guards** — a token count, a shape test, a known-entity lookup. A
+- **Much cheaper than what it guards**: a token count, a shape test, a known-entity lookup. A
   gate that costs what the operation costs is the operation with extra steps.
-- **Fail open** — a gate that errors performs the work. It must never silently produce
+- **Fail open**: a gate that errors performs the work. It must never silently produce
   confident, evidence-free answers.
 - **Log every skip with its reason**, on the existing retrieval event, so the skip rate is
   measurable before it is trusted.
 
-Both error directions are measured separately — retrievals wrongly skipped and retrievals
-wrongly performed — because they have different costs and one accuracy number hides the worse
+Both error directions are measured separately, retrievals wrongly skipped and retrievals
+wrongly performed, because they have different costs and one accuracy number hides the worse
 one. Nothing is gated that has not first been measured ungated; this slice therefore ships the
 gate **observing and logging by default**, with enforcement behind configuration.
 
@@ -265,23 +265,23 @@ rather than being overwritten by the next pipeline run. The detection scan is un
 
 Derive, from existing queue bookkeeping, the interval between a record becoming durable and
 becoming retrievable, and surface it as percentiles on existing health output. No new table and
-no new collection path — the timestamps are already written; only the summary is missing.
+no new collection path. The timestamps are already written; only the summary is missing.
 
 ### 3.10 Per-unit activation state
 
 Give each unit four independent parameters, evaluated as an ordered gate after relevance:
 
-1. **Sticky (N turns)** — having fired, stays eligible for N turns regardless of match, so a
+1. **Sticky (N turns)**: having fired, stays eligible for N turns regardless of match, so a
    rephrase does not drop the thread.
-2. **Cooldown (M turns)** — having fired, refuses to fire for M turns. The only mechanism that
+2. **Cooldown (M turns)**: having fired, refuses to fire for M turns. The only mechanism that
    prevents per-turn repetition.
-3. **Delay (N turns)** — will not fire until the conversation is N turns old, keeping
+3. **Delay (N turns)**: will not fire until the conversation is N turns old, keeping
    background material from leading.
-4. **Suppression** — withheld regardless of match; human-authorable.
+4. **Suppression**: withheld regardless of match; human-authorable.
 
 Evaluation order is fixed and documented: relevance → delay → cooldown → suppression → inject.
-Sticky and cooldown are the hysteresis proper — the condition for staying in is not the
-condition for getting in — and their precedence is stated rather than left emergent, because
+Sticky and cooldown are the hysteresis proper, the condition for staying in is not the
+condition for getting in, and their precedence is stated rather than left emergent, because
 ambiguity there is the commonest defect in existing implementations.
 
 Two constraints are load-bearing:
@@ -326,7 +326,7 @@ snapshot; diagnostics therefore report the exact turn the real pass used without
 conversation a second time. Store failure clears that snapshot and fails open.
 
 The shortcut not taken: holding activation in process memory. That is the failure this section
-already warns about — cooldowns reset silently on reload and the repetition returns with no visible
+already warns about, cooldowns reset silently on reload and the repetition returns with no visible
 cause, which looks exactly like the feature working. The contract work was the point, not an
 obstacle to route around.
 

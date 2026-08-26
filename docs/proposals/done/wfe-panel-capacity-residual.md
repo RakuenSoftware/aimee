@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implemented in Go and archived 2026-08-14.
+- **State:** DONE. Implemented in Go and archived 2026-08-14.
 - **Archived parent:**
   [`wfe-panel-cannot-seat-under-self-load.md`](../done/wfe-panel-cannot-seat-under-self-load.md).
 
@@ -48,7 +48,7 @@ backpressure.
 - `cd ../src && make -s lint`
 - Draft PR: https://github.com/RakuenSoftware/aimee/pull/2653
 
-### Live campaign transcript — 2026-08-14
+### Live campaign transcript: 2026-08-14
 
 ```text
 === RUN   TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable (x10)

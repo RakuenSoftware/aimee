@@ -7,7 +7,7 @@
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,
 > superseded by the current implementation, or fully represented by completed child slices.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Depends on:** P7 TPM2 PolicyNV anti-rollback, signed-HWM rotation, and
   steady-state key-use admission.
 
@@ -59,8 +59,8 @@ current callers but is not used for whole-vault rotation.
 - Before NV advances, abort is safe. After NV advances, the operation can only
   resume forward or remain sealed as `recovery_required`; old wraps are never
   reactivated.
-- A matching operation ID, generation, and artifact digest—not NV equality alone—
-  is required before database promotion.
+- A matching operation ID, generation, and artifact digest, not NV equality alone,
+is required before database promotion.
 - Intent and terminal state have deterministic, append-only WORM outbox records;
   external WORM delivery is idempotent and cannot turn an uncommitted transition
   into a reported success.
