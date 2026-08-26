@@ -4,6 +4,7 @@ set -euo pipefail
 
 SERVER_URL="${SERVER_URL:-https://localhost:8743}"
 BEARER="${BEARER:-}"
+REQUEST_TIMEOUT_SECONDS="${REQUEST_TIMEOUT_SECONDS:-60}"
 [[ -n "$BEARER" ]] || { echo "BEARER is required" >&2; exit 2; }
 AUTH=(-H "Authorization: Bearer ${BEARER}")
 IDENTITY=()
@@ -15,7 +16,7 @@ if [[ -n "${CLIENT_CERT:-}" || -n "${CLIENT_KEY:-}" ]]; then
 fi
 
 post() {
-  curl -fksS --max-time 20 "${IDENTITY[@]}" "${AUTH[@]}" \
+  curl -fksS --max-time "$REQUEST_TIMEOUT_SECONDS" "${IDENTITY[@]}" "${AUTH[@]}" \
     -H 'content-type: application/json' -X POST -d "$2" "$SERVER_URL$1"
 }
 fail() { echo "memory governance E2E: FAIL: $*" >&2; exit 1; }

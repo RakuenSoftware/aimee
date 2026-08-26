@@ -1,0 +1,11 @@
+{
+  "name": "turn integrity live fixture",
+  "prompt": "Return the exact token TURN_INTEGRITY_FIXTURE_DONE.",
+  "role": "explain",
+  "success_check": {
+    "type": "contains",
+    "value": "TURN_INTEGRITY_FIXTURE_DONE"
+  },
+  "max_turns": 3,
+  "max_latency_ms": 30000
+}

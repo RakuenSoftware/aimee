@@ -89,6 +89,20 @@ static int envelope_is_infra_fault(const rtp_envelope_t *e)
    return (!e->present || !e->parse_ok || e->has_error || e->lost_result);
 }
 
+rtp_action_t rtp_checker_decide(rtp_checker_failure_mode_t failure_mode,
+                                rtp_checker_verdict_t verdict)
+{
+   if (verdict == RTP_CHECKER_APPROVED)
+      return RTP_ACT_PASS;
+   if (verdict == RTP_CHECKER_REJECTED)
+      return RTP_ACT_REVISE;
+   if (failure_mode == RTP_CHECKER_FAIL_OPEN)
+      return RTP_ACT_PASS;
+   if (failure_mode == RTP_CHECKER_FAIL_CLOSED)
+      return RTP_ACT_REVISE;
+   return RTP_ACT_ESCALATE;
+}
+
 rtp_action_t rtp_loop_decide(const rtp_loop_cfg_t *cfg, const rtp_loop_state_t *st,
                              const rtp_envelope_t *e)
 {
@@ -102,10 +116,12 @@ rtp_action_t rtp_loop_decide(const rtp_loop_cfg_t *cfg, const rtp_loop_state_t *
           * ceiling; otherwise escalate (never silently spin, #29). */
          if (st && st->attempt_no < max_attempts)
             return RTP_ACT_RETRY;
-         return RTP_ACT_ESCALATE;
+         return rtp_checker_decide(cfg ? cfg->checker_failure_mode : RTP_CHECKER_DEGRADE,
+                                   RTP_CHECKER_ERROR);
       }
       /* captured-but-invalid engine evidence -> human (#38/#13). */
-      return RTP_ACT_ESCALATE;
+      return rtp_checker_decide(cfg ? cfg->checker_failure_mode : RTP_CHECKER_DEGRADE,
+                                RTP_CHECKER_SKIPPED);
    }
 
    rtp_donebar_result_t db = rtp_donebar_eval(cfg ? cfg->done_bar : RTP_DONEBAR_ZERO_BLOCKING, e,

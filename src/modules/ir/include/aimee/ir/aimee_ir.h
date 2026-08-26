@@ -55,9 +55,62 @@ typedef enum
    AIMEE_BLK_UNKNOWN   /* preserved via `raw` only */
 } aimee_block_type_t;
 
+/* Context authority is orthogonal to content type. A TEXT block may be a
+ * user task instruction, retrieved evidence, or an operator-only diagnostic;
+ * flattening those into one untyped prompt is an authority escalation. */
+typedef enum
+{
+   AIMEE_CTX_ORIGIN_UNKNOWN = 0,
+   AIMEE_CTX_ORIGIN_PLATFORM,
+   AIMEE_CTX_ORIGIN_OPERATOR,
+   AIMEE_CTX_ORIGIN_USER,
+   AIMEE_CTX_ORIGIN_TOOL,
+   AIMEE_CTX_ORIGIN_RETRIEVAL,
+   AIMEE_CTX_ORIGIN_MEMORY,
+   AIMEE_CTX_ORIGIN_MODEL
+} aimee_context_origin_t;
+
+typedef enum
+{
+   AIMEE_CTX_AUTH_DIAGNOSTIC = 0,
+   AIMEE_CTX_AUTH_EVIDENCE,
+   AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+   AIMEE_CTX_AUTH_POLICY
+} aimee_context_authority_t;
+
+typedef enum
+{
+   AIMEE_CTX_TRUST_UNKNOWN = 0,
+   AIMEE_CTX_TRUST_UNTRUSTED,
+   AIMEE_CTX_TRUST_UNVERIFIED,
+   AIMEE_CTX_TRUST_REVIEWED,
+   AIMEE_CTX_TRUST_VERIFIED
+} aimee_context_trust_t;
+
+typedef enum
+{
+   AIMEE_CTX_SENS_PUBLIC = 0,
+   AIMEE_CTX_SENS_INTERNAL,
+   AIMEE_CTX_SENS_CONFIDENTIAL,
+   AIMEE_CTX_SENS_RESTRICTED
+} aimee_context_sensitivity_t;
+
+typedef struct
+{
+   aimee_context_origin_t origin;
+   aimee_context_authority_t authority;
+   aimee_context_trust_t trust;
+   aimee_context_sensitivity_t sensitivity;
+   int model_visible;
+   char revision_domain[48];
+   char revision_scope[128];
+   unsigned long long revision_epoch;
+} aimee_context_meta_t;
+
 typedef struct
 {
    aimee_block_type_t type;
+   aimee_context_meta_t context;
    /* TEXT / THINKING */
    char *text;
    /* THINKING: the provider's opaque signature over the reasoning block. Anthropic
@@ -219,6 +272,25 @@ typedef struct
 void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
 void aimee_block_free_contents(aimee_block_t *b);
+
+/* Set metadata on one block. Content ownership is unchanged. */
+void aimee_ir_block_set_context(aimee_block_t *block, aimee_context_origin_t origin,
+                                aimee_context_authority_t authority, aimee_context_trust_t trust,
+                                aimee_context_sensitivity_t sensitivity, int model_visible,
+                                const char *revision_domain, const char *revision_scope,
+                                unsigned long long revision_epoch);
+
+/* Apply conservative defaults to blocks whose origin is still UNKNOWN. This is
+ * metadata-only and does not dirty provider payload bytes. Returns the number
+ * of blocks classified. */
+int aimee_ir_classify_context(aimee_request_t *request);
+
+/* Explicit authority-promotion policy. Model/tool/retrieval/memory content can
+ * never become task instructions or policy. User content may be a task
+ * instruction but never platform policy. */
+int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
+                                       aimee_context_authority_t from,
+                                       aimee_context_authority_t to);
 
 /* Build a canonical assistant response carrying a single TEXT block. This is the
  * bridge for producers that yield only flat text (the tmux/CLI TUI handler, whose

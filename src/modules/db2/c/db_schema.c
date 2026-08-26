@@ -682,8 +682,8 @@ static int kb_meta_set(void *conn, const char *key, const char *value)
 }
 
 /* unified-llm-container §2: record/check the EMBEDDER model identity (repo@sha)
- * alongside the dim, so a same-dim different-model swap (pplx-embed 1024 ↔
- * Qwen3-0.6B 1024) is refused rather than silently mixing vector spaces.
+ * alongside the dim, so a same-dim different-model swap is refused rather than
+ * silently mixing vector spaces.
  *   - model_id NULL/empty   -> no-op (return 0): a deployment whose embedder
  *     reports no identity (the legacy torch embedder) is unaffected.
  *   - kb_meta.schema_embedder_model_id absent or == model_id -> record / match.

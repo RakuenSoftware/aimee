@@ -65,6 +65,11 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
 
+/* Bind a successful execution-policy decision to the next dispatch on this
+ * thread. External mutations and unknown remote tools refuse execution without
+ * this trusted caller signal; model-provided arguments cannot set it. */
+void agent_tools_set_effect_authorized(int authorized);
+
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);
 struct cJSON *build_tools_array_responses(void);
@@ -223,7 +228,8 @@ typedef struct
    const char *actor;       /* principal (session id / role), captured on the dispatch thread */
    const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
    const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
-                            /* "timeout" | "unknown_tool" | "bad_args" | "policy"          */
+                            /* "timeout" | "unknown_tool" | "bad_args" | "policy" |       */
+                            /* "effect_contract" | "precondition" | "postcondition"        */
    const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
                             /* "outbound:sse" | "served"                    */
 } agent_tool_completion_t;

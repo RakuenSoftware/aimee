@@ -85,6 +85,29 @@ extern "C"
       RTP_ACT_ESCALATE = 3 /* ceiling/cost/invalid-evidence -> escalate to human */
    } rtp_action_t;
 
+   /* A checker contributes only a typed verdict to the controller. Its prompt,
+    * rationale, and model transcript are deliberately outside this interface so
+    * they cannot become hidden control instructions. */
+   typedef enum
+   {
+      RTP_CHECKER_APPROVED = 0,
+      RTP_CHECKER_REJECTED,
+      RTP_CHECKER_SKIPPED,
+      RTP_CHECKER_ERROR
+   } rtp_checker_verdict_t;
+
+   typedef enum
+   {
+      RTP_CHECKER_DEGRADE = 0, /* require a human decision */
+      RTP_CHECKER_FAIL_CLOSED, /* block automatic progress */
+      RTP_CHECKER_FAIL_OPEN    /* explicitly permit progress */
+   } rtp_checker_failure_mode_t;
+
+   /* Map the checker verdict through an explicit failure policy. Approval and
+    * rejection are invariant; only SKIPPED/ERROR consult failure_mode. */
+   rtp_action_t rtp_checker_decide(rtp_checker_failure_mode_t failure_mode,
+                                   rtp_checker_verdict_t verdict);
+
    typedef struct
    {
       const char *done_bar;
@@ -92,6 +115,7 @@ extern "C"
       int max_attempts_per_pass; /* >= 1 */
       double max_phase_cost_usd; /* per-phase cap; 0 = unbounded */
       double max_total_cost_usd; /* whole-pipeline cap; 0 = unbounded (#46) */
+      rtp_checker_failure_mode_t checker_failure_mode;
    } rtp_loop_cfg_t;
 
    typedef struct

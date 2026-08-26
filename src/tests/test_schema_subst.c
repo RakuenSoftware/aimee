@@ -1,7 +1,7 @@
 /* test_schema_subst.c: the DB2 schema is shipped with a __EMBED_DIM__
  * placeholder in its vector embedding columns so a deployment can run a single
- * embedder at its own dimension (768 for the default nomic embedder; older
- * deployments may still record the Qwen3 ladder's 1024 or 2560).
+ * embedder at its own dimension (384 for the active contract; migrated
+ * deployments may retain another recorded width until they are re-embedded).
  * db_apply_schema_postgres() substitutes the configured dimension before
  * handing the DDL to Postgres. These tests capture the SQL the apply path would
  * execute and assert the substitution is complete and correct. */

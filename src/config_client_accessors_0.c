@@ -317,6 +317,20 @@ int config_set_autonomy_auto_resume_cap_parks(int value)
 
 int config_mcp_client_count(void)
 {
+   /* mcp_clients is the documented source of truth. The process config module
+    * publishes that array directly, while the legacy struct-only loader also
+    * published a derived mcp_client_count scalar. Depending on the scalar makes
+    * valid YAML look empty because its default remains zero. */
+   cJSON *clients = config_client_value_copy("mcp_clients");
+   if (cJSON_IsArray(clients))
+   {
+      int count = cJSON_GetArraySize(clients);
+      cJSON_Delete(clients);
+      return count > CONFIG_MCP_MAX_CLIENTS ? CONFIG_MCP_MAX_CLIENTS : count;
+   }
+   cJSON_Delete(clients);
+
+   /* Compatibility for snapshots produced by pre-array config providers. */
    double value = 0;
    (void)config_client_read_number("mcp_client_count", &value);
    return (int)value;

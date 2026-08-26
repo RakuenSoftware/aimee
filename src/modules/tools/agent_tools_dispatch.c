@@ -19,7 +19,6 @@ const char *delegation_active_id(void)
 {
    return NULL;
 }
-
 static __thread char g_dispatch_role[64];
 static agent_tool_classifier_fn g_tool_classifier;
 
@@ -27,7 +26,6 @@ void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
 {
    g_tool_classifier = classifier;
 }
-
 void agent_tools_set_dispatch_role(const char *role)
 {
    if (role && role[0])
@@ -35,7 +33,6 @@ void agent_tools_set_dispatch_role(const char *role)
    else
       g_dispatch_role[0] = '\0';
 }
-
 const char *agent_tools_dispatch_role(void)
 {
    return g_dispatch_role[0] ? g_dispatch_role : NULL;
@@ -87,6 +84,7 @@ static void td_outcome_reset(void)
    g_td_reason = "";
    g_td_mode = "internal";
    g_td_explicit = 0;
+   agent_tools_effect_reset();
 }
 /* Record a definitive verdict at a return path (refusal, or a known error). */
 static void td_outcome_set(const char *verdict, const char *reason)
@@ -103,14 +101,6 @@ static void td_outcome_set(const char *verdict, const char *reason)
  * stderr beginning "refused:" is the fail-closed sandbox refusal. Only the numeric
  * exit_code, the status string, and a stderr PREFIX are read — no content is
  * stored; the parsed tree is freed. */
-static int is_exec_tool(const char *name)
-{
-   if (!g_tool_classifier)
-      return 0;
-   int classification = 0;
-   return g_tool_classifier(name, &classification) == 0 && classification == AIMEE_TOOL_CLASS_EXEC;
-}
-
 static void td_classify_exec_result(const char *result)
 {
    cJSON *r = cJSON_Parse(result);
@@ -1338,10 +1328,38 @@ static char *td_search_memory(cJSON *args, const char *name, const char *dispatc
    {
       memory_t facts[20];
       int count = kb_client_memory_find_facts(q->valuestring, 20, facts, 20);
+      kb_client_result_status_t status = kb_client_last_result_status();
       char buf[8192];
       int pos = 0;
       if (count <= 0)
-         pos += snprintf(buf, sizeof(buf), "No facts found for '%s'", q->valuestring);
+      {
+         td_retrieval_outcome_t outcome = TD_RETRIEVAL_FAILED;
+         const char *message = "memory retrieval failed";
+         if (status == KB_CLIENT_RESULT_EMPTY)
+         {
+            outcome = TD_RETRIEVAL_EMPTY;
+            message = "no local memory facts matched";
+         }
+         else if (status == KB_CLIENT_RESULT_ABSTAINED || status == KB_CLIENT_RESULT_STALE)
+         {
+            outcome = TD_RETRIEVAL_DEGRADED;
+            message = status == KB_CLIENT_RESULT_STALE ? "memory evidence is stale"
+                                                       : "memory retrieval abstained";
+         }
+         else if (status == KB_CLIENT_RESULT_UNAUTHORIZED)
+            message = "memory retrieval unauthorized";
+         else if (status == KB_CLIENT_RESULT_UNAVAILABLE)
+            message = "memory service unavailable";
+         char *contract =
+             td_render_retrieval_continuation(outcome, "memory", q->valuestring, message);
+         if (outcome == TD_RETRIEVAL_FAILED)
+            pos += snprintf(buf, sizeof(buf), "error: %s", message);
+         else
+            pos += snprintf(buf, sizeof(buf), "%s", message);
+         if (contract && pos < (int)sizeof(buf) - 2)
+            pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\n%s", contract);
+         free(contract);
+      }
       else
       {
          pos += snprintf(buf, sizeof(buf), "Found %d fact(s):\n\n", count);
@@ -2002,7 +2020,9 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
     * exit_code/status, not a prefix); every other tool signals failure with a
     * leading "error:" marker — read only that marker, never the rest of the
     * string, so no tool output can reach the hook. */
-   if (!g_td_explicit && result && is_exec_tool(name ? name : ""))
+   if (!g_td_explicit && result &&
+       agent_tools_effect_classification(name ? name : "", g_tool_classifier) ==
+           AIMEE_TOOL_CLASS_EXEC)
       td_classify_exec_result(result);
    if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
       td_outcome_set("timeout", "timeout");
@@ -2010,6 +2030,7 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
+   agent_tools_effect_finish(g_td_verdict, g_td_reason);
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
@@ -2272,6 +2293,17 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
+   /* Contract the effective call only after mechanical policy rewrites have
+    * settled its target and arguments, and always before the side effect. */
+   int effect_classification = agent_tools_effect_classification(name, g_tool_classifier);
+   agent_tools_effect_propose(name, args, effect_classification);
+   if (agent_tools_effect_validate_and_execute(name, args, effect_classification) != 0)
+   {
+      cJSON_Delete(args);
+      td_outcome_set("refused", "effect_contract");
+      return safe_strdup("error: effect contract refused execution: missing target or proposal "
+                         "drift");
+   }
    char *result = NULL;
 
    if (strcmp(name, "bash") == 0)
@@ -2401,7 +2433,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       {
          /* err_buf is the MCP server's own error text and may echo argument
           * values; classify to an enum, never let it near the audit fields. */
-         td_outcome_set("error", "tool_error");
+         if (agent_tools_effect_mcp_failure_is_timeout(err_buf))
+            td_outcome_set("timeout", "timeout");
+         else
+            td_outcome_set("error", "tool_error");
          char err[384];
          snprintf(err, sizeof(err), "error: %s mcp tool failed: %s", local ? "remote" : "kb-hosted",
                   err_buf[0] ? err_buf : "unknown error");
@@ -2430,6 +2465,28 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       else
          snprintf(err, sizeof(err), "error: unknown tool '%s'", name);
       result = safe_strdup(err);
+   }
+
+   if (agent_tools_effect_postcondition_pending() && result)
+   {
+      if (strncmp(result, "error:", 6) == 0)
+      {
+         /* The wrapper classifies the ordinary tool failure. */
+      }
+      else if (!agent_tools_effect_result_claims_success(result))
+         td_outcome_set("error", "precondition");
+      else
+      {
+         int verified = agent_tools_effect_verify_file_postcondition(name, args, dispatch_cwd);
+         agent_tools_effect_record_postcondition(verified, "readback");
+         if (!verified)
+         {
+            free(result);
+            result = safe_strdup("error: effect postcondition failed after mutation; inspect the "
+                                 "target before retrying");
+            td_outcome_set("error", "postcondition");
+         }
+      }
    }
 
    cJSON_Delete(args);

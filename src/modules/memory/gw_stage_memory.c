@@ -18,6 +18,7 @@
 #include "aimee_session_guidance.h"
 #include "ingress_preinject.h"
 #include <aimee/ir/aimee_ir.h>
+#include <aimee/core/turn_integrity.h>
 #include "cJSON.h"
 #include "log.h"
 #include <assert.h>
@@ -30,6 +31,28 @@
 
 /* Turn-level recall gate; defined below next to its mode/classifier helpers. */
 static int recall_gate_skip_turn(const char *query);
+
+static int ir_append_context_block(aimee_request_t *ir, char *owned_text,
+                                   aimee_context_origin_t origin,
+                                   aimee_context_authority_t authority, aimee_context_trust_t trust,
+                                   const char *revision_domain, const char *revision_scope,
+                                   unsigned long long revision_epoch)
+{
+   if (!ir || !owned_text)
+      return 0;
+   aimee_block_t *grown = realloc(ir->system, (size_t)(ir->n_system + 1) * sizeof *grown);
+   if (!grown)
+      return 0;
+   ir->system = grown;
+   aimee_block_t *block = &ir->system[ir->n_system];
+   memset(block, 0, sizeof *block);
+   block->type = AIMEE_BLK_TEXT;
+   block->text = owned_text;
+   aimee_ir_block_set_context(block, origin, authority, trust, AIMEE_CTX_SENS_INTERNAL, 1,
+                              revision_domain, revision_scope, revision_epoch);
+   ir->n_system++;
+   return 1;
+}
 
 /* Recall-query buffer for the IR transform. The query only feeds semantic KB
  * recall, so bounding an over-long last-user message here is acceptable (it does
@@ -163,38 +186,30 @@ int ir_stage_memory(aimee_request_t *ir, void *ud)
    if (!env && !session_start)
       return 0; /* nothing to say this turn: byte-identical no-op */
 
+   int changed = 0;
    if (session_start)
    {
-      /* Guidance first, then this turn's retrieval block if there is one. */
-      size_t n = sizeof(AIMEE_GUIDANCE_BLOCK) + (env ? strlen(env) + 1 : 0);
-      char *both = malloc(n);
-      if (!both)
-      {
-         free(env);
-         return 0;
-      }
-      snprintf(both, n, "%s%s%s", AIMEE_GUIDANCE_BLOCK, env ? "\n" : "", env ? env : "");
-      free(env);
-      env = both;
+      /* Guidance is code-owned task instruction. Keep it in a distinct block
+       * from recalled evidence so provider rendering cannot erase the authority
+       * boundary inside the canonical IR. */
+      char *guidance = strdup(AIMEE_GUIDANCE_BLOCK);
+      if (guidance && ir_append_context_block(ir, guidance, AIMEE_CTX_ORIGIN_PLATFORM,
+                                              AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                              AIMEE_CTX_TRUST_VERIFIED, NULL, NULL, 0))
+         changed = 1;
+      else
+         free(guidance);
    }
-
-   /* Append the envelope as a trailing system TEXT block. Grow the ordered block
-    * array by one; the new block owns `env` (freed by aimee_request_free) and
-    * carries no cache_control / raw sidecar so the backend serializes it from the
-    * typed field per wire — collapsing the old three per-wire arms into one. */
-   aimee_block_t *grown = realloc(ir->system, (size_t)(ir->n_system + 1) * sizeof *grown);
-   if (!grown)
+   if (env)
    {
-      free(env);
-      return 0;
+      unsigned long long epoch = ti_knowledge_epoch_current("knowledge", "global");
+      if (ir_append_context_block(ir, env, AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                                  AIMEE_CTX_TRUST_UNVERIFIED, "knowledge", "global", epoch))
+         changed = 1;
+      else
+         free(env);
    }
-   ir->system = grown;
-   aimee_block_t *b = &ir->system[ir->n_system];
-   memset(b, 0, sizeof *b);
-   b->type = AIMEE_BLK_TEXT;
-   b->text = env;
-   ir->n_system += 1;
-   return 1; /* changed typed fields -> runner sets ir->mutated */
+   return changed; /* changed typed fields -> runner sets ir->mutated */
 }
 
 /* Place the caller-resolved persona payload on the first user message. */

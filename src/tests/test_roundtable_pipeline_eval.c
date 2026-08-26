@@ -146,7 +146,7 @@ static void test_chunk_aggregate(void)
 
 static void test_loop_decide(void)
 {
-   rtp_loop_cfg_t cfg = {RTP_DONEBAR_ZERO_BLOCKING, 0, 2, 0.0, 0.0};
+   rtp_loop_cfg_t cfg = {RTP_DONEBAR_ZERO_BLOCKING, 0, 2, 0.0, 0.0, RTP_CHECKER_DEGRADE};
    rtp_loop_state_t st = {1, 1, 0.0, 0.0, 0};
 
    /* met -> pass */
@@ -173,7 +173,7 @@ static void test_loop_decide(void)
    assert(rtp_loop_decide(&cfg, &st, &e) == RTP_ACT_ESCALATE);
 
    /* pass ceiling reached while blocked -> escalate, never auto-pass. */
-   rtp_loop_cfg_t capped = {RTP_DONEBAR_ZERO_BLOCKING, 3, 2, 0.0, 0.0};
+   rtp_loop_cfg_t capped = {RTP_DONEBAR_ZERO_BLOCKING, 3, 2, 0.0, 0.0, RTP_CHECKER_DEGRADE};
    rtp_loop_state_t at_cap = {3, 1, 0.0, 0.0, 0};
    e = base_valid();
    e.blocking_count = 1;
@@ -183,19 +183,38 @@ static void test_loop_decide(void)
    assert(rtp_loop_decide(&capped, &below, &e) == RTP_ACT_REVISE);
 
    /* phase cost backstop while blocked -> escalate. */
-   rtp_loop_cfg_t costcap = {RTP_DONEBAR_ZERO_BLOCKING, 0, 2, 1.0, 0.0};
+   rtp_loop_cfg_t costcap = {RTP_DONEBAR_ZERO_BLOCKING, 0, 2, 1.0, 0.0, RTP_CHECKER_DEGRADE};
    rtp_loop_state_t spent = {1, 1, 1.5, 0.0, 0};
    assert(rtp_loop_decide(&costcap, &spent, &e) == RTP_ACT_ESCALATE);
 
    /* whole-pipeline total cost cap while blocked -> escalate (#46), even when the
     * per-phase cap is unbounded. */
-   rtp_loop_cfg_t totalcap = {RTP_DONEBAR_ZERO_BLOCKING, 0, 2, 0.0, 5.0};
+   rtp_loop_cfg_t totalcap = {RTP_DONEBAR_ZERO_BLOCKING, 0, 2, 0.0, 5.0, RTP_CHECKER_DEGRADE};
    rtp_loop_state_t spent_total = {1, 1, 1.0, 6.0, 0};
    assert(rtp_loop_decide(&totalcap, &spent_total, &e) == RTP_ACT_ESCALATE);
    /* under the total cap -> revise. */
    rtp_loop_state_t under_total = {1, 1, 1.0, 3.0, 0};
    assert(rtp_loop_decide(&totalcap, &under_total, &e) == RTP_ACT_REVISE);
    printf("  loop decide: ok\n");
+}
+
+static void test_checker_isolation_and_failure_policy(void)
+{
+   /* A real verdict is never weakened by the failure policy. */
+   assert(rtp_checker_decide(RTP_CHECKER_FAIL_OPEN, RTP_CHECKER_REJECTED) == RTP_ACT_REVISE);
+   assert(rtp_checker_decide(RTP_CHECKER_FAIL_CLOSED, RTP_CHECKER_APPROVED) == RTP_ACT_PASS);
+
+   /* Missing/failed checkers have explicit, inspectable behavior. */
+   assert(rtp_checker_decide(RTP_CHECKER_DEGRADE, RTP_CHECKER_ERROR) == RTP_ACT_ESCALATE);
+   assert(rtp_checker_decide(RTP_CHECKER_FAIL_CLOSED, RTP_CHECKER_SKIPPED) == RTP_ACT_REVISE);
+   assert(rtp_checker_decide(RTP_CHECKER_FAIL_OPEN, RTP_CHECKER_ERROR) == RTP_ACT_PASS);
+
+   rtp_loop_cfg_t cfg = {RTP_DONEBAR_ZERO_BLOCKING, 0, 1, 0.0, 0.0, RTP_CHECKER_FAIL_CLOSED};
+   rtp_loop_state_t st = {1, 1, 0.0, 0.0, 0};
+   rtp_envelope_t unavailable = base_valid();
+   unavailable.present = 0;
+   assert(rtp_loop_decide(&cfg, &st, &unavailable) == RTP_ACT_REVISE);
+   printf("  checker isolation/failure policy: ok\n");
 }
 
 static void test_gate_authority(void)
@@ -218,6 +237,7 @@ int main(void)
    test_done_bars();
    test_chunk_aggregate();
    test_loop_decide();
+   test_checker_isolation_and_failure_policy();
    test_gate_authority();
    printf("test_roundtable_pipeline_eval: all passed\n");
    return 0;

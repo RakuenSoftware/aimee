@@ -44,6 +44,7 @@
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
+#include "turn_integrity_audit_bridge.h"  /* route turn-contract observations onto the audit bus */
 #include "obs_bus_adapter.h"              /* bind shared bus events to server-owned durable sinks */
 #include "module_routing_adapter.h"       /* route selection through the local routing process */
 #include "module_stage_adapters.h"        /* process-owned stage decisions */
@@ -206,6 +207,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
    sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */
    memory_audit_bridge_install();  /* route server-side memory mutations onto the audit bus */
    tool_completion_audit_bridge_install(); /* route tool-dispatch outcomes onto the audit bus */
+   turn_integrity_audit_bridge_install();  /* route turn-contract observations onto the audit bus */
 
    /* Credential env vars are deployment bootstrap transport (for example a
     * Kubernetes Secret), never runtime storage. Seal and unset them before any
