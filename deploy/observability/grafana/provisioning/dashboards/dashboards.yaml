@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Aimee
+    orgId: 1
+    folder: Aimee
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

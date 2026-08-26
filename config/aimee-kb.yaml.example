@@ -10,6 +10,23 @@
 # postgres:///aimee_shared with the pgvector extension enabled.
 db2_url: "postgres:///aimee_shared"
 
+# ── Observability (disabled by default) ──────────────────────────────────
+# Set AIMEE_KB_OBSERVABILITY_LISTEN (or the generic
+# AIMEE_OBSERVABILITY_LISTEN) or pass --observability-listen. Accepted values:
+#   tcp://127.0.0.1:9464
+#   unix:///run/aimee/kb-metrics.sock
+# Plain TCP is loopback-only. A non-loopback listener requires TLS plus mTLS
+# and/or a file-backed bearer; see docs/runbooks/observability-security.md.
+# Preferred shared server/KB settings include:
+#   AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE=/run/pki/kb-chain.pem
+#   AIMEE_KB_OBSERVABILITY_TLS_KEY=/run/pki/kb-key.pem
+#   AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA=/run/pki/prometheus-client-ca.pem
+#   AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE=/run/secrets/metrics-token
+# The legacy KB-only SHA-256 bearer hash remains supported. If a token file is
+# also supplied, it must hash to this value:
+# telemetry:
+#   metrics_token: "<64-lowercase-hex-sha256>"
+
 # ── Public /v1 HTTP API ──────────────────────────────────────────────────
 # http_port = 0 (default) serves /v1 over the Unix socket only (filesystem
 # permission auth, no token). Set a port to expose the TCP listener; it

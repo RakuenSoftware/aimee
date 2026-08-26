@@ -653,6 +653,8 @@ ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 # name; the name must still appear as a literal at the call site.
 ENV_BY_NAME_RE = re.compile(
     r'config_sidecar_endpoint\([^;]*?"(AIMEE_[A-Z0-9_]+)"', re.S)
+ENV_PAIR_BY_NAME_RE = re.compile(
+    r'service_env_or_generic\(\s*"(AIMEE_[A-Z0-9_]+)"\s*,\s*"(AIMEE_[A-Z0-9_]+)"', re.S)
 
 # Credential names consumed by the generic first-boot sealer are intentionally
 # not read through individual getenv() calls. Keep their deployment contract in
@@ -1091,6 +1093,8 @@ def parse_env_vars():
             found.add(m.group(1))
         for m in ENV_BY_NAME_RE.finditer(text):
             found.add(m.group(1))
+        for m in ENV_PAIR_BY_NAME_RE.finditer(text):
+            found.update(m.groups())
     return found | ENV_DYNAMIC
 
 

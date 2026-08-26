@@ -1135,6 +1135,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_management_cert_storage.c
     ${AIMEE_SRC_DIR}/kb/kb_management_cert_lifecycle.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_metrics_listener.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_content_policy.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_entry.c
     # kb_http.c reads request bodies through these scanners; both build systems

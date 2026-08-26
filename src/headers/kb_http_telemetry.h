@@ -27,6 +27,17 @@ extern "C"
     * path (those routes are then org-admin only). Call once before the listener. */
    void kb_http_set_telemetry_token(const char *hash);
 
+   /* Gate scrape/export and metric-ingest routes. Disabled is the process
+    * default; the KB entry point enables them only for an explicit listener. */
+   void kb_http_set_telemetry_enabled(int enabled);
+
+   /* Render one scrape for the dedicated observability listener. trusted_transport
+    * means an owner-only Unix socket, a loopback bind, or verified mTLS. When
+    * require_bearer is set, the configured bearer is required in addition to that
+    * transport. Returns an HTTP status and writes a Prometheus body or JSON error. */
+   int kb_http_telemetry_scrape(const char *presented, int trusted_transport, int require_bearer,
+                                char *out_buf, int out_cap);
+
    /* Pre-bearer-gate scrape/ingest TOKEN path for GET /v1/metrics + POST
     * /v1/telemetry/metrics. presented is the raw bearer the caller sent (may be
     * NULL/empty); the expected hash is the module's configured token (set via

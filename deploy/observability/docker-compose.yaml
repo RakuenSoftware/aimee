@@ -1,0 +1,60 @@
+services:
+  otel-collector:
+    image: ${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.156.0}
+    command: [--config=/etc/otelcol/config.yaml]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - 127.0.0.1:4317:4317
+      - 127.0.0.1:4318:4318
+    depends_on: [loki, tempo]
+    restart: unless-stopped
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0}
+    command: [--config.file=/etc/prometheus/prometheus.yaml]
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./prometheus-rules.yaml:/etc/prometheus/rules/aimee.yaml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - 127.0.0.1:9090:9090
+    depends_on: [otel-collector]
+    restart: unless-stopped
+
+  loki:
+    image: ${LOKI_IMAGE:-grafana/loki:3.5.3}
+    command: [-config.file=/etc/loki/config.yaml]
+    volumes:
+      - ./loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/var/loki
+    restart: unless-stopped
+
+  tempo:
+    image: ${TEMPO_IMAGE:-grafana/tempo:2.8.2}
+    command: [-config.file=/etc/tempo/config.yaml]
+    volumes:
+      - ./tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:12.1.1}
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - 127.0.0.1:3000:3000
+    depends_on: [prometheus, loki, tempo]
+    restart: unless-stopped
+
+volumes:
+  grafana-data:
+  loki-data:
+  prometheus-data:
+  tempo-data:
