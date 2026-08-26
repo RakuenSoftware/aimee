@@ -199,9 +199,16 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
    if (!path || !path[0])
       return 0;
    /* legacy_config_read here mirrors the per-call pattern already used elsewhere in
-    * this file (it is cheap and reads the cached config). Default-off: when the
-    * flag is unset — or the config is unreadable, which leaves the default 0 —
-    * this is a no-op, matching the feature's opt-in nature. */
+    * this file (it is cheap and reads the cached config).
+    *
+    * Default ON, and an unreadable config ENFORCES. This comment used to say the
+    * opposite -- "default-off ... matching the feature's opt-in nature" -- while
+    * the same function said "(default ON)" twenty lines below, cli_attention_guard.c
+    * called isolation "the only safe default", and cmd_hooks.c documented the sister
+    * dial as "an unreadable config reads as ENFORCING". Four statements of intent,
+    * one of them the odd one out, and the accessor implemented the odd one.
+    *
+    * Only an explicit `require_session_worktree: false` turns it off. */
    if (!config_require_session_worktree())
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
