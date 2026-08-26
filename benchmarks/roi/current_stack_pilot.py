@@ -159,9 +159,19 @@ def usage_buckets(response: dict[str, Any]) -> dict[str, int]:
     prompt = int(usage.get("prompt_tokens") or 0)
     completion = int(usage.get("completion_tokens") or 0)
     total = int(usage.get("total_tokens") or prompt + completion)
+    details = usage.get("prompt_tokens_details") or {}
+    cached = int(details.get("cached_tokens") or 0)
     if prompt < 1 or completion < 0 or total != prompt + completion:
         raise RuntimeError(f"unreconciled provider usage object: {usage}")
-    return {"input_tokens": prompt, "output_tokens": completion, "total_tokens": total}
+    if cached < 0 or cached > prompt:
+        raise RuntimeError(f"invalid cache-read bucket in provider usage object: {usage}")
+    return {
+        "input_tokens": prompt,
+        "input_uncached_tokens": prompt - cached,
+        "input_cached_tokens": cached,
+        "output_tokens": completion,
+        "total_tokens": total,
+    }
 
 
 def summarize(calls: list[dict[str, Any]]) -> dict[str, Any]:
@@ -175,6 +185,13 @@ def summarize(calls: list[dict[str, Any]]) -> dict[str, Any]:
             "resolved": resolved,
             "resolution_rate": resolved / len(rows) if rows else 0,
             "input_tokens": sum(row["usage"]["input_tokens"] for row in rows),
+            "input_uncached_tokens": sum(
+                row["usage"].get("input_uncached_tokens", row["usage"]["input_tokens"])
+                for row in rows
+            ),
+            "input_cached_tokens": sum(
+                row["usage"].get("input_cached_tokens", 0) for row in rows
+            ),
             "output_tokens": sum(row["usage"]["output_tokens"] for row in rows),
             "total_tokens": total,
             "tokens_per_resolved_task": total / resolved if resolved else None,

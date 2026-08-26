@@ -1,7 +1,7 @@
 # Proposal: Current-stack ROI experiment suite
 
-- **State:** PENDING. Design only; this PR makes no new ROI claim and runs no
-  provider-backed cells.
+- **State:** PENDING. The staged design and a bounded local-Qwen calibration
+  pilot are implemented; this PR makes no confirmatory ROI claim.
 - **Date:** 2026-08-26
 - **Owner:** benchmark and product-evidence maintainers
 - **Baseline reviewed:** `origin/testing` at
@@ -40,6 +40,16 @@ one flattering percentage:
 No result may use frontier-token displacement, estimated avoided tokens, or a
 reduction ledger as a substitute for total realized cost per correct outcome.
 Those remain useful diagnostic panels.
+
+## Execution status
+
+The first bounded pilot is recorded under
+`benchmarks/results/roi/`. It exercises the production Go economizer handler
+in-process against paired direct Qwen3.8 calls and validates the result schema,
+budget preflight, activation trigger, byte-identical off path, provider-usage
+reconciliation, and exact-answer grading. It is intentionally labelled
+`pilot_only`: the module bus, recovery loop, delegation, natural coding tasks,
+and a billable provider are not yet in its execution boundary.
 
 ## Why the existing results are insufficient
 

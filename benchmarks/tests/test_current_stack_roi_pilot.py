@@ -1,6 +1,6 @@
 import unittest
 
-from benchmarks.roi.current_stack_pilot import build_tasks, exact_grade, summarize
+from benchmarks.roi.current_stack_pilot import build_tasks, exact_grade, summarize, usage_buckets
 
 
 class CurrentStackROIPilotTests(unittest.TestCase):
@@ -40,6 +40,23 @@ class CurrentStackROIPilotTests(unittest.TestCase):
         self.assertTrue(result["quality_gate_equal_resolved"])
         self.assertTrue(result["all_calls_reconciled"])
         self.assertTrue(result["unique_provider_response_ids"])
+
+    def test_usage_buckets_preserve_cache_reads(self):
+        result = usage_buckets({"usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 5,
+            "total_tokens": 105,
+            "prompt_tokens_details": {"cached_tokens": 40},
+        }})
+        self.assertEqual(result["input_uncached_tokens"], 60)
+        self.assertEqual(result["input_cached_tokens"], 40)
+        with self.assertRaises(RuntimeError):
+            usage_buckets({"usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 1,
+                "total_tokens": 11,
+                "prompt_tokens_details": {"cached_tokens": 20},
+            }})
 
 
 if __name__ == "__main__":

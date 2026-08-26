@@ -1,0 +1,70 @@
+# Current-stack economizer ROI pilot
+
+This is a calibration result, not a confirmatory product claim. It exercises
+the production Go economizer handler in process, then sends paired original and
+reduced transcripts directly to the operator-owned local Qwen3.8 endpoint. It
+does not exercise the module bus, Aimee delegation, tool recall, or durable
+organizational memory.
+
+## Valid paired pilot
+
+- Run ID: `roi-pilot-a82427406ef64a54`
+- Source pin: `f29dc522ae345d74de664492a11fd77609933e8c`
+- Model: Qwen3.8-27B UD-Q4_K_XL, 65,536-token endpoint context
+- Corpus: six deterministic synthetic multi-turn operations handoffs
+- Pairing: economizer off versus full history-fold/compress/Coordinate-Closet
+  configuration, one repeat, randomized order with seed `20260826`
+- Grader: exact match on a planted identifier in the retained tail
+- Provider budget: expected and hard maximum marginal spend both `$0.00`
+
+| condition | resolved | input | cache read | output | total | total / resolved |
+|---|---:|---:|---:|---:|---:|---:|
+| off | 6 / 6 | 26,034 | 162 | 78 | 26,112 | 4,352 |
+| full | 6 / 6 | 23,808 | 162 | 78 | 23,886 | 3,981 |
+
+The economizer removed **2,226 provider-counted tokens**, or **8.52% of total
+token volume**, with identical resolution and output-token totals. That is 371
+tokens per resolved task in this narrow workload. Cache reads were identical,
+so they do not explain the delta.
+
+The economizer's internal chars-per-token forecast reported 5,250 removed
+tokens across the six reduced prompts, while the provider tokenizer measured
+2,226. This is why the public metric uses provider usage objects rather than
+the reducer forecast.
+
+The run averaged 7.35 seconds per off call and 6.76 seconds per full call. With
+only six sequential observations, this latency difference is diagnostic and
+not a performance claim.
+
+Raw artifacts:
+
+- `current-stack-qwen38-tail-pilot.preflight.json` is the persisted budget and
+  lineage manifest written before dispatch.
+- `current-stack-qwen38-tail-pilot.json` contains every call, provider response
+  ID, raw usage object, activation record, exact grade, and paired summary.
+- Raw artifact SHA-256:
+  `ccac4bb72b1c273f6099791b36809d1d22cab6df81dd883969934325b0ee0bf0`.
+
+## Calibration findings that are not claims
+
+The endpoint defaults to xhigh thinking. A first uncommitted calibration capped
+generation at 32 tokens, spent the entire allowance in hidden reasoning, and
+returned no final answers. The valid pilot therefore pins
+`chat_template_kwargs.enable_thinking=false`.
+
+A second uncommitted calibration planted a secret-like rollback token in the
+folded region. The economizer correctly redacted it into a page-back
+placeholder, but this direct-provider harness has no `tool_output_get` recovery
+loop. The reduced arm therefore could not answer. That calibration is not a
+product-quality result; it identifies the recovery-aware workload required for
+the next pilot. Both uncommitted calibration artifacts were excluded because
+they could not meet the source-lineage gate.
+
+## What this supports
+
+This run supports only the narrow statement that the current economizer can
+reduce provider-counted input tokens on long, irrelevant history without
+changing exact-answer quality when the required information remains in the
+retained tail. Repeats, natural coding tasks, tool condensation and recovery,
+module-process activation, delegation, and a billable provider remain required
+before publication.
