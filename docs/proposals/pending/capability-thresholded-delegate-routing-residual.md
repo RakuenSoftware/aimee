@@ -1,6 +1,6 @@
 # Capability-thresholded delegate routing: residual work
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`capability-thresholded-delegate-routing.md`](../done/capability-thresholded-delegate-routing.md)
 

@@ -8,7 +8,7 @@ Companion to `graph-feedback-self-audit-and-learning.md`. Slice-by-slice build
 order, each slice an independently-shippable PR that is roundtable-reviewed
 before merge. Base branch: `origin/testing`. Worktree: `../aimee-graphfb`.
 
-## Gap analysis — what actually exists vs. what the proposal assumes
+## Gap analysis: what actually exists vs. what the proposal assumes
 
 Surveyed the codebase (2026-07-03). The proposal's §0 "what already exists" is
 **partly inaccurate**; two load-bearing assumptions are false and change the
@@ -16,14 +16,14 @@ slice plan:
 
 | Proposal §0 claim | Reality in the code | Impact |
 |---|---|---|
-| Hubs / centrality — `kb_graph_hubs`, `/v1/code/graph/hubs` | ✅ `src/kb/kb_graph_analytics.{c,h}`, route in `kb_http_code.c`, MCP `index{command:hubs}` | reuse as-is; add `bottom` mode |
-| Surprising links (code-graph §4) | ✅ `kb_graph_surprising` + judge suppress | not touched here |
-| Confidence/provenance tags per edge | ✅ `kb_graph_edge_provenance(edge_origin, structural_weight)` in `kb_service_graph.c` already derives `structural`/`inferred`/`ambiguous` (e.g. `curator`+weight-0 → `inferred`, `session`+weight-0 → `ambiguous`); `entity_edges.structural_weight`/`edge_origin`/`review_class` back it | consume this fn as-is for §1 unverified-inferred |
-| Projection generations (versioned) | ✅ `code_projection_generations` + lifecycle (`code_projection.{c,h}`) | diff reads these; but `db2_code_projection_list_edges` only reads the **visible** generation — §2 needs arbitrary-gen listing |
-| **Communities — Louvain/Leiden, "partly shipped"** | ❌ **NOT shipped.** No `community_id` column, no Louvain/Leiden anywhere. | **New foundation slice required.** §1 cohesion, §2 community-ID stability, §3 lessons-grouping all depend on it. |
-| **§4 "existing central agent-memory GA sanitizer" to extend** | ❌ **Does not exist.** Prompt-injection provenance was named a *future GA gate* in `central-agent-memory-interception.md`, never built. No `sanitize_for_prompt`, no render-boundary sanitizer. | **P0 must CREATE the sanitizer**, not extend one. The proposal's "name that sanitizer's file / add to its kinds" contract is re-cast as "create the module + own it." |
-| Tree-sitter front-end, 17 languages | ✅ `src/code_treesitter.c` clean grammar table (`ts_language_for_ext`, `ts_lang_t`) | §6a adds grammars the documented way |
-| MCP `index` family + `/v1/code/*` routes | ✅ `mcp_tools_extended.c`, `kb_http_code.c` — only `hubs`/`surprising` today | `audit`/`diff` are net-new commands + routes |
+| Hubs / centrality: `kb_graph_hubs`, `/v1/code/graph/hubs` | yes, `src/kb/kb_graph_analytics.{c,h}`, route in `kb_http_code.c`, MCP `index{command:hubs}` | reuse as-is; add `bottom` mode |
+| Surprising links (code-graph §4) | yes, `kb_graph_surprising` + judge suppress | not touched here |
+| Confidence/provenance tags per edge | yes, `kb_graph_edge_provenance(edge_origin, structural_weight)` in `kb_service_graph.c` already derives `structural`/`inferred`/`ambiguous` (e.g. `curator`+weight-0 → `inferred`, `session`+weight-0 → `ambiguous`); `entity_edges.structural_weight`/`edge_origin`/`review_class` back it | consume this fn as-is for §1 unverified-inferred |
+| Projection generations (versioned) | yes, `code_projection_generations` + lifecycle (`code_projection.{c,h}`) | diff reads these; but `db2_code_projection_list_edges` only reads the **visible** generation: §2 needs arbitrary-gen listing |
+| **Communities: Louvain/Leiden, "partly shipped"** | no, **NOT shipped.** No `community_id` column, no Louvain/Leiden anywhere. | **New foundation slice required.** §1 cohesion, §2 community-ID stability, §3 lessons-grouping all depend on it. |
+| **§4 "existing central agent-memory GA sanitizer" to extend** | no, **Does not exist.** Prompt-injection provenance was named a *future GA gate* in `central-agent-memory-interception.md`, never built. No `sanitize_for_prompt`, no render-boundary sanitizer. | **P0 must CREATE the sanitizer**, not extend one. The proposal's "name that sanitizer's file / add to its kinds" contract is re-cast as "create the module + own it." |
+| Tree-sitter front-end, 17 languages | yes, `src/code_treesitter.c` clean grammar table (`ts_language_for_ext`, `ts_lang_t`) | §6a adds grammars the documented way |
+| MCP `index` family + `/v1/code/*` routes | yes, `mcp_tools_extended.c`, `kb_http_code.c`: only `hubs`/`surprising` today | `audit`/`diff` are net-new commands + routes |
 
 **Net:** the substrate is real, but **community detection and the sanitizer are
 missing prerequisites** the proposal assumed present. Both become explicit
@@ -36,11 +36,11 @@ Dependency-ordered. P0 sanitizer first because §1/§2/§3 all render
 corpus-derived strings into agent prompts and must not merge in front of the
 boundary. Community detection second because three later slices depend on it.
 
-### S0 — P0: prompt-injection sanitizer (prerequisite)
+### S0: P0: prompt-injection sanitizer (prerequisite)
 - **Pre-audit (R1):** ship a short note in the PR naming the existing string
   primitives found (`strip_llm_private_scaffold` in `util.c`,
   `server/tool_schema_sanitizer.c`, `shell_escape`) and confirming none is a
-  render-boundary prompt sanitizer — so S0 is purely the boundary, not a
+  render-boundary prompt sanitizer, so S0 is purely the boundary, not a
   string-utils grab-bag.
 - New module `src/kb/prompt_sanitizer.{c,h}` (owned here, since none exists).
 - **Status-returning API (R1)**, not void/string-copy:
@@ -49,11 +49,11 @@ boundary. Community detection second because three later slices depend on it.
   reason code, so a security-sensitive renderer can fail closed per field.
 - **Two-layer design (R1):**
   - *Strict validators* for structured fields (`file_path`, `symbol_label`,
-    `source_location`, `community_name`) — reject (not silently rewrite) on
+    `source_location`, `community_name`). Reject (not silently rewrite) on
     newline / control / shell-log markers.
   - *Render-context escaping* for free text (`memory_fact`, `lesson_text`,
-    `correction_text`, `image_caption`, `transcript`, `markdown_doc`) —
-    neutralize injection markup, bound length, never reject.
+    `correction_text`, `image_caption`, `transcript`, `markdown_doc`),
+neutralize injection markup, bound length, never reject.
 - `sanitize_kind_t` enum covers all ten kinds above. Every kind strips
   ANSI/C0/C1; each carries an explicit length bound.
 - **Enumerated markers (R1)** documented in the PR + covered by a *categorized*
@@ -63,12 +63,12 @@ boundary. Community detection second because three later slices depend on it.
 - Ships: `src/tests/test_prompt_sanitizer.c` + fixtures (categorized by attack
   type), a call-site audit doc (`docs/SANITIZER_CALL_SITES.md`), and a **CI
   guard built around a small set of sanctioned renderer helpers** (a render
-  call must pass a sanitized value) — grep is only a backstop.
-- **No behavioural surface yet** — the render call-sites arrive in S1/S5/S6.
+  call must pass a sanitized value), grep is only a backstop.
+- **No behavioural surface yet**: the render call-sites arrive in S1/S5/S6.
 
-### S-community — foundation: deterministic community detection
+### S-community: foundation: deterministic community detection
 - New `kb_graph_communities()` in `kb_graph_analytics.{c,h}`. **Algorithm pinned
-  (R1):** single, fully-specified deterministic method — **no "fallback."**
+  (R1):** single, fully-specified deterministic method, **no "fallback."**
   Normalization spec documented in the header: edges treated **undirected**,
   parallel edges aggregated by summed structural weight, self-loops dropped,
   edge weight = `structural_weight`, modularity with resolution γ=1.0, fixed
@@ -76,23 +76,23 @@ boundary. Community detection second because three later slices depend on it.
   move decision (candidate community by `min-member-id` lex; final community id
   = `min-member-id` lex). Pure, in-memory.
 - Persist community membership **keyed by projection generation-id for every
-  generated projection (R1)** — not only the visible one — so S2 can diff
+  generated projection (R1)** (not only the visible one) so S2 can diff
   arbitrary generations. New table `code_projection_communities(gen_id,
   node_id, community_id)`; retention follows the generation cleanup schedule.
 - Two-pass cross-generation stable-ID remap is deferred to S2 (needs a prior
   generation to map against); S-community lands the single-generation
   deterministic partition, whose ids are **generation-local** by contract.
 - Tests: partition determinism under input permutation; known-modular fixture.
-- Parallelizable with S0 (produces IDs, renders nothing) — but sequenced after
+- Parallelizable with S0 (produces IDs, renders nothing), but sequenced after
   it so S0 review surfaces community-name rendering concerns first.
 
-### S1 — P1: graph self-audit
+### S1: P1: graph self-audit
 - New `GET /v1/code/graph/audit?project` + MCP `index{command:"audit"}`.
 - Finding types, each a pure function over the projection edge array:
   - **cycles**: collapse to file nodes, Tarjan SCC + bounded per-SCC DFS (cap
     100/SCC, truncation reported).
   - **orphans**: `bottom`/`bottom-excluding-hubs` **mode on the hubs route**
-    (not a fork) — degree ≤ 1 real defs.
+    (not a fork), degree ≤ 1 real defs.
   - **bridges**: exact Brandes below a node/edge threshold, deterministic-seed
     sampling above with `approximate:true`.
   - **low-cohesion**: conductance / modularity-contribution per community (uses
@@ -102,7 +102,7 @@ boundary. Community detection second because three later slices depend on it.
   - **unverified-inferred**: symbols with ≥ k inferred/ambiguous edges never
     confirmed. **Ships explicitly labeled `signal:"no-confirmation-yet"` (R1)**,
     excluded from the default audit-summary roll-up, expected volume documented
-    in the PR — because the confirmation signal only arrives in S3c. Each
+    in the PR, because the confirmation signal only arrives in S3c. Each
     finding carries a **stable finding ID** for the §1↔§3 loop.
 - **Staleness visibility (R1):** the audit response echoes the
   `extractor_version` / `pipeline_version` of the generation it analyzed, so a
@@ -110,7 +110,7 @@ boundary. Community detection second because three later slices depend on it.
 - Honesty gate: explicit "insufficient signal" / "clean" result.
 - Every rendered string routes through S0 `sanitize_for_prompt`.
 
-### S2 — P2: determinism substrate + snapshot diff
+### S2: P2: determinism substrate + snapshot diff
 - Determinism: stable generation-independent **node identity** (`project +
   norm-rel-path + language + symbol-kind + qualified-name`, span-hash fallback);
   total-order tie-breaks audited across hubs/audit/communities; **two-pass
@@ -125,20 +125,20 @@ boundary. Community detection second because three later slices depend on it.
 - Persist diffs keyed by `(from_gen, to_gen, pipeline_version)`.
 - Permutation-invariance tests are the acceptance gate.
 
-### S3 — P3: retrieval learning (the headline; split into 4 slices, R1)
+### S3: P3: retrieval learning (the headline; split into 4 slices, R1)
 - **S3a-schema**: ledger table + immutability (append-only, no-UPDATE/no-DELETE
-  trigger) + **enforced isolation** — the record schema exactly as §3. Isolation
+  trigger) + **enforced isolation**. The record schema exactly as §3. Isolation
   is *enforced, not commented (R1)*: the ledger lives in its own table whose
   name carries a `lessons_` prefix that `db2_memory_find_facts_like` and the
   decay/prune sweep explicitly skip, **plus a CI grep guard** that fails if a
   `lessons_*` table is joined into memory-fact recall or the prune schedule.
-  This slice is schema-only — no capture, no consumers.
-- **S3a-api**: the capture call-site. **Names the cite-emit hook (R1)** — the
+  This slice is schema-only, no capture, no consumers.
+- **S3a-api**: the capture call-site. **Names the cite-emit hook (R1)**, the
   point in the central agent-memory interception boundary where a citation is
   observed (file:line identified during S3a-schema; if absent, S3a-api builds
   it). Auto-`useful` proxy = cite-again-within-N-turns, with a test proving the
   counter increments on a real citation.
-- **S3b reflection + lessons**: deterministic trust scoring — signed
+- **S3b reflection + lessons**: deterministic trust scoring, signed
   time-decay, asymmetric half-lives (`dead_end` 30d / `corrected` 180d),
   corroboration ≥ N distinct, contested-by-recency; byte-stable output for a
   fixed `now`. Lessons artifact grouped by community label (uses S-community),
@@ -153,7 +153,7 @@ boundary. Community detection second because three later slices depend on it.
   that capability check has no existing enforcement point, S3c builds it; agent
   corrections stay `confirmed=false` and inert until then.
 
-### S4 — P4: cache-correctness refinements
+### S4: P4: cache-correctness refinements
 - **Explicit version-marker scheme (R1):** cache rows carry a `namespace_version`
   column (not a key-prefix hack); a cross-version read test proves a v1-written
   entry is still *readable* after v2 lands and that a v1-keyed lookup never hits
@@ -162,7 +162,7 @@ boundary. Community detection second because three later slices depend on it.
   versions on first use.
 - Namespace the semantic cache by full contract `(content_hash,
   extractor_contract_version, prompt/schema_version, model_family/version,
-  embedding_model_version)` — **preserve** old-namespace entries (never re-bill).
+  embedding_model_version)`, **preserve** old-namespace entries (never re-bill).
 - Frontmatter-insensitive doc hashing: hash body + allowlisted ignorable keys
   (`status`, `reviewed`, `tags`, `date`) only.
 - **Ordering note (R1):** S4 depends on S2's node-identity/version substrate;
@@ -170,7 +170,7 @@ boundary. Community detection second because three later slices depend on it.
   `extractor_version` (see S1) rather than blocking on S4, so S4 stays late but
   its dependency on S2 is documented.
 
-### S5 — P5: Tier-1 language grammars (one PR each)
+### S5: P5: Tier-1 language grammars (one PR each)
 - Order by leverage / build simplicity: **Scala**, **Groovy** (+`.gradle`),
   **Elixir**, **Objective-C/++** (`.m`/`.mm`), **PowerShell**, then Kotlin-Script
   edge cases.
@@ -181,8 +181,8 @@ boundary. Community detection second because three later slices depend on it.
   build failure fails loudly.
 - **Grammar-drop policy for already-indexed repos (R1):** if a
   previously-available grammar becomes unavailable, prior AST nodes are left
-  untouched and new files of that extension index as text-only (option (b)) —
-  no destructive re-index, no startup refusal; a structured log records the
+  untouched and new files of that extension index as text-only (option (b)).
+No destructive re-index, no startup refusal; a structured log records the
   degrade. A version bump that intends to *replace* an extractor's output is an
   S4 namespace concern, not a silent drop.
 
@@ -196,7 +196,7 @@ boundary. Community detection second because three later slices depend on it.
   Tier 3–5 grammars → each its own follow-on proposal.
 
 ## Testing
-- Unit: pure analytics tested standalone (ctest) — this is where determinism /
+- Unit: pure analytics tested standalone (ctest). This is where determinism /
   permutation-invariance / trust-math live.
 - Integration: a fresh CT on `root@192.168.1.253` with an indexed fixture repo
   to exercise the `/v1/code/graph/audit` + `/diff` routes and the outcome-ledger
@@ -209,10 +209,10 @@ boundary. Community detection second because three later slices depend on it.
 - Each slice: roundtable-review the **code** (not just design) before PR merge,
   per the `always-roundtable-review-before-pr` standing rule. `--rounds 1`.
 
-## R1 — roundtable plan-review dispositions (2026-07-03)
+## R1: roundtable plan-review dispositions (2026-07-03)
 
 Roundtable review (`--mode review --rounds 1`, 6/7 panelists, not degraded, 49
-items). **No blocking rejections** — the plan and both gap re-scopings (community
+items). **No blocking rejections**. The plan and both gap re-scopings (community
 detection not shipped; sanitizer must be created not extended) were accepted.
 Suggestions folded into the slices above:
 
@@ -234,7 +234,7 @@ Suggestions folded into the slices above:
 - **S4:** explicit `namespace_version` column + cross-version read test;
   dependency on S2 documented; kept late (staleness surfaced via S1's echoed
   version rather than blocking earlier slices). *(accepted)*
-- **S5:** grammar-drop policy pinned to option (b) — leave prior AST, index new
+- **S5:** grammar-drop policy pinned to option (b). Leave prior AST, index new
   files text-only, structured-log the degrade. *(accepted)*
 - **Slice order:** S0 and S-community are parallelizable but sequenced so S0
   review lands first; the stale-cache concern (move S4 earlier) is addressed by

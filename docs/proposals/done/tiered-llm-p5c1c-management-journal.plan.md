@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implementation, adversarial branch review, production/ASAN gates, and real PostgreSQL 17 authority/concurrency validation passed on CT103 and CT260.
+- **State:** DONE. Implementation, adversarial branch review, production/ASAN gates, and real PostgreSQL 17 authority/concurrency validation passed on CT103 and CT260.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
 - **Depends on:** P5-B2b/B2c active outbound management-certificate lineage, P5-A target registry, P5-C1a strict target verification/replay, and P5-C1b canonical mint core.
 - **Followed by:** P5-C2 custody-backed management signing key plus authenticated non-rollback JWKS, then P5-C3 action composition.

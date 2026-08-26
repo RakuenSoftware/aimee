@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — completed measurement record archived 2026-08-15; not an implementation
+- **State:** DONE. Completed measurement record archived 2026-08-15; not an implementation
   proposal.
 - **Recorded:** 2026-08-06.
 - **Scope:** C-to-Go module migration inventory.
@@ -109,7 +109,7 @@ them and watching the build, lint and full test suites still pass.
 
 - **The 16 `module_adapter.c` files.** Unshipped (every module process is Go:
   `17 processes, 17 Go, 0 C`) and they duplicate Go policy with nothing keeping
-  the two in sync -- `learning_signal_policy.c` restates `learning.Handle` rule
+  the two in sync, `learning_signal_policy.c` restates `learning.Handle` rule
   for rule. But **9 test targets link them as in-process module doubles**
   (`test_kb_route_acl.c` calls `aimee_control_web_module_handler` directly), so
   removing them is a test-infrastructure refactor, not a deletion.

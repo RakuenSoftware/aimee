@@ -1,9 +1,9 @@
-# Validation — recursive self-improvement S0 + S1
+# Validation: recursive self-improvement S0 + S1
 
 Proves the S0 (endogeneity gate) and S1 (regression synthesis) slices of
 [`recursive-self-improvement-closing-the-loops`](../proposals/pending/recursive-self-improvement-closing-the-loops.md).
 
-- **Commit:** `7f49f2f88b` — "feat: grow the eval suite from live failure, and bound the recursion",
+- **Commit:** `7f49f2f88b`. "feat: grow the eval suite from live failure, and bound the recursion",
   on `worktree-recursive-self-improvement`, branched from `origin/testing` at `a2fac47caa`.
 - **Environment:** `root@192.168.1.252` (pvetest), Linux 7.0.14-8-pve x86_64, 8 cores,
   31 GiB RAM, gcc (Debian 13), git 2.47.3, sqlite3, clang-format 19.1.7, ripgrep 14.1.1.
@@ -16,7 +16,7 @@ Proves the S0 (endogeneity gate) and S1 (regression synthesis) slices of
 | Command | Result |
 | --- | --- |
 | `make -C src -j8 all` | exit 0 |
-| `make -C src -j8 unit-tests` | 729 tests; 1 failure — `unit-test-mcp-git`, **pre-existing** (see below) |
+| `make -C src -j8 unit-tests` | 729 tests; 1 failure: `unit-test-mcp-git`, **pre-existing** (see below) |
 | `make -C src lint` | `lint: all 63 checks passed` |
 | `make -C src docs-gen-check` | `docs-gen-check: ok` |
 | `make -C src integration-tests` | `integration: 115/115 passed` |
@@ -47,7 +47,7 @@ handler → DB1 module → sqlite, and back.
 **The surface**
 
 - `aimee eval candidates` on a fresh installation: empty list, and
-  `admission gate: open` — an empty window reports "nothing observed", not
+  `admission gate: open`. An empty window reports "nothing observed", not
   "wholly endogenous", so a new installation can bootstrap.
 - `--state` filter honoured; `admit` without `--suite-dir` refused; `reject`
   without `--id` refused; `reject --id 4242` reports no such candidate; an
@@ -66,7 +66,7 @@ handler → DB1 module → sqlite, and back.
    the failing prompt, `role`, `max_turns`, **no fabricated `success_check`** (a
    failed job states what broke, not what success looks like), and
    `provenance.origin=agent_job`.
-6. A second `scan` left the observation count at 2 — a repeated sweep cannot
+6. A second `scan` left the observation count at 2. A repeated sweep cannot
    manufacture its own reproduction.
 7. `retire` with no recorded result → `0 retired`: never retired for lack of
    evidence.

@@ -80,8 +80,8 @@ KB capture layer at a real read-only filesystem while leaving PostgreSQL
 available, proving that health rejects a completeness claim and the WORM ledger
 retains the gap.
 
-The gap it was written for. Signal capture is served by `aimee-kb` -- that is
-where the learning tables live -- and the router it calls needs a signal
+The gap it was written for. Signal capture is served by `aimee-kb`. That is
+where the learning tables live, and the router it calls needs a signal
 classifier to decide which sinks a signal reaches. Only `aimee-server` ever
 registered one. In the KB the pointer was null, every signal was refused with a
 single WARN, and the route answered `200` carrying an error document while
@@ -95,7 +95,7 @@ tell you a deployed daemon actually attached its modules.
 The harness that originally found the bug started **two** modules, and that is
 part of why it hid: a module which is granted but never attached fails exactly
 like a module that was never placed. This suite attaches every module each
-daemon is granted and has a binary for -- 7 on the KB, 19 on the server -- and
+daemon is granted and has a binary for (7 on the KB, 19 on the server) and
 reports any it could not start rather than skipping it quietly.
 
 ## Running it
@@ -112,7 +112,7 @@ AIMEE_ROOT=/path/to/aimee AIMEE_SRC=/path/to/aimee/src \
 `AIMEE_DB2_URL` must reach the same database. The **postgres module** connects
 by that URL rather than by the libpq defaults `aimee-kb` itself uses, and with
 it unset the KB publishes the blocker *"store unavailable: the KB database
-schema is not ready"* while it is visibly storing and retrieving. That is an
+schema is not ready"* while it is visibly storing and retrieving; that is an
 under-configured environment, not a defect, and section 5 asserts the service
 does not contradict itself this way.
 
@@ -131,7 +131,7 @@ does not contradict itself this way.
 ## It is tested against the bug
 
 Deleting the KB's `learning_router_register_signal_classifier` line reproduces
-the original defect, and four independent assertions catch it -- both captures
+the original defect, and four independent assertions catch it, both captures
 refused, no supersession recorded, and the log sweep quoting the original WARN:
 
 ```
@@ -143,7 +143,7 @@ refused, no supersession recorded, and the log sweep quoting the original WARN:
 
 Section 3 judges the **delta** a run produces, not the state it inherits. The
 first version asked "is there a superseded row?", which passed on a row left by
-an earlier run -- and did exactly that in a run where every capture was refused
+an earlier run, and did exactly that in a run where every capture was refused
 and nothing was written.
 
 # The recursive self-improvement loops

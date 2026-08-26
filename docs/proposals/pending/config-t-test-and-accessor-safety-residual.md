@@ -1,6 +1,6 @@
 # `legacy_config_record` test migration and accessor-safety residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 - **Archived parent:** [`config-t-encapsulation.md`](../done/config-t-encapsulation.md).
 
 ## Delivered foundation

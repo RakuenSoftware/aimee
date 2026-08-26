@@ -1,6 +1,6 @@
 # Core process separation: residual work
 
-- **State:** PENDING — residual scope created by the 2026-08-04 proposal audit.
+- **State:** PENDING. Residual scope created by the 2026-08-04 proposal audit.
 
 **Archived source:** [`core-substrate-and-source-module-boundaries-residual.md`](../done/core-substrate-and-source-module-boundaries-residual.md)
 

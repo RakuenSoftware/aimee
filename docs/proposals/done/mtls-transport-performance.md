@@ -8,7 +8,7 @@
 > specification for work already delivered. Remaining work is tracked in
 > [`mtls-transport-rollout-evidence.md`](../pending/mtls-transport-rollout-evidence.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Date:** 2026-07-22
 - **Implementation updated:** 2026-07-22
 - **Scope:** thin-client ↔ aimee-server and aimee-server ↔ aimee-kb transport only
@@ -145,7 +145,7 @@ Every packet preserves these conditions:
 8. Old `Connection: close` clients continue to work throughout rollout. A peer's
    explicit close request is always honored.
 
-## P0 — Transport benchmark and observability contract
+## P0: Transport benchmark and observability contract
 
 Before changing defaults, add a transport benchmark covering both links. Each
 sample records:
@@ -180,7 +180,7 @@ Baseline and treatment run on the same build host and network profile. A packet
 does not promote if error rate increases, the existing path SLO fails, or its
 claimed improvement falls inside the measurement confidence interval.
 
-## P1 — Concurrent, framed kb mTLS serving
+## P1: Concurrent, framed kb mTLS serving
 
 Decouple `accept()` from `kb_tls_serve_conn` using the same bounded-worker shape as
 the server listener. The initial cap is 64 live kb TLS connections, aligned with
@@ -247,7 +247,7 @@ P1 can merge after its correctness tests, but it cannot be enabled beyond the CI
 cohort or claim performance acceptance until P0 has landed and
 `make check-latency-slo` passes on the same build and declared profile.
 
-## P2 — Persistent HTTP/1.1 and bounded server→kb pooling
+## P2: Persistent HTTP/1.1 and bounded server→kb pooling
 
 The first production pool is server→kb because both endpoints are resident
 processes and the server makes repeated kb calls. It is keyed by
@@ -357,7 +357,7 @@ P2 acceptance:
 - warm p50 TTFB is ≤0.70× baseline and p99 TTFB is ≤0.90× baseline on at least
   one declared remote profile, with no existing SLO/error regression.
 
-## P3 — Negotiated HTTP body compression
+## P3: Negotiated HTTP body compression
 
 Compression is application-level HTTP content encoding, not TLS compression and
 not the unrelated LLM-context economizer.
@@ -434,7 +434,7 @@ codec probe on both peers; a build that cannot initialize the codec advertises n
 zstd capability and never enters its decoder. It does not replace gzip on general
 thin clients.
 
-## P4 — TLS reconnect cost and short-lived thin clients
+## P4: TLS reconnect cost and short-lived thin clients
 
 Prefer TLS 1.3 while retaining the existing TLS 1.2 compatibility floor. Reusing
 the process-scoped `SSL_CTX` and TLS session cache improves reconnects inside
@@ -454,7 +454,7 @@ thin-client handshake. The options are:
 Persisting TLS sessions or adding a broker changes credential custody and process
 authority, so it is not an incidental optimization here. TLS 0-RTT remains off.
 
-## P5 — Falsifiable HTTP/2 gate
+## P5: Falsifiable HTTP/2 gate
 
 HTTP/2 is not part of P1–P4. It becomes proposal-eligible only after tuned pooled
 HTTP/1.1 meets correctness gates and either condition is reproduced:
@@ -475,7 +475,7 @@ the same request deadline. Reverse-proxy TLS termination is not accepted merely
 by trusting an identity header; it requires a separately reviewed authenticated
 handoff design.
 
-## P6 — Round-trip reduction
+## P6: Round-trip reduction
 
 After transport measurement identifies repeated sequential kb calls, add bounded
 batch endpoints only for operations that are independently authorized,
@@ -488,7 +488,7 @@ or mutations without a future idempotency contract.
 P6 is optional. It must not delay P1/P2 and must prove that eliminated round trips,
 not altered query semantics, caused the improvement.
 
-## P7 — Canary rollout and automatic rollback
+## P7: Canary rollout and automatic rollback
 
 P2 and P3 ship behind independent, live-reloadable settings. After the
 2026-07-22 three-node validation, the two connection-reuse settings default on;

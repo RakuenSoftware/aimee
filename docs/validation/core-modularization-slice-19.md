@@ -59,7 +59,7 @@ distributed across `src/kb/auth_oidc.c`, identity/JWKS code, DB2 enrollment/gran
 `/v1/config/oidc`, `kb-console`, and management-token code. Descriptor-level selection does not yet omit
 those objects, stores, routes, or settings.
 
-The current OIDC configuration shape—issuer, audience, JWKS URL, admin claim, and admin values—is
+The current OIDC configuration shape, issuer, audience, JWKS URL, admin claim, and admin values, is
 provider-neutral but partial. No provider enum was found. The target named issuer-profile contract adds
 discovery/explicit endpoints, vault secret references, redirects, scopes, PKCE/nonce, accepted
 algorithms, and namespaced claim mapping. Git/SSH/SSHSIG remain core; governance may consume their

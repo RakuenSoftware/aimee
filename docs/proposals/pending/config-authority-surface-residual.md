@@ -1,6 +1,6 @@
 # Config authority surface residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 - **Archived parent:**
   [`config-single-source-of-truth-audit.md`](../done/config-single-source-of-truth-audit.md).
 

@@ -55,9 +55,9 @@ code. The audit records which side of that boundary each export sits on.
 
 Reader side, with tracked host-side callers:
 
-- `plugin_chook_apply_pre_llm` — `src/server/agent_runtime.c`.
+- `plugin_chook_apply_pre_llm`: `src/server/agent_runtime.c`.
 - `plugin_kind_name`, `plugin_kind_from_str`, `plugin_permission_name`,
-  `plugin_permission_from_str`, `plugin_ctx_create`, `plugin_ctx_destroy` — plugin-loader, the
+  `plugin_permission_from_str`, `plugin_ctx_create`, `plugin_ctx_destroy`, plugin-loader, the
   plugin CLI, and MCP tool projection as listed above.
 
 Producer side, with no host-side caller in the tracked tree:
@@ -107,8 +107,8 @@ registration rejection, the user-message argument, and per-turn application.
 
 `src/tests/test_plugin.c` remains declared by plugin-loader. Its primary subject is loader
 integration, and a test is never claimed by two descriptors; it is complementary coverage of
-`extension.c` — context lifecycle, kind and permission conversion, and the tool, hook, and
-slash-command registries — and is currently the only coverage of those extension surfaces.
+`extension.c`, context lifecycle, kind and permission conversion, and the tool, hook, and
+slash-command registries, and is currently the only coverage of those extension surfaces.
 
 Both build systems register the declared test. Make builds `unit-test-plugin-c-hook` from
 `src/tests/Rules.mk`, and `src/tests/CMakeLists.txt` registers `test_plugin_c_hook` as a CTest case.

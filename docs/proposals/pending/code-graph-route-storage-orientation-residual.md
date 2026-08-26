@@ -1,6 +1,6 @@
 # Code graph route, storage, and orientation: residual work
 
-- **State:** PENDING — residual scope created by the 2026-08-04 proposal audit.
+- **State:** PENDING. Residual scope created by the 2026-08-04 proposal audit.
 
 **Archived source:** [`code-graph-architecture-surface.md`](../done/code-graph-architecture-surface.md)
 

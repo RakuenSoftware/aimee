@@ -14,8 +14,8 @@ that cannot be re-derived.
 
 ## The through-line
 
-The headline result of this exercise is not which model won. It is how many
-times the measurement was wrong, and in which direction.
+The headline result of this exercise is how many times the measurement was wrong, and in which
+direction. Which model won is the smaller finding.
 
 Twenty-three defects are recorded, and the expensive ones share a shape: the
 harness applied a constraint the product does not, and the resulting number

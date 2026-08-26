@@ -1,4 +1,4 @@
-# P6c-egress authority slice — catalog target resolution and policy region semantics
+# P6c-egress authority slice: catalog target resolution and policy region semantics
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current

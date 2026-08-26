@@ -1,4 +1,4 @@
-# Validation — six-loop learning evidence
+# Validation: six-loop learning evidence
 
 This run turns the recursive-learning proof into one reproducible target and
 closes the two live-path gaps left by the 2026-08-24 producer run. It exercises

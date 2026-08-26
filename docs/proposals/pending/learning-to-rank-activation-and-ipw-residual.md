@@ -1,6 +1,6 @@
 # Learning-to-rank activation and IPW residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 - **Archived parent:**
   [`learning-to-rank-from-interactions.md`](../done/learning-to-rank-from-interactions.md).
 

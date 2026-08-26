@@ -79,7 +79,10 @@ while IFS=$'\t ' read -r model_name embed_cmd_rest || [[ -n "${model_name}" ]]; 
 
   echo "=== model: ${model_name} ===" | tee -a "${SUMMARY_FILE}"
 
-  # Export the embedding command so aimee picks it up via AIMEE_EMBEDDING_COMMAND
+  # NOTE: nothing in the tree reads AIMEE_EMBEDDING_COMMAND. The embedder is the
+  # `embedding_command` config key, so whoever restores this harness must set
+  # that key per candidate and restore the operator's value afterwards.
+  # Left inert rather than wired up, because the entry points below are gone.
   export AIMEE_EMBEDDING_COMMAND="${embed_cmd_rest}"
 
   locomo_out="${SWEEP_DIR}/locomo_${model_name}_direct_v${GIT_SHA}.json"

@@ -19,7 +19,7 @@ The module root `src/modules/workflows/` contains, excluding `module.yaml`, thir
 twenty-four headers. No `src/modules/workflows/include/aimee/workflows/` directory exists, so every
 header is at the module root and is declared in `private_headers`.
 
-Every one of the twenty-four headers pairs with a like-named source — unlike config, vault, git, and
+Every one of the twenty-four headers pairs with a like-named source, unlike config, vault, git, and
 workspace, this module has no unpaired seam header. Six sources carry no paired header:
 `wfe_canonical.c`, `wfe_custom.c`, `wfe_live_forge.c`, `wfe_router_catalog.c`, `wfe_scheduler.c`, and
 `wfe_validate.c`; they declare through the paired headers.
@@ -33,7 +33,7 @@ providers, and the gateway orchestration entry point.
 
 Make compiles all thirty sources. CMake compiles twenty-four, omitting six: `gw_orch_workflows.c`,
 `wfe_live_foreach.c`, `wfe_live_forge.c`, `wfe_live_panel.c`, `wfe_panel_roundtable.c`, and
-`wfe_replay_worktree.c` — the live, panel, forge, replay, and gateway-orchestration units that are
+`wfe_replay_worktree.c`. The live, panel, forge, replay, and gateway-orchestration units that are
 server-side. This is the same intentional thin-client profile boundary recorded for gateway (slice 38),
 audit (slice 34), learning (slice 42), workspace (slice 44), vault (slice 46), config (slice 48), git
 (slice 50), and delegates (slice 52), evidenced by the green thin-client CMake jobs. The descriptor
@@ -66,18 +66,18 @@ and replay (`test_wfe_scheduler.c`, `test_wfe_replay_worktree.c`), the web API
 `test_wfe_webapi.c` is the most cross-cutting of the thirty-three: it links `db1/wfe_store.o`,
 `modules/config/*`, and `server/*` objects alongside three workflows engine objects
 (`wfe_canonical`, `wfe_custom`, `wfe_def`). It is included because it links workflows objects and its
-subject is the workflow engine's web API surface — the engine's external HTTP contract. Cross-cutting
+subject is the workflow engine's web API surface, the engine's external HTTP contract. Cross-cutting
 has not been an exclusion criterion in any of the eight prior modules, and inventing one here would
 orphan the engine's HTTP boundary.
 
 Four candidates are excluded because they link **no** workflows object at all:
 
 - `test_wfe_binding.c` links only `db1/*` objects and exercises re-bind, single-writer conflict,
-  unbind, and reclaim — the DB1 binding store.
+  unbind, and reclaim, the DB1 binding store.
 - `test_wfe_gate_apply.c` links `db1/wfe_store.o` and exercises state-precondition guarantees behind
-  operator human-gate decisions — the DB1 store.
+  operator human-gate decisions, the DB1 store.
 - `test_wfe_submitter.c` links `db1/wfe_store.o` and exercises `db1_work_item_submit_capped` and
-  per-principal count helpers — the DB1 store.
+  per-principal count helpers, the DB1 store.
 - `test_workflow_gate_caps.c` links no module object at all; it asserts a route/capability contract
   (`POST /v1/workflow/items/<id>/gate`, `CAP_WORKFLOW_ADMIN`).
 
@@ -91,8 +91,8 @@ detector that will fail CI if any declared test's registration moves before slic
 
 ## Why declare without latching
 
-The latch asserts the descriptor exhaustively covers the module root. That is true today — the module
-root holds exactly these thirty sources and twenty-four headers — so the latch would pass. It is
+The latch asserts the descriptor exhaustively covers the module root. That is true today. The module
+root holds exactly these thirty sources and twenty-four headers, so the latch would pass. It is
 deferred because declaring the files and asserting completeness are distinct claims, and the roundtable
 required the completeness audit to review declarations merged on their own first rather than authored
 in the same change.
@@ -102,8 +102,8 @@ in the same change.
 The declaration is covered by the existing descriptor validation: every declared path must exist and
 resolve within the module, and the regenerated test-registration baseline pins the thirty-three
 workflows tests' per-suite registration. The empty-domain guard from slice 39 does not apply, because
-the module root is not empty. The latch mutation coverage — source removal, private-header removal,
-planted files, cleared latch — is deferred to slice 55.
+the module root is not empty. The latch mutation coverage, source removal, private-header removal,
+planted files, cleared latch, is deferred to slice 55.
 
 ## Verification
 

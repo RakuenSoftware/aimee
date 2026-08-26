@@ -1,9 +1,9 @@
-# Proposal: P1 — a uniform, transactional mutation ledger for every memory object
+# Proposal: P1: a uniform, transactional mutation ledger for every memory object
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 1 of 9. Foundational.
 - **Author:** JBailes
@@ -18,7 +18,7 @@ store the *event*.
 
 Ask "who asserted that the user prefers Postgres, from what evidence, and what
 would happen if that turn were undone" and the answer has to be assembled from
-five differently-shaped partial records — `memories.provenance_category` for the
+five differently-shaped partial records, `memories.provenance_category` for the
 class of writer, `memory_provenance` for a session-scoped free-text action note,
 `entity_edges.asserted_at`/`superseded_at` for transaction time, `audit_events`
 for the artifact-driven surface writes only, and the WORM chain for the subset of
@@ -41,9 +41,9 @@ their own custody models and are not knowledge objects.
 | `memories.provenance_category`, stamped at insert and failing closed | `src/modules/db2/c/schema.sql` | Records the *class* of writer for a row, not the event or the sequence of events. |
 | `memory_authority_t` on the memory CRUD seam (`memory_insert_ex`, `memory_update_content_as`, `memory_delete_as`) | `src/modules/memory/memory_core_crud.c` | The authority check exists; nothing durably records that the check happened or what it decided. |
 | Semantic-edge transaction time (`asserted_at`, `superseded_at`, `suppressed`) | `entity_edges` | State, not event. Two supersessions of the same edge are indistinguishable afterwards. |
-| `audit_events` (before/after JSONB snapshots, operator, verdict) | `src/modules/db2/c/schema.sql` | Structurally close to what is wanted, but bound to `artifacts.id` by foreign key — it can only describe artifact-driven writes. |
+| `audit_events` (before/after JSONB snapshots, operator, verdict) | `src/modules/db2/c/schema.sql` | Structurally close to what is wanted, but bound to `artifacts.id` by foreign key: it can only describe artifact-driven writes. |
 | Hash-chained WORM audit with in-transaction append | `src/modules/audit/audit_worm_chain.c`, `db2_kb_audit_append_in_txn` | The right integrity primitive; today it carries governed *actions*, is default-off, and takes free-text detail rather than a typed before/after. |
-| `corpus_stage_events` | `src/modules/db2/c/schema.sql` | A good per-document precedent for exactly this shape — scoped to ingestion stages only. |
+| `corpus_stage_events` | `src/modules/db2/c/schema.sql` | A good per-document precedent for exactly this shape: scoped to ingestion stages only. |
 | `curator_invalidation_events` | `src/modules/db2/c/schema.sql` | Records that a source invalidated artifacts, with a count; no actor, no per-object detail, no reversal information. |
 
 The in-flight branch described in the charter's §0.1 implements this shape for
@@ -97,7 +97,7 @@ than an incremented counter with no history.
    ledger that lies, so there is no asynchronous or best-effort emission path.
 2. **Authenticated identity only.** `authenticated_actor` and
    `effective_authority` are resolved from the request context or from a
-   compile-time internal-actor constant, never from request JSON — the rule the
+   compile-time internal-actor constant, never from request JSON, the rule the
    pin already enforces for `fact_authority_t`, extended to every object kind.
    `transport_identity` is recorded separately so an operator can see *how* the
    principal was proved, not only who it claims to be.
@@ -110,17 +110,17 @@ than an incremented counter with no history.
    The ledger has no combined "trust" column and must never grow one.
 5. **Default-on.** The ledger is not behind a feature flag. The existing WORM
    dual-write stays separately gated exactly as today; the two are different
-   claims — "we recorded it" and "we recorded it tamper-evidently".
+   claims, "we recorded it" and "we recorded it tamper-evidently".
 6. **Purge leaves a receipt.** A `purge` event stores counts, selector, actor and
    reason, and never content, `before_ref` or `after_ref` payloads. The receipt
    survives the rows it describes.
 
 ### `before_ref` / `after_ref` are references, not copies
 
-Both columns hold a typed reference — `"edge:918:v3"`, `"memory:4412:h=ab3f…"`,
-`"docver:77"` — resolvable through the object kind's own version history, plus a
+Both columns hold a typed reference, `"edge:918:v3"`, `"memory:4412:h=ab3f…"`,
+`"docver:77"`, resolvable through the object kind's own version history, plus a
 content hash where the object has one. The ledger never stores object content.
-This is what allows a purge to remove content while leaving the event trail
+A purge can therefore remove content while leaving the event trail
 intact, and it keeps the ledger's growth proportional to *events*, not to corpus
 size.
 
@@ -138,7 +138,7 @@ and future call sites are then covered by construction rather than by review
 discipline.
 
 The guard is added **per object kind, in the same slice that hooks that kind's
-writers** — never ahead of them, since a guard without emitters is an outage.
+writers**, never ahead of them, since a guard without emitters is an outage.
 
 ## Non-goals
 

@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — sidecar topology delivered and archived 2026-08-04; residual measurement extracted.
+- **State:** DONE. Sidecar topology delivered and archived 2026-08-04; residual measurement extracted.
 
 > **Archived after partial delivery.** The independent `aimee-llm-e2b/e4b` images, input-keyed
 > publish guards, stunnel mTLS hop, KB-issued identities, managed-compose wiring, and wizard model
@@ -23,7 +23,7 @@ Originally a design-only amendment to the image
 #2242 baked llama.cpp and the synthesis weights into the `aimee-kb` image. The
 reason was sound and is not in dispute: a first-run download fails on a rate limit,
 a proxy, a flaky link or an air-gapped host, and reaches the operator as "synthesis
-never started" long after the deploy looked fine. An image either has its model or
+never started" long after the deploy looked fine; an image either has its model or
 it does not.
 
 What it got wrong is *which* image carries them. Baking synthesis into the kb image
@@ -33,8 +33,8 @@ couples a multi-gigabyte, near-static artefact to the most frequently rebuilt on
   under **separate `cache-from` scopes**. One kb code change rebuilt the LTO C
   binary, postgres, pgvectorscale, torch and the embedder weights **three times**,
   per channel, and pushed ~10 GB twice.
-- The inputs that actually determine a synthesis image — the model, the quant, the
-  pinned llama.cpp — change on the order of never.
+- The inputs that actually determine a synthesis image, the model, the quant, the
+  pinned llama.cpp, change on the order of never.
 
 Splitting them keeps the baked-weights property and removes the coupling.
 
@@ -67,11 +67,11 @@ path filter alone is one careless edit away from being wrong:
 1. A path-filtered trigger: `Dockerfile.llm`, `deploy/container/aimee-llm-entrypoint.sh`,
    `scripts/fetch-synthesis-model.sh`, the model list, the pinned `LLAMACPP_VERSION`,
    and the workflow itself.
-2. A skip-if-already-published check keyed on the inputs — model, quant, llama.cpp
-   version — the same pattern the existing `models` job uses. Even a broad or
+2. A skip-if-already-published check keyed on the inputs, model, quant, llama.cpp
+   version. The same pattern the existing `models` job uses. Even a broad or
    accidental trigger then costs one `docker manifest inspect`.
 
-Point 2 is what makes the guarantee robust rather than aspirational.
+Point 2 is what makes the guarantee enforceable rather than aspirational.
 
 ## The hop is mTLS, like every other container hop
 
@@ -81,16 +81,16 @@ context is built from the KB's own CA. A new inter-container hop follows the sam
 standard, and needs no argument from a threat model to justify it.
 
 That settles *what*. The only design content is *which component terminates it*, and
-llama-server is not a candidate — the pinned `b10218` binary offers `--api-key` and
+llama-server is not a candidate, the pinned `b10218` binary offers `--api-key` and
 `--ssl-cert-file`/`--ssl-key-file`, with no client-cert or CA verification flag. That
 is unremarkable; terminating mTLS is not an inference server's job. It means the
 sidecar looks like every other mTLS endpoint here: the terminator owns the
 network-facing listener, and the thing it protects sits behind it.
 
 **Terminator: `stunnel` from the distro, not new code.** A hand-rolled TLS listener
-would take on the burden this repo already names for llama.cpp — "THIS MAKES US THE
+would take on the burden this repo already names for llama.cpp, "THIS MAKES US THE
 VENDOR... `LLAMACPP_VERSION` is now the only thing deciding which llama.cpp a user
-runs, and it does not move on its own" — for a component whose failure mode is
+runs, and it does not move on its own": for a component whose failure mode is
 silent exposure. `stunnel` from apt inherits Debian's CVE fixes instead.
 
 llama-server binds `127.0.0.1` inside the sidecar. That is not defence in depth so
@@ -101,14 +101,14 @@ and is worth setting, but it is not what makes the endpoint safe.
 **The caller needs client-cert support it does not have.** `scripts/llm-chat.py`
 calls `urllib.request.urlopen` with no TLS context. It already handles
 `SYNTHESIS_API_KEY` as a bearer, including a `cmd:` form that shells out for the
-value — but presenting a certificate needs an `ssl.SSLContext` with
+value, but presenting a certificate needs an `ssl.SSLContext` with
 `load_cert_chain`, plus the identity paths as table-declared settings, per #2242's
 one-name-per-setting rule. This is the real work on the client side.
 
 **PKI ownership.** The KB already runs a CA: `kb_mtls_start()` calls
 `kb_pki_ca_load_or_create_custodied($data_dir/kb-ca)` and issues its own server cert
 from it. For this hop the KB is the *client*, so the sidecar must verify against the
-KB's CA — which means the KB issues the sidecar's server identity.
+KB's CA, which means the KB issues the sidecar's server identity.
 
 ### Bootstrap ordering
 
@@ -117,7 +117,7 @@ The deployment sequence is:
 1. deploy `aimee-server`
 2. run the wizard
 3. deploy and connect `aimee-kb`
-4. deploy and connect `aimee-llm` — **only if synthesis was selected in the wizard**
+4. deploy and connect `aimee-llm`, **only if synthesis was selected in the wizard**
 
 This removes the problem rather than solving it. The sidecar is deployed *after* the
 KB is up and connected, so the CA already exists at the moment the identity is
@@ -125,7 +125,7 @@ needed. There is no blocking wait, no files-appear race, and no need to widen
 `aimee-authority-bootstrap`'s remit: the ordering is a property of the wizard flow,
 not something compose has to be coerced into.
 
-Step 4 being conditional also matches the existing shape — the retired `aimee-llm`
+Step 4 being conditional also matches the existing shape. The retired `aimee-llm`
 service was gated behind `profiles: ["llm"]`, and `COMPOSE_PROFILES` already selects
 the kb this way.
 
@@ -138,14 +138,14 @@ party is new surface.
 ### What this simplifies in the wizard
 
 `frontend/src/setup/deployTopology.ts` currently derives the synthesis choice from
-the kb tag — "decided by the tag you pulled (`aimee-kb-llm-e2b` vs `-e4b`)" — which
+the kb tag ("decided by the tag you pulled (`aimee-kb-llm-e2b` vs `-e4b`)") which
 is why #2242 had to disable the local-model options on an image that bakes none.
 
 Once synthesis is its own container that coupling goes away: any kb image can have
 synthesis added or removed afterwards, because the two are no longer the same
 artefact. `bundledSynthesisModel(cfg)` and the option-disabling logic that depends on
 it can go, and "off" stops being a property of the image you happened to pull. The
-three-way surface the wizard already presents — off, local, external — survives
+three-way surface the wizard already presents (off, local, external) survives
 unchanged; only what "local" *means* changes, from a tag constraint to a service.
 
 ### Synthesis becomes an in-place upgrade
@@ -153,15 +153,15 @@ unchanged; only what "local" *means* changes, from a tag constraint to a service
 This is the capability the split unlocks, and it is worth more than the build-time
 saving that motivated it.
 
-Today, moving between E2B and E4B — or adding local synthesis to a running
-deployment — means pulling a different kb tag and recreating **the container that
+Today, moving between E2B and E4B, or adding local synthesis to a running
+deployment, means pulling a different kb tag and recreating **the container that
 holds the database**. A multi-gigabyte swap of a data-bearing service, to change a
 model that has nothing to do with the data.
 
 As a sidecar it is a stateless container swap: pull `aimee-llm-e4b`, recreate one
 service, leave the kb running. Add synthesis to a deployment that never had it,
 downgrade to E2B on a box that turned out too small, or remove it and point
-`SYNTHESIS_ENDPOINT` at an external provider — none of it touches the kb or its
+`SYNTHESIS_ENDPOINT` at an external provider, none of it touches the kb or its
 volume. Both surfaces already exist to drive it: the wizard's Deploy step, and
 `/v1/deploy/apply` behind it.
 
@@ -181,14 +181,14 @@ services independently.
 
 Dependency order, each independently reviewable:
 
-1. **`aimee-llm` image + publish workflow** — llama.cpp, baked model, stunnel,
+1. **`aimee-llm` image + publish workflow**: llama.cpp, baked model, stunnel,
    entrypoint, the two-way rebuild guard. No kb changes; nothing consumes it yet.
-2. **PKI provisioning** — the KB issues the sidecar's server identity and its own
+2. **PKI provisioning**: the KB issues the sidecar's server identity and its own
    client cert at step 4 of the deployment sequence, plus the identity settings. The
    ordering is settled; how the material is transported is what this step designs.
-3. **Client-side mTLS** — `SSLContext`/`load_cert_chain` in the sidecar clients.
-4. **Compose wiring** — the service, and `SYNTHESIS_ENDPOINT` pointed at it.
-5. **kb retopology** — drop llama.cpp and the model stages; embedder axis becomes
+3. **Client-side mTLS**: `SSLContext`/`load_cert_chain` in the sidecar clients.
+4. **Compose wiring**: the service, and `SYNTHESIS_ENDPOINT` pointed at it.
+5. **kb retopology**: drop llama.cpp and the model stages; embedder axis becomes
    none/a25m/nomic; publish matrices and docs follow.
 
 Synthesis keeps working throughout: until step 4 the kb resolves whatever
@@ -232,4 +232,4 @@ Synthesis keeps working throughout: until step 4 the kb resolves whatever
   transport for the identity is not.
 - No measurement of synthesis throughput over the hop versus loopback. The extra
   cost is a TLS handshake per connection against a model that takes seconds per
-  request, so it is expected to be noise — expected, not measured.
+  request, so it is expected to be noise, expected, not measured.

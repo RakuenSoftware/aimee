@@ -4,8 +4,8 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived after the readiness endpoint shipped.
-- **Historical state:** PENDING — design only, no code in the proposal PR.
+- **State:** DONE. Archived after the readiness endpoint shipped.
+- **Historical state:** PENDING. Design only, no code in the proposal PR.
 - **Author:** JBailes
 - **Date:** 2026-07-22
 - **Charter roles:** Constrain-Verify (report measured dependency state instead
@@ -26,12 +26,12 @@ return 200;
 ```
 
 It is a string literal. It returns `"ok"` when DB1 is unwritable, when aimee-kb
-is unreachable, and when aimee-llm is down. Anything polling it — a container
-restart policy, an uptime check, an operator triaging an incident — reads a value
+is unreachable, and when aimee-llm is down. Anything polling it, a container
+restart policy, an uptime check, an operator triaging an incident, reads a value
 that carries no information about whether the server can actually serve.
 
-A health endpoint that cannot report unhealth is not a missing feature. It is a
-false signal, and it is worse than having no endpoint, because it is trusted.
+A health endpoint that cannot report unhealth is a false signal, and it is worse than having no
+endpoint, because it is trusted.
 
 ## §0 What already exists
 
@@ -40,7 +40,7 @@ Every claim below was verified by direct read at the cited location.
 - **`/v1/health` is the only such route.** `src/server/server_http_routes.c:1505`
   registers `GET /v1/health -> rh_health`. There is no `/v1/ready`, no
   `/v1/live`. The only other match for "readiness" anywhere on the server route
-  table is `/v1/calibration/readiness` (`:1732`), which is unrelated — it
+  table is `/v1/calibration/readiness` (`:1732`), which is unrelated, it
   concerns model calibration, not service health.
 - **aimee-kb has the same shape.** `src/kb/http/kb_http.c:3` documents it serving
   `/v1/health`, `/v1/version`, `/v1/capabilities`, handled at `:160` and `:988`.
@@ -90,7 +90,7 @@ route that does not yet exist.
 ### §1.2 Execution model: cached snapshot, refreshed off the request path
 
 The review's second blocking finding was that "bounded by timeout" is not the
-same as "non-blocking" — a synchronous check still blocks until its timeout, and
+same as "non-blocking", a synchronous check still blocks until its timeout, and
 reusing a status enum provides no execution model.
 
 `/v1/ready` never performs I/O on the request path. It serves a cached snapshot:
@@ -101,7 +101,7 @@ reusing a status enum provides no execution model.
 - The handler reads the snapshot and returns it with a `sampled_at` timestamp and
   an `age_seconds` field, so a consumer can tell a fresh "ready" from a stale one.
 - **Startup:** before the first sample completes, state is `unknown` and the
-  endpoint reports **not-ready / 503**. Fail closed — an unsampled dependency is
+  endpoint reports **not-ready / 503**. Fail closed. An unsampled dependency is
   never reported ready.
 - **Staleness:** if a snapshot is older than a configured staleness bound, the
   affected dependencies degrade to `unknown` and the roll-up is not-ready. A
@@ -118,7 +118,7 @@ To respect the `server_http.c` isolation constraint (§0), dependency checks are
 the same style of seam `server_api.c` already uses to keep dependency closures
 out of the listener and its unit test: `server_http.c` holds a provider pointer
 and calls it; the implementation lives outside the unit. With no provider
-registered, `/v1/ready` reports `unknown`/503 — which keeps `server_http.c`'s
+registered, `/v1/ready` reports `unknown`/503, which keeps `server_http.c`'s
 existing unit test dependency-free.
 
 ### §1.4 Dependency set
@@ -139,7 +139,7 @@ only if every contributing dependency is `ok`.
 3. **Red before green.** A test harness starts the server with an injected
    failing dependency and asserts `/v1/ready` reports non-ok and status 503.
    The same harness, run against a build where the readiness provider is
-   replaced by one that unconditionally reports ok, must **fail** — proving the
+   replaced by one that unconditionally reports ok, must **fail**, proving the
    test detects blindness rather than merely observing a hardcoded string. (The
    original draft asked the test to fail against the stock endpoint; that was
    unachievable, since the stock build has no `/v1/ready` to point it at. This
@@ -150,7 +150,7 @@ only if every contributing dependency is `ok`.
    asserts a wedged refresher does not report ready indefinitely.
 6. A dependency probe exceeding its timeout is reported `fail`/`timeout`, and a
    test asserts the handler's own latency stays bounded and independent of that
-   probe's duration — i.e. the request path did no I/O.
+   probe's duration, i.e. the request path did no I/O.
 7. `server_http.c`'s existing unit test gains no new dependency linkage. With no
    provider registered, `/v1/ready` reports `unknown`/503.
 8. The route, its schema, and the 200-vs-503 boundary are added to the OpenAPI
@@ -168,8 +168,8 @@ only if every contributing dependency is `ok`.
   one-shot, this is a long-lived sampler), do not contort either side to share
   code that does not want to be shared.
 - **Not** adding metrics, alerting, or a dashboard surface for readiness.
-- **Not** touching untrusted-content marking or model capability resolution —
-  see §7.
+- **Not** touching untrusted-content marking or model capability resolution.
+See §7.
 
 ## §4 Risks
 
@@ -203,19 +203,19 @@ green criterion). Nothing here is validated by execution yet; §2 is the gate.
 Adversarial review of the implementation (2026-07-22) raised three points that
 were accepted as valid but deliberately not fixed in the first change. They are
 recorded here so they are not rediscovered as new findings. Note the review ran
-**degraded** — one of two seats failed — so these are single-reviewer findings
+**degraded** (one of two seats failed) so these are single-reviewer findings
 that were verified against the source rather than accepted on the panel's word.
 
 1. **Sampler lifecycle.** The sampler is a detached thread with an infinite
    loop and no stop/join protocol, and `fork()` behavior is undefined (a child
    inherits `g_ready_thread_started` and possibly a locked mutex without
    inheriting the thread). This matches the existing precedent in
-   `src/server/agent_logging.c:121-129`, so it is not a new deviation — but if
+   `src/server/agent_logging.c:121-129`, so it is not a new deviation, but if
    that pattern is ever given a real lifecycle, readiness should move with it.
 2. **Is aimee-kb genuinely required?** The roll-up reports not-ready when kb is
    down, which drains the instance even if chat and session paths remain
    serviceable. The proposal committed to "ready only if every dependency is
-   ok" and review accepted it, so the implementation follows it — but this is
+   ok" and review accepted it, so the implementation follows it, but this is
    the §4 over-reporting risk in concrete form. Resolving it properly needs an
    inventory of which workloads actually require kb, which is a deployment
    question, not a code one. Watch it in first deployment.
@@ -226,8 +226,8 @@ that were verified against the source rather than accepted on the panel's word.
    decision that this is acceptable on the deployment's trust boundary. Not
    resolved here.
 
-A fourth review point — that tests assert on substrings rather than parsing the
-JSON — is acknowledged: assertions could pass on a malformed body. The
+A fourth review point. That tests assert on substrings rather than parsing the
+JSON, is acknowledged: assertions could pass on a malformed body. The
 status/body consistency check added in review closes the case that mattered
 (a 200 disagreeing with its own body), but full semantic assertions remain
 worth doing.
@@ -244,8 +244,8 @@ relitigated:
   `:559`, `:615`). **Dropped** because the draft admitted it had not traced the
   downstream path from tool return to prompt assembly, nor the memory-recall
   (`src/cmd_hooks.c`, `src/modules/db2/c/memory_query.c`) or repo-file-content ingress
-  paths. Without that trace the premise — that nothing marks the content
-  downstream — is unestablished, and the proposed cross-tool invariant test had
+  paths. Without that trace the premise. That nothing marks the content
+  downstream, is unestablished, and the proposed cross-tool invariant test had
   no machine-readable notion of "returns external content" to test against. To
   revive it: trace every external-content ingress path, reproduce an unmarked
   payload in the stock system, and decide whether external-content provenance
@@ -256,12 +256,12 @@ relitigated:
   because the highest-precedence operator override
   (`models_dev_override_lookup`) already solves this by hand, and the draft named
   no OpenAI-compatible response field that reliably supplies a real context
-  window — so the probe's central claim was unsupported, while adding a network
+  window, so the probe's central claim was unsupported, while adding a network
   failure surface to every capability resolution. To revive it: name the endpoint
   APIs and schemas, prove they expose context size for the target servers, and
   specify timeout, cache TTL, auth failure, and 4xx-vs-5xx behavior.
 - **Deleting the dead `models_dev_capability_get()` stub**
-  (`src/models_dev.c:116-123`, unreferenced — the resolution chain uses
+  (`src/models_dev.c:116-123`, unreferenced; the resolution chain uses
   `models_dev_cache_lookup()` instead) is a real but unrelated cleanup. It was
   correctly called out as padding and belongs in its own change with its own
   reference and build verification.

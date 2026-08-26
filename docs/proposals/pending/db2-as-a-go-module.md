@@ -1,6 +1,6 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — residual scope only. S1 and S2 are complete, S3 is in progress, and S4/S6 remain open.
+- **State:** PENDING. Residual scope only. S1 and S2 are complete, S3 is in progress, and S4/S6 remain open.
 - **Completed slices:** The C source boundary, separately buildable process shell, generated health
   contract/client, declaration and
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
@@ -76,10 +76,10 @@ Measured on `origin/testing` at `0916c09472`:
 | SQL files under `src/modules/db2/c` | 6 |
 | C, header, and SQL lines | 92,852 |
 | Files outside `src/modules/db2/c` that include a DB2 header | 297 |
-| — production files | 147 |
-| — test files | 150 |
+| of those, production files | 147 |
+| of those, test files | 150 |
 | Direct DB2-header include directives outside the boundary | 967 |
-| — production directives | 532 |
+| of those, production directives | 532 |
 | Lines across the six SQL files | 16,349 |
 
 The physical move also exposed the other side of the source boundary. At the relocation merge,
@@ -332,30 +332,30 @@ conformance matrix, not the KB route, DB2 public stage, or caller grant.
 
 The migration lands in independently testable slices, but activation remains atomic:
 
-1. **S1 — boundary and process shell.** Relocate the C tree, inventory both sides of the source
+1. **S1, boundary and process shell.** Relocate the C tree, inventory both sides of the source
    boundary, register principal 29/event 11521, compile a standalone C runtime bundle, freeze the
    lifecycle-health codec, and return `capability_absent` until the real backend closure is linked.
    Exit: the bundle builds, malformed wire vectors fail closed, and DB2 imports no private KB header.
-2. **S2 — catalog and C closure.** Classify every external C declaration and consumer, generate the
+2. **S2, catalog and C closure.** Classify every external C declaration and consumer, generate the
    eight family dispatch surfaces, freeze an exhaustive disposition for every vector declaration,
    add database-free reference routing/codecs for the first portable candidate operation, and remove
    or promote every dependency that prevents the complete descriptor-owned C source set from linking
    standalone. Exit: exhaustive catalogs and no monolithic core link.
-3. **S3 — replayable C process.** Package schema, DSN, pool, tenancy, and every catalog handler in the
+3. **S3, replayable C process.** Package schema, DSN, pool, tenancy, and every catalog handler in the
    disabled C process; add reference-vs-process replay, schema, concurrency, cancellation, and fault
    fixtures. Exit: byte and database-effect parity while the KB still serves local calls.
-4. **S4 — atomic C activation.** Start DB2 before consumers, move the DSN and every caller to generated
+4. **S4, atomic C activation.** Start DB2 before consumers, move the DSN and every caller to generated
    bus clients, remove DB2/libpq from the KB link, and make failed DB2 readiness fail closed. Exit:
    only `aimee-module-db2` owns DB2 in the image.
-5. **S5 — DB3 contract and providers.** Connect the provider-neutral reference contract to the
+5. **S5. DB3 contract and providers.** Connect the provider-neutral reference contract to the
    pgvector default adapter, deterministic selection/fallback, committed outbox fan-out, and real DB2
    candidate revalidation; run conformance tests for fake and optional external providers. Exit: one
    selected external provider can replace every eligible operation without moving retained
    PostgreSQL-coupled work.
-6. **S6 — pure-Go parity.** Implement the frozen DB2 catalog in `server-go/modules/db2`, embed the same
+6. **S6, pure-Go parity.** Implement the frozen DB2 catalog in `server-go/modules/db2`, embed the same
    SQL, and pass C-vs-Go replay, schema, tenant, concurrency, vector, DB3, durability, and performance
    gates. Exit: a descriptor/runtime switch selects Go without caller or wire changes.
-7. **S7 — C retirement.** Deploy only the Go provider, remove the C tree and C-only shims after the
+7. **S7. C retirement.** Deploy only the Go provider, remove the C tree and C-only shims after the
    compatibility window, and prove no C DB2 object, stale grant, or fallback executable ships.
 
 This implementation is intentionally split across those ordered PRs. The current S2 owner series adds
@@ -439,7 +439,7 @@ Audit the 297 consumers by runtime placement before conversion:
 
 1. the six `src/server` consumers must use the existing KB service/API or lose accidental DB2 type
    dependencies; they cannot attach to the KB-local DB2 bus;
-2. the 49 `src/modules` consumers are split by declared placement—KB processes receive generated
+2. the 49 `src/modules` consumers are split by declared placement, KB processes receive generated
    clients, while server processes use their owning KB contract;
 3. the 79 `src/kb` consumers and 11 root/two tool consumers migrate by lifecycle, tenancy, reads,
    writes, maintenance, then custody/shutdown order; and

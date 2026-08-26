@@ -6,9 +6,9 @@
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
-> [`git-core-contract-runtime-residual.md`](../pending/git-core-contract-runtime-residual.md).
+> [`git-core-contract-runtime-residual.md`](git-core-contract-runtime-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Parent:** [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md)
 - **Delivery dependency:** [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)
 - **Owns:** Git's repository boundary, memory-ingest seam, provenance, redaction order, and non-Git behavior

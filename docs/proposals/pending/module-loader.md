@@ -1,9 +1,9 @@
-# Proposal: `module-loader` — load and host external and user-authored modules
+# Proposal: `module-loader`: load and host external and user-authored modules
 
-- **State:** DRAFT — 2026-07-23; awaiting roundtable review. Later-drafted consuming child; it does
+- **State:** DRAFT. 2026-07-23; awaiting roundtable review. Later-drafted consuming child; it does
   not inherit any prior approval.
 - **Parent:** [`core process separation residual`](core-process-separation-residual.md)
-- **Owns:** the optional `module-loader` module — the module package format, artifact verification,
+- **Owns:** the optional `module-loader` module. The module package format, artifact verification,
   the sandbox host runtimes (OS-sandboxed process and WebAssembly), and the loaded-module lifecycle
   by which an external or user-authored module is started, health-checked, upgraded, and stopped.
 - **Consumes (does not own):** the shared-memory bus, admission authority, capability state, and
@@ -18,8 +18,8 @@
 Under the modularization suite, core and every module are separate programs meeting only on the
 shared-memory event bus, and a module may be written in any conforming language (suite invariants
 11–12, 19). First-party modules are started as their own processes by ordinary orchestration. What is
-still missing is the piece that takes an **external or user-authored** module — an artifact from
-outside the build — verifies it, runs it under an enforced sandbox, and presents it to core for
+still missing is the piece that takes an **external or user-authored** module, an artifact from
+outside the build, verifies it, runs it under an enforced sandbox, and presents it to core for
 admission. That piece is `module-loader`. It is renamed from the former `plugin-loader`: it loads
 *modules* (native or sandboxed, any language), not in-process C plugins, and it supersedes the legacy
 in-tree plugin loader.
@@ -44,7 +44,7 @@ built-ins are unaffected.
   cannot read core, `vault`, or another module's memory.
 - **Loaded-module lifecycle.** Start, health-check, restart-on-crash, drain-and-upgrade, and stop.
   Because a loaded module is a separate program in its own sandbox, its crash is an isolated fault
-  domain — it does not take down core or its peers — and it can be upgraded independently.
+  domain (it does not take down core or its peers) and it can be upgraded independently.
 
 ## What it does not own (the safety boundary)
 
@@ -61,7 +61,7 @@ preconditions are unmet, naming the missing dependency.
 
 ## Trust of the loader itself (optional, but not untrusted)
 
-`module-loader` is optional — a deployment without external modules omits it — yet it hosts the
+`module-loader` is optional (a deployment without external modules omits it) yet it hosts the
 sandbox that confines *untrusted* code, which makes its own integrity trust-critical. Optional does
 not mean untrusted: `module-loader` is **first-party code**, built and signed like the core, and its
 artifact is attested before it runs; it is never itself a user-authored or externally supplied

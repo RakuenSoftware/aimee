@@ -6,9 +6,9 @@
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
-> [`core-substrate-and-source-module-boundaries-residual.md`](../pending/core-substrate-and-source-module-boundaries-residual.md).
+> [`core-substrate-and-source-module-boundaries-residual.md`](core-substrate-and-source-module-boundaries-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
   The 2026-07-23 amendment makes core a C communication substrate and every module a separate program
   in any conforming language, communicating over a core-owned shared-memory event bus (no
   cross-language linking, no cgo). It reopens the taxonomy and shared invariants and must be
@@ -51,7 +51,7 @@ is now the suite index and shared contract; it does not duplicate the child prop
 10. Less is more: remove duplicate implementations, registries, fallbacks, wrappers, stale config,
     and self-contained feature islands instead of relocating them.
 11. **The communication core is written in C; a module may be written in any language that conforms
-    to the bus contract.** The boundary between core and a module — and between two modules — is a
+    to the bus contract.** The boundary between core and a module (and between two modules) is a
     language-neutral message contract, not a header or a link edge, so language is a free choice.
     First-party modules standardize on Go as the reference implementation language; that is a
     convention, not a requirement. Language and selection are independent axes: a module may be
@@ -59,7 +59,7 @@ is now the suite index and shared contract; it does not duplicate the child prop
     authenticated, audited, typed messages between participants and owns the event bus; it performs no
     feature work.
 12. **Modules do not link or call each other; they only exchange messages over the bus.** A module
-    reaches another module — and core reaches a module — only by publishing or requesting a typed
+    reaches another module (and core reaches a module) only by publishing or requesting a typed
     event on the core-owned shared-memory event bus, gated by the descriptor dependency graph and
     execution policy. There is no shared header, symbol, link edge, cgo boundary, or side channel
     between core and a module or between two modules. Because the boundary is a message contract and
@@ -68,13 +68,13 @@ is now the suite index and shared contract; it does not duplicate the child prop
     inter-module message is a bus event, so one tap observes, records, authorizes (for action-class
     events), and can **replay** the entire cross-module message stream. No module-to-module
     communication may bypass it. Deterministic record-and-replay of the event stream is a
-    first-class capability — the primary debugging and reproduction surface for the whole system.
+    first-class capability, the primary debugging and reproduction surface for the whole system.
 14. **`memory` is a hub, not a peer.** Nearly every module depends on `memory`; `memory` depends on
     no other feature module. It is a sink in the dependency graph, keeping the graph acyclic under
     broad fan-in, and its public event contract stays narrow despite that fan-in.
 15. **The bus stays within a performance budget.** The bus is an in-memory shared-memory transport:
     lock-free ring buffers in a shared segment, zero-copy payloads, and no per-message syscall on the
-    fast path — near-in-process latency without a shared address space. A benchmark gate bounds
+    fast path, near-in-process latency without a shared address space. A benchmark gate bounds
     per-event dispatch overhead and keeps the `memory` round trip small; splitting `memory` into its
     own program costs more than the former monolithic in-process call, so batching and streaming keep
     that cost bounded rather than pretending it is zero. Governance capture and record must not push
@@ -95,7 +95,7 @@ is now the suite index and shared contract; it does not duplicate the child prop
     not a segment any process may map. Core is the sole admission authority: a module is granted the
     bus handle and its own queue mappings only when it is installed and registered, its
     identity/artifact is attested, and `execution-policy` authorizes it. There is no anonymous or
-    ambient access — an unadmitted process holds no handle and cannot map the segment, enumerate, or
+    ambient access. An unadmitted process holds no handle and cannot map the segment, enumerate, or
     inject. Admission is least-privilege (an admitted module still reaches only its declared,
     authorized event kinds) and fail-closed (a refused module is not started and the refusal is
     audited).
@@ -108,8 +108,8 @@ is now the suite index and shared contract; it does not duplicate the child prop
 19. **Modules are separate programs; isolation is by process or sandbox, not by language.** Core and
     each module are distinct programs that never link; they meet only on the shared-memory bus. A
     trusted first-party module runs as its own process mapped to only its authorized bus queues. An
-    untrusted external or user module runs under an enforced sandbox — an OS-sandboxed process
-    (seccomp/namespaces/container) or a WebAssembly instance in a host — reachable only through its
+    untrusted external or user module runs under an enforced sandbox, an OS-sandboxed process
+    (seccomp/namespaces/container) or a WebAssembly instance in a host, reachable only through its
     authorized bus queues and unable to read core, `vault`, or another module's memory. The isolation
     mechanism is a deployment choice; the bus contract, admission, and routing are identical across
     them, and separate programs give independent fault domains and scaling. Cross-language in-process
@@ -154,7 +154,7 @@ is now the suite index and shared contract; it does not duplicate the child prop
   subscribes to, and may request, plus the bus wire format that carries them. It is the only surface
   another participant may invoke, and it replaces the C public header as the enforced dependency edge
   between separate-program participants.
-- The **bus host** is the single in-source (C) implementation of the bus — the shared segment,
+- The **bus host** is the single in-source (C) implementation of the bus, the shared segment,
   admission/handle handshake, observer routing, and the governance/audit tap. It is contained only by
   the two bus-hosting services, the Runtime and the Control Plane; it is not a public, reimplementable
   spec, and there is exactly one of it.
@@ -163,7 +163,7 @@ is now the suite index and shared contract; it does not duplicate the child prop
   language-neutral, with reference clients in **C** and **Go** and a cross-language conformance suite,
   which is what makes any language a module host.
 - A **hub module** is a module (canonically `memory`) that is an allowed dependency of many other
-  modules and itself depends on no feature module — a sink in the dependency graph.
+  modules and itself depends on no feature module, a sink in the dependency graph.
 - The **object closure** term extends per axis: the **C object closure** is the selected `.o` set
   for the communication core; the **module closure** is the selected set of module programs and their
   registered event contracts. Omission removes a module from the module closure and the capability
@@ -178,7 +178,7 @@ and runtime surface named by the suite's absence manifest.
 The suite's original decision placed feature capabilities *inside* core. This amendment narrows core
 to exactly what the first message of this work asked for: **the pieces needed to communicate between
 the client, the Runtime, and the Control Plane.** That substrate is written in C. Every capability
-that does work in response to a message — including `memory` — is a **separate module program** that
+that does work in response to a message (including `memory`) is a **separate module program** that
 communicates over a **core-owned shared-memory event bus**. Because the boundary is a language-neutral
 message contract and the participants are separate programs, core and modules never link, cgo is
 never required, and a module may be written in any language with a bus client.
@@ -216,10 +216,9 @@ All eight optional modules are separate programs on the bus, Go by first-party c
 
 ### The shared-memory event bus
 
-`module-runtime` owns a **shared-memory event bus** per service — lock-free ring buffers in a shared
+`module-runtime` owns a **shared-memory event bus** per service, lock-free ring buffers in a shared
 segment that admitted modules map, giving in-memory speed and zero-copy payloads without a shared
-address space, so no cross-language linking or cgo is involved. Every message between participants —
-a remote client, the Runtime, the Control Plane, or another module — is a typed IR event on this bus.
+address space, so no cross-language linking or cgo is involved. Every message between participants (a remote client, the Runtime, the Control Plane, or another module) is a typed IR event on this bus.
 A participant publishes a one-way notification or a correlated request and receives the reply; the
 bus resolves the target by capability, authorizes the event through the trust kernel, offers it to
 the governance/audit tap, and returns the typed result or `capability_absent`. The same IR envelopes,
@@ -230,25 +229,25 @@ existing network transport; the shared-memory guarantee is intra-service.
 
 Choosing a bus over direct calls is deliberate: one construct carries every inter-module message, so
 it is the single place to **log, govern, and reason about** cross-module behavior (shared invariant
-13). It also structurally enforces invariants 1 and 12 — the C core has no build or link edge to any
+13). It also structurally enforces invariants 1 and 12. The C core has no build or link edge to any
 module; it holds only the descriptor graph and the bus. "Core never depends on an optional module"
 becomes unbreakable rather than merely checked: core is a separate program that cannot link a module
 at all. An unselected module simply has no registered event contract, and every attempt to reach it
 fails closed.
 
 Cross-boundary readiness is answered by the capability advertisement defined in
-[`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md): before a
+[`thin-client-capability-advertisement.md`](../pending/thin-client-capability-advertisement.md): before a
 module requests `memory` (or any dependency), it observes that dependency's `ready` state through
 the same generation-stamped projection the thin client uses. Discovery, for a module and for a
 client, is one mechanism.
 
 **Intra-service versus cross-service.** The shared-memory bus is intra-service: a module reaches
-the `memory` (and every other capability) **of its own service** — the Runtime hosts per-user memory,
+the `memory` (and every other capability) **of its own service**, the Runtime hosts per-user memory,
 the Control Plane hosts shared memory. When a module must reach the *other* service's capability (a
 Runtime module reading Control-Plane shared memory), the request does not travel the shared-memory
 bus; it crosses on the **existing Runtime↔Control network transport**, carrying the *same* typed event
 contract, auth, and capability advertisement, and is marked cross-service. That crossing is
-explicitly **not** on the shared-memory fast path — it carries network latency and is subject to the
+explicitly **not** on the shared-memory fast path. It carries network latency and is subject to the
 performance budget's separate, looser cross-service class, and cross-service readiness is gated by the
 merged advertisement across both services. This proposal fixes only that a cross-service request
 reuses the event contract over the network transport rather than inventing a second path; the exact
@@ -260,7 +259,7 @@ child.
 
 The bus carries every module's traffic, including the near-universal `memory` path and every
 governed action-class event, so **who may map its shared segment is a security boundary in its own
-right** — distinct from, and prior to, the per-event authorization above. A process that could map
+right**, distinct from, and prior to, the per-event authorization above. A process that could map
 the segment freely could observe every module's messages or inject its own; the shared segment must
 therefore not be mappable by any process (shared invariant 17).
 
@@ -268,12 +267,12 @@ therefore not be mappable by any process (shared invariant 17).
   segment and hands a module its handle and its own queue mappings only on admission. There is no
   side channel to join and no anonymous or ambient mapping; an unadmitted process holds no handle and
   the segment's OS permissions deny it.
-- **Every module is identity-attested.** Admission reuses the existing principal and trust machinery
-  — the vault principal model, the `cert:CN` / bearer classes the thin-client↔server link uses
+- **Every module is identity-attested.** Admission reuses the existing principal and trust machinery,
+the vault principal model, the `cert:CN` / bearer classes the thin-client↔server link uses
   ([`tiered-llm-p8-thinclient-mtls.md`](tiered-llm-p8-thinclient-mtls.md)), and, for externally
   authored modules, `governance`'s artifact signing/trust
-  ([`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md))
-  — rather than inventing a second scheme. A first-party module is trusted at build time; an external
+  ([`governance-agent-identity-and-artifact-trust.md`](../pending/governance-agent-identity-and-artifact-trust.md)),
+rather than inventing a second scheme. A first-party module is trusted at build time; an external
   module's artifact is verified before core starts it.
 - **Admission is gated by installation and authorization.** A module participates only when it is
   installed, registered, and authorized by `execution-policy`; a module that is not installed, or
@@ -281,7 +280,7 @@ therefore not be mappable by any process (shared invariant 17).
   the start-time gate; the per-event contract check (declared, authorized event kinds only) still
   applies afterward, so admission never implies full access.
 - **Isolation and least privilege.** An admitted module maps only its own queues, so it sees only the
-  event kinds it is authorized to subscribe to — the bus is not a shared channel every module can
+  event kinds it is authorized to subscribe to. The bus is not a shared channel every module can
   read in full (invariant 18). An untrusted module additionally cannot read core, `vault`, or another
   module's memory: its process/sandbox boundary and its restricted queue mappings expose nothing but
   its authorized bus verbs (invariant 19).
@@ -295,7 +294,7 @@ mechanics of segment creation, handle granting, and sandbox startup are owned by
 ### Execution model: separate programs, isolation by process or sandbox
 
 Every module is a separate program that meets core only on the shared-memory bus (invariant 19).
-Trust decides *how* a module is isolated, not whether it links into core — nothing links into core:
+Trust decides *how* a module is isolated, not whether it links into core. Nothing links into core:
 
 - **Trusted (first-party).** A first-party module runs as its own process, mapped to only its
   authorized bus queues. It is authored in Go by convention but may be any conforming language. It is
@@ -309,8 +308,8 @@ Trust decides *how* a module is isolated, not whether it links into core — not
   *is* the observer-routed authorized surface, so the runtime enforces isolation rather than trusting
   the module.
 
-Because the participants are separate programs, there is no cross-language in-process linking anywhere
-— cgo and native Go plugins are both excluded, the former unnecessary and the latter unshippable
+Because the participants are separate programs, there is no cross-language in-process linking anywhere,
+cgo and native Go plugins are both excluded, the former unnecessary and the latter unshippable
 (exact toolchain/dependency lockstep, no universal platform support, no isolation). Splitting a
 module out of core costs more than a monolithic in-process call did; the shared-memory bus keeps that
 cost small (zero-copy, no syscall on the fast path) and batching/streaming keep the `memory` path
@@ -321,7 +320,7 @@ lifecycle for the untrusted tier.
 
 Admission decides *whether* a participant is on the bus; routing decides *what it receives*. These
 are separate, and both are least-privilege. The bus is **not** a shared channel every admitted
-module reads in full — that would make admission the only wall and let any module observe `memory`
+module reads in full. That would make admission the only wall and let any module observe `memory`
 traffic, delegate invocations, or another module's events. Instead the bus follows an **observer
 pattern with authorization-scoped routing** (shared invariant 18):
 
@@ -331,8 +330,8 @@ pattern with authorization-scoped routing** (shared invariant 18):
   it did not subscribe to.
 - **Subscription is authorized at subscribe time.** Core honors a subscription only when the
   module's descriptor declares that subscribe edge *and* `execution-policy` authorizes it for the
-  module's principal. An undeclared or unauthorized subscription is refused, fail-closed and audited
-  — a module cannot opt into arbitrary traffic, and there is no "all events" subscription available
+  module's principal. An undeclared or unauthorized subscription is refused, fail-closed and audited.
+A module cannot opt into arbitrary traffic, and there is no "all events" subscription available
   to any module.
 - **Request/reply is point-to-point.** A correlated request is delivered to the one serving module,
   and its reply to the one requester; neither is fanned out to other observers.
@@ -349,7 +348,7 @@ reviewable and audited, not an ambient consequence of being on the bus.
 ### Record, replay, and debugging
 
 Because every inter-module message is one typed event on one construct, the bus is a complete,
-ordered record of the system's cross-module behavior — and that record is **replayable**. The bus
+ordered record of the system's cross-module behavior, and that record is **replayable**. The bus
 supports capturing the event stream (per service, within the performance budget) and re-driving it
 against modules. This is a first-class capability, not a side effect (shared invariant 13):
 
@@ -360,7 +359,7 @@ against modules. This is a first-class capability, not a side effect (shared inv
   test without the original environment; module behavior is exercised against real captured events.
 - **Forensics.** Governance replays a window of the stream to see the exact sequence that led to a
   verdict (complementing, not replacing, the durable audit chain in
-  [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md)).
+  [`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md)).
 
 Determinism has honest limits, because modules are separate programs, not one lockstep runtime. The
 suite does **not** promise bit-identical global re-execution of every process. It defines two replay
@@ -369,8 +368,7 @@ modes:
 - **Observational replay (always faithful).** Re-present the recorded, ordered stream for inspection,
   forensics, and debugging. Nothing is re-executed, so this is exact by construction and is the
   default for governance and triage.
-- **Module replay (bounded, divergence-detecting).** Re-drive one module — or a chosen subset —
-  against its recorded inbound events and compare its produced outbound events to the recording.
+- **Module replay (bounded, divergence-detecting).** Re-drive one module (or a chosen subset) against its recorded inbound events and compare its produced outbound events to the recording.
   Replay is deterministic **only to the extent a module is a function of its bus inputs**: any
   clock, randomness, or external I/O a module uses must be sourced from the bus or injected from the
   recording, or the module is not bit-reproducible and the spec marks it so. Divergence between
@@ -381,13 +379,12 @@ governed artifact.
 
 ### Performance budget (the speed constraint)
 
-The bus is superior only while its cost stays within acceptable limits, and the hottest path —
-module→`memory`, run on every request on both Runtime and Control Plane — is the one that must not
+The bus is superior only while its cost stays within acceptable limits, and the hottest path (module→`memory`, run on every request on both Runtime and Control Plane) is the one that must not
 regress (shared invariant 15). A **shared-memory** bus is what makes this viable: lock-free ring
 buffers in a shared segment give near-in-process latency and zero-copy payloads with no per-message
 syscall on the fast path, so a separate-program `memory` is reached far faster than any socket and
-without cgo. This is not free — splitting `memory` into its own program costs more than the former
-monolithic in-process call — so a benchmark gate bounds per-event dispatch overhead and batching and
+without cgo. This is not free, splitting `memory` into its own program costs more than the former
+monolithic in-process call, so a benchmark gate bounds per-event dispatch overhead and batching and
 streaming keep the `memory` round trip small; the round-trip proof exercises the `memory` stages
 *across* the bus, not as an in-proc shortcut.
 
@@ -402,7 +399,7 @@ that file, so "within budget" always names a real, checkable number.
 
 Governance capture must live within this budget. The tap observes every event, but **recording** to
 the durable audit chain is asynchronous and batched (consistent with the WORM hot-path cost noted in
-[`governance-attestable-enforcement.md`](governance-attestable-enforcement.md)); only **action-class**
+[`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md)); only **action-class**
 events require a synchronous pre-delivery verdict, and that verdict is a cheap in-memory policy
 check. High-frequency data events such as `memory` recall are observed and recorded, not gated
 synchronously, so completeness does not tax the hot path.
@@ -430,7 +427,7 @@ owner in each (shared invariant 16). A module does not have its capabilities rea
 core poller; it **publishes its capabilities and its invocable surface descriptors to core over the
 bus** when it registers, and publishes state transitions as they happen. Core aggregates those
 publications into the capability closure and the generation-stamped projection that
-[`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) returns to the
+[`thin-client-capability-advertisement.md`](../pending/thin-client-capability-advertisement.md) returns to the
 thin client and to other modules. Publication and advertisement are the same bus mechanism observed
 from two ends.
 
@@ -445,7 +442,7 @@ Installation is **dependency-complete** and transactional. Each module declares 
 dependencies in its descriptor; a module may not be installed unless every module it depends on is
 already installed, and it may not be removed while an installed module still depends on it. The
 installer/profile generator computes the dependency closure and **refuses** an install or selection
-that would leave a declared dependency unmet, naming the missing module — it never installs a module
+that would leave a declared dependency unmet, naming the missing module, it never installs a module
 into a state where a dependency it needs is absent. This is distinct from runtime readiness: a
 dependency being *installed* is an install-time precondition; a dependency being *ready* is the
 runtime condition the capability advertisement reports. Because `memory` is a dependency of nearly
@@ -458,14 +455,14 @@ Because the bus contract, the event contract, and capability publication are the
 surface, a module needs nothing from core but to speak that surface: attach the bus with a bus
 client, subscribe to and publish its declared event kinds, and publish its capabilities. This lets
 **end users author their own modules in any language** and plug them in without modifying,
-recompiling, or relinking core — the language boundary that once meant "C or Go" is gone, because the
+recompiling, or relinking core. The language boundary that once meant "C or Go" is gone, because the
 boundary is a message contract, not a linkage. A user module is authored in any language for which a
 bus client exists (or can be written as a small shim), packaged as an OS-sandboxed process or a WASM
 module, and admitted like any other untrusted participant. The optional `module-loader` module
 realizes this (artifact verification, sandbox host(s), and lifecycle); this suite records the
 property, and `module-loader`'s own document owns the packaging and host mechanics.
 
-The trust boundary does not soften for a user module — the sandbox and the bus boundary are exactly
+The trust boundary does not soften for a user module. The sandbox and the bus boundary are exactly
 why this is safe:
 
 - A user module is an **untrusted principal** running in an enforced sandbox (OS-sandboxed process or
@@ -476,13 +473,13 @@ why this is safe:
   installed.
 - **Dependency-complete installation** applies unchanged: a user module that depends on `memory`
   installs only when `memory` is present and reaches it solely over the bus.
-- Executable-artifact trust — signing and hash-pinning of externally authored modules — is owned by
+- Executable-artifact trust (signing and hash-pinning of externally authored modules) is owned by
   optional `governance`
-  ([`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md));
+  ([`governance-agent-identity-and-artifact-trust.md`](../pending/governance-agent-identity-and-artifact-trust.md));
   a deployment that requires signed modules enforces it there before core starts the module.
 
 Nothing about user-authored modules is a new core capability or a new privilege path; it is the
-existing bus boundary, enforced by the sandbox, offered to code from outside the project — in
+existing bus boundary, enforced by the sandbox, offered to code from outside the project, in
 whatever language its author chose.
 
 ### What this changes downstream
@@ -497,10 +494,10 @@ whatever language its author chose.
   stages flow as bus events across the boundary within the performance budget.
 - [`event-bus-governance-and-capture.md`](event-bus-governance-and-capture.md) uses the bus as a
   single, uniform capture and enforcement seam, replacing the seven scattered enforcer sinks that
-  the in-flight [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md) routes
-  into the chain one by one — consuming that work's ledger and attestation surface without modifying
+  the in-flight [`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md) routes
+  into the chain one by one, consuming that work's ledger and attestation surface without modifying
   it (it is mid-implementation).
-- [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) is the
+- [`thin-client-capability-advertisement.md`](../pending/thin-client-capability-advertisement.md) is the
   discovery and readiness mechanism modules use to reach each other, not only the thin client.
 
 ## Canonical module taxonomy
@@ -590,9 +587,9 @@ integrity, so disabling governance removes the organizational governance plane w
 the core safety boundary.
 
 The governance program includes
-[`governance-attestable-enforcement.md`](governance-attestable-enforcement.md),
-[`governance-policy-surface-and-posture.md`](governance-policy-surface-and-posture.md),
-[`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md),
+[`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md),
+[`governance-policy-surface-and-posture.md`](../pending/governance-policy-surface-and-posture.md),
+[`governance-agent-identity-and-artifact-trust.md`](../pending/governance-agent-identity-and-artifact-trust.md),
 and [`tiered-llm-p5-oidc-control-plane.md`](tiered-llm-p5-oidc-control-plane.md), plus their plans and
 follow-ups. Those proposals are implemented through `governance`; when they strengthen a required
 safety invariant, the underlying enforcement or ledger change lands behind the owning core contract
@@ -613,19 +610,19 @@ rather than making that safety property optional.
    and optional KB synthesis.
 5. [`product-governance-web-and-config.md`](product-governance-web-and-config.md) owns the Runtime /
    Control Plane rename, governance split, web lifecycles, and truthful configuration surfaces.
-6. The governance program—[`governance-attestable-enforcement.md`](governance-attestable-enforcement.md),
-   [`governance-policy-surface-and-posture.md`](governance-policy-surface-and-posture.md),
-   [`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md),
-   and [`tiered-llm-p5-oidc-control-plane.md`](tiered-llm-p5-oidc-control-plane.md)—owns the optional
+6. The governance program, [`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md),
+   [`governance-policy-surface-and-posture.md`](../pending/governance-policy-surface-and-posture.md),
+   [`governance-agent-identity-and-artifact-trust.md`](../pending/governance-agent-identity-and-artifact-trust.md),
+   and [`tiered-llm-p5-oidc-control-plane.md`](tiered-llm-p5-oidc-control-plane.md), owns the optional
    governance feature design and depends on proposals 2–5's core/module/product boundaries.
 7. [`large-refactor-delivery-and-compatibility.md`](large-refactor-delivery-and-compatibility.md)
    sequences the moves and defines compatibility, cleanup, recovery, and completion gates.
-8. [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) owns the
+8. [`thin-client-capability-advertisement.md`](../pending/thin-client-capability-advertisement.md) owns the
    registration chain and the static thin client: a module registers with its host service over the
    bus, a Runtime registers with its Control Plane, and a thin client registers with its Runtime;
    each edge returns a generation-stamped projection of the capability closure *and the invocable
    surface descriptors* (CLI verb/args/help, MCP tool schema, route, web surface) the registrant may
-   see. A registrant contacts only its own authority — the thin client never contacts a Control Plane
+   see. A registrant contacts only its own authority. The thin client never contacts a Control Plane
    and does not know whether one exists; the Runtime holds the merged closure and evaluates the
    cross-service dependency law once. The client therefore ships no module knowledge and needs no
    release when a module ships. It consumes proposals 2–5's capability-state, config, product, and
@@ -634,10 +631,10 @@ rather than making that safety property optional.
 9. [`event-bus-governance-and-capture.md`](event-bus-governance-and-capture.md) owns governance and
    audit over the module event bus: the single tap that captures every inter-module event, authorizes
    action-class events, and feeds the durable ledger and attestation bundle. It consumes the in-flight
-   [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md) (mid-implementation)
+   [`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md) (mid-implementation)
    without modifying it, and lands after both the event bus and that work's A1–A5. Later-drafted
    consuming child; awaits its own review.
-10. [`module-loader.md`](module-loader.md) owns the optional `module-loader` module (renamed from
+10. [`module-loader.md`](../pending/module-loader.md) owns the optional `module-loader` module (renamed from
     `plugin-loader`): the module package format, artifact verification, the OS-sandbox and WebAssembly
     host runtimes, and the loaded-module lifecycle for external and user-authored modules. It consumes
     core admission/bus/policy and optional `governance` artifact trust without owning them.

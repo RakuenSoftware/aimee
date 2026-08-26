@@ -8,24 +8,24 @@
 > specification for work already delivered. Remaining work is tracked in
 > [`operator-audit-activity-residual.md`](../pending/operator-audit-activity-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 ## Thesis
 
 Every shareable row in DB2 already carries the provenance needed to answer "who
-did what, in which scope, when" — `operator_id`, `content_hash`, timestamps — and
+did what, in which scope, when": `operator_id`, `content_hash`, timestamps, and
 a WORM audit ledger records privileged actions. But there is **no legible way to
 read it out.** The `aimee audit` verb only *verifies/checkpoints* the WORM store's
 integrity; it cannot render per-operator or per-scope activity. So the data is
 audit-*able* but not audit-*ed*: answering "what has operator X written to project
-Y this week?" means hand-writing SQL against DB2. The three-db-split Known
+Y this week?" means hand-writing SQL against DB2; the three-db-split Known
 Weaknesses section flagged this; it is still unbuilt.
 
 ## Goal
 
 An operator can run one command (and one `/v1` call) to get a legible,
-scoped activity report — per operator, per scope (project / workspace / global),
-over a time window — sourced from the provenance columns and the WORM ledger that
+scoped activity report, per operator, per scope (project / workspace / global),
+over a time window, sourced from the provenance columns and the WORM ledger that
 already exist, with no new write path.
 
 ## §0 What already exists
@@ -37,14 +37,14 @@ already exist, with no new write path.
   privileged/append-only actions with a verify chain.
 - **The CLI verb exists but is integrity-only.** `cmd_audit`
   (`{"audit", "Verify/checkpoint the WORM audit store …"}`) has `verify` +
-  `checkpoint` subcommands — nothing that reports activity.
+  `checkpoint` subcommands. Nothing that reports activity.
 
 Everything needed to *read* is present; only the read surface is missing.
 
 ## §1 DB2 read API: scoped activity query
 
 Add a read-only DB2 accessor (in the owning `src/modules/db2/c/` module, behind the KB
-service — server/CLI must not touch DB2 directly per the storage boundary) that
+service, server/CLI must not touch DB2 directly per the storage boundary) that
 aggregates activity by `(operator_id, scope, action, day)` over a time window,
 unioning the provenance columns and the WORM ledger. Read-only; no new table.
 
@@ -67,11 +67,11 @@ Known Weaknesses note asked for.
 
 A `--anomalies` flag that surfaces the obvious ones the rollup makes cheap:
 writes by an operator with no prior activity in a scope, a spike vs. that
-operator's trailing median, or a WORM-chain gap. Not intrusion detection — just
+operator's trailing median, or a WORM-chain gap. Not intrusion detection, just
 making the legible data legible.
 
 ## Non-goals
 
 No new capture (the data is already recorded), no tamper-evidence changes (the
-WORM chain stays as-is), and no multi-tenant policy engine — this is a *read*
+WORM chain stays as-is), and no multi-tenant policy engine. This is a *read*
 surface over provenance we already keep.

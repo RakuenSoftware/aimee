@@ -1,6 +1,6 @@
 # The corpus pipeline has no driver
 
-**Status:** pending — found during overnight validation of the bekko + E2B deployment
+**Status:** pending, found during overnight validation of the bekko + E2B deployment
 on CT 302, 2026-08-02. Deliberately NOT fixed in that pass: every candidate fix
 changes what background work a deployment performs, and that is a decision to take
 awake.
@@ -69,7 +69,7 @@ container and curl its loopback port. `check-kb-intelligence-surfaced` reports
 
 ## Why this was not fixed in the same pass
 
-The obvious fix — call the drain from the curator drain thread — starts LLM-backed
+The obvious fix (call the drain from the curator drain thread) starts LLM-backed
 stages (`summarized`, `questions_generated`, `entities_extracted`,
 `claims_extracted`, `relationships_mapped`, `conflicts_detected`, `gaps_detected`)
 automatically on every deployment. On the bundled CPU sidecar a single extraction
@@ -94,7 +94,7 @@ cannot be invoked is a defect on its own.
 
 `kb docs push` populates `docs` and `document_sections`; the searchable corpus
 (`kb_documents`, `kb_embeddings`) is populated by `aimee kb build --path P --project
-N`, which works correctly — verified on the same deployment: 2 files, 2 chunks,
+N`, which works correctly, verified on the same deployment: 2 files, 2 chunks,
 4 embeddings at dim 384, and semantic search ranked the then-present
 src/reconcile.py (0.5164) over
 `README.md` (0.3170) for "matching payments against statements", a query sharing no

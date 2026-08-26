@@ -1,9 +1,9 @@
-# Proposal: P5 — a work-outcome overlay that never mutates structural truth
+# Proposal: P5: a work-outcome overlay that never mutates structural truth
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 5 of 9.
 - **Author:** JBailes
@@ -13,7 +13,7 @@
 
 ## Problem and boundary
 
-Aimee already collects attributed retrieval outcomes and already consumes them —
+Aimee already collects attributed retrieval outcomes and already consumes them,
 for demotion, and as labels for the ranker fitter. What it does not have is an
 *inspectable projection* of that experience: a way to ask "has this memory
 actually helped anyone do work, and under what conditions did it fail?" and get
@@ -45,15 +45,15 @@ while the overlay is in its default read-only mode.
 | `retrieval_attribution` verdicts (`accepted`, `corrected`, `contradicted`, `rolled_back`, `irrelevant`) | `src/modules/db2/c/demotion.h` | Five verdicts about *the recall*, not about the *work*; no correction payload, no evaluator identity, no code generation at evaluation time. |
 | `demotion_profile` artifacts fitted per (memory_class, scope) | `src/modules/db2/c/demotion.c` | Consumes outcomes; produces a score, not an inspectable status. |
 | `agent_outcomes`, `lessons_outcome_ledger`, `lessons_outcome_citations` | `src/modules/db2/c/schema.sql` | Outcome records for agent runs and lessons; not joined to retrieved memory. |
-| `feature_rows` + the ranker fitter loop | `src/modules/db2/c/schema.sql`, `src/kb/` | Learning consumes outcomes already — P5 must feed it, not fork it. |
+| `feature_rows` + the ranker fitter loop | `src/modules/db2/c/schema.sql`, `src/kb/` | Learning consumes outcomes already: P5 must feed it, not fork it. |
 | `files.hash`, `code_projection_generations` | `src/modules/db2/c/schema.sql` | Precise code-staleness inputs, better than a whole-file heuristic. |
-| `/v1/audit/trace`, `/v1/audit/provenance` | `src/server/server_state_audit.c` | Read surfaces that already expose a turn's surfaced refs — the natural place to attach outcomes. |
+| `/v1/audit/trace`, `/v1/audit/provenance` | `src/server/server_state_audit.c` | Read surfaces that already expose a turn's surfaced refs: the natural place to attach outcomes. |
 
 ## Decision
 
 ### One outcome record
 
-Extend the existing evidence path — do not create an unrelated subsystem — with
+Extend the existing evidence path (do not create an unrelated subsystem) with
 a work-outcome record carrying the fields the current verdict lacks:
 
 ```

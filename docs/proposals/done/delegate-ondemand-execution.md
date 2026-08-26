@@ -4,12 +4,12 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** landed — merged to `testing` via PR #333. The server-only on-demand
+- **State:** landed. Merged to `testing` via PR #333. The server-only on-demand
   delegate execution (per-thread spawn + `delegate_max_inflight` backstop, all
   three call sites converted, the CPU-pool gate retired) is in tree
   (`src/server/server_delegate_ondemand.c`); session-delegate and aimee-kb worker
   pools remain the noted fast-follows. (Originally implemented on
-  `feat/delegate-io-pool`; self-reviewed — the roundtable infra was itself wedged
+  `feat/delegate-io-pool`; self-reviewed. The roundtable infra was itself wedged
   by the bug this fixes.)
 - **Author:** JBailes
 - **Date:** 2026-06-15
@@ -18,12 +18,12 @@
 
 ## Problem
 
-Background (sessionless) delegates — roundtable reviews, `aimee delegate
---background`, coord-task and skill-review jobs — ran on the global **compute
+Background (sessionless) delegates, roundtable reviews, `aimee delegate
+--background`, coord-task and skill-review jobs, ran on the global **compute
 pool** (`CONFIG_DEFAULT_BACKGROUND_THREADS = 2`) and were further gated by the
 2-wide **compute budget** (`server_compute_budget_acquire` blocks on a
 semaphore sized to `compute_threads`). A delegate holds a whole worker thread
-for the *entire* provider call, which is ≈100% network wait — near-zero CPU and
+for the *entire* provider call, which is ≈100% network wait, near-zero CPU and
 RAM. So just **two** concurrent (or slow, or hung) delegates saturated the pool
 and every further delegate sat `pending` forever. This is the wedge observed in
 the field: workers blocked in provider TLS reads while jobs never started.
@@ -31,7 +31,7 @@ the field: workers blocked in provider TLS reads while jobs never started.
 These caps are **relics**. They date from when the server embedded and indexed
 *inline* (genuinely CPU-bound work that warranted a core-sized pool). That work
 has since moved to the **embedder container** and **aimee-kb**; every remaining
-submit to the server compute pool is `delegate_worker` or a tool call — I/O
+submit to the server compute pool is `delegate_worker` or a tool call. I/O
 coordination, not CPU. Gating I/O concurrency on a CPU-sized pool is the wrong
 resource model.
 
@@ -40,7 +40,7 @@ resource model.
 The **per-model/provider concurrency limiter** (`concurrency_acquire_*`). It
 enforces each provider's rate/parallel limits and prevents hammering an
 endpoint. After this change it becomes the *only* throttle on delegate
-concurrency — which is exactly its purpose (the budget comment already said so:
+concurrency, which is exactly its purpose (the budget comment already said so:
 "Model/provider concurrency limits decide how many delegates may run in
 parallel").
 
@@ -51,12 +51,12 @@ demand and reaped on completion (`delegate_spawn_ondemand` in
 `server_compute.c`). No fixed pool; no compute-budget gate. Throttling is the
 per-model limiter. A configurable **backstop ceiling** (`delegate_max_inflight`,
 default **512**, env `AIMEE_DELEGATE_MAX_INFLIGHT`) prevents a pathological
-fan-out from exhausting fds/memory — "effectively unlimited" for any real
+fan-out from exhausting fds/memory, "effectively unlimited" for any real
 workload, but not literally unbounded.
 
 Mechanics:
 - An atomic-by-mutex in-flight counter; spawn rejects (`-1`, job marked failed)
-  only at the ceiling — unreachable under the per-model limiter in normal use.
+  only at the ceiling, unreachable under the per-model limiter in normal use.
 - Detached threads carry the same 32 MB stack as compute-pool workers (the
   agent loop has deep frames).
 - The compute **budget is bypassed** exactly as session delegates already do:
@@ -82,8 +82,8 @@ All three sites that submitted `delegate_worker` to the global pool:
 
 - **Session-delegate pools** (`server_session_pool`, 4 threads, *shared* with
   chat-stream + tool workers). Lower severity (per-session, already budget-free)
-  and entangled with chat/tool isolation — a separate, careful change.
-- **aimee-kb worker pools** — same "embedder is containerized → remaining work
+  and entangled with chat/tool isolation, a separate, careful change.
+- **aimee-kb worker pools**: same "embedder is containerized → remaining work
   is I/O" thesis applies; validated + changed in its own PR.
 - The complementary delegate **timeout** fix (separate PR) ensures a single hung
   call also self-terminates; with on-demand execution a hung call no longer

@@ -1,12 +1,11 @@
 # Proposal: Standing LoCoMo / LongMemEval benchmark cadence
 
-- **State:** proposed (pending — not started)
+- **State:** proposed (pending; Not started)
 
 ## Thesis
 
 Acceptance criteria across the codebase cite retrieval/memory parity in absolute
-terms — "within ±0.005 of baseline", "P@5 ≥ 0.45", "no regression vs. mem0" —
-but **nothing runs the full benchmarks on a schedule**. `bench-smoke.yml` fires
+terms ("within ±0.005 of baseline", "P@5 ≥ 0.45", "no regression vs. mem0") but **nothing runs the full benchmarks on a schedule**. `bench-smoke.yml` fires
 only on `pull_request`, and it runs the harness *unit tests* + a provisioning
 coverage gate + **mini** fixtures (`locomo-mini.json`, `longmemeval-mini.json`),
 not the real datasets. So the numbers those criteria are measured against are
@@ -18,7 +17,7 @@ put the benchmarks on a cadence, or stop citing parity criteria nobody measures.
 A scheduled job runs the **full** LoCoMo + LongMemEval (and the memory /
 code-vector suites) against `testing` on a fixed cadence, persists the scored
 results with a retention policy, and fails loudly on a drift beyond the parity
-band that acceptance criteria already cite — so "±0.005 of baseline" becomes a
+band that acceptance criteria already cite, so "±0.005 of baseline" becomes a
 measured, enforceable fact instead of a hope.
 
 ## §0 What already exists
@@ -44,11 +43,11 @@ Go direct-track proposal produces complete, compatible results.
 
 ## §1 Scheduled full-suite workflow
 
-After the direct track is delivered, add `.github/workflows/bench-nightly.yml` (`on: schedule:` —
+After the direct track is delivered, add `.github/workflows/bench-nightly.yml` (`on: schedule:`,
 nightly for the cheap suites, weekly for the LLM-graded ones, plus `workflow_dispatch`). It
 provisions the real datasets (gated behind a repo secret / self-hosted runner
 where the datasets or an LLM endpoint are needed), runs the full `bench_*`
-scripts, and writes scored JSON. Keep it OFF the PR path — PRs keep the fast
+scripts, and writes scored JSON. Keep it OFF the PR path. PRs keep the fast
 smoke; the full run is a cadence, not a blocker.
 
 ## §2 Results store + retention
@@ -56,7 +55,7 @@ smoke; the full run is a cadence, not a blocker.
 Persist each run's scored JSON as a dated artifact (retention policy, e.g. 90
 days for raw runs, indefinitely for the committed baseline). Commit a single
 rolling `benchmarks/BASELINE.json` (per suite, per metric) that the parity checks
-read, updated only by an explicit "accept new baseline" step — never silently by
+read, updated only by an explicit "accept new baseline" step, never silently by
 a run.
 
 ## §3 Drift gate wired to existing criteria
@@ -75,6 +74,6 @@ references a number no job measures is debt, not a spec.
 
 ## Non-goals
 
-Not changing what the benchmarks measure or adding new datasets — this is purely
+Not changing what the benchmarks measure or adding new datasets. This is purely
 about *running the ones we have on a cadence and holding the line*. New suites
 ride their own proposals.

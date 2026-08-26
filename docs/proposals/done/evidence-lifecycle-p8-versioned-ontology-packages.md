@@ -1,9 +1,9 @@
-# Proposal: P8 — versioned, dry-runnable, rollback-able ontology packages
+# Proposal: P8: versioned, dry-runnable, rollback-able ontology packages
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 8 of 9.
 - **Author:** JBailes
@@ -16,8 +16,8 @@
 Aimee's relation ontology is live, mutable, and unversioned. `rel_types` is a
 table that a seed loader populates and that a self-extension pipeline adds
 provisional rows to; `ontology_evaluations` records the promotion decisions. Each
-row carries real semantics — endpoint kinds, symmetry, an inverse, cardinality
-implied by `correction_behavior`, sensitivity — and those semantics decide
+row carries real semantics, endpoint kinds, symmetry, an inverse, cardinality
+implied by `correction_behavior`, sensitivity, and those semantics decide
 whether a write is accepted and how a correction behaves.
 
 There is no way to see the ontology as an artifact, to review a proposed change
@@ -39,7 +39,7 @@ gate's algorithm, not the fact write path.
 | Piece | Where | Gap |
 |---|---|---|
 | `rel_types` (head/tail kinds, symmetry, inverse, correction behaviour, category, sensitivity, hierarchy flag, status) | `src/modules/db2/c/schema.sql` | A live table, not a versioned artifact. No history of what it looked like when a fact was written. |
-| In-code seed ontology, idempotently upserted | `src/modules/db2/c/rel_types_store.c` | Ships as code, so it is versioned with the binary — but the live overlay that diverges from it is not. |
+| In-code seed ontology, idempotently upserted | `src/modules/db2/c/rel_types_store.c` | Ships as code, so it is versioned with the binary: but the live overlay that diverges from it is not. |
 | `ontology_evaluations` (occurrence count, pending/approved/mapped/rejected, mapped_to) | `src/modules/db2/c/ontology_evolution.c` | Records decisions; no impact analysis, no operator review step, no rollback. |
 | Provisional staging for novel relation types | `src/modules/db2/c/rel_types_store.c` | The extension mechanism works; the governance around it is missing. |
 | `memory_relation_schema` (relation_id, subject_kind, object_kind) | `src/modules/db2/c/schema.sql` | A second endpoint-kind record, which is itself an argument for one canonical, versioned definition. |
@@ -77,29 +77,29 @@ activation.
 
 ### The six operations
 
-1. **Export** — the active ontology as a package artifact, content-addressed and
+1. **Export**: the active ontology as a package artifact, content-addressed and
    diffable.
-2. **Import** — a package, reviewed (and signature-verified when signed), staged
+2. **Import**: a package, reviewed (and signature-verified when signed), staged
    but not activated.
-3. **Dry-run** — evaluate a staged package against existing data and report:
+3. **Dry-run**: evaluate a staged package against existing data and report:
    - facts that would become invalid, by relation and by rule violated,
    - facts whose correction behaviour would change meaning,
    - relations gaining or losing symmetry or an inverse,
    - endpoint-kind narrowings and the affected edge counts,
    - provisional types the package promotes or rejects,
    - derived items (P4) whose basis would change.
-4. **Migrate** — activate the package, migrating or retiring affected facts
+4. **Migrate**: activate the package, migrating or retiring affected facts
    through a single P2 changeset with P1 events.
-5. **Report** — the post-migration reconciliation: what was migrated, what was
+5. **Report**: the post-migration reconciliation: what was migrated, what was
    retired, what was left alone and why.
-6. **Roll back** — reactivate the prior version, again as a changeset. Facts
+6. **Roll back**: reactivate the prior version, again as a changeset. Facts
    retired by the migration are restored; facts created under the new contract
    that are invalid under the old one are reported and quarantined rather than
    deleted.
 
 Dry-run is **mandatory** before migrate, and its result is bound to the package
 hash and the changeset head it was computed against. A migrate whose dry-run is
-stale is refused — the same discipline P3 applies to purge.
+stale is refused, the same discipline P3 applies to purge.
 
 ### The invariant that cannot be traded
 

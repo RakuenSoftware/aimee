@@ -1,6 +1,6 @@
 # Per-query ranking feature persistence
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`per-query-grouping-key-for-ranking.md`](../done/per-query-grouping-key-for-ranking.md)
 

@@ -23,6 +23,8 @@ claims.
 The bus has committed dispatch and audit-enqueue baselines and ceilings. Dispatch measures roughly
 134 ns per event against a 1,000 ns ceiling for host enqueue through client dequeue, excluding
 module work. Governed-action audit enqueue has the same 1,000 ns ceiling.
+Its controlled reference measurement is 117 ns: the median of eight per-run
+medians, with each run timing 5,000 emits and the test pinned to one CPU.
 Run the gate on comparable hardware and keep the raw artifact. A slower machine can still be
 correct; changing the committed ceiling needs an explicit decision, not a convenient rebaseline.
 

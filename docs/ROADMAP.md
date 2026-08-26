@@ -1,6 +1,6 @@
 # Roadmap
 
-This is the remaining direction after v0.2.192. Accepted implementation detail lives in proposals;
+This is the remaining direction after 0.4.0. Accepted implementation detail lives in proposals;
 current behavior lives in product guides and generated references.
 
 ## 1. Finish the event-bus move

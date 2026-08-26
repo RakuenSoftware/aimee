@@ -1,18 +1,18 @@
-# Proposal: User-configurable curator pipeline — reorder, constraints, presets, user-defined stages
+# Proposal: User-configurable curator pipeline: reorder, constraints, presets, user-defined stages
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — every §8 acceptance criterion is met and verified. Shipped
+- **State:** DONE. Every §8 acceptance criterion is met and verified. Shipped
   across Phase A reorder + DAG (#1175), Phase C presets (#1177), Phase D composed
   custom stages backend (#1211) and GUI (#1212); Phase B GUI reorder shipped
   earlier. Authored autonomously (2026-07-08) at the product owner's direction
   ("users order stages any valid way; enforce constraints and disallow impossible
   configs; presets starting at 3, ultimately user-defined; ultimately users add
-  their own stages"). The design and every implementing change were validated
+  their own stages"); the design and every implementing change were validated
   through the delegate roundtable on 2026-07-09. **Phase E (plugin-contributed
-  stages) is explicitly out of scope here — future and trust-gated — and belongs
+  stages) is explicitly out of scope here (future and trust-gated) and belongs
   in its own proposal;** it carries no §8 acceptance criterion, so it does not hold
   this one open.
 - **Author:** JBailes (assisted)
@@ -23,17 +23,17 @@
   `kb_curator_pipeline_run_pass`, the `curator.stages` registry endpoint (Option B,
   single source of truth), and built-in presets (#1173).
 
-## 1. The order model — what "order" actually means here
+## 1. The order model: what "order" actually means here
 
 The pipeline is **queue-decoupled and two-laned**: each stage drains its own
 queue each pass; a producer (e.g. `index_claims`) enqueues work a consumer (e.g.
 `detect_contradictions`) picks up. The two lanes run on **separate threads**
 concurrently. Consequences:
 
-- **Cross-lane order is not a thing** — the LLM and INDEX lanes run in parallel;
+- **Cross-lane order is not a thing**: the LLM and INDEX lanes run in parallel;
   you cannot sequence an INDEX stage "before" an LLM stage. Only **intra-lane**
   order is meaningful.
-- **Intra-lane order affects latency, not correctness** — because queues persist
+- **Intra-lane order affects latency, not correctness**: because queues persist
   across passes, running a consumer before its producer in one pass just defers
   its work to the next pass; it never corrupts output. Correctness is guaranteed
   by the queues regardless of order.
@@ -56,24 +56,24 @@ but not order-enforced since lanes are concurrent):
 | resolve_entities | extract_docs |
 | index_narrative | extract_docs |
 | index_claims | extract_docs |
-| detect_contradictions | index_claims *(intra-lane — enforced)* |
+| detect_contradictions | index_claims *(intra-lane: enforced)* |
 | index_code_unit | extract_code |
 | link_artifacts | extract_docs, extract_code |
 | synthesize | index_claims |
 | promote_entity | resolve_entities |
-| embed_evidence | index_claims *(intra-lane — enforced)* |
-| cross_repo_graph | projection_graph *(intra-lane — enforced)* |
+| embed_evidence | index_claims *(intra-lane: enforced)* |
+| cross_repo_graph | projection_graph *(intra-lane: enforced)* |
 
 `extract_docs`, `extract_code`, `embed_code`, `ingest_docs`, `projection_graph`
 have no prerequisites. The enforced intra-lane edges (INDEX lane) are the ones
 that actually gate a valid order.
 
-## 3. Reorder — representation, validation, runtime
+## 3. Reorder: representation, validation, runtime
 
-- **Config:** `kb.curator.stage_order` — a comma-separated list of stage names.
+- **Config:** `kb.curator.stage_order`. A comma-separated list of stage names.
   Empty ⇒ registry order (the current default). Unknown names ignored; omitted
   stages keep registry order after the listed ones.
-- **Validation:** `kb_curator_order_valid(order, &reason)` — every stage must
+- **Validation:** `kb_curator_order_valid(order, &reason)`. Every stage must
   appear after its intra-lane prerequisites. **Disallow** invalid orders: the GUI
   refuses the move client-side (using the `requires` from the endpoint), the
   `config.set` path rejects an invalid `stage_order`, and the runner **fails safe**
@@ -99,17 +99,17 @@ that actually gate a valid order.
 A stage today is a C struct with a **function pointer** (`run`). Arbitrary
 user-supplied code is a non-starter (correctness + security). Phased, safe path:
 
-- **v1 — composed stages (SHIPPED, Phase D):** a user stage is
+- **v1, composed stages (SHIPPED, Phase D):** a user stage is
   `{name, base_op, budget, enabled?}` in `kb.curator.custom_stages`, where `base_op`
-  **references an existing, vetted registry op** — it reuses that op's `run`
+  **references an existing, vetted registry op**, it reuses that op's `run`
   function pointer under a new name/budget. The registry the workers iterate becomes
   `built-in ⊕ custom` (custom validated: `base_op` must resolve to a built-in;
   strict `[A-Za-z0-9_-]` ≤63-char names; count-capped; fail-safe skip-with-WARN on
-  any bad entry). No new executable code — only recomposition of shipped ops.
+  any bad entry). No new executable code, only recomposition of shipped ops.
   - **Scope correction (roundtable, 2026-07-09):** a composed stage can only *reuse*
     an existing `run()`, and every `run()` drains its **own hardcoded queue** via a
     non-atomic `SELECT … LIMIT 1 → commit`. So a custom stage cannot target "a
-    different source" (that needs a new pull spec — v2/v3), and it **must run on its
+    different source" (that needs a new pull spec, v2/v3), and it **must run on its
     `base_op`'s native lane**: re-laning would put two consumers on one queue across
     two concurrent lane threads, double-draining it (wasted LLM cost, racy commits).
     v1 therefore **disallows re-laning** (a differing `lane` is rejected). Re-laning
@@ -119,28 +119,28 @@ user-supplied code is a non-starter (correctness + security). Phased, safe path:
     composing it into the runner. A non-bool `enabled` is rejected, not coerced.
   - **Ordering:** custom stages append after the built-ins; they do not yet
     participate in `stage_order` (unknown names there are already safely ignored).
-- **v2 — declarative stages:** a small, sandboxed spec (source selector →
+- **v2, declarative stages:** a small, sandboxed spec (source selector →
   transform op → sink) built from a fixed vocabulary of vetted primitives. Still
   no arbitrary code.
-- **v3 — plugin stages:** the existing plugin/hook mechanism (`plugin_loader`,
+- **v3, plugin stages:** the existing plugin/hook mechanism (`plugin_loader`,
   `plugin_c_hook`) exposes a registration hook so a signed plugin contributes a
   stage. This is where genuinely new stage *logic* lives, gated by the plugin
-  trust model — not user config.
+  trust model, not user config.
 
 Full arbitrary user code is explicitly out of scope.
 
 ## 6. Phase plan
 
-- **Phase A (SHIPPED, #1175)** — DAG + `requires` on the endpoint;
+- **Phase A (SHIPPED, #1175)**: DAG + `requires` on the endpoint;
   `kb.curator.stage_order` config; validation; runtime reorder (fail-safe).
-- **Phase B (SHIPPED)** — GUI: drag/▲▼ reorder with client-side constraint
+- **Phase B (SHIPPED)**: GUI: drag/▲▼ reorder with client-side constraint
   enforcement; persist `stage_order`.
-- **Phase C (SHIPPED, #1177)** — user-defined presets (save/apply/delete).
-- **Phase D (SHIPPED, #1211 backend + #1212 GUI)** — composed user-defined stages
+- **Phase C (SHIPPED, #1177)**: user-defined presets (save/apply/delete).
+- **Phase D (SHIPPED, #1211 backend + #1212 GUI)**: composed user-defined stages
   (`custom_stages`), base_op-validated, same-lane, fail-safe; surfaced on the
   `curator.stages` endpoint (`custom:true`, `base_op`, `base_op_eligible`) and
   managed in a Custom stages panel on the Pipeline page (add / enable / delete).
-- **Phase E** — plugin-contributed stages (future; trust-gated). Also the home of
+- **Phase E**: plugin-contributed stages (future; trust-gated). Also the home of
   re-laning + new-source composition, both gated on an atomic transactional dequeue.
 
 ## 7. Risks
@@ -148,12 +148,12 @@ Full arbitrary user code is explicitly out of scope.
 - **Runner change (Phase A)** touches the core drain loop. Mitigated by: reorder is
   latency-only (queues protect correctness), fail-safe fallback to registry order,
   and no change to the stage set or their run functions.
-- **`config.set` rejecting invalid orders** needs a per-key validation hook — small
+- **`config.set` rejecting invalid orders** needs a per-key validation hook, small
   but new surface; keep the runner fail-safe regardless.
 - **Composed stages** must validate `base_op` against the vetted op set and reject
   unknown ops (no code injection); lane legality enforced. *(Resolved: base_op is
   allowlisted to built-in run()-backed stages; re-laning is rejected outright in v1
-  so built-in ⊕ custom stays single-threaded per lane — no concurrent double-drain
+  so built-in ⊕ custom stays single-threaded per lane. No concurrent double-drain
   of a queue whose dequeue is non-atomic.)*
 
 ## 8. Acceptance

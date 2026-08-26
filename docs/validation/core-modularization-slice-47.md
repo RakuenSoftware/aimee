@@ -33,7 +33,7 @@ assertion on the already-reviewed declarations.
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
 the server (`server_vault.c`, `server_vault_bootstrap.c`), KB (`kb_vault_policy.c`), or DB2 vault code
 outside the module root has been moved in, and it does not claim identical build-product membership
-across Make and CMake — the custody backends, `vault_hwm.c`, and `vault_server_key.c` are Make-only.
+across Make and CMake. The custody backends, `vault_hwm.c`, and `vault_server_key.c` are Make-only.
 
 ## Set-equality with an unpaired header
 
@@ -43,7 +43,7 @@ the largest header set latched so far. Twelve of the thirteen mirror a source; t
 the source set with a suffix swap. The regression suite removes `vault_service.c` from `sources` and
 requires `rule=ownership-complete` on `/sources` with the source named missing, and removes
 `vault_internal.h` from `private_headers` and requires the same rule on `/private_headers` with the
-header named missing — confirming the check bites on the unpaired header specifically, not only on a
+header named missing, confirming the check bites on the unpaired header specifically, not only on a
 header that shadows a removed source.
 
 ## Regression controls

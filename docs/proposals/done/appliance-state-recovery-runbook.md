@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implemented by workflow and archived 2026-08-04.
+- **State:** DONE. Implemented by workflow and archived 2026-08-04.
 - **Author:** JBailes
 - **Charter roles:** Recall (operator orientation), Constrain-Verify (a checklist a human follows under incident pressure).
 
@@ -34,7 +34,7 @@ operator can follow verbatim. It must cover:
    needs no secrets re-entered), then `touch $AIMEE_HOME/agents.json` to bust
    the identity (mtime+size+inode) config cache.
 2. **Stale-but-present `agents.json`.** Symptom: config looks absent though the
-   file is clearly valid — an mtime in the past vs the box clock. Fix: `touch`.
+   file is clearly valid, an mtime in the past vs the box clock. Fix: `touch`.
 3. **Corrupt/lost workspace repo git dir.** Symptom: the proposals trigger logs
    `ls-tree failed ... rc=128` every poll; the forge logs `resolve https origin:
    no origin remote`. Recovery: confirm a fresh clone on the same volume is

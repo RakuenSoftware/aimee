@@ -1,6 +1,6 @@
 # Persona-authored outputs: Go composition residual
 
-- **State:** PENDING — corrective Go-owned residual restored 2026-08-16 after rejection #2688.
+- **State:** PENDING. Corrective Go-owned residual restored 2026-08-16 after rejection #2688.
 
 **Archived parents:** [`persona-authored-outputs.md`](../done/persona-authored-outputs.md) and
 [`persona-authored-outputs.plan.md`](../done/persona-authored-outputs.plan.md)
@@ -26,8 +26,7 @@ lose or replace that name without preserving the actor, permission decision, sou
 outcome. Styling and provenance can consequently disagree even when the eventual repository or forge
 operation is guarded.
 
-The fix is not to move Git or workflow mutation into composition. It is to make Go composition return
-one immutable, provenance-bearing envelope, then require the effect owner to authorize and apply that
+The fix is to make Go composition return one immutable, provenance-bearing envelope, then require the effect owner to authorize and apply that
 exact envelope. Voice is presentation; it must never become authority. Missing identity evidence,
 impersonation, replay, and action denial therefore fail closed, while an optional voice transform may
 fall back to the caller's exact draft without inventing authorship.

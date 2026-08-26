@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** done — reviewed, converged at R3 (reviewer / architect / security
+- **State:** done. Reviewed, converged at R3 (reviewer / architect / security
   lenses across minimax + mistral all returned no major issues)
 - **Author:** JBailes
 - **Date:** 2026-06-12
@@ -30,7 +30,7 @@
 ## Goal
 
 Give aimee a **structured, write-validated layer for identity and world facts**
-— people, places, devices, IPs, hostnames, preferences, relationships — that
+(people, places, devices, IPs, hostnames, preferences, relationships) that
 sits *alongside* the existing code-knowledge KB rather than replacing any of it.
 
 Today aimee stores memories as free-text `content` (`memory_t`) plus a
@@ -45,7 +45,7 @@ assertion.
 
 This proposal adds seven capabilities that turn those facts into **typed,
 validated propositions** with explicit provenance, correctable history, and a
-self-extending schema — while reusing aimee's existing gate, lifecycle, graph,
+self-extending schema, while reusing aimee's existing gate, lifecycle, graph,
 conflict, and maintenance machinery wherever it already exists.
 
 ## §0 What already exists (so we don't rebuild it)
@@ -56,8 +56,8 @@ conflict, and maintenance machinery wherever it already exists.
   `REL_CO_DISCUSSED` / `NODE_OTHER`). The typed-fact layer **populates these
   columns with semantic relations** instead of co-occurrence defaults; it does
   not invent a second graph. **It does, however, share one physical table with
-  co-occurrence rows, so the two row populations must be explicitly separable —
-  see the `edge_class` discriminator below (R1-A1).**
+  co-occurrence rows, so the two row populations must be explicitly separable.
+See the `edge_class` discriminator below (R1-A1).**
 - **A write gate already exists.** `memory_gate_check` returns a
   `gate_verdict_t` (incl. `GATE_DOWNGRADE`). The fact gate is a sibling that
   validates *triples against an ontology*, not the prose-memory gate; both share
@@ -79,7 +79,7 @@ conflict, and maintenance machinery wherever it already exists.
   provenance signals.
 - **A background curation loop already exists.** `memory_maintenance.c`
   (replay / compact / prune / summarize) is the host for ontology promotion
-  (§2) and class expiry (§5) — new modes, not a new daemon.
+  (§2) and class expiry (§5), new modes, not a new daemon.
 - **Context pre-injection already exists.** `ingress_preinject_*` builds the
   `<aimee-context confidence=…>` envelope. Typed facts join this envelope as a
   new section (§7); we do not add a second injection point.
@@ -102,7 +102,7 @@ co-occurrence edge, and vice-versa. We therefore add an explicit
 `cooccurrence` for all existing rows (matching today's `REL_CO_DISCUSSED`
 default). Every typed-fact write sets `edge_class = 'semantic'`; the typed recall
 path (§1) and the prose/graph recall path filter on it. The union happens *only*
-at injection (§7), keyed by this column — never by an implicit `relation_id`
+at injection (§7), keyed by this column, never by an implicit `relation_id`
 heuristic. This replaces the earlier hand-wave that the layers were "unioned at
 injection, not merged in storage": they *are* co-located in storage, and
 `edge_class` is what keeps them separable.
@@ -116,7 +116,7 @@ injection, not merged in storage": they *are* co-located in storage, and
 fact is just text, so nothing rejects "the printer works_for the kernel."
 
 **Design.** A `rel_types` ontology table is the single source of truth for
-relationship semantics. Each row is **self-describing metadata** — no hardcoded
+relationship semantics. Each row is **self-describing metadata**, no hardcoded
 rules:
 
 | column | meaning |
@@ -142,8 +142,8 @@ A seed ontology ships in code (the `SEED_ONTOLOGY` idiom) as a DB-unavailable
 fallback; the live ontology is read from `rel_types` with a short TTL cache (the
 same registry-cache pattern aimee already uses for hot config tables).
 
-**Gate call site (R1-B3, blocking).** `memory_fact_gate` is not a free-floating
-validator — it is the *single* commit point for typed edges. All three triple
+**Gate call site (R1-B3, blocking).** `memory_fact_gate` is the *single* commit point for typed
+edges, and not a free-floating validator. All three triple
 emitters (the pattern extractor §6, the model rewrite, and the existing
 `kb_curator_*` / `memory_scan.c` edge path §0) route their candidate triples
 through `memory_fact_gate` *before* `db2_entity_edge_upsert`; no emitter writes a
@@ -152,8 +152,8 @@ through `memory_fact_gate` *before* `db2_entity_edge_upsert`; no emitter writes 
 from three paths" gap.
 
 **Gate failure modes are distinct (R2-2, refined R3-2).** The ontology has two
-sources — the in-code `SEED_ONTOLOGY` (always available) and the live `rel_types`
-table (DB) — so "unreachable" is not all-or-nothing:
+sources. The in-code `SEED_ONTOLOGY` (always available) and the live `rel_types`
+table (DB), so "unreachable" is not all-or-nothing:
 
 - **rel_type known (seed *or* live table)** → validate normally against whichever
   source is available. A DB outage does **not** block seed-known types
@@ -166,7 +166,7 @@ table (DB) — so "unreachable" is not all-or-nothing:
   so it **defers** the `semantic` write to a bounded retry queue. On DB recovery
   the queued triples re-enter the gate. Co-occurrence writes are unaffected.
 
-"Fail closed" means *never silently commit an unvalidated novel fact* — seed-known
+"Fail closed" means *never silently commit an unvalidated novel fact*, seed-known
 facts still flow; only genuinely-novel writes during a DB outage are deferred.
 
 **Provisional rel_type for staged Class C (R3-1).** A Class-C triple still needs
@@ -195,7 +195,7 @@ validated at load/insert time, not trusted as free text:
   type instead of fragmenting the ontology.
 - `sensitivity` (R3-4) is a closed enum (`normal` | `pii` | `secret`), `NOT NULL`,
   and **defaults to the restrictive `pii`** for any type whose sensitivity wasn't
-  explicitly classified — so a learned/seed-omitted type fails *closed* (withheld
+  explicitly classified, so a learned/seed-omitted type fails *closed* (withheld
   from injection, §7) rather than leaking. A promoted type (§2) must have its
   sensitivity set at the human-approval step before it can leave `pii`.
 
@@ -217,7 +217,7 @@ step for anything that changes the ontology shape.
 **Problem.** The ontology can't grow on its own, and there's no way to teach
 aimee a domain's structure before facts arrive.
 
-**Design — promotion pipeline.** Novel rel_types seen by the gate (§1)
+**Design, promotion pipeline.** Novel rel_types seen by the gate (§1)
 increment an `occurrence_count` in an `ontology_evaluations` table. When count
 ≥ N (default 3), a maintenance-cycle mode asks the model to evaluate: **approve**
 (confidence ≥ 0.7 → INSERT into `rel_types`), **map to existing**
@@ -225,7 +225,7 @@ increment an `occurrence_count` in an `ontology_evaluations` table. When count
 This rides `memory_maintenance.c` and the existing curator/LLM call path; it is
 a new mode, not a new loop.
 
-**Design — `aimee expand <domain> [url]`.** A CLI/`/v1` command that seeds the
+**Design, `aimee expand <domain> [url]`.** A CLI/`/v1` command that seeds the
 ontology for a domain *up front*: `aimee expand networking` plants the device /
 IP / MAC / hostname rel_types and their type constraints; `aimee expand
 kubernetes https://…/docs/concepts/` fetches the doc, extracts the domain's
@@ -234,7 +234,7 @@ relationship structure, and proposes rel_types through the same promotion gate
 (§4). This reuses `kb_client_docs` / curator ingestion for the fetch+extract
 step.
 
-## §3 Entity canonicalization — surrogate ids + alias resolution
+## §3 Entity canonicalization: surrogate ids + alias resolution
 
 **Problem.** `entity_edges` keys endpoints by **name string** (`char
 node[512]`). "DevBox", "the workstation", and "my main box" fragment into three
@@ -243,13 +243,13 @@ unrelated nodes; "Theo" and "Theodore" never reconcile (or wrongly merge).
 **Design.** A new `entity_registry` assigns each entity a **canonical surrogate
 id** and a kind; an `entity_aliases` table maps display names → canonical id
 with one `is_preferred` row per entity (ON CONFLICT preserves the existing
-preferred name — never silently downgrades).
+preferred name, never silently downgrades).
 
-**Resolution semantics (R1-B2, blocking — corrected).** The earlier draft made
+**Resolution semantics (R1-B2, blocking, corrected).** The earlier draft made
 strict-match the *only* default and punted all variation to an async queue. That
 fails the motivating case: in one session a user says "my workstation is DevBox"
-then asks "what's my workstation's IP?" — an async-only merge answers "no
-relation" because the canonical write hasn't merged yet. So resolution is now
+then asks "what's my workstation's IP?". An async-only merge answers "no
+relation" because the canonical write hasn't merged yet; so resolution is now
 **two-tier and synchronous on the hot path**:
 
 1. **Explicit binding is immediate.** When the user asserts an alias
@@ -269,12 +269,12 @@ relation" because the canonical write hasn't merged yet. So resolution is now
 **Registry constraints (R1-D2, blocking).** The schema enforces what the prose
 assumed:
 
-- `canonical_id` is a **globally-unique surrogate primary key** (R2-5) — never
+- `canonical_id` is a **globally-unique surrogate primary key** (R2-5), never
   reused across kinds or entities; `kind` is an attribute of the row, not part of
   the identity. (The earlier `UNIQUE (kind, canonical_id)` wording was weaker than
   the "never reused across kinds" prose claimed; the PK is the correct, stronger
   constraint.)
-- `entity_registry` carries a **`status`** column — `active` | `provisional` |
+- `entity_registry` carries a **`status`** column, `active` | `provisional` |
   `merged` (R2-4). An ambiguous write (§3 tier 3) lands as a `provisional` row
   (a real schema home, not a floating id); conflict resolution flips it to
   `active` or `merged`. A `merged` row keeps a `merged_into` pointer so recall
@@ -284,12 +284,12 @@ assumed:
   (`A→B`, `B→A`) structurally impossible rather than guarded after the fact.
 - `entity_aliases` carries its own **`suppressed`** flag (R3-3) so a `hard_delete`
   tombstone (§4) can stop an alias from resolving while retaining the row for
-  audit — symmetric with the `suppressed` flag on `entity_edges`. Tombstoning is
+  audit, symmetric with the `suppressed` flag on `entity_edges`. Tombstoning is
   never a literal `DELETE` on either table.
 - `entity_name_conflicts` has a defined lifecycle: a `status`
   (`open` / `resolved` / `failed`), priority by occurrence frequency, a bounded
   retry on model-resolution failure, and escalation to a human-visible list when
-  retries exhaust — unresolved conflicts never silently vanish.
+  retries exhaust, unresolved conflicts never silently vanish.
 - **Merge / unmerge are first-class operations**, not implied: a `merge(a, b)`
   collapses two canonical entities (re-pointing aliases and edges, recording the
   merge) and an `unmerge` reverses a recorded merge (including the audited
@@ -311,40 +311,40 @@ wrong").
 **Design.** `correction_behavior` (a `rel_types` column from §1) declares, per
 relationship, what a correction *does*:
 
-- **`supersede`** — set `superseded_at = now()` on the old edge, insert the new
+- **`supersede`**: set `superseded_at = now()` on the old edge, insert the new
   one (default; full audit trail, consistent with *always keep the origin
   artifact*).
-- **`hard_delete`** — *tombstone*, not a literal row delete (R2-1): the edge and
+- **`hard_delete`**: *tombstone*, not a literal row delete (R2-1): the edge and
   its aliases are removed from **active resolution** (a `suppressed` flag + the
   `superseded_at` stamp) but the row is retained, honouring §0's *always retain
   the origin artifact* rule. Used for `also_known_as` / `pref_name` where a stale
-  alias actively misleads and must stop resolving — but stays auditable. The name
+  alias actively misleads and must stop resolving, but stays auditable. The name
   is kept for familiarity; the behaviour is suppress-and-archive, never a literal
   `DELETE`.
-- **`immutable`** — reject *model/inferred* corrections to an already-asserted
+- **`immutable`**: reject *model/inferred* corrections to an already-asserted
   value (e.g. `born_on`): a Class B/C source cannot overwrite it. This does **not**
-  override the user (R1-B1) — see the authority rule below.
+  override the user (R1-B1). See the authority rule below.
 
 **Retraction-signal detection** runs in the ingress *before* the model answers:
 a cheap scan (regex-first, §6) flags "forget / delete / that's wrong / no longer"
 and routes a `{subject, rel_type, old_value}` retraction through a new
 `/v1/facts/retract` handler applying the declared behavior.
 
-**Authority vs. immutability (R1-B1, blocking — resolved).** `correction_behavior`
+**Authority vs. immutability (R1-B1, blocking, resolved).** `correction_behavior`
 governs the **inferred** write path only. A **user** correction always wins:
 `immutable` blocks Class B/C (model/inferred) overwrites but a direct user
 assertion supersedes the prior value as a new Class A fact (the old value is
 superseded, not hard-deleted, preserving history). So the two rules no longer
-conflict — `immutable` means "no *model* may silently rewrite this," not "the
+conflict, `immutable` means "no *model* may silently rewrite this," not "the
 user may never change it." A type that should resist even user edits is a
 separate, explicitly-flagged case and is out of scope for R1.
 
-**Bitemporal recall (R1-B4, blocking — clarified).** The model is genuinely
+**Bitemporal recall (R1-B4, blocking, clarified).** The model is genuinely
 bitemporal with two independently-named axes, both queryable:
 
-- **transaction time** — `superseded_at` (when aimee stopped believing the edge);
+- **transaction time**: `superseded_at` (when aimee stopped believing the edge);
   `NULL` = currently believed.
-- **valid time** — `valid_from` / `valid_to` (the real-world interval the fact
+- **valid time**: `valid_from` / `valid_to` (the real-world interval the fact
   held); open-ended `valid_to IS NULL` = still holds.
 
 Current-state queries filter `superseded_at IS NULL AND (valid_to IS NULL OR
@@ -370,7 +370,7 @@ the same way.
 | **C** | model speculation / novel rel_type | 0.4 | **expire after 30 days unless confirmed** |
 
 **B never becomes A (R2-3).** "Promotion" elevates a Class B fact from
-*expiring* to *durable* (TTL removed) — it does **not** make it Class A. A is
+*expiring* to *durable* (TTL removed). It does **not** make it Class A. A is
 reserved for direct user assertion (§1 trust boundary); a model-inferred fact,
 however many times re-observed, stays Class B. Conflict/decay semantics of a
 durable-B fact are explicit: it loses to any Class A fact on the same
@@ -382,7 +382,7 @@ are new **modes of `memory_run_maintenance`**, reusing the existing
 `promoted/demoted/expired` counters and `kind_lifecycle` thresholds. The class
 maps cleanly onto the memory metadata types already in use (`user` ⇒ A,
 `feedback`/`project` ⇒ B once confirmed, transient inferences ⇒ C). The point is
-that **unconfirmed model speculation cannot calcify into a remembered "fact"** —
+that **unconfirmed model speculation cannot calcify into a remembered "fact"**,
 it decays unless reality reinforces it.
 
 ## §6 Pattern-first extraction before the model
@@ -394,7 +394,7 @@ trivially regex-shaped (IPv4/IPv6, MAC, dates, "X is Y", "my <noun> is <value>")
 high-precision regexes emit candidate triples directly; only the residual text
 that the patterns don't cover is escalated to the model rewrite. This is a
 direct ingest-cost win and **plugs into the in-flight cost-accounting work**
-(see `ingress-cost-accounting-and-optimizations.md` / the cost ledger) — the
+(see `ingress-cost-accounting-and-optimizations.md` / the cost ledger). The
 saved model calls show up as measured spend reduction. It also lowers latency on
 the hot ingress path and doubles as the cheap scan for retraction signals (§4).
 Pattern hits are still validated by the §1 gate; regex precision buys cost, not
@@ -403,7 +403,7 @@ a bypass of validation.
 ## §7 Per-attribute PII sensitivity gating
 
 **Problem.** aimee's scope model (`MEMORY_SCOPE_GLOBAL` etc.) is coarse; it
-can't express "this attribute is sensitive — don't inject it unless explicitly
+can't express "this attribute is sensitive; Don't inject it unless explicitly
 asked."
 
 **Design.** The `sensitivity` column on `rel_types` (§1) tags attributes
@@ -412,7 +412,7 @@ pre-injection envelope **withholds sensitive facts unless the current turn
 explicitly requests them** (keyword/intent match), while identity facts needed
 for normal operation (preferred name, role) always pass at confidence ≥ 0.4.
 Because `sensitivity` is `NOT NULL` and defaults to `pii` (§1, R3-4), any type
-whose sensitivity was never explicitly classified is withheld by default — the
+whose sensitivity was never explicitly classified is withheld by default. The
 recall path fails *closed*, so a learned or seed-omitted attribute cannot leak PII
 simply because no one tagged it. This is a privacy refinement to
 `ingress_preinject_*`, gated behind the same default-off flag as the rest of the
@@ -425,7 +425,7 @@ layer.
 New/extended db2 objects (one migration, following the `agent_outcomes` table
 idiom):
 
-- `rel_types` — ontology (§1): `rel_type` (lower snake_case, case-insensitive
+- `rel_types`: ontology (§1): `rel_type` (lower snake_case, case-insensitive
   key), `head_kinds`, `tail_kinds` (closed entity-kind enum incl. `ANY`/`SCALAR`,
   validated at load), `is_symmetric`, `inverse_rel_type` (consistency-checked
   against `is_symmetric` at load), `correction_behavior` (`NOT NULL` default
@@ -433,15 +433,15 @@ idiom):
   `NOT NULL` default `pii`), `is_hierarchy_rel`, `status`
   (`active`/`provisional`; provisional = staged novel type pending promotion §2,
   so Class-C edges have a resolvable `relation_id`).
-- `entity_registry` — globally-unique surrogate `canonical_id` PK + `kind` +
+- `entity_registry`: globally-unique surrogate `canonical_id` PK + `kind` +
   `status` (`active`/`provisional`/`merged`) + `merged_into` pointer (§3).
-- `entity_aliases` — display name → canonical id (single-hop, no alias→alias),
+- `entity_aliases`: display name → canonical id (single-hop, no alias→alias),
   `is_preferred`, `suppressed` (tombstone flag, §4) (§3).
-- `entity_name_conflicts` — true-ambiguity queue (§3) with
+- `entity_name_conflicts`: true-ambiguity queue (§3) with
   `status` (`open`/`resolved`/`failed`), priority, bounded retry + escalation.
-- `entity_merges` — audited merge/near-match log enabling unmerge (§3).
-- `ontology_evaluations` — novel-rel_type occurrence counter + verdicts (§2).
-- `entity_edges` **+columns** — `edge_class` (`semantic`/`cooccurrence`, default
+- `entity_merges`: audited merge/near-match log enabling unmerge (§3).
+- `ontology_evaluations`: novel-rel_type occurrence counter + verdicts (§2).
+- `entity_edges` **+columns**, `edge_class` (`semantic`/`cooccurrence`, default
   `cooccurrence`; §0 storage boundary), `confidence_class`, `suppressed`
   (tombstone flag for `hard_delete`, §4), `superseded_at` (transaction time),
   `valid_from` / `valid_to` (valid time, §4), provenance link (`relation_id` /
@@ -449,21 +449,21 @@ idiom):
 
 ## Phasing
 
-- **P1 — Ontology + write gate (§1).** `rel_types` table + seed, `rel_types`
+- **P1. Ontology + write gate (§1).** `rel_types` table + seed, `rel_types`
   registry cache, `memory_fact_gate`, typed-edge population. Recall reads typed
   edges. *Default-off flag.* Self-contained and independently shippable.
-- **P2 — Entity registry (§3).** Surrogate ids + aliases + conflict queue; edge
+- **P2. Entity registry (§3).** Surrogate ids + aliases + conflict queue; edge
   writes resolve through it. Highest correctness leverage; depends on P1's write
   path.
-- **P3 — Confidence classes + correction (§4, §5).** `confidence_class`,
+- **P3. Confidence classes + correction (§4, §5).** `confidence_class`,
   bitemporal columns, `correction_behavior` enforcement, retraction handler,
   promotion/expiry maintenance modes.
-- **P4 — Self-extension (§2).** Promotion pipeline + `aimee expand`.
-- **P5 — Cost + privacy (§6, §7).** Pattern-first extractor (coordinated with
+- **P4. Self-extension (§2).** Promotion pipeline + `aimee expand`.
+- **P5. Cost + privacy (§6, §7).** Pattern-first extractor (coordinated with
   the cost ledger) + sensitivity gating.
 
 Each phase lands behind a default-off config flag and graduates per the
-flag-rollout-readiness program (6-criterion bar) — nothing flips on by default
+flag-rollout-readiness program (6-criterion bar), nothing flips on by default
 in the same PR that introduces it.
 
 ## Trade-offs & risks
@@ -474,7 +474,7 @@ in the same PR that introduces it.
   the §1 gate only *accepts* a triple when it maps to a known/plausible
   rel_type; everything else stays prose. The two share the `entity_edges` table
   but are kept separable by the `edge_class` discriminator (§0) and unioned only
-  at injection (§7) — not distinguished by an implicit heuristic.
+  at injection (§7), not distinguished by an implicit heuristic.
 - **Ontology quality gates correctness.** A wrong `head_kinds`/`tail_kinds`
   rejects legitimate facts. Mitigation: novel types stage as Class C (don't hard
   block), `aimee expand` is human-approvable, strict-match entity resolution
@@ -503,7 +503,7 @@ in the same PR that introduces it.
   single-hop alias resolution (no `A→B→A`); `entity_name_conflicts` lifecycle +
   escalation; `merge`/`unmerge` round-trip.
 - Integration: end-to-end "state → correct → recall current → recall historical"
-  over the `/v1/facts/*` surface — including same-session "X is Y → query Y"
+  over the `/v1/facts/*` surface, including same-session "X is Y → query Y"
   (synchronous binding) and both bitemporal axes (valid-time "used to" vs.
   transaction-time "believed last week"); user correction overriding an
   `immutable` type while a model correction is rejected; `aimee expand <domain>`
@@ -519,33 +519,32 @@ in the same PR that introduces it.
 Folded in from a multi-lens delegate review (reviewer / architect / security /
 data-model passes). Each blocking finding and where it landed:
 
-- **R1-A1 — shared storage vs. "not merged" claim** *(architect)*: added the
+- **R1-A1, shared storage vs. "not merged" claim** *(architect)*: added the
   `edge_class` discriminator (§0, data model, trade-offs) so typed and
   co-occurrence rows in the same `entity_edges` table are explicitly separable;
   union happens only at injection, keyed on `edge_class`.
-- **R1-B3 — `memory_fact_gate` had no call site** *(reviewer)*: §1 now names the
+- **R1-B3, `memory_fact_gate` had no call site** *(reviewer)*: §1 now names the
   gate as the single commit point for all three triple emitters, the only setter
   of `edge_class='semantic'`, and **fail-closed** when the ontology is
   unreachable.
-- **R1-B1 — `immutable` vs. "user authority is absolute"** *(reviewer)*: §4 now
+- **R1-B1, `immutable` vs. "user authority is absolute"** *(reviewer)*: §4 now
   scopes `correction_behavior` to the inferred path; a user correction always
   supersedes (Class A), `immutable` only blocks model/inferred overwrites.
-- **R1-B2 — strict-match didn't solve fragmentation** *(reviewer)*: §3 resolution
+- **R1-B2, strict-match didn't solve fragmentation** *(reviewer)*: §3 resolution
   is now two-tier and **synchronous** (immediate explicit binding + conservative
   audited near-match); the async queue is strictly for true ambiguity, and blocks
   neither write nor recall.
-- **R1-B4 — "bitemporal" wasn't** *(reviewer)*: §4 names both axes explicitly —
-  transaction time (`superseded_at`) and valid time (`valid_from`/`valid_to`) —
-  with the query form for each.
-- **R1-D1 — `rel_types` was self-trusted** *(data-model)*: §1 adds ontology
-  load-time validation — closed `head_kinds`/`tail_kinds` enum, symmetric/inverse
+- **R1-B4 ("bitemporal" wasn't** *(reviewer)*: §4 names both axes explicitly) transaction time (`superseded_at`) and valid time (`valid_from`/`valid_to`),
+with the query form for each.
+- **R1-D1, `rel_types` was self-trusted** *(data-model)*: §1 adds ontology
+  load-time validation, closed `head_kinds`/`tail_kinds` enum, symmetric/inverse
   consistency, `correction_behavior` NOT-NULL default, `snake_case`
   canonicalization.
-- **R1-D2 — registry constraints were assumed, not stated** *(data-model)*: §3
+- **R1-D2, registry constraints were assumed, not stated** *(data-model)*: §3
   adds UNIQUE `(kind, canonical_id)`, single-hop aliases (no circular chains),
   an `entity_name_conflicts` lifecycle, and first-class `merge`/`unmerge`.
-- **R1-S1 — model trusted where it shouldn't be** *(security)*: §1 adds the trust
-  boundary — model-sourced triples are capped at Class B/C (never Class A), and
+- **R1-S1, model trusted where it shouldn't be** *(security)*: §1 adds the trust
+  boundary, model-sourced triples are capped at Class B/C (never Class A), and
   ontology-shape promotions remain human-approvable.
 
 ### R2 (second review round)
@@ -553,19 +552,19 @@ data-model passes). Each blocking finding and where it landed:
 A second delegate pass on the R1 revision surfaced five more blocking issues,
 all folded in:
 
-- **R2-1 — `hard_delete` vs. §0 "never hard-delete"**: redefined as a
+- **R2-1, `hard_delete` vs. §0 "never hard-delete"**: redefined as a
   suppress-and-archive *tombstone* (`suppressed` flag + `superseded_at`), so the
   origin artifact is always retained.
-- **R2-2 — fail-closed was circular**: separated the two gate-failure modes —
-  *novel rel_type with ontology reachable* → stage Class C; *ontology unreachable*
+- **R2-2, fail-closed was circular**: separated the two gate-failure modes,
+*novel rel_type with ontology reachable* → stage Class C; *ontology unreachable*
   → defer to a retry queue (C-staging needs the ontology, so it can't be the
   unreachable-path behaviour).
-- **R2-3 — B→"permanent" was undefined**: promotion now elevates B from expiring
+- **R2-3. B→"permanent" was undefined**: promotion now elevates B from expiring
   to *durable B* (no TTL) but **never to Class A**; durable-B conflict/decay
   semantics stated explicitly.
-- **R2-4 — "provisional id" had no schema home**: added a `status`
+- **R2-4, "provisional id" had no schema home**: added a `status`
   (`active`/`provisional`/`merged`) + `merged_into` column to `entity_registry`.
-- **R2-5 — uniqueness prose ≠ constraint**: `canonical_id` is now a
+- **R2-5, uniqueness prose ≠ constraint**: `canonical_id` is now a
   globally-unique surrogate PK (matching the "never reused across kinds" claim),
   not a per-kind `UNIQUE (kind, canonical_id)`.
 
@@ -573,29 +572,29 @@ all folded in:
 
 A third pass (security lens) found four more blocking issues, all folded in:
 
-- **R3-1 — Class-C triple had a dangling `relation_id`**: novel types now insert a
+- **R3-1. Class-C triple had a dangling `relation_id`**: novel types now insert a
   `provisional` `rel_types` row at stage time, so the edge's `relation_id` always
   resolves; promotion flips it `active`.
-- **R3-2 — seed fallback contradicted "DB down → defer everything"**: the gate now
+- **R3-2, seed fallback contradicted "DB down → defer everything"**: the gate now
   validates seed-known types against the in-code `SEED_ONTOLOGY` during a DB
   outage; only *novel* writes during an outage defer.
-- **R3-3 — alias tombstone was unbuildable**: added a `suppressed` flag to
+- **R3-3, alias tombstone was unbuildable**: added a `suppressed` flag to
   `entity_aliases`, symmetric with `entity_edges`, so `hard_delete` suppresses an
   alias while retaining the audit row.
-- **R3-4 — `sensitivity` could fail open**: closed enum (`normal`/`pii`/`secret`),
+- **R3-4, `sensitivity` could fail open**: closed enum (`normal`/`pii`/`secret`),
   `NOT NULL`, default `pii`; unclassified types are withheld from injection by
   default (§7 fails closed).
 
 ### Convergence
 
-A fourth round on R3 came back **clean across three lenses and two models** —
+A fourth round on R3 came back **clean across three lenses and two models**,
 reviewer (minimax), architect (mistral), and security (mistral) each returned
 *NO MAJOR ISSUES*. The review loop is considered converged: findings progressed
 structural (R1) → state-semantics (R2) → schema-completeness/fail-open (R3) →
 clean, with no new blocking issues on the final pass.
 
-The one item carried as deferred — `confidence_class` A/B/durable-B/C transition
+The one item carried as deferred, `confidence_class` A/B/durable-B/C transition
 semantics and its interaction with the existing scalar `confidence` /
-`provenance_category` / lineage `source_kind` fields (§0, §5) — was then given a
+`provenance_category` / lineage `source_kind` fields (§0, §5), was then given a
 dedicated review pass and also returned *NO MAJOR ISSUES*. No open review items
 remain; the proposal is ready for human sign-off.

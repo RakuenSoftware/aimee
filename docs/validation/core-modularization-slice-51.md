@@ -33,7 +33,7 @@ this slice adds only the completeness assertion on the already-reviewed declarat
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
 the root-level `src/forge_app_token.c`, the server/kb git-facing code, or any adjacent git-touching code
 outside the module root has been moved in, and it does not claim identical build-product membership
-across Make and CMake — the fourteen credential/OAuth/ops/forge-vault/host/org-repos/PR-API sources are
+across Make and CMake. The fourteen credential/OAuth/ops/forge-vault/host/org-repos/PR-API sources are
 Make-only. It is also independent of the `git-core-contract` governance, which bounds git's core
 capability rather than its file ownership.
 

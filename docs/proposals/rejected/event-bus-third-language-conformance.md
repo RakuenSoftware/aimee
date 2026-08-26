@@ -1,6 +1,6 @@
 # Event-bus third-language conformance residual
 
-- **State:** REJECTED — archived 2026-08-14.
+- **State:** REJECTED. Archived 2026-08-14.
 - **Archived parent:** [`event-bus-wire-spec.md`](../done/event-bus-wire-spec.md).
 
 ## Decision
