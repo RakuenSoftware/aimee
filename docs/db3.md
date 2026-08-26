@@ -125,10 +125,13 @@ Capabilities never self-assert identity: principal, attachment handle, and seque
 host-stamped bus frame. A new attachment handle may restart its sequence, while duplicate or stale
 evidence from one handle is rejected. Ready search providers declare their generation, supported
 operation, metric, and exact-filter bits, and dimension/top-K limits. Selection requires cosine
-search and exact scope filtering. Ready admission refreshes the deterministic deployed default unless
+search and exact scope filtering.
+
+Ready admission refreshes the deterministic deployed default unless
 control has installed an override. Explicit route selection is a compare-and-select against the
 observed generation, which remains bound until another successful select or clear; a later capability
 generation makes the explicit selection unavailable rather than silently advancing it.
+
 An apply-capable principal is durable after admission; an attachment loss does not discard its
 delivery obligations. Admission installs durable per-projection cursors under the same PostgreSQL
 transaction lock used by live vector triggers, then a Go worker advances at most 128 rows in each
@@ -136,6 +139,7 @@ short transaction. Live writes also target backfilling principals, so releasing 
 chunks cannot lose a mutation; a later snapshot duplicate carries the current row and remains
 idempotent. It may advertise `ready=false` while applying that snapshot, but `ready=true` is rejected
 from routing until every backfill delivery is acknowledged.
+
 Retirement is an explicit durable control operation, not an inference from a lost heartbeat.
 Removing an
 automatic default advances to the next eligible principal; losing an explicitly selected provider

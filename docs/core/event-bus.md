@@ -87,26 +87,28 @@ module output remains a generic 502 transport failure.
 
 Control web's physical Go provider imports the same policy package. The KB
 console-admin containment is event-bus-only: the route layer asks the separately
-supervised control-web module and fails closed if no valid decision arrives. The
-KB keeps no duplicate local control-web allowlist.
-The server's live `memory.benchmark` RPC sends each bounded retrieval result set
-to the benchmarks process for MRR, NDCG@K, and recall@K scoring. An unavailable
-or invalid process response fails the RPC with no in-process scoring fallback;
-offline benchmark harnesses retain their local primitives because they do not
-run inside either daemon.
-The skills process serves both the review-nudge predicate and trigger-frontmatter
-matching. Guardrails resolves the skill file locally but requests the trigger
-decision over the bus; transport or decode failure is treated conservatively as
-a match, so the advisory cannot be bypassed by losing the module.
-The learning router also requires its supervised process before it mutates
-storage: event `6145` returns the sink mask for each supported signal. Missing,
-failed, or malformed module output aborts signal ingestion with no local routing
-fallback. The C signal policy exists only behind the parity handler and focused
-tests.
-The server's memory context pre-injection path requests confidence from event
-`5893`. Missing, failed, or malformed output suppresses the envelope rather than
-falling back to a local `low` classification; the formatter accepts only the
-three validated process-returned tiers.
+supervised control-web module and fails closed if no valid decision arrives, and
+the KB keeps no duplicate local allowlist.
+
+Four more production paths refuse to decide locally when their process is absent:
+
+- **benchmarks.** The live `memory.benchmark` RPC sends each bounded retrieval
+  result set for MRR, NDCG@K, and recall@K scoring. An unavailable or invalid
+  response fails the RPC with no in-process fallback. Offline harnesses keep their
+  local primitives because they do not run inside either daemon.
+- **skills.** The process serves both the review-nudge predicate and
+  trigger-frontmatter matching. Guardrails resolves the skill file locally but
+  requests the trigger decision over the bus, and transport or decode failure is
+  treated conservatively as a match, so the advisory cannot be bypassed by losing
+  the module.
+- **learning.** Event `6145` returns the sink mask for each supported signal before
+  the router mutates storage. Missing, failed, or malformed output aborts ingestion
+  with no local routing fallback; the C signal policy exists only behind the parity
+  handler and focused tests.
+- **memory.** The context pre-injection path requests confidence from event `5893`.
+  Missing, failed, or malformed output suppresses the envelope rather than falling
+  back to a local `low` classification, and the formatter accepts only the three
+  validated process-returned tiers.
 
 Every strict `*.grant` policy binds one principal class/reference to an exact
 absolute executable (resolved and compared with Linux `SO_PEERCRED` and

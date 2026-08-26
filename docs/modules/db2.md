@@ -526,25 +526,33 @@ activation.
 
 ## Tests and failure behavior
 
-Focused C tests cover every response flag combination, both embedding-dimension result shapes,
-pool counter widths and occupancy relations, and
-dimension bounds, malformed magic/version/length, unknown
-flags, reserved bytes, wrong stage, undersized output, cancellation, missing callbacks, backend
-failure, typed-client transport/protocol failures, and successful encode-handler-decode. A dedicated
-integration test crosses the real authenticated event bus from the generated client through the
-module runtime into the C handler and verifies non-zero evidence. Runtime-bundle tests compile the
-descriptor-owned C process from a clean tree with no `src/schema_data.h`. Generator tests pin
-UTF-8/C escaping, reproducibility, output location, path containment, ordering, duplicate symbols,
-and symlink rejection; an exported miniature CMake project exercises the same rule where CMake is
-available. Export tests pin compatibility-header path safety, ownership separation,
-materialization, manifest admission, and missing-file failure. Catalog tests mutate every closed
-field, process/descriptor binding, resource limit, and generated artifact. Boundary tests prohibit
-any direct import from `src/modules/db2/c` into private
-`src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
-comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
-limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
-and unchanged-output failure. Activation-gate mutation tests prove that an incomplete source list,
-weak backend, or remaining direct production caller prevents enablement.
+Each test family owns one boundary:
+
+- **Focused C tests** cover every response flag combination, both embedding-dimension
+  result shapes, pool counter widths and occupancy relations, dimension bounds,
+  malformed magic/version/length, unknown flags, reserved bytes, wrong stage,
+  undersized output, cancellation, missing callbacks, backend failure, typed-client
+  transport and protocol failures, and successful encode-handler-decode.
+- **A dedicated integration test** crosses the real authenticated event bus from the
+  generated client through the module runtime into the C handler and verifies
+  non-zero evidence.
+- **Runtime-bundle tests** compile the descriptor-owned C process from a clean tree
+  with no `src/schema_data.h`.
+- **Generator tests** pin UTF-8/C escaping, reproducibility, output location, path
+  containment, ordering, duplicate symbols, and symlink rejection. An exported
+  miniature CMake project exercises the same rule where CMake is available.
+- **Export tests** pin compatibility-header path safety, ownership separation,
+  materialization, manifest admission, and missing-file failure.
+- **Catalog tests** mutate every closed field, process/descriptor binding, resource
+  limit, and generated artifact.
+- **Boundary tests** prohibit any direct import from `src/modules/db2/c` into private
+  `src/kb`.
+- **Declaration-ledger tests** cover C linkage blocks, multiline and callback
+  declarations, comments/literals/directives, identical and conflicting duplicates,
+  malformed nesting, resource limits, signature-bound review transitions, pgvector
+  retention, output symlinks, reproducibility, and unchanged-output failure.
+- **Activation-gate mutation tests** prove that an incomplete source list, weak
+  backend, or remaining direct production caller prevents enablement.
 DB3-portability tests additionally prove exhaustive 76-symbol coverage, closed classification
 identities, fingerprint drift, duplicate/missing/extra detection, ordering, malformed JSON, resource
 limits, and copied-repository CLI behavior.
