@@ -20,13 +20,15 @@ function safeError(value: unknown, fallback: string): string {
 export async function storeIdentityField(cred: 'author_name' | 'author_email', secret: string,
                                          fetchImpl: FetchLike): Promise<string | null> {
   const token = csrf();
-  if (!token) return 'security token unavailable; reload Setup and try again';
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 10_000);
   try {
     const response = await fetchImpl('/api/vault/credentials', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'X-CSRF-Token': token } : {}),
+      },
       body: JSON.stringify({ agent: 'git', cred, secret }),
       signal: controller.signal,
     });

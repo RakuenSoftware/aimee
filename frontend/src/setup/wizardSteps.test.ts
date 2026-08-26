@@ -1,10 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { WIZARD_STEPS, visibleSteps, isRestartKey, helpFor } from './wizardSteps';
+import { WIZARD_STEPS, visibleSteps, isRestartKey, helpFor, ownsPrimaryAction } from './wizardSteps';
 import { RESTART_KEYS, FIELD_HELP } from '../pages/settingsHelp';
 import { saveConfigValue, loadConfig } from './configApi';
 import type { StepId } from './readiness';
 
 describe('WIZARD_STEPS structure', () => {
+  it('gives every bespoke step sole ownership of its primary action', () => {
+    for (const step of WIZARD_STEPS) {
+      expect(ownsPrimaryAction(step)).toBe(step.kind !== undefined);
+    }
+    expect(ownsPrimaryAction(WIZARD_STEPS.find((step) => step.kind === 'git_identity')!)).toBe(true);
+  });
+
   it('covers every readiness StepId exactly once, in dependency order', () => {
     const ids = WIZARD_STEPS.map((s) => s.id);
     expect(ids).toEqual<StepId[]>(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'git_identity', 'connection', 'project']);

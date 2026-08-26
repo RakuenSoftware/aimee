@@ -1358,6 +1358,7 @@
     },
     {
       "consumers": [
+        "src/kb/kb_main.c",
         "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_kb.c"
       ],
@@ -25631,7 +25632,9 @@
       "symbol": "pgvec_ensure_corpus_index"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
@@ -25640,7 +25643,7 @@
       ],
       "signature": "int pgvec_ensure_index ( const char * table , int dim , int recreate )",
       "signature_sha256": "9fd750f786e84a085b4c16b2aefc8f54e072e048ffd121d554bd26970925a3a7",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_ensure_index"
     },
     {
@@ -26574,7 +26577,9 @@
       "symbol": "pgvec_search_latency_snapshot"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
@@ -26583,7 +26588,7 @@
       ],
       "signature": "int pgvec_table_ready ( const char * table )",
       "signature_sha256": "29da9d42b2f83f86ddb41fba760e3041c0bfa2708cca3a4b7122de94ba3959df",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_table_ready"
     },
     {
@@ -26869,15 +26874,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9d886ffe8e218bdb914f3cee7e5f8c18755e39b1b3c96317edb15a3b85cbbd44",
+  "fingerprint": "9bd8ac80ca79c95245f647ea140d6a1019de6718055550fbe98f048264b99beb",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 738,
     "declarations": 1481,
     "headers": 142,
-    "internal_unconsumed": 170,
-    "private_test_only": 279,
+    "internal_unconsumed": 168,
+    "private_test_only": 281,
     "reviewed": 294
   }
 }

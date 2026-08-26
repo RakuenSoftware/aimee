@@ -85,9 +85,9 @@ The generated login is temporary. This step creates the account you will keep, a
 account, and removes the plaintext of the temporary one. A deployment that sealed its own
 `AIMEE_WEBCHAT_USER` pair before first boot skips this step.
 
-Pick a username that is not already a group on the host. The image ships the usual Unix groups, so
-names such as `operator`, `backup`, `staff`, `users`, `news`, `mail`, `proxy`, `adm`, and `aimee`
-are unavailable. The wizard names the collision and asks you to choose another username.
+The replacement account uses Aimee's managed login group as its primary group, so common names such
+as `operator`, `backup`, or `staff` remain valid even when a same-named system group already exists.
+The account is still scoped to the managed group and cannot expose unrelated host users.
 
 ### Step 2: choose the primary provider
 

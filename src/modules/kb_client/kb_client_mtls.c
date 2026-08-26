@@ -85,7 +85,7 @@ static int caller_authorization_valid(const char *jwt)
 }
 
 /* Read both independent application credentials for every request. Neither is
- * cached with the mTLS identity: bearer/OIDC/PAM rotation must take effect on
+ * cached with the mTLS identity: bearer/service-token/OIDC/PAM rotation must take effect on
  * request N+1 even while the HTTP/TLS connection remains pooled. */
 static int service_request_headers(char *out, size_t cap)
 {
@@ -93,6 +93,8 @@ static int service_request_headers(char *out, size_t cap)
    char value[KB_TLS_BEARER_TOKEN_MAX + 8] = "";
    char oidc[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
    char oidc_value[KB_TLS_BEARER_TOKEN_MAX + 8] = "";
+   char service_token[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
+   char service_value[KB_TLS_BEARER_TOKEN_MAX + 8] = "";
    char pam_user[KB_CLIENT_PAM_USER_MAX + 1] = "";
    char pam_pass[KB_CLIENT_PAM_PASS_MAX + 1] = "";
    char pam_pair[KB_CLIENT_PAM_USER_MAX + KB_CLIENT_PAM_PASS_MAX + 2] = "";
@@ -109,6 +111,8 @@ static int service_request_headers(char *out, size_t cap)
                ? snprintf(out, cap, "Authorization: %s\r\n", value)
                : -1;
    int have_oidc = runtime_secret_get("AIMEE_KB_CLIENT_OIDC_TOKEN", oidc, sizeof(oidc));
+   int have_service = runtime_secret_get("AIMEE_KB_SERVICE_IDENTITY_TOKEN", service_token,
+                                         sizeof(service_token));
    int have_pam_user =
        runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", pam_user, sizeof(pam_user));
    int have_pam_pass =
@@ -118,6 +122,13 @@ static int service_request_headers(char *out, size_t cap)
    {
       int added =
           snprintf(out + n, cap - (size_t)n, "X-Aimee-Service-Authorization: %s\r\n", oidc_value);
+      n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
+   }
+   else if (n > 0 && (size_t)n < cap && have_service &&
+            aimee_core_bearer_value(service_value, sizeof(service_value), service_token) == 0)
+   {
+      int added = snprintf(out + n, cap - (size_t)n,
+                           "X-Aimee-Service-Authorization: %s\r\n", service_value);
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
    else if (n > 0 && (size_t)n < cap && have_pam_user && have_pam_pass)
@@ -136,8 +147,8 @@ static int service_request_headers(char *out, size_t cap)
    {
       if (n > 0 && (size_t)n < cap)
          LOG_ERROR("kb_client",
-                   "server-to-KB request missing third-layer identity (OIDC token or complete PAM "
-                   "username/password pair)");
+                   "server-to-KB request missing third-layer identity (managed service token, "
+                   "OIDC token, or complete PAM username/password pair)");
       n = -1;
    }
    char managed_server[128] = "";
@@ -175,6 +186,8 @@ static int service_request_headers(char *out, size_t cap)
    runtime_secret_wipe(pam_pair, sizeof(pam_pair));
    runtime_secret_wipe(pam_pass, sizeof(pam_pass));
    runtime_secret_wipe(pam_user, sizeof(pam_user));
+   runtime_secret_wipe(service_value, sizeof(service_value));
+   runtime_secret_wipe(service_token, sizeof(service_token));
    runtime_secret_wipe(oidc_value, sizeof(oidc_value));
    runtime_secret_wipe(oidc, sizeof(oidc));
    runtime_secret_wipe(value, sizeof(value));
@@ -221,7 +234,16 @@ static int identity_distinct_from_server(const char *client_cert_pem)
    X509 *client_cert = client_bio ? PEM_read_bio_X509(client_bio, NULL, NULL, NULL) : NULL;
    EVP_PKEY *server_key = server_cert ? X509_get_pubkey(server_cert) : NULL;
    EVP_PKEY *client_key = client_cert ? X509_get_pubkey(client_cert) : NULL;
-   int distinct = server_key && client_key && EVP_PKEY_eq(server_key, client_key) == 0;
+   /* EVP_PKEY_eq() returns -1 when the key algorithms differ (for example the
+    * appliance's P-256 HTTPS key versus the managed KB identity's RSA key).
+    * Different algorithms prove that the keys are distinct; treating -1 as a
+    * validation failure made every such managed install silently ignore its
+    * valid mTLS identity and fall back to the bootstrap HTTP endpoint. Keep the
+    * same-algorithm case fail-closed when OpenSSL cannot compare the keys. */
+   int server_type = server_key ? EVP_PKEY_get_base_id(server_key) : EVP_PKEY_NONE;
+   int client_type = client_key ? EVP_PKEY_get_base_id(client_key) : EVP_PKEY_NONE;
+   int distinct = server_key && client_key && server_type > 0 && client_type > 0 &&
+                  (server_type != client_type || EVP_PKEY_eq(server_key, client_key) == 0);
    EVP_PKEY_free(server_key);
    EVP_PKEY_free(client_key);
    X509_free(server_cert);

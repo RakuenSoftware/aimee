@@ -40,12 +40,15 @@ describe('Git identity Vault writes', () => {
     expect(await storeIdentityField('author_name', 'Operator', fake)).toBe('b vault locked /b');
   });
 
-  it('fails closed without a CSRF token', async () => {
+  it('stores through the same-origin session when the legacy CSRF field is absent', async () => {
     delete (window as { _csrf?: string })._csrf;
-    const fake = vi.fn();
+    const fake = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+      expect((init?.headers as Record<string, string>)['X-CSRF-Token']).toBeUndefined();
+      return { ok: true, status: 200, json: async () => ({ status: 'ok' }) } as Response;
+    });
     expect(await storeIdentityField('author_name', 'Operator', fake as unknown as typeof fetch))
-      .toMatch(/security token unavailable/);
-    expect(fake).not.toHaveBeenCalled();
+      .toBeNull();
+    expect(fake).toHaveBeenCalledOnce();
   });
 
   it('makes skipping explicit without writing partial identity data', () => {

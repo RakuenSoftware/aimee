@@ -65,6 +65,17 @@ static void test_collection_names(void)
    printf("pgvec: collection names distinct and non-empty OK\n");
 }
 
+static void test_collection_readiness_accepts_supported_ann_indexes(void)
+{
+   assert(pgvec_table_ready(PGVEC_MEMORY_TABLE) == 1); /* HNSW */
+   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);     /* DiskANN */
+   /* Existing indexes satisfy ensure without trying to create a redundant
+    * second ANN index (SQLite cannot execute either backend's DDL). */
+   assert(pgvec_ensure_index(PGVEC_MEMORY_TABLE, 4, 0) == 0);
+   assert(pgvec_ensure_index(PGVEC_KB_TABLE, 4, 0) == 0);
+   printf("pgvec: HNSW and DiskANN both satisfy collection readiness OK\n");
+}
+
 static void test_schema_version_nonempty(void)
 {
    const char *v = pgvec_schema_version();
@@ -332,6 +343,7 @@ int main(void)
    db2_set_embedding_dim(4);
 
    test_collection_names();
+   test_collection_readiness_accepts_supported_ann_indexes();
    test_schema_version_nonempty();
    test_upsert_graceful_on_no_db();
    test_search_graceful_on_no_db();

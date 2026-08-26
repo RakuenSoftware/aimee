@@ -275,6 +275,44 @@ webchat_restore_identities() {
     return 0
 }
 
+# Snapshot the accounts provisioned by this shell before runtime-web starts.
+# runtime-web records every later account mutation, but the generated/explicit
+# first-boot account is created here. Without this initial snapshot a container
+# replacement has no verifier to restore and silently rotates the one credential
+# the operator was told to save.
+webchat_snapshot_identities() {
+    _wc_group=$(getent group "$WEBCHAT_LOGIN_GROUP" 2>/dev/null) || return 0
+    _wc_members=$(printf '%s\n' "$_wc_group" | cut -d: -f4 | tr ',' ' ')
+    mkdir -p "$(dirname "$WEBCHAT_IDENTITIES")" 2>/dev/null || return 0
+    _wc_tmp="${WEBCHAT_IDENTITIES}.tmp.$$"
+    (umask 077 && : > "$_wc_tmp") || {
+        webchat_log "WARNING: could not begin the dashboard identity snapshot"
+        _wc_group="" _wc_members="" _wc_tmp=""
+        return 0
+    }
+    for _wc_u in $_wc_members; do
+        [ -n "$_wc_u" ] || continue
+        getent passwd "$_wc_u" >/dev/null 2>&1 || continue
+        _wc_h=$(getent shadow "$_wc_u" 2>/dev/null | cut -d: -f2)
+        case "$_wc_h" in
+            '' | '!'* | '*'*) continue ;;
+        esac
+        printf '%s:%s\n' "$_wc_u" "$_wc_h" >> "$_wc_tmp" || {
+            rm -f "$_wc_tmp"
+            webchat_log "WARNING: could not write the dashboard identity snapshot"
+            _wc_group="" _wc_members="" _wc_u="" _wc_h="" _wc_tmp=""
+            return 0
+        }
+    done
+    if ! LC_ALL=C sort -o "$_wc_tmp" "$_wc_tmp" ||
+       ! chmod 600 "$_wc_tmp" || ! mv -f "$_wc_tmp" "$WEBCHAT_IDENTITIES"; then
+        rm -f "$_wc_tmp"
+        webchat_log "WARNING: could not commit the dashboard identity snapshot"
+    fi
+    _wc_group="" _wc_members="" _wc_u="" _wc_h="" _wc_tmp=""
+    return 0
+}
+
 webchat_provision_bootstrap_account() {
     # Before anything asks whether a login is needed: put back the ones this
     # appliance already had. Without this an upgrade hands the operator a new
@@ -288,6 +326,7 @@ webchat_provision_bootstrap_account() {
         webchat_provision_login "$wc_generated_user" "$wc_generated_pass" || true
     fi
     webchat_generate_bootstrap_login || true
+    webchat_snapshot_identities
     return 0
 }
 

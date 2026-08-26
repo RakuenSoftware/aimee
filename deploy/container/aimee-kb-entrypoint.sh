@@ -135,6 +135,16 @@ start_embedder() {
 # The mTLS material for the sidecar hop is issued by the kb at startup, not here;
 # see kb_synthesis_identity.c.
 
+# The PostgreSQL module is a separate process and deliberately cannot open the
+# KB's credential Vault.  For the embedded cluster its DSN contains no secret:
+# it is a local trust-authenticated Unix socket owned by this container.  Give
+# that exact DSN to the module instead of leaving health and all DB1-backed
+# operations permanently disconnected from the database the KB just started.
+configure_embedded_store_module() {
+    AIMEE_STORE_URL=$1
+    export AIMEE_STORE_URL
+}
+
 # Sourcing stops here: everything above is definitions, everything below starts a
 # container. tests/test_kb_entrypoint.sh uses this to exercise the embedder gate without
 # a PostgreSQL cluster, a Vault, or an image.
@@ -274,6 +284,14 @@ if [ "$external_db" -eq 0 ]; then
     if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
         echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
              "starting a second cluster" >&2
+        # Enrollment and informational one-shots share the live KB's volume,
+        # not its bus identity. Starting a second module supervisor here makes
+        # every module attach under a principal the serving KB already owns, so
+        # the bus correctly denies them and enrollment fails. The binary can
+        # reach the shared local-trust socket directly; run only that one-shot.
+        if ! kb_is_serving "$@"; then
+            exec aimee-kb "$@"
+        fi
         start_embedder "$@"
         run_kb_with_modules "$@"
         exit $?
@@ -366,6 +384,7 @@ if [ "$external_db" -eq 0 ]; then
     else
         embedded_dsn="postgresql:///$DB?host=$PGSOCK"
     fi
+    configure_embedded_store_module "$embedded_dsn"
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
     # The self-contained tier still runs audit construction in a separate OS

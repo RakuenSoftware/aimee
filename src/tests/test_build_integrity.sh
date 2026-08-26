@@ -204,8 +204,13 @@ cat >"$kb_shared_dir/pgbin/initdb" <<'SH'
 echo "initdb-must-not-run" >&2
 exit 1
 SH
+cat >"$kb_shared_dir/bin/module-supervisor.sh" <<'SH'
+#!/bin/sh
+echo "module-supervisor-must-not-run" >&2
+exit 1
+SH
 chmod +x "$kb_shared_dir/bin/aimee-kb" "$kb_shared_dir/pgbin/pg_isready" \
-    "$kb_shared_dir/pgbin/initdb"
+    "$kb_shared_dir/pgbin/initdb" "$kb_shared_dir/bin/module-supervisor.sh"
 kb_shared_stderr="$kb_shared_dir/stderr.log"
 kb_shared_output=$(env -i PATH="$kb_shared_dir/bin:/usr/bin:/bin" \
     AIMEE_HOME="$kb_shared_dir/home" \
@@ -214,8 +219,8 @@ kb_shared_output=$(env -i PATH="$kb_shared_dir/bin:/usr/bin:/bin" \
     managed-server-identity 2>"$kb_shared_stderr" || true)
 rm -rf "$kb_entrypoint_test_dir"
 if [ "$kb_shared_output" = "reached-binary:managed-server-identity" ] &&
-    ! grep -q 'initdb-must-not-run' "$kb_shared_stderr"; then
-    pass "KB entrypoint reuses an already-running cluster instead of provisioning a second"
+    ! grep -Eq 'initdb-must-not-run|module-supervisor-must-not-run' "$kb_shared_stderr"; then
+    pass "KB one-shot reuses the running cluster without duplicating its modules"
 else
     fail "KB entrypoint did not reuse the running cluster ($kb_shared_output, stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
 fi

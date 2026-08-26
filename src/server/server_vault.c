@@ -9,6 +9,7 @@
 #include "vault_capability.h"   /* vault:write:server gate (D2c) */
 #include "log.h"                /* audit_log dedicated 0600 audit sink (D2/D2c) */
 #include "vault_audit_bridge.h" /* publish server-principal writes onto the audit bus */
+#include "appliance_admin.h"
 #include "cJSON.h"
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
@@ -232,11 +233,22 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cJSON_IsString(ja) || !cJSON_IsString(jc) || !cJSON_IsString(js))
       return server_send_error(conn, "vault: set_server requires agent, cred, secret", NULL);
 
-   if (!vault_capability_server_write_allowed(conn->attested_transport, conn->vault_principal))
+   int allowed =
+       vault_capability_server_write_allowed(conn->attested_transport, conn->vault_principal);
+   /* The browser setup wizard configures shared appliance credentials. Its
+    * authenticated appliance administrator is already the sole webuser allowed
+    * to mutate global execution policy, and there is no safe browser route that
+    * can mint the otherwise UDS-only grant. Admit exactly that principal over the
+    * kernel-attested webchat hop; every other webuser still needs an explicit
+    * vault:write:server grant. */
+   if (!allowed && conn->attested_transport == ATTEST_WEBCHAT_TRUSTED)
+      allowed = appliance_admin_principal_authorized(conn->vault_principal);
+
+   if (!allowed)
    {
       if (!vault_conn_is_attested(conn))
-         return server_send_error(
-             conn,
+         return server_send_error_kind(
+             conn, SERVER_ERR_PERMISSION_DENIED,
              "vault: server-principal write requires an attested connection (local UDS, trusted "
              "webchat, or TLS/mTLS) — a plaintext TCP bearer is never accepted",
              NULL);
@@ -249,7 +261,7 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                "vault: caller (principal %s) lacks the vault:write:server capability "
                "(grant it over UDS with `aimee vault capability grant %s`)",
                who, who);
-      return server_send_error(conn, msg, NULL);
+      return server_send_error_kind(conn, SERVER_ERR_PERMISSION_DENIED, msg, NULL);
    }
 
    vault_status_t st = vault_service_set_server(ja->valuestring, jc->valuestring, js->valuestring);

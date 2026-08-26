@@ -28,12 +28,16 @@ const (
 // spends the money, and the reply arrives correlated on the same bus -- there
 // is no polling and no second transport.
 type BusReviewer struct {
-	// mu serializes calls: a caller owns its client, because a Client has a
-	// single reply stream and sharing one across concurrent callers is exactly
-	// the mistake that deadlocked the C side.
+	// mu serializes reviews. The WFE's shared ConcurrentModuleCaller still
+	// multiplexes this call with DB/config/delegate traffic on its one admitted
+	// principal.
 	mu      sync.Mutex
-	caller  *bus.ModuleCaller
+	caller  busStageCaller
 	timeout time.Duration
+}
+
+type busStageCaller interface {
+	Call(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
 }
 
 // NewBusReviewer attaches to the daemon's module bus as the WFE principal.
@@ -46,6 +50,16 @@ func NewBusReviewer(ctx context.Context, socketPath string, principalClass, prin
 	caller, err := bus.NewModuleCaller(client)
 	if err != nil {
 		return nil, err
+	}
+	return NewBusReviewerFromCaller(caller, timeout)
+}
+
+// NewBusReviewerFromCaller uses an already attached caller. Long-lived
+// processes must prefer this constructor: the bus admits one live slot per
+// principal, so attaching again with the same identity is correctly denied.
+func NewBusReviewerFromCaller(caller busStageCaller, timeout time.Duration) (*BusReviewer, error) {
+	if caller == nil {
+		return nil, errors.New("roundtable bus caller is not configured")
 	}
 	if timeout <= 0 {
 		// A review runs a panel of live agents; the module enforces its own

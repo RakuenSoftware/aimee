@@ -80,6 +80,12 @@ extern "C"
     * success, -1 if the principal is unauthenticated or args invalid. */
    int kb_identity_key(const kb_principal_t *p, char *out, size_t cap);
 
+   /* DB2 host-contract adapter for the same canonical identity derivation. CLI
+    * subcommands initialize DB2 without the daemon's module-stage setup, so this
+    * adapter must be registered by both startup paths before tenant entry. */
+   int kb_identity_key_from_fields(int kind, const char *issuer, const char *subject,
+                                   int authenticated, char *out, size_t cap);
+
    /* Parse one existing canonical identity key back into its existing principal
     * kind. Used only for caller context asserted over the fully authenticated
     * aimee-server service channel; this validates and decodes, it does not

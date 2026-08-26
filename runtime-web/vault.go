@@ -104,18 +104,45 @@ func vaultSafeErrorMessage(data []byte) string {
 	return "vault: request failed"
 }
 
+// vaultUpstreamFailure understands aimee-server's dispatch envelope. Native
+// /v1 routes deliberately return the envelope over HTTP 200 even when its
+// internal status is "error"; checking only the transport status turns a denied
+// mutation into a browser-visible success. Require a literal status:"ok" and
+// map typed dispatch faults back to HTTP. Malformed/ambiguous replies fail
+// closed as a bad gateway.
+func vaultUpstreamFailure(st int, data []byte, transportErr error) (int, string, bool) {
+	if transportErr != nil {
+		return http.StatusServiceUnavailable, "vault: aimee-server unavailable", true
+	}
+	var msg map[string]json.RawMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		if st != http.StatusOK {
+			return st, "vault: request failed", true
+		}
+		return http.StatusBadGateway, "vault: malformed server response", true
+	}
+	if dispatchErr := rpcError(msg); dispatchErr != nil {
+		return rpcErrorStatus(dispatchErr), vaultSafeErrorMessage(data), true
+	}
+	if st != http.StatusOK {
+		return st, vaultSafeErrorMessage(data), true
+	}
+	var status string
+	_ = json.Unmarshal(msg["status"], &status)
+	if status != "ok" {
+		return http.StatusBadGateway, "vault: malformed server response", true
+	}
+	return 0, "", false
+}
+
 // vaultRelayStatus is the browser response for a MUTATION (unlock/set/delete/
 // rekey): a fixed {"status":"ok"} on success, a sanitized error otherwise. It
 // NEVER echoes the upstream body — webchat is the user-facing trust boundary, so
 // no aimee-server bytes are passed through verbatim.
 func (s *server) vaultRelayStatus(w http.ResponseWriter, st int, data []byte, err error) {
 	w.Header().Set("Content-Type", "application/json")
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "vault: aimee-server unavailable")
-		return
-	}
-	if st != http.StatusOK {
-		writeJSONError(w, st, vaultSafeErrorMessage(data))
+	if status, message, failed := vaultUpstreamFailure(st, data, err); failed {
+		writeJSONError(w, status, message)
 		return
 	}
 	w.Write([]byte(`{"status":"ok"}`))
@@ -126,12 +153,8 @@ func (s *server) vaultRelayStatus(w http.ResponseWriter, st int, data []byte, er
 // secret/value/KEK field can NEVER reach the browser even if upstream regresses.
 func (s *server) vaultRelayList(w http.ResponseWriter, st int, data []byte, err error) {
 	w.Header().Set("Content-Type", "application/json")
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "vault: aimee-server unavailable")
-		return
-	}
-	if st != http.StatusOK {
-		writeJSONError(w, st, vaultSafeErrorMessage(data))
+	if status, message, failed := vaultUpstreamFailure(st, data, err); failed {
+		writeJSONError(w, status, message)
 		return
 	}
 	var up struct {
@@ -155,6 +178,10 @@ func (s *server) handleVaultUnlock(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !sameOriginRequest(r) {
+		writeJSONError(w, http.StatusForbidden, "cross-origin vault mutation refused")
+		return
+	}
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -175,6 +202,10 @@ func (s *server) handleVaultPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !sameOriginRequest(r) {
+		writeJSONError(w, http.StatusForbidden, "cross-origin vault mutation refused")
+		return
+	}
 	var req struct {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
@@ -193,6 +224,10 @@ func (s *server) handleVaultPassword(w http.ResponseWriter, r *http.Request) {
 // /api/vault/credentials — GET list (names only), POST set {agent,cred,secret},
 // DELETE remove {agent,cred}.
 func (s *server) handleVaultCredentials(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && !sameOriginRequest(r) {
+		writeJSONError(w, http.StatusForbidden, "cross-origin vault mutation refused")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
 	defer cancel()
 	user := currentUser(r)

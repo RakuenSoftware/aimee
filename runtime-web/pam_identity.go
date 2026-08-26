@@ -47,6 +47,10 @@ type pamAccounts struct {
 	authenticate func(service, username, password string) error
 	setPassword  func(username, password string) error
 	lock         func(username string) error
+	// A locked/disabled group member is not a dashboard login. Keep it out of
+	// both the user list and the durable identity snapshot while retaining the
+	// OS account as retirement evidence.
+	usable func(username string) bool
 	// Record the managed accounts after every mutation so they can be restored
 	// into a replaced container — see identity_persist.go. A seam because it
 	// reads /etc/shadow, which a unit test has no business doing.
@@ -85,6 +89,7 @@ func newPAMAccounts(service, group string) (*pamAccounts, error) {
 		authenticate: auth.PAMAuthenticate,
 		setPassword:  auth.SetPassword,
 		lock:         lockSystemAccount,
+		usable:       systemAccountHasUsablePassword,
 	}
 	p.persist = func() {
 		names, err := p.List()
@@ -145,10 +150,18 @@ func (p *pamAccounts) List() ([]string, error) {
 	}
 	names := make([]string, 0, len(users))
 	for _, u := range users {
+		if p.usable != nil && !p.usable(u.Username) {
+			continue
+		}
 		names = append(names, u.Username)
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func systemAccountHasUsablePassword(username string) bool {
+	hashes, err := readShadowHashes("/etc/shadow")
+	return err == nil && usableShadowHash(hashes[username])
 }
 
 func (p *pamAccounts) managed(username string) bool {

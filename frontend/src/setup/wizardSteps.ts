@@ -36,6 +36,13 @@ export interface WizardStep {
   showWhen?: (kbMode: WizardKbMode) => boolean;
 }
 
+/** Bespoke steps render and own their primary action. Keeping this exhaustive
+ * next to the kind union prevents SetupWizard from accidentally adding a
+ * generic Next button that bypasses a newly-added required step. */
+export function ownsPrimaryAction(step: WizardStep): boolean {
+  return step.kind !== undefined;
+}
+
 export const WIZARD_STEPS: WizardStep[] = [
   { id: 'account', title: 'Secure your account', keys: [], kind: 'account' },
   { id: 'provider', title: 'Primary provider', keys: [], kind: 'chooser' },

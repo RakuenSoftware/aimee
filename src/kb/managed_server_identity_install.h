@@ -9,6 +9,10 @@ typedef struct
    const char *host;
    int port;
    const char *endpoint;
+   /* Optional host/PAM operator to enroll into the managed server's team. The
+    * server resolves this from its root-owned onboarding record; the KB still
+    * performs the membership mutation under its bootstrap owner authority. */
+   const char *member;
    uid_t owner;
    /* Re-issue the client certificate even when a stored identity already
     * matches this KB. Without it the installer reuses whatever is on disk and

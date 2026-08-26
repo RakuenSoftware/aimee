@@ -553,7 +553,7 @@ CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJ
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
 # --- Server ---
-SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalog.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_v1_routes_e.c cli_v1_routes_f.c server/server_main.c server/vault_bootstrap_privilege.c server/server.c server/server_kb_heartbeat.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server/server_api_status.c server/server_error_kind.c server/server_bearer_auth.c server/server_seed_config.c server/server_http.c server/delegate_egress_adapter.c server/server_http_surfaces.c server/server_http_management.c server/server_http_routes.c server/server_http_mgmt_read_routes.c server/server_http_routes_git.c server/server_http_routes_workspace.c server/server_dev_submit.c server/server_ci_route.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/server_http_authz.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/msg_session_key.c modules/economizer/gateway_mutate.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c modules/memory/gw_stage_memory.c pipeline/gw_stage_registry.c pipeline/gw_response_registry.c modules/governance/gw_stage_governance.c modules/governance/gw_stage_completion.c pipeline/gw_orchestration_seam.c modules/delegates/gw_orch_delegates.c modules/workflows/gw_orch_workflows.c server/fidelity_check.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_ready.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_state_freshness.c server/server_memory_review.c server/server_facts.c server/server_audit_replay_routes.c server/server_runner_endpoints.c server/workspace_register_args.c server/server_state_audit.c server/server_css_query.c server/server_runner_endpoints.c server/server_workspace_scan.c server/server_state_audit.c server/server_css_query.c server/server_state.c server/server_state_index.c server/server_active_project.c server/server_state_vectors.c server/server_memory_benchmark.c server/roundtable_review_bus.c modules/roundtable/roundtable_review_panel.c server/workflow_control_bus.c modules/workspace/workspace_provider_detached.c modules/workspace/workspace_provider_container.c modules/workspace/workspace_runner_queue.c modules/workspace/workspace_runner_registry.c modules/workspace/workspace_turn.c modules/workspace/workspace_scope.c modules/delegates/delegate_sandbox_image.c modules/sandbox/sandbox_learned.c modules/roundtable/roundtable_chair.c modules/webuser/webuser_runtime.c \
+SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalog.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_v1_routes_e.c cli_v1_routes_f.c server/server_main.c server/vault_bootstrap_privilege.c server/server.c server/server_kb_heartbeat.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server/server_api_status.c server/server_error_kind.c server/server_bearer_auth.c server/server_seed_config.c server/server_http.c server/delegate_egress_adapter.c server/server_http_surfaces.c server/server_http_management.c server/server_http_routes.c server/server_http_mgmt_read_routes.c server/server_http_routes_git.c server/server_http_routes_workspace.c server/server_dev_submit.c server/server_ci_route.c server/appliance_admin.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/server_http_authz.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/msg_session_key.c modules/economizer/gateway_mutate.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c modules/memory/gw_stage_memory.c pipeline/gw_stage_registry.c pipeline/gw_response_registry.c modules/governance/gw_stage_governance.c modules/governance/gw_stage_completion.c pipeline/gw_orchestration_seam.c modules/delegates/gw_orch_delegates.c modules/workflows/gw_orch_workflows.c server/fidelity_check.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_ready.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_state_freshness.c server/server_memory_review.c server/server_facts.c server/server_audit_replay_routes.c server/server_runner_endpoints.c server/workspace_register_args.c server/server_state_audit.c server/server_css_query.c server/server_runner_endpoints.c server/server_workspace_scan.c server/server_state_audit.c server/server_css_query.c server/server_state.c server/server_state_index.c server/server_active_project.c server/server_state_vectors.c server/server_memory_benchmark.c server/roundtable_review_bus.c modules/roundtable/roundtable_review_panel.c server/workflow_control_bus.c modules/workspace/workspace_provider_detached.c modules/workspace/workspace_provider_container.c modules/workspace/workspace_runner_queue.c modules/workspace/workspace_runner_registry.c modules/workspace/workspace_turn.c modules/workspace/workspace_scope.c modules/delegates/delegate_sandbox_image.c modules/sandbox/sandbox_learned.c modules/roundtable/roundtable_chair.c modules/webuser/webuser_runtime.c \
               server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c server/turn_registry.c server/wfe_live_delegate.c modules/workflows/wfe_live_forge.c modules/workflows/wfe_live_foreach.c modules/workflows/wfe_live_panel.c modules/workflows/wfe_panel_roundtable.c modules/workflows/wfe_replay_worktree.c modules/workflows/wfe_scheduler.c \
               server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_compute_roundtable.c server/server_compute_mailbox.c server_compute_episodes.c server/router_advise.c modules/ir/aimee_ir.c modules/ir/aimee_ir_session.c modules/ir/aimee_ir_metrics.c modules/translation/aimee_frontend_anthropic.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_frontend_responses.c modules/translation/aimee_backend_anthropic.c modules/translation/aimee_backend_openai.c modules/translation/aimee_backend_responses.c modules/translation/aimee_backend_bedrock.c server/aimee_ir_shadow.c server/aimee_ir_serve.c modules/translation/aimee_ir_stream.c modules/delegates/aimee_ir_rescue.c server/shadow_mirror.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_delegate_reservation.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_roundtable.c server/server_mcp_surface.c server/server_mcp_call_table.c server/server_mcp_memory_gate.c server/server_mcp_ast_grep.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_ensemble.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c cli_client.c \
               modules/roundtable/roundtable_pipeline_eval.c modules/roundtable/roundtable_pipeline_capture.c modules/roundtable/roundtable_pipeline_chunk.c server/server_pipeline.c server/server_pipeline_merge.c \
@@ -1336,14 +1336,16 @@ BENCH_OBJS = $(OBJDIR)/tests/bench_perf.o $(OBJDIR)/modules/guardrails/guardrail
              $(OBJDIR)/modules/workspace/workspace.o \
              $(OBJDIR)/modules/workspace/workspace_session_lookup.o \
              $(OBJDIR)/modules/guardrails/guardrails_orchestrator.o $(OBJDIR)/modules/guardrails/guardrails_tdd.o $(OBJDIR)/modules/guardrails/guardrails_blast_radius.o \
-             $(OBJDIR)/server/agent_config.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/cmd_describe.o \
+             $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o \
+             $(OBJDIR)/modules/routing/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/cmd_describe.o \
              $(OBJDIR)/server/computer_use.o \
              $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/branch_ownership.o \
              $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/bench_perf_stubs.o \
              $(OBJDIR)/tests/support/model_provider_stub.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
-             $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/tests/support/vault_service_stub.o
+             $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/tests/support/vault_service_stub.o \
+             $(OBJDIR)/tests/support/git_ownership_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o
 
-tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS)
+tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS) | $(CORE_CONNECTION_LIB)
 	$(CC) -o $@ $^ $(TEST_L_FLAGS)
 
 bench: tests/bench-perf
@@ -2018,7 +2020,7 @@ clean:
 	       $(BINARY)-asan $(SERVER)-asan \
 	       $(LEAN_BINARY) $(LEAN_SERVER) $(LEAN_KB) \
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \
-	       tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
+	       tests/fuzz_message_frame tests/fuzz_acl_parse \
 	       tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
 	       tests/fuzz_kb_mgmt_token_authority_ipc \
 	       tests/fuzz_kb_mgmt_jwks_publication \
@@ -2499,8 +2501,6 @@ FUZZ_EXTRACTOR_OBJS = $(OBJDIR)/tests/fuzz_extractors.o $(TEST_DATA_OBJS_MOCK)
 
 FUZZ_JSON_OBJS = $(OBJDIR)/tests/fuzz_json_parse.o $(OBJDIR)/cJSON.o
 
-FUZZ_MEMSEARCH_OBJS = $(OBJDIR)/tests/fuzz_memory_search.o $(TEST_DATA_OBJS_MOCK)
-
 FUZZ_MSGFRAME_OBJS = $(OBJDIR)/tests/fuzz_message_frame.o $(OBJDIR)/sse_parser.o
 
 FUZZ_ACLPARSE_OBJS = $(OBJDIR)/tests/fuzz_acl_parse.o $(OBJDIR)/cJSON.o
@@ -2539,21 +2539,19 @@ FUZZ_SERVER_MGMT_READ_CONFIG_OBJS = $(OBJDIR)/tests/fuzz_server_mgmt_read_config
                                     $(OBJDIR)/shared/management_read.o $(OBJDIR)/cJSON.o
 
 FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse \
-               tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
+               tests/fuzz_message_frame tests/fuzz_acl_parse \
                tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
                tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_kb_mgmt_jwks_publication \
                tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
                tests/fuzz_server_mgmt_action tests/fuzz_server_mgmt_read_config
+
+$(FUZZ_TARGETS): | $(CORE_CONNECTION_LIB)
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
 $(OBJDIR)/tests/fuzz_json_parse.o: tests/fuzz_json_parse.c
-	@mkdir -p $(OBJDIR)/tests
-	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
-
-$(OBJDIR)/tests/fuzz_memory_search.o: tests/fuzz_memory_search.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
@@ -2607,9 +2605,6 @@ tests/fuzz_extractors: $(FUZZ_EXTRACTOR_OBJS)
 tests/fuzz_json_parse: $(FUZZ_JSON_OBJS)
 	$(CC) -o $@ $^ $(L_CORE)
 
-tests/fuzz_memory_search: $(FUZZ_MEMSEARCH_OBJS)
-	$(CC) -o $@ $^ $(L_FULL)
-
 tests/fuzz_message_frame: $(FUZZ_MSGFRAME_OBJS)
 	$(CC) -o $@ $^ $(L_CORE)
 
@@ -2646,7 +2641,6 @@ tests/fuzz_server_mgmt_read_config: $(FUZZ_SERVER_MGMT_READ_CONFIG_OBJS)
 fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_extractors tests/fuzz_corpus/seed.*
 	./tests/fuzz_json_parse tests/fuzz_corpus/seed.json tests/fuzz_corpus/seed_config.json
-	./tests/fuzz_memory_search tests/fuzz_corpus/seed_query.txt
 	./tests/fuzz_message_frame tests/fuzz_corpus/message_frame/*
 	./tests/fuzz_acl_parse tests/fuzz_corpus/acl_parse/*
 	./tests/fuzz_kb_workload_wire tests/fuzz_corpus/seed.*

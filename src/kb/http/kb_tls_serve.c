@@ -28,6 +28,7 @@
 #include "kb_identity.h"
 #include "kb_caller_token.h"
 #include "kb_reqctx.h"
+#include "kb_scope.h"
 #include "kb_verifier.h"
 #include "server_identity_token.h"
 #include "pam_auth.h"
@@ -166,7 +167,9 @@ done:
 
 /* Returns 1 for a verified third-layer service identity, 0 for bad/missing
  * credentials, and -1 when an OIDC policy was requested but cannot safely be
- * enforced. OIDC never falls back to PAM. */
+ * enforced. A managed opaque token is a distinct, scope-bearing application
+ * credential for the self-contained stack; externally federated OIDC never
+ * falls back to it or to PAM. */
 static int service_identity_authenticate(const char *authorization, kb_principal_t *out)
 {
    if (out)
@@ -175,7 +178,23 @@ static int service_identity_authenticate(const char *authorization, kb_principal
    if (mode < 0)
       return -1;
    if (mode == 0)
-      return pam_service_identity(authorization, out);
+   {
+      if (authorization && strncasecmp(authorization, "Basic ", 6) == 0)
+         return pam_service_identity(authorization, out);
+
+      char expected[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
+      const char *presented = aimee_core_bearer_token(authorization);
+      kb_verify_result_t verified;
+      memset(&verified, 0, sizeof(verified));
+      int have = runtime_secret_get("AIMEE_KB_SERVICE_IDENTITY_TOKEN", expected, sizeof(expected));
+      int ok = have && presented &&
+               kb_verifier_authenticate(presented, expected, &verified, NULL, 0) &&
+               strcmp(verified.scope_kind, KB_SCOPE_KIND_SERVICE) == 0 && verified.scope_id[0] &&
+               kb_principal_from_host_account(verified.scope_id, out) == 0;
+      OPENSSL_cleanse(expected, sizeof(expected));
+      OPENSSL_cleanse(&verified, sizeof(verified));
+      return ok ? 1 : 0;
+   }
 
    const char *jwt = aimee_core_bearer_token(authorization);
    kb_verify_result_t verified;
@@ -895,6 +914,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       kb_principal_t application_identity;
       int application_authority =
           service_identity_authenticate(service_authorization, &application_identity);
+      int application_matches = application_authority == 1 &&
+                                application_identity_matches_certificate(cn, &application_identity);
       int content_read = kb_http_is_content_read(method, cpath);
       int server_binding = server_id[0] && named_team > 0
                                ? db2_server_registry_client_match(
@@ -995,8 +1016,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"OIDC or PAM service identity required\"}");
          status = 401;
       }
-      else if (have_cert && !is_bootstrap &&
-               !application_identity_matches_certificate(cn, &application_identity))
+      else if (have_cert && !is_bootstrap && !application_matches)
       {
          close_after_response = 1;
          snprintf(resp, KB_TLS_RESP_MAX,
@@ -1151,6 +1171,14 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
             db2_tenant_scope_rollback();
          memset(&resolved, 0, sizeof(resolved));
       }
+      if (status >= 400 && !is_bootstrap)
+         LOG_WARN("kb.tls",
+                  "request rejected: method=%s path=%s status=%d cert=%d cert_authority=%d "
+                  "bearer=%d bearer_cert_match=%d application=%d application_cert_match=%d "
+                  "server_binding=%d caller=%d",
+                  method, cpath, status, have_cert, cert_authority, bearer_authority,
+                  identity_matches, application_authority, application_matches, server_binding,
+                  caller_authority);
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
       db2_lease_end();
       OPENSSL_cleanse(&service_identity, sizeof(service_identity));

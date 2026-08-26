@@ -667,7 +667,7 @@ static void test_search_v1_reports_http_status(void)
    assert(resp);
    assert(strstr(resp, "\"status\":\"unauthorized\"") != NULL);
    assert(strstr(resp, "\"retryable\":false") != NULL);
-   assert(strstr(resp, "HTTP 401") != NULL);
+   assert(strstr(resp, "\"message\":\"unauthorized\"") != NULL);
    assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAUTHORIZED);
    free(resp);
 
@@ -1335,6 +1335,13 @@ static void test_mtls_non_2xx_is_not_returned_as_valid_json(void)
    cJSON_Delete(request);
    assert(status == 403);
    assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAUTHORIZED);
+
+   char *search = kb_client_search_json_ex("aimee", "split kb", NULL, 7, "json", NULL);
+   assert(search != NULL);
+   assert(strstr(search, "\"status\":\"unauthorized\"") != NULL);
+   assert(strstr(search, "\"retryable\":false") != NULL);
+   assert(strstr(search, "knowledge service search was rejected") != NULL);
+   free(search);
 
    g_mtls_response = NULL;
    g_mtls_status = 0;

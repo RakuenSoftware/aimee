@@ -232,6 +232,33 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
    }
 }
 
+int kb_identity_key_from_fields(int kind, const char *issuer, const char *subject,
+                                int authenticated, char *out, size_t cap)
+{
+   kb_principal_t principal;
+   memset(&principal, 0, sizeof(principal));
+   if (!issuer || !subject || !out || cap < 2 || authenticated != 1 ||
+       strnlen(issuer, sizeof(principal.issuer)) == sizeof(principal.issuer) ||
+       strnlen(subject, sizeof(principal.subject)) == sizeof(principal.subject))
+      return -1;
+
+   switch (kind)
+   {
+   case KB_PRIN_OIDC:
+   case KB_PRIN_CERT:
+   case KB_PRIN_OWNER:
+   case KB_PRIN_HOST:
+      principal.kind = (kb_principal_kind_t)kind;
+      break;
+   default:
+      return -1;
+   }
+   memcpy(principal.issuer, issuer, strlen(issuer) + 1);
+   memcpy(principal.subject, subject, strlen(subject) + 1);
+   principal.authenticated = 1;
+   return kb_identity_key(&principal, out, cap);
+}
+
 int kb_principal_from_identity_key(const char *identity_key, kb_principal_t *out)
 {
    if (out)
