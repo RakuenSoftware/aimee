@@ -1368,10 +1368,10 @@ static int db2_eval_open_temp_store_pg(void)
    /* Carving a schema beside `public` only works while `public` still holds the
     * tables the schema's ~950 public.<table> qualifiers name. Those qualifiers are
     * absolute: no search_path puts the eval copy in front of them, so on a database
-    * whose `public` is EMPTY the apply reaches `INSERT INTO public.db3_projection`
-    * and fails. An empty `public` is also the case where there is nothing to shadow
-    * and nothing to protect, so apply straight into it -- the eval copy then IS
-    * public and every qualifier resolves to it. A database that already carries a
+    * whose `public` is EMPTY the apply reaches a statement such as
+    * `INSERT INTO public.kb_vault_rewrap_worm(...)` and fails. An empty `public` is also the case
+    * where there is nothing to shadow and nothing to protect, so apply straight into it -- the eval
+    * copy then IS public and every qualifier resolves to it. A database that already carries a
     * schema keeps the carve, and keeps being left alone. */
    char sql[192];
    int public_is_empty = 0;

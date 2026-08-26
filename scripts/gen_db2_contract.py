@@ -199,7 +199,7 @@ def validate_catalog(value: object) -> dict[str, object]:
     for index, raw in enumerate(raw_operations):
         operation = _keys(raw, {
             "family", "id", "name", "wire_format", "scope", "transaction", "idempotency",
-            "results", "db3_placement", "db3_reason", "c_symbols", "request", "reply",
+            "results", "c_symbols", "request", "reply",
         }, f"operations[{index}]")
         family_name = operation["family"]
         if family_name not in families:
@@ -233,9 +233,6 @@ def validate_catalog(value: object) -> dict[str, object]:
                 operation["idempotency"] != expected_idempotency:
             fail("operation-semantics",
                  f"{name} must be unscoped, {expected_transaction}, and {expected_idempotency}")
-        if operation["db3_placement"] != "retained-db2":
-            fail("db3-placement", f"{name} must remain in DB2")
-        _string(operation["db3_reason"], f"{name}.db3_reason", 256)
         if not isinstance(operation["c_symbols"], list) or not operation["c_symbols"] or not all(
                 isinstance(symbol, str) and NAME.fullmatch(symbol)
                 for symbol in operation["c_symbols"]):
@@ -1282,7 +1279,7 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
     if review["declarations_complete"] != ledger["declarations_complete"]:
         fail("declaration-completeness-drift", "review and generated ledger disagree")
 
-    expected: dict[str, tuple[str, str]] = {}
+    expected: dict[str, str] = {}
     operations = catalog["operations"]
     assert isinstance(operations, list)
     for operation in operations:
@@ -1290,8 +1287,8 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
         symbols = operation["c_symbols"]
         assert isinstance(symbols, list)
         for symbol in symbols:
-            expected[str(symbol)] = (str(operation["family"]), str(operation["db3_placement"]))
-    actual: dict[str, tuple[str, str]] = {}
+            expected[str(symbol)] = str(operation["family"])
+    actual: dict[str, str] = {}
     for index, row in enumerate(review["reviews"]):
         if not isinstance(row, dict):
             fail("declaration-review", f"review row {index} must be an object")
@@ -1299,17 +1296,16 @@ def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
             continue
         symbol = row.get("symbol")
         family = row.get("family")
-        placement = row.get("db3_placement")
-        if not all(isinstance(value, str) for value in (symbol, family, placement)):
+        if not all(isinstance(value, str) for value in (symbol, family)):
             fail("declaration-review", f"wire review row {index} has invalid fields")
-        actual[str(symbol)] = (str(family), str(placement))
+        actual[str(symbol)] = str(family)
     if actual != expected:
         fail("declaration-operation-binding",
              f"wire reviews {sorted(actual)} differ from catalog C symbols {sorted(expected)}")
     for symbol, binding in expected.items():
         if actual[symbol] != binding:
             fail("declaration-operation-binding",
-                 f"wire review for {symbol} differs from its catalog family or placement")
+                 f"wire review for {symbol} differs from its catalog family")
     if catalog["catalog_complete"] and (
             not review["declarations_complete"] or ledger["summary"]["audit_pending"] != 0):
         fail("catalog-declaration-gate", "catalog completeness requires a closed declaration audit")

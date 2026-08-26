@@ -225,6 +225,20 @@ aimee_add_test(test_db3_route
 target_include_directories(test_db3_route PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
 target_link_libraries(test_db3_route PRIVATE m)
+aimee_add_test(test_db3_filters
+  test_db3_filters.c
+  ../modules/db2/db3_route.c)
+target_include_directories(test_db3_filters PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
+target_link_libraries(test_db3_filters PRIVATE m)
+aimee_add_test(test_pgvec_db3
+  test_pgvec_db3.c
+  ../modules/db2/c/pgvec_db3.c
+  ../modules/db2/db3_route.c)
+target_include_directories(test_pgvec_db3 PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/c)
+target_link_libraries(test_pgvec_db3 PRIVATE m Threads::Threads)
 aimee_add_test(test_bus_db3
   test_bus_db3.c
   ../modules/db2/db3_route.c)

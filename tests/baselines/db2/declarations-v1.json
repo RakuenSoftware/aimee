@@ -34,6 +34,10 @@
     },
     {
       "classification": "host-generated-client",
+      "path": "src/curiosity_resolve.c"
+    },
+    {
+      "classification": "host-generated-client",
       "path": "src/dashboard_kb.c"
     },
     {
@@ -274,7 +278,15 @@
     },
     {
       "classification": "kb-generated-client",
+      "path": "src/kb/kb_module_stage_adapters.c"
+    },
+    {
+      "classification": "kb-generated-client",
       "path": "src/kb/kb_neardup.c"
+    },
+    {
+      "classification": "kb-generated-client",
+      "path": "src/kb/kb_obs_bus_adapter.c"
     },
     {
       "classification": "kb-generated-client",
@@ -441,23 +453,23 @@
       "path": "src/modules/kb-synthesis/kb_curator_version.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_bundle.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_endogeneity.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_evidence.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_regret.c"
     },
     {
-      "classification": "module-kb-contract",
+      "classification": "kb-generated-client",
       "path": "src/modules/learning/learning_router.c"
     },
     {
@@ -790,6 +802,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_curiosity_resolve.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_db2.c"
     },
     {
@@ -859,6 +875,10 @@
     {
       "classification": "private-implementation-test",
       "path": "src/tests/test_evidence_embed.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_fact_identity.c"
     },
     {
       "classification": "private-implementation-test",
@@ -1094,11 +1114,19 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_pgvec_generation_pg.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_pgvec_neardup.c"
     },
     {
       "classification": "private-implementation-test",
       "path": "src/tests/test_planner.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_policy_arms.c"
     },
     {
       "classification": "private-implementation-test",
@@ -1212,6 +1240,7 @@
   "declarations": [
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_code_project_lifecycle.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c"
@@ -1224,11 +1253,12 @@
       ],
       "signature": "void aimee_db2_register_audit_hash_provider ( db2_audit_hash_fn provider )",
       "signature_sha256": "8b6a2fb7e64f7f358d82c66cc77537019be51faacfe5a92901fb97c977b73459",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_audit_hash_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_index.c"
       ],
       "locations": [
@@ -1239,11 +1269,12 @@
       ],
       "signature": "void aimee_db2_register_css_analysis_providers ( db2_css_analyze_fn analyze , db2_css_stylesheet_free_fn release , db2_css_extract_class_tokens_fn extract_class_tokens )",
       "signature_sha256": "eab4f81abd7f516c144b73c160309a940bf36b42fe0d3ce4a136f4bb5b0a9918",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_css_analysis_providers"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_css_render.c"
       ],
       "locations": [
@@ -1254,11 +1285,12 @@
       ],
       "signature": "void aimee_db2_register_css_render_compare_provider ( db2_css_render_compare_fn provider )",
       "signature_sha256": "2187e0e80cfbc43fc34bb1a88fe02368d545488cd36fcd1c0e330f274d9bd2e0",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_css_render_compare_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_kb.c"
       ],
       "locations": [
@@ -1269,11 +1301,12 @@
       ],
       "signature": "void aimee_db2_register_embed_provider ( db2_embed_fn provider )",
       "signature_sha256": "e9a01b47b5f663d3142a8d4006da6eaead8fce289f6c768e7f845be525558dc7",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_embed_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_fact_ingest.c"
       ],
       "locations": [
@@ -1284,11 +1317,12 @@
       ],
       "signature": "void aimee_db2_register_fact_extract_provider ( db2_fact_extract_fn provider )",
       "signature_sha256": "13d592fd1c7dc0e9416cd39e7911f080042abd2aa9c46537b64280161e84dd91",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_fact_extract_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fact_recall.c",
@@ -1303,11 +1337,12 @@
       ],
       "signature": "void aimee_db2_register_fact_gate_provider ( db2_fact_gate_fn provider )",
       "signature_sha256": "8f2225aa4902b730d36b0d307d6312d7ad44dc383db012512b86283e2c93ef94",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_fact_gate_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_fact_ingest.c"
       ],
       "locations": [
@@ -1318,11 +1353,12 @@
       ],
       "signature": "void aimee_db2_register_fact_scan_provider ( db2_fact_scan_fn provider )",
       "signature_sha256": "778769db9a9b8ed08848a401aaac428b3a2886f97b72b9d2ab1671285aba7401",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_fact_scan_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_kb.c"
       ],
       "locations": [
@@ -1333,11 +1369,12 @@
       ],
       "signature": "void aimee_db2_register_identity_key_provider ( db2_identity_key_fn provider )",
       "signature_sha256": "d448312cb8c977de2f4ec84e24b403686315382b4fab8179bd18b32da55c1b07",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_identity_key_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_artifacts.c"
       ],
       "locations": [
@@ -1348,7 +1385,7 @@
       ],
       "signature": "void aimee_db2_register_mdl_score_provider ( db2_mdl_score_fn provider )",
       "signature_sha256": "e5f7efdd10154625d6ac214c5b44fc9620a13ede315fb55308a0f399ff03b577",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_mdl_score_provider"
     },
     {
@@ -1368,6 +1405,7 @@
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_kb_p2b_egress_live.c",
         "src/tests/test_vault_pg.c"
       ],
@@ -1379,11 +1417,12 @@
       ],
       "signature": "void aimee_db2_register_vault_crypto_provider ( const db2_vault_crypto_provider_t * provider )",
       "signature_sha256": "49ffbc2614e7377a56b847ad015d93a11eb8754eb15ce8c445fa3dc775fd6e83",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_vault_crypto_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_org_vault_rewrap.c"
       ],
       "locations": [
@@ -1394,11 +1433,12 @@
       ],
       "signature": "void aimee_db2_register_vault_reseal_provider ( const db2_vault_reseal_provider_t * provider )",
       "signature_sha256": "96c7ff2d4be69462de24ddc7a3b22d880e5f75e153832c4ef9b0a963f5580deb",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_vault_reseal_provider"
     },
     {
       "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
         "src/tests/test_witness_checkpoint_produce_pg.c",
         "src/tests/vault_witness_provider_fixture.h"
       ],
@@ -1410,7 +1450,7 @@
       ],
       "signature": "void aimee_db2_register_vault_witness_provider ( const db2_vault_witness_provider_t * provider )",
       "signature_sha256": "89a9422c9f7546f066acb0fb0e521be300f08e4d9c5a117acbee3135083908b1",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_db2_register_vault_witness_provider"
     },
     {
@@ -1479,7 +1519,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Binding an integer to an opaque PostgreSQL statement is private DB2 execution state; typed operations carry validated integer fields and bind them inside the owner process."
@@ -1515,6 +1554,7 @@
         "src/tests/test_memory_advanced.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
         "src/tests/test_witness_checkpoint_produce_pg.c",
         "src/tests/test_workspace_memory.c"
@@ -1526,7 +1566,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Binding a 64-bit value to a process-owned statement cannot cross the bus; bounded request fields are decoded and bound wholly inside DB2."
@@ -1635,7 +1674,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Statement text binding exposes an opaque handle and unbounded database plumbing; each wire operation validates bounded strings before DB2 performs its own bind."
@@ -1743,7 +1781,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Reading a double from an opaque result cursor is private row decoding; DB2 validates and encodes the domain value into a bounded typed reply."
@@ -1788,7 +1825,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Reading an integer from a process-owned result cursor cannot be remote API; complete operations decode rows and return explicit domain fields."
@@ -1832,6 +1868,7 @@
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_vault_pg.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
         "src/tests/test_witness_canary_pg.c",
@@ -1844,7 +1881,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Reading a 64-bit column is local cursor traversal; DB2 owns the result lifetime and emits only the bounded typed domain value."
@@ -1863,7 +1899,8 @@
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_org_model_catalog_target.c",
-        "src/tests/test_org_vault_rewrap.c"
+        "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c"
       ],
       "locations": [
         {
@@ -1958,7 +1995,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "A borrowed text pointer into PostgreSQL result storage is process-local lifetime state; DB2 copies validated bounded text into operation replies before finalizing."
@@ -2025,6 +2061,7 @@
         "src/tests/test_management_status_key_ctx.c",
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_memory_advanced.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_rules.c",
         "src/tests/test_schema_subst.c",
         "src/tests/test_tool_prompts.c",
@@ -2043,7 +2080,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Transporting caller-supplied raw SQL would violate the DB2 ownership and schema boundary; every bus mutation names a declared operation with DB2-owned SQL."
@@ -2164,6 +2200,7 @@
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
         "src/tests/test_pg_prepare_classification.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -2186,7 +2223,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Finalizing an opaque statement is local lifetime cleanup; DB2 releases all query resources before returning any operation reply."
@@ -2363,6 +2399,7 @@
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -2385,7 +2422,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Preparing caller-provided SQL and returning an opaque statement handle cannot cross a process boundary; declared operations prepare private fixed SQL inside DB2."
@@ -2546,6 +2582,7 @@
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -2568,7 +2605,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Incremental cursor stepping would create a chatty handle protocol; DB2 exhausts or bounds the result set and returns one complete structured reply."
@@ -2591,7 +2627,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Affected-row inspection belongs to the private statement lifetime; a mutation operation maps it to bounded domain evidence before replying."
@@ -2909,7 +2944,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
         "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
@@ -3931,7 +3965,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "Returning a raw calibration-profile JSON blob leaks storage and serialization across the boundary; a typed learning.calibration_threshold operation owns scoped fallback and profile interpretation in one request."
@@ -4002,7 +4035,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "Parsing DB2-owned profile JSON is private operation logic; the future learning.calibration_threshold reply returns only the validated bounded threshold selected from the same scoped profile read."
@@ -5063,6 +5095,7 @@
         "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_planner.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_roadmap.c",
@@ -5092,7 +5125,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "A PostgreSQL connection is private process state and cannot cross the bus; each caller is replaced by a bounded operation that owns its complete transaction inside DB2."
@@ -6147,7 +6179,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_curiosity.c"
+        "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c"
       ],
       "locations": [
         {
@@ -6193,7 +6226,9 @@
     },
     {
       "consumers": [
-        "src/tests/test_curiosity.c"
+        "src/curiosity_resolve.c",
+        "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c"
       ],
       "locations": [
         {
@@ -6203,7 +6238,7 @@
       ],
       "signature": "int db2_curiosity_list ( const char * state , curiosity_item_t * out , int max )",
       "signature_sha256": "4e665504fe006eb931fc8254cc3644253a1805519525c9e662913008c0e94fc1",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_curiosity_list"
     },
     {
@@ -6252,7 +6287,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_curiosity.c"
+        "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c"
       ],
       "locations": [
         {
@@ -6298,6 +6334,7 @@
     },
     {
       "consumers": [
+        "src/curiosity_resolve.c",
         "src/tests/test_curiosity.c"
       ],
       "locations": [
@@ -6308,7 +6345,7 @@
       ],
       "signature": "int db2_curiosity_update_state ( int64_t id , const char * new_state )",
       "signature_sha256": "0db3fc4ee440a431dc831780273c48e1fa56fdc8609660bdb4debaebe17e1f56",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_curiosity_update_state"
     },
     {
@@ -6653,7 +6690,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.dimension_reset operation keeps schema replacement, maintenance marking, and requeue accounting inside one DB2-owned operator transaction while returning only bounded structured evidence."
@@ -6943,7 +6979,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.embedder_serving_id operation replaces the curator replay direct caller with DB2's bounded effective vector-space identity; empty remains the legacy no-identity state."
@@ -7016,7 +7051,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.embedding_dimension operation replaces production direct callers; the effective pgvector schema width remains DB2 authority."
@@ -7029,7 +7063,8 @@
     {
       "consumers": [
         "src/tests/test_db2.c",
-        "src/tests/test_embedding_dim.c"
+        "src/tests/test_embedding_dim.c",
+        "src/tests/test_pgvec_generation_pg.c"
       ],
       "locations": [
         {
@@ -7053,7 +7088,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; the rejected width is DB2 pgvector diagnostic evidence."
@@ -7105,7 +7139,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
@@ -9159,7 +9192,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.health operation replaces production direct callers; PostgreSQL schema and extension readiness remain DB2 authority."
@@ -9252,6 +9284,7 @@
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_kb_vault_rotation_live.c",
         "src/tests/test_kb_vault_rotation_ops_live.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_pgvec_neardup.c",
         "src/tests/test_vault_pg.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
@@ -9274,7 +9307,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Database opening, schema application, and pool construction are private process bootstrap; the supervisor starts DB2 before exposing any bus capability."
@@ -9348,7 +9380,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.health operation proves the DB2 owner is initialized before reporting PostgreSQL and canonical KB readiness."
@@ -9457,6 +9488,7 @@
     {
       "consumers": [
         "src/kb/kb_main.c",
+        "src/kb/kb_obs_bus_adapter.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c"
       ],
@@ -10111,7 +10143,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
@@ -10719,7 +10750,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "This cJSON compatibility facade is caller presentation code; the learning operation consumes bounded role and prompt fields and returns a typed hint record."
@@ -10741,7 +10771,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON outcome wrapper is retired at the process boundary; a typed learning mutation validates bounded outcome evidence and returns structured status."
@@ -10763,7 +10792,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON mutation adapter cannot cross the stable bus; a typed anti-pattern operation owns the update and returns bounded counters."
@@ -10785,7 +10813,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON check result is caller-specific serialization; DB2 evaluates bounded path and command inputs and returns typed anti-pattern matches."
@@ -10807,7 +10834,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The legacy cJSON delete facade is not a wire shape; the typed learning mutation owns deletion and exposes only its closed result."
@@ -10829,7 +10855,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON escalation report stays with the caller; DB2 applies the bounded threshold atomically and returns typed aggregate evidence."
@@ -10851,7 +10876,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON maintenance response is not a transport contract; one typed learning operation owns failure extraction and returns bounded counts."
@@ -10873,7 +10897,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON maintenance response remains local presentation; one typed learning operation owns feedback extraction and returns bounded counts."
@@ -10895,7 +10918,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON insert facade is caller presentation code; a typed operation bounds every learning field and returns an explicit identifier and result."
@@ -10917,7 +10939,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON list builder cannot be the stable wire shape; DB2 returns a bounded typed anti-pattern record set for caller serialization."
@@ -11042,7 +11063,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
         "reason": "The cJSON code-audit document is caller presentation; a typed index-family query returns bounded audit findings without making an in-process JSON tree part of the bus ABI."
@@ -11064,7 +11084,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON approval wrapper is caller presentation code; a typed learning mutation owns the rule transition and returns a closed result."
@@ -11086,7 +11105,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON injection facade cannot be a stable contract; a bounded typed operation returns active collaboration rules newer than the supplied epoch."
@@ -11108,7 +11126,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The active-rule cJSON builder remains local serialization; DB2 returns a bounded typed rule set over the learning family."
@@ -11130,7 +11147,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The all-rules cJSON builder is not transported; a bounded typed list operation returns rule records for caller-owned presentation."
@@ -11152,7 +11168,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON proposal facade is retired at the process boundary; a typed mutation bounds text, rationale, and proposer before DB2 persists the rule."
@@ -11174,7 +11189,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON rejection wrapper stays outside the wire contract; DB2 owns the typed state transition and returns its closed result."
@@ -11196,7 +11210,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON retirement facade is caller-specific serialization; a typed learning mutation performs the rule transition atomically."
@@ -11293,7 +11306,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON creation facade is caller presentation code; a typed learning mutation bounds gap evidence, scores, and source before persistence."
@@ -11314,7 +11326,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON lookup result cannot define the stable bus; DB2 returns a bounded typed curiosity record for caller serialization."
@@ -11335,7 +11346,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON list builder remains local presentation; a typed learning operation returns a state-filtered bounded record set."
@@ -11356,7 +11366,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON maintenance report stays outside the wire contract; DB2 rescoring returns bounded typed aggregate evidence."
@@ -11378,7 +11387,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON routing response is caller-specific serialization; a typed operation bounds the limit and source session and returns routed identifiers."
@@ -11399,7 +11407,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON sweep report is not transported; one typed learning maintenance operation owns the sweep and returns bounded counts."
@@ -11420,7 +11427,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON state-update facade stays local; a typed learning mutation validates the closed state and returns the updated bounded record."
@@ -11442,7 +11448,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The dashboard directives cJSON envelope is presentation code; a bounded typed learning query supplies directive records for the caller to serialize."
@@ -11464,7 +11469,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The dashboard log cJSON builder cannot cross the module ABI; DB2 returns a bounded typed activity view and leaves HTTP serialization to its caller."
@@ -11486,7 +11490,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The dashboard memory-stat cJSON wrapper is presentation-only; typed bounded counters form the stable memory operation reply."
@@ -11508,7 +11511,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The dashboard recall cJSON envelope is a legacy rendering layer; a typed memory query owns the bounded recall rows and explicit truncation evidence."
@@ -11530,7 +11532,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The dashboard reminders cJSON wrapper remains local presentation; a typed bounded query returns reminder records without exposing cJSON ownership."
@@ -11552,7 +11553,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON decision-log wrapper is caller presentation code; a typed learning mutation bounds decision evidence and returns an explicit identifier and result."
@@ -11574,7 +11574,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON decision-list builder remains local serialization; DB2 returns a bounded outcome-filtered typed record set."
@@ -11611,7 +11610,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON expiry report does not cross the bus; one typed learning maintenance operation owns session expiry and returns bounded counts."
@@ -11632,7 +11630,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON directive-list facade cannot define the stable contract; DB2 returns bounded state- and cause-filtered typed records."
@@ -11747,7 +11744,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON feedback facade is caller-specific presentation; a typed learning mutation validates bounded polarity, title, description, and weight."
@@ -11799,7 +11795,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON response builder is a process-local compatibility facade; the learning proposal lookup becomes a bounded typed operation and JSON presentation remains with its caller."
@@ -11820,7 +11815,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON list adapter cannot cross the typed bus; a bounded learning list operation returns fixed proposal records while the caller owns JSON serialization."
@@ -11842,7 +11836,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON learning-signal request and dispatch response are compatibility presentation; a typed operation validates bounded signal fields and returns a closed dispatch result."
@@ -11879,7 +11872,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
@@ -11961,7 +11953,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON memory-alert response is caller presentation; a typed bounded memory query returns alert records and explicit truncation evidence."
@@ -11983,7 +11974,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON memory-question facade is local serialization; a typed operation validates bounded query and scope fields and returns structured answer evidence."
@@ -12005,7 +11995,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The assembled-context cJSON tree cannot define the module ABI; a complete bounded memory operation owns retrieval and returns typed context sections."
@@ -12042,7 +12031,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON briefing document is presentation-only; typed bounded briefing sections form the stable memory reply."
@@ -12064,7 +12052,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON drift report remains local rendering; a typed memory diagnostic returns bounded counters and findings."
@@ -12086,7 +12073,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON compaction facade cannot split or define the mutation boundary; a typed memory operation owns the complete window compaction and returns bounded results."
@@ -12108,7 +12094,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
@@ -12130,7 +12115,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON export-status wrapper is local presentation; a declared export operation validates its destination policy and returns a typed row count."
@@ -12152,7 +12136,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON deletion facade is not the mutation contract; a typed memory.delete operation owns relational cleanup and returns explicit status before caller serialization. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority retires the row (recoverable via fact history), user authority destroys it, so the typed operation must express authority rather than assume destruction."
@@ -12174,7 +12157,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The scoped-diagnostic cJSON document remains a compatibility view; a typed operation validates explicit bounded scope and returns structured findings."
@@ -12196,7 +12178,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The effectiveness-stat cJSON response is presentation code; bounded typed counters and scores define the stable memory reply."
@@ -12218,7 +12199,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The entity-edge cJSON array is caller serialization; a typed bounded query returns edge records and truncation state."
@@ -12240,7 +12220,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The entity-profile cJSON tree stays local presentation; a typed memory operation returns bounded profile statistics and relation records."
@@ -12262,7 +12241,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The episode-card cJSON response is presentation-only; a complete typed memory operation owns generation and returns bounded card fields."
@@ -12284,7 +12262,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The match-explanation cJSON document is caller rendering; typed bounded scoring evidence forms the stable memory reply."
@@ -12306,7 +12283,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON export-status wrapper stays local presentation; a typed export operation owns destination validation and returns its bounded row count."
@@ -12328,7 +12304,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The fact-history cJSON array is caller serialization; a typed operation returns bounded version records and explicit truncation state."
@@ -12350,7 +12325,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON facts response is a compatibility view; a bounded typed memory query returns canonical fact records."
@@ -12372,7 +12346,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON fact-search response does not cross the typed ABI; a bounded query returns structured matches and truncation evidence."
@@ -12394,7 +12367,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The scoped fact-search cJSON wrapper remains presentation; explicit bounded scope fields and typed matches define the memory operation."
@@ -12416,7 +12388,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The visibility-filtered cJSON result is local rendering; a typed query enforces scope and returns only bounded visible matches."
@@ -12438,7 +12409,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The identifier-lookup cJSON envelope is presentation-only; a typed bounded key/kind request returns explicit found state and identifier."
@@ -12460,7 +12430,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON session-fold wrapper cannot define or split the transaction; a typed memory.session_fold operation owns checkpoint creation and L0 cleanup before replying."
@@ -12482,7 +12451,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The episode cJSON response remains caller serialization; a typed bounded lookup returns the episode record and explicit found state."
@@ -12504,7 +12472,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The memory-record cJSON builder is a compatibility facade; typed bounded fields and explicit not-found status define the retrieval contract."
@@ -12526,7 +12493,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The provenance cJSON object stays local presentation; a typed lookup returns bounded provenance fields and explicit missing state."
@@ -12563,7 +12529,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The extended-insert cJSON facade is not the mutation boundary; one typed memory.insert operation validates all bounded fields and owns the complete transactional insert."
@@ -12587,7 +12552,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The legacy insert cJSON wrapper remains caller presentation; the typed memory.insert operation owns validation, provenance, and its structured result."
@@ -12609,7 +12573,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The key-existence cJSON envelope is local compatibility output; a typed bounded key request returns a boolean domain value."
@@ -12631,7 +12594,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON style-learning result is caller presentation; a typed operation validates bounded evidence and returns structured learning status."
@@ -12653,7 +12615,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The link-create cJSON envelope is not the mutation contract; a typed operation validates the IDs and closed relation before returning explicit status."
@@ -12675,7 +12636,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The link-delete cJSON wrapper remains local serialization; a typed memory mutation owns deletion and returns explicit found and result state."
@@ -12697,7 +12657,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The link-query cJSON array is caller rendering; a typed bounded query returns canonical link records and truncation evidence."
@@ -12719,7 +12678,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The memory-lint cJSON report is presentation-only; a typed diagnostic returns bounded findings and aggregate counts."
@@ -12741,7 +12699,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The conflict-list cJSON response stays local presentation; a typed bounded query returns unresolved conflict records."
@@ -12763,7 +12720,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The general memory-list cJSON builder is a compatibility view; typed bounded filters and records define the stable operation."
@@ -12785,7 +12741,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The low-effectiveness cJSON array is caller serialization; a typed query bounds threshold, limit, result rows, and truncation state."
@@ -12807,7 +12762,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The session-priority cJSON list remains presentation; a typed bounded query returns scope-ranked memory records."
@@ -12829,7 +12783,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The pattern-filtered session-priority cJSON list is local rendering; a typed request bounds the pattern and returns bounded ranked rows."
@@ -12851,7 +12804,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The superseded-key cJSON array is presentation-only; typed bounded version summaries form the stable query reply."
@@ -12873,7 +12825,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The unused-L2 cJSON report stays local serialization; a typed query bounds age and result rows and returns explicit truncation."
@@ -12895,7 +12846,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The evaluation-corpus cJSON document is caller presentation; a typed bounded query returns labeled memory records and truncation state."
@@ -12917,7 +12867,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON maintenance report cannot define the work boundary; a typed operation owns the complete maintenance run and returns bounded counters."
@@ -12939,7 +12888,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The prospective-complete cJSON wrapper is local presentation; a typed mutation validates the transition and returns explicit status."
@@ -12961,7 +12909,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The prospective-create cJSON facade is not the mutation contract; a typed operation bounds all fields and returns the new identifier and result."
@@ -12983,7 +12930,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The prospective-memory cJSON list is caller rendering; a typed bounded query returns prospective records and truncation evidence."
@@ -13005,7 +12951,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The trigger-state cJSON wrapper remains local presentation; a typed mutation owns the state change and returns explicit affected state."
@@ -13027,7 +12972,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The prospective-match cJSON response is compatibility rendering; a typed request bounds the observation and returns structured matches."
@@ -13049,7 +12993,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The expiry-sweep cJSON report stays local presentation; a typed maintenance mutation owns the sweep and returns bounded counts."
@@ -13071,7 +13014,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The graph-edge cJSON response is caller rendering; a typed bounded query returns canonical edge records and truncation state."
@@ -13093,7 +13035,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The memory-health cJSON document is presentation-only; typed bounded counters and diagnostic flags define the operation reply."
@@ -13115,7 +13056,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The recall cJSON envelope and activation input remain local serialization; a typed request bounds query, scope, and activation fields and returns structured recall records."
@@ -13153,7 +13093,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The memory-reject cJSON wrapper is not the state-transition contract; a typed mutation validates the reason and returns explicit status."
@@ -13207,7 +13146,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The conversation-scan cJSON input and report are compatibility presentation; a typed operation validates bounded directories and returns structured counts."
@@ -13229,7 +13167,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The scope-rank cJSON object is caller presentation; a typed bounded request returns explicit visibility and rank fields."
@@ -13266,7 +13203,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The keyword-search cJSON array is local rendering; a typed request bounds the keyword and returns bounded fact and pattern records."
@@ -13288,7 +13224,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The temporal graph-search cJSON response is presentation-only; a typed operation validates the timestamp and returns bounded relation records."
@@ -13311,7 +13246,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The graph-search cJSON document remains caller serialization; typed bounded query fields and relation records define the stable reply."
@@ -13333,7 +13267,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The general search cJSON response cannot cross the typed ABI; a bounded operation returns structured matches and explicit truncation."
@@ -13355,7 +13288,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The artifact-update cJSON facade is not the mutation contract; a typed operation validates bounded artifact fields and returns explicit status."
@@ -13377,7 +13309,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The memory-stat cJSON response is compatibility rendering; fixed typed counters and scores form the stable operation reply."
@@ -13399,7 +13330,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The supersede cJSON wrapper cannot define or split the transaction; a typed memory.supersede operation owns version closure, replacement insert, provenance, and result."
@@ -13421,7 +13351,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The scope-tag cJSON facade remains local presentation; a typed mutation validates the closed scope type and bounded value."
@@ -13443,7 +13372,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The workspace-tag cJSON wrapper is not the mutation ABI; a typed operation bounds the workspace and returns explicit status."
@@ -13465,7 +13393,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The top-L2 cJSON array is caller rendering; a typed bounded query returns ranked fact records and truncation state."
@@ -13487,7 +13414,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The touch cJSON wrapper remains local presentation; a typed idempotent mutation owns usage updates and returns explicit found state."
@@ -13509,7 +13435,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The memory-update cJSON facade is not the mutation contract; a typed operation validates bounded content and returns structured update status. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority supersedes (prior content kept as a version, new id returned), user authority overwrites in place, so the typed operation must express authority rather than assume overwrite."
@@ -13531,7 +13456,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The workflow-upsert cJSON response is compatibility presentation; a typed composite operation bounds workflow fields and owns the complete upsert."
@@ -13552,7 +13476,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON note-creation wrapper is caller presentation code; a typed learning mutation bounds note fields and returns an explicit identifier and result."
@@ -13573,7 +13496,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON note-list builder stays local; a typed learning operation returns a bounded tag-filtered record set."
@@ -13594,7 +13516,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON note-search response cannot define the wire shape; DB2 returns bounded typed matches for caller-owned serialization."
@@ -13631,7 +13552,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The relation-schema cJSON list is caller presentation; a typed bounded query returns canonical relation definitions and truncation state."
@@ -13668,7 +13588,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON decay report is presentation-only; one typed learning maintenance operation owns decay and returns bounded aggregate evidence."
@@ -13690,7 +13609,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON delete facade is not transported; a typed learning mutation owns rule deletion and returns its closed result."
@@ -13712,7 +13630,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON filesystem-export wrapper is process-local orchestration; a bounded export operation owns the path policy and returns typed counts."
@@ -13734,7 +13651,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON generation report remains local presentation; a typed learning operation performs generation and returns bounded counts."
@@ -13756,7 +13672,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON insert wrapper is caller serialization; a typed mutation validates bounded polarity, title, description, and weight before persistence."
@@ -13778,7 +13693,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON rule-list builder cannot cross the stable bus; DB2 returns a bounded typed rule record set."
@@ -13800,7 +13714,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON directive-type update is a legacy facade; a typed learning mutation validates the closed type and returns structured status."
@@ -13821,7 +13734,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON scene-list facade is process-local presentation code; the existing fixed scene rows define a bounded memory operation reply instead."
@@ -13842,7 +13754,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
@@ -13864,7 +13775,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The session-commitment cJSON array remains local rendering; a typed bounded briefing query returns commitment records."
@@ -13886,7 +13796,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The session-directive cJSON array is caller presentation; a typed bounded briefing query returns directive records."
@@ -13923,7 +13832,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON edge-mutation wrapper is caller presentation code; a typed learning operation validates task identifiers and the closed relation before persistence."
@@ -13945,7 +13853,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON task-creation facade is not transported; a typed mutation bounds title, session, and parent and returns an explicit identifier and result."
@@ -13967,7 +13874,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON task-delete wrapper stays outside the wire shape; DB2 performs the typed mutation and returns a closed result."
@@ -13989,7 +13895,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON edge-list response remains local serialization; a typed operation returns a bounded task-edge record set."
@@ -14011,7 +13916,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON task-list builder cannot define the stable contract; DB2 returns bounded state- and session-filtered task records."
@@ -14033,7 +13937,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "learning",
         "reason": "The cJSON task-state facade is retired at the process boundary; a typed mutation validates the closed state and returns structured status."
@@ -14055,7 +13958,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
         "reason": "The tool-lookup cJSON object remains a compatibility facade; a typed bounded name request returns the registry record and explicit found state."
@@ -14077,7 +13979,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
         "reason": "The tool-registry snapshot cJSON tree cannot cross the typed module ABI; a bounded typed snapshot operation owns records and truncation evidence."
@@ -14148,7 +14049,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
         "reason": "Beginning a caller-held content transaction cannot cross the module boundary; each document, PDF, or code-index mutation becomes one bounded operation with DB2-owned atomicity."
@@ -14172,7 +14072,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
         "reason": "Caller-controlled content commits are private DB2 mechanics; a complete index-family mutation commits before returning its structured reply and never exposes a transaction token."
@@ -14197,7 +14096,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
         "reason": "Content transaction rollback stays inside DB2; failed, denied, or cancelled composite index operations roll back before returning and cannot leave caller-owned database state."
@@ -14218,7 +14116,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Per-kind promotion, demotion, and expiry thresholds are a private input to the tier-cycle operations that apply them; exposing the lookup alone would let a caller act on thresholds DB2 had already superseded."
@@ -14706,7 +14603,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Lease scope terminates process-local PostgreSQL ownership and has no wire representation; it disappears when the enclosing DB2 work becomes one bounded request."
@@ -14747,7 +14643,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Idle-lease release is process-local pool hygiene, not a remote database operation; the standalone owner releases its own leases between complete bus requests."
@@ -14859,7 +14754,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "maintenance",
         "reason": "Applying transaction-local PostgreSQL maintenance context is private DB2 execution state; each maintenance wire operation carries its bounded worker and project scope and owns the complete transaction."
@@ -14900,7 +14794,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "maintenance",
         "reason": "The thread-local maintenance job binding cannot cross a process boundary; generated operations carry the named worker and bounded project on every complete DB2 request."
@@ -14926,7 +14819,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "maintenance",
         "reason": "Clearing a process-local maintenance job binding has no wire representation; explicit request scope replaces the caller-owned thread-local lifetime."
@@ -14968,7 +14860,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "maintenance",
         "reason": "Beginning a PostgreSQL transaction from thread-local maintenance state is private DB2 execution; a typed operation validates explicit scope and begins its own transaction instead."
@@ -14993,7 +14884,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "maintenance",
         "reason": "A caller-controlled commit is forbidden across the module boundary; each declared maintenance mutation commits before publishing its bounded reply."
@@ -15016,7 +14906,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "maintenance",
         "reason": "A caller-controlled rollback is process-local transaction cleanup; failed or cancelled maintenance operations roll back inside DB2 before returning transport status."
@@ -16364,7 +16253,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Fetching conflict member IDs is a private read inside the future memory.conflict_resolve transaction; the pair must remain stable through conflict update, audit logging, and directive closure."
@@ -16416,7 +16304,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Creating the conflict row is one private step of the future memory.conflict_record transaction, which must also create its audit, relationship, and directive evidence before replying."
@@ -16437,7 +16324,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Updating a conflict row is a private step of the future memory.conflict_resolve transaction; exposing it alone would allow the audit log and contradiction directive to disagree with canonical conflict state."
@@ -16458,7 +16344,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Contradiction audit insertion is private evidence written by complete conflict record and resolve operations; a standalone best-effort wire mutation could diverge from the conflict row it documents."
@@ -16495,7 +16380,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.total_count operation replaces the read-only global corpus count while preserving the legacy 64-bit result width; canonical relational memory rows remain DB2 authority."
@@ -16547,7 +16431,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.level2_count operation replaces the bounded global working-memory count; canonical relational memory rows remain DB2 authority."
@@ -16568,7 +16451,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.session_l2_count operation replaces the bounded per-session retention probe; canonical session attribution and L2 rows remain DB2 authority."
@@ -16589,7 +16471,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.level3_count operation replaces the bounded global corpus-count query; canonical relational memory rows remain DB2 authority."
@@ -16611,7 +16492,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.orphaned_l0_count operation replaces the bounded integrity diagnostic for unlinked short-term memories; canonical relational links remain DB2 authority."
@@ -16632,7 +16512,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
@@ -16962,7 +16841,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
@@ -17047,7 +16925,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
@@ -17273,7 +17150,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.effectiveness_update operation carries the positive memory identifier and explicit clear state while DB2 owns the canonical nullable column update."
@@ -17294,7 +17170,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Counting canonical rows for a health-cycle insert is private DB2 bookkeeping; the complete health-record operation owns this pre-step, while independent callers use the existing typed memory.total_count operation."
@@ -17315,7 +17190,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Counting recent canonical conflicts is a private input to the complete memory health-record operation; its day window and insert remain owned by one DB2 action."
@@ -17336,7 +17210,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.retention_enforce operation applies the complete fixed restricted and sensitive retention policy while DB2 owns deletion of canonical relational memory rows."
@@ -17357,7 +17230,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.effectiveness_demote operation applies the fixed host effectiveness threshold while DB2 owns the canonical relational tier update."
@@ -17378,7 +17250,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.effectiveness_stats operation returns the aggregate effectiveness summary under the fixed host low-effectiveness threshold while DB2 owns the canonical relational memory corpus."
@@ -17399,7 +17270,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.l2_memory_ids operation hands the bounded L2 identifier set across the boundary so the host can join it against DB1 surfacing evidence while DB2 keeps the canonical relational tier."
@@ -17420,7 +17290,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.health_retention operation applies the complete fixed snapshot and contradiction retention policy in one action, so neither half is reachable alone and no partially pruned state is exposed across the bus."
@@ -17441,7 +17310,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.health_retention operation runs contradiction pruning together with health-snapshot pruning under one fixed policy, so this half is never invoked on its own."
@@ -17462,7 +17330,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.health_counters operation returns the complete rolling-window aggregate under the fixed host promotion policy; DB2 owns every count and the host derives only ratios from them."
@@ -17483,7 +17350,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them."
@@ -17504,7 +17370,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.effectiveness_update operation preserves the host-computed binary64 value while DB2 owns the canonical effectiveness column update."
@@ -17532,7 +17397,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.key_exists operation replaces the bounded exact-key probe while preserving explicit backend-error handling; canonical memory keys remain DB2 authority."
@@ -17553,7 +17417,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
@@ -18375,7 +18238,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.expire operation wipes the L0 rows together with their provenance, so this half never runs alone and no partially expired L0 state is observable across the bus."
@@ -18396,7 +18258,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.expire operation clears L0 provenance immediately before the rows it describes, inside one DB2 action that owns both halves."
@@ -18417,7 +18278,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.expire operation applies each kind's own idle window from the private lifecycle thresholds, so the stale-L1 delete is never reachable with a caller-chosen kind or window."
@@ -18438,7 +18298,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.expire operation clears stale-L1 provenance immediately before the rows it describes, under the same per-kind window and inside the same DB2 action."
@@ -18459,7 +18318,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.demote operation cascades reduced confidence to dependants of the rows it just demoted, matched by the stamp it issued; exposing the cascade alone would let a caller match rows a different action had stamped."
@@ -18496,7 +18354,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.demote operation applies each kind's own confidence floor and resistance-scaled idle window from the private lifecycle thresholds, so the per-kind demotion is never reachable with a caller-chosen threshold or window."
@@ -18547,7 +18404,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Enumerating the kinds present in a tier is a private pre-step of the tier-cycle operations; each one iterates the kinds it finds inside a single DB2 action rather than exposing a snapshot that can go stale between calls."
@@ -18628,7 +18484,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
@@ -18649,7 +18504,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.reclassify_directives operation fixes the tiers and directive kinds and carries only the approval gate, which is a genuine caller choice: the batch path runs ungated while the operator approval path requires a recorded approval for policies."
@@ -18670,7 +18524,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
@@ -18706,7 +18559,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Provenance cleanup is an internal compatibility step of the complete memory.delete operation; it must commit with canonical row, vector, relation, and derived-state deletion rather than cross the bus independently."
@@ -18727,7 +18579,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Provenance append is private bookkeeping inside complete insert, merge, consolidate, and supersede operations; no generic caller-controlled provenance mutation crosses the bus."
@@ -19017,7 +18868,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The raw row insert is private implementation of a complete memory.insert operation, which must validate input, insert the canonical row, attach provenance and scope, and commit before replying."
@@ -19126,7 +18976,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Clearing thread-local memory query context has no wire representation; each bounded memory request carries its scope and DB2 discards that request-local state before replying."
@@ -19151,7 +19000,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Reading process thread-local scope is private memory-operation plumbing; explicit bounded scope fields replace implicit caller-owned state across the bus."
@@ -19174,7 +19022,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Per-candidate rank probes would expose chatty implicit state; DB2 applies scope ranking inside the complete bounded memory search and returns only the ranked result set."
@@ -19216,7 +19063,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "A setter for thread-local workspace and project scope cannot cross a process boundary; typed memory requests carry the bounded scope with the operation that consumes it."
@@ -19252,7 +19098,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
@@ -19366,7 +19211,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Listing a session's L0 rows is a private step of the future memory.session_fold operation; exposing the list separately would race the L1 checkpoint insert and subsequent provenance-aware purge."
@@ -19387,7 +19231,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Purging the exact L0 source set and its provenance is a private transactional step of memory.session_fold; exposing it independently would permit deletion without the derived checkpoint and its complete lineage."
@@ -19483,7 +19326,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Setting replacement validity is an internal post-insert step of the future composite memory.supersede transaction and cannot be exposed as a separately committed caller mutation."
@@ -19504,7 +19346,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "Renaming and closing the prior row is an internal step of the future composite memory.supersede transaction; callers cannot safely sequence this mutation across the event bus."
@@ -19525,7 +19366,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "memory",
         "reason": "The typed memory.stats_counts operation returns the complete tier, kind, and conflict breakdown of the canonical relational corpus; the host layers its own PageRank timings on top and DB2 owns none of those."
@@ -19928,7 +19768,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "memory",
         "reason": "The legacy-workspace membership probe remains an internal compatibility predicate folded into scoped memory operations, not a separately callable bus capability."
@@ -20707,7 +20546,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.postgres_status operation replaces the doctor command's direct PostgreSQL diagnostics call with bounded availability and metric fields."
@@ -20916,7 +20754,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.pool_status operation replaces the production health caller; PostgreSQL pool occupancy and counters remain DB2 process authority."
@@ -20938,7 +20775,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "The injected embedder callback is a process-local compatibility seam and cannot cross the bus; callers resolve the running endpoint's dimension before submitting the typed reset operation, which always carries an explicit target."
@@ -21190,7 +21026,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.reembed_clear_maintenance operation keeps the dimension-consistency check, optional force override, diagnostic snapshot, and marker delete inside one DB2 action."
@@ -21212,7 +21047,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.reembed_clear operation replaces the curator drain's direct maintenance-marker delete with an idempotent DB2 mutation."
@@ -21236,7 +21070,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "wire-operation",
         "family": "lifecycle",
         "reason": "The typed lifecycle.reembed_status operation replaces direct reads of the canonical maintenance marker while retaining DB2 schema and rebuild authority."
@@ -21885,7 +21718,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "The configured model identity is injected into the DB2 owner before initialization; exposing a post-attachment setter would violate atomic activation."
@@ -21957,6 +21789,7 @@
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_memory_embed_dim_guard.c",
         "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -21966,7 +21799,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "The operator-pinned embedding width is private pre-initialization configuration; the bus exposes only the resolved effective dimension."
@@ -21990,7 +21822,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "The descriptor-owned default width is injected during private module bootstrap and is immutable once the DB2 process attaches."
@@ -22014,7 +21845,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Pin precedence is private startup configuration consumed while DB2 establishes canonical schema authority; it is not a runtime mutation."
@@ -22055,7 +21885,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Pool capacity is fixed before DB2 initialization and remains private to the process owner; lifecycle.pool_status exposes the resulting bounded state."
@@ -22076,7 +21905,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Schema apply-versus-verify mode is a private bootstrap choice made before opening DB2 and cannot be changed through the serving bus."
@@ -22184,7 +22012,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "lifecycle",
         "reason": "Connection and pool teardown belongs to supervised process termination; callers cannot remotely shut down the required DB2 capability."
@@ -22822,7 +22649,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "tenancy",
         "reason": "A caller-held tenant transaction cannot cross the bus; each tenancy or tenant-scoped operation carries bounded verifier-owned principal fields and owns context setup through completion."
@@ -22870,7 +22696,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "tenancy",
         "reason": "Committing caller-owned tenant state is not a wire operation; a complete scoped DB2 request commits before its reply and never returns a transaction token."
@@ -22914,7 +22739,6 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "tenancy",
         "reason": "Rollback and tenant-GUC clearing remain DB2 process cleanup; failures, cancellation, and denied scope roll back before the typed operation returns."
@@ -23093,6 +22917,7 @@
         "src/tests/test_curator_synthesize.c",
         "src/tests/test_curator_version.c",
         "src/tests/test_curiosity.c",
+        "src/tests/test_curiosity_resolve.c",
         "src/tests/test_decision_log.c",
         "src/tests/test_demotion.c",
         "src/tests/test_embedding_dim.c",
@@ -23127,6 +22952,7 @@
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_planner.c",
+        "src/tests/test_policy_arms.c",
         "src/tests/test_ranker_fit.c",
         "src/tests/test_reasoning.c",
         "src/tests/test_rel_types_store.c",
@@ -25157,7 +24983,9 @@
       "symbol": "fact_class_rank"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_fact_identity.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_identity.h",
@@ -25166,7 +24994,7 @@
       ],
       "signature": "size_t fact_identity_key ( const char * source , const char * relation , const char * target , char * out , size_t out_len )",
       "signature_sha256": "c67ab5346958cc8a518f1a74993722d0f93b6acf41ac28db5d9e32fe907eea92",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "fact_identity_key"
     },
     {
@@ -25183,7 +25011,9 @@
       "symbol": "fact_identity_normalize_component"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_fact_identity.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_identity.h",
@@ -25192,7 +25022,7 @@
       ],
       "signature": "size_t fact_identity_subject_key ( const char * source , const char * relation , char * out , size_t out_len )",
       "signature_sha256": "69e241112de620cf9e03a2529ded84c2f1430f38c328a98503d9dee52536e9f0",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "fact_identity_subject_key"
     },
     {
@@ -25330,7 +25160,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 201
+          "line": 204
         }
       ],
       "signature": "int pgvec_code_delete ( int64_t point_id )",
@@ -25346,14 +25176,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 202
+          "line": 205
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_code_delete_project ( const char * project )",
       "signature_sha256": "45c29c809f61b8e5477df2aeed71c164879447e1dabdc6ff27509b799384da9a",
@@ -25365,7 +25194,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 211
+          "line": 214
         }
       ],
       "signature": "int pgvec_code_exists_by_hash ( const char * project , const char * node_key , const char * content_hash , const char * body_hash )",
@@ -25380,14 +25209,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 227
+          "line": 230
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_code_node_path ( const char * project , const char * node_key , char * out , int out_cap )",
       "signature_sha256": "be3f5708665e86527ed5dacda5e91c0a60e1da3d69472f0a994d52dfabd7e032",
@@ -25399,7 +25227,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 203
+          "line": 206
         }
       ],
       "signature": "int pgvec_code_search ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
@@ -25415,14 +25243,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 207
+          "line": 210
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_code_search_paths ( const char * project , const float * vec , int dim , int limit , char * paths , int path_cap , double * scores , int max )",
       "signature_sha256": "12c967a3c4668b86c49648ffb9defaffada5d0e8331aa27faa000f1671b2932b",
@@ -25437,14 +25264,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 222
+          "line": 225
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_code_similar_pairs ( const char * project , int k , double min_cosine , int anchor_cap , char * a_keys , char * b_keys , int key_cap , double * cosines , int max )",
       "signature_sha256": "30829910364042e23f577f9f6814387c1c2aadf0a3b68905c3165e69b414ab1b",
@@ -25456,7 +25282,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 197
+          "line": 200
         }
       ],
       "signature": "int pgvec_code_upsert ( int64_t point_id , const float * vec , int dim , const char * project , const char * node_key , const char * file_path , const char * symbol , const char * content_hash , const char * body_hash , const char * source_hash , const char * payload_json )",
@@ -25471,14 +25297,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 37
+          "line": 40
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "const char * pgvec_corpus_index_type ( const char * configured , int64_t corpus_rows , int vectorscale_available , int64_t diskann_threshold )",
       "signature_sha256": "7ecc94728f86fc9bb9c116d10929abb21cdf83629884aaf754a18fba2fb410b3",
@@ -25492,14 +25317,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 153
+          "line": 156
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_claim_delete ( int64_t point_id )",
       "signature_sha256": "441a4660428ae9d9c743ec2fb8a0d4f550aacfb41f129048b713dc0a6c37eace",
@@ -25513,14 +25337,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 160
+          "line": 163
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_claim_search ( const char * which_vec , const char * claim_kind , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "ed0586aefeabb85338f3e554963d1389886f6cfc95ace3f596f23913121eeb35",
@@ -25536,14 +25359,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 147
+          "line": 150
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_claim_upsert ( int64_t point_id , const float * subj_attr_vec , const float * value_vec , int dim , const char * artifact_id , const char * subject , const char * attribute , const char * value , const char * claim_kind , const char * payload_json )",
       "signature_sha256": "f036d998cfe9b3b3a69d1125e4546e633d47e50ec36068d955e64719cdc39835",
@@ -25557,14 +25379,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 175
+          "line": 178
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_code_unit_delete ( int64_t point_id )",
       "signature_sha256": "eaebcb1e04d6ca9c1c3eed2865cb37c069e52c78827120a2ae0ef509aa210354",
@@ -25579,14 +25400,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 182
+          "line": 185
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_code_unit_delete_project ( const char * project )",
       "signature_sha256": "75a9494e2231c10c886c003fd831f47c9b4cd62e8178162d363343e57cc6b3cb",
@@ -25600,14 +25420,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 189
+          "line": 192
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_code_unit_search ( const char * which_vec , const char * def_kind , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "e7c14e612cb369de70eb2314ddfa5f3781a6c43b885ecebe93eac653a9e54455",
@@ -25624,14 +25443,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 168
+          "line": 171
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_code_unit_upsert ( int64_t point_id , const float * intent_vec , const float * signature_vec , const float * body_vec , int dim , const char * artifact_id , const char * file_path , const char * def_kind , const char * signature , const char * body_hash , const char * payload_json )",
       "signature_sha256": "6a987071ea19d710e8fe2261907d35c30a31692d841874ce0bb60801615120c6",
@@ -25645,14 +25463,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 117
+          "line": 120
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_entity_delete ( int64_t point_id )",
       "signature_sha256": "c101176093901f754edea0c078a72b3dae0acdc0b387f2f5b6c953dab7d4830c",
@@ -25670,14 +25487,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 113
+          "line": 116
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_entity_lookup ( int64_t point_id , char * artifact_id_out , int aid_len , char * name_out , int name_len )",
       "signature_sha256": "bd260b8414a9d4f5fbe52032074b807e905b8f75e6cb0058f442d0921d73d174",
@@ -25696,14 +25512,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 122
+          "line": 125
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_entity_search ( const char * scope_kind , const char * scope_id , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "e01cc5bbe1aa1708368d92b7362bce8d23fb5af9a73c35c43da6332b7f919c2c",
@@ -25720,14 +25535,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 104
+          "line": 107
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_entity_upsert ( int64_t point_id , const float * vec , int dim , const char * scope_kind , const char * scope_id , const char * canonical_name , const char * artifact_id , const char * payload_json )",
       "signature_sha256": "83511116b0316092e76077b1d80b80639fc5284e29abec70f053c7d57a0351db",
@@ -25741,14 +25555,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 134
+          "line": 137
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_narrative_delete ( int64_t point_id )",
       "signature_sha256": "590eb8d84d5738c7e898408ac50e1b42801890562a0dfd15cc58880263d24447",
@@ -25762,14 +25575,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 139
+          "line": 142
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_narrative_search ( const char * kind , const char * status , const char * priority , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "d9a9fe00f81fab04b274f95e41104c99eae71420d09f5dc4839198595acf07b7",
@@ -25785,14 +25597,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 128
+          "line": 131
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_curator_narrative_upsert ( int64_t point_id , const float * vec , int dim , const char * artifact_id , const char * kind , const char * doc_id , const char * status , const char * priority , const char * payload_json )",
       "signature_sha256": "4325ed0a1947aff695887fa1c72cb36b9978fdba5e3bdd726612536da801eb84",
@@ -25806,14 +25617,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 44
+          "line": 47
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_ensure_corpus_index ( const char * table , const char * index_type , int recreate )",
       "signature_sha256": "e24a6ead508f2190db0bf01446560587a2d5698f66e67ace9bef27a63bf06416",
@@ -25840,14 +25650,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 61
+          "line": 64
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_delete ( int64_t point_id )",
       "signature_sha256": "f93159ab9303911d0c2a12a50bb81b5f90f40a06edfaaf483ba25863e6037383",
@@ -25859,7 +25668,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 65
+          "line": 68
         }
       ],
       "signature": "int pgvec_kb_delete_current_project ( const char * project )",
@@ -25872,7 +25681,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 64
+          "line": 67
         }
       ],
       "signature": "int pgvec_kb_delete_project ( const char * project )",
@@ -25887,14 +25696,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 95
+          "line": 98
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_search ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "f870577a3ad2761d9cfcccba2e03cf5ae0c505193434db42b036f839d1814a24",
@@ -25906,7 +25714,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 97
+          "line": 100
         }
       ],
       "signature": "int pgvec_kb_search_scoped ( const char * project , const char * exclude_project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
@@ -25926,10 +25734,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_code_exists_by_hash ( const char * project , const char * node_key , const char * content_hash , const char * body_hash )",
       "signature_sha256": "fe8cebf35ae956323be6f5350eb1d5513ade70349260378140bd117278cc8d4f",
@@ -25947,10 +25754,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_code_upsert ( int64_t point_id , const float * vec , int dim , const char * project , const char * node_key , const char * file_path , const char * symbol , const char * content_hash , const char * body_hash , const char * source_hash , const char * payload_json )",
       "signature_sha256": "01314345dc6cd82803a0c049fa0cfc4cacb81bf24def9eaff7586e81842e8e19",
@@ -25969,10 +25775,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_ensure_code_collection ( int dim )",
       "signature_sha256": "b99d2f07e8af1648cdb46a3e3aa2823676d299f7deb6829e979618b65a9cede0",
@@ -25992,10 +25797,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_ensure_kb_collection ( int dim )",
       "signature_sha256": "b82e51e816a713f4c335149624cd09a631b3e87fae01df840b495fe8e137351a",
@@ -26013,10 +25817,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_ensure_memory_collection ( int dim )",
       "signature_sha256": "4460134fb085bac4d71fd1ca6ce428b8da97d66256f0c317ec37ea50a8386fc7",
@@ -26035,10 +25838,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_reconcile_orphans ( pgvec_kb_service_record_exists_fn mem_exists , pgvec_kb_service_record_exists_fn kb_exists , int dry_run , pgvec_kb_service_reconcile_result_t * out )",
       "signature_sha256": "d5bfc9b529f6685ba6d59223df1fa9dd4ed5e1c168659b9ac5dc16e5e0331ace",
@@ -26056,10 +25858,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_search_memory_points ( const char * record_type , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "7efc1baf6ea4b77cb09f179f7c740d83bbd9d0087c658519de1cb3275294365f",
@@ -26078,10 +25879,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_service_upsert_document_point ( int64_t doc_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "d99c58a927c8c7accbba579380d14527daa0c3ed53655247527be7fa24940857",
@@ -26090,19 +25890,19 @@
     },
     {
       "consumers": [
-        "src/tests/test_pgvec.c"
+        "src/tests/test_pgvec.c",
+        "src/tests/test_pgvec_generation_pg.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 54
+          "line": 57
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_upsert ( int64_t point_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "1d0265c957300a7be32d09edf316064d066243c16356e5fc68f647dfe07d2f1e",
@@ -26114,7 +25914,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 57
+          "line": 60
         }
       ],
       "signature": "int pgvec_kb_upsert_batch ( const int64_t * ids , const float * vecs , int dim , const char * const * payloads , int count )",
@@ -26138,10 +25938,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "const char * pgvec_kb_vector_collection_name ( void )",
       "signature_sha256": "475ce4ce77f0c7916a43641bfef8b076c8b596d684a5bdeb39194ac478005842",
@@ -26162,10 +25961,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_vector_delete_current_project ( const char * project )",
       "signature_sha256": "2d51ff4ce0a59b88a855b9f8e484c9dd2e03c66b716691cf1ac82f2d01aa70e2",
@@ -26185,10 +25983,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_vector_delete_point ( int64_t point_id )",
       "signature_sha256": "09aa5f68d054c5974a03c62369ab50bfcae69253d164c2fa56f3b595d1366cf1",
@@ -26208,10 +26005,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_vector_delete_project ( const char * project )",
       "signature_sha256": "d442144d5ac5c4cd33182ea04cc95eee6aa6b19da73e50f7a06b78e0690c2efa",
@@ -26229,10 +26025,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_vector_search_project ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "c3386f4d0e339283832760eb7e7f4a94b2ddd19e69c360ea1963085b3ffc57ec",
@@ -26250,10 +26045,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_vector_search_scoped ( const char * project , const char * exclude_project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "05a4ddb15cb758a9b67e3cfeaabe238cef8a691c652b7d04b41f37a640da14de",
@@ -26274,10 +26068,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_vector_upsert_document ( int64_t doc_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "507d0c85e1d519480e07159cba55faaa0b7fa9d7a74674f4b25305af90b451da",
@@ -26297,10 +26090,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kb_vector_upsert_document_batch ( const int64_t * doc_ids , const float * vecs , int dim , const char * const * payloads , int count )",
       "signature_sha256": "949f030feb0cf464272b7b90ced6d8d65646a6f73119e95d4d79a90a72d93dac",
@@ -26312,7 +26104,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 71
+          "line": 74
         }
       ],
       "signature": "int pgvec_kbpdf_delete ( int64_t point_id )",
@@ -26328,14 +26120,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 72
+          "line": 75
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_kbpdf_delete_project ( const char * project )",
       "signature_sha256": "f013cb966a6b0537116cc83ea84150e5092d6b1c1991ae6ae1540df79e9b03c9",
@@ -26347,7 +26138,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 73
+          "line": 76
         }
       ],
       "signature": "int pgvec_kbpdf_search ( const char * project , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
@@ -26356,16 +26147,18 @@
       "symbol": "pgvec_kbpdf_search"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_pgvec_generation_pg.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 70
+          "line": 73
         }
       ],
       "signature": "int pgvec_kbpdf_upsert ( int64_t point_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "0a202cc35beafcbdb44e49d073688f2c4d9f795cca47ae6d9a276db92bdc24fd",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "pgvec_kbpdf_upsert"
     },
     {
@@ -26375,14 +26168,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 51
+          "line": 54
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_delete ( int64_t point_id )",
       "signature_sha256": "f928c0d7904690b7105c708f9c3c0d71eff71cb38c0bd5a5939efcec0194831e",
@@ -26396,14 +26188,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 89
+          "line": 92
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_search ( const float * vec , int dim , const char * record_type , const char * const * kinds , int n_kinds , const char * workspace , const char * project , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "4f54500f1f9b1b636fc682423c43a42ae0c36da57b7e0c77ac48e51b01d76d72",
@@ -26417,14 +26208,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 48
+          "line": 51
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_upsert ( int64_t point_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "423d68121bcc9365889fd7a85cf5dd6dd1dfb403fab2d7c221315e2ff2632796",
@@ -26444,10 +26234,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_collection_exists ( void )",
       "signature_sha256": "970a6597e3d80bf37c459184affec3b199a1ce4f302bca36fe4e1d5eb88e20f1",
@@ -26466,10 +26255,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "const char * pgvec_memory_vector_collection_name ( void )",
       "signature_sha256": "57f73e52f17277bcf9060901228faf957a6c3cd7dfacbe7d8a7c40bf9fc1e5fe",
@@ -26490,10 +26278,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_collection_recreate ( int dim )",
       "signature_sha256": "823a421c4008dea0a9caaf2b7c8df064c77d4d9946ffb96c8d592d7237cf7f15",
@@ -26513,10 +26300,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_delete_point ( int64_t point_id )",
       "signature_sha256": "28d630f5e8345e68357013d2d6b96675e9ef24f87cab27986a753ed482262258",
@@ -26551,10 +26337,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_ensure_payload_indexes ( void )",
       "signature_sha256": "72d24c8dd27be2b744b45cf51f5e1eaca3ba300ca9bfd81b4d50bfd38aa46156",
@@ -26573,10 +26358,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_near_duplicate_pairs ( const int64_t * ids , int n , double min_cosine , int64_t * a_out , int64_t * b_out , double * cosine_out , int max )",
       "signature_sha256": "0ba356f46dad8fb5f7811ae8ccd560c370484662068a90cc8f40552402602e89",
@@ -26595,10 +26379,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "void pgvec_memory_vector_scope_hint_clear ( void )",
       "signature_sha256": "695496a9f1cada5b20d5a2b4830e0f5f6123995f0181a99be9fb25b4d2fd9b65",
@@ -26617,10 +26400,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "void pgvec_memory_vector_scope_hint_set ( const char * workspace , const char * project )",
       "signature_sha256": "1f7f43922a05e55657831b84d8296102e1ebbc9d4f1e616a3054ede3aeee5e58",
@@ -26641,10 +26423,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_search_record_type ( const char * record_type , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "5162275eb78ab6fe04703289917cf9e4879000392e43d8a8781bc98b20f20c1c",
@@ -26663,10 +26444,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_search_with_kinds ( const float * vec , int dim , const char * const * kinds , int n_kinds , int limit , int64_t * ids , double * scores , int max )",
       "signature_sha256": "56b8ac66e565b078b3450caf4e5729c2765277fa18fa89b3dd12882b8607ec9f",
@@ -26687,10 +26467,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_upsert_memory ( int64_t memory_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "629d7ab90d15ee8f0b91eab9d4b81b4c0efd45602189c162437e33fa9b6d59e0",
@@ -26709,10 +26488,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_memory_vector_upsert_unit ( int64_t unit_id , const float * vec , int dim , const char * payload_json )",
       "signature_sha256": "4ebd3a8cfe08c36894061425adf0462c8f6bd27b37600b0803219b3ee289f30e",
@@ -26746,10 +26524,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "const char * pgvec_schema_version ( void )",
       "signature_sha256": "10ae2794b5c396967b625a66f50f1fe1a586f7d48ae86ef11eb53142f16d97ff",
@@ -26763,14 +26540,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 81
+          "line": 84
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_scroll ( const char * table , int64_t offset , int64_t * ids_out , int max , int64_t * next_offset_out , int * done_out )",
       "signature_sha256": "4e4db41e8e3a16ec6163ad90b0ce9c6714474e421f1f5175e9b41c87fba3d4c3",
@@ -26784,14 +26560,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_transport.h",
-          "line": 194
+          "line": 197
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "void pgvec_search_latency_snapshot ( int64_t * total_us , int64_t * count , int64_t * max_us , int reset )",
       "signature_sha256": "858baf44f71f7d89dc57c903f1b15c1be07a9a25084aa814ecb36a9dc8edd735",
@@ -26822,10 +26597,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "cJSON * pgvec_vector_status_json ( void )",
       "signature_sha256": "6f6e2d213226a72f8e8a1252f95f3140a7af7c5b7b91a4b7e818d0f2b5c8926f",
@@ -26856,10 +26630,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "int pgvec_verify_snapshot ( pgvec_verify_snapshot_t * out )",
       "signature_sha256": "a2df700d9d2e82cc3776c9d842485aa8ed35be287ddfd6c61a058a6adbd64e3f",
@@ -26877,10 +26650,9 @@
         }
       ],
       "review": {
-        "db3_placement": "retained-db2",
         "disposition": "private-db2",
         "family": "index",
-        "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
       },
       "signature": "void pgvec_verify_snapshot_cleanup ( pgvec_verify_snapshot_t * snapshot )",
       "signature_sha256": "9a63ecd2682eab302576a2d023d3dd00dd2a4b4c2d3e779213dda9a9fb7857fa",
@@ -27097,15 +26869,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1d15f56e019759fcfaeb700100a3453d0d4937dc1f784dae50be20741828aa1b",
+  "fingerprint": "9d886ffe8e218bdb914f3cee7e5f8c18755e39b1b3c96317edb15a3b85cbbd44",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 724,
+    "audit_pending": 738,
     "declarations": 1481,
     "headers": 142,
-    "internal_unconsumed": 173,
-    "private_test_only": 290,
+    "internal_unconsumed": 170,
+    "private_test_only": 279,
     "reviewed": 294
   }
 }

@@ -11,15 +11,15 @@ import (
 // the C static asserts (head==64, tail==128, slots==192); this package must
 // agree because it maps the same bytes.
 const (
-	ringMagic     uint32 = 0x474e4952 // "RING"
-	ringOffMagic         = 0
-	ringOffSlot          = 4
-	ringOffCap           = 8
-	ringOffMask          = 12
-	ringOffSlots         = 16
-	ringOffHead          = 64
-	ringOffTail          = 128
-	ringHdrBytes         = 192
+	ringMagic    uint32 = 0x474e4952 // "RING"
+	ringOffMagic        = 0
+	ringOffSlot         = 4
+	ringOffCap          = 8
+	ringOffMask         = 12
+	ringOffSlots        = 16
+	ringOffHead         = 64
+	ringOffTail         = 128
+	ringHdrBytes        = 192
 )
 
 // ErrRingLayout is returned when a mapped ring does not match its own header.
@@ -94,8 +94,8 @@ func (r *Ring) slot(index uint64) []byte {
 // is not visible to the consumer until ProduceCommit. The producer is the only
 // writer of head.
 func (r *Ring) ProduceBegin() []byte {
-	head := atomic.LoadUint64(r.head)         // our own index
-	tail := atomic.LoadUint64(r.tail)         // acquire the consumer's index
+	head := atomic.LoadUint64(r.head) // our own index
+	tail := atomic.LoadUint64(r.tail) // acquire the consumer's index
 	if head-tail >= uint64(r.capacity) {
 		return nil
 	}

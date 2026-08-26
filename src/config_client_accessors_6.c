@@ -54,7 +54,18 @@ int config_set_ingress_compress_min_chars(int value)
 
 int config_require_aimee_git(void)
 {
-   double value = 0;
+   /* Fail CLOSED. This is a guard rail, and it defaulted to 0 -- so a config
+    * service that was unreachable, or a key nobody had set, silently turned the
+    * guard OFF. The client-side accessor for the same setting has always passed
+    * a default of 1, so the two disagreed about what an absent value means, and
+    * the one that fails open is the one the server-side chokepoint uses.
+    *
+    * cmd_hooks.c already documents this dial as "an unreadable config reads as
+    * ENFORCING", which is what it now does.
+    *
+    * read_number leaves value untouched when it cannot answer, so an explicit
+    * `require_aimee_git: false` still turns the guard off -- only silence enforces. */
+   double value = 1;
    (void)config_client_read_number("require_aimee_git", &value);
    return (int)value;
 }

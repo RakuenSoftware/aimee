@@ -5,8 +5,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_POSTGRES_EVENT_HEALTH   11265u
-#define AIMEE_POSTGRES_STAGE_HEALTH   1u
+#define AIMEE_POSTGRES_EVENT_HEALTH 11265u
+#define AIMEE_POSTGRES_STAGE_HEALTH 1u
+/* The SQL transport stage. Declared in src/modules/process-contracts.json and
+ * served by the module process, but absent from this header until the bus
+ * conformance run needed it -- so the C side could name the health stage and
+ * not the one every store call in the tree actually lands on. */
+#define AIMEE_POSTGRES_EVENT_SQL      11266u
+#define AIMEE_POSTGRES_STAGE_SQL      2u
 #define AIMEE_POSTGRES_REQUEST_MAGIC  0x51484750u /* "PGHQ" */
 #define AIMEE_POSTGRES_RESPONSE_MAGIC 0x52484750u /* "PGHR" */
 #define AIMEE_POSTGRES_WIRE_VERSION   1u

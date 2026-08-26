@@ -119,18 +119,30 @@ int main(int argc, char **argv)
    /* Rebuild from scratch: a template carrying a previous run's leftovers would
     * hand every test binary a database that is not the freshly-seeded state the
     * reset restores back to. FORCE evicts clones still connected from a killed run. */
+   /* AIMEE_TEMPLATE_KEEP applies the schema to the database as it stands.
+    *
+    * The default is to rebuild, and that is right for a template. It is exactly
+    * wrong for the one question a template can never answer: whether a database
+    * carrying an OLDER schema survives this one being applied over it. Dropping
+    * first makes every teardown statement look like it worked, because there
+    * was nothing to tear down. See
+    * scripts/validation/db2-schema/upgrade-over-installed-schema.sh, which sets
+    * this and found two defects that every from-scratch suite reported green. */
    char sql[768];
-   snprintf(sql, sizeof(sql), "DROP DATABASE IF EXISTS \"%s\" WITH (FORCE)", dbname);
-   if (admin_exec(admin_url, sql) != 0)
+   if (!getenv("AIMEE_TEMPLATE_KEEP"))
    {
-      free(reset_sql);
-      return 1;
-   }
-   snprintf(sql, sizeof(sql), "CREATE DATABASE \"%s\"", dbname);
-   if (admin_exec(admin_url, sql) != 0)
-   {
-      free(reset_sql);
-      return 1;
+      snprintf(sql, sizeof(sql), "DROP DATABASE IF EXISTS \"%s\" WITH (FORCE)", dbname);
+      if (admin_exec(admin_url, sql) != 0)
+      {
+         free(reset_sql);
+         return 1;
+      }
+      snprintf(sql, sizeof(sql), "CREATE DATABASE \"%s\"", dbname);
+      if (admin_exec(admin_url, sql) != 0)
+      {
+         free(reset_sql);
+         return 1;
+      }
    }
 
    /* db2_init applies the schema, including the rows schema.sql seeds. */
