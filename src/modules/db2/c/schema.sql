@@ -213,6 +213,11 @@ CREATE TABLE IF NOT EXISTS kb_audit_outbox (
   producer_txid BIGINT NOT NULL DEFAULT (txid_current()),
   actor_role TEXT NOT NULL DEFAULT '',
   actor_principal TEXT NOT NULL DEFAULT '',
+  actor_issuer TEXT NOT NULL DEFAULT '',
+  actor_subject TEXT NOT NULL DEFAULT '',
+  transport_cn TEXT NOT NULL DEFAULT '',
+  team_id BIGINT NOT NULL DEFAULT 0,
+  selected_default_from TEXT NOT NULL DEFAULT '',
   action TEXT NOT NULL CHECK (action <> ''),
   subject TEXT NOT NULL DEFAULT '',
   verdict TEXT NOT NULL DEFAULT '',
@@ -7385,8 +7390,14 @@ BEGIN
   IF ac = '' THEN
     RAISE EXCEPTION 'kb_audit_worm_submit: empty action' USING ERRCODE = '22023';
   END IF;
-  INSERT INTO kb_audit_outbox(actor_role,actor_principal,action,subject,verdict,detail)
-    VALUES(r,a,ac,s,vd,d) RETURNING outbox_id INTO v_outbox_id;
+  INSERT INTO kb_audit_outbox(actor_role,actor_principal,actor_issuer,actor_subject,transport_cn,
+      team_id,selected_default_from,action,subject,verdict,detail)
+    VALUES(r,a,COALESCE(current_setting('aimee.actor_issuer',true),''),
+      COALESCE(current_setting('aimee.actor_subject',true),''),
+      COALESCE(current_setting('aimee.transport_identity',true),''),
+      COALESCE(NULLIF(current_setting('aimee.team',true),'')::BIGINT,0),
+      COALESCE(current_setting('aimee.selected_default_from',true),''),ac,s,vd,d)
+    RETURNING outbox_id INTO v_outbox_id;
   PERFORM pg_notify('kb_audit_worm', v_outbox_id::TEXT);
   RETURN v_outbox_id;
 END; $$;
@@ -7453,6 +7464,10 @@ BEGIN
   END IF;
   INSERT INTO kb_audit_delivery(outbox_id,audit_seq) VALUES(p_outbox_id,p_audit_seq);
 END; $$;
+
+-- The replaced drain now depends on the v2 attribution-aware overload, so the
+-- legacy seven-text-argument implementation can be retired without CASCADE.
+DROP FUNCTION IF EXISTS kb_audit_worm_append_internal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT);
 
 CREATE OR REPLACE FUNCTION kb_audit_worm_pending()
 RETURNS TABLE(pending_count BIGINT, oldest_enqueued_at TEXT, oldest_age_seconds BIGINT)

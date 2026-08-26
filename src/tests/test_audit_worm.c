@@ -123,6 +123,27 @@ static void test_tamper_detected_past_triggers(void)
    printf("  test_tamper_detected_past_triggers: ok (%s)\n", err);
 }
 
+static void test_timestamp_tamper_detected(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/ts.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u1", "tool.read", "v1-1", "allow", "{}") == 0);
+   audit_worm_close();
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET ts='1999-01-01T00:00:00Z' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+   assert(audit_worm_init_at(path) == 0);
+   char err[128];
+   assert(audit_worm_verify_chain(err, sizeof err) == -1);
+   audit_worm_close();
+   printf("  test_timestamp_tamper_detected: ok (%s)\n", err);
+}
+
 /* Checkpoints move verify from AMBER (uncheckpointed tail) to GREEN, and back to
  * AMBER once new rows land after the newest checkpoint. */
 static void test_checkpoint_and_verify_status(void)
@@ -401,6 +422,7 @@ int main(void)
    test_worm_triggers_block_mutation();
    test_cross_store_determinism();
    test_tamper_detected_past_triggers();
+   test_timestamp_tamper_detected();
    test_checkpoint_and_verify_status();
    test_startup_verify_fails_closed();
    test_checkpoint_bound_to_chain_key();

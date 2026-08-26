@@ -191,8 +191,7 @@ static int cmd_list(void)
 #endif
 }
 
-static const char *TEMPLATE = "name: %s\n"
-                              "start: draft\n"
+static const char *TEMPLATE = "start: draft\n"
                               "nodes:\n"
                               "  - id: draft\n"
                               "    block: author.proposal\n"
@@ -238,7 +237,8 @@ static int cmd_new(const char *path)
    char *dot = strrchr(name, '.');
    if (dot)
       *dot = '\0';
-   fprintf(f, TEMPLATE, name);
+   fprintf(f, "name: %s\n", name);
+   fputs(TEMPLATE, f);
    fclose(f);
    printf("created %s (edit, then `aimee workflow validate %s`)\n", path, path);
    return 0;

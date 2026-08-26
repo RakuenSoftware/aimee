@@ -8,6 +8,8 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"net/url"
 	"testing"
 	"time"
 
@@ -117,6 +119,26 @@ func TestVerifyOIDC(t *testing.T) {
 				t.Fatalf("expected rejection, got principal %v", p)
 			}
 		})
+	}
+}
+
+func TestJWKSAddressPolicyRejectsNonPublicRanges(t *testing.T) {
+	blocked := []string{"127.0.0.1", "10.0.0.1", "169.254.169.254", "::1", "fc00::1", "fe80::1"}
+	for _, raw := range blocked {
+		if jwksAddressAllowed(netip.MustParseAddr(raw)) {
+			t.Fatalf("non-public JWKS address allowed: %s", raw)
+		}
+	}
+	if !jwksAddressAllowed(netip.MustParseAddr("8.8.8.8")) ||
+		!jwksAddressAllowed(netip.MustParseAddr("2606:4700:4700::1111")) {
+		t.Fatal("public JWKS address rejected")
+	}
+	u, err := url.Parse("https://127.0.0.1/jwks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hardenedJWKSClient(u); err == nil {
+		t.Fatal("loopback JWKS endpoint was not refused")
 	}
 }
 

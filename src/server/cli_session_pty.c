@@ -205,8 +205,8 @@ int cli_session_pty_ensure(const char *id, const char *cli_cmd, const char *work
       pthread_mutex_lock(&g_lock);
       snprintf(s->tmux_name, sizeof(s->tmux_name), "%s", name);
       pthread_mutex_unlock(&g_lock);
-      char *esc = shell_escape(name);
-      snprintf(attach_cmd, sizeof(attach_cmd), "tmux attach -t %s", esc ? esc : name);
+      char *esc = shell_quote(name);
+      snprintf(attach_cmd, sizeof(attach_cmd), "tmux attach -t %s", esc);
       free(esc);
       free(name);
    }

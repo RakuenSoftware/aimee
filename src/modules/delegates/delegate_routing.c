@@ -6,6 +6,8 @@
 #include "provider_cli_adapter.h" /* declared context window for tmux-CLI agents */
 #include "log.h"
 #include <ctype.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <aimee/delegates/delegate_launch_args.h>
 
@@ -293,10 +295,15 @@ int delegate_max_cost_tier(agent_config_t *cfg, const char *role)
    return max_tier;
 }
 
-static void route_err(char *errbuf, size_t errbuf_sz, const char *fmt, const char *a, const char *b)
+static void route_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...)
 {
    if (errbuf && errbuf_sz > 0)
-      snprintf(errbuf, errbuf_sz, fmt, a ? a : "", b ? b : "");
+   {
+      va_list ap;
+      va_start(ap, fmt);
+      vsnprintf(errbuf, errbuf_sz, fmt, ap);
+      va_end(ap);
+   }
 }
 
 int delegate_add_inline_acp_agent(agent_config_t *cfg, const char *command, const char *args,

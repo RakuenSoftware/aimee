@@ -12,6 +12,8 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <openssl/evp.h>
+#include <openssl/sha.h>
 #include <stdarg.h>
 #include <stdint.h>
 #ifndef _WIN32
@@ -79,7 +81,249 @@ static const char *skill_bundled_dir(void)
 static int skill_regular_file(const char *path)
 {
    struct stat st;
-   return path && stat(path, &st) == 0 && S_ISREG(st.st_mode);
+   return path && lstat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1;
+}
+
+static int skill_path_below(const char *root, const char *path)
+{
+   size_t n = root ? strlen(root) : 0;
+   return n > 0 && path && strncmp(root, path, n) == 0 && (path[n] == '/' || path[n] == '\0');
+}
+
+static int skill_source_base(const char *project_root, skill_source_t source, char *base,
+                             size_t base_cap)
+{
+   if (!base || base_cap == 0)
+      return -1;
+   if (source == SKILL_SOURCE_PROJECT)
+      snprintf(base, base_cap, "%s/.aimee/skills", project_root ? project_root : "");
+   else if (source == SKILL_SOURCE_USER)
+      snprintf(base, base_cap, "%s/skills", config_default_dir());
+   else if (source == SKILL_SOURCE_BUNDLED)
+      snprintf(base, base_cap, "%s", skill_bundled_dir());
+   else
+      return -1;
+   return base[0] ? 0 : -1;
+}
+
+/* Read one regular, single-link file by walking from an already selected skill
+ * root.  Every untrusted component is opened with O_NOFOLLOW, so neither the
+ * skill directory nor a support-file parent can redirect the walk through a
+ * symlink.  st_nlink closes the corresponding hard-link escape. */
+static char *skill_read_beneath(const char *base, const char *relative, size_t max_size)
+{
+   if (!base || !base[0] || !relative || !relative[0] || relative[0] == '/')
+      return NULL;
+
+   char *base_real = realpath(base, NULL);
+   if (!base_real)
+      return NULL;
+
+   char rel[SKILL_PATH_MAX];
+   if (snprintf(rel, sizeof(rel), "%s", relative) < 0 || strlen(relative) >= sizeof(rel))
+      return NULL;
+
+   int dirfd = open(base_real, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+   free(base_real);
+   if (dirfd < 0)
+      return NULL;
+
+   char *save = NULL;
+   char *part = strtok_r(rel, "/", &save);
+   int fd = -1;
+   while (part)
+   {
+      if (!part[0] || strcmp(part, ".") == 0 || strcmp(part, "..") == 0)
+         goto fail;
+      char *next = strtok_r(NULL, "/", &save);
+      int flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW;
+      if (next)
+         flags |= O_DIRECTORY;
+      fd = openat(dirfd, part, flags);
+      if (fd < 0)
+         goto fail;
+      close(dirfd);
+      dirfd = fd;
+      fd = -1;
+      part = next;
+   }
+
+   struct stat st;
+   if (fstat(dirfd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_size < 0 ||
+       (uintmax_t)st.st_size > (uintmax_t)max_size)
+      goto fail;
+
+   char *buf = malloc(max_size + 1);
+   if (!buf)
+      goto fail;
+   size_t used = 0;
+   while (used < max_size)
+   {
+      ssize_t n = read(dirfd, buf + used, max_size - used);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n < 0)
+      {
+         free(buf);
+         goto fail;
+      }
+      if (n == 0)
+         break;
+      used += (size_t)n;
+   }
+   if (used == max_size)
+   {
+      char extra;
+      ssize_t n;
+      do
+         n = read(dirfd, &extra, 1);
+      while (n < 0 && errno == EINTR);
+      if (n != 0)
+      {
+         free(buf);
+         goto fail;
+      }
+   }
+   buf[used] = '\0';
+   close(dirfd);
+   return buf;
+
+fail:
+   if (fd >= 0)
+      close(fd);
+   close(dirfd);
+   return NULL;
+}
+
+#define SKILL_APPROVAL_MAX (1024u * 1024u)
+
+static int skill_hex_decode(const char *s, size_t n, unsigned char *out, size_t out_n)
+{
+   if (!s || n != out_n * 2)
+      return -1;
+   for (size_t i = 0; i < out_n; i++)
+   {
+      int hi = isdigit((unsigned char)s[i * 2])       ? s[i * 2] - '0'
+               : (s[i * 2] >= 'a' && s[i * 2] <= 'f') ? s[i * 2] - 'a' + 10
+               : (s[i * 2] >= 'A' && s[i * 2] <= 'F') ? s[i * 2] - 'A' + 10
+                                                      : -1;
+      int lo = isdigit((unsigned char)s[i * 2 + 1])           ? s[i * 2 + 1] - '0'
+               : (s[i * 2 + 1] >= 'a' && s[i * 2 + 1] <= 'f') ? s[i * 2 + 1] - 'a' + 10
+               : (s[i * 2 + 1] >= 'A' && s[i * 2 + 1] <= 'F') ? s[i * 2 + 1] - 'A' + 10
+                                                              : -1;
+      if (hi < 0 || lo < 0)
+         return -1;
+      out[i] = (unsigned char)((hi << 4) | lo);
+   }
+   return 0;
+}
+
+static char *skill_read_approval_file(const char *path, size_t max_size)
+{
+   struct stat st;
+   if (!path || lstat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 ||
+       (st.st_mode & (S_IWGRP | S_IWOTH)) != 0 || st.st_size <= 0 ||
+       (uintmax_t)st.st_size > max_size)
+      return NULL;
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return NULL;
+   char *buf = malloc((size_t)st.st_size + 1);
+   size_t used = 0;
+   if (!buf)
+   {
+      close(fd);
+      return NULL;
+   }
+   while (used < (size_t)st.st_size)
+   {
+      ssize_t n = read(fd, buf + used, (size_t)st.st_size - used);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n <= 0)
+      {
+         free(buf);
+         close(fd);
+         return NULL;
+      }
+      used += (size_t)n;
+   }
+   close(fd);
+   buf[used] = '\0';
+   return buf;
+}
+
+/* Project skills are agent authority, not ordinary repository text. Their exact
+ * bytes must appear in a detached Ed25519-signed operator manifest. */
+static int skill_project_artifact_approved(const char *path, const char *content)
+{
+   const char *unsafe = getenv("AIMEE_UNVERIFIED_PROJECT_SKILLS");
+   if (unsafe && strcmp(unsafe, "I_ACKNOWLEDGE_UNVERIFIED_AGENT_AUTHORITY") == 0)
+      return 1;
+
+   const char *manifest_path = getenv("AIMEE_SKILL_APPROVAL_MANIFEST");
+   const char *public_hex = getenv("AIMEE_SKILL_APPROVAL_PUBLIC_KEY");
+   if (!manifest_path || !manifest_path[0] || !public_hex)
+      return 0;
+   char signature_path[SKILL_PATH_MAX];
+   if (strlen(manifest_path) + 4 >= sizeof(signature_path))
+      return 0;
+   snprintf(signature_path, sizeof(signature_path), "%s.sig", manifest_path);
+   char *manifest = skill_read_approval_file(manifest_path, SKILL_APPROVAL_MAX);
+   char *signature_hex = skill_read_approval_file(signature_path, 256);
+   if (!manifest || !signature_hex)
+   {
+      free(manifest);
+      free(signature_hex);
+      return 0;
+   }
+   signature_hex[strcspn(signature_hex, "\r\n")] = '\0';
+   unsigned char public_key[32], signature[64];
+   int valid =
+       skill_hex_decode(public_hex, strlen(public_hex), public_key, sizeof(public_key)) == 0 &&
+       skill_hex_decode(signature_hex, strlen(signature_hex), signature, sizeof(signature)) == 0;
+   EVP_PKEY *key =
+       valid ? EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, public_key, sizeof(public_key))
+             : NULL;
+   EVP_MD_CTX *ctx = key ? EVP_MD_CTX_new() : NULL;
+   valid = ctx && EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, key) == 1 &&
+           EVP_DigestVerify(ctx, signature, sizeof(signature), (const unsigned char *)manifest,
+                            strlen(manifest)) == 1;
+   EVP_MD_CTX_free(ctx);
+   EVP_PKEY_free(key);
+   free(signature_hex);
+   if (!valid)
+   {
+      free(manifest);
+      return 0;
+   }
+
+   unsigned char digest[SHA256_DIGEST_LENGTH];
+   SHA256((const unsigned char *)content, strlen(content), digest);
+   char digest_hex[SHA256_DIGEST_LENGTH * 2 + 1];
+   for (size_t i = 0; i < sizeof(digest); i++)
+      snprintf(digest_hex + i * 2, 3, "%02x", digest[i]);
+   char *canonical = realpath(path, NULL);
+   if (!canonical)
+   {
+      free(manifest);
+      return 0;
+   }
+   int approved = 0;
+   char *save = NULL;
+   for (char *line = strtok_r(manifest, "\n", &save); line; line = strtok_r(NULL, "\n", &save))
+   {
+      size_t n = strlen(line);
+      if (n > 66 && line[64] == ' ' && line[65] == ' ' && strncmp(line, digest_hex, 64) == 0 &&
+          strcmp(line + 66, canonical) == 0)
+      {
+         approved = 1;
+         break;
+      }
+   }
+   free(canonical);
+   free(manifest);
+   return approved;
 }
 
 static int skill_dir_with_manifest(const char *base, const char *name, char *buf, size_t bufsz)
@@ -171,29 +415,37 @@ const char *skill_source(const char *project_root, const char *name)
 
 char *skill_load(const char *project_root, const char *name)
 {
-   if (!name || !name[0])
+   if (!skill_name_is_valid(name))
       return NULL;
 
    char path[SKILL_PATH_MAX];
-   if (skill_path(project_root, name, path, sizeof(path)) != 0)
+   skill_source_t source = SKILL_SOURCE_NONE;
+   if (skill_resolve_path(project_root, name, path, sizeof(path), &source) != 0)
       return NULL;
-
-   FILE *f = fopen(path, "r");
-   if (!f)
+   char base[SKILL_PATH_MAX];
+   if (skill_source_base(project_root, source, base, sizeof(base)) != 0)
       return NULL;
-
-   char *buf = malloc(SKILL_MAX_SIZE + 1);
-   if (!buf)
+   size_t base_len = strlen(base);
+   if (strncmp(path, base, base_len) != 0 || path[base_len] != '/')
+      return NULL;
+   if (source == SKILL_SOURCE_PROJECT)
    {
-      fclose(f);
+      char *root_real = project_root ? realpath(project_root, NULL) : NULL;
+      char *base_real = realpath(base, NULL);
+      int safe = root_real && base_real && skill_path_below(root_real, base_real);
+      free(root_real);
+      free(base_real);
+      if (!safe)
+         return NULL;
+   }
+   char *buf = skill_read_beneath(base, path + base_len + 1, SKILL_MAX_SIZE);
+   if (buf && !buf[0])
+   {
+      free(buf);
       return NULL;
    }
 
-   size_t n = fread(buf, 1, SKILL_MAX_SIZE, f);
-   buf[n] = '\0';
-   fclose(f);
-
-   if (n == 0)
+   if (buf && source == SKILL_SOURCE_PROJECT && !skill_project_artifact_approved(path, buf))
    {
       free(buf);
       return NULL;
@@ -1718,14 +1970,24 @@ int skill_manage_write_file(const char *project_root, const char *name, const ch
                             const char *content, const char *updated_by, char *errbuf,
                             size_t errbuf_len)
 {
-   char skill_file[SKILL_PATH_MAX];
-   if (skill_project_path(project_root, name, skill_file, sizeof(skill_file)) != 0 ||
-       access(skill_file, F_OK) != 0)
+   char skill_file[SKILL_PATH_MAX], skill_dir[SKILL_PATH_MAX], manifest[SKILL_PATH_MAX];
+   if (skill_project_path(project_root, name, skill_file, sizeof(skill_file)) != 0)
       return skill_set_err(errbuf, errbuf_len, "skill not found"), -1;
    if (!skill_support_path_ok(file_path))
       return skill_set_err(errbuf, errbuf_len, "invalid support file path"), -1;
+   /* Support files belong to the selected skill, never to a shared
+    * .aimee/skills/references directory. Promote the legacy flat manifest to
+    * the Agent Skills directory layout on the first support-file write. */
+   snprintf(skill_dir, sizeof(skill_dir), "%s/.aimee/skills/%s", project_root, name);
+   snprintf(manifest, sizeof(manifest), "%s/SKILL.md", skill_dir);
+   if (access(manifest, F_OK) != 0)
+   {
+      if (access(skill_file, F_OK) != 0 || skill_mkdir_p(skill_dir) != 0 ||
+          rename(skill_file, manifest) != 0)
+         return skill_set_err(errbuf, errbuf_len, "failed to create skill support directory"), -1;
+   }
    char path[SKILL_PATH_MAX], dir[SKILL_PATH_MAX];
-   snprintf(path, sizeof(path), "%s/.aimee/skills/%s", project_root, file_path);
+   snprintf(path, sizeof(path), "%s/%s", skill_dir, file_path);
    snprintf(dir, sizeof(dir), "%s", path);
    char *slash = strrchr(dir, '/');
    if (slash)
@@ -1739,7 +2001,9 @@ char *skill_support_file_load(const char *project_root, const char *name, const 
                               char *errbuf, size_t errbuf_len)
 {
    char skill_file[SKILL_PATH_MAX];
-   if (skill_resolve_path(project_root, name, skill_file, sizeof(skill_file), NULL) != 0)
+   skill_source_t source = SKILL_SOURCE_NONE;
+   if (!skill_name_is_valid(name) ||
+       skill_resolve_path(project_root, name, skill_file, sizeof(skill_file), &source) != 0)
    {
       skill_set_err(errbuf, errbuf_len, "skill not found");
       return NULL;
@@ -1749,49 +2013,62 @@ char *skill_support_file_load(const char *project_root, const char *name, const 
       skill_set_err(errbuf, errbuf_len, "invalid support file path");
       return NULL;
    }
-   char path[SKILL_PATH_MAX];
-   char *slash = strrchr(skill_file, '/');
-   if (!slash)
+   char base[SKILL_PATH_MAX];
+   if (skill_source_base(project_root, source, base, sizeof(base)) != 0)
    {
       skill_set_err(errbuf, errbuf_len, "skill not found");
       return NULL;
    }
-   *slash = '\0';
-   snprintf(path, sizeof(path), "%s/%s", skill_file, file_path);
-   FILE *f = fopen(path, "r");
-   if (!f)
+   size_t base_len = strlen(base);
+   if (strncmp(skill_file, base, base_len) != 0 || skill_file[base_len] != '/')
    {
-      skill_set_err(errbuf, errbuf_len, "support file not found");
+      skill_set_err(errbuf, errbuf_len, "skill not found");
       return NULL;
    }
-   char *buf = malloc(SKILL_SUPPORT_MAX_SIZE + 1);
-   if (!buf)
+   const char *manifest_rel = skill_file + base_len + 1;
+   size_t manifest_len = strlen(manifest_rel);
+   static const char suffix[] = "/SKILL.md";
+   if (manifest_len <= sizeof(suffix) - 1 ||
+       strcmp(manifest_rel + manifest_len - (sizeof(suffix) - 1), suffix) != 0)
    {
-      fclose(f);
-      skill_set_err(errbuf, errbuf_len, "out of memory");
+      skill_set_err(errbuf, errbuf_len, "flat skills do not have support files");
       return NULL;
    }
-   size_t n = fread(buf, 1, SKILL_SUPPORT_MAX_SIZE, f);
-   if (ferror(f))
+   char relative[SKILL_PATH_MAX];
+   size_t dir_len = manifest_len - (sizeof(suffix) - 1);
+   if (dir_len == 0 ||
+       snprintf(relative, sizeof(relative), "%.*s/%s", (int)dir_len, manifest_rel, file_path) < 0 ||
+       dir_len + 1 + strlen(file_path) >= sizeof(relative))
    {
-      free(buf);
-      fclose(f);
-      skill_set_err(errbuf, errbuf_len, "failed to read support file");
+      skill_set_err(errbuf, errbuf_len, "support file path is too long");
       return NULL;
    }
-   buf[n] = '\0';
-   if (n == SKILL_SUPPORT_MAX_SIZE)
+   if (source == SKILL_SOURCE_PROJECT)
    {
-      int extra = fgetc(f);
-      if (extra != EOF)
+      char *root_real = project_root ? realpath(project_root, NULL) : NULL;
+      char *base_real = realpath(base, NULL);
+      int safe = root_real && base_real && skill_path_below(root_real, base_real);
+      free(root_real);
+      free(base_real);
+      if (!safe)
       {
-         free(buf);
-         fclose(f);
-         skill_set_err(errbuf, errbuf_len, "support file is too large");
+         skill_set_err(errbuf, errbuf_len, "project skill root escapes workspace");
          return NULL;
       }
    }
-   fclose(f);
+   char *buf = skill_read_beneath(base, relative, SKILL_SUPPORT_MAX_SIZE);
+   char full_path[SKILL_PATH_MAX];
+   if (buf && source == SKILL_SOURCE_PROJECT &&
+       (strlen(base) + 1 + strlen(relative) >= sizeof(full_path) ||
+        snprintf(full_path, sizeof(full_path), "%s/%s", base, relative) < 0 ||
+        !skill_project_artifact_approved(full_path, buf)))
+   {
+      free(buf);
+      buf = NULL;
+      skill_set_err(errbuf, errbuf_len, "project support file is not operator-approved");
+   }
+   else if (!buf)
+      skill_set_err(errbuf, errbuf_len, "support file not found or unsafe");
    return buf;
 }
 

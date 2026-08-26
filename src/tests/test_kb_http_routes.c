@@ -660,6 +660,10 @@ int config_embedder_dims_pinned_current(void)
 {
    return 0;
 }
+int config_resolve_embedder_dims_current(void)
+{
+   return 0;
+}
 
 int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
 {

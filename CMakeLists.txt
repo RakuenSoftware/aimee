@@ -155,7 +155,8 @@ if(AIMEE_LEAN)
         -Wextra
         -Werror
         -Wno-unused-parameter
-        -Wno-format-truncation
+        -Wformat=2
+        -Wformat-security
         -Wno-unused-result
         -ffunction-sections
         -fdata-sections
@@ -168,11 +169,18 @@ else()
         -Wextra
         -Werror
         -Wno-unused-parameter
-        -Wno-format-truncation
+        -Wformat=2
+        -Wformat-security
         -Wno-unused-result
         -ffunction-sections
         -fdata-sections
     )
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_compile_options(-D_FORTIFY_SOURCE=3 -fstack-protector-strong
+                        -fstack-clash-protection -fPIE -fcf-protection=full)
+    add_link_options(-pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack)
 endif()
 
 # --- Platform-specific source selection ---
@@ -554,6 +562,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/util_url.c
     ${AIMEE_SRC_DIR}/kb/kb_identity.c
     ${AIMEE_SRC_DIR}/modules/audit/audit_action.c
+    ${AIMEE_SRC_DIR}/modules/audit/audit_worm.c
+    ${AIMEE_SRC_DIR}/modules/audit/audit_worm_chain.c
     ${AIMEE_SRC_DIR}/modules/audit/audit_ledger.c
     ${AIMEE_SRC_DIR}/report_enrichment.c
     ${AIMEE_SRC_DIR}/delivery_target.c
@@ -1422,12 +1432,8 @@ else()
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
 endif()
 
-# Lean build: additionally strip symbols
-if(AIMEE_LEAN)
-    if(NOT WIN32 AND NOT APPLE)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
-    endif()
-endif()
+# Preserve symbols in the built artifact for crash forensics. Packaging may
+# publish detached symbols, but link-time stripping cannot be the only copy.
 
 file(STRINGS "${AIMEE_SRC_DIR}/core/VERSION" AIMEE_CORE_SOURCE_VERSION LIMIT_COUNT 1)
 set(AIMEE_CORE_REQUIRED_VERSION "${AIMEE_CORE_SOURCE_VERSION}" CACHE STRING

@@ -90,8 +90,11 @@ int main(void)
                        "Body.\n");
       char *limited = session_briefing_render_skill_index(root, 1);
       assert(limited != NULL);
-      assert(strstr(limited, "- project-first: Use when proving index limit behavior.") != NULL);
-      assert(strstr(limited, "- find-symbols:") == NULL);
+      /* Unsigned project skills are agent authority and default-denied. They
+       * also must not consume the display limit and hide a trusted skill. */
+      assert(strstr(limited, "- project-first:") == NULL);
+      assert(strstr(limited, "- find-symbols: Use when locating where a symbol is defined.") !=
+             NULL);
       free(limited);
 
       rm_rf(root);

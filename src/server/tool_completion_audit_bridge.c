@@ -42,10 +42,14 @@ static void on_tool_completion(const char *tool, const agent_tool_completion_t *
    char args_hash[AUDIT_ARGS_HASH_LEN];
    audit_args_hash(tool, NULL, args_hash, sizeof args_hash);
 
-   obs_bus_emit(o->actor && o->actor[0] ? o->actor : "tool", tool, args_hash, /*command=*/"",
-                o->mode && o->mode[0] ? o->mode : "internal", o->reason_code ? o->reason_code : "",
-                o->verdict && o->verdict[0] ? o->verdict : "ok",
-                /*task_id=*/0);
+   const char *actor = o->actor && o->actor[0] ? o->actor : "tool";
+   const char *mode = o->mode && o->mode[0] ? o->mode : "internal";
+   const char *reason = o->reason_code ? o->reason_code : "";
+   const char *verdict = o->verdict && o->verdict[0] ? o->verdict : "ok";
+   if (obs_bus_commit_action(actor, tool, args_hash, /*command=*/"", mode, reason, verdict,
+                             /*task_id=*/0) != 0)
+      fprintf(stderr, "audit: tool completion WORM commit failed for %s\n", tool);
+   obs_bus_emit(actor, tool, args_hash, /*command=*/"", mode, reason, verdict, /*task_id=*/0);
 }
 
 void tool_completion_audit_bridge_install(void)

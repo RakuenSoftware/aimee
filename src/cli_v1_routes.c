@@ -1685,7 +1685,7 @@ static void marshal_preload_append_file(char *block, size_t cap, size_t *pos, co
 /* Escape a token for safe interpolation inside the single quotes of a shell
  * command: a literal ' becomes '\'' so it cannot break out and inject commands.
  * Caller frees; NULL on OOM. Kept local to this .inc (rather than calling
- * util.c's shell_escape) so the thin-client TUs that include it — and the
+ * util.c's shell_quote) so the thin-client TUs that include it — and the
  * unit-test target that compiles it — need no extra link dependency. */
 /* Caller (marshal_preload_append_symbol) is POSIX-only, so this is unused on the
  * Windows build — mark maybe-unused to stay -Werror-clean there. */
@@ -1725,7 +1725,7 @@ static void marshal_preload_append_symbol(char *block, size_t cap, size_t *pos, 
 #else
    if (!sym || !sym[0] || *pos + 512 >= cap)
       return;
-   /* shell_escape the symbol: it is interpolated into a popen() command, so a
+   /* shell_quote the symbol: it is interpolated into a popen() command, so a
     * raw single quote would break out of the quotes and inject shell commands. */
    char *esc_sym = cli_v1_shell_quote_inner(sym);
    if (!esc_sym)

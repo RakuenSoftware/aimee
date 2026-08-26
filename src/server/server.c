@@ -639,9 +639,9 @@ static cJSON *server_run_kb_bootstrap(void)
    if (server_sibling_kb_path(kb_path, sizeof(kb_path)) != 0)
       return NULL;
 
-   char *quoted = shell_escape(kb_path);
+   char *quoted = shell_quote(kb_path);
    char cmd[MAX_PATH_LEN + 128];
-   snprintf(cmd, sizeof(cmd), "'%s' --bootstrap-db2 --json", quoted);
+   snprintf(cmd, sizeof(cmd), "%s --bootstrap-db2 --json", quoted);
    free(quoted);
 
    char *out = NULL;
@@ -677,17 +677,13 @@ static int handle_launch_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cwd = jcwd_in->valuestring;
 
    /* Fresh session ID per launch; never inherit a stale session-ppid file. */
-   char sid[16];
+   char sid[33];
    {
-      unsigned char rnd[4];
+      unsigned char rnd[16];
       if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
-      {
-         rnd[0] = (unsigned char)(getpid() & 0xff);
-         rnd[1] = (unsigned char)((getpid() >> 8) & 0xff);
-         rnd[2] = (unsigned char)(time(NULL) & 0xff);
-         rnd[3] = (unsigned char)((time(NULL) >> 8) & 0xff);
-      }
-      snprintf(sid, sizeof(sid), "%02x%02x%02x%02x", rnd[0], rnd[1], rnd[2], rnd[3]);
+         return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
+      for (size_t i = 0; i < sizeof(rnd); i++)
+         snprintf(sid + i * 2, sizeof(sid) - i * 2, "%02x", rnd[i]);
    }
 
    /* Copied out: held across the worktree/session work below. */

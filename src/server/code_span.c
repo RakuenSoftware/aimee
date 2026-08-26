@@ -88,7 +88,7 @@ cJSON *code_span_read(const char *project, const char *project_root, const char 
 
    /* realpath + `..`/symlink-escape rejection + sensitive-path deny-list. */
    char resolved[MAX_PATH_LEN];
-   const char *verr = guardrails_validate_file_path(candidate, resolved, sizeof(resolved));
+   const char *verr = guardrails_check_sensitive_path(candidate, resolved, sizeof(resolved));
    if (verr)
       return span_err(verr);
 

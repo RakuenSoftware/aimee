@@ -33,8 +33,14 @@ static const char *WORM_SCHEMA_SQL =
     "CREATE TABLE IF NOT EXISTS audit_event ("
     "  seq INTEGER PRIMARY KEY,"
     "  ts TEXT NOT NULL,"
+    "  hash_version TEXT NOT NULL DEFAULT 'v1-partial',"
     "  actor_role TEXT NOT NULL,"
     "  actor_principal TEXT NOT NULL,"
+    "  actor_issuer TEXT NOT NULL DEFAULT '',"
+    "  actor_subject TEXT NOT NULL DEFAULT '',"
+    "  transport_cn TEXT NOT NULL DEFAULT '',"
+    "  team_id INTEGER NOT NULL DEFAULT 0,"
+    "  selected_default_from TEXT NOT NULL DEFAULT '',"
     "  action TEXT NOT NULL,"
     "  subject TEXT NOT NULL,"
     "  verdict TEXT NOT NULL,"
@@ -69,10 +75,10 @@ static int worm_has_column(sqlite3 *db, const char *table, const char *column)
    return found;
 }
 
-/* row_hash = SHA256( DOMAIN "\n" prev_hash "\n" <length-prefixed fixed fields> ).
- * ts is deliberately NOT hashed (advisory; seq is the sole ordering authority).
- * Length-prefixing (`<byte-len>:<bytes>` per field, fixed order) is injective, so
- * no field value can be confused with a delimiter. */
+/* New rows use the v2 canonical record, which binds time and attribution.
+ * Legacy v1 rows remain explicitly labelled v1-partial and use the old verifier.
+ * The separately stored producer event ID occupies the canonical key-id binding
+ * slot for idempotent outbox rows so rewriting it is also detectable. */
 
 /* HMAC-SHA256 over wfe_sha256_raw (standard construction; the chain key is 32
  * bytes, below the 64-byte block size, so no key pre-hash is needed). */
@@ -153,6 +159,18 @@ static int worm_open_locked(const char *db_path)
       sqlite3_close(db);
       return -1;
    }
+   /* Online migration for pre-v2 stores. Duplicate-column errors are expected
+    * on subsequent opens; no existing row is silently upgraded to full-field
+    * evidence. */
+   static const char *const v2_columns[] = {
+       "ALTER TABLE audit_event ADD COLUMN hash_version TEXT NOT NULL DEFAULT 'v1-partial'",
+       "ALTER TABLE audit_event ADD COLUMN actor_issuer TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE audit_event ADD COLUMN actor_subject TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE audit_event ADD COLUMN transport_cn TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE audit_event ADD COLUMN team_id INTEGER NOT NULL DEFAULT 0",
+       "ALTER TABLE audit_event ADD COLUMN selected_default_from TEXT NOT NULL DEFAULT ''"};
+   for (size_t i = 0; i < sizeof(v2_columns) / sizeof(v2_columns[0]); i++)
+      (void)sqlite3_exec(db, v2_columns[i], NULL, NULL, NULL);
    g_worm_db = db;
    return 0;
 }
@@ -286,19 +304,16 @@ static int worm_append(const char *event_id, const char *event_ts, const char *a
    }
 
    char row_hash[65];
-   /* The canonical format's key-id slot binds the durable producer event ID
-    * for outbox rows. Ordinary rows keep the historical empty slot and
-    * checkpoint rows keep their actual key ID. This makes offline event-ID
-    * rewrites visible without changing any pre-existing server row hash. */
-   audit_worm_row_hash(seq, actor_role, actor_principal, action, subject, verdict, event_id, detail,
-                       prev, row_hash);
+   audit_worm_row_hash_v2(seq, ts, actor_role, actor_principal, "", "", "", 0, "", action, subject,
+                          verdict, event_id, detail, prev, row_hash);
 
    sqlite3_stmt *ins = NULL;
-   if (sqlite3_prepare_v2(db,
-                          "INSERT INTO audit_event(seq, ts, actor_role, actor_principal, action,"
-                          " subject, verdict, detail, key_id, event_id, prev_hash, row_hash)"
-                          " VALUES(?,?,?,?,?,?,?,?,'',?,?,?)",
-                          -1, &ins, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(
+           db,
+           "INSERT INTO audit_event(seq, ts, hash_version, actor_role, actor_principal, action,"
+           " subject, verdict, detail, key_id, event_id, prev_hash, row_hash)"
+           " VALUES(?,?,'v2-full',?,?,?,?,?,?,'',?,?,?)",
+           -1, &ins, NULL) != SQLITE_OK)
    {
       sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
       goto done;
@@ -401,16 +416,16 @@ int audit_worm_checkpoint(void)
    strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 
    char row_hash[65];
-   audit_worm_row_hash(seq, "system", "", "chain.checkpoint", "", "ok", key_id, detail, prev,
-                       row_hash);
+   audit_worm_row_hash_v2(seq, ts, "system", "", "", "", "", 0, "", "chain.checkpoint", "", "ok",
+                          key_id, detail, prev, row_hash);
 
    sqlite3_stmt *ins = NULL;
-   if (sqlite3_prepare_v2(
-           db,
-           "INSERT INTO audit_event(seq, ts, actor_role, actor_principal, action, subject,"
-           " verdict, detail, key_id, prev_hash, row_hash)"
-           " VALUES(?,?,'system','','chain.checkpoint','','ok',?,?,?,?)",
-           -1, &ins, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(db,
+                          "INSERT INTO audit_event(seq, ts, hash_version, actor_role, "
+                          "actor_principal, action, subject,"
+                          " verdict, detail, key_id, prev_hash, row_hash)"
+                          " VALUES(?,?,'v2-full','system','','chain.checkpoint','','ok',?,?,?,?)",
+                          -1, &ins, NULL) != SQLITE_OK)
    {
       sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
       goto done;
@@ -468,10 +483,11 @@ static int worm_verify_db(sqlite3 *db, char *err, size_t errlen)
       err[0] = '\0';
    sqlite3_stmt *q = NULL;
    const char *event_column = worm_has_column(db, "audit_event", "event_id") ? "event_id" : "''";
-   char verify_sql[320];
+   char verify_sql[512];
    snprintf(verify_sql, sizeof(verify_sql),
-            "SELECT seq,actor_role,actor_principal,action,subject,verdict,key_id,%s,"
-            "detail,prev_hash,row_hash FROM audit_event ORDER BY seq ASC",
+            "SELECT seq,ts,hash_version,actor_role,actor_principal,actor_issuer,"
+            " actor_subject,transport_cn,team_id,selected_default_from,action,subject,"
+            " verdict,key_id,%s,detail,prev_hash,row_hash FROM audit_event ORDER BY seq ASC",
             event_column);
    if (sqlite3_prepare_v2(db, verify_sql, -1, &q, NULL) != SQLITE_OK)
    {
@@ -490,16 +506,23 @@ static int worm_verify_db(sqlite3 *db, char *err, size_t errlen)
    while ((step_rc = sqlite3_step(q)) == SQLITE_ROW)
    {
       long long seq = sqlite3_column_int64(q, 0);
-      const char *role = (const char *)sqlite3_column_text(q, 1);
-      const char *principal = (const char *)sqlite3_column_text(q, 2);
-      const char *action = (const char *)sqlite3_column_text(q, 3);
-      const char *subject = (const char *)sqlite3_column_text(q, 4);
-      const char *verdict = (const char *)sqlite3_column_text(q, 5);
-      const char *key_id = (const char *)sqlite3_column_text(q, 6);
-      const char *event_id = (const char *)sqlite3_column_text(q, 7);
-      const char *detail = (const char *)sqlite3_column_text(q, 8);
-      const char *stored_prev = (const char *)sqlite3_column_text(q, 9);
-      const char *stored_row = (const char *)sqlite3_column_text(q, 10);
+      const char *ts = (const char *)sqlite3_column_text(q, 1);
+      const char *version = (const char *)sqlite3_column_text(q, 2);
+      const char *role = (const char *)sqlite3_column_text(q, 3);
+      const char *principal = (const char *)sqlite3_column_text(q, 4);
+      const char *issuer = (const char *)sqlite3_column_text(q, 5);
+      const char *actor_subject = (const char *)sqlite3_column_text(q, 6);
+      const char *transport = (const char *)sqlite3_column_text(q, 7);
+      long long team_id = sqlite3_column_int64(q, 8);
+      const char *selected_default = (const char *)sqlite3_column_text(q, 9);
+      const char *action = (const char *)sqlite3_column_text(q, 10);
+      const char *subject = (const char *)sqlite3_column_text(q, 11);
+      const char *verdict = (const char *)sqlite3_column_text(q, 12);
+      const char *key_id = (const char *)sqlite3_column_text(q, 13);
+      const char *event_id = (const char *)sqlite3_column_text(q, 14);
+      const char *detail = (const char *)sqlite3_column_text(q, 15);
+      const char *stored_prev = (const char *)sqlite3_column_text(q, 16);
+      const char *stored_row = (const char *)sqlite3_column_text(q, 17);
       if (seq != expect)
       {
          if (err)
@@ -516,9 +539,16 @@ static int worm_verify_db(sqlite3 *db, char *err, size_t errlen)
       }
       char rh[65];
       const char *binding = event_id && event_id[0] ? event_id : (key_id ? key_id : "");
-      audit_worm_row_hash(seq, role ? role : "", principal ? principal : "", action ? action : "",
-                          subject ? subject : "", verdict ? verdict : "", binding,
-                          detail ? detail : "", prev, rh);
+      if (version && strcmp(version, "v2-full") == 0)
+         audit_worm_row_hash_v2(
+             seq, ts ? ts : "", role ? role : "", principal ? principal : "", issuer ? issuer : "",
+             actor_subject ? actor_subject : "", transport ? transport : "", team_id,
+             selected_default ? selected_default : "", action ? action : "", subject ? subject : "",
+             verdict ? verdict : "", binding, detail ? detail : "", prev, rh);
+      else
+         audit_worm_row_hash(seq, role ? role : "", principal ? principal : "",
+                             action ? action : "", subject ? subject : "", verdict ? verdict : "",
+                             binding, detail ? detail : "", prev, rh);
       if (!stored_row || strcmp(rh, stored_row) != 0)
       {
          if (err)
@@ -722,6 +752,12 @@ int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_
       *head_seq = head;
    if (last_ckpt_seq)
       *last_ckpt_seq = ckpt;
+   if (head == 0)
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "chain empty — nothing verified");
+      return AUDIT_WORM_VERIFY_RED;
+   }
    /* A checkpoint at seq C attests the head at seq C-1, so rows after C-1 are
     * unattested. Green only when a checkpoint covers the current head. */
    return (ckpt >= head) ? AUDIT_WORM_VERIFY_GREEN : AUDIT_WORM_VERIFY_AMBER;
@@ -782,10 +818,12 @@ cJSON *audit_worm_read_page(long offset, long limit, long *total)
       sqlite3_finalize(c);
    }
    sqlite3_stmt *q = NULL;
-   if (sqlite3_prepare_v2(g_worm_db,
-                          "SELECT seq, ts, actor_role, actor_principal, action, subject, verdict,"
-                          " detail, key_id FROM audit_event ORDER BY seq DESC LIMIT ? OFFSET ?",
-                          -1, &q, NULL) == SQLITE_OK)
+   if (sqlite3_prepare_v2(
+           g_worm_db,
+           "SELECT seq,ts,hash_version,actor_role,actor_principal,actor_issuer,"
+           " actor_subject,transport_cn,team_id,selected_default_from,action,subject,"
+           " verdict,detail,key_id FROM audit_event ORDER BY seq DESC LIMIT ? OFFSET ?",
+           -1, &q, NULL) == SQLITE_OK)
    {
       sqlite3_bind_int64(q, 1, limit);
       sqlite3_bind_int64(q, 2, offset);
@@ -793,12 +831,20 @@ cJSON *audit_worm_read_page(long offset, long limit, long *total)
       {
          cJSON *o = cJSON_CreateObject();
          cJSON_AddNumberToObject(o, "seq", (double)sqlite3_column_int64(q, 0));
-         const char *cols[] = {"ts",      "actor_role", "actor_principal", "action",
-                               "subject", "verdict",    "detail",          "key_id"};
-         for (int i = 0; i < 8; i++)
+         const char *cols[] = {"ts",           "hash_version",  "actor_role",  "actor_principal",
+                               "actor_issuer", "actor_subject", "transport_cn"};
+         for (int i = 0; i < 7; i++)
          {
             const unsigned char *v = sqlite3_column_text(q, i + 1);
             cJSON_AddStringToObject(o, cols[i], v ? (const char *)v : "");
+         }
+         cJSON_AddNumberToObject(o, "team_id", (double)sqlite3_column_int64(q, 8));
+         const char *tail_cols[] = {
+             "selected_default_from", "action", "subject", "verdict", "detail", "key_id"};
+         for (int i = 0; i < 6; i++)
+         {
+            const unsigned char *v = sqlite3_column_text(q, i + 9);
+            cJSON_AddStringToObject(o, tail_cols[i], v ? (const char *)v : "");
          }
          cJSON_AddItemToArray(arr, o);
       }

@@ -37,6 +37,41 @@ permissions:
   contents: read
 
 jobs:
+  secure-development-gates:
+    name: Static analysis and secret scanning
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install native analyzers
+        run: sudo apt-get update && sudo apt-get install -y cppcheck clang-tidy
+      - name: Run mandatory native static analysis
+        working-directory: src
+        run: make static-analysis STATIC_ANALYSIS_STRICT=1
+      - name: Scan the complete Git history for secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sanitizer-gate:
+    name: Address and undefined-behavior sanitizers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc make libsqlite3-dev libcurl4-openssl-dev \
+            libpam0g-dev libssl-dev libp11-kit-dev libpq-dev
+      - name: Run the complete native test registry under ASan and UBSan
+        working-directory: src
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: make sanitizers
+
   # Keep the workflow itself unfiltered: GitHub leaves required checks pending
   # when an entire workflow is skipped by a path filter. Job-level skips report
   # success, so required checks remain mergeable for documentation-only PRs.
@@ -65,7 +100,7 @@ jobs:
       # Separate from docs_only on purpose: see the documentation step below.
       docs_changed: ${{ steps.classify.outputs.docs_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
@@ -128,7 +163,7 @@ jobs:
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
       - name: Reject AI co-authorship trailers in new commits
@@ -224,7 +259,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -304,11 +339,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # Pinned from go.mod for the same reason the integration harness pins it:
       # relying on whatever toolchain the runner image ships means the coverage
       # can disappear with an image bump while the job stays green.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
@@ -327,6 +362,10 @@ jobs:
           timeout 240 sudo apt-get install -y -q libpam0g-dev
       - name: Go unit tests
         run: make -C src go-unit-tests
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - name: Reject reachable Go vulnerabilities
+        run: make -C src go-vulncheck GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
 
   build:
     needs: change-scope
@@ -334,7 +373,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -357,6 +396,8 @@ jobs:
             libpq-dev curl
       - name: Build
         run: cd src && make -j$(nproc) all server build/obj/aimee-module-config
+      - name: Verify binary hardening
+        run: cd src && make hardening-check
       - name: Skill lint
         run: |
           app_home=$(mktemp -d)
@@ -423,7 +464,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -479,9 +520,9 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Restore compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.cache/ccache
           key: unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
@@ -611,9 +652,9 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Restore compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.cache/ccache
           key: unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
@@ -696,7 +737,7 @@ jobs:
       AIMEE_DB2_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_db2_process_ci
       EMBEDDER_DIMS: "384"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -827,7 +868,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         # Same image and retry rationale as unit-tests: the schema needs the vector
         # and pg_trgm extensions, which the runner's preinstalled Postgres does not
@@ -913,7 +954,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install dependencies
         # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
         # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
@@ -971,7 +1012,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -1039,7 +1080,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -1096,7 +1137,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -1176,7 +1217,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -1218,15 +1259,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      AIMEE_STORE_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_integration_ci
+      AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_integration_ci
+      AIMEE_STORE_MIGRATION_URL: postgres://aimee_store_migrator:migrator-ci@127.0.0.1:5432/aimee_integration_ci
+      # The job owns an ephemeral database, so public is already its isolated
+      # schema and inherits the role grants provisioned below.
+      AIMEE_STORE_SCHEMA: public
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # The harness builds the workflow control module, which is Go. The runner
       # image happens to ship a toolchain, but the harness SKIPS its workflow
       # section when it cannot find one -- so relying on the image would mean
       # the whole /v1/workflow surface silently stops being covered the day
       # that changes, with the job still green. Pin it instead.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
@@ -1262,6 +1307,12 @@ jobs:
           echo "Postgres did not become ready in time"
           docker logs aimee-integration-pg || true
           exit 1
+      - name: Provision separate store authorities
+        run: |
+          docker exec aimee-integration-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_integration_ci -c \
+            "CREATE ROLE aimee_store_migrator LOGIN PASSWORD 'migrator-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; CREATE ROLE aimee_store_runtime LOGIN PASSWORD 'runtime-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;"
+          docker exec aimee-integration-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_integration_ci -c \
+            "ALTER DATABASE aimee_integration_ci OWNER TO aimee_store_migrator; ALTER SCHEMA public OWNER TO aimee_store_migrator; REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT CONNECT ON DATABASE aimee_integration_ci TO aimee_store_runtime; GRANT USAGE ON SCHEMA public TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;"
       - name: Install dependencies
         run: |
           # Same transient-apt-mirror workaround the sibling jobs carry.
@@ -1307,7 +1358,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -1358,7 +1409,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up MinGW-w64
         shell: pwsh
@@ -1449,7 +1500,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Set up MinGW-w64
         shell: pwsh
         run: |
@@ -1526,7 +1577,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # macOS ships ONE universal (arm64 + x86_64) thin client, matching the
       # release build. TLS uses Secure Transport (system frameworks, already
       # universal), so the fat build needs no arch-specific brew libraries.
@@ -1596,7 +1647,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -1654,9 +1705,9 @@ jobs:
             images: aimee-server
     name: e2e-docker (${{ matrix.topology }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
       - name: Runner diagnostics
         run: |
           docker version --format '{{.Server.Version}}'
@@ -1692,7 +1743,7 @@ jobs:
             echo CACHE_FLAGS_EOF
           } >> "$GITHUB_OUTPUT"
       - name: Build topology images with persistent cache
-        uses: docker/bake-action@v7
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b
         with:
           source: .
           files: ${{ matrix.compose_file }}
@@ -1740,7 +1791,7 @@ jobs:
     env:
       AIMEE_STORE_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_adoption_ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # The store is a PostgreSQL module now, so a rig that stands a server up
       # needs a database. Before the C store was retired this harness ran
       # against a SQLite file it created itself and needed nothing; the store
@@ -1800,7 +1851,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           gcc --version 2>/dev/null | head -1 || true
@@ -1831,7 +1882,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true

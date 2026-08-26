@@ -1502,6 +1502,53 @@ int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
    return 0;
 }
 
+static size_t action_field_len(const char *value, size_t limit)
+{
+   size_t length = 0;
+   while (length < limit && value[length])
+      length++;
+   return length;
+}
+
+int obs_bus_commit_action(const char *actor, const char *tool, const char *args_hash,
+                          const char *command, const char *mode, const char *reason_code,
+                          const char *verdict, long long task_id)
+{
+   if (!sinks.durable)
+   {
+      aimee_log(LOG_ERROR, "obs_bus", "action has no configured WORM sink: %s",
+                tool ? tool : "");
+      return -1;
+   }
+
+   /* Length prefixes make the bounded detail unambiguous even when a value
+    * contains spaces or '='.  command is already a non-content preview or
+    * fingerprint at every caller; raw tool arguments never enter this row. */
+   const char *safe_command = command ? command : "";
+   const char *safe_mode = mode ? mode : "";
+   const char *safe_reason = reason_code ? reason_code : "";
+   size_t command_len = action_field_len(safe_command, 319);
+   size_t mode_len = action_field_len(safe_mode, AB_MODE - 1);
+   size_t reason_len = action_field_len(safe_reason, 95);
+   char action[AB_DUR_ACTION];
+   char detail[AB_DUR_DETAIL];
+   int action_len =
+       snprintf(action, sizeof action, "tool.%.*s", AB_DUR_ACTION - 6, tool ? tool : "");
+   int detail_len = snprintf(detail, sizeof detail,
+                             "command=%zu:%.*s mode=%zu:%.*s reason=%zu:%.*s task_id=%lld",
+                             command_len, (int)command_len, safe_command, mode_len, (int)mode_len,
+                             safe_mode, reason_len, (int)reason_len, safe_reason, task_id);
+   if (action_len < 0 || (size_t)action_len >= sizeof action || detail_len < 0 ||
+       (size_t)detail_len >= sizeof detail)
+   {
+      aimee_log(LOG_ERROR, "obs_bus", "action WORM row exceeds bounded schema: %s",
+                tool ? tool : "");
+      return -1;
+   }
+   return sinks.durable("action", actor ? actor : "", action, args_hash ? args_hash : "",
+                        verdict ? verdict : "", detail, sinks.durable_ctx);
+}
+
 int obs_bus_test_capture_fault(const char *reason)
 {
    static const char *const allowed[] = {"", "no_home", "open_failed", "write_failed",

@@ -1419,7 +1419,7 @@ int is_safe_id(const char *s)
    return 1;
 }
 
-char *shell_escape(const char *raw)
+char *shell_quote(const char *raw)
 {
    return strdup(raw ? raw : "");
 }

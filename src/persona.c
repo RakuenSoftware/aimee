@@ -580,20 +580,22 @@ char *persona_compose_primary_instructions(const char *name, const char *cwd)
    const char *principles = p.principles_text ? p.principles_text : prompt_principles_text(mode);
    char *identity = persona_identity_prose(&p, cwd);
    const char *brief = p.brief_text ? p.brief_text : "";
-   const char *format = "<aimee-persona schema=\"1\" name=\"%s\">\n%s%s%s%s%s\n# Aimee Tools\n%s"
-                        "</aimee-persona>\n";
+#define PERSONA_PRIMARY_FORMAT                                                                     \
+   "<aimee-persona schema=\"1\" name=\"%s\">\n%s%s%s%s%s\n# Aimee Tools\n%s"                       \
+   "</aimee-persona>\n"
    const char *identity_header = identity && identity[0] ? "\n# Persona\n" : "";
    const char *identity_body = identity && identity[0] ? identity : "";
    const char *brief_header = brief[0] ? "\n# Aimee Context\n" : "";
-   int rendered = snprintf(NULL, 0, format, p.name, principles, identity_header, identity_body,
-                           brief_header, brief, AIMEE_GUIDANCE_BLOCK);
+   int rendered = snprintf(NULL, 0, PERSONA_PRIMARY_FORMAT, p.name, principles, identity_header,
+                           identity_body, brief_header, brief, AIMEE_GUIDANCE_BLOCK);
    char *out = rendered >= 0 ? malloc((size_t)rendered + 1) : NULL;
    if (out)
-      snprintf(out, (size_t)rendered + 1, format, p.name, principles, identity_header,
-               identity_body, brief_header, brief, AIMEE_GUIDANCE_BLOCK);
+      snprintf(out, (size_t)rendered + 1, PERSONA_PRIMARY_FORMAT, p.name, principles,
+               identity_header, identity_body, brief_header, brief, AIMEE_GUIDANCE_BLOCK);
    free(identity);
    persona_free(&p);
    return out;
+#undef PERSONA_PRIMARY_FORMAT
 }
 
 char *persona_compose_delegate_prompt(const char *name, const char *cwd, const char *base_prompt)

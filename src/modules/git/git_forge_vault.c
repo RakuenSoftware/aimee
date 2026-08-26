@@ -1,6 +1,6 @@
 /* git_forge_vault.c — autonomous read of environment Git credentials. */
 #include "git_forge_vault.h"
-#include "util.h" /* shell_escape */
+#include "util.h" /* shell_quote */
 #include "vault_service.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,11 +89,11 @@ static int read_git_config(const char *repo_dir, const char *key, int scope, cha
       return 0;
    out[0] = '\0';
 
-   char *dir = shell_escape(repo_dir && repo_dir[0] ? repo_dir : ".");
+   char *dir = shell_quote(repo_dir && repo_dir[0] ? repo_dir : ".");
    if (!dir)
       return 0;
    char cmd[4608];
-   snprintf(cmd, sizeof(cmd), "%sgit -C '%s' config --get %s 2>/dev/null",
+   snprintf(cmd, sizeof(cmd), "%sgit -C %s config --get %s 2>/dev/null",
             scope == GIT_CFG_SCOPE_REPO
                 ? "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL=/dev/null "
                 : "unset GIT_CONFIG_NOSYSTEM GIT_CONFIG_SYSTEM GIT_CONFIG_GLOBAL; ",

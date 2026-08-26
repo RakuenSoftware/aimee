@@ -204,6 +204,119 @@ func TestSSETransportRefusesANonOKStream(t *testing.T) {
 	}
 }
 
+func testSSELimits() sseLimits {
+	limits := defaultSSELimits
+	limits.maxLineBytes = 128
+	limits.maxEventBytes = 256
+	limits.maxPostResponseBytes = 128
+	limits.maxConnectionBytes = 1024
+	limits.idleTimeout = 250 * time.Millisecond
+	limits.connectionLifetime = 5 * time.Second
+	limits.postTimeout = 250 * time.Millisecond
+	return limits
+}
+
+func TestSSETransportRefusesCrossOriginEndpoint(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: endpoint\ndata: https://attacker.example/messages\n\n")
+	}))
+	defer ts.Close()
+
+	if _, err := newSSETransportWithLimits(ts.URL, "", time.Second, testSSELimits()); err == nil {
+		t.Fatal("a cross-origin POST endpoint was accepted")
+	}
+}
+
+func TestSSETransportBoundsLinesAndEvents(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{name: "line", payload: "data: " + strings.Repeat("x", 256) + "\n\n"},
+		{name: "event", payload: "data: " + strings.Repeat("x", 120) + "\ndata: " + strings.Repeat("y", 120) + "\ndata: " + strings.Repeat("z", 20) + "\n\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				flusher, _ := w.(http.Flusher)
+				fmt.Fprint(w, "event: endpoint\ndata: /messages\n\n")
+				flusher.Flush()
+				fmt.Fprint(w, tc.payload)
+				flusher.Flush()
+				<-r.Context().Done()
+			}))
+			defer ts.Close()
+
+			tr, err := newSSETransportWithLimits(ts.URL, "", time.Second, testSSELimits())
+			if err != nil {
+				t.Fatalf("connect: %v", err)
+			}
+			defer tr.Close()
+			if _, err := tr.Recv(time.Second); err == nil {
+				t.Fatal("an oversized SSE payload was accepted")
+			}
+		})
+	}
+}
+
+func TestSSETransportBoundsPostResponseAndTime(t *testing.T) {
+	tests := []struct {
+		name string
+		post func(http.ResponseWriter)
+	}{
+		{name: "body", post: func(w http.ResponseWriter) { _, _ = io.WriteString(w, strings.Repeat("x", 256)) }},
+		{name: "time", post: func(w http.ResponseWriter) { time.Sleep(500 * time.Millisecond) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "event: endpoint\ndata: /messages\n\n")
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			})
+			mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) { tc.post(w) })
+			ts := httptest.NewServer(mux)
+			defer ts.Close()
+
+			tr, err := newSSETransportWithLimits(ts.URL+"/sse", "", time.Second, testSSELimits())
+			if err != nil {
+				t.Fatalf("connect: %v", err)
+			}
+			defer tr.Close()
+			if err := tr.Send([]byte(`{"jsonrpc":"2.0"}`)); err == nil {
+				t.Fatal("an unbounded POST response was accepted")
+			}
+		})
+	}
+}
+
+func TestSSETransportClosesAnIdleStream(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: endpoint\ndata: /messages\n\n")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	limits := testSSELimits()
+	limits.idleTimeout = 50 * time.Millisecond
+	tr, err := newSSETransportWithLimits(ts.URL+"/sse", "", time.Second, limits)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer tr.Close()
+	if _, err := tr.Recv(time.Second); err == nil {
+		t.Fatal("an idle SSE stream remained open")
+	}
+}
+
 func TestSSETransportIsUsableByTheModuleLikeAnyOther(t *testing.T) {
 	// The Transport interface is the whole point: the module must not know or
 	// care which transport its plugin is behind.

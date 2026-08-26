@@ -61,7 +61,7 @@
 #define KB_TLS_CALLER_MAX       576
 #define KB_TLS_CALLER_AUTH_MAX  (KB_IDENTITY_TOKEN_WIRE_MAX + 8)
 #define KB_TLS_SERVER_ID_MAX    127
-#define KB_TLS_CALLER_JWKS_MAX  1024
+#define KB_TLS_CALLER_JWKS_MAX  (65536u + 1u)
 
 static int (*g_pam_check_override)(const char *, const char *);
 
@@ -308,16 +308,22 @@ static int caller_token_identity(const char *authorization, const char *server_i
       return 0;
    if (fetched != DB2_MANAGEMENT_JWKS_RUNTIME_OK)
       return -1;
-   char jwks[KB_TLS_CALLER_JWKS_MAX] = "";
+   char *jwks = calloc(KB_TLS_CALLER_JWKS_MAX, 1);
+   if (!jwks)
+   {
+      OPENSSL_cleanse(&record, sizeof(record));
+      return -1;
+   }
    server_identity_token_claims_t claims;
    memset(&claims, 0, sizeof(claims));
    long now = (long)time(NULL);
-   int verified = caller_jwks(&record, now, jwks, sizeof(jwks)) == 0 &&
+   int verified = caller_jwks(&record, now, jwks, KB_TLS_CALLER_JWKS_MAX) == 0 &&
                   kb_caller_token_verify(jwt, strlen(jwt), jwks, server_id, named_team, now,
                                          &claims) == SERVER_IDENTITY_TOKEN_OK &&
                   kb_principal_from_identity_key(claims.subject, out) == 0;
    OPENSSL_cleanse(&claims, sizeof(claims));
-   OPENSSL_cleanse(jwks, sizeof(jwks));
+   OPENSSL_cleanse(jwks, KB_TLS_CALLER_JWKS_MAX);
+   free(jwks);
    OPENSSL_cleanse(&record, sizeof(record));
    return verified ? 1 : 0;
 }

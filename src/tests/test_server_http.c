@@ -1691,6 +1691,8 @@ int main(void)
       /* memory:admin must not leak into the read-only set, and must stay inside
        * the authenticated set (the operator can still administer their store). */
       assert((CAPS_READ_ONLY & CAP_MEMORY_ADMIN) == 0);
+      assert((CAPS_READ_ONLY & CAP_DASHBOARD_READ) == 0);
+      assert((CAPS_AUTHENTICATED & CAP_DASHBOARD_READ) == 0);
       assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
       assert((CAPS_ALL & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
 

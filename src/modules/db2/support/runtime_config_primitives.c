@@ -4,6 +4,7 @@
 
 static db2_runtime_config_t DB2_RUNTIME_CONFIG = {
     .abi_version = DB2_RUNTIME_CONFIG_ABI_VERSION,
+    .audit_worm_enabled = 1,
 };
 
 int db2_runtime_config_install(const db2_runtime_config_t *snapshot)

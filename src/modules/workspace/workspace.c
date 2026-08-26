@@ -775,13 +775,12 @@ char *resolve_proposal_path(const char *proposal)
  * The caller holds the Git-common-dir provisioning lock. */
 static int worktree_exclude_internal_store(const char *git_root)
 {
-   char *esc = shell_escape(git_root);
+   char *esc = shell_quote(git_root);
    if (!esc)
       return -1;
    char cmd[MAX_PATH_LEN * 2 + 128];
    snprintf(cmd, sizeof(cmd),
-            "git -C '%s' rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null",
-            esc);
+            "git -C %s rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null", esc);
    free(esc);
    int rc = 0;
    char *exclude_path = run_cmd(cmd, &rc);
@@ -2044,11 +2043,11 @@ static char *worktree_status_porcelain(const char *wt_path)
    if (!wt_path || !wt_path[0])
       return NULL;
 
-   char *esc = shell_escape(wt_path);
+   char *esc = shell_quote(wt_path);
    if (!esc)
       return NULL;
    char cmd[MAX_PATH_LEN * 2 + 128];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' status --porcelain 2>/dev/null", esc);
+   snprintf(cmd, sizeof(cmd), "git -C %s status --porcelain 2>/dev/null", esc);
    free(esc);
 
    int rc;
@@ -2066,8 +2065,8 @@ static int worktree_path_has_changes(const char *wt_path, const char *rel_path)
    if (!wt_path || !wt_path[0] || !rel_path || !rel_path[0])
       return 0;
 
-   char *esc_wt = shell_escape(wt_path);
-   char *esc_path = shell_escape(rel_path);
+   char *esc_wt = shell_quote(wt_path);
+   char *esc_path = shell_quote(rel_path);
    if (!esc_wt || !esc_path)
    {
       free(esc_wt);
@@ -2076,8 +2075,7 @@ static int worktree_path_has_changes(const char *wt_path, const char *rel_path)
    }
 
    char cmd[MAX_PATH_LEN * 3 + 128];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' status --porcelain -- '%s' 2>/dev/null", esc_wt,
-            esc_path);
+   snprintf(cmd, sizeof(cmd), "git -C %s status --porcelain -- %s 2>/dev/null", esc_wt, esc_path);
    free(esc_wt);
    free(esc_path);
 

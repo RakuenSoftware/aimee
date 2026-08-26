@@ -63,7 +63,7 @@ char *tool_read_outline(const char *path)
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
    char resolved[MAX_PATH_LEN];
-   const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+   const char *verr = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
    if (verr)
       return safe_strdup(verr);
 
@@ -185,7 +185,7 @@ char *tool_read_symbol(const char *symbol, const char *path)
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(target, cwd_path, sizeof(cwd_path));
    const char *verr =
-       guardrails_validate_file_path(actual_path, resolved_path, sizeof(resolved_path));
+       guardrails_check_sensitive_path(actual_path, resolved_path, sizeof(resolved_path));
    if (verr)
       return safe_strdup(verr);
 
@@ -284,7 +284,7 @@ char *tool_edit_symbol(const char *symbol, const char *path, const char *op, con
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(target, cwd_path, sizeof(cwd_path));
    char resolved[MAX_PATH_LEN];
-   const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+   const char *verr = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
    if (verr)
       return safe_strdup(verr);
 
@@ -418,7 +418,7 @@ char *tool_grep_anchored(const char *path, const char *pattern, int max_results)
          char cwd_path[MAX_PATH_LEN];
          const char *actual = path_in_thread_cwd(fpath, cwd_path, sizeof(cwd_path));
          char resolved[MAX_PATH_LEN];
-         const char *verr = guardrails_validate_file_path(actual, resolved, sizeof(resolved));
+         const char *verr = guardrails_check_sensitive_path(actual, resolved, sizeof(resolved));
          char snap[ANCHOR_SNAPSHOT_ID_MAX] = {0};
          const char *errmsg = NULL;
          if (!verr && read_text_file(actual, &file_data, &file_len, &errmsg) == 0)

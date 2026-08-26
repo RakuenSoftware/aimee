@@ -1462,13 +1462,14 @@ static int cli_clean(int argc, char **argv)
 
    /* Clean hooks and MCP entries from tool settings files */
    static const char *settings_files[] = {
-       "%s/.claude/settings.json",  "%s/.gemini/settings.json", "%s/.codex/hooks.json",
-       "%s/.codex/mcp-config.json", "%s/.copilot/config.json",  "%s/.copilot/mcp-config.json",
+       ".claude/settings.json",  ".gemini/settings.json", ".codex/hooks.json",
+       ".codex/mcp-config.json", ".copilot/config.json",  ".copilot/mcp-config.json",
    };
    char path[MAX_PATH_LEN];
    for (size_t i = 0; i < sizeof(settings_files) / sizeof(settings_files[0]); i++)
    {
-      snprintf(path, sizeof(path), settings_files[i], home);
+      if (snprintf(path, sizeof(path), "%s/%s", home, settings_files[i]) >= (int)sizeof(path))
+         continue;
       clean_settings_file(path);
    }
 

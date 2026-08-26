@@ -68,23 +68,19 @@ void delegate_worktree_restore(const char *orig_cwd, const char *git_root, const
  * aimee routes to the cheapest agent, executes, returns result on stdout.
  * This allows Claude Code / Gemini / Codex to delegate expensive work
  * to cheaper or local LLMs. */
-void generate_task_id(char *buf, size_t len)
+int generate_task_id(char *buf, size_t len)
 {
-   static unsigned long fallback_counter = 0;
    unsigned char rand_bytes[8];
    if (platform_random_bytes(rand_bytes, sizeof(rand_bytes)) != 0)
    {
-      unsigned long seed =
-          (unsigned long)time(NULL) ^ ((unsigned long)getpid() << 16) ^ ++fallback_counter;
-      for (size_t i = 0; i < sizeof(rand_bytes); i++)
-      {
-         seed = seed * 1103515245u + 12345u;
-         rand_bytes[i] = (unsigned char)((seed >> 16) & 0xffu);
-      }
+      if (buf && len)
+         buf[0] = '\0';
+      return -1;
    }
    snprintf(buf, len, "aimee-task-%02x%02x%02x%02x%02x%02x%02x%02x", rand_bytes[0], rand_bytes[1],
             rand_bytes[2], rand_bytes[3], rand_bytes[4], rand_bytes[5], rand_bytes[6],
             rand_bytes[7]);
+   return 0;
 }
 
 static void delegate_list_roles(void)
@@ -1103,12 +1099,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
             if (*tok)
             {
-               /* shell_escape the symbol: it is interpolated into a popen()
+               /* shell_quote the symbol: it is interpolated into a popen()
                 * command, so a raw single quote in the token would break out of
                 * the quotes and inject shell commands. */
-               char *esc_tok = shell_escape(tok);
+               char *esc_tok = shell_quote(tok);
                char find_cmd[512];
-               snprintf(find_cmd, sizeof(find_cmd), "aimee index find '%s' 2>/dev/null", esc_tok);
+               snprintf(find_cmd, sizeof(find_cmd), "aimee index find %s 2>/dev/null", esc_tok);
                free(esc_tok);
                FILE *fp = popen(find_cmd, "r");
                if (fp)
@@ -1392,7 +1388,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       platform_mkdir_p(tasks_dir, 0700);
 
       char task_id[64];
-      generate_task_id(task_id, sizeof(task_id));
+      if (generate_task_id(task_id, sizeof(task_id)) != 0)
+         fatal("secure entropy unavailable; background task not created");
       char result_path[MAX_PATH_LEN];
       snprintf(result_path, sizeof(result_path), "%s/%s.json", tasks_dir, task_id);
 
@@ -1445,7 +1442,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
    /* Generate a delegation ID for checkpoint tracking */
    char deleg_id[32];
-   generate_task_id(deleg_id, sizeof(deleg_id));
+   if (generate_task_id(deleg_id, sizeof(deleg_id)) != 0)
+      fatal("secure entropy unavailable; delegation not created");
 
    /* OTel: start a delegation span covering the full delegate execution */
    otel_span_t otel_deleg_span;

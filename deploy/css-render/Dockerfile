@@ -3,7 +3,7 @@
 # container reached only over HTTP (proposal §8) — never inside aimee-kb/server.
 #
 # The official Playwright image bundles Chromium + matching system deps.
-FROM mcr.microsoft.com/playwright:v1.49.0-jammy
+FROM mcr.microsoft.com/playwright:v1.49.0-jammy@sha256:98b1ad488de36b22d41fdd1b0c5b9cceaa78a8d2661c6ab02d2108a07c182338
 
 ENV CSS_RENDER_PORT=8780
 # The base image already bundles the browser binaries (at PLAYWRIGHT_BROWSERS_PATH);

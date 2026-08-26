@@ -16,6 +16,7 @@
 #include "db1_client/session_state.h" /* db1_session_state_delete -- teardown only */
 #include "session_worktree_key.h"
 #include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
+#include "platform_path.h"
 #include "platform_test_util.h"
 #include "modules/git/git_verify.h"
 #include "support/git_module_fixture.h"
@@ -258,11 +259,46 @@ static void test_policy_file_overrides_defaults(void)
    assert(is_write_command("brew install jq") == 1);
 
    char resolved[MAX_PATH_LEN];
-   assert(guardrails_validate_file_path(denied_file, resolved, sizeof(resolved)) != NULL);
+   assert(guardrails_check_sensitive_path(denied_file, resolved, sizeof(resolved)) != NULL);
 
    clear_temp_policy_path(policy_path);
    unlink(denied_file);
    rmdir(deny_dir);
+}
+
+static void test_sensitive_path_bounds_and_nonexistent_basename(void)
+{
+   char root[512];
+   snprintf(root, sizeof(root), "%s/test-guardrails-path-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root) != NULL);
+
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s", root);
+   for (int i = 0; i < 4; i++)
+   {
+      size_t used = strlen(path);
+      assert(used + 82 < sizeof(path));
+      path[used++] = '/';
+      memset(path + used, 'a' + i, 80);
+      path[used + 80] = '\0';
+      assert(mkdir(path, 0700) == 0);
+   }
+
+   char ordinary[MAX_PATH_LEN];
+   assert(snprintf(ordinary, sizeof(ordinary), "%s/file.txt", path) < (int)sizeof(ordinary));
+   char small[256];
+   memset(small, 0xa5, sizeof(small));
+   assert(guardrails_check_sensitive_path(ordinary, small, sizeof(small)) != NULL);
+
+   char dotenv[MAX_PATH_LEN];
+   assert(snprintf(dotenv, sizeof(dotenv), "%s/.env", path) < (int)sizeof(dotenv));
+   char resolved[MAX_PATH_LEN];
+   write_file_text(dotenv, "SECRET=value\n");
+   assert(guardrails_check_sensitive_path(dotenv, resolved, sizeof(resolved)) != NULL);
+   assert(unlink(dotenv) == 0);
+   assert(guardrails_check_sensitive_path(dotenv, resolved, sizeof(resolved)) != NULL);
+
+   platform_test_rmrf(root);
 }
 
 static void test_policy_file_reloads_on_change(void)
@@ -1568,6 +1604,8 @@ static void test_known_subagent_tools_blocked(void)
                            "\"prompt\":\"Find the installer code\","
                            "\"description\":\"Find installer\"}",
                            &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+   if (rc != 2)
+      fprintf(stderr, "Agent subagent guard returned %d: %s\n", rc, msg);
    assert(rc == 2);
    assert(strstr(msg, "BLOCKED") != NULL);
    assert(strstr(msg, "guardrails") != NULL);
@@ -2083,7 +2121,12 @@ static void test_git_commands_allowed_by_default(void)
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-git-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmpdir) != NULL);
+   const char *home_env = getenv("HOME");
+   char *saved_home = home_env ? strdup(home_env) : NULL;
    platform_setenv("HOME", tmpdir);
+   char audit_home[640];
+   snprintf(audit_home, sizeof(audit_home), "%s/.config/aimee", tmpdir);
+   assert(platform_mkdir_p(audit_home, 0700) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
 
    guardrails_open_test_sqlite();
@@ -2113,9 +2156,16 @@ static void test_git_commands_allowed_by_default(void)
 
    platform_unsetenv("AIMEE_NO_CACHE");
    guardrails_close_test_sqlite();
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
-   (void)system(cmd);
+   if (saved_home)
+   {
+      platform_setenv("HOME", saved_home);
+      free(saved_home);
+   }
+   else
+   {
+      platform_unsetenv("HOME");
+   }
+   platform_test_rmrf(tmpdir);
 }
 
 static void test_bash_command_guard_warns(void)
@@ -2469,6 +2519,9 @@ static void test_semantic_advisory_pre_tool_check(void)
        getenv("AIMEE_ANTIPATTERNS_BYPASS") ? strdup(getenv("AIMEE_ANTIPATTERNS_BYPASS")) : NULL;
    platform_setenv("HOME", tmpdir);
    platform_unsetenv("AIMEE_HOME");
+   char audit_home[640];
+   snprintf(audit_home, sizeof(audit_home), "%s/.config/aimee", tmpdir);
+   assert(platform_mkdir_p(audit_home, 0700) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
    platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", "1");
 
@@ -3852,6 +3905,7 @@ int main(void)
    test_classify_sensitive();
    test_classify_database();
    test_classify_safe();
+   test_sensitive_path_bounds_and_nonexistent_basename();
    test_classify_path_traversal();
    test_classify_edge_cases();
    test_is_write_command();

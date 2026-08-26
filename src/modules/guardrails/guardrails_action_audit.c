@@ -3,10 +3,8 @@
  * pre_tool_check is a thin wrapper around the verdict logic
  * (pre_tool_check_inner in guardrails_orchestrator.c): it emits EXACTLY ONE
  * audit row per call, AFTER the verdict is decided, so the many inner return
- * paths cannot drift the emit count. The emit is strictly side-effect-only —
- * any failure here (hashing, log write) leaves the verdict untouched (audit loss
- * is acceptable, enforcement drift is not). Kept in its own file so the verdict
- * logic stays within the source line budget. */
+ * paths cannot drift the emit count. Required audit failures fail the action
+ * closed; a governed effect must never outrun its evidence. */
 #include <string.h>
 
 #include <stdio.h>
@@ -33,11 +31,9 @@ static int audit_action_is_enabled(void)
    return g_audit_action_enabled;
 }
 
-/* Cached audit_worm_enabled (default-off). Same fail-safe read-once pattern as
- * audit_action_is_enabled: a legacy_config_read failure leaves the WORM dual-write OFF.
- * Persisted like audit_action (config.c load + config_save opt-in), so the value
- * survives a restart; the reload reapplier below clears the cache so a live
- * config.set / SIGHUP also takes effect without one. */
+/* Cached required WORM posture. The accessor is default-on and accepts only the
+ * deployment-visible break-glass override; ordinary config loss/edit cannot
+ * silently disable governed-action capture. */
 static int g_audit_worm_enabled = -1;
 static int audit_worm_is_enabled(void)
 {
@@ -66,27 +62,25 @@ void guardrails_action_audit_register_reload(void)
  * best-effort — a failure is recoverable audit loss (audit.log stays
  * authoritative) and never touches the verdict. Structured principal/detail
  * schemas and fail-closed authority arrive in later slices. */
-static void emit_worm_row(const char *actor, const char *tool_name, const char *args_hash,
-                          const char *mode, const char *reason, const char *verdict,
-                          long long task_id)
+static int emit_worm_row(const char *actor, const char *tool_name, const char *args_hash,
+                         const char *mode, const char *reason, const char *verdict,
+                         long long task_id)
 {
    if (!audit_worm_is_enabled())
-      return;
+      return 0;
    char action[192];
    snprintf(action, sizeof action, "tool.%s", tool_name ? tool_name : "");
    char detail[320];
    snprintf(detail, sizeof detail, "{\"mode\":\"%s\",\"reason\":\"%s\",\"task_id\":%lld}",
             mode ? mode : "", reason ? reason : "", task_id);
-   audit_worm_append(actor, "", action, args_hash ? args_hash : "", verdict ? verdict : "", detail);
+   return audit_worm_append(actor, "", action, args_hash ? args_hash : "", verdict ? verdict : "",
+                            detail);
 }
 
-static void emit_action_audit(const char *tool_name, const char *input_json,
-                              const char *guardrail_mode, session_state_t *state, int rc,
-                              const char *msg_buf)
+static int emit_action_audit(const char *tool_name, const char *input_json,
+                             const char *guardrail_mode, session_state_t *state, int rc,
+                             const char *msg_buf)
 {
-   if (!audit_action_is_enabled())
-      return;
-
    /* reason_code = the stable key of the block site's existing audit_log() call,
     * captured on this thread (see audit_last_event). Empty for allow/rewrite. */
    const char *reason = audit_last_event();
@@ -109,13 +103,23 @@ static void emit_action_audit(const char *tool_name, const char *input_json,
    if (!reason || !reason[0])
       reason = verdict;
 
-   const char *actor = (state && state->is_delegate) ? "delegate" : "primary";
+   const char *sid = session_id();
+   if (!sid || !sid[0])
+   {
+      LOG_ERROR("audit", "governed action refused: session identity unavailable");
+      return -1;
+   }
+   char actor[96];
+   snprintf(actor, sizeof(actor), "%s:%s", (state && state->is_delegate) ? "delegate" : "primary",
+            sid);
    const char *mode = guardrail_mode ? guardrail_mode : MODE_APPROVE;
-   /* Pre-init to the S1 sentinel so the wrapper is safe even if audit_args_hash
-    * changes behavior; audit_args_hash also writes the sentinel first. */
    char args_hash[AUDIT_ARGS_HASH_LEN];
-   snprintf(args_hash, sizeof args_hash, "v1-");
-   audit_args_hash(tool_name, input_json, args_hash, sizeof args_hash);
+   if (audit_args_hash(tool_name, input_json, args_hash, sizeof args_hash) != 0)
+   {
+      LOG_ERROR("audit", "governed action refused: argument hash unavailable for tool=%s",
+                tool_name ? tool_name : "");
+      return -1;
+   }
    /* Arg-free command preview (shell tools only; "" otherwise). Safe-by-
     * construction — only program basenames, never an argument value — so it
     * rides on the same audit_action_enabled gate with no extra PII surface. */
@@ -127,8 +131,18 @@ static void emit_action_audit(const char *tool_name, const char *input_json,
     * audit_action_log. The direct call is gone — the bus is the sole route (an
     * all-or-nothing migration, no flagged parallel write). Still off the verdict's
     * critical path and best-effort: a publish failure never blocks the tool. */
-   obs_bus_emit(actor, tool_name, args_hash, command, mode, reason, verdict, task_id);
-   emit_worm_row(actor, tool_name, args_hash, mode, reason, verdict, task_id);
+   /* The ordinary observability stream remains operator-configurable.  The WORM
+    * decision record below is an independent, required enforcement precondition;
+    * disabling the convenience action log must never disable durable evidence. */
+   if (audit_action_is_enabled())
+      obs_bus_emit(actor, tool_name, args_hash, command, mode, reason, verdict, task_id);
+   if (emit_worm_row(actor, tool_name, args_hash, mode, reason, verdict, task_id) != 0)
+   {
+      LOG_ERROR("audit", "governed action refused: WORM append failed for tool=%s",
+                tool_name ? tool_name : "");
+      return -1;
+   }
+   return 0;
 }
 
 int pre_tool_check(const char *tool_name, const char *input_json, session_state_t *state,
@@ -139,6 +153,12 @@ int pre_tool_check(const char *tool_name, const char *input_json, session_state_
    audit_last_event_reset();
    int rc =
        pre_tool_check_inner(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len);
-   emit_action_audit(tool_name, input_json, guardrail_mode, state, rc, msg_buf);
+   if (emit_action_audit(tool_name, input_json, guardrail_mode, state, rc, msg_buf) != 0 && rc != 2)
+   {
+      if (msg_buf && msg_len > 0)
+         snprintf(msg_buf, msg_len,
+                  "Blocked: required governed-action audit evidence could not be committed.");
+      return 2;
+   }
    return rc;
 }

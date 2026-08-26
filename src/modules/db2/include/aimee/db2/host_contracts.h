@@ -20,6 +20,13 @@ extern "C"
 
    /* Deprecated no-op retained for binary compatibility. */
    void aimee_db2_register_audit_hash_provider(aimee_db2_audit_hash_fn provider);
+   typedef void (*aimee_db2_audit_hash_v2_fn)(
+       long long seq, const char *ts, const char *actor_role, const char *actor_principal,
+       const char *actor_issuer, const char *actor_subject, const char *transport_cn,
+       long long team_id, const char *selected_default_from, const char *action,
+       const char *subject, const char *verdict, const char *key_id, const char *detail,
+       const char *prev_hash, char out_hex[65]);
+   void aimee_db2_register_audit_hash_v2_provider(aimee_db2_audit_hash_v2_fn provider);
 
    /* Score one synthesis candidate against its evidence bundle. The provider
     * returns 0 and fills all three outputs on success, or -1 when scoring is

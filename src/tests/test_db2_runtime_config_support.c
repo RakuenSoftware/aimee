@@ -5,7 +5,7 @@
 
 static void test_fail_closed_defaults(void)
 {
-   assert(config_audit_worm_enabled() == 0);
+   assert(config_audit_worm_enabled() == 1);
    assert(config_cache_disabled() == 0);
    assert(config_code_cochange_git_enabled() == 0);
    assert(config_css_style_graph_enabled() == 0);

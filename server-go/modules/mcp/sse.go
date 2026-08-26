@@ -3,6 +3,8 @@ package mcp
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +13,26 @@ import (
 	"sync"
 	"time"
 )
+
+type sseLimits struct {
+	maxLineBytes         int
+	maxEventBytes        int
+	maxPostResponseBytes int64
+	maxConnectionBytes   int64
+	idleTimeout          time.Duration
+	connectionLifetime   time.Duration
+	postTimeout          time.Duration
+}
+
+var defaultSSELimits = sseLimits{
+	maxLineBytes:         64 << 10,
+	maxEventBytes:        1 << 20,
+	maxPostResponseBytes: 64 << 10,
+	maxConnectionBytes:   256 << 20,
+	idleTimeout:          2 * time.Minute,
+	connectionLifetime:   24 * time.Hour,
+	postTimeout:          30 * time.Second,
+}
 
 // SSETransport speaks MCP over the HTTP+SSE transport.
 //
@@ -30,9 +52,11 @@ import (
 //
 // A bearer token, when set, rides every request as "Authorization: Bearer <t>".
 type SSETransport struct {
-	client  *http.Client
-	baseURL string
-	bearer  string
+	streamClient *http.Client
+	postClient   *http.Client
+	baseURL      string
+	bearer       string
+	limits       sseLimits
 
 	body io.ReadCloser
 
@@ -56,45 +80,66 @@ type SSETransport struct {
 // would turn a server that never announced its endpoint into a confusing
 // per-call timeout instead of one clear connect failure.
 func NewSSETransport(rawURL, bearer string, timeout time.Duration) (*SSETransport, error) {
+	return newSSETransportWithLimits(rawURL, bearer, timeout, defaultSSELimits)
+}
+
+func newSSETransportWithLimits(rawURL, bearer string, timeout time.Duration, limits sseLimits) (*SSETransport, error) {
 	if rawURL == "" {
 		return nil, fmt.Errorf("%w: empty SSE url", ErrTransport)
 	}
-	if _, err := url.Parse(rawURL); err != nil {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, fmt.Errorf("%w: bad SSE url: %v", ErrTransport, err)
 	}
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-
-	t := &SSETransport{
-		// No client timeout: the GET is a long-lived stream, and a Client
-		// timeout would cut it at the deadline rather than bounding a request.
-		client:     &http.Client{},
-		baseURL:    rawURL,
-		bearer:     bearer,
-		endpointCh: make(chan string, 1),
-		frames:     make(chan []byte, 16),
-		errCh:      make(chan error, 1),
-		closed:     make(chan struct{}),
+	if limits.maxLineBytes <= 0 || limits.maxEventBytes <= 0 ||
+		limits.maxPostResponseBytes <= 0 || limits.maxConnectionBytes <= 0 ||
+		limits.idleTimeout <= 0 || limits.connectionLifetime <= 0 || limits.postTimeout <= 0 {
+		return nil, fmt.Errorf("%w: invalid SSE resource limits", ErrTransport)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	transport := &http.Transport{
+		Proxy:                  http.ProxyFromEnvironment,
+		ResponseHeaderTimeout:  timeout,
+		MaxResponseHeaderBytes: 64 << 10,
+	}
+	postTransport := transport.Clone()
+
+	t := &SSETransport{
+		streamClient: &http.Client{Transport: transport},
+		postClient:   &http.Client{Transport: postTransport, Timeout: limits.postTimeout},
+		baseURL:      rawURL,
+		bearer:       bearer,
+		limits:       limits,
+		endpointCh:   make(chan string, 1),
+		frames:       make(chan []byte, 16),
+		errCh:        make(chan error, 1),
+		closed:       make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), limits.connectionLifetime)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("%w: %v", ErrTransport, err)
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	t.auth(req)
 
-	resp, err := t.client.Do(req)
+	resp, err := t.streamClient.Do(req)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("%w: SSE connect: %v", ErrTransport, err)
 	}
 	if resp.StatusCode/100 != 2 {
+		cancel()
 		resp.Body.Close()
 		return nil, fmt.Errorf("%w: SSE connect: HTTP %d", ErrTransport, resp.StatusCode)
 	}
 	t.body = resp.Body
-	go t.readLoop()
+	go t.readLoop(cancel)
 
 	select {
 	case ep := <-t.endpointCh:
@@ -123,27 +168,58 @@ func (t *SSETransport) auth(req *http.Request) {
 func (t *SSETransport) resolveEndpoint(value string) string {
 	base, err := url.Parse(t.baseURL)
 	if err != nil {
-		return value
+		return ""
 	}
 	ref, err := url.Parse(value)
 	if err != nil {
-		return value
+		return ""
 	}
-	return base.ResolveReference(ref).String()
+	resolved := base.ResolveReference(ref)
+	if resolved.Scheme != base.Scheme || !strings.EqualFold(resolved.Host, base.Host) {
+		return ""
+	}
+	return resolved.String()
+}
+
+func readBoundedSSELine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
+	var line []byte
+	for {
+		part, err := reader.ReadSlice('\n')
+		if len(line)+len(part) > maxBytes {
+			return nil, fmt.Errorf("SSE line exceeds %d bytes", maxBytes)
+		}
+		line = append(line, part...)
+		if err == nil {
+			return line, nil
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return line, err
+		}
+	}
 }
 
 // readLoop parses the SSE stream into endpoint announcements and JSON frames.
-func (t *SSETransport) readLoop() {
+func (t *SSETransport) readLoop(cancel context.CancelFunc) {
+	defer cancel()
 	defer close(t.frames)
 
-	reader := bufio.NewReaderSize(t.body, 1<<16)
+	reader := bufio.NewReaderSize(t.body, min(t.limits.maxLineBytes, 64<<10))
 	var eventName string
 	var data bytes.Buffer
+	var connectionBytes int64
+	idle := time.AfterFunc(t.limits.idleTimeout, func() { _ = t.body.Close() })
+	defer idle.Stop()
+	reportError := func(err error) {
+		select {
+		case t.errCh <- fmt.Errorf("%w: SSE stream: %v", ErrTransport, err):
+		default:
+		}
+	}
 
-	dispatch := func() {
+	dispatch := func() error {
 		if data.Len() == 0 {
 			eventName = ""
-			return
+			return nil
 		}
 		payload := strings.TrimRight(data.String(), "\n")
 		data.Reset()
@@ -151,13 +227,17 @@ func (t *SSETransport) readLoop() {
 		eventName = ""
 
 		if name == "endpoint" {
+			resolved := t.resolveEndpoint(strings.TrimSpace(payload))
+			if resolved == "" {
+				return fmt.Errorf("endpoint must retain the SSE origin")
+			}
 			t.endpointOnce.Do(func() {
 				select {
-				case t.endpointCh <- t.resolveEndpoint(strings.TrimSpace(payload)):
+				case t.endpointCh <- resolved:
 				default:
 				}
 			})
-			return
+			return nil
 		}
 		// Everything else is a JSON-RPC frame. An unnamed event is a message
 		// too: the SSE default event type is "message", and servers rely on it.
@@ -165,21 +245,48 @@ func (t *SSETransport) readLoop() {
 		case t.frames <- []byte(payload):
 		case <-t.closed:
 		}
+		return nil
 	}
 
 	for {
-		line, err := reader.ReadString('\n')
+		lineBytes, err := readBoundedSSELine(reader, t.limits.maxLineBytes)
+		connectionBytes += int64(len(lineBytes))
+		if connectionBytes > t.limits.maxConnectionBytes {
+			reportError(fmt.Errorf("connection exceeds %d bytes", t.limits.maxConnectionBytes))
+			return
+		}
+		if len(lineBytes) > 0 {
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
+			idle.Reset(t.limits.idleTimeout)
+		}
+		line := string(lineBytes)
 		if len(line) > 0 {
 			line = strings.TrimRight(line, "\r\n")
 			switch {
 			case line == "":
-				dispatch() // a blank line terminates one event
+				if dispatchErr := dispatch(); dispatchErr != nil {
+					reportError(dispatchErr)
+					return
+				}
 			case strings.HasPrefix(line, ":"):
 				// A comment / keep-alive. Ignored, but it is what stops an idle
 				// stream from looking dead to an intermediary.
 			case strings.HasPrefix(line, "event:"):
 				eventName = strings.TrimSpace(line[len("event:"):])
 			case strings.HasPrefix(line, "data:"):
+				additional := len(line[len("data:"):])
+				if data.Len() > 0 {
+					additional++
+				}
+				if data.Len()+additional > t.limits.maxEventBytes {
+					reportError(fmt.Errorf("event exceeds %d bytes", t.limits.maxEventBytes))
+					return
+				}
 				if data.Len() > 0 {
 					data.WriteByte('\n')
 				}
@@ -189,10 +296,7 @@ func (t *SSETransport) readLoop() {
 			}
 		}
 		if err != nil {
-			select {
-			case t.errCh <- fmt.Errorf("%w: SSE stream: %v", ErrTransport, err):
-			default:
-			}
+			reportError(err)
 			return
 		}
 	}
@@ -214,14 +318,23 @@ func (t *SSETransport) Send(frame []byte) error {
 	req.Header.Set("Content-Type", "application/json")
 	t.auth(req)
 
-	resp, err := t.client.Do(req)
+	resp, err := t.postClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: POST: %v", ErrTransport, err)
 	}
 	// The reply arrives on the SSE stream, not here; the body is drained so the
 	// connection can be reused rather than leaked per call.
-	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	drained, drainErr := io.CopyN(io.Discard, resp.Body, t.limits.maxPostResponseBytes+1)
+	closeErr := resp.Body.Close()
+	if drained > t.limits.maxPostResponseBytes {
+		return fmt.Errorf("%w: POST response exceeds %d bytes", ErrTransport, t.limits.maxPostResponseBytes)
+	}
+	if drainErr != nil && !errors.Is(drainErr, io.EOF) {
+		return fmt.Errorf("%w: POST response: %v", ErrTransport, drainErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("%w: POST response close: %v", ErrTransport, closeErr)
+	}
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("%w: POST returned HTTP %d", ErrTransport, resp.StatusCode)
 	}
@@ -258,7 +371,8 @@ func (t *SSETransport) Close() error {
 		if t.body != nil {
 			t.body.Close()
 		}
-		t.client.CloseIdleConnections()
+		t.streamClient.CloseIdleConnections()
+		t.postClient.CloseIdleConnections()
 	})
 	return nil
 }

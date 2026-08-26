@@ -73,7 +73,7 @@ int mcp_git_response_failed(cJSON *resp)
 typedef struct
 {
    const char *name;        /* aimee command name, for messages */
-   const char *start;       /* printf with one %s: the escaped target ref */
+   const char *start;       /* fixed git words placed before the escaped target ref */
    const char *needs_ref;   /* what to call the ref in the "required" error */
    const char *inprog_ref;  /* ref that exists while the op is stopped mid-flight */
    const char *cont;        /* git words to continue */
@@ -91,14 +91,14 @@ typedef struct
 } integrate_op_t;
 
 static const integrate_op_t OPS[] = {
-    {"merge", "merge --no-edit '%s'", "ref (the branch or commit to merge in)", "MERGE_HEAD",
+    {"merge", "merge --no-edit", "ref (the branch or commit to merge in)", "MERGE_HEAD",
      "merge --continue", "merge --abort", NULL, 1, 0},
-    {"rebase", "rebase '%s'", "base (the branch to rebase onto)", "REBASE_HEAD",
-     "rebase --continue", "rebase --abort", "rebase --skip", 1, 1},
-    {"cherry_pick", "cherry-pick '%s'", "ref (the commit to cherry-pick)", "CHERRY_PICK_HEAD",
+    {"rebase", "rebase", "base (the branch to rebase onto)", "REBASE_HEAD", "rebase --continue",
+     "rebase --abort", "rebase --skip", 1, 1},
+    {"cherry_pick", "cherry-pick", "ref (the commit to cherry-pick)", "CHERRY_PICK_HEAD",
      "cherry-pick --continue", "cherry-pick --abort", "cherry-pick --skip", 1, 1},
-    {"revert", "revert --no-edit '%s'", "ref (the commit to revert)", "REVERT_HEAD",
-     "revert --continue", "revert --abort", "revert --skip", 1, 1},
+    {"revert", "revert --no-edit", "ref (the commit to revert)", "REVERT_HEAD", "revert --continue",
+     "revert --abort", "revert --skip", 1, 1},
 };
 
 /* Never let git open an editor: these run unattended, and a blocked editor looks
@@ -191,18 +191,18 @@ static void fetch_if_remote(const char *ref, char *note, size_t note_len)
    memcpy(remote, ref, rlen);
    remote[rlen] = '\0';
 
-   char *esc_remote = shell_escape(remote);
+   char *esc_remote = shell_quote(remote);
    char check[256];
-   snprintf(check, sizeof(check), "git remote get-url '%s' >/dev/null 2>&1", esc_remote);
+   snprintf(check, sizeof(check), "git remote get-url %s >/dev/null 2>&1", esc_remote);
    if (!run_ok(check))
    {
       free(esc_remote);
       return; /* not a remote name: a branch with a slash, or a path */
    }
 
-   char *esc_branch = shell_escape(slash + 1);
+   char *esc_branch = shell_quote(slash + 1);
    char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git fetch '%s' '%s' 2>&1", esc_remote, esc_branch);
+   snprintf(cmd, sizeof(cmd), "git fetch %s %s 2>&1", esc_remote, esc_branch);
    free(esc_remote);
    free(esc_branch);
    int rc = 0;
@@ -384,9 +384,9 @@ static cJSON *integrate_run(const integrate_op_t *op, cJSON *args)
          return mcp_text(mcp_git_identity_error(have));
    }
 
-   char *esc_ref = shell_escape(ref);
+   char *esc_ref = shell_quote(ref);
    char start[512];
-   snprintf(start, sizeof(start), op->start, esc_ref);
+   snprintf(start, sizeof(start), "%s %s", op->start, esc_ref);
    free(esc_ref);
 
    char cmd[1024];
@@ -533,9 +533,9 @@ cJSON *handle_git_sync(cJSON *args)
     * rather than failing on a ref that was never going to resolve. */
    if (!strchr(base, '/'))
    {
-      char *esc = shell_escape(base);
+      char *esc = shell_quote(base);
       char probe[512];
-      snprintf(probe, sizeof(probe), "git rev-parse --verify --quiet 'origin/%s' >/dev/null 2>&1",
+      snprintf(probe, sizeof(probe), "git rev-parse --verify --quiet origin/%s >/dev/null 2>&1",
                esc);
       free(esc);
       if (run_ok(probe))
@@ -562,8 +562,8 @@ cJSON *handle_git_sync(cJSON *args)
    fetch_if_remote(base, fetch_note, sizeof(fetch_note));
 
    char gap_cmd[512], gap[128] = "";
-   char *esc_base = shell_escape(base);
-   snprintf(gap_cmd, sizeof(gap_cmd), "git rev-list --left-right --count '%s'...HEAD 2>/dev/null",
+   char *esc_base = shell_quote(base);
+   snprintf(gap_cmd, sizeof(gap_cmd), "git rev-list --left-right --count %s...HEAD 2>/dev/null",
             esc_base);
    free(esc_base);
    capture_line(gap_cmd, gap, sizeof(gap));

@@ -1243,13 +1243,29 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 21
+          "line": 27
         }
       ],
       "signature": "void aimee_db2_register_audit_hash_provider ( db2_audit_hash_fn provider )",
       "signature_sha256": "8b6a2fb7e64f7f358d82c66cc77537019be51faacfe5a92901fb97c977b73459",
       "status": "internal-unconsumed",
       "symbol": "aimee_db2_register_audit_hash_provider"
+    },
+    {
+      "consumers": [
+        "src/kb/kb_module_stage_adapters.c",
+        "src/tests/test_kb_audit_worm_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/kb_audit_worm.h",
+          "line": 28
+        }
+      ],
+      "signature": "void aimee_db2_register_audit_hash_v2_provider ( db2_audit_hash_v2_fn provider )",
+      "signature_sha256": "0048abbc0d255e383e33c9ccb82a2a1f845da550da68aba6a34c55c6840d66ab",
+      "status": "audit-pending",
+      "symbol": "aimee_db2_register_audit_hash_v2_provider"
     },
     {
       "consumers": [
@@ -3492,8 +3508,8 @@
           "line": 26
         }
       ],
-      "signature": "void db2_artifact_gen_id ( char * buf , size_t len )",
-      "signature_sha256": "c1911e29817cc9bb30d28d255c09b434818be47018ce579c1036cef1a398bb4a",
+      "signature": "int db2_artifact_gen_id ( char * buf , size_t len )",
+      "signature_sha256": "915a198a8313e6dde84325dc6f70a5fd854cad6dd6946d2cf1057285a24b8ec3",
       "status": "audit-pending",
       "symbol": "db2_artifact_gen_id"
     },
@@ -9628,7 +9644,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 25
+          "line": 32
         }
       ],
       "signature": "int db2_kb_audit_append ( const char * actor_role , const char * actor_principal , const char * action , const char * subject , const char * verdict , const char * detail )",
@@ -9644,7 +9660,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 31
+          "line": 38
         }
       ],
       "signature": "int db2_kb_audit_append_in_txn ( void * conn , const char * actor_role , const char * actor_principal , const char * action , const char * subject , const char * verdict , const char * detail )",

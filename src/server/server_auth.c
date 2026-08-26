@@ -297,14 +297,19 @@ int server_ct_equal(const char *a, const char *b)
 #include "platform_process.h"
 
 /* Generate a UUID using platform random */
-static void generate_uuid(char *buf, size_t len)
+static int generate_uuid(char *buf, size_t len)
 {
    unsigned char raw[16];
    if (platform_random_bytes(raw, sizeof(raw)) != 0)
-      memset(raw, 0, sizeof(raw));
+   {
+      if (buf && len)
+         buf[0] = '\0';
+      return -1;
+   }
    snprintf(buf, len, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
             raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
             raw[11], raw[12], raw[13], raw[14], raw[15]);
+   return 0;
 }
 
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -316,7 +321,8 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Generate session ID (persisted in DB, not RAM) */
    char sid[64];
-   generate_uuid(sid, sizeof(sid));
+   if (generate_uuid(sid, sizeof(sid)) != 0)
+      return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
 
    /* Build principal from peer UID */
    char principal[32];

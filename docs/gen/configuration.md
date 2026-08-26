@@ -112,7 +112,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `verify_role` | string | Delegate role used for cross-verification. |
 | `virtual_context_assembly_budget` | int | Token budget for virtual-context assembly. |
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
-| `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
+| `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-OFF). Enable it explicitly only for approved autonomous workflows. When off, the forge provider is not registered and every forge op fails closed; even when on, each operation re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`, `client_tool_transport_preference`

@@ -61,8 +61,13 @@ static cJSON *schema_for(const char *tool_name)
    {
       const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
       if (cJSON_IsString(name) && strcmp(name->valuestring, tool_name) == 0)
-         return cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+      {
+         cJSON *schema = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(tool, "inputSchema"), 1);
+         cJSON_Delete(tools);
+         return schema;
+      }
    }
+   cJSON_Delete(tools);
    return NULL;
 }
 
@@ -111,6 +116,7 @@ int main(void)
       assert(!(cJSON_IsString(item) && strcmp(item->valuestring, "handoff_json") == 0));
    }
 
+   cJSON_Delete(schema);
    printf("ok\n");
    return 0;
 }

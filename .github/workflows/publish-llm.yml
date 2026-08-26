@@ -81,13 +81,13 @@ jobs:
           - { name: aimee-llm-e2b, model: gemma-4-E2B-it }
           - { name: aimee-llm-e4b, model: gemma-4-E4B-it }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -128,20 +128,21 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.have.outputs.exists != 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       # A PULL REQUEST BUILDS BUT NEVER PUSHES: publishing is a merge-time act, so
       # nothing unreviewed reaches the registry. The PR still proves the Dockerfile
       # builds, which is the part that used to be discovered at deploy time.
       - name: Build ${{ matrix.name }}
         if: steps.have.outputs.exists != 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           file: Dockerfile.llm
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          provenance: false
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha,scope=${{ matrix.name }}-amd64
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}-amd64
           build-args: |

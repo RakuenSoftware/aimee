@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 /* Defined in cmd_agent_delegate.c */
-void generate_task_id(char *buf, size_t len);
+int generate_task_id(char *buf, size_t len);
 
 /* --- cmd_dispatch (formerly cmd_queue) --- */
 
@@ -73,7 +73,8 @@ void cmd_dispatch(app_ctx_t *ctx, int argc, char **argv)
          int task_timeout = (to && cJSON_IsNumber(to)) ? to->valueint : global_timeout;
 
          char task_id[64];
-         generate_task_id(task_id, sizeof(task_id));
+         if (generate_task_id(task_id, sizeof(task_id)) != 0)
+            continue;
          char result_path[MAX_PATH_LEN];
          snprintf(result_path, sizeof(result_path), "%s/%s.json", tasks_dir, task_id);
 

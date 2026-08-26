@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 #ifndef _WIN32
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -147,7 +150,7 @@ static void test_failure_parity(void)
    support_rc = db2_support_platform_random_hex(support_zero, 16);
    assert(legacy_rc == -1 && support_rc == -1);
    assert(memcmp(legacy_zero, support_zero, sizeof(legacy_zero)) == 0);
-   assert(strcmp(legacy_zero, "0000000000000000") == 0);
+   assert(legacy_zero[0] == '\0');
 
    char maximum[515];
    memset(maximum, '#', sizeof(maximum));
@@ -243,6 +246,33 @@ static void test_fork_safety(void)
    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
    assert(memcmp(parent, from_child, sizeof(parent)) != 0);
 }
+
+static void test_random_survives_descriptor_exhaustion(void)
+{
+   pid_t child = fork();
+   assert(child >= 0);
+   if (child == 0)
+   {
+      struct rlimit limit = {.rlim_cur = 64, .rlim_max = 64};
+      if (setrlimit(RLIMIT_NOFILE, &limit) != 0)
+         _exit(2);
+      size_t count = 0;
+      while (count < 64)
+      {
+         int fd = open("/dev/null", O_RDONLY);
+         if (fd < 0)
+            break;
+         count++;
+      }
+      if (errno != EMFILE)
+         _exit(3);
+      unsigned char bytes[32];
+      _exit(platform_random_bytes(bytes, sizeof(bytes)) == 0 ? 0 : 4);
+   }
+   int status = 0;
+   assert(waitpid(child, &status, 0) == child);
+   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
 #endif
 
 int main(void)
@@ -252,6 +282,7 @@ int main(void)
    test_real_entropy_and_concurrency();
 #ifndef _WIN32
    test_fork_safety();
+   test_random_survives_descriptor_exhaustion();
 #endif
    return 0;
 }

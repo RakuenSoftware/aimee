@@ -46,7 +46,7 @@
   "embedders": {
     "bekko-a25m": {
       "repo": "hotchpotch/bekko-embedding-v1-a25m",
-      "revision": "main",
+      "revision": "44f0b8af0f487acd0ccf1a7cb7ae7a29a6dfc09c",
       "pooling": "mean",
       "dim": 384,
       "context": 8192,
@@ -69,7 +69,7 @@
     },
     "nomic-embed-text-v2-moe": {
       "repo": "nomic-ai/nomic-embed-text-v2-moe",
-      "revision": "main",
+      "revision": "1066b6599d099fbb93dfcb64f9c37a7c9e503e85",
       "pooling": "mean",
       "dim": 768,
       "context": 2048,

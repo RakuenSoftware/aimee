@@ -8,10 +8,10 @@ permissions:
   contents: read
 
 # The default branch ruleset requires a successful deployment to this
-# environment. JBailes is its required reviewer, self-review is allowed so PRs
-# created with the owner's CLI identity remain approvable, and admin bypass is
-# disabled. The job therefore cannot complete until the owner explicitly
-# approves it on github.com.
+# environment. The environment and branch rules must require an approval from a
+# reviewer other than the PR author, with admin bypass disabled. The source tree
+# cannot prove live GitHub settings, so the quarterly access/ruleset export is
+# retained with the assurance evidence bundle.
 jobs:
   approval:
     environment: main-merge-approval

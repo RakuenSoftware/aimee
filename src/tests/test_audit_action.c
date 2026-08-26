@@ -3,7 +3,7 @@
  * Exercises the contract in audit_action.h: determinism, key-order and
  * whitespace independence, per-tool allowlist projection (non-allowlisted fields
  * dropped), unknown-tool name-only hashing, key-sensitivity, oversize bounding,
- * and the best-effort failure sentinel. */
+ * automatic key provisioning and fail-closed errors. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,23 +30,13 @@ static void rm_key(void)
    unlink(p);
 }
 
-static int is_sentinel(const char *h)
-{
-   if (strncmp(h, "v1-", 3) != 0)
-      return 0;
-   for (int i = 3; i < 67; i++)
-      if (h[i] != '0')
-         return 0;
-   return h[67] == '\0';
-}
-
 static void hash_of(const char *tool, const char *args, char out[AUDIT_ARGS_HASH_LEN])
 {
    int rc = audit_args_hash(tool, args, out, AUDIT_ARGS_HASH_LEN);
    assert(rc == 0);
    assert(strncmp(out, "v1-", 3) == 0);
    assert(strlen(out) == 67);
-   assert(!is_sentinel(out)); /* a keyed hash is not the all-zero sentinel */
+   assert(strcmp(out, "v1-0000000000000000000000000000000000000000000000000000000000000000") != 0);
 }
 
 static void test_shape_and_determinism(void)
@@ -127,13 +117,30 @@ static void test_key_sensitivity(void)
    assert(strcmp(k1, k2) != 0);
 }
 
-static void test_missing_key_returns_sentinel(void)
+static void test_missing_key_is_provisioned(void)
 {
-   rm_key(); /* no key present, do NOT ensure */
+   rm_key(); /* no key present, do NOT explicitly ensure */
    char out[AUDIT_ARGS_HASH_LEN];
    int rc = audit_args_hash("Bash", "{\"command\":\"ls\"}", out, sizeof out);
-   assert(rc == -1);
-   assert(is_sentinel(out)); /* never HMAC-over-empty; stable sentinel */
+   assert(rc == 0);
+   assert(strlen(out) == 67);
+
+   char path[600];
+   struct stat st;
+   snprintf(path, sizeof path, "%s/.audit-key", g_home);
+   assert(stat(path, &st) == 0);
+   assert((st.st_mode & 0777) == 0600);
+}
+
+static void test_key_provision_failure_is_closed(void)
+{
+   char missing[600];
+   snprintf(missing, sizeof missing, "%s/no-such-parent/child", g_home);
+   setenv("AIMEE_HOME", missing, 1);
+   char out[AUDIT_ARGS_HASH_LEN] = "must-be-cleared";
+   assert(audit_args_hash("Bash", "{\"command\":\"ls\"}", out, sizeof out) == -1);
+   assert(out[0] == '\0');
+   setenv("AIMEE_HOME", g_home, 1);
 }
 
 static void mac_hex(const unsigned char mac[32], char out[65])
@@ -405,7 +412,8 @@ int main(void)
    test_unknown_tool_hashes_name_only();
    test_oversize_is_bounded_and_stable();
    test_key_sensitivity();
-   test_missing_key_returns_sentinel();
+   test_missing_key_is_provisioned();
+   test_key_provision_failure_is_closed();
    test_hmac_rfc4231_vectors();
    test_separator_injection_no_collision();
    test_value_truncation_semantics();

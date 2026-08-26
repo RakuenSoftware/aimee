@@ -107,7 +107,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/db2/c)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/db2/c -Imodules/economizer -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory/include -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -g -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/db2/c -Imodules/economizer -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory/include -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -124,6 +124,14 @@ ifeq ($(OS),Windows_NT)
 endif
 
 UNAME_S := $(shell uname -s)
+
+# Shipping Linux binaries carry an explicit, repository-owned hardening contract;
+# their exploit resistance must not vary with the runner distribution defaults.
+ifeq ($(UNAME_S),Linux)
+    HARDEN_C_FLAGS = -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE -fcf-protection=full
+    HARDEN_L_FLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
+    C_FLAGS += $(HARDEN_C_FLAGS)
+endif
 
 # Platform-specific HTTP library
 ifeq ($(OS),Windows_NT)
@@ -223,17 +231,18 @@ LEAN_KB = ../aimee-kb-lean$(EXEEXT)
 LEAN_OBJDIR = build/obj-lean
 
 # Linker flag sets (layered -- each level adds to the previous)
-L_MINIMAL = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lpthread $(EXTRA_L_FLAGS)
-L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB)
+L_MINIMAL = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS)
+L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB)
 L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
 L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
 # Server link flags. The daemon owns the store directly: it links libpq and the
 # same postgres + memory modules as aimee-kb, so it no longer routes every
-# store-bound call through the kb client socket.
-L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
-L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+# store-bound call through the kb client socket. Keep the audit hardening flags
+# on this newer direct-store topology.
+L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) $(PQ_LIB) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 ifeq ($(OS),Windows_NT)
     L_FULL += -ladvapi32
     L_KB += -ladvapi32
@@ -918,7 +927,7 @@ GATEWAY_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes
                posix/agent_bridge.c posix/cli_client.c proxy_bootstrap.c \
                delivery_target.c aimee_home.c log.c platform_random.c \
                shutdown_forensics.c
-GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
+GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o %/platform_random.o, $(PLATFORM_BASIC_OBJS))
 # cJSON uses a special build rule (strips -Werror); reference it separately.
 GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
                $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
@@ -945,7 +954,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS
 # nothing is stale when nothing exists.
 DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
-.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check cleanup-ledger-check repository-lock-check db2-contract-check db2-declaration-ledger-check db2-activation-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
+.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check cleanup-ledger-check repository-lock-check db2-contract-check db2-declaration-ledger-check db2-activation-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests go-vulncheck verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
 
 all: retire-obsolete-binaries $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
 
@@ -989,6 +998,7 @@ AIMEE_VERIFY_TEST_JOBS ?= 2
 # tests are red. Discover modules instead of maintaining another service list.
 GO_MODULE_DIRS ?= $(sort $(patsubst %/go.mod,%,$(wildcard ../*/go.mod)))
 GO ?= $(shell command -v go 2>/dev/null || { test -x /usr/local/go/bin/go && echo /usr/local/go/bin/go; })
+GOVULNCHECK ?= $(shell command -v govulncheck 2>/dev/null)
 CONFIG_TEST_DEFAULTS ?= $(shell cd ../server-go && $(GO) list -mod=mod -f '{{.Dir}}' \
 	github.com/RakuenSoftware/aimee-module-config/server-go/modules/config 2>/dev/null)/defaults.json
 
@@ -1025,6 +1035,15 @@ go-unit-tests:
 	@echo "go-unit-tests: cross-language bus conformance"
 	@cd .. && bash scripts/test_bus_conformance.sh
 	@echo "go-unit-tests: ok"
+
+go-vulncheck:
+	@test -n "$(GOVULNCHECK)" || { echo "go-vulncheck: ERROR govulncheck is required"; exit 1; }
+	@test -n "$(strip $(GO_MODULE_DIRS))" || { echo "go-vulncheck: ERROR no Go modules found"; exit 1; }
+	@set -e; for module in $(GO_MODULE_DIRS); do \
+		echo "go-vulncheck: $$module"; \
+		(cd "$$module" && "$(GOVULNCHECK)" ./...); \
+	done
+	@echo "go-vulncheck: ok"
 
 # The complete shipping build must finish before lint inspects its artifacts.
 # Declaring lint and check-linking as sibling prerequisites lets a parallel outer
@@ -2112,7 +2131,7 @@ lint:
 	echo "lint: all $$n checks passed"
 
 # Appended separately to keep the already-wide canonical check list readable.
-LINT_CHECKS += event-durability-check
+LINT_CHECKS += event-durability-check shell-quote-check workflow-pin-check build-input-integrity-check config-failopen-check security-claims-check
 
 background-skill-curator-absence-check:
 	@python3 -I -S ../scripts/check_background_skill_curator_absence.py
@@ -2579,6 +2598,10 @@ FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse \
                tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
                tests/fuzz_server_mgmt_action tests/fuzz_server_mgmt_read_config
 
+.PHONY: print-fuzz-targets
+print-fuzz-targets:
+	@for target in $(FUZZ_TARGETS); do printf '%s\n' "$$target"; done
+
 $(FUZZ_TARGETS): | $(CORE_CONNECTION_LIB)
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
@@ -2765,6 +2788,31 @@ clang-tidy:
 	fi
 
 static-analysis: cppcheck clang-tidy
+
+# Broad native memory-safety lane. A separate object tree prevents sanitized
+# objects from contaminating release output.
+sanitizers:
+	$(MAKE) unit-tests OBJDIR=build/obj-sanitize \
+		EXTRA_C_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined" \
+		EXTRA_L_FLAGS="-fsanitize=address,undefined"
+
+hardening-check: $(SERVER)
+	../scripts/check-binary-hardening.sh $(SERVER)
+
+shell-quote-check:
+	@python3 ../scripts/check-shell-quote.py
+
+workflow-pin-check:
+	@python3 ../scripts/check-workflow-pins.py
+
+build-input-integrity-check:
+	@python3 ../scripts/check-build-input-integrity.py
+
+config-failopen-check:
+	@python3 ../scripts/check-config-failopen.py
+
+security-claims-check:
+	@python3 ../scripts/check-security-claims.py
 
 # ThreadSanitizer lane for the witness release-gate cross-thread cell. A normal build
 # cannot distinguish the required C11 atomic from a non-atomic int (an aligned load is

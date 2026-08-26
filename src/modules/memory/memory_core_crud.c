@@ -30,6 +30,7 @@
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
+#include "integrity.h"
 #include "util.h"       /* util_now_ms — memory.search stage timing */
 #include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
@@ -84,6 +85,18 @@ int memory_gate_check(const char *tier, const char *kind, const char *key, const
 
    if (!content || !content[0])
       return 0; /* L0 scratch allows empty content */
+
+   /* Durable memory becomes future prompt context, so treat it as agent-message
+    * authority unless a future typed ingress carries an authenticated user
+    * provenance. Ambiguous provenance fails closed. */
+   integrity_result_t integrity = integrity_gate_check(content, INTEGRITY_SOURCE_AGENT_MESSAGE);
+   if (integrity.verdict != INTEGRITY_VERDICT_ACCEPT)
+   {
+      verdict->result = GATE_REJECT;
+      snprintf(verdict->reason, sizeof(verdict->reason), "integrity: %s (%s)",
+               integrity_verdict_name(integrity.verdict), integrity.match_category);
+      return 0;
+   }
 
    /* Gate 1: Sensitivity check (secrets, PII) */
    int sens =

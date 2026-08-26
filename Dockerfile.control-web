@@ -5,7 +5,7 @@
 # fronts the kb /v1 with a scoped console-admin credential. See docs/KB_CONSOLE.md.
 
 # --- frontend: build the console SPA into a single inlined html ---
-FROM node:20-bookworm AS frontend
+FROM node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5 AS frontend
 WORKDIR /frontend
 # @rakuensoftware/smoothgui is vendored (frontend/vendor/) so the build needs no
 # credentials — same as the runtime-web SPA.
@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN npm run build:console
 
 # --- console service: the standalone Go server (cgo: sqlite sessions) ---
-FROM golang:1.25-bookworm AS gobuild
+FROM golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437 AS gobuild
 WORKDIR /src/control-web
 COPY server-go/go.mod server-go/go.sum /src/server-go/
 COPY server-go/modules/control-web/policy/ /src/server-go/modules/control-web/policy/
@@ -26,7 +26,7 @@ COPY control-web/ ./
 RUN CGO_ENABLED=1 go build -o /out/control-web .
 
 # --- runtime ---
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*

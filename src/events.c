@@ -255,17 +255,17 @@ int notify_build_ntfy_command(const notify_target_t *target, const char *event_n
       return -1;
 
    char url[768];
-   char title[160];
+   char title_header[192];
    if (ntfy_build_url(target, url, sizeof(url)) != 0)
       return -1;
-   snprintf(title, sizeof(title), "aimee: %s", event_name && event_name[0] ? event_name : "event");
+   snprintf(title_header, sizeof(title_header), "Title: aimee: %s",
+            event_name && event_name[0] ? event_name : "event");
 
-   char *url_quoted = shell_escape(url);
-   char *title_quoted = shell_escape(title);
-   char *msg_quoted = shell_escape(message ? message : "");
+   char *url_quoted = shell_quote(url);
+   char *title_quoted = shell_quote(title_header);
+   char *msg_quoted = shell_quote(message ? message : "");
    int n = snprintf(cmd, cmd_len,
-                    "curl -s -X POST -H 'Title: %s' -H 'Priority: default' -H 'Tags: "
-                    "aimee' -d '%s' '%s'",
+                    "curl -s -X POST -H %s -H 'Priority: default' -H 'Tags: aimee' -d %s %s",
                     title_quoted, msg_quoted, url_quoted);
    free(url_quoted);
    free(title_quoted);
@@ -723,10 +723,9 @@ void event_notify(aimee_event_t event, const char *message)
          json_escape(msg_json, sizeof(msg_json), msg);
          snprintf(payload, sizeof(payload), "{\"event\":\"%s\",\"message\":\"%s\"}", event_json,
                   msg_json);
-         char *payload_quoted = shell_escape(payload);
-         char *url_quoted = shell_escape(target->url);
-         snprintf(cmd, sizeof(cmd),
-                  "curl -s -X POST -H 'Content-Type: application/json' -d '%s' '%s'",
+         char *payload_quoted = shell_quote(payload);
+         char *url_quoted = shell_quote(target->url);
+         snprintf(cmd, sizeof(cmd), "curl -s -X POST -H 'Content-Type: application/json' -d %s %s",
                   payload_quoted, url_quoted);
          free(payload_quoted);
          free(url_quoted);

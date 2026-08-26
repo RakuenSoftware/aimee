@@ -1,6 +1,8 @@
 /* pairing.c: in-memory pairing registry with mutex protection */
 #include "pairing.h"
 #include "log.h"
+#include "platform_random.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +30,26 @@ static int find_by_identity_locked(const char *platform, const char *user_id)
       if (g_pairings[i].code[0] != '\0' && strcmp(g_pairings[i].platform, platform) == 0 &&
           strcmp(g_pairings[i].user_id, user_id) == 0)
          return i;
+   }
+   return -1;
+}
+
+static int random_unique_code_locked(char out[16])
+{
+   for (int attempt = 0; attempt < 128; attempt++)
+   {
+      uint32_t draw = 0;
+      if (platform_random_bytes(&draw, sizeof(draw)) != 0)
+         return -1;
+      if (draw >= UINT32_C(4294000000))
+         continue;
+      char candidate[16];
+      snprintf(candidate, sizeof(candidate), "%06u", draw % UINT32_C(1000000));
+      if (find_by_code_locked(candidate) < 0)
+      {
+         snprintf(out, 16, "%s", candidate);
+         return 0;
+      }
    }
    return -1;
 }
@@ -71,14 +93,18 @@ int pairing_issue(const char *platform, const char *user_id, int ttl_seconds, ch
    slot = g_next_slot;
    g_next_slot = (g_next_slot + 1) % MAX_PAIRINGS;
 
-   int code = rand() % 1000000;
-   snprintf(g_pairings[slot].code, sizeof(g_pairings[slot].code), "%06d", code);
+   if (random_unique_code_locked(g_pairings[slot].code) != 0)
+   {
+      pthread_mutex_unlock(&g_mutex);
+      LOG_WARN("pairing", "secure random code generation failed");
+      return -1;
+   }
    snprintf(g_pairings[slot].platform, sizeof(g_pairings[slot].platform), "%s", platform);
    snprintf(g_pairings[slot].user_id, sizeof(g_pairings[slot].user_id), "%s", user_id);
    g_pairings[slot].expires_at = time(NULL) + ttl_seconds;
    g_pairings[slot].approved = 0;
 
-   snprintf(code_out, code_size, "%06d", code);
+   snprintf(code_out, code_size, "%s", g_pairings[slot].code);
    pthread_mutex_unlock(&g_mutex);
    return 0;
 }

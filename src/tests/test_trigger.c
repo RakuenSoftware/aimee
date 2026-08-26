@@ -43,6 +43,8 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 
 #include "db1_client/wfe_store.h" /* db1_work_item_t for the list/cost-cap stubs */
 #include "db1_client/db1_trigger.h"
+static int g_random_failure;
+static int g_trigger_insert_count;
 int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task,
                        const char *workspace, const char *metadata)
 {
@@ -52,6 +54,7 @@ int db1_trigger_insert(const char *id, const char *source, const char *event, co
    (void)task;
    (void)workspace;
    (void)metadata;
+   g_trigger_insert_count++;
    return 0;
 }
 
@@ -84,6 +87,8 @@ int db1_pipeline_cancel(int pipeline_id)
 
 int platform_random_bytes(void *buf, size_t len)
 {
+   if (g_random_failure)
+      return -1;
    unsigned char *p = (unsigned char *)buf;
    for (size_t i = 0; i < len; i++)
       p[i] = (unsigned char)(i + 1);
@@ -843,11 +848,10 @@ static void test_scan_proposals_end_to_end(void)
    size_t pl = strlen(g_lstree_pathspec);
    assert(pl > 0 && g_lstree_pathspec[pl - 1] == '/');
    /* Correct launch args: workflow=pipeline_template, repo=workspace, and — with
-    * the rule's mode left empty — the default execution mode "autonomous" (so the
-    * autonomy scheduler drives the run hands-off). */
+    * the rule's mode left empty — the safe default execution mode "interactive". */
    assert(strcmp(g_created[0].wf, "build") == 0);
    assert(strcmp(g_created[0].repo, "/repo/aimee") == 0);
-   assert(strcmp(g_created[0].mode, "autonomous") == 0);
+   assert(strcmp(g_created[0].mode, "interactive") == 0);
    /* proposal_path is <home>/triggers/proposals/<blob-sha>.md and holds the blob. */
    char exp0[700], exp1[700];
    snprintf(exp0, sizeof exp0, "%s/triggers/proposals/%s.md", g_home, g_blobs[0].sha);
@@ -1134,6 +1138,7 @@ static void test_scan_proposals_enforces_max_concurrent(void)
    snprintf(rule.source, sizeof rule.source, "proposals");
    snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
    snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+   snprintf(rule.mode, sizeof rule.mode, "autonomous");
 
    /* Three pending, cap 2 -> exactly two filed this pass. */
    scan_proposals(&rule, 2);
@@ -1183,8 +1188,8 @@ static void test_scan_proposals_supersedes_legacy_interactive_binding(void)
    scan_proposals(&rule, 1);
    assert(g_ncreated == 2);
    assert(strcmp(g_created[1].wf, "build") == 0);
-   assert(strcmp(g_created[1].mode, "autonomous") == 0);
-   assert(strstr(g_created[1].path, ".build.autonomous.md") != NULL);
+   assert(strcmp(g_created[1].mode, "interactive") == 0);
+   assert(strstr(g_created[1].path, ".build.interactive.md") != NULL);
 
    /* The deterministic lane-scoped replacement deduplicates subsequent scans. */
    scan_proposals(&rule, 1);
@@ -1240,6 +1245,22 @@ static void test_proposal_name_matches(void)
    printf("  proposal_name_matches: ok\n");
 }
 
+static void test_scheduled_trigger_refuses_entropy_failure(void)
+{
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof(rule));
+   snprintf(rule.schedule, sizeof(rule.schedule), "* * * * *");
+   snprintf(rule.pipeline_template, sizeof(rule.pipeline_template), "test-pipeline");
+   snprintf(rule.workspace, sizeof(rule.workspace), "/workspace/entropy-fixture");
+
+   g_trigger_insert_count = 0;
+   g_random_failure = 1;
+   trigger_scheduler_fire_rule(&rule);
+   g_random_failure = 0;
+   assert(g_trigger_insert_count == 0);
+   printf("  PASS: test_scheduled_trigger_refuses_entropy_failure\n");
+}
+
 int main(void)
 {
    printf("test_trigger\n");
@@ -1290,6 +1311,7 @@ int main(void)
    test_scan_proposals_supersedes_legacy_interactive_binding();
    test_trigger_source_registry();
    test_proposal_name_matches();
+   test_scheduled_trigger_refuses_entropy_failure();
    printf("All tests passed.\n");
    return 0;
 }

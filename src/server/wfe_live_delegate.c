@@ -241,10 +241,10 @@ static void wfe_commit_worktree_changes(const char *workdir)
                 workdir);
       return;
    }
-   char *qn = shell_escape(au_name);
-   char *qe = shell_escape(au_email);
+   char *qn = shell_quote(au_name);
+   char *qe = shell_quote(au_email);
    snprintf(cmd, sizeof cmd,
-            "git -C '%s' -c user.name='%s' -c user.email='%s' commit -q "
+            "git -C '%s' -c user.name=%s -c user.email=%s commit -q "
             "-m 'wfe: apply implement changes' 2>&1",
             workdir, qn ? qn : "", qe ? qe : "");
    free(qn);

@@ -95,7 +95,9 @@ OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o \
 TEST_WORM_OBJS = $(OBJDIR)/modules/audit/audit_worm.o \
                  $(OBJDIR)/modules/audit/audit_worm_chain.o \
                  $(OBJDIR)/modules/workflows/wfe_canonical.o \
-                 $(OBJDIR)/aimee_sha256.o
+                 $(OBJDIR)/aimee_sha256.o \
+                 $(OBJDIR)/platform_random.o \
+                 $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
 
 .PHONY: unit-test-server-management-tls
 unit-test-server-management-tls: $(TESTPREFIX)/unit-test-server-management-tls
@@ -151,7 +153,7 @@ TEST_CORE_OBJS = $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o $(CONFIG_
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
                  $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/wire_fence.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
-                 $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o $(OBJDIR)/modules/vault/runtime_secret.o
+                 $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o $(OBJDIR)/integrity_gate.o $(OBJDIR)/modules/vault/runtime_secret.o
 TEST_CORE_OBJS += $(OBJDIR)/http_content_encoding.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
 # The two DB1 domains the daemon stopped linking: their callers reach them over
@@ -935,7 +937,7 @@ unit-test-communication: $(TESTPREFIX)/unit-test-communication
 
 $(TESTPREFIX)/unit-test-communication: $(OBJDIR)/tests/test_communication.o \
                                         $(CORE_CONNECTION_LIB)
-	$(TESTLINK_MIN) -o $@ $^ -lssl -lcrypto
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lssl -lcrypto
 
 # CI can split the suite across independent runners without changing the local
 # contract: the defaults still build and execute every test in one invocation.
@@ -1853,7 +1855,7 @@ $(TESTPREFIX)/unit-test-markdown: $(OBJDIR)/tests/test_markdown.o $(OBJDIR)/mark
 $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOCK) \
                                $(OBJDIR)/db2/canonical_index.o \
                                $(OBJDIR)/db2/canonical_index_query.o \
-                               $(OBJDIR)/db2/cross_repo_resolver.o
+                               $(OBJDIR)/db2/cross_repo_resolver.o $(OBJDIR)/code_match.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
@@ -2138,7 +2140,7 @@ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_hand
 
 
 $(TESTPREFIX)/unit-test-agent-admission: $(OBJDIR)/tests/test_agent_admission.o $(OBJDIR)/server/agent_admission.o
-	$(TESTLINK) -o $@ $^ -lpthread
+	$(TESTLINK) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 # Workflow engine W1: pure (yaml/cJSON/dstr only), no DB/config needed.
 $(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
@@ -2222,7 +2224,7 @@ $(TESTPREFIX)/unit-test-web-egress: $(OBJDIR)/tests/test_web_egress.o \
 $(TESTPREFIX)/unit-test-web-read-spans: $(OBJDIR)/tests/test_web_read_spans.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
-	$(CC) $(L_FLAGS) -o $@ $^
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cli-claude-allowlist: $(OBJDIR)/tests/test_cli_claude_allowlist.o \
                                     $(OBJDIR)/server/cli_claude.o \
@@ -2235,7 +2237,7 @@ $(TESTPREFIX)/unit-test-tool-egress: $(OBJDIR)/tests/test_tool_egress.o \
                                     $(OBJDIR)/modules/workflows/tool_egress.o \
                                     $(OBJDIR)/modules/workflows/wfe_externalization.o \
                                     $(OBJDIR)/modules/workflows/wfe_native_gate.o
-	$(CC) $(L_FLAGS) -o $@ $^
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-externalization: $(OBJDIR)/tests/test_wfe_externalization.o \
                                     $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o
@@ -3987,6 +3989,7 @@ $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pa
                                              $(OBJDIR)/gateway/mirror.o \
                                              $(OBJDIR)/log.o \
                                              $(OBJDIR)/platform_random.o \
+                                             $(OBJDIR)/posix/platform_random.o \
                                              $(OBJDIR)/posix/agent_bridge.o \
                                              $(OBJDIR)/proxy_bootstrap.o \
                                              $(OBJDIR)/util.o \
@@ -7221,7 +7224,7 @@ $(TESTPREFIX)/unit-test-db2-code-import-support: \
                      $(OBJDIR)/tests/test_db2_code_import_support.o \
                      $(OBJDIR)/tests/db2_code_import_support_impl.o \
                      $(OBJDIR)/tests/db2_code_import_monolith.o
-	$(CC) -Wl,--gc-sections -o $@ $^
+	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
 
 DB2_CODE_IMPORT_SANITIZE_DIR = $(OBJDIR)/tests/db2-code-import-support-sanitize
 
@@ -7273,7 +7276,7 @@ $(TESTPREFIX)/unit-test-db2-code-audit-graph-support: \
                      $(OBJDIR)/tests/test_db2_code_audit_graph_support.o \
                      $(OBJDIR)/tests/db2_code_audit_graph_support_impl.o \
                      $(OBJDIR)/tests/db2_code_audit_graph_monolith.o
-	$(CC) -Wl,--gc-sections -o $@ $^
+	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
 
 DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR = \
                      $(OBJDIR)/tests/db2-code-audit-graph-support-sanitize
@@ -7464,7 +7467,7 @@ $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support: \
                      $(OBJDIR)/tests/test_db2_pii_inject_gate_support.o \
                      $(OBJDIR)/tests/db2_pii_inject_gate_support_impl.o \
                      $(OBJDIR)/tests/db2_memory_pii_gate_monolith.o
-	$(CC) -Wl,--gc-sections -o $@ $^
+	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
 
 DB2_PII_INJECT_GATE_SANITIZE_DIR = \
                      $(OBJDIR)/tests/db2-pii-inject-gate-support-sanitize
@@ -7535,7 +7538,7 @@ $(TESTPREFIX)/unit-test-db2-pii-classifier-support: \
                      $(OBJDIR)/tests/db2_pii_classifier_monolith.o \
                      $(OBJDIR)/tests/db2_pii_classifier_rel_type.o \
                      $(OBJDIR)/tests/db2_pii_classifier_rel_seed.o
-	$(CC) -Wl,--gc-sections -o $@ $^
+	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
 
 DB2_PII_CLASSIFIER_SANITIZE_DIR = $(OBJDIR)/tests/db2-pii-classifier-support-sanitize
 
@@ -8175,7 +8178,7 @@ $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.
 
 $(TESTPREFIX)/unit-test-http-content-encoding: \
     $(OBJDIR)/tests/test_http_content_encoding.o $(OBJDIR)/http_content_encoding.o
-	$(TESTLINK_MIN) -o $@ $^ -lz
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lz
 
 
 # Runtime credentials are a low-level process service used by config and client

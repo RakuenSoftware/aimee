@@ -23,16 +23,22 @@ void aimee_db2_register_mdl_score_provider(db2_mdl_score_fn provider)
    g_mdl_score_provider = provider;
 }
 
-void db2_artifact_gen_id(char *buf, size_t len)
+int db2_artifact_gen_id(char *buf, size_t len)
 {
+   if (!buf || len < 37)
+      return -1;
    unsigned char raw[16];
    if (platform_random_bytes(raw, sizeof(raw)) != 0)
-      memset(raw, 0, sizeof(raw));
+   {
+      buf[0] = '\0';
+      return -1;
+   }
    snprintf(buf, len,
             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x"
             "-%02x%02x%02x%02x%02x%02x",
             raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
             raw[11], raw[12], raw[13], raw[14], raw[15]);
+   return 0;
 }
 
 static const char *artifact_payload_string(cJSON *root, const char *name)

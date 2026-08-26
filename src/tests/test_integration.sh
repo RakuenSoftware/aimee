@@ -238,6 +238,10 @@ start_db1_module() {
         echo "integration: AIMEE_STORE_URL unset; skipping the store module" >&2
         return 0
     fi
+    if [ -z "${AIMEE_STORE_MIGRATION_URL:-}" ]; then
+        echo "integration: AIMEE_STORE_MIGRATION_URL unset; refusing an unprivileged or implicit migration" >&2
+        return 1
+    fi
     # One schema per run. Without it the run inherits every row the last one
     # wrote -- the harness used to get a fresh SQLite file each time and the
     # isolation came free. The module creates the schema it is pointed at, so
@@ -248,20 +252,28 @@ start_db1_module() {
             *\?*) AIMEE_STORE_URL="$AIMEE_STORE_URL&search_path=$AIMEE_STORE_SCHEMA" ;;
             *)    AIMEE_STORE_URL="$AIMEE_STORE_URL?search_path=$AIMEE_STORE_SCHEMA" ;;
         esac
-        export AIMEE_STORE_URL AIMEE_STORE_SCHEMA
+        case "$AIMEE_STORE_MIGRATION_URL" in
+            *\?*) AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL&search_path=$AIMEE_STORE_SCHEMA" ;;
+            *)    AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL?search_path=$AIMEE_STORE_SCHEMA" ;;
+        esac
+        export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL AIMEE_STORE_SCHEMA
     fi
     stop_db1_module
     # Postgres first: the store looks for its backend as it comes up, so a store
     # started into an empty bus fails immediately rather than waiting.
     if [ -x "$PG_MODULE" ] && [ -z "$PG_MODULE_PID" ]; then
-        AIMEE_STORE_URL="$AIMEE_STORE_URL" "$PG_MODULE" "$MODULE_BUS_SOCK" \
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" \
+            AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
+            "$PG_MODULE" "$MODULE_BUS_SOCK" \
             >"$AIMEE_HOME/pg-module.log" 2>&1 &
         PG_MODULE_PID=$!
     fi
     # Its output goes to a file, not /dev/null: a module that refuses to start
     # says why exactly once, and discarding that leaves the failure looking like
     # a socket that never appeared.
-    AIMEE_STORE_URL="$AIMEE_STORE_URL" "$DB1_MODULE" "$MODULE_BUS_SOCK"         >"$AIMEE_HOME/db1-module.log" 2>&1 &
+    AIMEE_STORE_URL="$AIMEE_STORE_URL" \
+        AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
+        "$DB1_MODULE" "$MODULE_BUS_SOCK" >"$AIMEE_HOME/db1-module.log" 2>&1 &
     DB1_MODULE_PID=$!
     # Wait for the store to be SERVING, not for the bus socket: the daemon owns
     # that socket and creates it before the module is forked, so polling it fell
